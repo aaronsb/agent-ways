@@ -1,0 +1,81 @@
+name: Clippy
+
+# Rust toolchain is deliberately unpinned. Per-PR gate catches regressions;
+# scheduled drift canary surfaces new lints from upstream releases as small,
+# fixable issues instead of letting them accumulate silently.
+# See CONTRIBUTING.md § "Clippy and Rust toolchain drift".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/**'
+      - '.github/workflows/clippy.yml'
+  pull_request:
+    paths:
+      - 'tools/**'
+      - '.github/workflows/clippy.yml'
+  schedule:
+    # Weekly drift canary — Monday 12:00 UTC
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: cargo clippy --workspace --all-targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: rustc version
+        run: rustc --version
+      - name: clippy
+        id: clippy
+        run: |
+          cargo clippy --manifest-path tools/Cargo.toml --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+      - name: Upload log on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-drift-log
+          path: clippy.log
+
+      # Scheduled-only: on failure, open (or comment on) a drift issue.
+      - name: Open or update drift issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rust_version=$(rustc --version | awk '{print $2}')
+          title_prefix="clippy drift:"
+          today=$(date -u +%Y-%m-%d)
+
+          existing=$(gh issue list \
+            --state open \
+            --search "in:title \"$title_prefix\"" \
+            --json number,title \
+            --jq '[.[] | select(.title | startswith("'"$title_prefix"'"))] | .[0].number // empty')
+
+          body=$(cat <<EOF
+          Scheduled clippy drift canary failed on \`main\` with rustc $rust_version on $today.
+
+          \`\`\`
+          $(tail -80 clippy.log)
+          \`\`\`
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Per CONTRIBUTING.md, the toolchain is deliberately unpinned — fix each new warning in a small targeted PR.
+          EOF
+          )
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create \
+              --title "$title_prefix new warnings on rustc $rust_version" \
+              --body "$body"
+          fi

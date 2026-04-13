@@ -29,6 +29,17 @@ Open an issue. Include which hook or way is involved, your OS/shell, and any err
 
 **The `ways` binary** is Rust (`tools/ways-cli/`). Run `cargo test` before submitting changes. See [ADR-111](docs/architecture/system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation rationale.
 
+## Clippy and Rust toolchain drift
+
+The Rust toolchain is **deliberately unpinned**. This is an internal tool with no MSRV commitment, and new clippy lints from upstream Rust releases are treated as free code-quality upgrades — `.clamp()` is strictly better than `.max().min()`, and so on.
+
+To make that drift visible instead of silent:
+
+- **Per-PR gate**: `.github/workflows/clippy.yml` runs `cargo clippy --workspace --all-targets -- -D warnings` on every PR touching `tools/**`. A lint triggering means the PR is blocked until the warning is fixed.
+- **Weekly drift canary**: the same workflow runs on a schedule against `main` with the latest stable toolchain. On failure it opens (or comments on) a `clippy drift:` issue so new lints become small, targeted follow-up PRs instead of accumulating silently.
+
+Fix drift in small batches. If a lint is genuinely wrong for a specific case, `#[allow(clippy::…)]` with a one-line reason is fine.
+
 ## Gitignore: Exclusive by Design
 
 The `.gitignore` uses an **exclusive pattern**: `*` (ignore everything) with explicit `!` exceptions for tracked files. This is intentional, not lazy.

@@ -79,6 +79,27 @@ pub fn extract_locale_from_filename(filename: &str) -> Option<String> {
     None
 }
 
+/// Check if a path should be excluded based on schema-defined segments.
+pub fn is_excluded_path(path: &Path, excluded_segments: &[String]) -> bool {
+    let path_str = match path.to_str() {
+        Some(s) => s,
+        None => return false,
+    };
+    for segment in excluded_segments {
+        if path_str.contains(segment.as_str()) {
+            return true;
+        }
+    }
+    // Timestamp filenames from sync tools (e.g., 2026-03-30T13_13_26.616Z.Desktop.md)
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+        let stem = stem.strip_suffix(".check").unwrap_or(stem);
+        if stem.starts_with("20") && stem.contains('T') && stem.contains('.') {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,25 +161,4 @@ mod tests {
         // Last segment is the locale candidate
         assert_eq!(extract_locale_from_filename("some.way.name.ja.md"), Some("ja".to_string()));
     }
-}
-
-/// Check if a path should be excluded based on schema-defined segments.
-pub fn is_excluded_path(path: &Path, excluded_segments: &[String]) -> bool {
-    let path_str = match path.to_str() {
-        Some(s) => s,
-        None => return false,
-    };
-    for segment in excluded_segments {
-        if path_str.contains(segment.as_str()) {
-            return true;
-        }
-    }
-    // Timestamp filenames from sync tools (e.g., 2026-03-30T13_13_26.616Z.Desktop.md)
-    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-        let stem = stem.strip_suffix(".check").unwrap_or(stem);
-        if stem.starts_with("20") && stem.contains('T') && stem.contains('.') {
-            return true;
-        }
-    }
-    false
 }
