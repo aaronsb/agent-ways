@@ -693,4 +693,37 @@ mod tests {
             vec!["cargo", "mix"]
         );
     }
+
+    #[test]
+    fn block_list_terminates_across_sensor_boundary() {
+        // Regression test flagged in code review: a block-form list in
+        // one sensor block must not bleed into the next sensor block
+        // when they're adjacent. The new sensor line clears
+        // `current_list_key` via the "any other line" path before
+        // `current_sensor` is reassigned.
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            // processes.watch ends on the blank before git.requires
+            "sensors:\n  \
+             processes:\n    \
+             watch:\n      \
+             - cargo\n      \
+             - rustc\n  \
+             git:\n    \
+             requires:\n      \
+             - Bash(git:*)\n      \
+             - Read\n",
+        );
+        let processes = cfg.sensors.get("processes").unwrap();
+        let git = cfg.sensors.get("git").unwrap();
+        assert_eq!(processes.watch.clone().unwrap(), vec!["cargo", "rustc"]);
+        // The git requires list must contain exactly what was written
+        // under its own block — no leakage of "cargo" / "rustc" from
+        // the previous sensor's watch list.
+        assert_eq!(
+            git.requires,
+            vec!["Bash(git:*)".to_string(), "Read".to_string()]
+        );
+    }
 }
