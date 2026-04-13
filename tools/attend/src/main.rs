@@ -441,29 +441,44 @@ fn cmd_inbox_read(msg_id: &str) {
     let target = format!("{msg_id}.signal");
     for dir in &scan_dirs {
         let path = dir.join(&target);
-        if path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Some(sig) = parse_signal(content.trim()) {
-                    let from = sig.from;
-                    let project = sig.project;
-                    let source_cwd = sig.cwd;
-                    let (kind, identity) = from.split_once(':').unwrap_or(("?", from));
-                    let sender = match kind {
-                        "claude" => format!("claude/{source_cwd}"),
-                        "external" => identity.to_string(),
-                        _ => format!("{project} ({from})"),
-                    };
-                    println!("From: {sender}");
-                    println!("ID:   {msg_id}");
-                    if let Some(re_id) = sig.reply_to {
-                        println!("Re:   {re_id}");
-                    }
-                    println!();
-                    println!("{}", sig.message);
-                    return;
-                }
-            }
+        if !path.is_file() {
+            continue;
         }
+        // File exists: from here on, any failure is a corrupt-file
+        // condition, not a benign "already consumed" miss. Distinguish
+        // them so operators can tell partial-write / disk-full bugs
+        // from ordinary races.
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("(signal {msg_id} exists but could not be read: {e})");
+                return;
+            }
+        };
+        let sig = match parse_signal(content.trim()) {
+            Some(s) => s,
+            None => {
+                eprintln!("(signal {msg_id} exists but its wire format is corrupt)");
+                return;
+            }
+        };
+        let from = sig.from;
+        let project = sig.project;
+        let source_cwd = sig.cwd;
+        let (kind, identity) = from.split_once(':').unwrap_or(("?", from));
+        let sender = match kind {
+            "claude" => format!("claude/{source_cwd}"),
+            "external" => identity.to_string(),
+            _ => format!("{project} ({from})"),
+        };
+        println!("From: {sender}");
+        println!("ID:   {msg_id}");
+        if let Some(re_id) = sig.reply_to {
+            println!("Re:   {re_id}");
+        }
+        println!();
+        println!("{}", sig.message);
+        return;
     }
     // Benign miss — message may already be consumed or expired.
     // Exit 0 so callers don't treat a normal race as an error.
@@ -568,27 +583,20 @@ fn cmd_inbox() {
     if entries.is_empty() {
         println!("no messages");
     } else {
-        let any_threaded = entries.iter().any(|e| !e.re.is_empty());
-        if any_threaded {
-            let mut t = agent_fmt::Table::new(&["Scope", "From", "ID", "Re", "Message", "Source"]);
-            t.max_width(0, 10);
-            t.max_width(1, 24);
-            t.max_width(2, 20);
-            t.max_width(3, 20);
-            for entry in &entries {
-                t.add(vec![&entry.scope, &entry.sender, &entry.id, &entry.re, &entry.message, &entry.source]);
-            }
-            t.print();
-        } else {
-            let mut t = agent_fmt::Table::new(&["Scope", "From", "ID", "Message", "Source"]);
-            t.max_width(0, 10);
-            t.max_width(1, 24);
-            t.max_width(2, 20);
-            for entry in &entries {
-                t.add(vec![&entry.scope, &entry.sender, &entry.id, &entry.message, &entry.source]);
-            }
-            t.print();
+        // Render a stable 6-column layout regardless of whether any
+        // message is threaded. The `Re` column stays empty for legacy
+        // entries — visual stability beats saving a column, and the
+        // inbox reshuffling mid-conversation as threads come and go
+        // was surprising in review.
+        let mut t = agent_fmt::Table::new(&["Scope", "From", "ID", "Re", "Message", "Source"]);
+        t.max_width(0, 10);
+        t.max_width(1, 24);
+        t.max_width(2, 20);
+        t.max_width(3, 20);
+        for entry in &entries {
+            t.add(vec![&entry.scope, &entry.sender, &entry.id, &entry.re, &entry.message, &entry.source]);
         }
+        t.print();
         println!("  {} message(s)", entries.len());
     }
 }
@@ -606,24 +614,34 @@ struct ParsedSignal<'a> {
     message: &'a str,
 }
 
+/// Signal IDs are filename stems in the form `<sender-id>-<timestamp>`,
+/// which is always `[A-Za-z0-9_-]+`. Using this char class as the
+/// discriminator fence keeps legacy prose that happens to start with
+/// "re:" from being misparsed as threaded — e.g. `attend send "re: the
+/// thing we discussed|still open"` stays a 4-field legacy message
+/// because `the thing we discussed` has a space.
+fn is_valid_signal_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Parse a single-line signal. Accepts both the legacy 4-field format and
-/// the 5-field threaded format; the discriminator is a `re:` prefix on the
-/// field that follows `cwd`.
+/// the 5-field threaded format; the discriminator is a `re:<id>|` prefix
+/// on the field that follows `cwd`, where `<id>` matches
+/// `is_valid_signal_id`. A malformed or ambiguous `re:` prefix degrades
+/// to legacy interpretation so real prose round-trips cleanly.
 fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     let parts: Vec<&str> = content.splitn(4, '|').collect();
     if parts.len() < 4 {
         return None;
     }
     let tail = parts[3];
-    // Threaded form: `re:<id>|<message>` in the tail.
-    let (reply_to, message) = if let Some(rest) = tail.strip_prefix("re:") {
-        match rest.split_once('|') {
-            Some((id, msg)) => (Some(id), msg),
-            // Malformed (re: prefix with no message) — treat whole tail as message.
-            None => (None, tail),
-        }
-    } else {
-        (None, tail)
+    let (reply_to, message) = match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
+        Some((id, msg)) if is_valid_signal_id(id) => (Some(id), msg),
+        // Either not threaded, or the `re:` prefix is followed by text
+        // that doesn't look like a signal id — fall back to legacy so
+        // prose like "re: the thing we discussed" stays intact.
+        _ => (None, tail),
     };
     Some(ParsedSignal {
         from: parts[0],
@@ -731,11 +749,15 @@ fn cmd_send(args: &[String]) {
         i += 1;
     }
 
-    // A signal id may not contain '|' (it would corrupt the wire format).
-    // Filename stems never contain '|' in practice, but fence user input.
+    // A signal id must match the same character class the parser uses to
+    // disambiguate threaded records from legacy messages that happen to
+    // start with "re:". Signal filename stems are `<sender-id>-<ts>`, so
+    // `[A-Za-z0-9_-]+` comfortably covers the real shape and rejects
+    // anything that would break the wire format (pipes, whitespace,
+    // control chars) or trip the ambiguity fence in parse_signal.
     if let Some(ref id) = reply_to {
-        if id.contains('|') {
-            eprintln!("attend send: --re signal id must not contain '|'");
+        if !is_valid_signal_id(id) {
+            eprintln!("attend send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
             std::process::exit(1);
         }
     }

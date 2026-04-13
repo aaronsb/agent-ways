@@ -850,28 +850,41 @@ fn chunk_message(message: &str, chunk_size: usize, max_chunks: usize) -> Vec<Str
     chunks
 }
 
+/// Signal IDs are filename stems in the form `<sender-id>-<timestamp>`,
+/// always `[A-Za-z0-9_-]+`. Used as the discriminator fence for the `re:`
+/// prefix so legacy prose like "re: the thing we discussed" doesn't get
+/// misparsed as threaded. Must stay in lockstep with the equivalent
+/// helper in `attend::main::is_valid_signal_id`.
+fn is_valid_signal_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Parsed signal tuple: `(from, project, cwd, message)`.
 ///
 /// Accepts both the legacy 4-field format (`from|project|cwd|message`) and
 /// the 5-field threaded format (`from|project|cwd|re:signal-id|message`,
-/// ADR-120). The discriminator is a literal `re:` prefix on the field
-/// following `cwd`. The threading id itself is dropped at parse time —
-/// the peer sensor doesn't currently render thread context. If that
-/// changes (e.g., a "replying to …" notification header), widen the
-/// return type instead of re-parsing downstream.
+/// ADR-120). The discriminator is a `re:<id>|` prefix on the field
+/// following `cwd` where `<id>` matches `is_valid_signal_id`. A malformed
+/// or ambiguous `re:` prefix degrades to legacy interpretation so real
+/// prose round-trips cleanly.
+///
+/// The threading id itself is dropped at parse time — the peer sensor
+/// doesn't currently render thread context. If that changes (e.g., a
+/// "replying to …" notification header), widen the return type instead
+/// of re-parsing downstream.
 pub(crate) fn parse_signal(content: &str) -> Option<(&str, &str, &str, &str)> {
     let parts: Vec<&str> = content.splitn(4, '|').collect();
     if parts.len() < 4 {
         return None;
     }
     let tail = parts[3];
-    let message = if let Some(rest) = tail.strip_prefix("re:") {
-        // Threaded: drop the `re:id|` prefix if well-formed; degrade to
-        // the raw tail otherwise so the signal still renders instead of
-        // vanishing on a malformed emitter.
-        rest.split_once('|').map(|(_id, msg)| msg).unwrap_or(tail)
-    } else {
-        tail
+    let message = match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
+        Some((id, msg)) if is_valid_signal_id(id) => msg,
+        // Either not threaded or the `re:` prefix is followed by text
+        // that doesn't look like a signal id — render the raw tail so
+        // legacy prose stays intact.
+        _ => tail,
     };
     Some((parts[0], parts[1], parts[2], message))
 }
@@ -1009,11 +1022,33 @@ mod tests {
     }
 
     #[test]
-    fn parse_accepts_empty_reply_id() {
-        // Empty `re:` ID is odd but legal — the parser still yields
-        // the message field cleanly.
+    fn parse_rejects_empty_reply_id() {
+        // Empty `re:` ID fails the is_valid_signal_id fence — the tail
+        // is rendered raw so the recipient still sees something instead
+        // of getting a silent drop.
         let (_, _, _, message) =
             parse_signal("claude:abc|proj|/home/a|re:|body").unwrap();
-        assert_eq!(message, "body");
+        assert_eq!(message, "re:|body");
+    }
+
+    #[test]
+    fn parse_legacy_re_prose_falls_back_to_message() {
+        // Regression fence: a legacy sender writing prose that happens
+        // to start with "re:" must not be mistaken for a threaded reply.
+        // The id candidate "the thing we discussed" has a space, which
+        // fails is_valid_signal_id, so we render the whole tail.
+        let (_, _, _, message) = parse_signal(
+            "claude:abc|proj|/home/a|re: the thing we discussed|still open"
+        ).unwrap();
+        assert_eq!(message, "re: the thing we discussed|still open");
+    }
+
+    #[test]
+    fn parse_rejects_id_with_non_word_chars() {
+        // A re: prefix with what looks like a real id except it contains
+        // whitespace or punctuation other than `-`/`_` also falls back.
+        let (_, _, _, message) =
+            parse_signal("claude:abc|proj|/home/a|re:has spaces|body").unwrap();
+        assert_eq!(message, "re:has spaces|body");
     }
 }

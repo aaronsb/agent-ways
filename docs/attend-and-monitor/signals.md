@@ -24,7 +24,7 @@ from|project|cwd|re:signal-id|message
   - Future kinds (e.g., `script:<name>` for automated ops) follow the same pattern
 - **`project`** — human-readable project name (e.g., `api-service`, `bosectl-qt`). Used in display formatting, not routing.
 - **`cwd`** — absolute path of the sender's current working directory. This is the ground truth for "who am I" — signals scope to encoded-cwd directories, so cwd determines where a signal goes and where it comes from.
-- **`re:signal-id`** — optional threading field. Empty string for new threads; carries the original signal's ID when this is a reply. One level of threading only — no reply-to-reply.
+- **`re:signal-id`** — optional threading field. Present only when the sender explicitly marked this signal as a threaded reply (via `attend send --re <id>`); unthreaded sends emit the 4-field legacy form unchanged. One level of threading only — no reply-to-reply. The signal ID is the original signal's filename stem and must match `[A-Za-z0-9_-]+`; that char class is also the parser's discriminator fence, so legacy prose that happens to start with "re:" (e.g., a reply quoting an email header) round-trips as a plain message.
 - **`message`** — the payload. Free text, usually the actual content the sender wants the receiver to see.
 
 Fields are pipe-delimited with no escaping. If your message contains a literal `|`, you need to escape it yourself at emit time — in practice this almost never happens because peer messages are prose.
