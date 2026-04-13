@@ -162,6 +162,11 @@ attend_build() {
 
 The sensor reads this file on each poll. When it detects an exit for a build tool *and* the marker's `cmd` matches *and* the marker timestamp is within 60 s, it enriches the event. Otherwise it falls back to the legacy "X exited" text — there's no penalty for skipping the wrapper.
 
+**Known limits of v1.**
+
+- **Single-slot, global marker.** There's one marker file for the whole machine. Two concurrent `cargo build` invocations in different directories will last-writer-wins, and a quick `cargo --version` that happens inside the 60 s window can mask a real build's failure. For single-user, single-project sessions the aliasing is rare; for parallel builds across projects you'll want a smarter wrapper that keys the marker filename on `$PWD` or `$CLAUDE_SESSION_ID`. Widening the marker to a per-session slot is tracked as a follow-up.
+- **Non-atomic write.** The wrapper above uses `> "$dir/last-build-status"`. For a ~30-byte payload on local ext4/xfs this is effectively atomic (one `write()` syscall, well under a page), but on NFS or if the wrapper is killed mid-write the reader could see a truncated line. `parse_marker` treats malformed input as "no fresh marker" (falls back to legacy text), so the actual failure mode is bounded — but if you're on a networked filesystem, prefer an atomic `printf … > "$tmp" && mv "$tmp" "$dst"`.
+
 ### State the sensor carries
 
 - Previous snapshot: map of app name → instance count
