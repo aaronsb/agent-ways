@@ -232,6 +232,5 @@
         "repo": "anthropics/knowledge-work-plugins"
       }
     }
-  },
-  "alwaysThinkingEnabled": true
+  }
 }
