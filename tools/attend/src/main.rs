@@ -443,12 +443,10 @@ fn cmd_inbox_read(msg_id: &str) {
         let path = dir.join(&target);
         if path.is_file() {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                let parts: Vec<&str> = content.splitn(4, '|').collect();
-                if parts.len() >= 4 {
-                    let from = parts[0];
-                    let project = parts[1];
-                    let source_cwd = parts[2];
-                    let message = parts[3].trim();
+                if let Some(sig) = parse_signal(content.trim()) {
+                    let from = sig.from;
+                    let project = sig.project;
+                    let source_cwd = sig.cwd;
                     let (kind, identity) = from.split_once(':').unwrap_or(("?", from));
                     let sender = match kind {
                         "claude" => format!("claude/{source_cwd}"),
@@ -457,8 +455,11 @@ fn cmd_inbox_read(msg_id: &str) {
                     };
                     println!("From: {sender}");
                     println!("ID:   {msg_id}");
+                    if let Some(re_id) = sig.reply_to {
+                        println!("Re:   {re_id}");
+                    }
                     println!();
-                    println!("{message}");
+                    println!("{}", sig.message);
                     return;
                 }
             }
@@ -495,6 +496,8 @@ fn cmd_inbox() {
         sender: String,
         message: String,
         source: String,
+        id: String,
+        re: String,
     }
     let mut entries: Vec<InboxEntry> = Vec::new();
 
@@ -528,32 +531,33 @@ fn cmd_inbox() {
                 Err(_) => continue,
             };
             let content = content.trim().to_string();
-            let parts: Vec<&str> = content.splitn(4, '|').collect();
-            if parts.len() != 4 { continue; }
-
-            let from = parts[0];
-            let project = parts[1];
-            let source_cwd = parts[2];
-            let message = parts[3];
+            let sig = match parse_signal(&content) {
+                Some(s) => s,
+                None => continue,
+            };
 
             // Skip own messages
-            if let Some((_, identity)) = from.split_once(':') {
+            if let Some((_, identity)) = sig.from.split_once(':') {
                 if identity == own_session_id { continue; }
             }
 
-            let (kind, identity) = from.split_once(':').unwrap_or(("unknown", from));
+            let (kind, identity) = sig.from.split_once(':').unwrap_or(("unknown", sig.from));
             let sender = match kind {
-                "claude" => format!("claude/{}", source_cwd),
+                "claude" => format!("claude/{}", sig.cwd),
                 "external" => identity.to_string(),
-                _ => format!("{} ({})", project, from),
+                _ => format!("{} ({})", sig.project, sig.from),
             };
+
+            let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
 
             entries.push(InboxEntry {
                 mtime,
                 scope: scope.to_string(),
                 sender,
-                message: message.to_string(),
-                source: source_cwd.to_string(),
+                message: sig.message.to_string(),
+                source: sig.cwd.to_string(),
+                id,
+                re: sig.reply_to.map(|s| s.to_string()).unwrap_or_default(),
             });
         }
     }
@@ -564,15 +568,70 @@ fn cmd_inbox() {
     if entries.is_empty() {
         println!("no messages");
     } else {
-        let mut t = agent_fmt::Table::new(&["Scope", "From", "Message", "Source"]);
-        t.max_width(0, 10);
-        t.max_width(1, 24);
-        for entry in &entries {
-            t.add(vec![&entry.scope, &entry.sender, &entry.message, &entry.source]);
+        let any_threaded = entries.iter().any(|e| !e.re.is_empty());
+        if any_threaded {
+            let mut t = agent_fmt::Table::new(&["Scope", "From", "ID", "Re", "Message", "Source"]);
+            t.max_width(0, 10);
+            t.max_width(1, 24);
+            t.max_width(2, 20);
+            t.max_width(3, 20);
+            for entry in &entries {
+                t.add(vec![&entry.scope, &entry.sender, &entry.id, &entry.re, &entry.message, &entry.source]);
+            }
+            t.print();
+        } else {
+            let mut t = agent_fmt::Table::new(&["Scope", "From", "ID", "Message", "Source"]);
+            t.max_width(0, 10);
+            t.max_width(1, 24);
+            t.max_width(2, 20);
+            for entry in &entries {
+                t.add(vec![&entry.scope, &entry.sender, &entry.id, &entry.message, &entry.source]);
+            }
+            t.print();
         }
-        t.print();
         println!("  {} message(s)", entries.len());
     }
+}
+
+/// Parsed signal record (ADR-120 wire format).
+///
+/// Legacy signals have no `reply_to`; threaded replies carry the original
+/// signal's ID in that field. Borrows from the input to keep the parse
+/// allocation-free at the hot path.
+struct ParsedSignal<'a> {
+    from: &'a str,
+    project: &'a str,
+    cwd: &'a str,
+    reply_to: Option<&'a str>,
+    message: &'a str,
+}
+
+/// Parse a single-line signal. Accepts both the legacy 4-field format and
+/// the 5-field threaded format; the discriminator is a `re:` prefix on the
+/// field that follows `cwd`.
+fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
+    let parts: Vec<&str> = content.splitn(4, '|').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+    let tail = parts[3];
+    // Threaded form: `re:<id>|<message>` in the tail.
+    let (reply_to, message) = if let Some(rest) = tail.strip_prefix("re:") {
+        match rest.split_once('|') {
+            Some((id, msg)) => (Some(id), msg),
+            // Malformed (re: prefix with no message) — treat whole tail as message.
+            None => (None, tail),
+        }
+    } else {
+        (None, tail)
+    };
+    Some(ParsedSignal {
+        from: parts[0],
+        project: parts[1],
+        cwd: parts[2],
+        reply_to,
+        message,
+    })
 }
 
 fn cmd_peers() {
@@ -630,10 +689,11 @@ fn cmd_peers() {
 }
 
 fn cmd_send(args: &[String]) {
-    // Parse flags: --broadcast, --to <project-path>, --focus <name>
+    // Parse flags: --broadcast, --to <project-path>, --focus <name>, --re <signal-id>
     let mut broadcast = false;
     let mut target_dir: Option<String> = None;
     let mut target_focus: Option<String> = None;
+    let mut reply_to: Option<String> = None;
     let mut message_parts: Vec<&str> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -657,9 +717,27 @@ fn cmd_send(args: &[String]) {
                     std::process::exit(1);
                 }
             }
+            "--re" => {
+                i += 1;
+                if i < args.len() {
+                    reply_to = Some(args[i].clone());
+                } else {
+                    eprintln!("attend send: --re requires a signal id");
+                    std::process::exit(1);
+                }
+            }
             _ => message_parts.push(&args[i]),
         }
         i += 1;
+    }
+
+    // A signal id may not contain '|' (it would corrupt the wire format).
+    // Filename stems never contain '|' in practice, but fence user input.
+    if let Some(ref id) = reply_to {
+        if id.contains('|') {
+            eprintln!("attend send: --re signal id must not contain '|'");
+            std::process::exit(1);
+        }
     }
 
     let message = message_parts.join(" ");
@@ -749,7 +827,14 @@ fn cmd_send(args: &[String]) {
 
     let from = format!("{}:{}", source_kind, sender_id);
     let filename = format!("{}-{}.signal", sender_id.replace('/', "-"), ts);
-    let content = format!("{}|{}|{}|{}\n", from, project, cwd, message);
+    // Wire format: `from|project|cwd|message` (legacy) or
+    // `from|project|cwd|re:signal-id|message` (threaded reply). The `re:`
+    // field is only emitted when --re was given; unthreaded sends stay
+    // byte-identical to the pre-ADR-120 format.
+    let content = match &reply_to {
+        Some(id) => format!("{}|{}|{}|re:{}|{}\n", from, project, cwd, id, message),
+        None => format!("{}|{}|{}|{}\n", from, project, cwd, message),
+    };
 
     let scope = if target_focus.is_some() { "focus" }
         else if target_dir.is_some() { "directed" }

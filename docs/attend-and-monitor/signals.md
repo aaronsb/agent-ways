@@ -117,7 +117,7 @@ flowchart LR
     Cleanup --> Delete
 ```
 
-**Phase 1 — creation.** The sender (an agent via `attend send`, a sensor via an internal emit path, or a human via `attend chat`) constructs the `from|project|cwd|message` line and writes it atomically to the right scope directory. The routing logic picks the directory based on flags: `--broadcast` → `_broadcast/`, `--focus <name>` → `@<name>/`, `--to <path>` → the encoded path, no flags → the sender's own project scope.
+**Phase 1 — creation.** The sender (an agent via `attend send`, a sensor via an internal emit path, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--broadcast` → `_broadcast/`, `--focus <name>` → `@<name>/`, `--to <path>` → the encoded path, no flags → the sender's own project scope. The threading flag composes with any routing flag.
 
 **Phase 2 — scanning.** Every peer sensor poll (default 30 seconds), `sensor-peers` walks its scan directories: own project scope, `_broadcast`, every `@group` the session has joined (refreshed per-poll since issue #15). New `.signal` files (not in the seen-set) are read and parsed into observations.
 
