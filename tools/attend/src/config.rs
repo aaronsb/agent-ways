@@ -287,6 +287,18 @@ sensors:
     threshold: 2.0
     decay_threshold: 3
 
+  # Second shipped example: gh-pr-checks. Watches `gh pr checks` for
+  # the current branch's PR and emits on CI state transitions
+  # (pass / fail). Requires git, gh, and jq on PATH. Silent on
+  # main/master and on branches with no PR. Enable the same way as
+  # xdg-downloads above: copy the script, review, flip enabled.
+  #+gh-pr-checks:
+  #  script: $XDG_DATA_HOME/attend/sensors/gh-pr-checks.sh
+  #  enabled: false
+  #  interval: 120
+  #  min_interval: 30
+  #  threshold: 2.0
+
 # Project-scope example (in .claude/attend.yaml):
 #
 # sensors:

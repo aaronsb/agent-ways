@@ -34,10 +34,17 @@
 #      `pending → fail` is 4.0: still loud, still breaks refractory,
 #      but it's the normal "you pushed broken code" feedback loop.
 #
-#   4. **State keyed by repo + branch.** The marker filename includes
-#      a sanitized form of the repo root plus the branch name, so
-#      switching branches or cloning the same repo twice doesn't
-#      collide with stale state from another worktree.
+#   4. **State keyed by repo + branch + PR number.** The marker
+#      filename sanitizes the repo root, the branch name, and the
+#      current PR's number into a filename-safe key. Including the
+#      PR number matters: if you close a PR on a branch and open a
+#      new one on the same branch, the old marker's terminal state
+#      shouldn't tag the new PR's first transition as "recovered"
+#      (or worse, "regressed"). Sanitization reduces collisions
+#      across unrelated checkouts — it doesn't guarantee uniqueness
+#      (two paths that differ only in a non-alnum separator can
+#      still alias), but collisions are rare enough in practice
+#      that a hash would be over-engineering.
 #
 # Prerequisites: `git`, `gh` (authenticated), `jq`. The script exits
 # silently if any of these are missing — attend treats a silent exit
@@ -83,18 +90,6 @@ case "$branch" in
   main|master|develop|trunk) exit 0 ;;
 esac
 
-# --- State marker ------------------------------------------------------
-
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/attend"
-mkdir -p "$STATE_DIR"
-
-# Key the marker on repo-root + branch so two checkouts of the same
-# repo don't stomp each other, and so the state resets when you switch
-# branches. The sanitize pass strips anything filename-hostile.
-repo_key=$(git rev-parse --show-toplevel 2>/dev/null | tr -c 'a-zA-Z0-9' '_')
-branch_key=$(printf '%s' "$branch" | tr -c 'a-zA-Z0-9' '_')
-MARKER="$STATE_DIR/gh-pr-checks.${repo_key}.${branch_key}.state"
-
 # --- Query the PR ------------------------------------------------------
 
 # Single API call — grab the PR number and the full check rollup in one
@@ -109,14 +104,25 @@ pr_number=$(printf '%s' "$rollup" | jq -r '.number // empty')
 # Roll up the per-check array into a single aggregate state. GitHub's
 # API returns two shapes in the rollup — CheckRun entries carry
 # `conclusion` + `status`, StatusContext entries carry `state` — so we
-# coalesce with `conclusion // state` and treat anything actively
-# running (IN_PROGRESS, PENDING, QUEUED, WAITING) as pending. SKIPPED
-# and NEUTRAL count as non-blocking.
+# coalesce with `conclusion // state // "PENDING"`. That trailing
+# `"PENDING"` literal is load-bearing: an in-progress CheckRun has
+# `conclusion: null, state: null`, so without the literal it would
+# coalesce to null and break the aggregate comparison. With it, pending
+# CheckRuns route cleanly through the `any(. == "PENDING" ...)` arm.
+#
+# Failure set: FAILURE, TIMED_OUT, CANCELLED, ACTION_REQUIRED, plus
+# STARTUP_FAILURE (an Actions-side infra failure where the runner
+# never started the job — masking this as pass would hide a real
+# broken-CI signal). NEUTRAL and SKIPPED fall through to pass, which
+# matches gh's own non-blocking semantics. STALE (a CheckRun
+# conclusion meaning the check ran against a commit that's no longer
+# HEAD) also falls through to pass — GitHub itself treats it as
+# non-blocking, and re-running CI on the new HEAD will supersede it.
 state=$(printf '%s' "$rollup" | jq -r '
   (.statusCheckRollup // [])
   | map(.conclusion // .state // "PENDING")
   | if length == 0 then "none"
-    elif any(. == "FAILURE" or . == "TIMED_OUT" or . == "CANCELLED" or . == "ACTION_REQUIRED") then "fail"
+    elif any(. == "FAILURE" or . == "TIMED_OUT" or . == "CANCELLED" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail"
     elif any(. == "IN_PROGRESS" or . == "PENDING" or . == "QUEUED" or . == "WAITING" or . == "EXPECTED") then "pending"
     else "pass" end
 ')
@@ -128,9 +134,26 @@ state=$(printf '%s' "$rollup" | jq -r '
 # This gives the agent one concrete pointer instead of "something broke."
 first_fail=$(printf '%s' "$rollup" | jq -r '
   (.statusCheckRollup // [])
-  | map(select((.conclusion // .state) == "FAILURE" or (.conclusion // .state) == "TIMED_OUT" or (.conclusion // .state) == "CANCELLED"))
+  | map(select((.conclusion // .state) == "FAILURE" or (.conclusion // .state) == "TIMED_OUT" or (.conclusion // .state) == "CANCELLED" or (.conclusion // .state) == "STARTUP_FAILURE"))
   | .[0].name // .[0].context // empty
 ')
+
+# --- State marker ------------------------------------------------------
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/attend"
+mkdir -p "$STATE_DIR"
+
+# Key the marker on repo-root + branch + PR number. Including the PR
+# number avoids a subtle footgun: if you close PR N on `feat/x` and
+# open PR N+1 on the same branch, a repo+branch-only marker would
+# carry PR N's terminal state into PR N+1's first transition, so the
+# sensor might emit "recovered" or "regressed" on what is actually a
+# brand-new PR. The sanitize pass strips anything filename-hostile
+# and reduces (but does not guarantee) collisions across unrelated
+# checkouts — see header note #4.
+repo_key=$(git rev-parse --show-toplevel 2>/dev/null | tr -c 'a-zA-Z0-9' '_')
+branch_key=$(printf '%s' "$branch" | tr -c 'a-zA-Z0-9' '_')
+MARKER="$STATE_DIR/gh-pr-checks.${repo_key}.${branch_key}.pr${pr_number}.state"
 
 # --- Compare against previous and emit --------------------------------
 
