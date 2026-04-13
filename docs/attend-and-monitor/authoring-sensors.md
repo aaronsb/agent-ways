@@ -105,15 +105,18 @@ The script is executed via `bash` with cwd set to the working directory attend w
 
 **Trust is the author's responsibility.** External sensors run arbitrary shell under your user — read every sensor before you enable it. Attend's design assumes sensors come from locations you already trust: your own data home, your own project dirs, your own tool repos. The parser will happily resolve any path, but if you point it at something you haven't audited, that's on you.
 
-**The shipped example.** Attend ships one reference external sensor at `tools/attend/examples/xdg-downloads.sh` in the agent-ways repo. The default user-scope config declares it as `+xdg-downloads:` with `enabled: false`. The intended workflow is:
+**The shipped examples.** Attend ships two reference external sensors in the agent-ways repo under `tools/attend/examples/`:
 
-1. Open `$XDG_CONFIG_HOME/attend/config.yaml` and find the `+xdg-downloads:` block
+- **`xdg-downloads.sh`** — pedagogical minimum. Watches the XDG Downloads directory and emits on new arrivals. ~80 lines, most of them comments walking through the contract. Good first read.
+- **`gh-pr-checks.sh`** — the "I want this in my workflow right now" sensor. Polls `gh pr checks` for the current branch's PR and emits only on terminal state transitions (pass / fail), keyed on repo-root + branch so two checkouts don't collide. Demonstrates aggregate-state modelling, marker-based state persistence, silent no-op when there's no PR, and magnitude tiers designed to break refractory on regressions without spamming on routine pushes.
+
+Both are disabled by default. The intended workflow for either:
+
+1. Open `$XDG_CONFIG_HOME/attend/config.yaml` and find the sensor's block (or paste the recipe from the script header if it doesn't exist yet)
 2. Follow the comment to copy the script from the agent-ways repo into `$XDG_DATA_HOME/attend/sensors/`
-3. Read the script — it's ~80 lines of bash, most of it comments explaining the pattern
+3. Read the script — it's all bash, most of it comments explaining the pattern
 4. Flip `enabled: true`
 5. Restart attend
-
-After that, new files landing in your XDG Downloads directory trigger notifications via the magnitude hierarchy documented in the script header (1 file → 2.0, small batch → 2.5, burst → 3.0).
 
 **The subprocess contract:**
 
