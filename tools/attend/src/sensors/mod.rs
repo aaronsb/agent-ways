@@ -78,7 +78,16 @@ pub fn register_sensors(
     register_builtin!("context", ContextSensor::new(), 60, 20, 3);
 
     #[cfg(feature = "sensor-processes")]
-    register_builtin!("processes", ProcessSensor::new(), 30, 5, 5);
+    {
+        // Resolve the watch list once at startup: if config provides one,
+        // it replaces the defaults verbatim (explicit-replace contract).
+        // Otherwise the sensor's `new()` uses `DEFAULT_WATCH`.
+        let processes_sensor = match cfg.sensors.get("processes").and_then(|s| s.watch.clone()) {
+            Some(list) => ProcessSensor::with_watch(list),
+            None => ProcessSensor::new(),
+        };
+        register_builtin!("processes", processes_sensor, 30, 5, 5);
+    }
 
     #[cfg(feature = "sensor-git")]
     register_builtin!("git", GitSensor::new(), 30, 10, 4);

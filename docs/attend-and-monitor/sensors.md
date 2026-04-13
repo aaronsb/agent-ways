@@ -116,6 +116,8 @@ Tracks specific dev-tool processes running under the user's session. Not a gener
 
 ### Watched processes
 
+The sensor enriches a specific list of build/dev tools with "exited (success/failure)" events. The default list covers common toolchains:
+
 ```
 cargo, rustc, make, cmake, ninja,
 gcc, g++, cc, c++, clang, clang++,
@@ -123,7 +125,30 @@ go, npm, yarn, pnpm, tsc,
 mvn, gradle, pip, pip3
 ```
 
-A future extension could make this list configurable; today it's hardcoded.
+Any process *not* on this list still produces a plain `X exited` at magnitude 2.0 when it disappears from the snapshot — the watch list only controls who gets the marker-correlated enrichment (success/failure codes, louder magnitudes). Process **start** events are not gated by the watch list.
+
+**Overriding the list.** Set `sensors.processes.watch:` in your attend config. Both YAML shapes are accepted:
+
+```yaml
+sensors:
+  processes:
+    watch:
+      - cargo
+      - rustc
+      - mix          # elixir
+      - zig
+      - ./build.sh
+```
+
+Or inline:
+
+```yaml
+sensors:
+  processes:
+    watch: [cargo, rustc, mix, zig]
+```
+
+The explicit list **replaces** the defaults verbatim — no merging. If you want the defaults plus one extra entry, you list all of them. If you want to disable enrichment entirely, pass an empty list (`watch: []`). This contract makes the config the single source of truth: what you write is what the sensor runs.
 
 ### What it emits
 

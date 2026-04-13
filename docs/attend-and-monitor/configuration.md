@@ -182,6 +182,10 @@ All sensors (built-in or script) accept:
 - **`script`** (path, script sensors only): path to the executable
 - **`requires`** (list): permission strings audited against `settings.json` (ADR-116)
 
+Some sensors accept additional sensor-specific keys:
+
+- **`processes.watch`** (list): overrides the default build-tool watch list. Only processes on this list get exit-code enrichment (success/failure magnitudes, marker correlation); everything else produces a plain `X exited`. Explicit-replace — passing `watch:` drops the defaults. See [`sensors.md`](sensors.md#watched-processes) for the default list and format examples.
+
 ## Overlay semantics
 
 The overlay layers project-scope on top of user-scope. For each setting:
@@ -242,8 +246,9 @@ Attend's YAML parser is deliberately minimal — it's a hand-written subset that
 
 - Two-level section headers (`governor:`, `engagement:`, `sensors:`)
 - Four-space indent for sensor properties
-- Inline arrays for `requires:` (`requires: [Bash(gh:*), Read]`)
-- Comments (`#`) and blank lines
+- Inline arrays (`requires: [Bash(gh:*), Read]`, `watch: [cargo, mix]`)
+- Block-form lists on a new line (`requires:` followed by indented `- item` lines) for `requires:` and `watch:`
+- Comments (`#`) and blank lines (they don't terminate a block-form list)
 - `+name:` and `-name:` sensor prefixes
 
 It does **not** support:

@@ -28,6 +28,18 @@ fn marker_matches(marker: &BuildMarker, cmd: &str, now: u64, window_secs: u64) -
     marker.cmd == cmd && now.saturating_sub(marker.ts) <= window_secs
 }
 
+/// Default watch list — process names whose exits get enriched build-event
+/// treatment (success/failure magnitude tiers, marker correlation). Covers
+/// the common build and package tools out of the box; users working in
+/// other toolchains (elixir, zig, custom scripts) override via
+/// `sensors.processes.watch:` in attend config.
+pub const DEFAULT_WATCH: &[&str] = &[
+    "cargo", "rustc", "make", "cmake", "ninja",
+    "gcc", "g++", "cc", "c++", "clang", "clang++",
+    "go", "npm", "yarn", "pnpm", "tsc",
+    "mvn", "gradle", "pip", "pip3",
+];
+
 /// Parse a single-line marker file. Format: `cmd|code|unix_ts`. Any other
 /// shape (extra fields, missing fields, non-numeric code) parses to None
 /// — we'd rather silently ignore a malformed marker than surface a fake
@@ -105,16 +117,35 @@ pub struct ProcessSensor {
     /// Marker file mtime on the previous read — lets us skip re-parsing
     /// when the file hasn't changed between polls.
     last_marker_mtime: Option<SystemTime>,
+    /// Exact process names whose exits get enriched build-event treatment.
+    /// Resolved once at construction: either from the user's config or
+    /// from `DEFAULT_WATCH`. Not merged — explicit-replace is the
+    /// documented contract.
+    watch: Vec<String>,
 }
 
 impl ProcessSensor {
+    /// Build with the default watch list (`DEFAULT_WATCH`).
     pub fn new() -> Self {
+        Self::with_watch(DEFAULT_WATCH.iter().map(|s| s.to_string()).collect())
+    }
+
+    /// Build with an explicit watch list. Passing an empty list disables
+    /// build-event enrichment entirely — all process exits fall through
+    /// to the plain `X exited` path.
+    pub fn with_watch(watch: Vec<String>) -> Self {
         Self {
             prior: HashMap::new(),
             baseline_established: false,
             last_marker: None,
             last_marker_mtime: None,
+            watch,
         }
+    }
+
+    /// Is `name` one of the processes we enrich on exit?
+    fn is_watched(&self, name: &str) -> bool {
+        self.watch.iter().any(|w| w == name)
     }
 
     /// Refresh `self.last_marker` from the marker file if it has been
@@ -259,14 +290,10 @@ impl Sensor for ProcessSensor {
             }
         }
 
-        // Exited applications (were in prior, gone now)
-        // Build tools: exact match on process name (comm field from /proc)
-        let build_tools = [
-            "cargo", "rustc", "make", "cmake", "ninja",
-            "gcc", "g++", "cc", "c++", "clang", "clang++",
-            "go", "npm", "yarn", "pnpm", "tsc",
-            "mvn", "gradle", "pip", "pip3",
-        ];
+        // Exited applications (were in prior, gone now). Processes on the
+        // watch list get enriched build-event treatment (success/failure
+        // magnitudes, marker correlation); everything else gets a plain
+        // `X exited` at 2.0.
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -274,8 +301,7 @@ impl Sensor for ProcessSensor {
 
         for app in self.prior.keys() {
             if !current.contains_key(app) {
-                let is_build = build_tools.contains(&app.as_str());
-                if is_build {
+                if self.is_watched(app) {
                     observations.push(format_build_exit(app, self.last_marker.as_ref(), now));
                 } else {
                     observations.push((2.0, format!("{app} exited")));
@@ -453,6 +479,53 @@ mod tests {
         let m = BuildMarker { cmd: "cargo".into(), code: 1, ts: 1000 };
         let (mag, _) = format_build_exit("cargo", Some(&m), 1010);
         assert_eq!(mag, 3.5);
+    }
+
+    // ── watch list ─────────────────────────────────────────────────────
+
+    #[test]
+    fn new_uses_default_watch_list() {
+        let s = ProcessSensor::new();
+        // Spot-check the defaults that appear in docs and old hardcoded list.
+        assert!(s.is_watched("cargo"));
+        assert!(s.is_watched("rustc"));
+        assert!(s.is_watched("go"));
+        assert!(s.is_watched("npm"));
+        // And something that's *not* in the default list — a Rust dev
+        // shouldn't accidentally start getting enriched exits for python.
+        assert!(!s.is_watched("python"));
+        assert!(!s.is_watched("mix"));
+    }
+
+    #[test]
+    fn with_watch_replaces_defaults() {
+        // Explicit-replace contract: passing `watch:` drops the defaults.
+        // An elixir dev who lists only `mix` should NOT still see cargo
+        // enriched — their config is the single source of truth.
+        let s = ProcessSensor::with_watch(vec!["mix".into(), "zig".into()]);
+        assert!(s.is_watched("mix"));
+        assert!(s.is_watched("zig"));
+        assert!(!s.is_watched("cargo"));
+        assert!(!s.is_watched("rustc"));
+    }
+
+    #[test]
+    fn with_watch_empty_disables_enrichment() {
+        // An empty watch list is a documented way to turn off build-event
+        // enrichment entirely — every process exit becomes plain 2.0.
+        let s = ProcessSensor::with_watch(Vec::new());
+        assert!(!s.is_watched("cargo"));
+        assert!(!s.is_watched("anything"));
+    }
+
+    #[test]
+    fn default_watch_const_matches_expected_members() {
+        // Locks in the set so we notice at review time if someone silently
+        // adds or removes a default. New defaults are fine; this just
+        // forces the discussion.
+        assert_eq!(DEFAULT_WATCH.len(), 20);
+        assert!(DEFAULT_WATCH.contains(&"cargo"));
+        assert!(DEFAULT_WATCH.contains(&"pip3"));
     }
 }
 

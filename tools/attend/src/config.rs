@@ -113,6 +113,11 @@ pub struct SensorConfig {
     pub script: Option<String>,
     /// Permission requirements (ADR-116) — tool permissions this sensor needs.
     pub requires: Vec<String>,
+    /// Sensor-specific watch list (consumed by individual sensors; the
+    /// processes sensor uses it for its build-event enrichment list).
+    /// `None` means "use the sensor's built-in default"; an explicit
+    /// (possibly empty) list means "replace defaults verbatim."
+    pub watch: Option<Vec<String>>,
 }
 
 impl Default for GovernorConfig {
@@ -136,6 +141,7 @@ impl Default for Config {
             decay_threshold: 3,
             script: None,
             requires: vec!["Read".to_string()],
+            watch: None,
         });
         sensors.insert("git".to_string(), SensorConfig {
             enabled: true,
@@ -145,6 +151,7 @@ impl Default for Config {
             decay_threshold: 4,
             script: None,
             requires: vec!["Bash(git:*)".to_string()],
+            watch: None,
         });
         sensors.insert("peers".to_string(), SensorConfig {
             enabled: true,
@@ -154,6 +161,7 @@ impl Default for Config {
             decay_threshold: 5,
             script: None,
             requires: vec!["Read".to_string()],
+            watch: None,
         });
         sensors.insert("processes".to_string(), SensorConfig {
             enabled: true,
@@ -163,6 +171,7 @@ impl Default for Config {
             decay_threshold: 5,
             script: None,
             requires: vec!["Bash(ps:*)".to_string()],
+            watch: None,
         });
         Self {
             governor: GovernorConfig::default(),
@@ -314,16 +323,44 @@ fn user_config_path() -> PathBuf {
 fn apply_config(config: &mut Config, content: &str) {
     let mut current_section = String::new();
     let mut current_sensor = String::new();
+    // Tracks the list field we're currently populating in block form
+    // (e.g., "requires" or "watch"). Cleared the moment we see a line
+    // that isn't a `- item` continuation. Empty string = not in a list.
+    let mut current_list_key = String::new();
 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Skip comments and empty lines
+        // Skip comments and empty lines — don't let them reset list state.
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
         let indent = line.len() - line.trim_start().len();
+
+        // Block-form list item (`  - value`) — must come before the
+        // indent dispatch so we don't try to parse `- foo` as a sensor
+        // name at indent 2.
+        if trimmed.starts_with("- ") && !current_list_key.is_empty() && !current_sensor.is_empty() {
+            let item = trimmed[2..].trim().trim_matches('"').trim_matches('\'');
+            if !item.is_empty() {
+                if let Some(sensor) = config.sensors.get_mut(&current_sensor) {
+                    match current_list_key.as_str() {
+                        "requires" => sensor.requires.push(item.to_string()),
+                        "watch" => {
+                            sensor
+                                .watch
+                                .get_or_insert_with(Vec::new)
+                                .push(item.to_string());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            continue;
+        }
+        // Any other line ends the current block-form list.
+        current_list_key.clear();
 
         // Top-level section
         if indent == 0 && trimmed.ends_with(':') {
@@ -431,6 +468,7 @@ fn apply_config(config: &mut Config, content: &str) {
                         decay_threshold: 4,
                         script: None,
                         requires: Vec::new(),
+                        watch: None,
                     });
                     current_sensor = name;
                 } else {
@@ -443,6 +481,30 @@ fn apply_config(config: &mut Config, content: &str) {
 
         // Third-level: sensor properties
         if indent == 4 && !current_sensor.is_empty() {
+            // Bare `key:` with no inline value opens a block-form list.
+            // The current_list_key state then consumes the subsequent
+            // `- item` lines at greater indent.
+            if let Some(bare_key) = trimmed.strip_suffix(':') {
+                let bare_key = bare_key.trim();
+                match bare_key {
+                    "requires" => {
+                        if let Some(sensor) = config.sensors.get_mut(&current_sensor) {
+                            sensor.requires.clear();
+                        }
+                        current_list_key = "requires".to_string();
+                        continue;
+                    }
+                    "watch" => {
+                        if let Some(sensor) = config.sensors.get_mut(&current_sensor) {
+                            sensor.watch = Some(Vec::new());
+                        }
+                        current_list_key = "watch".to_string();
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
             if let Some((key, value)) = parse_kv(trimmed) {
                 if let Some(sensor) = config.sensors.get_mut(&current_sensor) {
                     match key {
@@ -476,11 +538,14 @@ fn apply_config(config: &mut Config, content: &str) {
                             // Inline array: requires: [Bash(gh:*), Read]
                             if value.starts_with('[') && value.ends_with(']') {
                                 let inner = &value[1..value.len() - 1];
-                                sensor.requires = inner
-                                    .split(',')
-                                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
+                                sensor.requires = parse_inline_list(inner);
+                            }
+                        }
+                        "watch" => {
+                            // Inline array: watch: [cargo, rustc, mix]
+                            if value.starts_with('[') && value.ends_with(']') {
+                                let inner = &value[1..value.len() - 1];
+                                sensor.watch = Some(parse_inline_list(inner));
                             }
                         }
                         _ => {}
@@ -489,6 +554,17 @@ fn apply_config(config: &mut Config, content: &str) {
             }
         }
     }
+}
+
+/// Split an inline-array body (the text between `[` and `]`) into trimmed,
+/// unquoted items, dropping empties. Shared by `requires:` and `watch:`
+/// so the quoting/whitespace rules stay in one place.
+fn parse_inline_list(inner: &str) -> Vec<String> {
+    inner
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Expand `$HOME`, `~`, `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, and
@@ -519,4 +595,102 @@ fn parse_kv(line: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((key, value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── watch: list (inline + block form) ──────────────────────────────
+
+    #[test]
+    fn watch_inline_array_replaces_defaults() {
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  processes:\n    watch: [mix, zig, ./build.sh]\n",
+        );
+        let watch = cfg.sensors.get("processes").unwrap().watch.clone().unwrap();
+        assert_eq!(watch, vec!["mix", "zig", "./build.sh"]);
+    }
+
+    #[test]
+    fn watch_block_form_replaces_defaults() {
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  processes:\n    watch:\n      - cargo\n      - mix\n      - zig\n",
+        );
+        let watch = cfg.sensors.get("processes").unwrap().watch.clone().unwrap();
+        assert_eq!(watch, vec!["cargo", "mix", "zig"]);
+    }
+
+    #[test]
+    fn watch_absent_stays_none() {
+        // If the user doesn't set watch, the sensor config carries None
+        // and the sensor itself falls back to DEFAULT_WATCH at startup.
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  processes:\n    interval: 45\n",
+        );
+        assert!(cfg.sensors.get("processes").unwrap().watch.is_none());
+    }
+
+    #[test]
+    fn watch_block_form_terminates_on_next_property() {
+        // Make sure the block-form list doesn't swallow subsequent sibling
+        // properties at the same indent level.
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  processes:\n    watch:\n      - cargo\n    interval: 45\n",
+        );
+        let p = cfg.sensors.get("processes").unwrap();
+        assert_eq!(p.watch.clone().unwrap(), vec!["cargo"]);
+        assert_eq!(p.interval, Duration::from_secs(45));
+    }
+
+    // ── requires: block form (bonus fix unlocked by the same parser change)
+
+    #[test]
+    fn requires_block_form_populates_list() {
+        // Regression test: prior to the block-form extension, block-form
+        // `requires:` was silently dropped because the parser only
+        // recognised inline arrays. This test locks in the fix.
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  +gh-pr-checks:\n    script: ./gh.sh\n    requires:\n      - Bash(git:*)\n      - Bash(gh:*)\n",
+        );
+        let r = &cfg.sensors.get("gh-pr-checks").unwrap().requires;
+        assert_eq!(r, &vec!["Bash(git:*)".to_string(), "Bash(gh:*)".to_string()]);
+    }
+
+    #[test]
+    fn requires_inline_array_still_works() {
+        // Older configs use the inline form — must stay supported.
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  +foo:\n    script: ./foo.sh\n    requires: [Bash(gh:*), Read]\n",
+        );
+        let r = &cfg.sensors.get("foo").unwrap().requires;
+        assert_eq!(r, &vec!["Bash(gh:*)".to_string(), "Read".to_string()]);
+    }
+
+    #[test]
+    fn block_list_items_survive_blank_lines_and_comments() {
+        // Comments and blank lines inside a block list are skipped early
+        // in the parser, so they must not terminate the list.
+        let mut cfg = Config::default();
+        apply_config(
+            &mut cfg,
+            "sensors:\n  processes:\n    watch:\n      - cargo\n\n      # elixir\n      - mix\n",
+        );
+        assert_eq!(
+            cfg.sensors.get("processes").unwrap().watch.clone().unwrap(),
+            vec!["cargo", "mix"]
+        );
+    }
 }
