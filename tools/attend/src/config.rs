@@ -308,6 +308,21 @@ sensors:
   #  min_interval: 30
   #  threshold: 2.0
 
+  # Third shipped example: gh-notifications. Watches the authenticated
+  # GitHub notification inbox and emits one line per new notification
+  # since the last poll, with magnitude tiered by reason
+  # (review_requested > mention > author > comment). Requires gh and
+  # jq on PATH, and an authenticated gh login. Different shape from
+  # gh-pr-checks — queries a global endpoint keyed on a rolling
+  # timestamp rather than a per-branch state machine — so it's worth
+  # reading both to see the range.
+  #+gh-notifications:
+  #  script: $XDG_DATA_HOME/attend/sensors/gh-notifications.sh
+  #  enabled: false
+  #  interval: 180
+  #  min_interval: 60
+  #  threshold: 2.0
+
 # Project-scope example (in .claude/attend.yaml):
 #
 # sensors:
