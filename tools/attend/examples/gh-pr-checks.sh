@@ -3,11 +3,16 @@
 # gh-pr-checks.sh — example attend external sensor
 #
 # Polls `gh pr checks` for the PR attached to the current branch and
-# emits a notification only when the aggregate CI state crosses into a
-# terminal bucket (all passing / any failing). Quiet on first run, quiet
-# on pending-state churn, quiet when there's no PR or the branch is
-# main/master. In practice this means: you push, your CI goes green or
-# red, you get one notification, you move on.
+# emits a notification when the aggregate CI state lands in a terminal
+# bucket (all passing / any failing). Quiet on pending-state churn,
+# quiet when there's no PR, quiet when the branch is main/master. On
+# first observation of a `(repo, branch, pr)` tuple: quiet if the
+# state is still pending (wait for a resolution), emit if the state is
+# already terminal (the resolution already happened, surface it). In
+# practice this means: you push, your CI goes green or red, you get
+# one notification, you move on — and the notification arrives even
+# on fast-CI PRs where the sensor's first poll on the branch catches
+# `pass` directly.
 #
 # Why this exists. The built-in sensors don't observe GitHub — nothing
 # inside attend knows your PR just went red. Without this sensor the
@@ -23,10 +28,20 @@
 #      and emits only on terminal transitions. Users who want the
 #      check-by-check view run `gh pr checks` on demand.
 #
-#   2. **Silent on pending entry.** A new push restarts checks, which
-#      means every push triggers `pass → pending` or `fail → pending`.
-#      Emitting on those would produce "CI is running…" spam; the user
-#      knows they pushed. Only transitions *out* of pending matter.
+#   2. **Terminal-first-run, silent on pending entry.** A new push
+#      restarts checks, which means every push triggers `pass →
+#      pending` or `fail → pending`; emitting on those would produce
+#      "CI is running…" spam. Only transitions *out* of pending
+#      matter. First observation of a `(repo, branch, pr)` tuple is
+#      the interesting edge case: if the state is already `pass` or
+#      `fail` (the common shape on fast CI, because the sensor's
+#      first poll arrives after the run has finished), we *do* emit
+#      — there's nothing to wait for, and the user wants to know.
+#      Only a first observation of `pending` stays silent, because
+#      we don't yet have a resolution to report.
+#      Since the sensor only polls the *current* branch's PR, the
+#      worst case is exactly one notification per attend restart.
+#      No flood.
 #
 #   3. **Loudest event is a regression.** `pass → fail` is magnitude
 #      4.5 because it's unusual (you thought it was green and it
@@ -68,14 +83,13 @@
 #         - Bash(gh:*)
 #         - Bash(jq:*)
 #
-# Why 30 s rest and 10 s ramp? The sensor is first-run-silent on every
-# new (repo, branch, pr_number) tuple, so with a slower default the
-# sensor effectively got one chance per CI run to catch a transition —
-# first poll saw `pending`, second poll usually arrived after the user
-# had already merged the PR. 30 s at rest gives the sensor three-to-
-# four polls inside a typical 90 s CI run, and the action-potential
-# ramp drops it to 10 s the moment a state change fires, so bursty CI
-# windows stay responsive without paying that cost while idle.
+# Why 30 s rest and 10 s ramp? Combined with the terminal-first-run
+# rule (see design note #2 below), 30 s at rest gives the sensor
+# three-to-four polls inside a typical 90 s CI run — enough to
+# observe a true `pending → pass` transition when the user is
+# actively pushing — and the action-potential ramp drops it to
+# 10 s the moment a state change fires, so bursty CI windows stay
+# responsive without paying that cost while idle.
 #
 # ----------------------------------------------------------------------
 
@@ -173,20 +187,31 @@ prev=""
 # exited; if we get here the state is a known bucket.
 printf '%s\n' "$state" > "$MARKER"
 
-# First run — record state but don't emit. Prevents a flood of
-# "checks passing" notifications whenever attend restarts.
-[[ -z "$prev" ]] && exit 0
+# First run rule: if the marker didn't exist (new branch, new PR, or
+# attend restart), suppress only when the state is `pending`. A pending
+# first-run means "CI is still in progress and we haven't seen the
+# resolution yet, wait for one." A terminal first-run means "the
+# resolution already happened and the user wants to know" — emit it
+# with the empty-prev path through the case statement below, which
+# correctly picks the fresh-observation magnitudes (3.0 for pass, 4.0
+# for fail). Because the sensor only polls the current branch's PR,
+# the worst case on restart is exactly one notification — no flood.
+if [[ -z "$prev" && "$state" == "pending" ]]; then
+  exit 0
+fi
 
 # No transition, no news.
 [[ "$state" == "$prev" ]] && exit 0
 
 # Magnitude table:
 #
-#   pass  after fail     → 3.5  (recovered — notable, not an alarm)
-#   pass  after pending  → 3.0  (green on a fresh push — good news)
-#   fail  after pass     → 4.5  (regression — break refractory hard)
-#   fail  after pending  → 4.0  (broke on push — break refractory)
-#   pending              → silent (user just pushed; they know)
+#   pass  (first observation) → 3.0  (green, no prior history)
+#   pass  after pending       → 3.0  (green on a fresh push — good news)
+#   pass  after fail          → 3.5  (recovered — notable, not an alarm)
+#   fail  (first observation) → 4.0  (red, no prior history)
+#   fail  after pending       → 4.0  (broke on push — break refractory)
+#   fail  after pass          → 4.5  (regression — break refractory hard)
+#   pending (any time)        → silent (user just pushed; they know)
 #
 # Failures sit above the refractory ceiling so they break through even
 # when the agent is deep in another task. Passes are quieter — they
