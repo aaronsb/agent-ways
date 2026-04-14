@@ -60,13 +60,22 @@
 #     +gh-pr-checks:
 #       script: ~/.claude/tools/attend/examples/gh-pr-checks.sh
 #       enabled: true
-#       interval: 120       # 2 min at rest — CI is minute-scale anyway
-#       min_interval: 30    # 30 s during change
+#       interval: 30        # fast enough to catch a single CI run in progress
+#       min_interval: 10    # ramp into 10 s polls during active transitions
 #       threshold: 2.0
 #       requires:
 #         - Bash(git:*)
 #         - Bash(gh:*)
 #         - Bash(jq:*)
+#
+# Why 30 s rest and 10 s ramp? The sensor is first-run-silent on every
+# new (repo, branch, pr_number) tuple, so with a slower default the
+# sensor effectively got one chance per CI run to catch a transition —
+# first poll saw `pending`, second poll usually arrived after the user
+# had already merged the PR. 30 s at rest gives the sensor three-to-
+# four polls inside a typical 90 s CI run, and the action-potential
+# ramp drops it to 10 s the moment a state change fires, so bursty CI
+# windows stay responsive without paying that cost while idle.
 #
 # ----------------------------------------------------------------------
 

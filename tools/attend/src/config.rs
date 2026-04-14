@@ -304,8 +304,8 @@ sensors:
   #+gh-pr-checks:
   #  script: $XDG_DATA_HOME/attend/sensors/gh-pr-checks.sh
   #  enabled: false
-  #  interval: 120
-  #  min_interval: 30
+  #  interval: 30        # fast enough to catch a single CI run in progress
+  #  min_interval: 10    # ramps to 10 s during active transitions
   #  threshold: 2.0
 
   # Third shipped example: gh-notifications. Watches the authenticated
