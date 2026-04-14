@@ -4,6 +4,8 @@ Sensor authorship is a first-class design surface in attend. A sensor is not a l
 
 This page is for people building sensors, in either of attend's two implementations.
 
+> **New to attend sensors?** [`first-sensor.md`](first-sensor.md) is a walkthrough-style companion that builds a sensor from zero in one sitting. It covers the same ground as this reference but in narrative form, so you end up with a working sensor before you have to memorize the protocol. Read the tutorial first if you've never written one; come back here for the full schema and the subprocess contract when you want the details.
+
 ## The sensor-layer contract
 
 Sensors in attend refuse to editorialize. Each sensor reports a **fact the framework can verify** rather than a guess the sensor produced. The token ledger is authoritative; the signal file is authoritative; the working tree is authoritative. The sensor surfaces state transitions; the consuming agent does whatever synthesis it wants on top.

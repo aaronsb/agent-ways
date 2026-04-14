@@ -56,7 +56,8 @@ See [`authoring-sensors.md`](authoring-sensors.md) for the full author's guide, 
 |---|---|
 | [`README.md`](README.md) | Orientation — you are here |
 | [`loop.md`](loop.md) | The sensor loop — state diagrams, timing, signal flow |
-| [`authoring-sensors.md`](authoring-sensors.md) | Writing crate and external sensors (planned) |
+| [`first-sensor.md`](first-sensor.md) | Walkthrough — build your first external sensor from zero |
+| [`authoring-sensors.md`](authoring-sensors.md) | Writing crate and external sensors (reference) |
 | [`tui.md`](tui.md) | `attend chat` — human mode and conversation interface (planned) |
 | [`sensors.md`](sensors.md) | What each built-in sensor observes and how it emits (planned) |
 | [`signals.md`](signals.md) | Signal file format, storage layout, lifecycle (planned) |
@@ -70,14 +71,15 @@ Files marked **planned** are part of the ongoing documentation pass.
 ## Reading order
 
 1. **[`loop.md`](loop.md)** — if you only read one file, read this. The sensor loop is the substrate everything else rides on.
-2. **[`authoring-sensors.md`](authoring-sensors.md)** — if you're building a sensor (crate or external), read this next. It explains what you're designing for.
-3. **[`tui.md`](tui.md)** — if you're a human using attend directly, or coordinating multiple agents.
-4. **`sensors.md`** — reference for the built-in sensors' behavior.
-5. **`engagement.md`** — the action potential model governs when sensors fire.
-6. **`signals.md`** — the wire format and storage layout for peer messages and notifications.
-7. **`focus-groups.md`** — how groups scope signal routing between agents.
-8. **`salience.md`** — presentation-layer aging.
-9. **`configuration.md`** — reference manual for the YAML surface.
+2. **[`first-sensor.md`](first-sensor.md)** — if you want to build a sensor and you've never done it before. Walkthrough, top to bottom, from zero to a shipped sensor.
+3. **[`authoring-sensors.md`](authoring-sensors.md)** — reference for the subprocess contract, config schema, and design surface once the tutorial isn't enough.
+4. **[`tui.md`](tui.md)** — if you're a human using attend directly, or coordinating multiple agents.
+5. **`sensors.md`** — reference for the built-in sensors' behavior.
+6. **`engagement.md`** — the action potential model governs when sensors fire.
+7. **`signals.md`** — the wire format and storage layout for peer messages and notifications.
+8. **`focus-groups.md`** — how groups scope signal routing between agents.
+9. **`salience.md`** — presentation-layer aging.
+10. **`configuration.md`** — reference manual for the YAML surface.
 
 ## Related docs
 
