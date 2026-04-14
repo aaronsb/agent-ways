@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تصنيف العمليات وتطبيق السياسات","vocabulary":"سياسة تصنيف عمليات تطبيق قواعد امتثال","embed_threshold":0.7}
-{"lang":"de","description":"Operationsklassifizierung, Richtliniendurchsetzung, Freigabeschritte, Auswirkungsanalyse und Risikobewertung","vocabulary":"Operationsklasse Richtlinie Durchsetzung Freigabe Genehmigung Auswirkungsradius Risikobewertung Stufe gefährlich sicher kritisch","embed_threshold":0.75}
-{"lang":"es","description":"Clasificación de operaciones, cumplimiento de políticas, puertas de aprobación","vocabulary":"operación política cumplimiento aprobación puerta radio de impacto riesgo","embed_threshold":0.72}
-{"lang":"fr","description":"Classification des opérations, application des politiques, portes d'approbation","vocabulary":"opération politique application approbation porte rayon d'impact risque évaluation","embed_threshold":0.71}
-{"lang":"hi","description":"ऑपरेशन वर्गीकरण, नीति प्रवर्तन, अनुमोदन गेट","vocabulary":"ऑपरेशन नीति प्रवर्तन अनुमोदन गेट ब्लास्ट रेडियस जोखिम मूल्यांकन","embed_threshold":0.73}
-{"lang":"id","description":"Klasifikasi operasi, penegakan kebijakan, gerbang persetujuan","vocabulary":"operasi kebijakan penegakan persetujuan gerbang radius dampak risiko penilaian","embed_threshold":0.71}
-{"lang":"it","description":"Classificazione operazioni, applicazione policy, gate di approvazione","vocabulary":"operazione policy applicazione approvazione gate raggio impatto rischio valutazione","embed_threshold":0.7}
-{"lang":"ja","description":"オペレーション分類、ポリシー適用、承認ゲート管理","vocabulary":"ポリシー 運用ルール 承認 ゲート 影響範囲 リスク 分類","embed_threshold":0.66}
-{"lang":"ko","description":"작업 분류, 정책 시행, 승인 게이트, 영향 범위 평가","vocabulary":"작업 정책 시행 승인 게이트 영향범위 위험 평가","embed_threshold":0.67}
-{"lang":"pl","description":"Klasyfikacja operacji, egzekwowanie polityk, bramki zatwierdzenia","vocabulary":"operacja polityka egzekwowanie zatwierdzenie bramka promień oddziaływania ryzyko ocena","embed_threshold":0.84}
-{"lang":"pt-br","description":"Classificação de operações, aplicação de políticas, gates de aprovação","vocabulary":"operação política aplicação aprovação gate raio de impacto risco avaliação","embed_threshold":0.7}
-{"lang":"ru","description":"Классификация операций, применение политик, шлюзы одобрения, оценка рисков","vocabulary":"операция политика применение одобрение шлюз радиус воздействия риск оценка","embed_threshold":0.71}
-{"lang":"th","description":"การจำแนกการดำเนินงาน การบังคับใช้นโยบาย ประตูอนุมัติ การประเมินความเสี่ยง","vocabulary":"การดำเนินงาน นโยบาย อนุมัติ ความเสี่ยง ประเมิน รัศมีผลกระทบ ขั้นตอน","embed_threshold":0.77}
-{"lang":"tr","description":"İşlem sınıflandırma, politika uygulama, onay kapıları, risk değerlendirmesi","vocabulary":"işlem sınıflandırma politika onay risk değerlendirme etki alanı iş akışı","embed_threshold":0.73}
-{"lang":"uk","description":"Класифікація операцій, дотримання політик, ворота затвердження, оцінка ризиків","vocabulary":"операція класифікація політика затвердження ризик оцінка радіус впливу","embed_threshold":0.71}
-{"lang":"vi","description":"Phân loại hoạt động, thực thi chính sách, cổng phê duyệt, đánh giá rủi ro","vocabulary":"hoạt động phân loại chính sách phê duyệt rủi ro đánh giá phạm vi quy trình","embed_threshold":0.79}
+{"lang":"ar","description":"تصنيف العمليات وتطبيق السياسات","vocabulary":"سياسة تصنيف عمليات تطبيق قواعد امتثال","embed_threshold":0.68}
+{"lang":"de","description":"Operationsklassifizierung, Richtliniendurchsetzung, Freigabeschritte, Auswirkungsanalyse und Risikobewertung","vocabulary":"Operationsklasse Richtlinie Durchsetzung Freigabe Genehmigung Auswirkungsradius Risikobewertung Stufe gefährlich sicher kritisch","embed_threshold":0.77}
+{"lang":"es","description":"Clasificación de operaciones, cumplimiento de políticas, puertas de aprobación","vocabulary":"operación política cumplimiento aprobación puerta radio de impacto riesgo","embed_threshold":0.75}
+{"lang":"fr","description":"Classification des opérations, application des politiques, portes d'approbation","vocabulary":"opération politique application approbation porte rayon d'impact risque évaluation","embed_threshold":0.73}
+{"lang":"hi","description":"ऑपरेशन वर्गीकरण, नीति प्रवर्तन, अनुमोदन गेट","vocabulary":"ऑपरेशन नीति प्रवर्तन अनुमोदन गेट ब्लास्ट रेडियस जोखिम मूल्यांकन","embed_threshold":0.72}
+{"lang":"id","description":"Klasifikasi operasi, penegakan kebijakan, gerbang persetujuan","vocabulary":"operasi kebijakan penegakan persetujuan gerbang radius dampak risiko penilaian","embed_threshold":0.72}
+{"lang":"it","description":"Classificazione operazioni, applicazione policy, gate di approvazione","vocabulary":"operazione policy applicazione approvazione gate raggio impatto rischio valutazione","embed_threshold":0.75}
+{"lang":"ja","description":"オペレーション分類、ポリシー適用、承認ゲート管理","vocabulary":"ポリシー 運用ルール 承認 ゲート 影響範囲 リスク 分類","embed_threshold":0.72}
+{"lang":"ko","description":"작업 분류, 정책 시행, 승인 게이트, 영향 범위 평가","vocabulary":"작업 정책 시행 승인 게이트 영향범위 위험 평가","embed_threshold":0.69}
+{"lang":"pl","description":"Klasyfikacja operacji, egzekwowanie polityk, bramki zatwierdzenia","vocabulary":"operacja polityka egzekwowanie zatwierdzenie bramka promień oddziaływania ryzyko ocena","embed_threshold":0.82}
+{"lang":"pt-br","description":"Classificação de operações, aplicação de políticas, gates de aprovação","vocabulary":"operação política aplicação aprovação gate raio de impacto risco avaliação","embed_threshold":0.73}
+{"lang":"ru","description":"Классификация операций, применение политик, шлюзы одобрения, оценка рисков","vocabulary":"операция политика применение одобрение шлюз радиус воздействия риск оценка","embed_threshold":0.78}
+{"lang":"th","description":"การจำแนกการดำเนินงาน การบังคับใช้นโยบาย ประตูอนุมัติ การประเมินความเสี่ยง","vocabulary":"การดำเนินงาน นโยบาย อนุมัติ ความเสี่ยง ประเมิน รัศมีผลกระทบ ขั้นตอน","embed_threshold":0.75}
+{"lang":"tr","description":"İşlem sınıflandırma, politika uygulama, onay kapıları, risk değerlendirmesi","vocabulary":"işlem sınıflandırma politika onay risk değerlendirme etki alanı iş akışı","embed_threshold":0.71}
+{"lang":"uk","description":"Класифікація операцій, дотримання політик, ворота затвердження, оцінка ризиків","vocabulary":"операція класифікація політика затвердження ризик оцінка радіус впливу","embed_threshold":0.74}
+{"lang":"vi","description":"Phân loại hoạt động, thực thi chính sách, cổng phê duyệt, đánh giá rủi ro","vocabulary":"hoạt động phân loại chính sách phê duyệt rủi ro đánh giá phạm vi quy trình","embed_threshold":0.78}
 {"lang":"zh","description":"操作分类、策略执行、审批门控、爆炸半径评估","vocabulary":"操作 分类 策略 审批 风险 评估 影响范围 工作流","embed_threshold":0.73}

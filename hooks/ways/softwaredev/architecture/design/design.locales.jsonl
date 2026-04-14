@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تصميم الأنظمة وأنماط التصميم ومخططات قواعد البيانات","vocabulary":"تصميم نظام أنماط قاعدة بيانات مخطط نمذجة","embed_threshold":0.73}
+{"lang":"ar","description":"تصميم الأنظمة وأنماط التصميم ومخططات قواعد البيانات","vocabulary":"تصميم نظام أنماط قاعدة بيانات مخطط نمذجة","embed_threshold":0.72}
 {"lang":"de","description":"Software-Systemdesign, Architekturmuster, Datenbankschema, Komponentenmodellierung, Vorschläge, RFCs, Entwurfsdiskussion","vocabulary":"Architekturmuster Datenbankschema Modellierung Schnittstelle Komponente Module Monolith Microservice Domäne Schicht Kopplung Kohäsion Abstraktion Vorschlag RFC Entwurf Whiteboard","embed_threshold":0.7}
-{"lang":"es","description":"Diseno de sistemas — patrones, esquema de base de datos, modelado de datos","vocabulary":"diseno patron esquema base-de-datos modelado datos relaciones tablas entidades dominio","embed_threshold":0.67}
-{"lang":"fr","description":"Conception de systèmes logiciels, patrons, schéma de base de données, RFC","vocabulary":"architecture patron base de données schéma modélisation interface composant proposition RFC","embed_threshold":0.66}
-{"lang":"hi","description":"सॉफ्टवेयर सिस्टम डिज़ाइन, आर्किटेक्चर पैटर्न, डेटाबेस स्कीमा","vocabulary":"डिज़ाइन आर्किटेक्चर पैटर्न डेटाबेस स्कीमा इंटरफेस मॉड्यूल","embed_threshold":0.67}
-{"lang":"id","description":"Desain sistem perangkat lunak, pola arsitektur, skema database","vocabulary":"desain arsitektur pola database skema antarmuka modul","embed_threshold":0.71}
+{"lang":"es","description":"Diseno de sistemas — patrones, esquema de base de datos, modelado de datos","vocabulary":"diseno patron esquema base-de-datos modelado datos relaciones tablas entidades dominio","embed_threshold":0.69}
+{"lang":"fr","description":"Conception de systèmes logiciels, patrons, schéma de base de données, RFC","vocabulary":"architecture patron base de données schéma modélisation interface composant proposition RFC","embed_threshold":0.71}
+{"lang":"hi","description":"सॉफ्टवेयर सिस्टम डिज़ाइन, आर्किटेक्चर पैटर्न, डेटाबेस स्कीमा","vocabulary":"डिज़ाइन आर्किटेक्चर पैटर्न डेटाबेस स्कीमा इंटरफेस मॉड्यूल","embed_threshold":0.69}
+{"lang":"id","description":"Desain sistem perangkat lunak, pola arsitektur, skema database","vocabulary":"desain arsitektur pola database skema antarmuka modul","embed_threshold":0.75}
 {"lang":"it","description":"Progettazione di sistemi software, pattern architetturali, schema database","vocabulary":"progettazione architettura pattern database schema interfaccia modulo","embed_threshold":0.74}
-{"lang":"ja","description":"ソフトウェアシステム設計、パターン、データベーススキーマ、RFC","vocabulary":"アーキテクチャ パターン データベース スキーマ モデリング インターフェース 設計提案","embed_threshold":0.75}
-{"lang":"ko","description":"소프트웨어 시스템 설계, 아키텍처 패턴, 데이터베이스 스키마","vocabulary":"설계 아키텍처 패턴 데이터베이스 스키마 인터페이스 모듈","embed_threshold":0.74}
-{"lang":"pl","description":"Projektowanie systemów oprogramowania, wzorce, schemat bazy danych, RFC","vocabulary":"architektura wzorzec baza danych schemat modelowanie interfejs komponent propozycja RFC","embed_threshold":0.72}
-{"lang":"pt-br","description":"Design de sistemas de software, padrões, esquema de banco de dados, RFC","vocabulary":"arquitetura padrão banco de dados esquema modelagem interface componente proposta RFC","embed_threshold":0.68}
+{"lang":"ja","description":"ソフトウェアシステム設計、パターン、データベーススキーマ、RFC","vocabulary":"アーキテクチャ パターン データベース スキーマ モデリング インターフェース 設計提案","embed_threshold":0.76}
+{"lang":"ko","description":"소프트웨어 시스템 설계, 아키텍처 패턴, 데이터베이스 스키마","vocabulary":"설계 아키텍처 패턴 데이터베이스 스키마 인터페이스 모듈","embed_threshold":0.76}
+{"lang":"pl","description":"Projektowanie systemów oprogramowania, wzorce, schemat bazy danych, RFC","vocabulary":"architektura wzorzec baza danych schemat modelowanie interfejs komponent propozycja RFC","embed_threshold":0.75}
+{"lang":"pt-br","description":"Design de sistemas de software, padrões, esquema de banco de dados, RFC","vocabulary":"arquitetura padrão banco de dados esquema modelagem interface componente proposta RFC","embed_threshold":0.72}
 {"lang":"ru","description":"Проектирование программных систем, паттерны, схема базы данных, RFC","vocabulary":"архитектура паттерн база данных схема моделирование интерфейс компонент предложение RFC","embed_threshold":0.72}
-{"lang":"th","description":"การออกแบบระบบซอฟต์แวร์ รูปแบบ สคีมาฐานข้อมูล RFC","vocabulary":"สถาปัตยกรรม รูปแบบ ฐานข้อมูล สคีมา โมเดล อินเทอร์เฟซ ส่วนประกอบ ข้อเสนอ RFC","embed_threshold":0.74}
-{"lang":"tr","description":"Yazılım sistem tasarımı, kalıplar, veritabanı şeması, RFC","vocabulary":"mimari kalıp veritabanı şema modelleme arayüz bileşen öneri RFC","embed_threshold":0.69}
-{"lang":"uk","description":"Проєктування програмних систем, шаблони, схема бази даних, RFC","vocabulary":"архітектура шаблон база даних схема моделювання інтерфейс компонент пропозиція RFC","embed_threshold":0.68}
-{"lang":"vi","description":"Thiết kế hệ thống phần mềm, mẫu, lược đồ cơ sở dữ liệu, RFC","vocabulary":"kiến trúc mẫu cơ sở dữ liệu lược đồ mô hình giao diện thành phần đề xuất RFC","embed_threshold":0.65}
-{"lang":"zh","description":"软件系统设计、模式、数据库模式、RFC","vocabulary":"架构 模式 数据库 模式 建模 接口 组件 提案 RFC","embed_threshold":0.71}
+{"lang":"th","description":"การออกแบบระบบซอฟต์แวร์ รูปแบบ สคีมาฐานข้อมูล RFC","vocabulary":"สถาปัตยกรรม รูปแบบ ฐานข้อมูล สคีมา โมเดล อินเทอร์เฟซ ส่วนประกอบ ข้อเสนอ RFC","embed_threshold":0.75}
+{"lang":"tr","description":"Yazılım sistem tasarımı, kalıplar, veritabanı şeması, RFC","vocabulary":"mimari kalıp veritabanı şema modelleme arayüz bileşen öneri RFC","embed_threshold":0.72}
+{"lang":"uk","description":"Проєктування програмних систем, шаблони, схема бази даних, RFC","vocabulary":"архітектура шаблон база даних схема моделювання інтерфейс компонент пропозиція RFC","embed_threshold":0.7}
+{"lang":"vi","description":"Thiết kế hệ thống phần mềm, mẫu, lược đồ cơ sở dữ liệu, RFC","vocabulary":"kiến trúc mẫu cơ sở dữ liệu lược đồ mô hình giao diện thành phần đề xuất RFC","embed_threshold":0.7}
+{"lang":"zh","description":"软件系统设计、模式、数据库模式、RFC","vocabulary":"架构 模式 数据库 模式 建模 接口 组件 提案 RFC","embed_threshold":0.72}

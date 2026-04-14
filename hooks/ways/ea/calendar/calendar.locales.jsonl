@@ -1,17 +1,17 @@
-{"lang":"ar","description":"جدولة الاجتماعات والتحقق من التوفر في التقويم","vocabulary":"تقويم اجتماع موعد جدولة توفر حجز","embed_threshold":0.75}
-{"lang":"de","description":"Termine planen, Verfügbarkeit prüfen, Zeitblöcke im Kalender reservieren, Besprechungen erstellen, freie Zeitfenster finden","vocabulary":"Termin Kalender Verfügbarkeit Zeitblock Besprechung Einladung Erinnerung verschieben freier Slot buchen Zeitzone Terminplanung","embed_threshold":0.7}
-{"lang":"es","description":"Agendar reuniones, consultar disponibilidad, bloquear tiempo, eventos del calendario","vocabulary":"agendar calendario disponibilidad bloquear tiempo evento reunión invitación horario","embed_threshold":0.7}
-{"lang":"fr","description":"Planifier des réunions, vérifier les disponibilités, gérer les événements du calendrier","vocabulary":"calendrier réunion disponibilité planifier événement invitation rappel créneau réserver","embed_threshold":0.72}
-{"lang":"hi","description":"मीटिंग शेड्यूल करें, उपलब्धता जांचें, कैलेंडर पर समय ब्लॉक करें","vocabulary":"कैलेंडर मीटिंग शेड्यूल उपलब्धता समय इवेंट निमंत्रण रिमाइंडर","embed_threshold":0.67}
-{"lang":"id","description":"Menjadwalkan rapat, memeriksa ketersediaan, memblokir waktu di kalender","vocabulary":"kalender rapat jadwal ketersediaan waktu acara undangan pengingat","embed_threshold":0.7}
-{"lang":"it","description":"Pianificare riunioni, verificare disponibilità, bloccare tempo nel calendario","vocabulary":"calendario riunione pianificare disponibilità tempo evento invito promemoria","embed_threshold":0.71}
-{"lang":"ja","description":"会議のスケジュール調整、空き時間の確認、カレンダー管理","vocabulary":"スケジュール カレンダー 予定 会議 空き時間 予約 招待 日程調整","embed_threshold":0.74}
-{"lang":"ko","description":"회의 일정 잡기, 가용 시간 확인, 캘린더에 시간 차단","vocabulary":"캘린더 회의 일정 가용성 시간 이벤트 초대 알림","embed_threshold":0.7}
-{"lang":"pl","description":"Planowanie spotkań, sprawdzanie dostępności, rezerwacja czasu w kalendarzu","vocabulary":"kalendarz spotkanie termin planowanie dostępność rezerwacja zaproszenie przypomnienie","embed_threshold":0.74}
-{"lang":"pt-br","description":"Marcar reuniões, checar disponibilidade, bloquear horário na agenda","vocabulary":"agenda reunião compromisso marcar disponibilidade bloquear convite lembrete horário","embed_threshold":0.67}
-{"lang":"ru","description":"Планирование встреч, проверка доступности, бронирование времени в календаре","vocabulary":"календарь встреча планирование доступность бронирование приглашение напоминание слот","embed_threshold":0.7}
-{"lang":"th","description":"นัดหมายประชุม ตรวจสอบตารางว่าง จัดการปฏิทิน","vocabulary":"ปฏิทิน ประชุม นัดหมาย ตารางว่าง กิจกรรม เตือน จอง เวลา","embed_threshold":0.82}
-{"lang":"tr","description":"Toplantı planlama, müsaitlik kontrolü, takvim etkinlikleri yönetimi","vocabulary":"takvim toplantı planlama müsaitlik etkinlik hatırlatıcı randevu saat dilimi","embed_threshold":0.76}
-{"lang":"uk","description":"Планування зустрічей, перевірка доступності, керування подіями календаря","vocabulary":"календар зустріч планування доступність подія нагадування бронювання часовий пояс","embed_threshold":0.75}
-{"lang":"vi","description":"Lên lịch họp, kiểm tra lịch trống, quản lý sự kiện lịch","vocabulary":"lịch họp đặt lịch khả dụng sự kiện nhắc nhở đặt chỗ múi giờ","embed_threshold":0.73}
-{"lang":"zh","description":"安排会议、查看日程空闲、管理日历事件","vocabulary":"日历 会议 安排 空闲 事件 提醒 预约 时区 日程","embed_threshold":0.81}
+{"lang":"ar","description":"جدولة الاجتماعات والتحقق من التوفر في التقويم","vocabulary":"تقويم اجتماع موعد جدولة توفر حجز","embed_threshold":0.74}
+{"lang":"de","description":"Termine planen, Verfügbarkeit prüfen, Zeitblöcke im Kalender reservieren, Besprechungen erstellen, freie Zeitfenster finden","vocabulary":"Termin Kalender Verfügbarkeit Zeitblock Besprechung Einladung Erinnerung verschieben freier Slot buchen Zeitzone Terminplanung","embed_threshold":0.73}
+{"lang":"es","description":"Agendar reuniones, consultar disponibilidad, bloquear tiempo, eventos del calendario","vocabulary":"agendar calendario disponibilidad bloquear tiempo evento reunión invitación horario","embed_threshold":0.71}
+{"lang":"fr","description":"Planifier des réunions, vérifier les disponibilités, gérer les événements du calendrier","vocabulary":"calendrier réunion disponibilité planifier événement invitation rappel créneau réserver","embed_threshold":0.71}
+{"lang":"hi","description":"मीटिंग शेड्यूल करें, उपलब्धता जांचें, कैलेंडर पर समय ब्लॉक करें","vocabulary":"कैलेंडर मीटिंग शेड्यूल उपलब्धता समय इवेंट निमंत्रण रिमाइंडर","embed_threshold":0.68}
+{"lang":"id","description":"Menjadwalkan rapat, memeriksa ketersediaan, memblokir waktu di kalender","vocabulary":"kalender rapat jadwal ketersediaan waktu acara undangan pengingat","embed_threshold":0.71}
+{"lang":"it","description":"Pianificare riunioni, verificare disponibilità, bloccare tempo nel calendario","vocabulary":"calendario riunione pianificare disponibilità tempo evento invito promemoria","embed_threshold":0.73}
+{"lang":"ja","description":"会議のスケジュール調整、空き時間の確認、カレンダー管理","vocabulary":"スケジュール カレンダー 予定 会議 空き時間 予約 招待 日程調整","embed_threshold":0.75}
+{"lang":"ko","description":"회의 일정 잡기, 가용 시간 확인, 캘린더에 시간 차단","vocabulary":"캘린더 회의 일정 가용성 시간 이벤트 초대 알림","embed_threshold":0.69}
+{"lang":"pl","description":"Planowanie spotkań, sprawdzanie dostępności, rezerwacja czasu w kalendarzu","vocabulary":"kalendarz spotkanie termin planowanie dostępność rezerwacja zaproszenie przypomnienie","embed_threshold":0.73}
+{"lang":"pt-br","description":"Marcar reuniões, checar disponibilidade, bloquear horário na agenda","vocabulary":"agenda reunião compromisso marcar disponibilidade bloquear convite lembrete horário","embed_threshold":0.66}
+{"lang":"ru","description":"Планирование встреч, проверка доступности, бронирование времени в календаре","vocabulary":"календарь встреча планирование доступность бронирование приглашение напоминание слот","embed_threshold":0.69}
+{"lang":"th","description":"นัดหมายประชุม ตรวจสอบตารางว่าง จัดการปฏิทิน","vocabulary":"ปฏิทิน ประชุม นัดหมาย ตารางว่าง กิจกรรม เตือน จอง เวลา","embed_threshold":0.8}
+{"lang":"tr","description":"Toplantı planlama, müsaitlik kontrolü, takvim etkinlikleri yönetimi","vocabulary":"takvim toplantı planlama müsaitlik etkinlik hatırlatıcı randevu saat dilimi","embed_threshold":0.74}
+{"lang":"uk","description":"Планування зустрічей, перевірка доступності, керування подіями календаря","vocabulary":"календар зустріч планування доступність подія нагадування бронювання часовий пояс","embed_threshold":0.73}
+{"lang":"vi","description":"Lên lịch họp, kiểm tra lịch trống, quản lý sự kiện lịch","vocabulary":"lịch họp đặt lịch khả dụng sự kiện nhắc nhở đặt chỗ múi giờ","embed_threshold":0.72}
+{"lang":"zh","description":"安排会议、查看日程空闲、管理日历事件","vocabulary":"日历 会议 安排 空闲 事件 提醒 预约 时区 日程","embed_threshold":0.79}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إعداد الإحاطة الصباحية وملخص الأحداث الليلية","vocabulary":"إحاطة صباحية ملخص ليلي تقرير يومي مستجدات","embed_threshold":0.57}
-{"lang":"de","description":"Morgendliches Briefing, was ist über Nacht passiert, Tagesübersicht über alle Posteingänge und Kalender","vocabulary":"Morgenbriefing Tagesübersicht aufholen was habe ich verpasst Zusammenfassung Prioritäten Posteingang Kalender Überblick","embed_threshold":0.69}
-{"lang":"es","description":"Resumen matutino, ponerse al día con lo que pasó durante la noche","vocabulary":"ponerse al día resumen matutino inicio del día agenda prioridades briefing","embed_threshold":0.65}
-{"lang":"fr","description":"Briefing matinal, rattraper ce qui s'est passé pendant la nuit, résumé de la journée","vocabulary":"briefing matinal résumé nuit agenda priorités boîte de réception calendrier rattraper","embed_threshold":0.72}
-{"lang":"hi","description":"सुबह की ब्रीफिंग, रात भर में क्या हुआ इसका सारांश, दिन की समीक्षा","vocabulary":"ब्रीफिंग सुबह सारांश रात अपडेट प्राथमिकता दैनिक इनबॉक्स कैलेंडर","embed_threshold":0.64}
-{"lang":"id","description":"Briefing pagi, ringkasan kejadian semalam, tinjauan hari ini","vocabulary":"briefing pagi ringkasan semalam tinjauan hari prioritas pembaruan kotak masuk kalender","embed_threshold":0.72}
-{"lang":"it","description":"Briefing mattutino, riepilogo notturno, panoramica della giornata","vocabulary":"briefing mattutino riepilogo notturno panoramica giornata priorità aggiornamento posta calendario","embed_threshold":0.78}
-{"lang":"ja","description":"朝のブリーフィング、昨夜の出来事の要約、一日の予定確認","vocabulary":"朝礼 ブリーフィング 要約 まとめ 予定 優先事項 今日のタスク","embed_threshold":0.7}
-{"lang":"ko","description":"아침 브리핑, 밤사이 일어난 일 요약, 하루 일정 확인","vocabulary":"브리핑 아침 요약 야간 일정 우선순위 업데이트 하루 받은편지함 캘린더","embed_threshold":0.55}
-{"lang":"pl","description":"Poranny briefing, podsumowanie tego co wydarzyło się w nocy, przegląd dnia","vocabulary":"briefing poranny podsumowanie przegląd dnia priorytety skrzynka kalendarz","embed_threshold":0.75}
-{"lang":"pt-br","description":"Resumo da manhã, o que aconteceu durante a noite, visão geral do dia","vocabulary":"resumo manhã briefing agenda prioridades caixa de entrada calendário atualização","embed_threshold":0.63}
-{"lang":"ru","description":"Утренний брифинг, сводка событий за ночь, обзор дня","vocabulary":"брифинг утренний сводка обзор дня приоритеты почта календарь","embed_threshold":0.78}
-{"lang":"th","description":"สรุปข้อมูลตอนเช้า ทบทวนเหตุการณ์ข้ามคืน ภาพรวมประจำวัน","vocabulary":"บรีฟฟิ่ง เช้า สรุป ข้ามคืน ภาพรวม วัน ลำดับความสำคัญ กล่องจดหมาย ปฏิทิน","embed_threshold":0.79}
-{"lang":"tr","description":"Sabah brifing, gece boyunca neler olduğunun özeti, günlük genel bakış","vocabulary":"brifing sabah özet gece günlük genel bakış öncelikler gelen kutusu takvim","embed_threshold":0.65}
-{"lang":"uk","description":"Ранковий брифінг, підсумок нічних подій, огляд дня","vocabulary":"брифінг ранковий підсумок ніч огляд день пріоритети оновлення календар","embed_threshold":0.74}
+{"lang":"ar","description":"إعداد الإحاطة الصباحية وملخص الأحداث الليلية","vocabulary":"إحاطة صباحية ملخص ليلي تقرير يومي مستجدات","embed_threshold":0.59}
+{"lang":"de","description":"Morgendliches Briefing, was ist über Nacht passiert, Tagesübersicht über alle Posteingänge und Kalender","vocabulary":"Morgenbriefing Tagesübersicht aufholen was habe ich verpasst Zusammenfassung Prioritäten Posteingang Kalender Überblick","embed_threshold":0.67}
+{"lang":"es","description":"Resumen matutino, ponerse al día con lo que pasó durante la noche","vocabulary":"ponerse al día resumen matutino inicio del día agenda prioridades briefing","embed_threshold":0.68}
+{"lang":"fr","description":"Briefing matinal, rattraper ce qui s'est passé pendant la nuit, résumé de la journée","vocabulary":"briefing matinal résumé nuit agenda priorités boîte de réception calendrier rattraper","embed_threshold":0.74}
+{"lang":"hi","description":"सुबह की ब्रीफिंग, रात भर में क्या हुआ इसका सारांश, दिन की समीक्षा","vocabulary":"ब्रीफिंग सुबह सारांश रात अपडेट प्राथमिकता दैनिक इनबॉक्स कैलेंडर","embed_threshold":0.69}
+{"lang":"id","description":"Briefing pagi, ringkasan kejadian semalam, tinjauan hari ini","vocabulary":"briefing pagi ringkasan semalam tinjauan hari prioritas pembaruan kotak masuk kalender","embed_threshold":0.7}
+{"lang":"it","description":"Briefing mattutino, riepilogo notturno, panoramica della giornata","vocabulary":"briefing mattutino riepilogo notturno panoramica giornata priorità aggiornamento posta calendario","embed_threshold":0.76}
+{"lang":"ja","description":"朝のブリーフィング、昨夜の出来事の要約、一日の予定確認","vocabulary":"朝礼 ブリーフィング 要約 まとめ 予定 優先事項 今日のタスク","embed_threshold":0.72}
+{"lang":"ko","description":"아침 브리핑, 밤사이 일어난 일 요약, 하루 일정 확인","vocabulary":"브리핑 아침 요약 야간 일정 우선순위 업데이트 하루 받은편지함 캘린더","embed_threshold":0.63}
+{"lang":"pl","description":"Poranny briefing, podsumowanie tego co wydarzyło się w nocy, przegląd dnia","vocabulary":"briefing poranny podsumowanie przegląd dnia priorytety skrzynka kalendarz","embed_threshold":0.74}
+{"lang":"pt-br","description":"Resumo da manhã, o que aconteceu durante a noite, visão geral do dia","vocabulary":"resumo manhã briefing agenda prioridades caixa de entrada calendário atualização","embed_threshold":0.68}
+{"lang":"ru","description":"Утренний брифинг, сводка событий за ночь, обзор дня","vocabulary":"брифинг утренний сводка обзор дня приоритеты почта календарь","embed_threshold":0.76}
+{"lang":"th","description":"สรุปข้อมูลตอนเช้า ทบทวนเหตุการณ์ข้ามคืน ภาพรวมประจำวัน","vocabulary":"บรีฟฟิ่ง เช้า สรุป ข้ามคืน ภาพรวม วัน ลำดับความสำคัญ กล่องจดหมาย ปฏิทิน","embed_threshold":0.77}
+{"lang":"tr","description":"Sabah brifing, gece boyunca neler olduğunun özeti, günlük genel bakış","vocabulary":"brifing sabah özet gece günlük genel bakış öncelikler gelen kutusu takvim","embed_threshold":0.69}
+{"lang":"uk","description":"Ранковий брифінг, підсумок нічних подій, огляд дня","vocabulary":"брифінг ранковий підсумок ніч огляд день пріоритети оновлення календар","embed_threshold":0.72}
 {"lang":"vi","description":"Tóm tắt buổi sáng, tổng hợp sự kiện qua đêm, tổng quan ngày","vocabulary":"tóm tắt sáng briefing đêm tổng quan ngày ưu tiên hộp thư lịch","embed_threshold":0.74}
-{"lang":"zh","description":"早间简报，夜间事件摘要，全天日程概览","vocabulary":"简报 早间 摘要 夜间 日程 优先级 收件箱 日历 概览","embed_threshold":0.79}
+{"lang":"zh","description":"早间简报，夜间事件摘要，全天日程概览","vocabulary":"简报 早间 摘要 夜间 日程 优先级 收件箱 日历 概览","embed_threshold":0.77}

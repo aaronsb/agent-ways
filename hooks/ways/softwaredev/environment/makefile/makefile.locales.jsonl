@@ -1,17 +1,17 @@
-{"lang":"ar","description":"Makefile كمشغل للمهام","vocabulary":"Makefile مهام بناء تشغيل أوامر أتمتة make","embed_threshold":0.65}
-{"lang":"de","description":"Makefile als Projekt-Taskrunner — Build, Lint, Test und Format als Make-Targets","vocabulary":"Makefile Make Target Build Lint Test Format Clean Install Taskrunner Bauziel","embed_threshold":0.53}
-{"lang":"es","description":"Makefile como ejecutor de tareas — targets, recetas, automatizacion de build","vocabulary":"Makefile make target receta tarea build automatizar compilar ejecutar dependencia","embed_threshold":0.61}
-{"lang":"fr","description":"Makefile comme gestionnaire de tâches du projet","vocabulary":"Makefile make cible build lint test format clean install","embed_threshold":0.54}
+{"lang":"ar","description":"Makefile كمشغل للمهام","vocabulary":"Makefile مهام بناء تشغيل أوامر أتمتة make","embed_threshold":0.64}
+{"lang":"de","description":"Makefile als Projekt-Taskrunner — Build, Lint, Test und Format als Make-Targets","vocabulary":"Makefile Make Target Build Lint Test Format Clean Install Taskrunner Bauziel","embed_threshold":0.56}
+{"lang":"es","description":"Makefile como ejecutor de tareas — targets, recetas, automatizacion de build","vocabulary":"Makefile make target receta tarea build automatizar compilar ejecutar dependencia","embed_threshold":0.6}
+{"lang":"fr","description":"Makefile comme gestionnaire de tâches du projet","vocabulary":"Makefile make cible build lint test format clean install","embed_threshold":0.6}
 {"lang":"hi","description":"Makefile प्रोजेक्ट टास्क रनर — बिल्ड, टेस्ट, लिंट, डिप्लॉय","vocabulary":"Makefile make टार्गेट बिल्ड टेस्ट लिंट क्लीन इंस्टॉल","embed_threshold":0.69}
-{"lang":"id","description":"Makefile sebagai task runner proyek — build, test, lint, deploy","vocabulary":"Makefile make target build test lint bersihkan install","embed_threshold":0.55}
-{"lang":"it","description":"Makefile come task runner del progetto — build, test, lint, deploy","vocabulary":"Makefile make target build test lint pulizia installazione","embed_threshold":0.55}
-{"lang":"ja","description":"Makefileをプロジェクトのタスクランナーとして活用","vocabulary":"Makefile make ターゲット ビルド リント テスト フォーマット クリーン インストール","embed_threshold":0.55}
-{"lang":"ko","description":"Makefile 프로젝트 작업 실행기 — 빌드, 테스트, 린트, 배포","vocabulary":"Makefile make 타겟 빌드 테스트 린트 클린 설치","embed_threshold":0.59}
-{"lang":"pl","description":"Makefile jako uruchamiacz zadań projektu — build, lint, test, format","vocabulary":"Makefile make cel build lint test format clean install","embed_threshold":0.57}
-{"lang":"pt-br","description":"Makefile como task runner do projeto — build, lint, test, format","vocabulary":"Makefile make alvo build lint teste formato clean install","embed_threshold":0.54}
-{"lang":"ru","description":"Makefile как раннер задач проекта — сборка, линтинг, тесты, форматирование","vocabulary":"Makefile make цель сборка линтинг тест формат clean install","embed_threshold":0.58}
-{"lang":"th","description":"Makefile เป็นตัวรันงานของโปรเจกต์","vocabulary":"Makefile make เป้าหมาย build lint test format clean install","embed_threshold":0.58}
-{"lang":"tr","description":"Makefile proje görev çalıştırıcısı olarak","vocabulary":"Makefile make hedef build lint test format clean install","embed_threshold":0.56}
-{"lang":"uk","description":"Makefile як виконавець завдань проєкту","vocabulary":"Makefile make ціль build lint test format clean install","embed_threshold":0.56}
-{"lang":"vi","description":"Makefile là trình chạy tác vụ dự án","vocabulary":"Makefile make mục tiêu build lint test format clean install","embed_threshold":0.56}
-{"lang":"zh","description":"Makefile 作为项目任务运行器","vocabulary":"Makefile make 目标 build lint test format clean install","embed_threshold":0.57}
+{"lang":"id","description":"Makefile sebagai task runner proyek — build, test, lint, deploy","vocabulary":"Makefile make target build test lint bersihkan install","embed_threshold":0.6}
+{"lang":"it","description":"Makefile come task runner del progetto — build, test, lint, deploy","vocabulary":"Makefile make target build test lint pulizia installazione","embed_threshold":0.64}
+{"lang":"ja","description":"Makefileをプロジェクトのタスクランナーとして活用","vocabulary":"Makefile make ターゲット ビルド リント テスト フォーマット クリーン インストール","embed_threshold":0.66}
+{"lang":"ko","description":"Makefile 프로젝트 작업 실행기 — 빌드, 테스트, 린트, 배포","vocabulary":"Makefile make 타겟 빌드 테스트 린트 클린 설치","embed_threshold":0.64}
+{"lang":"pl","description":"Makefile jako uruchamiacz zadań projektu — build, lint, test, format","vocabulary":"Makefile make cel build lint test format clean install","embed_threshold":0.58}
+{"lang":"pt-br","description":"Makefile como task runner do projeto — build, lint, test, format","vocabulary":"Makefile make alvo build lint teste formato clean install","embed_threshold":0.59}
+{"lang":"ru","description":"Makefile как раннер задач проекта — сборка, линтинг, тесты, форматирование","vocabulary":"Makefile make цель сборка линтинг тест формат clean install","embed_threshold":0.65}
+{"lang":"th","description":"Makefile เป็นตัวรันงานของโปรเจกต์","vocabulary":"Makefile make เป้าหมาย build lint test format clean install","embed_threshold":0.57}
+{"lang":"tr","description":"Makefile proje görev çalıştırıcısı olarak","vocabulary":"Makefile make hedef build lint test format clean install","embed_threshold":0.58}
+{"lang":"uk","description":"Makefile як виконавець завдань проєкту","vocabulary":"Makefile make ціль build lint test format clean install","embed_threshold":0.58}
+{"lang":"vi","description":"Makefile là trình chạy tác vụ dự án","vocabulary":"Makefile make mục tiêu build lint test format clean install","embed_threshold":0.57}
+{"lang":"zh","description":"Makefile 作为项目任务运行器","vocabulary":"Makefile make 目标 build lint test format clean install","embed_threshold":0.59}

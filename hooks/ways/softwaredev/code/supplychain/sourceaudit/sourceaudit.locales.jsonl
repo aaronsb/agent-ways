@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تدقيق أمان الكود المصدري","vocabulary":"تدقيق كود مصدري أمان مراجعة فحص ثغرات","embed_threshold":0.84}
-{"lang":"de","description":"Quellcode-Sicherheitsaudit auf gefährliche Muster, Verschleierung, Datenexfiltration","vocabulary":"eval exec verschleiert base64 pickle Deserialisierung Exfiltration Shell-Injection Subprocess os.system innerHTML gefährliches Muster Codeaudit Quellcodeprüfung","embed_threshold":0.69}
-{"lang":"es","description":"Auditoria de seguridad de codigo fuente — revision manual, patrones peligrosos","vocabulary":"auditoria codigo-fuente revision seguridad patron peligroso manual inspeccion hallazgos riesgo","embed_threshold":0.79}
-{"lang":"fr","description":"Audit de sécurité du code source, détection de patterns dangereux","vocabulary":"eval exec obfuscation base64 exfiltration shell injection pattern dangereux audit","embed_threshold":0.71}
-{"lang":"hi","description":"खतरनाक पैटर्न के लिए सोर्स कोड सुरक्षा ऑडिट, अस्पష्टीकरण","vocabulary":"सोर्स ऑडिट खतरनाक पैटर्न अस्पष्टीकरण बैकडोर eval","embed_threshold":0.71}
-{"lang":"id","description":"Audit keamanan kode sumber untuk pola berbahaya, obfuskasi","vocabulary":"sumber audit berbahaya pola obfuskasi backdoor eval","embed_threshold":0.8}
-{"lang":"it","description":"Audit sicurezza codice sorgente per pattern pericolosi, offuscamento","vocabulary":"sorgente audit pericoloso pattern offuscamento backdoor eval","embed_threshold":0.76}
-{"lang":"ja","description":"ソースコードのセキュリティ監査、危険なパターンの検出","vocabulary":"eval exec 難読化 base64 情報流出 シェル注入 危険パターン","embed_threshold":0.8}
-{"lang":"ko","description":"위험 패턴에 대한 소스 코드 보안 감사, 난독화","vocabulary":"소스 감사 위험 패턴 난독화 백도어 eval","embed_threshold":0.77}
-{"lang":"pl","description":"Audyt bezpieczeństwa kodu źródłowego, wykrywanie niebezpiecznych wzorców","vocabulary":"eval exec zaciemnianie base64 eksfiltracja shell wstrzyknięcie niebezpieczny wzorzec audyt","embed_threshold":0.69}
-{"lang":"pt-br","description":"Auditoria de segurança de código-fonte, detecção de padrões perigosos","vocabulary":"eval exec ofuscação base64 exfiltração shell injeção padrão perigoso auditoria","embed_threshold":0.74}
-{"lang":"ru","description":"Аудит безопасности исходного кода, обнаружение опасных паттернов","vocabulary":"eval exec обфускация base64 эксфильтрация shell инъекция опасный паттерн аудит","embed_threshold":0.73}
-{"lang":"th","description":"ตรวจสอบความปลอดภัยซอร์สโค้ด ค้นหารูปแบบอันตราย","vocabulary":"eval exec obfuscated base64 ดึงข้อมูลออก shell injection อันตราย รูปแบบ ตรวจสอบ","embed_threshold":0.79}
-{"lang":"tr","description":"Kaynak kod güvenlik denetimi, tehlikeli kalıpları tespit etme","vocabulary":"eval exec gizleme base64 sızdırma shell enjeksiyon tehlikeli kalıp denetim","embed_threshold":0.78}
-{"lang":"uk","description":"Аудит безпеки вихідного коду, виявлення небезпечних шаблонів","vocabulary":"eval exec обфускація base64 ексфільтрація оболонка ін'єкція небезпечний шаблон аудит","embed_threshold":0.78}
-{"lang":"vi","description":"Kiểm toán bảo mật mã nguồn, phát hiện mẫu nguy hiểm","vocabulary":"eval exec obfuscated base64 trích xuất shell injection nguy hiểm mẫu kiểm toán","embed_threshold":0.73}
-{"lang":"zh","description":"源代码安全审计、危险模式检测","vocabulary":"eval exec 混淆 base64 数据外泄 shell 注入 危险 模式 审计","embed_threshold":0.79}
+{"lang":"ar","description":"تدقيق أمان الكود المصدري","vocabulary":"تدقيق كود مصدري أمان مراجعة فحص ثغرات","embed_threshold":0.83}
+{"lang":"de","description":"Quellcode-Sicherheitsaudit auf gefährliche Muster, Verschleierung, Datenexfiltration","vocabulary":"eval exec verschleiert base64 pickle Deserialisierung Exfiltration Shell-Injection Subprocess os.system innerHTML gefährliches Muster Codeaudit Quellcodeprüfung","embed_threshold":0.68}
+{"lang":"es","description":"Auditoria de seguridad de codigo fuente — revision manual, patrones peligrosos","vocabulary":"auditoria codigo-fuente revision seguridad patron peligroso manual inspeccion hallazgos riesgo","embed_threshold":0.78}
+{"lang":"fr","description":"Audit de sécurité du code source, détection de patterns dangereux","vocabulary":"eval exec obfuscation base64 exfiltration shell injection pattern dangereux audit","embed_threshold":0.69}
+{"lang":"hi","description":"खतरनाक पैटर्न के लिए सोर्स कोड सुरक्षा ऑडिट, अस्पష्टीकरण","vocabulary":"सोर्स ऑडिट खतरनाक पैटर्न अस्पष्टीकरण बैकडोर eval","embed_threshold":0.69}
+{"lang":"id","description":"Audit keamanan kode sumber untuk pola berbahaya, obfuskasi","vocabulary":"sumber audit berbahaya pola obfuskasi backdoor eval","embed_threshold":0.79}
+{"lang":"it","description":"Audit sicurezza codice sorgente per pattern pericolosi, offuscamento","vocabulary":"sorgente audit pericoloso pattern offuscamento backdoor eval","embed_threshold":0.75}
+{"lang":"ja","description":"ソースコードのセキュリティ監査、危険なパターンの検出","vocabulary":"eval exec 難読化 base64 情報流出 シェル注入 危険パターン","embed_threshold":0.79}
+{"lang":"ko","description":"위험 패턴에 대한 소스 코드 보안 감사, 난독화","vocabulary":"소스 감사 위험 패턴 난독화 백도어 eval","embed_threshold":0.75}
+{"lang":"pl","description":"Audyt bezpieczeństwa kodu źródłowego, wykrywanie niebezpiecznych wzorców","vocabulary":"eval exec zaciemnianie base64 eksfiltracja shell wstrzyknięcie niebezpieczny wzorzec audyt","embed_threshold":0.68}
+{"lang":"pt-br","description":"Auditoria de segurança de código-fonte, detecção de padrões perigosos","vocabulary":"eval exec ofuscação base64 exfiltração shell injeção padrão perigoso auditoria","embed_threshold":0.73}
+{"lang":"ru","description":"Аудит безопасности исходного кода, обнаружение опасных паттернов","vocabulary":"eval exec обфускация base64 эксфильтрация shell инъекция опасный паттерн аудит","embed_threshold":0.72}
+{"lang":"th","description":"ตรวจสอบความปลอดภัยซอร์สโค้ด ค้นหารูปแบบอันตราย","vocabulary":"eval exec obfuscated base64 ดึงข้อมูลออก shell injection อันตราย รูปแบบ ตรวจสอบ","embed_threshold":0.78}
+{"lang":"tr","description":"Kaynak kod güvenlik denetimi, tehlikeli kalıpları tespit etme","vocabulary":"eval exec gizleme base64 sızdırma shell enjeksiyon tehlikeli kalıp denetim","embed_threshold":0.77}
+{"lang":"uk","description":"Аудит безпеки вихідного коду, виявлення небезпечних шаблонів","vocabulary":"eval exec обфускація base64 ексфільтрація оболонка ін'єкція небезпечний шаблон аудит","embed_threshold":0.76}
+{"lang":"vi","description":"Kiểm toán bảo mật mã nguồn, phát hiện mẫu nguy hiểm","vocabulary":"eval exec obfuscated base64 trích xuất shell injection nguy hiểm mẫu kiểm toán","embed_threshold":0.72}
+{"lang":"zh","description":"源代码安全审计、危险模式检测","vocabulary":"eval exec 混淆 base64 数据外泄 shell 注入 危险 模式 审计","embed_threshold":0.78}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"أطر التفكير المنظم والاستدلال","vocabulary":"تفكير منظم استدلال تحليل إطار منهجي","embed_threshold":0.72}
-{"lang":"de","description":"Strukturiertes Denken, Denkrahmen, kognitive Gerüste für komplexe Entscheidungen","vocabulary":"Optionen erkunden Ansätze Abwägung Balance Alternativen feststecken Prinzip abstrakt Denkrahmen systematisch","embed_threshold":0.72}
+{"lang":"ar","description":"أطر التفكير المنظم والاستدلال","vocabulary":"تفكير منظم استدلال تحليل إطار منهجي","embed_threshold":0.7}
+{"lang":"de","description":"Strukturiertes Denken, Denkrahmen, kognitive Gerüste für komplexe Entscheidungen","vocabulary":"Optionen erkunden Ansätze Abwägung Balance Alternativen feststecken Prinzip abstrakt Denkrahmen systematisch","embed_threshold":0.71}
 {"lang":"es","description":"Razonamiento estructurado, marcos de pensamiento","vocabulary":"explorar opciones compensación equilibrio alternativas atascado razonamiento","embed_threshold":0.65}
-{"lang":"fr","description":"Raisonnement structuré, cadres de réflexion, échafaudages cognitifs","vocabulary":"options approches compromis équilibre alternatives bloqué principe raisonnement","embed_threshold":0.66}
-{"lang":"hi","description":"संरचित तर्क, विचार ढांचा, जटिल निर्णयों के लिए संज्ञानात्मक सहायता","vocabulary":"विकल्प दृष्टिकोण समझौता संतुलन विकल्प अटका सिद्धांत तर्क ढांचा","embed_threshold":0.71}
-{"lang":"id","description":"Penalaran terstruktur, kerangka berpikir, dukungan kognitif untuk keputusan kompleks","vocabulary":"opsi pendekatan pertukaran keseimbangan alternatif terjebak prinsip penalaran kerangka","embed_threshold":0.61}
-{"lang":"it","description":"Ragionamento strutturato, framework decisionali, supporto cognitivo","vocabulary":"opzioni approccio compromesso equilibrio alternative bloccato principio ragionamento framework","embed_threshold":0.71}
-{"lang":"ja","description":"構造化された思考、思考フレームワークの活用","vocabulary":"思考 選択肢 トレードオフ 比較 代替案 行き詰まり 推論","embed_threshold":0.71}
-{"lang":"ko","description":"구조화된 추론, 사고 프레임워크, 복잡한 의사결정을 위한 인지적 지원","vocabulary":"옵션 접근법 트레이드오프 균형 대안 막힘 원칙 추론 프레임워크","embed_threshold":0.73}
-{"lang":"pl","description":"Strukturalne rozumowanie, ramy myślenia, rusztowania poznawcze","vocabulary":"opcje podejścia kompromis równowaga alternatywy utknięcie zasada rozumowanie","embed_threshold":0.71}
-{"lang":"pt-br","description":"Raciocínio estruturado, frameworks de pensamento, estruturas cognitivas","vocabulary":"opções abordagens tradeoff equilíbrio alternativas travado princípio raciocínio","embed_threshold":0.66}
+{"lang":"fr","description":"Raisonnement structuré, cadres de réflexion, échafaudages cognitifs","vocabulary":"options approches compromis équilibre alternatives bloqué principe raisonnement","embed_threshold":0.67}
+{"lang":"hi","description":"संरचित तर्क, विचार ढांचा, जटिल निर्णयों के लिए संज्ञानात्मक सहायता","vocabulary":"विकल्प दृष्टिकोण समझौता संतुलन विकल्प अटका सिद्धांत तर्क ढांचा","embed_threshold":0.69}
+{"lang":"id","description":"Penalaran terstruktur, kerangka berpikir, dukungan kognitif untuk keputusan kompleks","vocabulary":"opsi pendekatan pertukaran keseimbangan alternatif terjebak prinsip penalaran kerangka","embed_threshold":0.6}
+{"lang":"it","description":"Ragionamento strutturato, framework decisionali, supporto cognitivo","vocabulary":"opzioni approccio compromesso equilibrio alternative bloccato principio ragionamento framework","embed_threshold":0.7}
+{"lang":"ja","description":"構造化された思考、思考フレームワークの活用","vocabulary":"思考 選択肢 トレードオフ 比較 代替案 行き詰まり 推論","embed_threshold":0.7}
+{"lang":"ko","description":"구조화된 추론, 사고 프레임워크, 복잡한 의사결정을 위한 인지적 지원","vocabulary":"옵션 접근법 트레이드오프 균형 대안 막힘 원칙 추론 프레임워크","embed_threshold":0.71}
+{"lang":"pl","description":"Strukturalne rozumowanie, ramy myślenia, rusztowania poznawcze","vocabulary":"opcje podejścia kompromis równowaga alternatywy utknięcie zasada rozumowanie","embed_threshold":0.69}
+{"lang":"pt-br","description":"Raciocínio estruturado, frameworks de pensamento, estruturas cognitivas","vocabulary":"opções abordagens tradeoff equilíbrio alternativas travado princípio raciocínio","embed_threshold":0.69}
 {"lang":"ru","description":"Структурированное рассуждение, мыслительные фреймворки, когнитивные леса","vocabulary":"варианты подходы компромисс баланс альтернативы застрял принцип рассуждение","embed_threshold":0.68}
-{"lang":"th","description":"การใช้เหตุผลอย่างมีโครงสร้าง กรอบความคิด โครงร่างทางปัญญา","vocabulary":"ทางเลือก แนวทาง ข้อแลกเปลี่ยน สมดุล ทางเลือก ติดอยู่ หลักการ ใช้เหตุผล","embed_threshold":0.71}
-{"lang":"tr","description":"Yapılandırılmış akıl yürütme, düşünce çerçeveleri, bilişsel iskele","vocabulary":"seçenekler yaklaşımlar ödünleşim denge alternatifler tıkanma ilke akıl yürütme","embed_threshold":0.69}
-{"lang":"uk","description":"Структуроване мислення, фреймворки мислення, когнітивні підмостки","vocabulary":"варіанти підходи компроміс баланс альтернативи застряг принцип міркування","embed_threshold":0.67}
-{"lang":"vi","description":"Suy luận có cấu trúc, khung tư duy, giàn giáo nhận thức","vocabulary":"lựa chọn cách tiếp cận đánh đổi cân bằng thay thế bế tắc nguyên tắc suy luận","embed_threshold":0.68}
+{"lang":"th","description":"การใช้เหตุผลอย่างมีโครงสร้าง กรอบความคิด โครงร่างทางปัญญา","vocabulary":"ทางเลือก แนวทาง ข้อแลกเปลี่ยน สมดุล ทางเลือก ติดอยู่ หลักการ ใช้เหตุผล","embed_threshold":0.7}
+{"lang":"tr","description":"Yapılandırılmış akıl yürütme, düşünce çerçeveleri, bilişsel iskele","vocabulary":"seçenekler yaklaşımlar ödünleşim denge alternatifler tıkanma ilke akıl yürütme","embed_threshold":0.71}
+{"lang":"uk","description":"Структуроване мислення, фреймворки мислення, когнітивні підмостки","vocabulary":"варіанти підходи компроміс баланс альтернативи застряг принцип міркування","embed_threshold":0.69}
+{"lang":"vi","description":"Suy luận có cấu trúc, khung tư duy, giàn giáo nhận thức","vocabulary":"lựa chọn cách tiếp cận đánh đổi cân bằng thay thế bế tắc nguyên tắc suy luận","embed_threshold":0.69}
 {"lang":"zh","description":"结构化推理、思维框架、认知脚手架","vocabulary":"选项 方法 权衡 平衡 替代 卡住 原则 推理","embed_threshold":0.72}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"نظام الذاكرة المستمرة عبر الجلسات","vocabulary":"ذاكرة مستمرة حفظ سياق جلسات تذكر","embed_threshold":0.69}
-{"lang":"de","description":"Persistentes Gedächtnissystem — MEMORY.md, Themendateien, was wann gespeichert wird","vocabulary":"merken Gedächtnis speichern Notiz vergessen erinnern persistieren Session Erkenntnis Stolperfalle Muster","embed_threshold":0.68}
-{"lang":"es","description":"Sistema de memoria persistente — MEMORY.md, archivos temáticos","vocabulary":"recordar memoria guardar nota olvidar recuperar persistir sesión","embed_threshold":0.67}
-{"lang":"fr","description":"Système de mémoire persistante — MEMORY.md, fichiers thématiques","vocabulary":"mémoire retenir enregistrer note oublier rappeler session persister","embed_threshold":0.67}
-{"lang":"hi","description":"स्थायी मेमोरी सिस्टम — MEMORY.md, विषय फाइलें, क्या और कब रेकॉर्ड करना","vocabulary":"याद मेमोरी सहेजें नोट भूलें याद करें सत्र सीखना पैटर्न","embed_threshold":0.65}
-{"lang":"id","description":"Sistem memori persisten — MEMORY.md, file topik, apa dan kapan dicatat","vocabulary":"ingat memori simpan catatan lupakan panggil sesi pembelajaran pola","embed_threshold":0.67}
-{"lang":"it","description":"Sistema di memoria persistente — MEMORY.md, file per argomento, cosa e quando registrare","vocabulary":"ricordare memoria salvare nota dimenticare richiamare sessione apprendimento schema","embed_threshold":0.67}
-{"lang":"ja","description":"永続メモリシステム — MEMORY.mdとトピックファイルの管理","vocabulary":"記憶 メモリ 保存 メモ 忘れる 思い出す 永続化 セッション","embed_threshold":0.73}
-{"lang":"ko","description":"영구 메모리 시스템 — MEMORY.md, 주제별 파일, 무엇을 언제 기록할지","vocabulary":"기억 메모리 저장 메모 잊기 떠올리기 세션 학습 패턴","embed_threshold":0.68}
-{"lang":"pl","description":"System trwałej pamięci — MEMORY.md, pliki tematyczne","vocabulary":"pamięć zapamiętać zapisać notatka zapomnieć przywołać sesja trwały","embed_threshold":0.7}
-{"lang":"pt-br","description":"Sistema de memória persistente — MEMORY.md, arquivos temáticos","vocabulary":"memória lembrar salvar nota esquecer recuperar sessão persistir","embed_threshold":0.67}
-{"lang":"ru","description":"Система постоянной памяти — MEMORY.md, тематические файлы","vocabulary":"память запомнить сохранить заметка забыть вспомнить сессия сохранение","embed_threshold":0.65}
-{"lang":"th","description":"ระบบหน่วยความจำถาวร — MEMORY.md ไฟล์หัวข้อ","vocabulary":"หน่วยความจำ จดจำ บันทึก บันทึกย่อ ลืม เรียกคืน เซสชัน ถาวร","embed_threshold":0.69}
-{"lang":"tr","description":"Kalıcı bellek sistemi — MEMORY.md, konu dosyaları","vocabulary":"bellek hatırlamak kaydetmek not unutmak geri çağırmak oturum kalıcı","embed_threshold":0.71}
-{"lang":"uk","description":"Система постійної пам'яті — MEMORY.md, тематичні файли","vocabulary":"пам'ять запам'ятати зберегти нотатка забути пригадати сесія постійний","embed_threshold":0.65}
-{"lang":"vi","description":"Hệ thống bộ nhớ bền vững — MEMORY.md, tệp chủ đề","vocabulary":"bộ nhớ ghi nhớ lưu ghi chú quên nhớ lại phiên bền vững","embed_threshold":0.68}
-{"lang":"zh","description":"持久化记忆系统 — MEMORY.md、主题文件","vocabulary":"记忆 记住 保存 笔记 忘记 回忆 会话 持久","embed_threshold":0.67}
+{"lang":"ar","description":"نظام الذاكرة المستمرة عبر الجلسات","vocabulary":"ذاكرة مستمرة حفظ سياق جلسات تذكر","embed_threshold":0.74}
+{"lang":"de","description":"Persistentes Gedächtnissystem — MEMORY.md, Themendateien, was wann gespeichert wird","vocabulary":"merken Gedächtnis speichern Notiz vergessen erinnern persistieren Session Erkenntnis Stolperfalle Muster","embed_threshold":0.75}
+{"lang":"es","description":"Sistema de memoria persistente — MEMORY.md, archivos temáticos","vocabulary":"recordar memoria guardar nota olvidar recuperar persistir sesión","embed_threshold":0.76}
+{"lang":"fr","description":"Système de mémoire persistante — MEMORY.md, fichiers thématiques","vocabulary":"mémoire retenir enregistrer note oublier rappeler session persister","embed_threshold":0.73}
+{"lang":"hi","description":"स्थायी मेमोरी सिस्टम — MEMORY.md, विषय फाइलें, क्या और कब रेकॉर्ड करना","vocabulary":"याद मेमोरी सहेजें नोट भूलें याद करें सत्र सीखना पैटर्न","embed_threshold":0.72}
+{"lang":"id","description":"Sistem memori persisten — MEMORY.md, file topik, apa dan kapan dicatat","vocabulary":"ingat memori simpan catatan lupakan panggil sesi pembelajaran pola","embed_threshold":0.74}
+{"lang":"it","description":"Sistema di memoria persistente — MEMORY.md, file per argomento, cosa e quando registrare","vocabulary":"ricordare memoria salvare nota dimenticare richiamare sessione apprendimento schema","embed_threshold":0.74}
+{"lang":"ja","description":"永続メモリシステム — MEMORY.mdとトピックファイルの管理","vocabulary":"記憶 メモリ 保存 メモ 忘れる 思い出す 永続化 セッション","embed_threshold":0.79}
+{"lang":"ko","description":"영구 메모리 시스템 — MEMORY.md, 주제별 파일, 무엇을 언제 기록할지","vocabulary":"기억 메모리 저장 메모 잊기 떠올리기 세션 학습 패턴","embed_threshold":0.75}
+{"lang":"pl","description":"System trwałej pamięci — MEMORY.md, pliki tematyczne","vocabulary":"pamięć zapamiętać zapisać notatka zapomnieć przywołać sesja trwały","embed_threshold":0.77}
+{"lang":"pt-br","description":"Sistema de memória persistente — MEMORY.md, arquivos temáticos","vocabulary":"memória lembrar salvar nota esquecer recuperar sessão persistir","embed_threshold":0.75}
+{"lang":"ru","description":"Система постоянной памяти — MEMORY.md, тематические файлы","vocabulary":"память запомнить сохранить заметка забыть вспомнить сессия сохранение","embed_threshold":0.75}
+{"lang":"th","description":"ระบบหน่วยความจำถาวร — MEMORY.md ไฟล์หัวข้อ","vocabulary":"หน่วยความจำ จดจำ บันทึก บันทึกย่อ ลืม เรียกคืน เซสชัน ถาวร","embed_threshold":0.75}
+{"lang":"tr","description":"Kalıcı bellek sistemi — MEMORY.md, konu dosyaları","vocabulary":"bellek hatırlamak kaydetmek not unutmak geri çağırmak oturum kalıcı","embed_threshold":0.78}
+{"lang":"uk","description":"Система постійної пам'яті — MEMORY.md, тематичні файли","vocabulary":"пам'ять запам'ятати зберегти нотатка забути пригадати сесія постійний","embed_threshold":0.73}
+{"lang":"vi","description":"Hệ thống bộ nhớ bền vững — MEMORY.md, tệp chủ đề","vocabulary":"bộ nhớ ghi nhớ lưu ghi chú quên nhớ lại phiên bền vững","embed_threshold":0.74}
+{"lang":"zh","description":"持久化记忆系统 — MEMORY.md、主题文件","vocabulary":"记忆 记住 保存 笔记 忘记 回忆 会话 持久","embed_threshold":0.77}

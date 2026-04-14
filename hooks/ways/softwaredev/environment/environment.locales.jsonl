@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إعداد بيئة التطوير","vocabulary":"بيئة تطوير إعداد تثبيت أدوات تهيئة","embed_threshold":0.67}
-{"lang":"de","description":"Entwicklungsumgebung einrichten — Konfiguration, Abhängigkeiten, Debugging und SSH","vocabulary":"Umgebung Einrichtung Konfiguration Abhängigkeit installieren Build Werkzeug Debug SSH Entwicklungsumgebung","embed_threshold":0.64}
-{"lang":"es","description":"Entorno de desarrollo — configuracion, herramientas, preparacion del espacio de trabajo","vocabulary":"entorno desarrollo configurar herramientas espacio-de-trabajo preparar instalar requisitos local","embed_threshold":0.58}
-{"lang":"fr","description":"Environnement de développement — configuration, dépendances, débogage, SSH","vocabulary":"environnement configuration dépendance installer paquet build outil débogage SSH","embed_threshold":0.66}
-{"lang":"hi","description":"विकास वातावरण — कॉन्फ़िगरेशन, डिपेंडेंसी, डिबगिंग, SSH","vocabulary":"वातावरण सेटअप कॉन्फ़िगरेशन डिपेंडेंसी इंस्टॉल बिल्ड टूल डिबग SSH","embed_threshold":0.61}
+{"lang":"ar","description":"إعداد بيئة التطوير","vocabulary":"بيئة تطوير إعداد تثبيت أدوات تهيئة","embed_threshold":0.75}
+{"lang":"de","description":"Entwicklungsumgebung einrichten — Konfiguration, Abhängigkeiten, Debugging und SSH","vocabulary":"Umgebung Einrichtung Konfiguration Abhängigkeit installieren Build Werkzeug Debug SSH Entwicklungsumgebung","embed_threshold":0.63}
+{"lang":"es","description":"Entorno de desarrollo — configuracion, herramientas, preparacion del espacio de trabajo","vocabulary":"entorno desarrollo configurar herramientas espacio-de-trabajo preparar instalar requisitos local","embed_threshold":0.57}
+{"lang":"fr","description":"Environnement de développement — configuration, dépendances, débogage, SSH","vocabulary":"environnement configuration dépendance installer paquet build outil débogage SSH","embed_threshold":0.64}
+{"lang":"hi","description":"विकास वातावरण — कॉन्फ़िगरेशन, डिपेंडेंसी, डिबगिंग, SSH","vocabulary":"वातावरण सेटअप कॉन्फ़िगरेशन डिपेंडेंसी इंस्टॉल बिल्ड टूल डिबग SSH","embed_threshold":0.62}
 {"lang":"id","description":"Lingkungan pengembangan — konfigurasi, dependensi, debugging, SSH","vocabulary":"lingkungan pengembangan konfigurasi dependensi instalasi build alat debug SSH","embed_threshold":0.59}
-{"lang":"it","description":"Ambiente di sviluppo — configurazione, dipendenze, debugging, SSH","vocabulary":"ambiente sviluppo configurazione dipendenza installare build strumento debug SSH","embed_threshold":0.61}
-{"lang":"ja","description":"開発環境 — 設定、依存関係、デバッグ、SSH","vocabulary":"環境 セットアップ 設定 依存関係 インストール ビルド ツール デバッグ SSH","embed_threshold":0.66}
+{"lang":"it","description":"Ambiente di sviluppo — configurazione, dipendenze, debugging, SSH","vocabulary":"ambiente sviluppo configurazione dipendenza installare build strumento debug SSH","embed_threshold":0.6}
+{"lang":"ja","description":"開発環境 — 設定、依存関係、デバッグ、SSH","vocabulary":"環境 セットアップ 設定 依存関係 インストール ビルド ツール デバッグ SSH","embed_threshold":0.65}
 {"lang":"ko","description":"개발 환경 — 설정, 의존성, 디버깅, SSH","vocabulary":"환경 설정 구성 의존성 설치 빌드 도구 디버그 SSH","embed_threshold":0.66}
-{"lang":"pl","description":"Środowisko programistyczne — konfiguracja, zależności, debugowanie, SSH","vocabulary":"środowisko konfiguracja zależność instalacja budowanie narzędzie debugowanie SSH","embed_threshold":0.62}
-{"lang":"pt-br","description":"Ambiente de desenvolvimento — configuração, dependências, depuração, SSH","vocabulary":"ambiente configuração dependência instalar build ferramenta depuração SSH","embed_threshold":0.6}
-{"lang":"ru","description":"Среда разработки — конфигурация, зависимости, отладка, SSH","vocabulary":"среда настройка конфигурация зависимость установка сборка инструмент отладка SSH","embed_threshold":0.69}
-{"lang":"th","description":"สภาพแวดล้อมการพัฒนา — การตั้งค่า การพึ่งพา การดีบัก SSH","vocabulary":"สภาพแวดล้อม ตั้งค่า คอนฟิก การพึ่งพา ติดตั้ง บิลด์ เครื่องมือ ดีบัก SSH","embed_threshold":0.61}
-{"lang":"tr","description":"Geliştirme ortamı — yapılandırma, bağımlılıklar, hata ayıklama, SSH","vocabulary":"ortam yapılandırma bağımlılık kurulum derleme araç hata ayıklama SSH","embed_threshold":0.68}
-{"lang":"uk","description":"Середовище розробки — конфігурація, залежності, налагодження, SSH","vocabulary":"середовище налаштування конфігурація залежність встановлення збірка інструмент налагодження SSH","embed_threshold":0.71}
+{"lang":"pl","description":"Środowisko programistyczne — konfiguracja, zależności, debugowanie, SSH","vocabulary":"środowisko konfiguracja zależność instalacja budowanie narzędzie debugowanie SSH","embed_threshold":0.66}
+{"lang":"pt-br","description":"Ambiente de desenvolvimento — configuração, dependências, depuração, SSH","vocabulary":"ambiente configuração dependência instalar build ferramenta depuração SSH","embed_threshold":0.59}
+{"lang":"ru","description":"Среда разработки — конфигурация, зависимости, отладка, SSH","vocabulary":"среда настройка конфигурация зависимость установка сборка инструмент отладка SSH","embed_threshold":0.67}
+{"lang":"th","description":"สภาพแวดล้อมการพัฒนา — การตั้งค่า การพึ่งพา การดีบัก SSH","vocabulary":"สภาพแวดล้อม ตั้งค่า คอนฟิก การพึ่งพา ติดตั้ง บิลด์ เครื่องมือ ดีบัก SSH","embed_threshold":0.69}
+{"lang":"tr","description":"Geliştirme ortamı — yapılandırma, bağımlılıklar, hata ayıklama, SSH","vocabulary":"ortam yapılandırma bağımlılık kurulum derleme araç hata ayıklama SSH","embed_threshold":0.67}
+{"lang":"uk","description":"Середовище розробки — конфігурація, залежності, налагодження, SSH","vocabulary":"середовище налаштування конфігурація залежність встановлення збірка інструмент налагодження SSH","embed_threshold":0.69}
 {"lang":"vi","description":"Môi trường phát triển — cấu hình, phụ thuộc, gỡ lỗi, SSH","vocabulary":"môi trường cấu hình phụ thuộc cài đặt build công cụ gỡ lỗi SSH","embed_threshold":0.64}
-{"lang":"zh","description":"开发环境 — 配置、依赖、调试、SSH","vocabulary":"环境 设置 配置 依赖 安装 构建 工具 调试 SSH","embed_threshold":0.66}
+{"lang":"zh","description":"开发环境 — 配置、依赖、调试、SSH","vocabulary":"环境 设置 配置 依赖 安装 构建 工具 调试 SSH","embed_threshold":0.64}

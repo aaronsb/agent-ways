@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تغطية الاختبارات والتأكيدات والتجهيزات","vocabulary":"اختبار تغطية تأكيدات تجهيزات فحص وحدة تكامل","embed_threshold":0.77}
-{"lang":"de","description":"Testabdeckung, Teststruktur, Assertions, Fixtures, was und wie getestet werden soll","vocabulary":"Test Abdeckung Assertion Framework Spec Fixture describe expect verifizieren Unit Integration Teststruktur","embed_threshold":0.67}
-{"lang":"es","description":"Pruebas de software — cobertura, aserciones, fixtures, estrategias de prueba","vocabulary":"pruebas cobertura asercion fixture unitaria integracion e2e estrategia suite ejecutar","embed_threshold":0.63}
-{"lang":"fr","description":"Couverture de tests, structure, assertions, fixtures","vocabulary":"test couverture assertion framework fixture vérification unitaire intégration","embed_threshold":0.67}
-{"lang":"hi","description":"टेस्ट कवरेज, टेस्ट संरचना, एसर्शन, फिक्स्चर","vocabulary":"टेस्ट कवरेज एसर्शन फिक्स्चर यूनिट इंटीग्रेशन रिग्रेशन","embed_threshold":0.72}
-{"lang":"id","description":"Cakupan tes, struktur tes, assertion, fixture","vocabulary":"tes cakupan assertion fixture unit integrasi regresi","embed_threshold":0.59}
-{"lang":"it","description":"Copertura test, struttura test, assertion, fixture","vocabulary":"test copertura assertion fixture unitario integrazione regressione","embed_threshold":0.62}
-{"lang":"ja","description":"テストカバレッジ、構造、アサーション、フィクスチャ","vocabulary":"テスト カバレッジ アサーション フレームワーク フィクスチャ 検証 単体テスト 結合テスト","embed_threshold":0.72}
-{"lang":"ko","description":"테스트 커버리지, 테스트 구조, 어서션, 픽스처","vocabulary":"테스트 커버리지 어서션 픽스처 유닛 통합 회귀","embed_threshold":0.83}
-{"lang":"pl","description":"Pokrycie testów, struktura, asercje, fixtures","vocabulary":"test pokrycie asercja framework fixture weryfikacja jednostkowy integracyjny","embed_threshold":0.64}
-{"lang":"pt-br","description":"Cobertura de testes, estrutura, assertions, fixtures","vocabulary":"teste cobertura assertion framework fixture verificação unitário integração","embed_threshold":0.61}
-{"lang":"ru","description":"Покрытие тестами, структура, утверждения, фикстуры","vocabulary":"тест покрытие утверждение фреймворк фикстура верификация модульный интеграционный","embed_threshold":0.7}
-{"lang":"th","description":"ครอบคลุมการทดสอบ โครงสร้าง การยืนยัน fixtures","vocabulary":"ทดสอบ ครอบคลุม ยืนยัน framework fixture ตรวจสอบ unit integration","embed_threshold":0.72}
-{"lang":"tr","description":"Test kapsamı, yapı, iddialar, fixture'lar","vocabulary":"test kapsam iddia çerçeve fixture doğrulama birim entegrasyon","embed_threshold":0.65}
-{"lang":"uk","description":"Покриття тестами, структура, твердження, fixtures","vocabulary":"тест покриття твердження фреймворк fixture верифікація модульний інтеграційний","embed_threshold":0.68}
-{"lang":"vi","description":"Độ bao phủ kiểm thử, cấu trúc, assertion, fixture","vocabulary":"kiểm thử bao phủ assertion framework fixture xác minh đơn vị tích hợp","embed_threshold":0.67}
-{"lang":"zh","description":"测试覆盖率、结构、断言、fixtures","vocabulary":"测试 覆盖 断言 框架 fixture 验证 单元 集成","embed_threshold":0.75}
+{"lang":"ar","description":"تغطية الاختبارات والتأكيدات والتجهيزات","vocabulary":"اختبار تغطية تأكيدات تجهيزات فحص وحدة تكامل","embed_threshold":0.76}
+{"lang":"de","description":"Testabdeckung, Teststruktur, Assertions, Fixtures, was und wie getestet werden soll","vocabulary":"Test Abdeckung Assertion Framework Spec Fixture describe expect verifizieren Unit Integration Teststruktur","embed_threshold":0.65}
+{"lang":"es","description":"Pruebas de software — cobertura, aserciones, fixtures, estrategias de prueba","vocabulary":"pruebas cobertura asercion fixture unitaria integracion e2e estrategia suite ejecutar","embed_threshold":0.62}
+{"lang":"fr","description":"Couverture de tests, structure, assertions, fixtures","vocabulary":"test couverture assertion framework fixture vérification unitaire intégration","embed_threshold":0.65}
+{"lang":"hi","description":"टेस्ट कवरेज, टेस्ट संरचना, एसर्शन, फिक्स्चर","vocabulary":"टेस्ट कवरेज एसर्शन फिक्स्चर यूनिट इंटीग्रेशन रिग्रेशन","embed_threshold":0.71}
+{"lang":"id","description":"Cakupan tes, struktur tes, assertion, fixture","vocabulary":"tes cakupan assertion fixture unit integrasi regresi","embed_threshold":0.57}
+{"lang":"it","description":"Copertura test, struttura test, assertion, fixture","vocabulary":"test copertura assertion fixture unitario integrazione regressione","embed_threshold":0.61}
+{"lang":"ja","description":"テストカバレッジ、構造、アサーション、フィクスチャ","vocabulary":"テスト カバレッジ アサーション フレームワーク フィクスチャ 検証 単体テスト 結合テスト","embed_threshold":0.74}
+{"lang":"ko","description":"테스트 커버리지, 테스트 구조, 어서션, 픽스처","vocabulary":"테스트 커버리지 어서션 픽스처 유닛 통합 회귀","embed_threshold":0.81}
+{"lang":"pl","description":"Pokrycie testów, struktura, asercje, fixtures","vocabulary":"test pokrycie asercja framework fixture weryfikacja jednostkowy integracyjny","embed_threshold":0.63}
+{"lang":"pt-br","description":"Cobertura de testes, estrutura, assertions, fixtures","vocabulary":"teste cobertura assertion framework fixture verificação unitário integração","embed_threshold":0.59}
+{"lang":"ru","description":"Покрытие тестами, структура, утверждения, фикстуры","vocabulary":"тест покрытие утверждение фреймворк фикстура верификация модульный интеграционный","embed_threshold":0.68}
+{"lang":"th","description":"ครอบคลุมการทดสอบ โครงสร้าง การยืนยัน fixtures","vocabulary":"ทดสอบ ครอบคลุม ยืนยัน framework fixture ตรวจสอบ unit integration","embed_threshold":0.7}
+{"lang":"tr","description":"Test kapsamı, yapı, iddialar, fixture'lar","vocabulary":"test kapsam iddia çerçeve fixture doğrulama birim entegrasyon","embed_threshold":0.63}
+{"lang":"uk","description":"Покриття тестами, структура, твердження, fixtures","vocabulary":"тест покриття твердження фреймворк fixture верифікація модульний інтеграційний","embed_threshold":0.67}
+{"lang":"vi","description":"Độ bao phủ kiểm thử, cấu trúc, assertion, fixture","vocabulary":"kiểm thử bao phủ assertion framework fixture xác minh đơn vị tích hợp","embed_threshold":0.65}
+{"lang":"zh","description":"测试覆盖率、结构、断言、fixtures","vocabulary":"测试 覆盖 断言 框架 fixture 验证 单元 集成","embed_threshold":0.73}

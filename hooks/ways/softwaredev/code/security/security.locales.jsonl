@@ -1,17 +1,17 @@
-{"lang":"ar","description":"نظرة عامة على الأمان والبرمجة الآمنة","vocabulary":"أمان برمجة آمنة حماية ثغرات دفاع","embed_threshold":0.77}
-{"lang":"de","description":"Sicherheitsüberblick, sichere Programmierstandards, Sicherheitscheckliste","vocabulary":"Sicherheit Schwachstelle schützen Verteidigung absichern härten OWASP Sicherheitsüberprüfung","embed_threshold":0.81}
-{"lang":"es","description":"Seguridad general — codificacion segura, revision de vulnerabilidades, defensa en profundidad","vocabulary":"seguridad vulnerable codificacion-segura defensa OWASP auditoria riesgo parche endurecimiento","embed_threshold":0.76}
-{"lang":"fr","description":"Vue d'ensemble de la sécurité, normes de codage sécurisé","vocabulary":"sécurité vulnérabilité protection défense durcissement OWASP codage sécurisé","embed_threshold":0.75}
-{"lang":"hi","description":"सुरक्षा अवलोकन, सुरक्षित कोडिंग डिफॉल्ट, सुरक्षा समीक्षा","vocabulary":"सुरक्षा कमजोरी सुरक्षित रक्षा OWASP ऑडिट जोखिम","embed_threshold":0.79}
-{"lang":"id","description":"Ikhtisar keamanan, standar pengkodean aman, tinjauan keamanan","vocabulary":"keamanan kerentanan aman pertahanan OWASP audit risiko","embed_threshold":0.81}
-{"lang":"it","description":"Panoramica sicurezza, standard di codifica sicura, revisione sicurezza","vocabulary":"sicurezza vulnerabilità sicuro difesa OWASP audit rischio","embed_threshold":0.82}
+{"lang":"ar","description":"نظرة عامة على الأمان والبرمجة الآمنة","vocabulary":"أمان برمجة آمنة حماية ثغرات دفاع","embed_threshold":0.83}
+{"lang":"de","description":"Sicherheitsüberblick, sichere Programmierstandards, Sicherheitscheckliste","vocabulary":"Sicherheit Schwachstelle schützen Verteidigung absichern härten OWASP Sicherheitsüberprüfung","embed_threshold":0.79}
+{"lang":"es","description":"Seguridad general — codificacion segura, revision de vulnerabilidades, defensa en profundidad","vocabulary":"seguridad vulnerable codificacion-segura defensa OWASP auditoria riesgo parche endurecimiento","embed_threshold":0.78}
+{"lang":"fr","description":"Vue d'ensemble de la sécurité, normes de codage sécurisé","vocabulary":"sécurité vulnérabilité protection défense durcissement OWASP codage sécurisé","embed_threshold":0.77}
+{"lang":"hi","description":"सुरक्षा अवलोकन, सुरक्षित कोडिंग डिफॉल्ट, सुरक्षा समीक्षा","vocabulary":"सुरक्षा कमजोरी सुरक्षित रक्षा OWASP ऑडिट जोखिम","embed_threshold":0.78}
+{"lang":"id","description":"Ikhtisar keamanan, standar pengkodean aman, tinjauan keamanan","vocabulary":"keamanan kerentanan aman pertahanan OWASP audit risiko","embed_threshold":0.79}
+{"lang":"it","description":"Panoramica sicurezza, standard di codifica sicura, revisione sicurezza","vocabulary":"sicurezza vulnerabilità sicuro difesa OWASP audit rischio","embed_threshold":0.8}
 {"lang":"ja","description":"セキュリティ概要、セキュアコーディングのデフォルト設定","vocabulary":"セキュリティ 脆弱性 防御 保護 堅牢化 OWASP セキュアコーディング","embed_threshold":0.73}
-{"lang":"ko","description":"보안 개요, 시큐어 코딩 기본값, 보안 리뷰","vocabulary":"보안 취약점 안전 방어 OWASP 감사 위험","embed_threshold":0.79}
-{"lang":"pl","description":"Przegląd bezpieczeństwa, standardy bezpiecznego kodowania","vocabulary":"bezpieczeństwo podatność ochrona obrona hartowanie OWASP bezpieczne kodowanie","embed_threshold":0.8}
-{"lang":"pt-br","description":"Visão geral de segurança, padrões de codificação segura","vocabulary":"segurança vulnerabilidade proteção defesa hardening OWASP codificação segura","embed_threshold":0.74}
-{"lang":"ru","description":"Обзор безопасности, стандарты безопасного кодирования","vocabulary":"безопасность уязвимость защита оборона усиление OWASP безопасное кодирование","embed_threshold":0.76}
-{"lang":"th","description":"ภาพรวมความปลอดภัย การเขียนโค้ดที่ปลอดภัยเป็นค่าเริ่มต้น","vocabulary":"ความปลอดภัย ช่องโหว่ ป้องกัน ป้องกันตัว เสริมความแข็งแกร่ง OWASP","embed_threshold":0.73}
-{"lang":"tr","description":"Güvenlik genel bakış, varsayılan güvenli kodlama, kontrol listesi","vocabulary":"güvenlik zafiyet koruma savunma güvence sağlamlaştırma OWASP","embed_threshold":0.75}
-{"lang":"uk","description":"Огляд безпеки, безпечне кодування за замовчуванням, чекліст","vocabulary":"безпека вразливість захист оборона забезпечення зміцнення OWASP","embed_threshold":0.73}
-{"lang":"vi","description":"Tổng quan bảo mật, lập trình an toàn mặc định, danh sách kiểm tra","vocabulary":"bảo mật lỗ hổng bảo vệ phòng thủ tăng cường OWASP","embed_threshold":0.78}
-{"lang":"zh","description":"安全概览、默认安全编码、安全检查清单","vocabulary":"安全 漏洞 保护 防御 加固 OWASP","embed_threshold":0.77}
+{"lang":"ko","description":"보안 개요, 시큐어 코딩 기본값, 보안 리뷰","vocabulary":"보안 취약점 안전 방어 OWASP 감사 위험","embed_threshold":0.77}
+{"lang":"pl","description":"Przegląd bezpieczeństwa, standardy bezpiecznego kodowania","vocabulary":"bezpieczeństwo podatność ochrona obrona hartowanie OWASP bezpieczne kodowanie","embed_threshold":0.81}
+{"lang":"pt-br","description":"Visão geral de segurança, padrões de codificação segura","vocabulary":"segurança vulnerabilidade proteção defesa hardening OWASP codificação segura","embed_threshold":0.77}
+{"lang":"ru","description":"Обзор безопасности, стандарты безопасного кодирования","vocabulary":"безопасность уязвимость защита оборона усиление OWASP безопасное кодирование","embed_threshold":0.78}
+{"lang":"th","description":"ภาพรวมความปลอดภัย การเขียนโค้ดที่ปลอดภัยเป็นค่าเริ่มต้น","vocabulary":"ความปลอดภัย ช่องโหว่ ป้องกัน ป้องกันตัว เสริมความแข็งแกร่ง OWASP","embed_threshold":0.78}
+{"lang":"tr","description":"Güvenlik genel bakış, varsayılan güvenli kodlama, kontrol listesi","vocabulary":"güvenlik zafiyet koruma savunma güvence sağlamlaştırma OWASP","embed_threshold":0.76}
+{"lang":"uk","description":"Огляд безпеки, безпечне кодування за замовчуванням, чекліст","vocabulary":"безпека вразливість захист оборона забезпечення зміцнення OWASP","embed_threshold":0.76}
+{"lang":"vi","description":"Tổng quan bảo mật, lập trình an toàn mặc định, danh sách kiểm tra","vocabulary":"bảo mật lỗ hổng bảo vệ phòng thủ tăng cường OWASP","embed_threshold":0.77}
+{"lang":"zh","description":"安全概览、默认安全编码、安全检查清单","vocabulary":"安全 漏洞 保护 防御 加固 OWASP","embed_threshold":0.76}

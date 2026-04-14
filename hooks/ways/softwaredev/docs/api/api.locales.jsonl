@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تصميم واجهات برمجة التطبيقات REST","vocabulary":"واجهة برمجة تطبيقات REST API تصميم نقاط وصول","embed_threshold":0.6}
-{"lang":"de","description":"API-Entwurf — REST-Endpunkte, HTTP-Schnittstellen, Versionierung und Paginierung","vocabulary":"Endpunkt API REST Route HTTP Paginierung Versionierung GraphQL Webhook Schnittstelle API-Design","embed_threshold":0.51}
-{"lang":"es","description":"Diseno de API REST — endpoints, verbos HTTP, codigos de estado, OpenAPI","vocabulary":"API REST endpoint HTTP GET POST PUT DELETE estado OpenAPI diseno recurso","embed_threshold":0.49}
-{"lang":"fr","description":"Conception d'API REST, points de terminaison HTTP, versionnage","vocabulary":"endpoint API REST route HTTP pagination versionnage GraphQL Webhook","embed_threshold":0.48}
-{"lang":"hi","description":"REST API डिज़ाइन, HTTP एंडपॉइंट, API वर्जनिंग","vocabulary":"API REST HTTP एंडपॉइंट वर्जनिंग रिक्वेस्ट रिस्पॉन्स","embed_threshold":0.51}
-{"lang":"id","description":"Desain REST API, endpoint HTTP, versioning API","vocabulary":"API REST HTTP endpoint versioning request response","embed_threshold":0.52}
-{"lang":"it","description":"Progettazione REST API, endpoint HTTP, versionamento API","vocabulary":"API REST HTTP endpoint versionamento richiesta risposta","embed_threshold":0.5}
-{"lang":"ja","description":"REST API設計、HTTPエンドポイント、バージョニング","vocabulary":"エンドポイント API REST ルート HTTP ページネーション バージョニング GraphQL Webhook","embed_threshold":0.52}
-{"lang":"ko","description":"REST API 설계, HTTP 엔드포인트, API 버전 관리","vocabulary":"API REST HTTP 엔드포인트 버전관리 요청 응답","embed_threshold":0.49}
-{"lang":"pl","description":"Projektowanie REST API, endpointy HTTP, wersjonowanie","vocabulary":"endpoint API REST trasa HTTP paginacja wersjonowanie GraphQL webhook","embed_threshold":0.51}
-{"lang":"pt-br","description":"Design de API REST, endpoints HTTP, versionamento","vocabulary":"endpoint API REST rota HTTP paginação versionamento GraphQL webhook","embed_threshold":0.5}
-{"lang":"ru","description":"Проектирование REST API, HTTP-эндпоинты, версионирование","vocabulary":"эндпоинт API REST маршрут HTTP пагинация версионирование GraphQL webhook","embed_threshold":0.56}
-{"lang":"th","description":"การออกแบบ REST API, HTTP endpoint, การกำหนดเวอร์ชัน","vocabulary":"endpoint API REST route HTTP pagination versioning GraphQL webhook","embed_threshold":0.48}
-{"lang":"tr","description":"REST API tasarımı, HTTP uç noktaları, sürümleme","vocabulary":"uç nokta API REST rota HTTP sayfalama sürümleme GraphQL webhook","embed_threshold":0.53}
-{"lang":"uk","description":"Проєктування REST API, HTTP-ендпоінти, версіонування","vocabulary":"ендпоінт API REST маршрут HTTP пагінація версіонування GraphQL webhook","embed_threshold":0.56}
-{"lang":"vi","description":"Thiết kế REST API, HTTP endpoint, phiên bản hóa","vocabulary":"endpoint API REST route HTTP phân trang phiên bản GraphQL webhook","embed_threshold":0.5}
-{"lang":"zh","description":"REST API 设计、HTTP 端点、版本控制","vocabulary":"端点 API REST 路由 HTTP 分页 版本控制 GraphQL webhook","embed_threshold":0.55}
+{"lang":"ar","description":"تصميم واجهات برمجة التطبيقات REST","vocabulary":"واجهة برمجة تطبيقات REST API تصميم نقاط وصول","embed_threshold":0.61}
+{"lang":"de","description":"API-Entwurf — REST-Endpunkte, HTTP-Schnittstellen, Versionierung und Paginierung","vocabulary":"Endpunkt API REST Route HTTP Paginierung Versionierung GraphQL Webhook Schnittstelle API-Design","embed_threshold":0.59}
+{"lang":"es","description":"Diseno de API REST — endpoints, verbos HTTP, codigos de estado, OpenAPI","vocabulary":"API REST endpoint HTTP GET POST PUT DELETE estado OpenAPI diseno recurso","embed_threshold":0.56}
+{"lang":"fr","description":"Conception d'API REST, points de terminaison HTTP, versionnage","vocabulary":"endpoint API REST route HTTP pagination versionnage GraphQL Webhook","embed_threshold":0.55}
+{"lang":"hi","description":"REST API डिज़ाइन, HTTP एंडपॉइंट, API वर्जनिंग","vocabulary":"API REST HTTP एंडपॉइंट वर्जनिंग रिक्वेस्ट रिस्पॉन्स","embed_threshold":0.62}
+{"lang":"id","description":"Desain REST API, endpoint HTTP, versioning API","vocabulary":"API REST HTTP endpoint versioning request response","embed_threshold":0.58}
+{"lang":"it","description":"Progettazione REST API, endpoint HTTP, versionamento API","vocabulary":"API REST HTTP endpoint versionamento richiesta risposta","embed_threshold":0.57}
+{"lang":"ja","description":"REST API設計、HTTPエンドポイント、バージョニング","vocabulary":"エンドポイント API REST ルート HTTP ページネーション バージョニング GraphQL Webhook","embed_threshold":0.62}
+{"lang":"ko","description":"REST API 설계, HTTP 엔드포인트, API 버전 관리","vocabulary":"API REST HTTP 엔드포인트 버전관리 요청 응답","embed_threshold":0.6}
+{"lang":"pl","description":"Projektowanie REST API, endpointy HTTP, wersjonowanie","vocabulary":"endpoint API REST trasa HTTP paginacja wersjonowanie GraphQL webhook","embed_threshold":0.6}
+{"lang":"pt-br","description":"Design de API REST, endpoints HTTP, versionamento","vocabulary":"endpoint API REST rota HTTP paginação versionamento GraphQL webhook","embed_threshold":0.57}
+{"lang":"ru","description":"Проектирование REST API, HTTP-эндпоинты, версионирование","vocabulary":"эндпоинт API REST маршрут HTTP пагинация версионирование GraphQL webhook","embed_threshold":0.62}
+{"lang":"th","description":"การออกแบบ REST API, HTTP endpoint, การกำหนดเวอร์ชัน","vocabulary":"endpoint API REST route HTTP pagination versioning GraphQL webhook","embed_threshold":0.56}
+{"lang":"tr","description":"REST API tasarımı, HTTP uç noktaları, sürümleme","vocabulary":"uç nokta API REST rota HTTP sayfalama sürümleme GraphQL webhook","embed_threshold":0.6}
+{"lang":"uk","description":"Проєктування REST API, HTTP-ендпоінти, версіонування","vocabulary":"ендпоінт API REST маршрут HTTP пагінація версіонування GraphQL webhook","embed_threshold":0.6}
+{"lang":"vi","description":"Thiết kế REST API, HTTP endpoint, phiên bản hóa","vocabulary":"endpoint API REST route HTTP phân trang phiên bản GraphQL webhook","embed_threshold":0.6}
+{"lang":"zh","description":"REST API 设计、HTTP 端点、版本控制","vocabulary":"端点 API REST 路由 HTTP 分页 版本控制 GraphQL webhook","embed_threshold":0.61}

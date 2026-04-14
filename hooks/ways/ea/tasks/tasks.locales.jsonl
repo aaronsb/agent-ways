@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إدارة المهام وبنود العمل","vocabulary":"مهام إدارة بنود عمل متابعة قائمة أولويات","embed_threshold":0.72}
-{"lang":"de","description":"Persönliche Aufgabenverwaltung, Aktionspunkte, Verpflichtungen, Aufgaben erstellen aktualisieren abschließen aufräumen","vocabulary":"Aufgabe Aktionspunkt To-do Verpflichtung verfolgen erstellen erledigen aktualisieren überfällig offen Priorität Fälligkeitsdatum aufräumen","embed_threshold":0.72}
-{"lang":"es","description":"Gestión de tareas personales, acciones pendientes, obligaciones","vocabulary":"tarea acción pendiente lista seguimiento crear completar actualizar prioridad","embed_threshold":0.65}
-{"lang":"fr","description":"Gestion de tâches personnelles, points d'action, obligations","vocabulary":"tâche action liste obligation suivi créer terminer priorité","embed_threshold":0.67}
-{"lang":"hi","description":"व्यक्तिगत कार्य प्रबंधन, एक्शन आइटम, दायित्व","vocabulary":"कार्य एक्शन सूची दायित्व ट्रैकिंग बनाना पूरा प्राथमिकता","embed_threshold":0.63}
-{"lang":"id","description":"Manajemen tugas pribadi, item tindakan, kewajiban","vocabulary":"tugas tindakan daftar kewajiban pelacakan buat selesai prioritas","embed_threshold":0.68}
-{"lang":"it","description":"Gestione attività personali, punti d'azione, obblighi","vocabulary":"attività azione lista obbligo tracciamento creare completare priorità","embed_threshold":0.63}
-{"lang":"ja","description":"個人タスク管理、アクションアイテムの追跡、やることリスト","vocabulary":"タスク アクションアイテム やること 追跡 作成 完了 優先度 管理","embed_threshold":0.68}
-{"lang":"ko","description":"개인 작업 관리, 액션 아이템, 의무사항","vocabulary":"작업 액션 목록 의무 추적 생성 완료 우선순위","embed_threshold":0.67}
+{"lang":"ar","description":"إدارة المهام وبنود العمل","vocabulary":"مهام إدارة بنود عمل متابعة قائمة أولويات","embed_threshold":0.73}
+{"lang":"de","description":"Persönliche Aufgabenverwaltung, Aktionspunkte, Verpflichtungen, Aufgaben erstellen aktualisieren abschließen aufräumen","vocabulary":"Aufgabe Aktionspunkt To-do Verpflichtung verfolgen erstellen erledigen aktualisieren überfällig offen Priorität Fälligkeitsdatum aufräumen","embed_threshold":0.71}
+{"lang":"es","description":"Gestión de tareas personales, acciones pendientes, obligaciones","vocabulary":"tarea acción pendiente lista seguimiento crear completar actualizar prioridad","embed_threshold":0.68}
+{"lang":"fr","description":"Gestion de tâches personnelles, points d'action, obligations","vocabulary":"tâche action liste obligation suivi créer terminer priorité","embed_threshold":0.69}
+{"lang":"hi","description":"व्यक्तिगत कार्य प्रबंधन, एक्शन आइटम, दायित्व","vocabulary":"कार्य एक्शन सूची दायित्व ट्रैकिंग बनाना पूरा प्राथमिकता","embed_threshold":0.61}
+{"lang":"id","description":"Manajemen tugas pribadi, item tindakan, kewajiban","vocabulary":"tugas tindakan daftar kewajiban pelacakan buat selesai prioritas","embed_threshold":0.71}
+{"lang":"it","description":"Gestione attività personali, punti d'azione, obblighi","vocabulary":"attività azione lista obbligo tracciamento creare completare priorità","embed_threshold":0.65}
+{"lang":"ja","description":"個人タスク管理、アクションアイテムの追跡、やることリスト","vocabulary":"タスク アクションアイテム やること 追跡 作成 完了 優先度 管理","embed_threshold":0.67}
+{"lang":"ko","description":"개인 작업 관리, 액션 아이템, 의무사항","vocabulary":"작업 액션 목록 의무 추적 생성 완료 우선순위","embed_threshold":0.69}
 {"lang":"pl","description":"Osobiste zarządzanie zadaniami, punkty do działania, śledzenie zobowiązań","vocabulary":"zadanie punkt działania lista do zrobienia zobowiązanie śledzenie tworzenie ukończenie priorytet","embed_threshold":0.66}
-{"lang":"pt-br","description":"Gerenciamento de tarefas pessoais, itens de ação, acompanhamento de compromissos","vocabulary":"tarefa item de ação lista de tarefas compromisso acompanhar criar concluir atualizar prioridade","embed_threshold":0.65}
-{"lang":"ru","description":"Управление личными задачами, пункты действий, отслеживание обязательств","vocabulary":"задача пункт действия список дел обязательство отслеживание создание завершение приоритет","embed_threshold":0.67}
-{"lang":"th","description":"จัดการงานส่วนตัว รายการสิ่งที่ต้องทำ ติดตามภาระงาน","vocabulary":"งาน รายการ สิ่งที่ต้องทำ ติดตาม สร้าง เสร็จ ลำดับความสำคัญ กำหนด","embed_threshold":0.79}
-{"lang":"tr","description":"Kişisel görev yönetimi, eylem maddeleri, yükümlülükler","vocabulary":"görev eylem maddesi yapılacak yükümlülük takip oluşturma tamamlama öncelik son tarih","embed_threshold":0.63}
-{"lang":"uk","description":"Управління особистими завданнями, елементи дій, зобов'язання","vocabulary":"завдання елемент дій справа зобов'язання відстеження створення завершення пріоритет термін","embed_threshold":0.67}
+{"lang":"pt-br","description":"Gerenciamento de tarefas pessoais, itens de ação, acompanhamento de compromissos","vocabulary":"tarefa item de ação lista de tarefas compromisso acompanhar criar concluir atualizar prioridade","embed_threshold":0.69}
+{"lang":"ru","description":"Управление личными задачами, пункты действий, отслеживание обязательств","vocabulary":"задача пункт действия список дел обязательство отслеживание создание завершение приоритет","embed_threshold":0.73}
+{"lang":"th","description":"จัดการงานส่วนตัว รายการสิ่งที่ต้องทำ ติดตามภาระงาน","vocabulary":"งาน รายการ สิ่งที่ต้องทำ ติดตาม สร้าง เสร็จ ลำดับความสำคัญ กำหนด","embed_threshold":0.78}
+{"lang":"tr","description":"Kişisel görev yönetimi, eylem maddeleri, yükümlülükler","vocabulary":"görev eylem maddesi yapılacak yükümlülük takip oluşturma tamamlama öncelik son tarih","embed_threshold":0.62}
+{"lang":"uk","description":"Управління особистими завданнями, елементи дій, зобов'язання","vocabulary":"завдання елемент дій справа зобов'язання відстеження створення завершення пріоритет термін","embed_threshold":0.71}
 {"lang":"vi","description":"Quản lý công việc cá nhân, mục hành động, theo dõi nghĩa vụ","vocabulary":"công việc hành động việc cần làm nghĩa vụ theo dõi tạo hoàn thành ưu tiên hạn","embed_threshold":0.67}
-{"lang":"zh","description":"个人任务管理、行动项、义务追踪","vocabulary":"任务 行动项 待办 义务 追踪 创建 完成 优先级 截止日期","embed_threshold":0.73}
+{"lang":"zh","description":"个人任务管理、行动项、义务追踪","vocabulary":"任务 行动项 待办 义务 追踪 创建 完成 优先级 截止日期","embed_threshold":0.71}

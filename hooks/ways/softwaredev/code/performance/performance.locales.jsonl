@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تحسين الأداء والتنميط","vocabulary":"أداء تحسين تنميط سرعة كفاءة ذاكرة","embed_threshold":0.61}
-{"lang":"de","description":"Performanceoptimierung, Profiling, Benchmarking, Latenz","vocabulary":"optimieren Profiling Benchmark Latenz Durchsatz Speicher Cache Engpass Flamegraph Allokation Heap Geschwindigkeit langsam","embed_threshold":0.53}
-{"lang":"es","description":"Optimizacion de rendimiento — perfilado, cuellos de botella, eficiencia","vocabulary":"rendimiento optimizar perfilado benchmark cuello-de-botella latencia memoria CPU cache eficiencia","embed_threshold":0.59}
-{"lang":"fr","description":"Optimisation des performances, profilage, benchmarking","vocabulary":"optimisation profilage benchmark latence débit mémoire cache goulot d'étranglement","embed_threshold":0.68}
-{"lang":"hi","description":"प्रदर्शन अनुकूलन, प्रोफाइलिंग, बेंचमार्किंग, लेटेंसी","vocabulary":"प्रदर्शन अनुकूलन प्रोफाइल बेंचमार्क लेटेंसी कैश मेमोरी CPU","embed_threshold":0.67}
-{"lang":"id","description":"Optimalisasi performa, profiling, benchmarking, latensi","vocabulary":"performa optimalisasi profil benchmark latensi cache memori CPU","embed_threshold":0.58}
-{"lang":"it","description":"Ottimizzazione delle prestazioni, profiling, benchmarking, latenza","vocabulary":"prestazioni ottimizzazione profiling benchmark latenza cache memoria CPU","embed_threshold":0.58}
-{"lang":"ja","description":"パフォーマンス最適化、プロファイリング、ベンチマーク","vocabulary":"最適化 プロファイル ベンチマーク レイテンシ スループット メモリ キャッシュ ボトルネック","embed_threshold":0.66}
+{"lang":"ar","description":"تحسين الأداء والتنميط","vocabulary":"أداء تحسين تنميط سرعة كفاءة ذاكرة","embed_threshold":0.64}
+{"lang":"de","description":"Performanceoptimierung, Profiling, Benchmarking, Latenz","vocabulary":"optimieren Profiling Benchmark Latenz Durchsatz Speicher Cache Engpass Flamegraph Allokation Heap Geschwindigkeit langsam","embed_threshold":0.51}
+{"lang":"es","description":"Optimizacion de rendimiento — perfilado, cuellos de botella, eficiencia","vocabulary":"rendimiento optimizar perfilado benchmark cuello-de-botella latencia memoria CPU cache eficiencia","embed_threshold":0.61}
+{"lang":"fr","description":"Optimisation des performances, profilage, benchmarking","vocabulary":"optimisation profilage benchmark latence débit mémoire cache goulot d'étranglement","embed_threshold":0.66}
+{"lang":"hi","description":"प्रदर्शन अनुकूलन, प्रोफाइलिंग, बेंचमार्किंग, लेटेंसी","vocabulary":"प्रदर्शन अनुकूलन प्रोफाइल बेंचमार्क लेटेंसी कैश मेमोरी CPU","embed_threshold":0.65}
+{"lang":"id","description":"Optimalisasi performa, profiling, benchmarking, latensi","vocabulary":"performa optimalisasi profil benchmark latensi cache memori CPU","embed_threshold":0.6}
+{"lang":"it","description":"Ottimizzazione delle prestazioni, profiling, benchmarking, latenza","vocabulary":"prestazioni ottimizzazione profiling benchmark latenza cache memoria CPU","embed_threshold":0.62}
+{"lang":"ja","description":"パフォーマンス最適化、プロファイリング、ベンチマーク","vocabulary":"最適化 プロファイル ベンチマーク レイテンシ スループット メモリ キャッシュ ボトルネック","embed_threshold":0.65}
 {"lang":"ko","description":"성능 최적화, 프로파일링, 벤치마킹, 지연시간","vocabulary":"성능 최적화 프로파일 벤치마크 지연시간 캐시 메모리 CPU","embed_threshold":0.64}
-{"lang":"pl","description":"Optymalizacja wydajności, profilowanie, benchmarking","vocabulary":"optymalizacja profilowanie benchmark opóźnienie przepustowość pamięć cache wąskie gardło","embed_threshold":0.73}
-{"lang":"pt-br","description":"Otimização de performance, profiling, benchmarking","vocabulary":"otimização profiling benchmark latência throughput memória cache gargalo","embed_threshold":0.68}
-{"lang":"ru","description":"Оптимизация производительности, профилирование, бенчмаркинг","vocabulary":"оптимизация профилирование бенчмарк задержка пропускная способность память кэш узкое место","embed_threshold":0.7}
-{"lang":"th","description":"การเพิ่มประสิทธิภาพ การวิเคราะห์ประสิทธิภาพ เบนช์มาร์ก","vocabulary":"เพิ่มประสิทธิภาพ โปรไฟล์ เบนช์มาร์ก เวลาแฝง ปริมาณงาน หน่วยความจำ แคช คอขวด","embed_threshold":0.69}
-{"lang":"tr","description":"Performans optimizasyonu, profilleme, kıyaslama","vocabulary":"optimizasyon profilleme kıyaslama gecikme verim bellek önbellek darboğaz","embed_threshold":0.74}
-{"lang":"uk","description":"Оптимізація продуктивності, профілювання, бенчмаркінг","vocabulary":"оптимізація профілювання бенчмарк затримка пропускна здатність пам'ять кеш вузьке місце","embed_threshold":0.73}
-{"lang":"vi","description":"Tối ưu hóa hiệu suất, profiling, benchmarking","vocabulary":"tối ưu profiling benchmark độ trễ thông lượng bộ nhớ cache nút thắt","embed_threshold":0.68}
-{"lang":"zh","description":"性能优化、性能分析、基准测试","vocabulary":"优化 分析 基准 延迟 吞吐量 内存 缓存 瓶颈","embed_threshold":0.73}
+{"lang":"pl","description":"Optymalizacja wydajności, profilowanie, benchmarking","vocabulary":"optymalizacja profilowanie benchmark opóźnienie przepustowość pamięć cache wąskie gardło","embed_threshold":0.71}
+{"lang":"pt-br","description":"Otimização de performance, profiling, benchmarking","vocabulary":"otimização profiling benchmark latência throughput memória cache gargalo","embed_threshold":0.67}
+{"lang":"ru","description":"Оптимизация производительности, профилирование, бенчмаркинг","vocabulary":"оптимизация профилирование бенчмарк задержка пропускная способность память кэш узкое место","embed_threshold":0.68}
+{"lang":"th","description":"การเพิ่มประสิทธิภาพ การวิเคราะห์ประสิทธิภาพ เบนช์มาร์ก","vocabulary":"เพิ่มประสิทธิภาพ โปรไฟล์ เบนช์มาร์ก เวลาแฝง ปริมาณงาน หน่วยความจำ แคช คอขวด","embed_threshold":0.67}
+{"lang":"tr","description":"Performans optimizasyonu, profilleme, kıyaslama","vocabulary":"optimizasyon profilleme kıyaslama gecikme verim bellek önbellek darboğaz","embed_threshold":0.72}
+{"lang":"uk","description":"Оптимізація продуктивності, профілювання, бенчмаркінг","vocabulary":"оптимізація профілювання бенчмарк затримка пропускна здатність пам'ять кеш вузьке місце","embed_threshold":0.72}
+{"lang":"vi","description":"Tối ưu hóa hiệu suất, profiling, benchmarking","vocabulary":"tối ưu profiling benchmark độ trễ thông lượng bộ nhớ cache nút thắt","embed_threshold":0.67}
+{"lang":"zh","description":"性能优化、性能分析、基准测试","vocabulary":"优化 分析 基准 延迟 吞吐量 内存 缓存 瓶颈","embed_threshold":0.72}

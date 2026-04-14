@@ -1,17 +1,17 @@
-{"lang":"ar","description":"فلسفة التوثيق ومبادئه","vocabulary":"توثيق وثائق فلسفة كتابة تقنية شرح","embed_threshold":0.65}
-{"lang":"de","description":"Dokumentationsphilosophie — Markdown-Konventionen und technische Prosa","vocabulary":"Dokumentation Markdown technisch Prosa Projektdokumentation Anleitung Beschreibung Handbuch","embed_threshold":0.7}
-{"lang":"es","description":"Filosofia de documentacion — escribir para la audiencia, mantener actualizado","vocabulary":"documentacion escribir guia manual audiencia mantener actualizar claro conciso","embed_threshold":0.77}
-{"lang":"fr","description":"Philosophie de documentation, conventions Markdown","vocabulary":"documentation markdown technique prose projet guide manuel","embed_threshold":0.74}
-{"lang":"hi","description":"प्रलेखन दर्शन, मार्कडाउन सम्मेलन, कब लिखना","vocabulary":"प्रलेखन मार्कडाउन सम्मेलन लिखना दर्शन टिप्पणी","embed_threshold":0.67}
-{"lang":"id","description":"Filosofi dokumentasi, konvensi markdown, kapan menulis","vocabulary":"dokumentasi markdown konvensi menulis filosofi komentar","embed_threshold":0.63}
-{"lang":"it","description":"Filosofia della documentazione, convenzioni markdown, quando scrivere","vocabulary":"documentazione markdown convenzione scrittura filosofia commento","embed_threshold":0.7}
-{"lang":"ja","description":"ドキュメントの考え方、Markdownの規約","vocabulary":"ドキュメント マークダウン 技術文書 プロジェクト文書 文書化","embed_threshold":0.77}
-{"lang":"ko","description":"문서화 철학, 마크다운 관례, 언제 작성할지","vocabulary":"문서화 마크다운 관례 작성 철학 주석","embed_threshold":0.71}
-{"lang":"pl","description":"Filozofia dokumentacji, konwencje Markdown, proza techniczna","vocabulary":"dokumentacja markdown techniczny proza dokumentacja projektu przewodnik","embed_threshold":0.71}
-{"lang":"pt-br","description":"Filosofia de documentação, convenções Markdown, escrita técnica","vocabulary":"documentação markdown técnico prosa documentação de projeto guia","embed_threshold":0.8}
-{"lang":"ru","description":"Философия документации, соглашения Markdown, техническая проза","vocabulary":"документация markdown технический проза проектная документация руководство","embed_threshold":0.71}
-{"lang":"th","description":"ปรัชญาการทำเอกสาร หลักการ Markdown งานเขียนเทคนิค","vocabulary":"เอกสาร markdown เทคนิค ร้อยแก้ว โปรเจกต์ คู่มือ","embed_threshold":0.7}
+{"lang":"ar","description":"فلسفة التوثيق ومبادئه","vocabulary":"توثيق وثائق فلسفة كتابة تقنية شرح","embed_threshold":0.68}
+{"lang":"de","description":"Dokumentationsphilosophie — Markdown-Konventionen und technische Prosa","vocabulary":"Dokumentation Markdown technisch Prosa Projektdokumentation Anleitung Beschreibung Handbuch","embed_threshold":0.68}
+{"lang":"es","description":"Filosofia de documentacion — escribir para la audiencia, mantener actualizado","vocabulary":"documentacion escribir guia manual audiencia mantener actualizar claro conciso","embed_threshold":0.75}
+{"lang":"fr","description":"Philosophie de documentation, conventions Markdown","vocabulary":"documentation markdown technique prose projet guide manuel","embed_threshold":0.73}
+{"lang":"hi","description":"प्रलेखन दर्शन, मार्कडाउन सम्मेलन, कब लिखना","vocabulary":"प्रलेखन मार्कडाउन सम्मेलन लिखना दर्शन टिप्पणी","embed_threshold":0.65}
+{"lang":"id","description":"Filosofi dokumentasi, konvensi markdown, kapan menulis","vocabulary":"dokumentasi markdown konvensi menulis filosofi komentar","embed_threshold":0.62}
+{"lang":"it","description":"Filosofia della documentazione, convenzioni markdown, quando scrivere","vocabulary":"documentazione markdown convenzione scrittura filosofia commento","embed_threshold":0.68}
+{"lang":"ja","description":"ドキュメントの考え方、Markdownの規約","vocabulary":"ドキュメント マークダウン 技術文書 プロジェクト文書 文書化","embed_threshold":0.76}
+{"lang":"ko","description":"문서화 철학, 마크다운 관례, 언제 작성할지","vocabulary":"문서화 마크다운 관례 작성 철학 주석","embed_threshold":0.7}
+{"lang":"pl","description":"Filozofia dokumentacji, konwencje Markdown, proza techniczna","vocabulary":"dokumentacja markdown techniczny proza dokumentacja projektu przewodnik","embed_threshold":0.69}
+{"lang":"pt-br","description":"Filosofia de documentação, convenções Markdown, escrita técnica","vocabulary":"documentação markdown técnico prosa documentação de projeto guia","embed_threshold":0.79}
+{"lang":"ru","description":"Философия документации, соглашения Markdown, техническая проза","vocabulary":"документация markdown технический проза проектная документация руководство","embed_threshold":0.7}
+{"lang":"th","description":"ปรัชญาการทำเอกสาร หลักการ Markdown งานเขียนเทคนิค","vocabulary":"เอกสาร markdown เทคนิค ร้อยแก้ว โปรเจกต์ คู่มือ","embed_threshold":0.69}
 {"lang":"tr","description":"Dokümantasyon felsefesi, Markdown kuralları, teknik yazım","vocabulary":"dokümantasyon markdown teknik yazım proje kılavuz","embed_threshold":0.65}
-{"lang":"uk","description":"Філософія документації, конвенції Markdown, технічне письмо","vocabulary":"документація markdown технічне письмо проєкт посібник","embed_threshold":0.68}
-{"lang":"vi","description":"Triết lý tài liệu, quy ước Markdown, văn bản kỹ thuật","vocabulary":"tài liệu markdown kỹ thuật văn bản dự án hướng dẫn","embed_threshold":0.74}
-{"lang":"zh","description":"文档理念、Markdown 约定、技术写作","vocabulary":"文档 markdown 技术 写作 项目 指南","embed_threshold":0.8}
+{"lang":"uk","description":"Філософія документації, конвенції Markdown, технічне письмо","vocabulary":"документація markdown технічне письмо проєкт посібник","embed_threshold":0.66}
+{"lang":"vi","description":"Triết lý tài liệu, quy ước Markdown, văn bản kỹ thuật","vocabulary":"tài liệu markdown kỹ thuật văn bản dự án hướng dẫn","embed_threshold":0.73}
+{"lang":"zh","description":"文档理念、Markdown 约定、技术写作","vocabulary":"文档 markdown 技术 写作 项目 指南","embed_threshold":0.79}

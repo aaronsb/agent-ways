@@ -1,17 +1,17 @@
-{"lang":"ar","description":"طلب السحب كنقطة للتأمل والمراجعة الذاتية","vocabulary":"تأمل مراجعة ذاتية انعكاس طلب سحب تحسين","embed_threshold":0.61}
-{"lang":"de","description":"PR-Erstellung als Reflexionspunkt — innehalten und überlegen, was in dieser Session gelernt wurde","vocabulary":"Pull Request PR erstellen öffnen ausliefern mergen Review Reflexion Session Erkenntnis Selbstbetrachtung","embed_threshold":0.55}
-{"lang":"es","description":"Creación de PR como punto de reflexión","vocabulary":"pull request crear pr enviar merge revisión reflejar aprendizaje","embed_threshold":0.54}
-{"lang":"fr","description":"Création de PR comme point de réflexion — qu'avons-nous appris","vocabulary":"pull request PR réflexion apprentissage revue merge session","embed_threshold":0.58}
-{"lang":"hi","description":"PR बनाना एक चिंतन बिंदु — सत्र में क्या सीखा","vocabulary":"pull request PR चिंतन सीखना समीक्षा merge सत्र","embed_threshold":0.62}
-{"lang":"id","description":"Pembuatan PR sebagai titik refleksi — apa yang dipelajari","vocabulary":"pull request PR refleksi pembelajaran tinjauan merge sesi","embed_threshold":0.62}
-{"lang":"it","description":"Creazione della PR come punto di riflessione — cosa abbiamo imparato","vocabulary":"pull request PR riflessione apprendimento revisione merge sessione","embed_threshold":0.61}
+{"lang":"ar","description":"طلب السحب كنقطة للتأمل والمراجعة الذاتية","vocabulary":"تأمل مراجعة ذاتية انعكاس طلب سحب تحسين","embed_threshold":0.62}
+{"lang":"de","description":"PR-Erstellung als Reflexionspunkt — innehalten und überlegen, was in dieser Session gelernt wurde","vocabulary":"Pull Request PR erstellen öffnen ausliefern mergen Review Reflexion Session Erkenntnis Selbstbetrachtung","embed_threshold":0.63}
+{"lang":"es","description":"Creación de PR como punto de reflexión","vocabulary":"pull request crear pr enviar merge revisión reflejar aprendizaje","embed_threshold":0.57}
+{"lang":"fr","description":"Création de PR comme point de réflexion — qu'avons-nous appris","vocabulary":"pull request PR réflexion apprentissage revue merge session","embed_threshold":0.65}
+{"lang":"hi","description":"PR बनाना एक चिंतन बिंदु — सत्र में क्या सीखा","vocabulary":"pull request PR चिंतन सीखना समीक्षा merge सत्र","embed_threshold":0.61}
+{"lang":"id","description":"Pembuatan PR sebagai titik refleksi — apa yang dipelajari","vocabulary":"pull request PR refleksi pembelajaran tinjauan merge sesi","embed_threshold":0.69}
+{"lang":"it","description":"Creazione della PR come punto di riflessione — cosa abbiamo imparato","vocabulary":"pull request PR riflessione apprendimento revisione merge sessione","embed_threshold":0.68}
 {"lang":"ja","description":"PR作成時の振り返り、学びの記録","vocabulary":"プルリクエスト 振り返り 学び 反省 レビュー マージ","embed_threshold":0.56}
-{"lang":"ko","description":"PR 생성을 회고 시점으로 — 세션에서 무엇을 배웠는가","vocabulary":"pull request PR 회고 학습 리뷰 merge 세션","embed_threshold":0.64}
-{"lang":"pl","description":"Tworzenie PR jako punkt refleksji — co się nauczyliśmy","vocabulary":"pull request PR refleksja nauka przegląd merge sesja","embed_threshold":0.65}
-{"lang":"pt-br","description":"Criação de PR como ponto de reflexão — o que aprendemos na sessão","vocabulary":"pull request PR reflexão aprendizado revisão merge sessão","embed_threshold":0.67}
-{"lang":"ru","description":"Создание PR как точка рефлексии — что мы узнали за сессию","vocabulary":"pull request PR рефлексия обучение обзор merge сессия","embed_threshold":0.64}
-{"lang":"th","description":"การสร้าง PR เป็นจุดทบทวน — เรียนรู้อะไรจากเซสชันนี้","vocabulary":"pull request PR ทบทวน เรียนรู้ ตรวจสอบ merge เซสชัน","embed_threshold":0.61}
-{"lang":"tr","description":"PR oluşturmayı bir yansıma noktası olarak kullanma — oturumda ne öğrendik","vocabulary":"pull request PR yansıma öğrenme gözden geçirme merge oturum","embed_threshold":0.65}
-{"lang":"uk","description":"Створення PR як точка рефлексії — що ми дізналися під час сесії","vocabulary":"pull request PR рефлексія навчання огляд merge сесія","embed_threshold":0.59}
-{"lang":"vi","description":"Tạo PR như một điểm suy ngẫm — học được gì trong phiên làm việc","vocabulary":"pull request PR suy ngẫm học hỏi đánh giá merge phiên","embed_threshold":0.6}
-{"lang":"zh","description":"将创建 PR 作为反思点 — 本次会话学到了什么","vocabulary":"pull request PR 反思 学习 审查 merge 会话","embed_threshold":0.6}
+{"lang":"ko","description":"PR 생성을 회고 시점으로 — 세션에서 무엇을 배웠는가","vocabulary":"pull request PR 회고 학습 리뷰 merge 세션","embed_threshold":0.65}
+{"lang":"pl","description":"Tworzenie PR jako punkt refleksji — co się nauczyliśmy","vocabulary":"pull request PR refleksja nauka przegląd merge sesja","embed_threshold":0.68}
+{"lang":"pt-br","description":"Criação de PR como ponto de reflexão — o que aprendemos na sessão","vocabulary":"pull request PR reflexão aprendizado revisão merge sessão","embed_threshold":0.72}
+{"lang":"ru","description":"Создание PR как точка рефлексии — что мы узнали за сессию","vocabulary":"pull request PR рефлексия обучение обзор merge сессия","embed_threshold":0.65}
+{"lang":"th","description":"การสร้าง PR เป็นจุดทบทวน — เรียนรู้อะไรจากเซสชันนี้","vocabulary":"pull request PR ทบทวน เรียนรู้ ตรวจสอบ merge เซสชัน","embed_threshold":0.62}
+{"lang":"tr","description":"PR oluşturmayı bir yansıma noktası olarak kullanma — oturumda ne öğrendik","vocabulary":"pull request PR yansıma öğrenme gözden geçirme merge oturum","embed_threshold":0.72}
+{"lang":"uk","description":"Створення PR як точка рефлексії — що ми дізналися під час сесії","vocabulary":"pull request PR рефлексія навчання огляд merge сесія","embed_threshold":0.6}
+{"lang":"vi","description":"Tạo PR như một điểm suy ngẫm — học được gì trong phiên làm việc","vocabulary":"pull request PR suy ngẫm học hỏi đánh giá merge phiên","embed_threshold":0.66}
+{"lang":"zh","description":"将创建 PR 作为反思点 — 本次会话学到了什么","vocabulary":"pull request PR 反思 学习 审查 merge 会话","embed_threshold":0.65}

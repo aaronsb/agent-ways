@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إزالة البيانات الشخصية من ملفات الطرق","vocabulary":"بيانات شخصية خصوصية إزالة تنقية حماية معلومات","embed_threshold":0.65}
-{"lang":"de","description":"Persönliche Daten aus Ways entfernen, wenn persönliche Fähigkeiten oder Konfigurationen in wiederverwendbare Anleitungen zerlegt werden","vocabulary":"PII persönliche Daten Namen E-Mails Konten entfernen anonymisieren zerlegen Persona Datenschutz","embed_threshold":0.57}
-{"lang":"es","description":"Eliminar información personal de los ways","vocabulary":"pii información personal anonimizar descomponer persona datos sensibles","embed_threshold":0.68}
-{"lang":"fr","description":"Supprimer les informations personnelles des fichiers ways","vocabulary":"informations personnelles anonymiser confidentialité supprimer décomposer données","embed_threshold":0.69}
-{"lang":"hi","description":"Ways फ़ाइलों से व्यक्तिगत जानकारी हटाना — PII-मुक्त मार्गदर्शन","vocabulary":"PII व्यक्तिगत जानकारी गुमनाम गोपनीयता हटाना अलग करना डेटा","embed_threshold":0.61}
-{"lang":"id","description":"Menghapus informasi pribadi dari ways — panduan bebas PII","vocabulary":"PII informasi pribadi anonimisasi penghapusan privasi","embed_threshold":0.66}
-{"lang":"it","description":"Rimozione delle informazioni personali dai ways — linee guida PII-free","vocabulary":"PII informazioni personali anonimizzazione rimozione privacy","embed_threshold":0.62}
-{"lang":"ja","description":"個人情報の除去、匿名化されたwayの作成","vocabulary":"個人情報 匿名化 プライバシー 除去 分離 ペルソナ","embed_threshold":0.68}
-{"lang":"ko","description":"ways에서 개인정보 제거 — PII 없는 가이던스","vocabulary":"PII 개인정보 익명화 제거 프라이버시","embed_threshold":0.62}
-{"lang":"pl","description":"Usuwanie danych osobowych z plików ways","vocabulary":"dane osobowe anonimizacja prywatność usuwanie dekompozycja dane","embed_threshold":0.62}
-{"lang":"pt-br","description":"Remover informações pessoais dos arquivos de ways","vocabulary":"informação pessoal anonimizar privacidade remover decompor dados","embed_threshold":0.65}
-{"lang":"ru","description":"Удаление личных данных из файлов ways","vocabulary":"персональные данные анонимизация конфиденциальность удаление разделение данные","embed_threshold":0.63}
-{"lang":"th","description":"ลบข้อมูลส่วนบุคคลออกจากไฟล์ ways","vocabulary":"ข้อมูลส่วนบุคคล ไม่ระบุตัวตน ความเป็นส่วนตัว ลบ แยก ข้อมูล","embed_threshold":0.63}
-{"lang":"tr","description":"Ways dosyalarından kişisel bilgileri çıkarma","vocabulary":"kişisel bilgi anonimleştirme gizlilik çıkarma ayrıştırma veri","embed_threshold":0.75}
-{"lang":"uk","description":"Видалення особистої інформації з файлів ways","vocabulary":"особисті дані анонімізація конфіденційність видалення розділення дані","embed_threshold":0.62}
-{"lang":"vi","description":"Loại bỏ thông tin cá nhân khỏi các tệp ways","vocabulary":"thông tin cá nhân ẩn danh quyền riêng tư loại bỏ tách dữ liệu","embed_threshold":0.63}
-{"lang":"zh","description":"从 ways 文件中去除个人信息","vocabulary":"个人信息 匿名化 隐私 去除 拆分 数据","embed_threshold":0.73}
+{"lang":"ar","description":"إزالة البيانات الشخصية من ملفات الطرق","vocabulary":"بيانات شخصية خصوصية إزالة تنقية حماية معلومات","embed_threshold":0.68}
+{"lang":"de","description":"Persönliche Daten aus Ways entfernen, wenn persönliche Fähigkeiten oder Konfigurationen in wiederverwendbare Anleitungen zerlegt werden","vocabulary":"PII persönliche Daten Namen E-Mails Konten entfernen anonymisieren zerlegen Persona Datenschutz","embed_threshold":0.6}
+{"lang":"es","description":"Eliminar información personal de los ways","vocabulary":"pii información personal anonimizar descomponer persona datos sensibles","embed_threshold":0.69}
+{"lang":"fr","description":"Supprimer les informations personnelles des fichiers ways","vocabulary":"informations personnelles anonymiser confidentialité supprimer décomposer données","embed_threshold":0.7}
+{"lang":"hi","description":"Ways फ़ाइलों से व्यक्तिगत जानकारी हटाना — PII-मुक्त मार्गदर्शन","vocabulary":"PII व्यक्तिगत जानकारी गुमनाम गोपनीयता हटाना अलग करना डेटा","embed_threshold":0.64}
+{"lang":"id","description":"Menghapus informasi pribadi dari ways — panduan bebas PII","vocabulary":"PII informasi pribadi anonimisasi penghapusan privasi","embed_threshold":0.69}
+{"lang":"it","description":"Rimozione delle informazioni personali dai ways — linee guida PII-free","vocabulary":"PII informazioni personali anonimizzazione rimozione privacy","embed_threshold":0.66}
+{"lang":"ja","description":"個人情報の除去、匿名化されたwayの作成","vocabulary":"個人情報 匿名化 プライバシー 除去 分離 ペルソナ","embed_threshold":0.67}
+{"lang":"ko","description":"ways에서 개인정보 제거 — PII 없는 가이던스","vocabulary":"PII 개인정보 익명화 제거 프라이버시","embed_threshold":0.65}
+{"lang":"pl","description":"Usuwanie danych osobowych z plików ways","vocabulary":"dane osobowe anonimizacja prywatność usuwanie dekompozycja dane","embed_threshold":0.69}
+{"lang":"pt-br","description":"Remover informações pessoais dos arquivos de ways","vocabulary":"informação pessoal anonimizar privacidade remover decompor dados","embed_threshold":0.69}
+{"lang":"ru","description":"Удаление личных данных из файлов ways","vocabulary":"персональные данные анонимизация конфиденциальность удаление разделение данные","embed_threshold":0.69}
+{"lang":"th","description":"ลบข้อมูลส่วนบุคคลออกจากไฟล์ ways","vocabulary":"ข้อมูลส่วนบุคคล ไม่ระบุตัวตน ความเป็นส่วนตัว ลบ แยก ข้อมูล","embed_threshold":0.66}
+{"lang":"tr","description":"Ways dosyalarından kişisel bilgileri çıkarma","vocabulary":"kişisel bilgi anonimleştirme gizlilik çıkarma ayrıştırma veri","embed_threshold":0.74}
+{"lang":"uk","description":"Видалення особистої інформації з файлів ways","vocabulary":"особисті дані анонімізація конфіденційність видалення розділення дані","embed_threshold":0.69}
+{"lang":"vi","description":"Loại bỏ thông tin cá nhân khỏi các tệp ways","vocabulary":"thông tin cá nhân ẩn danh quyền riêng tư loại bỏ tách dữ liệu","embed_threshold":0.67}
+{"lang":"zh","description":"从 ways 文件中去除个人信息","vocabulary":"个人信息 匿名化 隐私 去除 拆分 数据","embed_threshold":0.72}

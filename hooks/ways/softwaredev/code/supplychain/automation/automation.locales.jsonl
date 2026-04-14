@@ -1,17 +1,17 @@
-{"lang":"ar","description":"أتمتة فحص الأمان في سلسلة التوريد","vocabulary":"أتمتة فحص أمان مسح آلي تكامل مستمر","embed_threshold":0.77}
-{"lang":"de","description":"Sicherheitsscanning-Automatisierung, GitHub Actions, Dependabot, CodeQL, Makefile-Audit-Targets","vocabulary":"GitHub Action Dependabot CodeQL Sicherheitsscanning Automatisierung CI Pipeline SBOM Scorecard Audit Workflow Sicherheitsrichtlinie","embed_threshold":0.7}
-{"lang":"es","description":"Automatizacion de escaneo de seguridad — CI/CD, analisis estatico, pipelines","vocabulary":"automatizacion escaneo seguridad CI CD pipeline analisis-estatico SAST DAST integrar","embed_threshold":0.59}
-{"lang":"fr","description":"Automatisation du scan de sécurité, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL scan automatisation CI pipeline","embed_threshold":0.68}
-{"lang":"hi","description":"सुरक्षा स्कैनिंग ऑटोमेशन, GitHub Actions, Dependabot","vocabulary":"ऑटोमेशन GitHub Actions Dependabot CI स्कैन सुरक्षा पाइपलाइन","embed_threshold":0.71}
-{"lang":"id","description":"Otomatisasi pemindaian keamanan, GitHub Actions, Dependabot","vocabulary":"otomatisasi GitHub Actions Dependabot CI pemindaian keamanan pipeline","embed_threshold":0.7}
-{"lang":"it","description":"Automazione scansione sicurezza, GitHub Actions, Dependabot","vocabulary":"automazione GitHub Actions Dependabot CI scansione sicurezza pipeline","embed_threshold":0.67}
-{"lang":"ja","description":"セキュリティスキャンの自動化、GitHub Actions、Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL スキャン 自動化 CI パイプライン","embed_threshold":0.71}
-{"lang":"ko","description":"보안 스캐닝 자동화, GitHub Actions, Dependabot","vocabulary":"자동화 GitHub Actions Dependabot CI 스캔 보안 파이프라인","embed_threshold":0.73}
-{"lang":"pl","description":"Automatyzacja skanowania bezpieczeństwa, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL skanowanie automatyzacja CI pipeline","embed_threshold":0.67}
-{"lang":"pt-br","description":"Automação de escaneamento de segurança, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL escaneamento automação CI pipeline","embed_threshold":0.64}
-{"lang":"ru","description":"Автоматизация сканирования безопасности, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL сканирование автоматизация CI pipeline","embed_threshold":0.7}
-{"lang":"th","description":"ระบบอัตโนมัติการสแกนความปลอดภัย GitHub Actions Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL สแกน อัตโนมัติ CI pipeline","embed_threshold":0.68}
-{"lang":"tr","description":"Güvenlik tarama otomasyonu, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL tarama otomasyon CI pipeline","embed_threshold":0.67}
-{"lang":"uk","description":"Автоматизація сканування безпеки, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL сканування автоматизація CI pipeline","embed_threshold":0.71}
-{"lang":"vi","description":"Tự động hóa quét bảo mật, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL quét tự động CI pipeline","embed_threshold":0.69}
-{"lang":"zh","description":"安全扫描自动化、GitHub Actions、Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL 扫描 自动化 CI pipeline","embed_threshold":0.7}
+{"lang":"ar","description":"أتمتة فحص الأمان في سلسلة التوريد","vocabulary":"أتمتة فحص أمان مسح آلي تكامل مستمر","embed_threshold":0.76}
+{"lang":"de","description":"Sicherheitsscanning-Automatisierung, GitHub Actions, Dependabot, CodeQL, Makefile-Audit-Targets","vocabulary":"GitHub Action Dependabot CodeQL Sicherheitsscanning Automatisierung CI Pipeline SBOM Scorecard Audit Workflow Sicherheitsrichtlinie","embed_threshold":0.72}
+{"lang":"es","description":"Automatizacion de escaneo de seguridad — CI/CD, analisis estatico, pipelines","vocabulary":"automatizacion escaneo seguridad CI CD pipeline analisis-estatico SAST DAST integrar","embed_threshold":0.66}
+{"lang":"fr","description":"Automatisation du scan de sécurité, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL scan automatisation CI pipeline","embed_threshold":0.67}
+{"lang":"hi","description":"सुरक्षा स्कैनिंग ऑटोमेशन, GitHub Actions, Dependabot","vocabulary":"ऑटोमेशन GitHub Actions Dependabot CI स्कैन सुरक्षा पाइपलाइन","embed_threshold":0.7}
+{"lang":"id","description":"Otomatisasi pemindaian keamanan, GitHub Actions, Dependabot","vocabulary":"otomatisasi GitHub Actions Dependabot CI pemindaian keamanan pipeline","embed_threshold":0.69}
+{"lang":"it","description":"Automazione scansione sicurezza, GitHub Actions, Dependabot","vocabulary":"automazione GitHub Actions Dependabot CI scansione sicurezza pipeline","embed_threshold":0.66}
+{"lang":"ja","description":"セキュリティスキャンの自動化、GitHub Actions、Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL スキャン 自動化 CI パイプライン","embed_threshold":0.7}
+{"lang":"ko","description":"보안 스캐닝 자동화, GitHub Actions, Dependabot","vocabulary":"자동화 GitHub Actions Dependabot CI 스캔 보안 파이프라인","embed_threshold":0.72}
+{"lang":"pl","description":"Automatyzacja skanowania bezpieczeństwa, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL skanowanie automatyzacja CI pipeline","embed_threshold":0.66}
+{"lang":"pt-br","description":"Automação de escaneamento de segurança, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL escaneamento automação CI pipeline","embed_threshold":0.63}
+{"lang":"ru","description":"Автоматизация сканирования безопасности, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL сканирование автоматизация CI pipeline","embed_threshold":0.68}
+{"lang":"th","description":"ระบบอัตโนมัติการสแกนความปลอดภัย GitHub Actions Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL สแกน อัตโนมัติ CI pipeline","embed_threshold":0.66}
+{"lang":"tr","description":"Güvenlik tarama otomasyonu, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL tarama otomasyon CI pipeline","embed_threshold":0.65}
+{"lang":"uk","description":"Автоматизація сканування безпеки, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL сканування автоматизація CI pipeline","embed_threshold":0.7}
+{"lang":"vi","description":"Tự động hóa quét bảo mật, GitHub Actions, Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL quét tự động CI pipeline","embed_threshold":0.67}
+{"lang":"zh","description":"安全扫描自动化、GitHub Actions、Dependabot","vocabulary":"GitHub Actions Dependabot CodeQL 扫描 自动化 CI pipeline","embed_threshold":0.69}

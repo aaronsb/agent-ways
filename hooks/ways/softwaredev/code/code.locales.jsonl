@@ -1,17 +1,17 @@
-{"lang":"ar","description":"جودة الكود والاختبار والأمان والأداء","vocabulary":"كود جودة اختبار أمان أداء برمجة","embed_threshold":0.74}
-{"lang":"de","description":"Codequalität, Testen, Sicherheit und Performance — das Handwerk, Produktionscode zu schreiben und zu pflegen","vocabulary":"Code Qualität sauber refaktorisieren verbessern testen sicher performant optimieren Review Best Practice Muster Antipattern Codegeruch technische Schulden Wartbarkeit Lesbarkeit","embed_threshold":0.79}
-{"lang":"es","description":"Calidad de codigo — pruebas, seguridad, rendimiento, buenas practicas","vocabulary":"codigo calidad pruebas seguridad rendimiento revision refactorizar limpio mantenible legible","embed_threshold":0.82}
-{"lang":"fr","description":"Qualité du code, tests, sécurité et performance","vocabulary":"code qualité refactoriser test sécurité optimiser revue","embed_threshold":0.75}
-{"lang":"hi","description":"कोड गुणवत्ता, टेस्टिंग, सुरक्षा और प्रदर्शन — शिल्प का स्तर","vocabulary":"कोड गुणवत्ता टेस्टिंग सुरक्षा प्रदर्शन समीक्षा रिफैक्टर","embed_threshold":0.77}
-{"lang":"id","description":"Kualitas kode, pengujian, keamanan, dan performa — tingkat keahlian","vocabulary":"kode kualitas pengujian keamanan performa tinjauan refaktor","embed_threshold":0.73}
+{"lang":"ar","description":"جودة الكود والاختبار والأمان والأداء","vocabulary":"كود جودة اختبار أمان أداء برمجة","embed_threshold":0.79}
+{"lang":"de","description":"Codequalität, Testen, Sicherheit und Performance — das Handwerk, Produktionscode zu schreiben und zu pflegen","vocabulary":"Code Qualität sauber refaktorisieren verbessern testen sicher performant optimieren Review Best Practice Muster Antipattern Codegeruch technische Schulden Wartbarkeit Lesbarkeit","embed_threshold":0.85}
+{"lang":"es","description":"Calidad de codigo — pruebas, seguridad, rendimiento, buenas practicas","vocabulary":"codigo calidad pruebas seguridad rendimiento revision refactorizar limpio mantenible legible","embed_threshold":0.84}
+{"lang":"fr","description":"Qualité du code, tests, sécurité et performance","vocabulary":"code qualité refactoriser test sécurité optimiser revue","embed_threshold":0.83}
+{"lang":"hi","description":"कोड गुणवत्ता, टेस्टिंग, सुरक्षा और प्रदर्शन — शिल्प का स्तर","vocabulary":"कोड गुणवत्ता टेस्टिंग सुरक्षा प्रदर्शन समीक्षा रिफैक्टर","embed_threshold":0.8}
+{"lang":"id","description":"Kualitas kode, pengujian, keamanan, dan performa — tingkat keahlian","vocabulary":"kode kualitas pengujian keamanan performa tinjauan refaktor","embed_threshold":0.8}
 {"lang":"it","description":"Qualità del codice, testing, sicurezza e prestazioni — il livello dell'artigianato","vocabulary":"codice qualità testing sicurezza prestazioni revisione refactoring","embed_threshold":0.81}
-{"lang":"ja","description":"コード品質、テスト、セキュリティ、パフォーマンスの総合管理","vocabulary":"コード 品質 リファクタリング テスト セキュリティ 最適化 レビュー","embed_threshold":0.8}
-{"lang":"ko","description":"코드 품질, 테스팅, 보안, 성능 — 장인 정신의 수준","vocabulary":"코드 품질 테스팅 보안 성능 리뷰 리팩토링","embed_threshold":0.83}
-{"lang":"pl","description":"Jakość kodu, testowanie, bezpieczeństwo i wydajność","vocabulary":"kod jakość refaktoryzacja test bezpieczeństwo optymalizacja przegląd","embed_threshold":0.77}
-{"lang":"pt-br","description":"Qualidade de código, testes, segurança e performance","vocabulary":"código qualidade refatorar teste segurança otimizar revisão","embed_threshold":0.78}
-{"lang":"ru","description":"Качество кода, тестирование, безопасность и производительность","vocabulary":"код качество рефакторинг тест безопасность оптимизация ревью","embed_threshold":0.81}
-{"lang":"th","description":"คุณภาพโค้ด การทดสอบ ความปลอดภัย และประสิทธิภาพ","vocabulary":"โค้ด คุณภาพ รีแฟคเตอร์ ทดสอบ ปลอดภัย เพิ่มประสิทธิภาพ ตรวจสอบ","embed_threshold":0.85}
+{"lang":"ja","description":"コード品質、テスト、セキュリティ、パフォーマンスの総合管理","vocabulary":"コード 品質 リファクタリング テスト セキュリティ 最適化 レビュー","embed_threshold":0.79}
+{"lang":"ko","description":"코드 품질, 테스팅, 보안, 성능 — 장인 정신의 수준","vocabulary":"코드 품질 테스팅 보안 성능 리뷰 리팩토링","embed_threshold":0.81}
+{"lang":"pl","description":"Jakość kodu, testowanie, bezpieczeństwo i wydajność","vocabulary":"kod jakość refaktoryzacja test bezpieczeństwo optymalizacja przegląd","embed_threshold":0.81}
+{"lang":"pt-br","description":"Qualidade de código, testes, segurança e performance","vocabulary":"código qualidade refatorar teste segurança otimizar revisão","embed_threshold":0.82}
+{"lang":"ru","description":"Качество кода, тестирование, безопасность и производительность","vocabulary":"код качество рефакторинг тест безопасность оптимизация ревью","embed_threshold":0.79}
+{"lang":"th","description":"คุณภาพโค้ด การทดสอบ ความปลอดภัย และประสิทธิภาพ","vocabulary":"โค้ด คุณภาพ รีแฟคเตอร์ ทดสอบ ปลอดภัย เพิ่มประสิทธิภาพ ตรวจสอบ","embed_threshold":0.83}
 {"lang":"tr","description":"Kod kalitesi, test, güvenlik ve performans","vocabulary":"kod kalite yeniden düzenleme test güvenlik optimizasyon inceleme","embed_threshold":0.76}
-{"lang":"uk","description":"Якість коду, тестування, безпека та продуктивність","vocabulary":"код якість рефакторинг тестування безпека оптимізація огляд","embed_threshold":0.79}
-{"lang":"vi","description":"Chất lượng mã, kiểm thử, bảo mật và hiệu suất","vocabulary":"mã chất lượng tái cấu trúc kiểm thử bảo mật tối ưu đánh giá","embed_threshold":0.78}
-{"lang":"zh","description":"代码质量、测试、安全和性能","vocabulary":"代码 质量 重构 测试 安全 优化 审查","embed_threshold":0.82}
+{"lang":"uk","description":"Якість коду, тестування, безпека та продуктивність","vocabulary":"код якість рефакторинг тестування безпека оптимізація огляд","embed_threshold":0.81}
+{"lang":"vi","description":"Chất lượng mã, kiểm thử, bảo mật và hiệu suất","vocabulary":"mã chất lượng tái cấu trúc kiểm thử bảo mật tối ưu đánh giá","embed_threshold":0.79}
+{"lang":"zh","description":"代码质量、测试、安全和性能","vocabulary":"代码 质量 重构 测试 安全 优化 审查","embed_threshold":0.84}

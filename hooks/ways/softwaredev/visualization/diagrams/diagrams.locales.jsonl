@@ -1,17 +1,17 @@
 {"lang":"ar","description":"رسومات Mermaid في الطرفية","vocabulary":"رسم تخطيطي Mermaid طرفية مخطط تدفق","embed_threshold":0.9}
 {"lang":"de","description":"Mermaid-Diagramme als Terminal-Grafik rendern — Fluss-, Sequenz- und ER-Diagramme","vocabulary":"Mermaid Diagramm Flussdiagramm Sequenzdiagramm Zustandsautomat ER Entitätsbeziehung Terminalkunst Schaubild","embed_threshold":0.9}
-{"lang":"es","description":"Diagramas Mermaid en terminal — flujo, secuencia, arquitectura visual","vocabulary":"diagrama Mermaid terminal flujo secuencia arquitectura visual renderizar ASCII bloque","embed_threshold":0.81}
+{"lang":"es","description":"Diagramas Mermaid en terminal — flujo, secuencia, arquitectura visual","vocabulary":"diagrama Mermaid terminal flujo secuencia arquitectura visual renderizar ASCII bloque","embed_threshold":0.8}
 {"lang":"fr","description":"Diagrammes Mermaid en art de terminal","vocabulary":"Mermaid diagramme flux séquence état ER entité terminal","embed_threshold":0.9}
-{"lang":"hi","description":"mmaid का उपयोग करके Mermaid डायग्राम को टर्मिनल आर्ट के रूप में रेंडर","vocabulary":"Mermaid mmaid डायग्राम टर्मिनल फ्लोचार्ट सिक्वेंस रेंडर","embed_threshold":0.84}
+{"lang":"hi","description":"mmaid का उपयोग करके Mermaid डायग्राम को टर्मिनल आर्ट के रूप में रेंडर","vocabulary":"Mermaid mmaid डायग्राम टर्मिनल फ्लोचार्ट सिक्वेंस रेंडर","embed_threshold":0.82}
 {"lang":"id","description":"Render diagram Mermaid sebagai seni terminal menggunakan mmaid","vocabulary":"Mermaid mmaid diagram terminal flowchart sekuens render","embed_threshold":0.82}
-{"lang":"it","description":"Renderizzare diagrammi Mermaid come arte terminale usando mmaid","vocabulary":"Mermaid mmaid diagramma terminale diagramma di flusso sequenza renderizzare","embed_threshold":0.9}
-{"lang":"ja","description":"Mermaid図をターミナルアートとして描画","vocabulary":"Mermaid 図 フローチャート シーケンス図 状態遷移 ER図 エンティティ","embed_threshold":0.88}
+{"lang":"it","description":"Renderizzare diagrammi Mermaid come arte terminale usando mmaid","vocabulary":"Mermaid mmaid diagramma terminale diagramma di flusso sequenza renderizzare","embed_threshold":0.89}
+{"lang":"ja","description":"Mermaid図をターミナルアートとして描画","vocabulary":"Mermaid 図 フローチャート シーケンス図 状態遷移 ER図 エンティティ","embed_threshold":0.9}
 {"lang":"ko","description":"mmaid를 사용하여 Mermaid 다이어그램을 터미널 아트로 렌더링","vocabulary":"Mermaid mmaid 다이어그램 터미널 플로차트 시퀀스 렌더링","embed_threshold":0.9}
-{"lang":"pl","description":"Diagramy Mermaid jako sztuka terminala","vocabulary":"Mermaid diagram schemat blokowy sekwencja stan ER encja terminal","embed_threshold":0.87}
+{"lang":"pl","description":"Diagramy Mermaid jako sztuka terminala","vocabulary":"Mermaid diagram schemat blokowy sekwencja stan ER encja terminal","embed_threshold":0.86}
 {"lang":"pt-br","description":"Diagramas Mermaid como arte de terminal","vocabulary":"Mermaid diagrama fluxograma sequência estado ER entidade terminal","embed_threshold":0.9}
-{"lang":"ru","description":"Диаграммы Mermaid как терминальная графика","vocabulary":"Mermaid диаграмма блок-схема последовательность состояние ER сущность терминал","embed_threshold":0.9}
-{"lang":"th","description":"Mermaid diagram แสดงผลเป็น terminal art","vocabulary":"Mermaid diagram flow sequence state ER entity terminal","embed_threshold":0.89}
-{"lang":"tr","description":"Terminal sanatı olarak Mermaid diyagramları","vocabulary":"Mermaid diyagram akış sıralama durum ER varlık terminal","embed_threshold":0.85}
-{"lang":"uk","description":"Діаграми Mermaid як термінальне мистецтво","vocabulary":"Mermaid діаграма потік послідовність стан ER сутність термінал","embed_threshold":0.88}
-{"lang":"vi","description":"Sơ đồ Mermaid hiển thị dưới dạng terminal art","vocabulary":"Mermaid sơ đồ luồng sequence trạng thái ER thực thể terminal","embed_threshold":0.83}
-{"lang":"zh","description":"Mermaid 图表以终端文字艺术渲染","vocabulary":"Mermaid 图表 流程 时序 状态 ER 实体 终端","embed_threshold":0.9}
+{"lang":"ru","description":"Диаграммы Mermaid как терминальная графика","vocabulary":"Mermaid диаграмма блок-схема последовательность состояние ER сущность терминал","embed_threshold":0.89}
+{"lang":"th","description":"Mermaid diagram แสดงผลเป็น terminal art","vocabulary":"Mermaid diagram flow sequence state ER entity terminal","embed_threshold":0.88}
+{"lang":"tr","description":"Terminal sanatı olarak Mermaid diyagramları","vocabulary":"Mermaid diyagram akış sıralama durum ER varlık terminal","embed_threshold":0.84}
+{"lang":"uk","description":"Діаграми Mermaid як термінальне мистецтво","vocabulary":"Mermaid діаграма потік послідовність стан ER сутність термінал","embed_threshold":0.86}
+{"lang":"vi","description":"Sơ đồ Mermaid hiển thị dưới dạng terminal art","vocabulary":"Mermaid sơ đồ luồng sequence trạng thái ER thực thể terminal","embed_threshold":0.81}
+{"lang":"zh","description":"Mermaid 图表以终端文字艺术渲染","vocabulary":"Mermaid 图表 流程 时序 状态 ER 实体 终端","embed_threshold":0.89}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"المصادقة والتفويض والتحكم بالوصول","vocabulary":"مصادقة تفويض صلاحيات تحكم وصول أدوار","embed_threshold":0.63}
-{"lang":"de","description":"Authentifizierung, Autorisierung, Zugriffskontrolle, Middleware-Guards, RBAC, Berechtigungen","vocabulary":"Authentifizierung Autorisierung Middleware Guard Berechtigung Rolle RBAC Zugriffskontrolle Login Sitzung JWT CSRF CORS","embed_threshold":0.58}
-{"lang":"es","description":"Autenticacion y autorizacion — RBAC, tokens, permisos, sesiones","vocabulary":"autenticacion autorizacion RBAC token JWT sesion permiso rol acceso identidad","embed_threshold":0.62}
-{"lang":"fr","description":"Authentification, autorisation, contrôle d'accès, RBAC","vocabulary":"authentification autorisation middleware permission rôle RBAC contrôle accès","embed_threshold":0.6}
-{"lang":"hi","description":"प्रमाणीकरण, प्राधिकरण, एक्सेस नियंत्रण, RBAC","vocabulary":"प्रमाणीकरण प्राधिकरण मिडलवेयर गार्ड अनुमति भूमिका RBAC लॉगिन","embed_threshold":0.62}
+{"lang":"ar","description":"المصادقة والتفويض والتحكم بالوصول","vocabulary":"مصادقة تفويض صلاحيات تحكم وصول أدوار","embed_threshold":0.64}
+{"lang":"de","description":"Authentifizierung, Autorisierung, Zugriffskontrolle, Middleware-Guards, RBAC, Berechtigungen","vocabulary":"Authentifizierung Autorisierung Middleware Guard Berechtigung Rolle RBAC Zugriffskontrolle Login Sitzung JWT CSRF CORS","embed_threshold":0.64}
+{"lang":"es","description":"Autenticacion y autorizacion — RBAC, tokens, permisos, sesiones","vocabulary":"autenticacion autorizacion RBAC token JWT sesion permiso rol acceso identidad","embed_threshold":0.61}
+{"lang":"fr","description":"Authentification, autorisation, contrôle d'accès, RBAC","vocabulary":"authentification autorisation middleware permission rôle RBAC contrôle accès","embed_threshold":0.61}
+{"lang":"hi","description":"प्रमाणीकरण, प्राधिकरण, एक्सेस नियंत्रण, RBAC","vocabulary":"प्रमाणीकरण प्राधिकरण मिडलवेयर गार्ड अनुमति भूमिका RBAC लॉगिन","embed_threshold":0.61}
 {"lang":"id","description":"Autentikasi, otorisasi, kontrol akses, RBAC","vocabulary":"autentikasi otorisasi middleware guard izin peran RBAC login","embed_threshold":0.64}
 {"lang":"it","description":"Autenticazione, autorizzazione, controllo accessi, RBAC","vocabulary":"autenticazione autorizzazione middleware guard permesso ruolo RBAC login","embed_threshold":0.58}
-{"lang":"ja","description":"認証・認可、アクセス制御、RBAC","vocabulary":"認証 認可 ミドルウェア ガード 権限 ロール RBAC ログイン","embed_threshold":0.63}
+{"lang":"ja","description":"認証・認可、アクセス制御、RBAC","vocabulary":"認証 認可 ミドルウェア ガード 権限 ロール RBAC ログイン","embed_threshold":0.61}
 {"lang":"ko","description":"인증, 인가, 접근 제어, RBAC","vocabulary":"인증 인가 미들웨어 가드 권한 역할 RBAC 로그인","embed_threshold":0.59}
-{"lang":"pl","description":"Uwierzytelnianie, autoryzacja, kontrola dostępu, RBAC","vocabulary":"uwierzytelnianie autoryzacja middleware uprawnienie rola RBAC kontrola dostępu","embed_threshold":0.62}
+{"lang":"pl","description":"Uwierzytelnianie, autoryzacja, kontrola dostępu, RBAC","vocabulary":"uwierzytelnianie autoryzacja middleware uprawnienie rola RBAC kontrola dostępu","embed_threshold":0.65}
 {"lang":"pt-br","description":"Autenticação, autorização, controle de acesso, RBAC","vocabulary":"autenticação autorização middleware permissão papel RBAC controle acesso","embed_threshold":0.62}
-{"lang":"ru","description":"Аутентификация, авторизация, управление доступом, RBAC","vocabulary":"аутентификация авторизация middleware разрешение роль RBAC контроль доступа","embed_threshold":0.61}
-{"lang":"th","description":"การยืนยันตัวตน การอนุญาต การควบคุมการเข้าถึง RBAC","vocabulary":"ยืนยันตัวตน อนุญาต เข้าถึง สิทธิ์ บทบาท RBAC มิดเดิลแวร์ การ์ด","embed_threshold":0.59}
-{"lang":"tr","description":"Kimlik doğrulama, yetkilendirme, erişim kontrolü, RBAC","vocabulary":"kimlik doğrulama yetkilendirme erişim izin rol RBAC ara yazılım koruma","embed_threshold":0.69}
-{"lang":"uk","description":"Автентифікація, авторизація, контроль доступу, RBAC","vocabulary":"автентифікація авторизація доступ дозвіл роль RBAC мідлвер захист","embed_threshold":0.67}
-{"lang":"vi","description":"Xác thực, ủy quyền, kiểm soát truy cập, RBAC","vocabulary":"xác thực ủy quyền truy cập quyền vai trò RBAC middleware bảo vệ","embed_threshold":0.63}
-{"lang":"zh","description":"认证、授权、访问控制、RBAC","vocabulary":"认证 授权 访问 权限 角色 RBAC 中间件 守卫","embed_threshold":0.64}
+{"lang":"ru","description":"Аутентификация, авторизация, управление доступом, RBAC","vocabulary":"аутентификация авторизация middleware разрешение роль RBAC контроль доступа","embed_threshold":0.6}
+{"lang":"th","description":"การยืนยันตัวตน การอนุญาต การควบคุมการเข้าถึง RBAC","vocabulary":"ยืนยันตัวตน อนุญาต เข้าถึง สิทธิ์ บทบาท RBAC มิดเดิลแวร์ การ์ด","embed_threshold":0.64}
+{"lang":"tr","description":"Kimlik doğrulama, yetkilendirme, erişim kontrolü, RBAC","vocabulary":"kimlik doğrulama yetkilendirme erişim izin rol RBAC ara yazılım koruma","embed_threshold":0.67}
+{"lang":"uk","description":"Автентифікація, авторизація, контроль доступу, RBAC","vocabulary":"автентифікація авторизація доступ дозвіл роль RBAC мідлвер захист","embed_threshold":0.65}
+{"lang":"vi","description":"Xác thực, ủy quyền, kiểm soát truy cập, RBAC","vocabulary":"xác thực ủy quyền truy cập quyền vai trò RBAC middleware bảo vệ","embed_threshold":0.64}
+{"lang":"zh","description":"认证、授权、访问控制、RBAC","vocabulary":"认证 授权 访问 权限 角色 RBAC 中间件 守卫","embed_threshold":0.63}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تتبع المشاريع ومواءمة سجلات القرارات المعمارية","vocabulary":"صحة مشروع تتبع مواءمة قرارات معمارية مراجعة","embed_threshold":0.79}
-{"lang":"de","description":"claude-code-config als Projekt pflegen — Upstream-Tracking gegen Claude-Code-Releases, ADR-Abgleich, Release-Disziplin","vocabulary":"Upstream Changelog Release Version Claude-Code Update ADR Status Abgleich Drift veraltet ausgeliefert Projektgesundheit Audit","embed_threshold":0.66}
-{"lang":"es","description":"Gestión de proyecto — seguimiento upstream, reconciliación de ADRs","vocabulary":"upstream changelog versión actualizar adr estado salud auditoría","embed_threshold":0.61}
-{"lang":"fr","description":"Gestion de projet — suivi upstream, réconciliation des ADR","vocabulary":"upstream changements version mise à jour ADR statut santé audit","embed_threshold":0.69}
-{"lang":"hi","description":"प्रोजेक्ट प्रबंधन — अपस्ट्रीम ट्रैकिंग, रिलीज अनुशासन, ADR समाधान","vocabulary":"अपस्ट्रीम रिलीज संस्करण अपडेट ADR ड्रिफ्ट ऑडिट स्वास्थ्य प्रोजेक्ट","embed_threshold":0.7}
-{"lang":"id","description":"Manajemen proyek — pelacakan upstream, disiplin rilis, rekonsiliasi ADR","vocabulary":"upstream rilis versi pembaruan ADR penyimpangan audit kesehatan proyek","embed_threshold":0.68}
-{"lang":"it","description":"Gestione del progetto — tracciamento upstream, disciplina di rilascio, riconciliazione ADR","vocabulary":"upstream rilascio versione aggiornamento ADR deviazione audit salute progetto","embed_threshold":0.68}
-{"lang":"ja","description":"プロジェクト管理 — アップストリーム追跡、ADRの整合性確認","vocabulary":"アップストリーム 変更履歴 リリース バージョン ADR 健全性 監査","embed_threshold":0.73}
-{"lang":"ko","description":"프로젝트 관리 — 업스트림 추적, 릴리스 규율, ADR 조정","vocabulary":"업스트림 릴리스 버전 업데이트 ADR 드리프트 감사 상태 프로젝트","embed_threshold":0.8}
-{"lang":"pl","description":"Zarządzanie projektem — śledzenie upstream, uzgadnianie ADR","vocabulary":"upstream zmiany wersja aktualizacja ADR status zdrowie audyt","embed_threshold":0.68}
-{"lang":"pt-br","description":"Gestão de projeto — rastreamento upstream, reconciliação de ADRs","vocabulary":"upstream mudanças versão atualização ADR status saúde auditoria","embed_threshold":0.67}
-{"lang":"ru","description":"Управление проектом — отслеживание upstream, согласование ADR","vocabulary":"upstream изменения версия обновление ADR статус здоровье аудит","embed_threshold":0.67}
-{"lang":"th","description":"การจัดการโครงการ — ติดตาม upstream สอดคล้อง ADR","vocabulary":"upstream เปลี่ยนแปลง เวอร์ชัน อัปเดต ADR สถานะ สุขภาพ ตรวจสอบ","embed_threshold":0.7}
-{"lang":"tr","description":"Proje yönetimi — upstream takibi, ADR uyumlaştırma","vocabulary":"upstream değişiklik sürüm güncelleme ADR durum sağlık denetim","embed_threshold":0.73}
-{"lang":"uk","description":"Управління проєктом — відстеження upstream, узгодження ADR","vocabulary":"upstream зміна версія оновлення ADR статус здоров'я аудит","embed_threshold":0.71}
-{"lang":"vi","description":"Quản lý dự án — theo dõi upstream, đối chiếu ADR","vocabulary":"upstream thay đổi phiên bản cập nhật ADR trạng thái sức khỏe kiểm toán","embed_threshold":0.68}
-{"lang":"zh","description":"项目管理 — 上游跟踪、ADR 对齐","vocabulary":"上游 变更 版本 更新 ADR 状态 健康 审计","embed_threshold":0.75}
+{"lang":"ar","description":"تتبع المشاريع ومواءمة سجلات القرارات المعمارية","vocabulary":"صحة مشروع تتبع مواءمة قرارات معمارية مراجعة","embed_threshold":0.9}
+{"lang":"de","description":"claude-code-config als Projekt pflegen — Upstream-Tracking gegen Claude-Code-Releases, ADR-Abgleich, Release-Disziplin","vocabulary":"Upstream Changelog Release Version Claude-Code Update ADR Status Abgleich Drift veraltet ausgeliefert Projektgesundheit Audit","embed_threshold":0.65}
+{"lang":"es","description":"Gestión de proyecto — seguimiento upstream, reconciliación de ADRs","vocabulary":"upstream changelog versión actualizar adr estado salud auditoría","embed_threshold":0.6}
+{"lang":"fr","description":"Gestion de projet — suivi upstream, réconciliation des ADR","vocabulary":"upstream changements version mise à jour ADR statut santé audit","embed_threshold":0.68}
+{"lang":"hi","description":"प्रोजेक्ट प्रबंधन — अपस्ट्रीम ट्रैकिंग, रिलीज अनुशासन, ADR समाधान","vocabulary":"अपस्ट्रीम रिलीज संस्करण अपडेट ADR ड्रिफ्ट ऑडिट स्वास्थ्य प्रोजेक्ट","embed_threshold":0.69}
+{"lang":"id","description":"Manajemen proyek — pelacakan upstream, disiplin rilis, rekonsiliasi ADR","vocabulary":"upstream rilis versi pembaruan ADR penyimpangan audit kesehatan proyek","embed_threshold":0.66}
+{"lang":"it","description":"Gestione del progetto — tracciamento upstream, disciplina di rilascio, riconciliazione ADR","vocabulary":"upstream rilascio versione aggiornamento ADR deviazione audit salute progetto","embed_threshold":0.66}
+{"lang":"ja","description":"プロジェクト管理 — アップストリーム追跡、ADRの整合性確認","vocabulary":"アップストリーム 変更履歴 リリース バージョン ADR 健全性 監査","embed_threshold":0.71}
+{"lang":"ko","description":"프로젝트 관리 — 업스트림 추적, 릴리스 규율, ADR 조정","vocabulary":"업스트림 릴리스 버전 업데이트 ADR 드리프트 감사 상태 프로젝트","embed_threshold":0.78}
+{"lang":"pl","description":"Zarządzanie projektem — śledzenie upstream, uzgadnianie ADR","vocabulary":"upstream zmiany wersja aktualizacja ADR status zdrowie audyt","embed_threshold":0.66}
+{"lang":"pt-br","description":"Gestão de projeto — rastreamento upstream, reconciliação de ADRs","vocabulary":"upstream mudanças versão atualização ADR status saúde auditoria","embed_threshold":0.65}
+{"lang":"ru","description":"Управление проектом — отслеживание upstream, согласование ADR","vocabulary":"upstream изменения версия обновление ADR статус здоровье аудит","embed_threshold":0.66}
+{"lang":"th","description":"การจัดการโครงการ — ติดตาม upstream สอดคล้อง ADR","vocabulary":"upstream เปลี่ยนแปลง เวอร์ชัน อัปเดต ADR สถานะ สุขภาพ ตรวจสอบ","embed_threshold":0.69}
+{"lang":"tr","description":"Proje yönetimi — upstream takibi, ADR uyumlaştırma","vocabulary":"upstream değişiklik sürüm güncelleme ADR durum sağlık denetim","embed_threshold":0.72}
+{"lang":"uk","description":"Управління проєктом — відстеження upstream, узгодження ADR","vocabulary":"upstream зміна версія оновлення ADR статус здоров'я аудит","embed_threshold":0.7}
+{"lang":"vi","description":"Quản lý dự án — theo dõi upstream, đối chiếu ADR","vocabulary":"upstream thay đổi phiên bản cập nhật ADR trạng thái sức khỏe kiểm toán","embed_threshold":0.67}
+{"lang":"zh","description":"项目管理 — 上游跟踪、ADR 对齐","vocabulary":"上游 变更 版本 更新 ADR 状态 健康 审计","embed_threshold":0.73}

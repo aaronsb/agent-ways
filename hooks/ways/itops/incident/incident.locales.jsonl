@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الاستجابة للحوادث والتصعيد وتقليل وقت الحل","vocabulary":"حادث استجابة تصعيد وقت حل طوارئ عطل","embed_threshold":0.65}
-{"lang":"de","description":"Incident Response, Eskalationspfade, MTTR-Ziele, Alarmtriage und Behebungsworkflows","vocabulary":"Incident Störung Eskalation Support-Stufe L0 L1 L2 MTTR Alarmtriage Behebung Bereitschaft Ausfall Schweregrad Produktion","embed_threshold":0.55}
-{"lang":"es","description":"Respuesta a incidentes, escalamiento, MTTR, triaje de alertas","vocabulary":"incidente respuesta escalamiento nivel mttr alerta triaje guardia interrupción","embed_threshold":0.53}
+{"lang":"ar","description":"الاستجابة للحوادث والتصعيد وتقليل وقت الحل","vocabulary":"حادث استجابة تصعيد وقت حل طوارئ عطل","embed_threshold":0.64}
+{"lang":"de","description":"Incident Response, Eskalationspfade, MTTR-Ziele, Alarmtriage und Behebungsworkflows","vocabulary":"Incident Störung Eskalation Support-Stufe L0 L1 L2 MTTR Alarmtriage Behebung Bereitschaft Ausfall Schweregrad Produktion","embed_threshold":0.53}
+{"lang":"es","description":"Respuesta a incidentes, escalamiento, MTTR, triaje de alertas","vocabulary":"incidente respuesta escalamiento nivel mttr alerta triaje guardia interrupción","embed_threshold":0.57}
 {"lang":"fr","description":"Réponse aux incidents, escalade, objectifs MTTR, triage des alertes","vocabulary":"incident réponse escalade alerte triage astreinte panne remédiation","embed_threshold":0.61}
-{"lang":"hi","description":"घटना प्रतिक्रिया, एस्केलेशन, अलर्ट ट्राइएज, निवारण","vocabulary":"घटना प्रतिक्रिया एस्केलेशन सपोर्ट अलर्ट ट्राइएज निवारण MTTR","embed_threshold":0.72}
-{"lang":"id","description":"Respons insiden, jalur eskalasi, triase peringatan, remediasi","vocabulary":"insiden respons eskalasi dukungan peringatan triase remediasi MTTR","embed_threshold":0.59}
-{"lang":"it","description":"Risposta agli incidenti, percorsi di escalation, triage degli avvisi, rimedio","vocabulary":"incidente risposta escalation supporto avviso triage rimedio MTTR","embed_threshold":0.61}
-{"lang":"ja","description":"インシデント対応のティア分類、エスカレーション、MTTR、アラートトリアージ","vocabulary":"インシデント 障害対応 エスカレーション アラート トリアージ オンコール 復旧","embed_threshold":0.67}
-{"lang":"ko","description":"인시던트 대응, 에스컬레이션, 알림 분류, 복구","vocabulary":"인시던트 대응 에스컬레이션 지원 알림 분류 복구 MTTR","embed_threshold":0.66}
-{"lang":"pl","description":"Reakcja na incydenty, ścieżki eskalacji, cele MTTR, triażowanie alertów","vocabulary":"incydent reakcja eskalacja alert triaż dyżur awaria naprawa","embed_threshold":0.58}
+{"lang":"hi","description":"घटना प्रतिक्रिया, एस्केलेशन, अलर्ट ट्राइएज, निवारण","vocabulary":"घटना प्रतिक्रिया एस्केलेशन सपोर्ट अलर्ट ट्राइएज निवारण MTTR","embed_threshold":0.7}
+{"lang":"id","description":"Respons insiden, jalur eskalasi, triase peringatan, remediasi","vocabulary":"insiden respons eskalasi dukungan peringatan triase remediasi MTTR","embed_threshold":0.57}
+{"lang":"it","description":"Risposta agli incidenti, percorsi di escalation, triage degli avvisi, rimedio","vocabulary":"incidente risposta escalation supporto avviso triage rimedio MTTR","embed_threshold":0.62}
+{"lang":"ja","description":"インシデント対応のティア分類、エスカレーション、MTTR、アラートトリアージ","vocabulary":"インシデント 障害対応 エスカレーション アラート トリアージ オンコール 復旧","embed_threshold":0.65}
+{"lang":"ko","description":"인시던트 대응, 에스컬레이션, 알림 분류, 복구","vocabulary":"인시던트 대응 에스컬레이션 지원 알림 분류 복구 MTTR","embed_threshold":0.64}
+{"lang":"pl","description":"Reakcja na incydenty, ścieżki eskalacji, cele MTTR, triażowanie alertów","vocabulary":"incydent reakcja eskalacja alert triaż dyżur awaria naprawa","embed_threshold":0.57}
 {"lang":"pt-br","description":"Resposta a incidentes, escalação, metas de MTTR, triagem de alertas","vocabulary":"incidente resposta escalação alerta triagem plantão indisponibilidade remediação","embed_threshold":0.6}
-{"lang":"ru","description":"Реагирование на инциденты, эскалация, цели MTTR, сортировка оповещений","vocabulary":"инцидент реагирование эскалация оповещение сортировка дежурство сбой восстановление","embed_threshold":0.68}
-{"lang":"th","description":"การตอบสนองต่อเหตุการณ์ เส้นทางการยกระดับ การคัดกรองการแจ้งเตือน","vocabulary":"เหตุการณ์ ตอบสนอง ยกระดับ สนับสนุน แจ้งเตือน คัดกรอง แก้ไข MTTR","embed_threshold":0.65}
+{"lang":"ru","description":"Реагирование на инциденты, эскалация, цели MTTR, сортировка оповещений","vocabulary":"инцидент реагирование эскалация оповещение сортировка дежурство сбой восстановление","embed_threshold":0.66}
+{"lang":"th","description":"การตอบสนองต่อเหตุการณ์ เส้นทางการยกระดับ การคัดกรองการแจ้งเตือน","vocabulary":"เหตุการณ์ ตอบสนอง ยกระดับ สนับสนุน แจ้งเตือน คัดกรอง แก้ไข MTTR","embed_threshold":0.64}
 {"lang":"tr","description":"Olay müdahalesi, eskalasyon yolları, alarm triajı, düzeltme","vocabulary":"olay müdahale eskalasyon destek alarm triaj düzeltme MTTR","embed_threshold":0.63}
-{"lang":"uk","description":"Реагування на інциденти, ескалація, тріаж алертів, ремедіація","vocabulary":"інцидент реагування ескалація підтримка алерт тріаж ремедіація MTTR","embed_threshold":0.5}
-{"lang":"vi","description":"Phản ứng sự cố, đường dẫn leo thang, phân loại cảnh báo, khắc phục","vocabulary":"sự cố phản ứng leo thang hỗ trợ cảnh báo phân loại khắc phục MTTR","embed_threshold":0.59}
-{"lang":"zh","description":"事件响应、升级路径、告警分类、修复措施","vocabulary":"事件 响应 升级 支持 告警 分类 修复 MTTR","embed_threshold":0.59}
+{"lang":"uk","description":"Реагування на інциденти, ескалація, тріаж алертів, ремедіація","vocabulary":"інцидент реагування ескалація підтримка алерт тріаж ремедіація MTTR","embed_threshold":0.52}
+{"lang":"vi","description":"Phản ứng sự cố, đường dẫn leo thang, phân loại cảnh báo, khắc phục","vocabulary":"sự cố phản ứng leo thang hỗ trợ cảnh báo phân loại khắc phục MTTR","embed_threshold":0.6}
+{"lang":"zh","description":"事件响应、升级路径、告警分类、修复措施","vocabulary":"事件 响应 升级 支持 告警 分类 修复 MTTR","embed_threshold":0.58}

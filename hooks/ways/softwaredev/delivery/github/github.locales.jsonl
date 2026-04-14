@@ -1,17 +1,17 @@
-{"lang":"ar","description":"طلبات السحب والمشكلات والتكامل المستمر على GitHub","vocabulary":"GitHub طلب سحب مشكلة تكامل مستمر مراجعة","embed_threshold":0.63}
-{"lang":"de","description":"GitHub-Workflows — Pull Requests, Issues, Code-Review und CI-Pipelines","vocabulary":"Pull-Request Issue Review Prüfung CI Label Fork Repository mergen zusammenführen GitHub Codeüberprüfung","embed_threshold":0.68}
-{"lang":"es","description":"Flujo de trabajo en GitHub — pull requests, issues, CI, Actions","vocabulary":"GitHub PR pull-request issue CI Actions workflow revision colaboracion repositorio","embed_threshold":0.62}
+{"lang":"ar","description":"طلبات السحب والمشكلات والتكامل المستمر على GitHub","vocabulary":"GitHub طلب سحب مشكلة تكامل مستمر مراجعة","embed_threshold":0.7}
+{"lang":"de","description":"GitHub-Workflows — Pull Requests, Issues, Code-Review und CI-Pipelines","vocabulary":"Pull-Request Issue Review Prüfung CI Label Fork Repository mergen zusammenführen GitHub Codeüberprüfung","embed_threshold":0.66}
+{"lang":"es","description":"Flujo de trabajo en GitHub — pull requests, issues, CI, Actions","vocabulary":"GitHub PR pull-request issue CI Actions workflow revision colaboracion repositorio","embed_threshold":0.6}
 {"lang":"fr","description":"Workflows GitHub — pull requests, issues, revue de code, CI","vocabulary":"PR pull request issue revue CI label dépôt merge GitHub","embed_threshold":0.59}
-{"lang":"hi","description":"GitHub PR, इश्यू, कोड रिव्यू, CI चेक्स","vocabulary":"GitHub PR इश्यू रिव्यू CI चेक्स रिपॉजिटरी","embed_threshold":0.69}
-{"lang":"id","description":"GitHub PR, issue, code review, CI checks","vocabulary":"GitHub PR issue tinjauan CI pemeriksaan repositori","embed_threshold":0.73}
-{"lang":"it","description":"GitHub PR, issue, code review, controlli CI","vocabulary":"GitHub PR issue revisione CI controllo repository","embed_threshold":0.67}
-{"lang":"ja","description":"GitHubのプルリクエスト、イシュー、コードレビュー、CI","vocabulary":"PR プルリクエスト イシュー レビュー チェック CI ラベル リポジトリ マージ","embed_threshold":0.72}
-{"lang":"ko","description":"GitHub PR, 이슈, 코드 리뷰, CI 체크","vocabulary":"GitHub PR 이슈 리뷰 CI 체크 저장소","embed_threshold":0.72}
-{"lang":"pl","description":"Przepływy pracy GitHub — pull requesty, issues, przegląd kodu, CI","vocabulary":"PR pull request issue przegląd CI label repozytorium merge GitHub","embed_threshold":0.62}
-{"lang":"pt-br","description":"Fluxos de trabalho GitHub — pull requests, issues, code review, CI","vocabulary":"PR pull request issue revisão CI label repositório merge GitHub","embed_threshold":0.63}
-{"lang":"ru","description":"Рабочие процессы GitHub — pull requests, issues, code review, CI","vocabulary":"PR pull request issue ревью CI метка репозиторий merge GitHub","embed_threshold":0.65}
-{"lang":"th","description":"เวิร์กโฟลว์ GitHub — pull request, issue, โค้ดรีวิว, CI","vocabulary":"PR pull request issue รีวิว CI label repo merge GitHub","embed_threshold":0.64}
-{"lang":"tr","description":"GitHub iş akışları — pull request'ler, issue'lar, kod inceleme, CI","vocabulary":"PR pull request issue inceleme CI etiket repo merge GitHub","embed_threshold":0.64}
-{"lang":"uk","description":"Робочі процеси GitHub — pull request, issue, огляд коду, CI","vocabulary":"PR pull request issue огляд CI мітка repo merge GitHub","embed_threshold":0.68}
-{"lang":"vi","description":"Quy trình GitHub — pull request, issue, đánh giá mã, CI","vocabulary":"PR pull request issue đánh giá CI nhãn repo merge GitHub","embed_threshold":0.64}
-{"lang":"zh","description":"GitHub 工作流 — pull request、issue、代码审查、CI","vocabulary":"PR pull request issue 审查 CI 标签 repo merge GitHub","embed_threshold":0.65}
+{"lang":"hi","description":"GitHub PR, इश्यू, कोड रिव्यू, CI चेक्स","vocabulary":"GitHub PR इश्यू रिव्यू CI चेक्स रिपॉजिटरी","embed_threshold":0.68}
+{"lang":"id","description":"GitHub PR, issue, code review, CI checks","vocabulary":"GitHub PR issue tinjauan CI pemeriksaan repositori","embed_threshold":0.72}
+{"lang":"it","description":"GitHub PR, issue, code review, controlli CI","vocabulary":"GitHub PR issue revisione CI controllo repository","embed_threshold":0.65}
+{"lang":"ja","description":"GitHubのプルリクエスト、イシュー、コードレビュー、CI","vocabulary":"PR プルリクエスト イシュー レビュー チェック CI ラベル リポジトリ マージ","embed_threshold":0.71}
+{"lang":"ko","description":"GitHub PR, 이슈, 코드 리뷰, CI 체크","vocabulary":"GitHub PR 이슈 리뷰 CI 체크 저장소","embed_threshold":0.7}
+{"lang":"pl","description":"Przepływy pracy GitHub — pull requesty, issues, przegląd kodu, CI","vocabulary":"PR pull request issue przegląd CI label repozytorium merge GitHub","embed_threshold":0.64}
+{"lang":"pt-br","description":"Fluxos de trabalho GitHub — pull requests, issues, code review, CI","vocabulary":"PR pull request issue revisão CI label repositório merge GitHub","embed_threshold":0.61}
+{"lang":"ru","description":"Рабочие процессы GitHub — pull requests, issues, code review, CI","vocabulary":"PR pull request issue ревью CI метка репозиторий merge GitHub","embed_threshold":0.66}
+{"lang":"th","description":"เวิร์กโฟลว์ GitHub — pull request, issue, โค้ดรีวิว, CI","vocabulary":"PR pull request issue รีวิว CI label repo merge GitHub","embed_threshold":0.63}
+{"lang":"tr","description":"GitHub iş akışları — pull request'ler, issue'lar, kod inceleme, CI","vocabulary":"PR pull request issue inceleme CI etiket repo merge GitHub","embed_threshold":0.63}
+{"lang":"uk","description":"Робочі процеси GitHub — pull request, issue, огляд коду, CI","vocabulary":"PR pull request issue огляд CI мітка repo merge GitHub","embed_threshold":0.66}
+{"lang":"vi","description":"Quy trình GitHub — pull request, issue, đánh giá mã, CI","vocabulary":"PR pull request issue đánh giá CI nhãn repo merge GitHub","embed_threshold":0.67}
+{"lang":"zh","description":"GitHub 工作流 — pull request、issue、代码审查、CI","vocabulary":"PR pull request issue 审查 CI 标签 repo merge GitHub","embed_threshold":0.64}

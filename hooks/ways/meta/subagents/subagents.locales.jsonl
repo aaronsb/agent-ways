@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تفويض المهام إلى وكلاء فرعيين","vocabulary":"وكيل فرعي تفويض مهام توزيع عمل موازي","embed_threshold":0.7}
-{"lang":"de","description":"Sub-Agent-Delegation — wann und wie spezialisierte Sub-Agenten für tokenintensive Arbeit gestartet werden","vocabulary":"Subagent delegieren starten Hintergrundaufgabe parallel Worker Teamkollege","embed_threshold":0.57}
-{"lang":"es","description":"Delegación a sub-agentes — lanzar agentes especializados","vocabulary":"subagente delegar lanzar segundo plano paralelo trabajador equipo","embed_threshold":0.53}
+{"lang":"ar","description":"تفويض المهام إلى وكلاء فرعيين","vocabulary":"وكيل فرعي تفويض مهام توزيع عمل موازي","embed_threshold":0.73}
+{"lang":"de","description":"Sub-Agent-Delegation — wann und wie spezialisierte Sub-Agenten für tokenintensive Arbeit gestartet werden","vocabulary":"Subagent delegieren starten Hintergrundaufgabe parallel Worker Teamkollege","embed_threshold":0.55}
+{"lang":"es","description":"Delegación a sub-agentes — lanzar agentes especializados","vocabulary":"subagente delegar lanzar segundo plano paralelo trabajador equipo","embed_threshold":0.51}
 {"lang":"fr","description":"Délégation aux sous-agents — lancer des agents spécialisés","vocabulary":"sous-agent déléguer lancer arrière-plan parallèle travailleur équipe","embed_threshold":0.46}
-{"lang":"hi","description":"सब-एजेंट प्रतिनिधिमंडल — टोकन-इंटेंसिव कार्य के लिए विशेष एजेंट","vocabulary":"सबएजेंट सौंपें शुरू करें पृष्ठभूमि कार्य समानांतर कार्यकर्ता","embed_threshold":0.5}
-{"lang":"id","description":"Delegasi sub-agen — agen khusus untuk pekerjaan intensif token","vocabulary":"subagen delegasi spawn latar belakang tugas paralel pekerja","embed_threshold":0.6}
-{"lang":"it","description":"Delegazione sub-agente — agenti specializzati per lavoro intensivo","vocabulary":"subagente delegare avviare sfondo compito parallelo lavoratore","embed_threshold":0.57}
+{"lang":"hi","description":"सब-एजेंट प्रतिनिधिमंडल — टोकन-इंटेंसिव कार्य के लिए विशेष एजेंट","vocabulary":"सबएजेंट सौंपें शुरू करें पृष्ठभूमि कार्य समानांतर कार्यकर्ता","embed_threshold":0.49}
+{"lang":"id","description":"Delegasi sub-agen — agen khusus untuk pekerjaan intensif token","vocabulary":"subagen delegasi spawn latar belakang tugas paralel pekerja","embed_threshold":0.59}
+{"lang":"it","description":"Delegazione sub-agente — agenti specializzati per lavoro intensivo","vocabulary":"subagente delegare avviare sfondo compito parallelo lavoratore","embed_threshold":0.56}
 {"lang":"ja","description":"サブエージェントへの委任 — 専門サブエージェントの起動","vocabulary":"サブエージェント 委任 並列 バックグラウンド ワーカー 分担","embed_threshold":0.57}
-{"lang":"ko","description":"서브 에이전트 위임 — 토큰 집약적 작업을 위한 전문 에이전트","vocabulary":"서브에이전트 위임 생성 백그라운드 작업 병렬 워커","embed_threshold":0.61}
-{"lang":"pl","description":"Delegowanie do sub-agentów — uruchamianie wyspecjalizowanych agentów","vocabulary":"subagent delegować uruchomić zadanie w tle równoległe pracownik zespół","embed_threshold":0.51}
-{"lang":"pt-br","description":"Delegação a sub-agentes — lançar agentes especializados","vocabulary":"subagente delegar lançar segundo plano paralelo trabalhador equipe","embed_threshold":0.53}
-{"lang":"ru","description":"Делегирование суб-агентам — запуск специализированных агентов","vocabulary":"субагент делегировать запустить фоновая задача параллельный работник команда","embed_threshold":0.54}
-{"lang":"th","description":"มอบหมายงานให้เอเจนต์ย่อย — เปิดใช้เอเจนต์เฉพาะทาง","vocabulary":"เอเจนต์ย่อย มอบหมาย เปิดใช้ งาน พื้นหลัง ขนาน ผู้ทำงาน","embed_threshold":0.72}
-{"lang":"tr","description":"Alt ajanlara yetki devri — özelleşmiş ajanlar başlatma","vocabulary":"altajan yetki devri başlatma görev arka plan paralel çalışan","embed_threshold":0.56}
-{"lang":"uk","description":"Делегування підагентам — запуск спеціалізованих агентів","vocabulary":"підагент делегування запуск завдання фон паралельно робітник","embed_threshold":0.62}
-{"lang":"vi","description":"Ủy quyền cho tác nhân phụ — khởi chạy tác nhân chuyên biệt","vocabulary":"tác nhân phụ ủy quyền khởi chạy tác vụ nền song song worker","embed_threshold":0.7}
-{"lang":"zh","description":"委派子代理 — 启动专用代理执行任务","vocabulary":"子代理 委派 启动 任务 后台 并行 工作者","embed_threshold":0.69}
+{"lang":"ko","description":"서브 에이전트 위임 — 토큰 집약적 작업을 위한 전문 에이전트","vocabulary":"서브에이전트 위임 생성 백그라운드 작업 병렬 워커","embed_threshold":0.59}
+{"lang":"pl","description":"Delegowanie do sub-agentów — uruchamianie wyspecjalizowanych agentów","vocabulary":"subagent delegować uruchomić zadanie w tle równoległe pracownik zespół","embed_threshold":0.54}
+{"lang":"pt-br","description":"Delegação a sub-agentes — lançar agentes especializados","vocabulary":"subagente delegar lançar segundo plano paralelo trabalhador equipe","embed_threshold":0.52}
+{"lang":"ru","description":"Делегирование суб-агентам — запуск специализированных агентов","vocabulary":"субагент делегировать запустить фоновая задача параллельный работник команда","embed_threshold":0.55}
+{"lang":"th","description":"มอบหมายงานให้เอเจนต์ย่อย — เปิดใช้เอเจนต์เฉพาะทาง","vocabulary":"เอเจนต์ย่อย มอบหมาย เปิดใช้ งาน พื้นหลัง ขนาน ผู้ทำงาน","embed_threshold":0.71}
+{"lang":"tr","description":"Alt ajanlara yetki devri — özelleşmiş ajanlar başlatma","vocabulary":"altajan yetki devri başlatma görev arka plan paralel çalışan","embed_threshold":0.61}
+{"lang":"uk","description":"Делегування підагентам — запуск спеціалізованих агентів","vocabulary":"підагент делегування запуск завдання фон паралельно робітник","embed_threshold":0.6}
+{"lang":"vi","description":"Ủy quyền cho tác nhân phụ — khởi chạy tác nhân chuyên biệt","vocabulary":"tác nhân phụ ủy quyền khởi chạy tác vụ nền song song worker","embed_threshold":0.68}
+{"lang":"zh","description":"委派子代理 — 启动专用代理执行任务","vocabulary":"子代理 委派 启动 任务 后台 并行 工作者","embed_threshold":0.68}

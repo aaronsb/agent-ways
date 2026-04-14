@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إنشاء المحتوى والمستندات والمقترحات","vocabulary":"كتابة محتوى مستند مقترح تأليف نص وثيقة","embed_threshold":0.78}
-{"lang":"de","description":"Texterstellung — Dokumente, Präsentationen, Berichte und Entwürfe verfassen","vocabulary":"schreiben verfassen entwerfen Vorschlag Bericht Präsentation Memo Gliederung überarbeiten Entwurf Dokument Texterstellung","embed_threshold":0.79}
-{"lang":"es","description":"Creacion de contenido — documentos, propuestas, redaccion, comunicacion escrita","vocabulary":"escribir redactar documento propuesta contenido comunicacion texto borrador revisar estilo","embed_threshold":0.77}
-{"lang":"fr","description":"Création de contenu — documents, présentations, rapports, propositions","vocabulary":"écrire brouillon document proposition rapport présentation plan réviser","embed_threshold":0.77}
-{"lang":"hi","description":"सामग्री निर्माण — दस्तावेज, प्रेजेंटેशन, रिपोर्ट, प्रस्ताव","vocabulary":"लेखन सामग्री दस्तावेज प्रस्ताव रिपोर्ट प्रेजेंटेशन ड्राफ्ट","embed_threshold":0.77}
-{"lang":"id","description":"Pembuatan konten — dokumen, presentasi, laporan, proposal","vocabulary":"penulisan konten dokumen proposal laporan presentasi draf","embed_threshold":0.74}
-{"lang":"it","description":"Creazione di contenuti — documenti, presentazioni, report, proposte","vocabulary":"scrittura contenuto documento proposta report presentazione bozza","embed_threshold":0.74}
-{"lang":"ja","description":"コンテンツ作成 — 文書、プレゼン、レポート、提案書","vocabulary":"執筆 下書き 作成 提案書 レポート プレゼン メモ アウトライン 推敲","embed_threshold":0.8}
-{"lang":"ko","description":"콘텐츠 작성 — 문서, 프레젠테이션, 보고서, 제안서","vocabulary":"작성 콘텐츠 문서 제안서 보고서 프레젠테이션 초안","embed_threshold":0.79}
+{"lang":"ar","description":"إنشاء المحتوى والمستندات والمقترحات","vocabulary":"كتابة محتوى مستند مقترح تأليف نص وثيقة","embed_threshold":0.79}
+{"lang":"de","description":"Texterstellung — Dokumente, Präsentationen, Berichte und Entwürfe verfassen","vocabulary":"schreiben verfassen entwerfen Vorschlag Bericht Präsentation Memo Gliederung überarbeiten Entwurf Dokument Texterstellung","embed_threshold":0.78}
+{"lang":"es","description":"Creacion de contenido — documentos, propuestas, redaccion, comunicacion escrita","vocabulary":"escribir redactar documento propuesta contenido comunicacion texto borrador revisar estilo","embed_threshold":0.76}
+{"lang":"fr","description":"Création de contenu — documents, présentations, rapports, propositions","vocabulary":"écrire brouillon document proposition rapport présentation plan réviser","embed_threshold":0.78}
+{"lang":"hi","description":"सामग्री निर्माण — दस्तावेज, प्रेजेंटેशन, रिपोर्ट, प्रस्ताव","vocabulary":"लेखन सामग्री दस्तावेज प्रस्ताव रिपोर्ट प्रेजेंटेशन ड्राफ्ट","embed_threshold":0.78}
+{"lang":"id","description":"Pembuatan konten — dokumen, presentasi, laporan, proposal","vocabulary":"penulisan konten dokumen proposal laporan presentasi draf","embed_threshold":0.72}
+{"lang":"it","description":"Creazione di contenuti — documenti, presentazioni, report, proposte","vocabulary":"scrittura contenuto documento proposta report presentazione bozza","embed_threshold":0.78}
+{"lang":"ja","description":"コンテンツ作成 — 文書、プレゼン、レポート、提案書","vocabulary":"執筆 下書き 作成 提案書 レポート プレゼン メモ アウトライン 推敲","embed_threshold":0.81}
+{"lang":"ko","description":"콘텐츠 작성 — 문서, 프레젠테이션, 보고서, 제안서","vocabulary":"작성 콘텐츠 문서 제안서 보고서 프레젠테이션 초안","embed_threshold":0.78}
 {"lang":"pl","description":"Tworzenie treści — dokumenty, prezentacje, raporty, propozycje","vocabulary":"pisanie szkic dokument propozycja raport prezentacja zarys redagowanie","embed_threshold":0.79}
-{"lang":"pt-br","description":"Criação de conteúdo — documentos, apresentações, relatórios, propostas","vocabulary":"escrever rascunho documento proposta relatório apresentação esquema editar","embed_threshold":0.73}
-{"lang":"ru","description":"Создание контента — документы, презентации, отчёты, предложения","vocabulary":"писать черновик документ предложение отчёт презентация план редактирование","embed_threshold":0.73}
-{"lang":"th","description":"การสร้างเนื้อหา — เอกสาร การนำเสนอ รายงาน ข้อเสนอ","vocabulary":"เขียน ร่าง เอกสาร ข้อเสนอ รายงาน การนำเสนอ โครงร่าง แก้ไข","embed_threshold":0.79}
-{"lang":"tr","description":"İçerik oluşturma — belgeler, sunumlar, raporlar, teklifler","vocabulary":"yazmak taslak belge teklif rapor sunum taslak düzenleme","embed_threshold":0.72}
-{"lang":"uk","description":"Створення контенту — документи, презентації, звіти, пропозиції","vocabulary":"писати чернетка документ пропозиція звіт презентація план редагування","embed_threshold":0.71}
-{"lang":"vi","description":"Tạo nội dung — tài liệu, bài thuyết trình, báo cáo, đề xuất","vocabulary":"viết nháp tài liệu đề xuất báo cáo thuyết trình dàn ý chỉnh sửa","embed_threshold":0.76}
-{"lang":"zh","description":"内容创作 — 文档、演示、报告、提案","vocabulary":"写作 草稿 文档 提案 报告 演示 大纲 编辑","embed_threshold":0.8}
+{"lang":"pt-br","description":"Criação de conteúdo — documentos, apresentações, relatórios, propostas","vocabulary":"escrever rascunho documento proposta relatório apresentação esquema editar","embed_threshold":0.77}
+{"lang":"ru","description":"Создание контента — документы, презентации, отчёты, предложения","vocabulary":"писать черновик документ предложение отчёт презентация план редактирование","embed_threshold":0.78}
+{"lang":"th","description":"การสร้างเนื้อหา — เอกสาร การนำเสนอ รายงาน ข้อเสนอ","vocabulary":"เขียน ร่าง เอกสาร ข้อเสนอ รายงาน การนำเสนอ โครงร่าง แก้ไข","embed_threshold":0.78}
+{"lang":"tr","description":"İçerik oluşturma — belgeler, sunumlar, raporlar, teklifler","vocabulary":"yazmak taslak belge teklif rapor sunum taslak düzenleme","embed_threshold":0.76}
+{"lang":"uk","description":"Створення контенту — документи, презентації, звіти, пропозиції","vocabulary":"писати чернетка документ пропозиція звіт презентація план редагування","embed_threshold":0.77}
+{"lang":"vi","description":"Tạo nội dung — tài liệu, bài thuyết trình, báo cáo, đề xuất","vocabulary":"viết nháp tài liệu đề xuất báo cáo thuyết trình dàn ý chỉnh sửa","embed_threshold":0.75}
+{"lang":"zh","description":"内容创作 — 文档、演示、报告、提案","vocabulary":"写作 草稿 文档 提案 报告 演示 大纲 编辑","embed_threshold":0.81}

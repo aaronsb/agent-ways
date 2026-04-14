@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تصحيح الأخطاء واستكشاف المشكلات","vocabulary":"تصحيح أخطاء استكشاف مشكلات تتبع حل","embed_threshold":0.68}
-{"lang":"de","description":"Debugging und Fehlersuche — Breakpoints, Stacktraces und Regressionsanalyse","vocabulary":"Debug Breakpoint Stacktrace untersuchen Fehlersuche Regression Absturz Bug Fehler Haltepunkt Ablaufverfolgung","embed_threshold":0.62}
-{"lang":"es","description":"Depuracion y resolucion de problemas — trazas, puntos de interrupcion, diagnostico","vocabulary":"depurar depuracion traza breakpoint diagnostico error problema resolver log inspeccionar","embed_threshold":0.65}
-{"lang":"fr","description":"Débogage, investigation et résolution de problèmes","vocabulary":"débogage point d'arrêt trace de pile investiguer régression plantage bogue","embed_threshold":0.55}
-{"lang":"hi","description":"डिबगिंग, समस्या निवारण, टूटे व्यवहार की जांच","vocabulary":"डिबग समस्या निवारण जांच त्रुटि लॉग ब्रेकपॉइंट ट्रेस","embed_threshold":0.76}
-{"lang":"id","description":"Debugging, pemecahan masalah, investigasi perilaku rusak","vocabulary":"debug masalah pemecahan investigasi error log breakpoint trace","embed_threshold":0.73}
-{"lang":"it","description":"Debugging, risoluzione problemi, indagine comportamento difettoso","vocabulary":"debug problema risoluzione indagine errore log breakpoint traccia","embed_threshold":0.69}
-{"lang":"ja","description":"デバッグ、障害の調査と問題解決","vocabulary":"デバッグ ブレークポイント スタックトレース 調査 トラブルシューティング リグレッション クラッシュ バグ","embed_threshold":0.68}
-{"lang":"ko","description":"디버깅, 문제 해결, 깨진 동작 조사","vocabulary":"디버그 문제해결 조사 에러 로그 브레이크포인트 트레이스","embed_threshold":0.85}
-{"lang":"pl","description":"Debugowanie i rozwiązywanie problemów — breakpointy, stacktrace, analiza regresji","vocabulary":"debugowanie breakpoint stacktrace badanie regresja awaria błąd","embed_threshold":0.56}
-{"lang":"pt-br","description":"Debugging e solução de problemas — breakpoints, stacktraces, análise de regressão","vocabulary":"debugar breakpoint stacktrace investigar regressão crash bug erro","embed_threshold":0.65}
-{"lang":"ru","description":"Отладка и устранение неполадок — точки останова, стек-трейсы, анализ регрессий","vocabulary":"отладка точка останова стек-трейс исследование регрессия сбой баг ошибка","embed_threshold":0.66}
-{"lang":"th","description":"การดีบักและแก้ไขปัญหา — breakpoint, stack trace, regression","vocabulary":"ดีบัก breakpoint stack trace สืบสวน regression crash บัก ข้อบกพร่อง","embed_threshold":0.59}
-{"lang":"tr","description":"Hata ayıklama ve sorun giderme — breakpoint, yığın izi, regresyon","vocabulary":"hata ayıklama breakpoint yığın izi araştırma regresyon çökme hata kusur","embed_threshold":0.73}
-{"lang":"uk","description":"Налагодження та усунення несправностей — breakpoint, stack trace","vocabulary":"налагодження breakpoint stack trace розслідування регресія збій помилка дефект","embed_threshold":0.65}
-{"lang":"vi","description":"Gỡ lỗi và khắc phục sự cố — breakpoint, stack trace, regression","vocabulary":"gỡ lỗi breakpoint stack trace điều tra regression crash lỗi khuyết tật","embed_threshold":0.69}
-{"lang":"zh","description":"调试和故障排查 — 断点、堆栈跟踪、回归分析","vocabulary":"调试 断点 堆栈跟踪 调查 回归 崩溃 bug 缺陷","embed_threshold":0.75}
+{"lang":"ar","description":"تصحيح الأخطاء واستكشاف المشكلات","vocabulary":"تصحيح أخطاء استكشاف مشكلات تتبع حل","embed_threshold":0.66}
+{"lang":"de","description":"Debugging und Fehlersuche — Breakpoints, Stacktraces und Regressionsanalyse","vocabulary":"Debug Breakpoint Stacktrace untersuchen Fehlersuche Regression Absturz Bug Fehler Haltepunkt Ablaufverfolgung","embed_threshold":0.6}
+{"lang":"es","description":"Depuracion y resolucion de problemas — trazas, puntos de interrupcion, diagnostico","vocabulary":"depurar depuracion traza breakpoint diagnostico error problema resolver log inspeccionar","embed_threshold":0.63}
+{"lang":"fr","description":"Débogage, investigation et résolution de problèmes","vocabulary":"débogage point d'arrêt trace de pile investiguer régression plantage bogue","embed_threshold":0.54}
+{"lang":"hi","description":"डिबगिंग, समस्या निवारण, टूटे व्यवहार की जांच","vocabulary":"डिबग समस्या निवारण जांच त्रुटि लॉग ब्रेकपॉइंट ट्रेस","embed_threshold":0.75}
+{"lang":"id","description":"Debugging, pemecahan masalah, investigasi perilaku rusak","vocabulary":"debug masalah pemecahan investigasi error log breakpoint trace","embed_threshold":0.72}
+{"lang":"it","description":"Debugging, risoluzione problemi, indagine comportamento difettoso","vocabulary":"debug problema risoluzione indagine errore log breakpoint traccia","embed_threshold":0.67}
+{"lang":"ja","description":"デバッグ、障害の調査と問題解決","vocabulary":"デバッグ ブレークポイント スタックトレース 調査 トラブルシューティング リグレッション クラッシュ バグ","embed_threshold":0.66}
+{"lang":"ko","description":"디버깅, 문제 해결, 깨진 동작 조사","vocabulary":"디버그 문제해결 조사 에러 로그 브레이크포인트 트레이스","embed_threshold":0.84}
+{"lang":"pl","description":"Debugowanie i rozwiązywanie problemów — breakpointy, stacktrace, analiza regresji","vocabulary":"debugowanie breakpoint stacktrace badanie regresja awaria błąd","embed_threshold":0.6}
+{"lang":"pt-br","description":"Debugging e solução de problemas — breakpoints, stacktraces, análise de regressão","vocabulary":"debugar breakpoint stacktrace investigar regressão crash bug erro","embed_threshold":0.63}
+{"lang":"ru","description":"Отладка и устранение неполадок — точки останова, стек-трейсы, анализ регрессий","vocabulary":"отладка точка останова стек-трейс исследование регрессия сбой баг ошибка","embed_threshold":0.65}
+{"lang":"th","description":"การดีบักและแก้ไขปัญหา — breakpoint, stack trace, regression","vocabulary":"ดีบัก breakpoint stack trace สืบสวน regression crash บัก ข้อบกพร่อง","embed_threshold":0.61}
+{"lang":"tr","description":"Hata ayıklama ve sorun giderme — breakpoint, yığın izi, regresyon","vocabulary":"hata ayıklama breakpoint yığın izi araştırma regresyon çökme hata kusur","embed_threshold":0.71}
+{"lang":"uk","description":"Налагодження та усунення несправностей — breakpoint, stack trace","vocabulary":"налагодження breakpoint stack trace розслідування регресія збій помилка дефект","embed_threshold":0.66}
+{"lang":"vi","description":"Gỡ lỗi và khắc phục sự cố — breakpoint, stack trace, regression","vocabulary":"gỡ lỗi breakpoint stack trace điều tra regression crash lỗi khuyết tật","embed_threshold":0.68}
+{"lang":"zh","description":"调试和故障排查 — 断点、堆栈跟踪、回归分析","vocabulary":"调试 断点 堆栈跟踪 调查 回归 崩溃 bug 缺陷","embed_threshold":0.74}

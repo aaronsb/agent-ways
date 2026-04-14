@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إرشادات التفريع في Git","vocabulary":"تفريع Git فرع دمج استراتيجية إصدار","embed_threshold":0.72}
-{"lang":"de","description":"Git-Branch-Strategien — Worktrees, Feature-Branches und Trunk-basierte Entwicklung","vocabulary":"Branch Zweig auschecken Worktree Hauptzweig Trunk Feature-Branch Bugfix-Branch Refaktorisierungsbranch Verzweigung Zusammenführung","embed_threshold":0.63}
-{"lang":"es","description":"Estrategias de ramificacion en Git — ramas de funcionalidad, flujo de trabajo","vocabulary":"rama branch git estrategia funcionalidad feature trunk flujo-de-trabajo fusionar merge","embed_threshold":0.69}
-{"lang":"fr","description":"Stratégies de branches Git, gestion des branches","vocabulary":"branche branch stratégie feature trunk worktree main merge","embed_threshold":0.66}
-{"lang":"hi","description":"Git शाखा जागरूकता, फाइल संपादन करते समय शाखा मार्गदर्शन","vocabulary":"शाखा git चेकઆउट स्विच बनाएं ट्रंक फीचर","embed_threshold":0.78}
-{"lang":"id","description":"Kesadaran branch Git, panduan branch saat mengedit file","vocabulary":"branch git checkout beralih membuat trunk fitur","embed_threshold":0.72}
-{"lang":"it","description":"Consapevolezza branch Git, guida ai branch durante l'editing","vocabulary":"branch git checkout cambio creazione trunk funzionalità","embed_threshold":0.74}
-{"lang":"ja","description":"Gitブランチの管理とブランチ戦略のガイダンス","vocabulary":"ブランチ チェックアウト ワークツリー メイン トランク フィーチャー 修正","embed_threshold":0.67}
-{"lang":"ko","description":"Git 브랜치 인식, 파일 편집 시 브랜치 안내","vocabulary":"브랜치 git checkout 전환 생성 트렁크 기능","embed_threshold":0.72}
-{"lang":"pl","description":"Strategie rozgałęziania w Git, zarządzanie gałęziami","vocabulary":"gałąź branch strategia feature trunk worktree main merge","embed_threshold":0.62}
-{"lang":"pt-br","description":"Estratégias de branching Git, gestão de branches","vocabulary":"branch ramo estratégia feature trunk worktree main merge","embed_threshold":0.64}
-{"lang":"ru","description":"Стратегии ветвления Git, управление ветками","vocabulary":"ветка branch стратегия feature trunk worktree main merge","embed_threshold":0.6}
-{"lang":"th","description":"กลยุทธ์การแตก branch ของ Git การจัดการ branch","vocabulary":"branch กลยุทธ์ feature trunk worktree main merge","embed_threshold":0.63}
-{"lang":"tr","description":"Git dallanma stratejileri, dal yönetimi","vocabulary":"dal branch strateji feature trunk worktree main merge","embed_threshold":0.59}
-{"lang":"uk","description":"Стратегії гілкування Git, управління гілками","vocabulary":"гілка branch стратегія feature trunk worktree main merge","embed_threshold":0.62}
-{"lang":"vi","description":"Chiến lược phân nhánh Git, quản lý nhánh","vocabulary":"nhánh branch chiến lược feature trunk worktree main merge","embed_threshold":0.65}
-{"lang":"zh","description":"Git 分支策略、分支管理","vocabulary":"分支 branch 策略 feature trunk worktree main merge","embed_threshold":0.63}
+{"lang":"ar","description":"إرشادات التفريع في Git","vocabulary":"تفريع Git فرع دمج استراتيجية إصدار","embed_threshold":0.8}
+{"lang":"de","description":"Git-Branch-Strategien — Worktrees, Feature-Branches und Trunk-basierte Entwicklung","vocabulary":"Branch Zweig auschecken Worktree Hauptzweig Trunk Feature-Branch Bugfix-Branch Refaktorisierungsbranch Verzweigung Zusammenführung","embed_threshold":0.61}
+{"lang":"es","description":"Estrategias de ramificacion en Git — ramas de funcionalidad, flujo de trabajo","vocabulary":"rama branch git estrategia funcionalidad feature trunk flujo-de-trabajo fusionar merge","embed_threshold":0.68}
+{"lang":"fr","description":"Stratégies de branches Git, gestion des branches","vocabulary":"branche branch stratégie feature trunk worktree main merge","embed_threshold":0.65}
+{"lang":"hi","description":"Git शाखा जागरूकता, फाइल संपादन करते समय शाखा मार्गदर्शन","vocabulary":"शाखा git चेकઆउट स्विच बनाएं ट्रंक फीचर","embed_threshold":0.77}
+{"lang":"id","description":"Kesadaran branch Git, panduan branch saat mengedit file","vocabulary":"branch git checkout beralih membuat trunk fitur","embed_threshold":0.71}
+{"lang":"it","description":"Consapevolezza branch Git, guida ai branch durante l'editing","vocabulary":"branch git checkout cambio creazione trunk funzionalità","embed_threshold":0.73}
+{"lang":"ja","description":"Gitブランチの管理とブランチ戦略のガイダンス","vocabulary":"ブランチ チェックアウト ワークツリー メイン トランク フィーチャー 修正","embed_threshold":0.68}
+{"lang":"ko","description":"Git 브랜치 인식, 파일 편집 시 브랜치 안내","vocabulary":"브랜치 git checkout 전환 생성 트렁크 기능","embed_threshold":0.77}
+{"lang":"pl","description":"Strategie rozgałęziania w Git, zarządzanie gałęziami","vocabulary":"gałąź branch strategia feature trunk worktree main merge","embed_threshold":0.6}
+{"lang":"pt-br","description":"Estratégias de branching Git, gestão de branches","vocabulary":"branch ramo estratégia feature trunk worktree main merge","embed_threshold":0.62}
+{"lang":"ru","description":"Стратегии ветвления Git, управление ветками","vocabulary":"ветка branch стратегия feature trunk worktree main merge","embed_threshold":0.58}
+{"lang":"th","description":"กลยุทธ์การแตก branch ของ Git การจัดการ branch","vocabulary":"branch กลยุทธ์ feature trunk worktree main merge","embed_threshold":0.61}
+{"lang":"tr","description":"Git dallanma stratejileri, dal yönetimi","vocabulary":"dal branch strateji feature trunk worktree main merge","embed_threshold":0.58}
+{"lang":"uk","description":"Стратегії гілкування Git, управління гілками","vocabulary":"гілка branch стратегія feature trunk worktree main merge","embed_threshold":0.61}
+{"lang":"vi","description":"Chiến lược phân nhánh Git, quản lý nhánh","vocabulary":"nhánh branch chiến lược feature trunk worktree main merge","embed_threshold":0.64}
+{"lang":"zh","description":"Git 分支策略、分支管理","vocabulary":"分支 branch 策略 feature trunk worktree main merge","embed_threshold":0.61}

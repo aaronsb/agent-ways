@@ -1,17 +1,17 @@
-{"lang":"ar","description":"رسومات بيانية في الطرفية","vocabulary":"رسم بياني طرفية مخطط بيانات عرض","embed_threshold":0.85}
-{"lang":"de","description":"ANSI-Terminaldiagramme rendern — Balken-, Linien- und Sparkline-Grafiken","vocabulary":"Diagramm Grafik Sparkline Histogramm Plot Trend Metrik Balkendiagramm Liniendiagramm Visualisierung","embed_threshold":0.6}
-{"lang":"es","description":"Graficos en terminal — barras, lineas, histogramas, visualizacion de datos","vocabulary":"grafico barra linea histograma terminal datos visualizar sparkline tabla ASCII","embed_threshold":0.58}
-{"lang":"fr","description":"Graphiques de terminal ANSI — barres, lignes, sparklines","vocabulary":"graphique sparkline histogramme plot tendance métrique visualisation","embed_threshold":0.62}
-{"lang":"hi","description":"डेटा से ANSI टर्मिनल चार्ट रेंडर — बार, लाइन, स्पार्कलाइन","vocabulary":"चार्ट बार लाइन स्पार्कलाइन टर्मिनल ANSI डेटा रेंडर","embed_threshold":0.47}
+{"lang":"ar","description":"رسومات بيانية في الطرفية","vocabulary":"رسم بياني طرفية مخطط بيانات عرض","embed_threshold":0.83}
+{"lang":"de","description":"ANSI-Terminaldiagramme rendern — Balken-, Linien- und Sparkline-Grafiken","vocabulary":"Diagramm Grafik Sparkline Histogramm Plot Trend Metrik Balkendiagramm Liniendiagramm Visualisierung","embed_threshold":0.59}
+{"lang":"es","description":"Graficos en terminal — barras, lineas, histogramas, visualizacion de datos","vocabulary":"grafico barra linea histograma terminal datos visualizar sparkline tabla ASCII","embed_threshold":0.73}
+{"lang":"fr","description":"Graphiques de terminal ANSI — barres, lignes, sparklines","vocabulary":"graphique sparkline histogramme plot tendance métrique visualisation","embed_threshold":0.61}
+{"lang":"hi","description":"डेटा से ANSI टर्मिनल चार्ट रेंडर — बार, लाइन, स्पार्कलाइन","vocabulary":"चार्ट बार लाइन स्पार्कलाइन टर्मिनल ANSI डेटा रेंडर","embed_threshold":0.45}
 {"lang":"id","description":"Render grafik terminal ANSI dari data — bar, line, sparkline","vocabulary":"grafik bar line sparkline terminal ANSI data render","embed_threshold":0.47}
-{"lang":"it","description":"Renderizzare grafici ANSI terminale da dati — barre, linee, sparkline","vocabulary":"grafico barre linee sparkline terminale ANSI dati renderizzare","embed_threshold":0.49}
-{"lang":"ja","description":"ANSIターミナルチャートの描画 — 棒グラフ、折れ線、スパークライン","vocabulary":"チャート グラフ スパークライン ヒストグラム プロット 傾向 指標 可視化","embed_threshold":0.8}
-{"lang":"ko","description":"데이터에서 ANSI 터미널 차트 렌더링 — 막대, 라인, 스파크라인","vocabulary":"차트 막대 라인 스파크라인 터미널 ANSI 데이터 렌더링","embed_threshold":0.56}
-{"lang":"pl","description":"Wykresy terminala ANSI — słupkowe, liniowe, sparkline","vocabulary":"wykres sparkline histogram plot trend metryka wizualizacja","embed_threshold":0.58}
-{"lang":"pt-br","description":"Gráficos de terminal ANSI — barras, linhas, sparklines","vocabulary":"gráfico sparkline histograma plot tendência métrica visualização","embed_threshold":0.61}
-{"lang":"ru","description":"ANSI-графики в терминале — столбчатые, линейные, спарклайны","vocabulary":"график спарклайн гистограмма плот тренд метрика визуализация","embed_threshold":0.58}
-{"lang":"th","description":"กราฟ ANSI terminal — แท่ง เส้น sparkline","vocabulary":"กราฟ sparkline histogram plot trend metric แสดงผล","embed_threshold":0.5}
-{"lang":"tr","description":"ANSI terminal grafikleri — çubuk, çizgi, sparkline","vocabulary":"grafik sparkline histogram çizim trend metrik görselleştirme","embed_threshold":0.55}
-{"lang":"uk","description":"ANSI-термінальні графіки — стовпчасті, лінійні, sparkline","vocabulary":"графік sparkline гістограма графік тренд метрика візуалізація","embed_threshold":0.67}
-{"lang":"vi","description":"Biểu đồ terminal ANSI — cột, đường, sparkline","vocabulary":"biểu đồ sparkline histogram plot xu hướng metric trực quan hóa","embed_threshold":0.57}
-{"lang":"zh","description":"ANSI 终端图表 — 柱状、折线、sparkline","vocabulary":"图表 sparkline 直方图 绘图 趋势 指标 可视化","embed_threshold":0.55}
+{"lang":"it","description":"Renderizzare grafici ANSI terminale da dati — barre, linee, sparkline","vocabulary":"grafico barre linee sparkline terminale ANSI dati renderizzare","embed_threshold":0.53}
+{"lang":"ja","description":"ANSIターミナルチャートの描画 — 棒グラフ、折れ線、スパークライン","vocabulary":"チャート グラフ スパークライン ヒストグラム プロット 傾向 指標 可視化","embed_threshold":0.78}
+{"lang":"ko","description":"데이터에서 ANSI 터미널 차트 렌더링 — 막대, 라인, 스파크라인","vocabulary":"차트 막대 라인 스파크라인 터미널 ANSI 데이터 렌더링","embed_threshold":0.54}
+{"lang":"pl","description":"Wykresy terminala ANSI — słupkowe, liniowe, sparkline","vocabulary":"wykres sparkline histogram plot trend metryka wizualizacja","embed_threshold":0.57}
+{"lang":"pt-br","description":"Gráficos de terminal ANSI — barras, linhas, sparklines","vocabulary":"gráfico sparkline histograma plot tendência métrica visualização","embed_threshold":0.59}
+{"lang":"ru","description":"ANSI-графики в терминале — столбчатые, линейные, спарклайны","vocabulary":"график спарклайн гистограмма плот тренд метрика визуализация","embed_threshold":0.56}
+{"lang":"th","description":"กราฟ ANSI terminal — แท่ง เส้น sparkline","vocabulary":"กราฟ sparkline histogram plot trend metric แสดงผล","embed_threshold":0.49}
+{"lang":"tr","description":"ANSI terminal grafikleri — çubuk, çizgi, sparkline","vocabulary":"grafik sparkline histogram çizim trend metrik görselleştirme","embed_threshold":0.57}
+{"lang":"uk","description":"ANSI-термінальні графіки — стовпчасті, лінійні, sparkline","vocabulary":"графік sparkline гістограма графік тренд метрика візуалізація","embed_threshold":0.66}
+{"lang":"vi","description":"Biểu đồ terminal ANSI — cột, đường, sparkline","vocabulary":"biểu đồ sparkline histogram plot xu hướng metric trực quan hóa","embed_threshold":0.55}
+{"lang":"zh","description":"ANSI 终端图表 — 柱状、折线、sparkline","vocabulary":"图表 sparkline 直方图 绘图 趋势 指标 可视化","embed_threshold":0.54}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الاستقلالية المكتسبة عبر الجلسات","vocabulary":"استقلالية ثقة مكتسبة صلاحيات تدريجي","embed_threshold":0.74}
-{"lang":"de","description":"Wie Vertrauen über Sessions hinweg zu verdiente Autonomie wächst — gewährte Ressourcen, Anti-Manipulation, Wahrheit als Effizienz","vocabulary":"verdiente Autonomie eigenständig Ressourcen gewähren Sessions Beständigkeit Vertrauenswürdigkeit Manipulation Täuschung Wahrheit Kosteneffizienz","embed_threshold":0.8}
-{"lang":"es","description":"Confianza que evoluciona hacia autonomía ganada","vocabulary":"autonomía ganada independiente recursos otorgar sesiones confiabilidad","embed_threshold":0.77}
+{"lang":"ar","description":"الاستقلالية المكتسبة عبر الجلسات","vocabulary":"استقلالية ثقة مكتسبة صلاحيات تدريجي","embed_threshold":0.73}
+{"lang":"de","description":"Wie Vertrauen über Sessions hinweg zu verdiente Autonomie wächst — gewährte Ressourcen, Anti-Manipulation, Wahrheit als Effizienz","vocabulary":"verdiente Autonomie eigenständig Ressourcen gewähren Sessions Beständigkeit Vertrauenswürdigkeit Manipulation Täuschung Wahrheit Kosteneffizienz","embed_threshold":0.78}
+{"lang":"es","description":"Confianza que evoluciona hacia autonomía ganada","vocabulary":"autonomía ganada independiente recursos otorgar sesiones confiabilidad","embed_threshold":0.76}
 {"lang":"fr","description":"Confiance qui évolue vers une autonomie méritée","vocabulary":"autonomie méritée indépendant ressources accorder sessions fiabilité","embed_threshold":0.77}
-{"lang":"hi","description":"सत्रों में विश्वास कैसे अर्जित स्वायत्तता में बढ़ता है","vocabulary":"अर्जित स्वायत्तता स्वतंत्र संसाधन अनुदान सुसंगतता ट्रैक रिकॉर्ड","embed_threshold":0.66}
-{"lang":"id","description":"Bagaimana kepercayaan tumbuh menjadi otonomi yang diperoleh lintas sesi","vocabulary":"diperoleh otonomi mandiri sumber daya pemberian konsistensi rekam jejak","embed_threshold":0.8}
-{"lang":"it","description":"Come la fiducia cresce in autonomia guadagnata attraverso le sessioni","vocabulary":"guadagnata autonomia indipendente risorse concessione coerenza track record","embed_threshold":0.79}
-{"lang":"ja","description":"信頼から得られる自律性の段階的な拡大","vocabulary":"自律 独立 権限 信頼獲得 セッション リソース","embed_threshold":0.71}
+{"lang":"hi","description":"सत्रों में विश्वास कैसे अर्जित स्वायत्तता में बढ़ता है","vocabulary":"अर्जित स्वायत्तता स्वतंत्र संसाधन अनुदान सुसंगतता ट्रैक रिकॉर्ड","embed_threshold":0.65}
+{"lang":"id","description":"Bagaimana kepercayaan tumbuh menjadi otonomi yang diperoleh lintas sesi","vocabulary":"diperoleh otonomi mandiri sumber daya pemberian konsistensi rekam jejak","embed_threshold":0.79}
+{"lang":"it","description":"Come la fiducia cresce in autonomia guadagnata attraverso le sessioni","vocabulary":"guadagnata autonomia indipendente risorse concessione coerenza track record","embed_threshold":0.78}
+{"lang":"ja","description":"信頼から得られる自律性の段階的な拡大","vocabulary":"自律 独立 権限 信頼獲得 セッション リソース","embed_threshold":0.76}
 {"lang":"ko","description":"세션을 거치며 신뢰가 획득된 자율성으로 성장하는 방식","vocabulary":"획득 자율성 독립 자원 부여 일관성 실적","embed_threshold":0.75}
-{"lang":"pl","description":"Zaufanie rosnące w kierunku zasłużonej autonomii","vocabulary":"autonomia zasłużona niezależny zasoby przyznawanie sesje wiarygodność","embed_threshold":0.8}
-{"lang":"pt-br","description":"Confiança que evolui para autonomia conquistada ao longo do tempo","vocabulary":"autonomia conquistada independente recursos conceder sessões confiabilidade","embed_threshold":0.78}
-{"lang":"ru","description":"Доверие, перерастающее в заслуженную автономию","vocabulary":"автономия заслуженная независимый ресурсы предоставление сессии надёжность","embed_threshold":0.79}
-{"lang":"th","description":"ความไว้วางใจที่เติบโตสู่ความเป็นอิสระที่ได้รับ","vocabulary":"อิสระ ได้รับ อิสระ ทรัพยากร มอบ เซสชัน ความน่าเชื่อถือ","embed_threshold":0.79}
-{"lang":"tr","description":"Kazanılmış özerkliğe doğru büyüyen güven","vocabulary":"özerklik kazanılmış bağımsız kaynaklar tahsis oturumlar güvenilirlik","embed_threshold":0.8}
-{"lang":"uk","description":"Довіра, що зростає до заслуженої автономії","vocabulary":"автономія заслужена незалежна ресурси надання сесії надійність","embed_threshold":0.79}
-{"lang":"vi","description":"Niềm tin phát triển hướng tới quyền tự chủ đạt được","vocabulary":"tự chủ đạt được độc lập tài nguyên cấp phiên độ tin cậy","embed_threshold":0.76}
-{"lang":"zh","description":"信任逐步增长为赢得的自主权","vocabulary":"自主 赢得 独立 资源 授予 会话 可靠性","embed_threshold":0.74}
+{"lang":"pl","description":"Zaufanie rosnące w kierunku zasłużonej autonomii","vocabulary":"autonomia zasłużona niezależny zasoby przyznawanie sesje wiarygodność","embed_threshold":0.78}
+{"lang":"pt-br","description":"Confiança que evolui para autonomia conquistada ao longo do tempo","vocabulary":"autonomia conquistada independente recursos conceder sessões confiabilidade","embed_threshold":0.77}
+{"lang":"ru","description":"Доверие, перерастающее в заслуженную автономию","vocabulary":"автономия заслуженная независимый ресурсы предоставление сессии надёжность","embed_threshold":0.78}
+{"lang":"th","description":"ความไว้วางใจที่เติบโตสู่ความเป็นอิสระที่ได้รับ","vocabulary":"อิสระ ได้รับ อิสระ ทรัพยากร มอบ เซสชัน ความน่าเชื่อถือ","embed_threshold":0.77}
+{"lang":"tr","description":"Kazanılmış özerkliğe doğru büyüyen güven","vocabulary":"özerklik kazanılmış bağımsız kaynaklar tahsis oturumlar güvenilirlik","embed_threshold":0.79}
+{"lang":"uk","description":"Довіра, що зростає до заслуженої автономії","vocabulary":"автономія заслужена незалежна ресурси надання сесії надійність","embed_threshold":0.77}
+{"lang":"vi","description":"Niềm tin phát triển hướng tới quyền tự chủ đạt được","vocabulary":"tự chủ đạt được độc lập tài nguyên cấp phiên độ tin cậy","embed_threshold":0.74}
+{"lang":"zh","description":"信任逐步增长为赢得的自主权","vocabulary":"自主 赢得 独立 资源 授予 会话 可靠性","embed_threshold":0.73}

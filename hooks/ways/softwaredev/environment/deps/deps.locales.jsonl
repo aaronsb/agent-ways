@@ -1,17 +1,17 @@
-{"lang":"ar","description":"إدارة التبعيات والحزم","vocabulary":"تبعيات حزم إدارة تثبيت تحديث إصدارات","embed_threshold":0.79}
-{"lang":"de","description":"Abhängigkeitsverwaltung — Pakete installieren, aktualisieren und auditieren","vocabulary":"Abhängigkeit Paket Bibliothek installieren aktualisieren Audit Schwachstelle Paketmanager Paketverwaltung","embed_threshold":0.65}
-{"lang":"es","description":"Gestion de dependencias — instalar, actualizar, resolver conflictos","vocabulary":"dependencias gestionar instalar actualizar resolver conflicto version paquete gestor lock","embed_threshold":0.65}
-{"lang":"fr","description":"Gestion des dépendances, installation de paquets","vocabulary":"dépendance paquet bibliothèque installer mettre à jour audit vulnérabilité","embed_threshold":0.83}
-{"lang":"hi","description":"डिपेंडेंसी प्रबंधन, पैकेज इंस्टॉलेशन, लाइब्रेरी","vocabulary":"डिपेंडेंसी पैकेज इंस्टॉल लाइब्रेरी npm pip cargo","embed_threshold":0.67}
-{"lang":"id","description":"Manajemen dependensi, instalasi paket, pustaka","vocabulary":"dependensi paket instalasi pustaka npm pip cargo","embed_threshold":0.66}
-{"lang":"it","description":"Gestione dipendenze, installazione pacchetti, librerie","vocabulary":"dipendenza pacchetto installazione libreria npm pip cargo","embed_threshold":0.62}
-{"lang":"ja","description":"依存関係管理、パッケージのインストール","vocabulary":"依存関係 パッケージ ライブラリ インストール アップグレード 監査 脆弱性","embed_threshold":0.72}
-{"lang":"ko","description":"의존성 관리, 패키지 설치, 라이브러리","vocabulary":"의존성 패키지 설치 라이브러리 npm pip cargo","embed_threshold":0.65}
-{"lang":"pl","description":"Zarządzanie zależnościami — instalowanie, aktualizacja i audyt pakietów","vocabulary":"zależność pakiet biblioteka instalacja aktualizacja audyt podatność","embed_threshold":0.71}
-{"lang":"pt-br","description":"Gestão de dependências — instalar, atualizar e auditar pacotes","vocabulary":"dependência pacote biblioteca instalar atualizar auditoria vulnerabilidade","embed_threshold":0.84}
-{"lang":"ru","description":"Управление зависимостями — установка, обновление и аудит пакетов","vocabulary":"зависимость пакет библиотека установка обновление аудит уязвимость","embed_threshold":0.86}
-{"lang":"th","description":"การจัดการ dependency — ติดตั้ง อัปเดต และตรวจสอบแพ็กเกจ","vocabulary":"dependency แพ็กเกจ ไลบรารี ติดตั้ง อัปเดต ตรวจสอบ ช่องโหว่","embed_threshold":0.8}
-{"lang":"tr","description":"Bağımlılık yönetimi — paket kurulumu, güncelleme ve denetimi","vocabulary":"bağımlılık paket kütüphane kurulum güncelleme denetim zafiyet","embed_threshold":0.62}
-{"lang":"uk","description":"Управління залежностями — встановлення, оновлення та аудит пакетів","vocabulary":"залежність пакет бібліотека встановлення оновлення аудит вразливість","embed_threshold":0.82}
-{"lang":"vi","description":"Quản lý phụ thuộc — cài đặt, cập nhật và kiểm toán gói","vocabulary":"phụ thuộc gói thư viện cài đặt cập nhật kiểm toán lỗ hổng","embed_threshold":0.68}
-{"lang":"zh","description":"依赖管理 — 包安装、更新和审计","vocabulary":"依赖 包 库 安装 更新 审计 漏洞","embed_threshold":0.77}
+{"lang":"ar","description":"إدارة التبعيات والحزم","vocabulary":"تبعيات حزم إدارة تثبيت تحديث إصدارات","embed_threshold":0.78}
+{"lang":"de","description":"Abhängigkeitsverwaltung — Pakete installieren, aktualisieren und auditieren","vocabulary":"Abhängigkeit Paket Bibliothek installieren aktualisieren Audit Schwachstelle Paketmanager Paketverwaltung","embed_threshold":0.64}
+{"lang":"es","description":"Gestion de dependencias — instalar, actualizar, resolver conflictos","vocabulary":"dependencias gestionar instalar actualizar resolver conflicto version paquete gestor lock","embed_threshold":0.64}
+{"lang":"fr","description":"Gestion des dépendances, installation de paquets","vocabulary":"dépendance paquet bibliothèque installer mettre à jour audit vulnérabilité","embed_threshold":0.81}
+{"lang":"hi","description":"डिपेंडेंसी प्रबंधन, पैकेज इंस्टॉलेशन, लाइब्रेरी","vocabulary":"डिपेंडेंसी पैकेज इंस्टॉल लाइब्रेरी npm pip cargo","embed_threshold":0.65}
+{"lang":"id","description":"Manajemen dependensi, instalasi paket, pustaka","vocabulary":"dependensi paket instalasi pustaka npm pip cargo","embed_threshold":0.64}
+{"lang":"it","description":"Gestione dipendenze, installazione pacchetti, librerie","vocabulary":"dipendenza pacchetto installazione libreria npm pip cargo","embed_threshold":0.66}
+{"lang":"ja","description":"依存関係管理、パッケージのインストール","vocabulary":"依存関係 パッケージ ライブラリ インストール アップグレード 監査 脆弱性","embed_threshold":0.7}
+{"lang":"ko","description":"의존성 관리, 패키지 설치, 라이브러리","vocabulary":"의존성 패키지 설치 라이브러리 npm pip cargo","embed_threshold":0.63}
+{"lang":"pl","description":"Zarządzanie zależnościami — instalowanie, aktualizacja i audyt pakietów","vocabulary":"zależność pakiet biblioteka instalacja aktualizacja audyt podatność","embed_threshold":0.69}
+{"lang":"pt-br","description":"Gestão de dependências — instalar, atualizar e auditar pacotes","vocabulary":"dependência pacote biblioteca instalar atualizar auditoria vulnerabilidade","embed_threshold":0.82}
+{"lang":"ru","description":"Управление зависимостями — установка, обновление и аудит пакетов","vocabulary":"зависимость пакет библиотека установка обновление аудит уязвимость","embed_threshold":0.84}
+{"lang":"th","description":"การจัดการ dependency — ติดตั้ง อัปเดต และตรวจสอบแพ็กเกจ","vocabulary":"dependency แพ็กเกจ ไลบรารี ติดตั้ง อัปเดต ตรวจสอบ ช่องโหว่","embed_threshold":0.78}
+{"lang":"tr","description":"Bağımlılık yönetimi — paket kurulumu, güncelleme ve denetimi","vocabulary":"bağımlılık paket kütüphane kurulum güncelleme denetim zafiyet","embed_threshold":0.6}
+{"lang":"uk","description":"Управління залежностями — встановлення, оновлення та аудит пакетів","vocabulary":"залежність пакет бібліотека встановлення оновлення аудит вразливість","embed_threshold":0.81}
+{"lang":"vi","description":"Quản lý phụ thuộc — cài đặt, cập nhật và kiểm toán gói","vocabulary":"phụ thuộc gói thư viện cài đặt cập nhật kiểm toán lỗ hổng","embed_threshold":0.66}
+{"lang":"zh","description":"依赖管理 — 包安装、更新和审计","vocabulary":"依赖 包 库 安装 更新 审计 漏洞","embed_threshold":0.75}

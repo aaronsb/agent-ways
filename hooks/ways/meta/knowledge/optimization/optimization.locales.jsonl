@@ -1,17 +1,17 @@
-{"lang":"ar","description":"ضبط المفردات وتحسين عتبات المطابقة","vocabulary":"تحسين مفردات عتبة مطابقة ضبط دقة","embed_threshold":0.73}
-{"lang":"de","description":"Way-Vokabular optimieren, Schwellenwerte tunen, Matching-Qualität prüfen, Lücken und Abdeckung analysieren","vocabulary":"optimieren Vokabular Vorschläge Lücken Abdeckung ungenutzt Schwellenwert tunen Bewertung Gesundheitsprüfung Audit Trennschärfe Überlappung","embed_threshold":0.73}
-{"lang":"es","description":"Optimizar vocabulario de ways, ajustar umbrales","vocabulary":"optimizar vocabulario huecos cobertura umbral ajustar puntuación","embed_threshold":0.63}
-{"lang":"fr","description":"Optimiser le vocabulaire des ways, ajuster les seuils, analyser la couverture","vocabulary":"optimiser vocabulaire couverture seuil ajuster score audit lacunes","embed_threshold":0.67}
-{"lang":"hi","description":"way शब्दावली अनुकूलन, थ्रेशोल्ड ट्यूनिंग, गैप विश्लेषण","vocabulary":"अनुकूलन शब्दावली गैप कवरेज थ्रेशोल्ड ट्यून स्कोरिंग ऑडिट","embed_threshold":0.67}
-{"lang":"id","description":"Optimalisasi kosakata way, penyesuaian ambang batas, analisis kesenjangan","vocabulary":"optimalisasi kosakata kesenjangan cakupan ambang batas penyesuaian penilaian audit","embed_threshold":0.69}
-{"lang":"it","description":"Ottimizzazione del vocabolario, regolazione delle soglie, analisi delle lacune","vocabulary":"ottimizzazione vocabolario lacune copertura soglia regolazione punteggio audit","embed_threshold":0.68}
-{"lang":"ja","description":"wayのvocabulary最適化、閾値チューニング","vocabulary":"最適化 語彙 カバレッジ 閾値 チューニング スコアリング","embed_threshold":0.7}
-{"lang":"ko","description":"way 어휘 최적화, 임계값 튜닝, 격차 분석","vocabulary":"최적화 어휘 격차 커버리지 임계값 튜닝 스코어링 감사","embed_threshold":0.74}
-{"lang":"pl","description":"Optymalizacja słownictwa ways, strojenie progów, analiza pokrycia","vocabulary":"optymalizacja słownictwo pokrycie próg strojenie punktacja audyt luki","embed_threshold":0.66}
-{"lang":"pt-br","description":"Otimizar vocabulário de ways, ajustar limiares, analisar cobertura","vocabulary":"otimizar vocabulário cobertura limiar ajustar pontuação auditoria lacunas","embed_threshold":0.64}
-{"lang":"ru","description":"Оптимизация словаря ways, настройка порогов, анализ покрытия","vocabulary":"оптимизация словарь покрытие порог настройка оценка аудит пробелы","embed_threshold":0.67}
-{"lang":"th","description":"การเพิ่มประสิทธิภาพคำศัพท์ ways การปรับแต่งเกณฑ์ การวิเคราะห์ครอบคลุม","vocabulary":"เพิ่มประสิทธิภาพ คำศัพท์ ครอบคลุม เกณฑ์ ปรับแต่ง คะแนน ตรวจสอบ ช่องว่าง","embed_threshold":0.69}
-{"lang":"tr","description":"Ways kelime hazinesi optimizasyonu, eşik ayarı, kapsam analizi","vocabulary":"optimizasyon kelime hazinesi kapsam eşik ayar puanlama denetim boşluk","embed_threshold":0.66}
-{"lang":"uk","description":"Оптимізація словника ways, налаштування порогів, аналіз покриття","vocabulary":"оптимізація словник покриття поріг налаштування оцінка аудит прогалина","embed_threshold":0.68}
-{"lang":"vi","description":"Tối ưu hóa từ vựng ways, điều chỉnh ngưỡng, phân tích độ bao phủ","vocabulary":"tối ưu từ vựng bao phủ ngưỡng điều chỉnh chấm điểm kiểm toán khoảng trống","embed_threshold":0.75}
-{"lang":"zh","description":"Ways 词汇优化、阈值调优、覆盖率分析","vocabulary":"优化 词汇 覆盖 阈值 调优 评分 审计 差距","embed_threshold":0.73}
+{"lang":"ar","description":"ضبط المفردات وتحسين عتبات المطابقة","vocabulary":"تحسين مفردات عتبة مطابقة ضبط دقة","embed_threshold":0.71}
+{"lang":"de","description":"Way-Vokabular optimieren, Schwellenwerte tunen, Matching-Qualität prüfen, Lücken und Abdeckung analysieren","vocabulary":"optimieren Vokabular Vorschläge Lücken Abdeckung ungenutzt Schwellenwert tunen Bewertung Gesundheitsprüfung Audit Trennschärfe Überlappung","embed_threshold":0.72}
+{"lang":"es","description":"Optimizar vocabulario de ways, ajustar umbrales","vocabulary":"optimizar vocabulario huecos cobertura umbral ajustar puntuación","embed_threshold":0.66}
+{"lang":"fr","description":"Optimiser le vocabulaire des ways, ajuster les seuils, analyser la couverture","vocabulary":"optimiser vocabulaire couverture seuil ajuster score audit lacunes","embed_threshold":0.69}
+{"lang":"hi","description":"way शब्दावली अनुकूलन, थ्रेशोल्ड ट्यूनिंग, गैप विश्लेषण","vocabulary":"अनुकूलन शब्दावली गैप कवरेज थ्रेशोल्ड ट्यून स्कोरिंग ऑडिट","embed_threshold":0.69}
+{"lang":"id","description":"Optimalisasi kosakata way, penyesuaian ambang batas, analisis kesenjangan","vocabulary":"optimalisasi kosakata kesenjangan cakupan ambang batas penyesuaian penilaian audit","embed_threshold":0.68}
+{"lang":"it","description":"Ottimizzazione del vocabolario, regolazione delle soglie, analisi delle lacune","vocabulary":"ottimizzazione vocabolario lacune copertura soglia regolazione punteggio audit","embed_threshold":0.66}
+{"lang":"ja","description":"wayのvocabulary最適化、閾値チューニング","vocabulary":"最適化 語彙 カバレッジ 閾値 チューニング スコアリング","embed_threshold":0.68}
+{"lang":"ko","description":"way 어휘 최적화, 임계값 튜닝, 격차 분석","vocabulary":"최적화 어휘 격차 커버리지 임계값 튜닝 스코어링 감사","embed_threshold":0.72}
+{"lang":"pl","description":"Optymalizacja słownictwa ways, strojenie progów, analiza pokrycia","vocabulary":"optymalizacja słownictwo pokrycie próg strojenie punktacja audyt luki","embed_threshold":0.67}
+{"lang":"pt-br","description":"Otimizar vocabulário de ways, ajustar limiares, analisar cobertura","vocabulary":"otimizar vocabulário cobertura limiar ajustar pontuação auditoria lacunas","embed_threshold":0.66}
+{"lang":"ru","description":"Оптимизация словаря ways, настройка порогов, анализ покрытия","vocabulary":"оптимизация словарь покрытие порог настройка оценка аудит пробелы","embed_threshold":0.7}
+{"lang":"th","description":"การเพิ่มประสิทธิภาพคำศัพท์ ways การปรับแต่งเกณฑ์ การวิเคราะห์ครอบคลุม","vocabulary":"เพิ่มประสิทธิภาพ คำศัพท์ ครอบคลุม เกณฑ์ ปรับแต่ง คะแนน ตรวจสอบ ช่องว่าง","embed_threshold":0.7}
+{"lang":"tr","description":"Ways kelime hazinesi optimizasyonu, eşik ayarı, kapsam analizi","vocabulary":"optimizasyon kelime hazinesi kapsam eşik ayar puanlama denetim boşluk","embed_threshold":0.64}
+{"lang":"uk","description":"Оптимізація словника ways, налаштування порогів, аналіз покриття","vocabulary":"оптимізація словник покриття поріг налаштування оцінка аудит прогалина","embed_threshold":0.69}
+{"lang":"vi","description":"Tối ưu hóa từ vựng ways, điều chỉnh ngưỡng, phân tích độ bao phủ","vocabulary":"tối ưu từ vựng bao phủ ngưỡng điều chỉnh chấm điểm kiểm toán khoảng trống","embed_threshold":0.74}
+{"lang":"zh","description":"Ways 词汇优化、阈值调优、覆盖率分析","vocabulary":"优化 词汇 覆盖 阈值 调优 评分 审计 差距","embed_threshold":0.71}

@@ -1,17 +1,17 @@
 {"lang":"ar","description":"رسومات Mermaid البيانية","vocabulary":"Mermaid رسم بياني مخطط تدفق تسلسل","embed_threshold":0.9}
 {"lang":"de","description":"Mermaid-Diagramme — Flussdiagramme, Sequenzdiagramme und Zustandsautomaten","vocabulary":"Mermaid Diagramm Flussdiagramm Sequenzdiagramm Zustandsautomat Gantt Zeitstrahl Schaubild Ablaufdiagramm","embed_threshold":0.9}
-{"lang":"es","description":"Diagramas Mermaid — flujo, secuencia, clases, entidad-relacion","vocabulary":"Mermaid diagrama flujo secuencia clase entidad relacion grafico sintaxis renderizar","embed_threshold":0.88}
-{"lang":"fr","description":"Diagrammes Mermaid, organigrammes, diagrammes de séquence","vocabulary":"Mermaid diagramme organigramme séquence état Gantt chronologie","embed_threshold":0.83}
-{"lang":"hi","description":"Mermaid डायग्राम, फ्लोचार्ट, सिक्वेंस डायग्राम","vocabulary":"Mermaid डायग्राम फ्लोचार्ट सिक्वेंस स्टेट ER ग्राफ","embed_threshold":0.84}
-{"lang":"id","description":"Diagram Mermaid, flowchart, diagram sekuens","vocabulary":"Mermaid diagram flowchart sekuens state ER grafik","embed_threshold":0.9}
+{"lang":"es","description":"Diagramas Mermaid — flujo, secuencia, clases, entidad-relacion","vocabulary":"Mermaid diagrama flujo secuencia clase entidad relacion grafico sintaxis renderizar","embed_threshold":0.87}
+{"lang":"fr","description":"Diagrammes Mermaid, organigrammes, diagrammes de séquence","vocabulary":"Mermaid diagramme organigramme séquence état Gantt chronologie","embed_threshold":0.82}
+{"lang":"hi","description":"Mermaid डायग्राम, फ्लोचार्ट, सिक्वेंस डायग्राम","vocabulary":"Mermaid डायग्राम फ्लोचार्ट सिक्वेंस स्टेट ER ग्राफ","embed_threshold":0.82}
+{"lang":"id","description":"Diagram Mermaid, flowchart, diagram sekuens","vocabulary":"Mermaid diagram flowchart sekuens state ER grafik","embed_threshold":0.89}
 {"lang":"it","description":"Diagrammi Mermaid, diagrammi di flusso, diagrammi di sequenza","vocabulary":"Mermaid diagramma flusso sequenza stato ER grafico","embed_threshold":0.9}
-{"lang":"ja","description":"Mermaid図、フローチャート、シーケンス図の作成","vocabulary":"Mermaid 図 フローチャート シーケンス図 状態遷移 ガントチャート タイムライン","embed_threshold":0.89}
+{"lang":"ja","description":"Mermaid図、フローチャート、シーケンス図の作成","vocabulary":"Mermaid 図 フローチャート シーケンス図 状態遷移 ガントチャート タイムライン","embed_threshold":0.9}
 {"lang":"ko","description":"Mermaid 다이어그램, 플로차트, 시퀀스 다이어그램","vocabulary":"Mermaid 다이어그램 플로차트 시퀀스 상태 ER 그래프","embed_threshold":0.9}
-{"lang":"pl","description":"Diagramy Mermaid — schematy blokowe, diagramy sekwencji, automaty stanów","vocabulary":"Mermaid diagram schemat blokowy diagram sekwencji automat stanów Gantt oś czasu","embed_threshold":0.85}
-{"lang":"pt-br","description":"Diagramas Mermaid — fluxogramas, diagramas de sequência, máquinas de estado","vocabulary":"Mermaid diagrama fluxograma sequência estado Gantt linha do tempo","embed_threshold":0.89}
-{"lang":"ru","description":"Диаграммы Mermaid — блок-схемы, диаграммы последовательности, автоматы состояний","vocabulary":"Mermaid диаграмма блок-схема последовательность состояние Gantt хронология","embed_threshold":0.87}
-{"lang":"th","description":"แผนภาพ Mermaid — flowchart, sequence diagram, state diagram","vocabulary":"Mermaid แผนภาพ flow sequence state Gantt timeline","embed_threshold":0.84}
-{"lang":"tr","description":"Mermaid diyagramları — akış, sıralama, durum diyagramları","vocabulary":"Mermaid diyagram akış sıralama durum Gantt zaman çizelgesi","embed_threshold":0.85}
-{"lang":"uk","description":"Діаграми Mermaid — блок-схеми, діаграми послідовності, станів","vocabulary":"Mermaid діаграма потік послідовність стан Gantt часова шкала","embed_threshold":0.84}
-{"lang":"vi","description":"Sơ đồ Mermaid — flowchart, sequence diagram, state diagram","vocabulary":"Mermaid sơ đồ luồng sequence trạng thái Gantt timeline","embed_threshold":0.84}
-{"lang":"zh","description":"Mermaid 图表 — 流程图、时序图、状态图","vocabulary":"Mermaid 图表 流程 时序 状态 甘特 时间线","embed_threshold":0.9}
+{"lang":"pl","description":"Diagramy Mermaid — schematy blokowe, diagramy sekwencji, automaty stanów","vocabulary":"Mermaid diagram schemat blokowy diagram sekwencji automat stanów Gantt oś czasu","embed_threshold":0.83}
+{"lang":"pt-br","description":"Diagramas Mermaid — fluxogramas, diagramas de sequência, máquinas de estado","vocabulary":"Mermaid diagrama fluxograma sequência estado Gantt linha do tempo","embed_threshold":0.87}
+{"lang":"ru","description":"Диаграммы Mermaid — блок-схемы, диаграммы последовательности, автоматы состояний","vocabulary":"Mermaid диаграмма блок-схема последовательность состояние Gantt хронология","embed_threshold":0.86}
+{"lang":"th","description":"แผนภาพ Mermaid — flowchart, sequence diagram, state diagram","vocabulary":"Mermaid แผนภาพ flow sequence state Gantt timeline","embed_threshold":0.83}
+{"lang":"tr","description":"Mermaid diyagramları — akış, sıralama, durum diyagramları","vocabulary":"Mermaid diyagram akış sıralama durum Gantt zaman çizelgesi","embed_threshold":0.83}
+{"lang":"uk","description":"Діаграми Mermaid — блок-схеми, діаграми послідовності, станів","vocabulary":"Mermaid діаграма потік послідовність стан Gantt часова шкала","embed_threshold":0.83}
+{"lang":"vi","description":"Sơ đồ Mermaid — flowchart, sequence diagram, state diagram","vocabulary":"Mermaid sơ đồ luồng sequence trạng thái Gantt timeline","embed_threshold":0.83}
+{"lang":"zh","description":"Mermaid 图表 — 流程图、时序图、状态图","vocabulary":"Mermaid 图表 流程 时序 状态 甘特 时间线","embed_threshold":0.88}

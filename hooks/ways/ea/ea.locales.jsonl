@@ -1,17 +1,17 @@
-{"lang":"ar","description":"المساعد التنفيذي — إدارة البريد والتقويم والمهام","vocabulary":"مساعد تنفيذي بريد إلكتروني تقويم مهام إدارة","embed_threshold":0.66}
-{"lang":"de","description":"Persönliche Assistenz für E-Mail, Posteingang, Kalender, Aufgaben und Kommunikation über mehrere Konten hinweg","vocabulary":"Assistenz Triage Briefing aufholen Posteingang Tagesablauf Terminplan Agenda Konten Arbeitsbereich verwalten helfen","embed_threshold":0.68}
-{"lang":"es","description":"Asistente ejecutivo para correo, bandeja de entrada, calendario, tareas y comunicaciones","vocabulary":"asistente ejecutivo triaje briefing bandeja de entrada agenda calendario","embed_threshold":0.73}
-{"lang":"fr","description":"Assistant exécutif pour email, calendrier, tâches et communications","vocabulary":"assistant exécutif triage briefing boîte de réception calendrier agenda","embed_threshold":0.73}
-{"lang":"hi","description":"ईमेल, कैलेंडर, कार्य और संचार के लिए एक्जीक्यूटिव असिस्टेंट","vocabulary":"एक्जीक्यूटिव असिस्टेंट ईमेल कैलेंडर कार्य ट्राइएज ब्रीफिंग","embed_threshold":0.63}
-{"lang":"id","description":"Asisten eksekutif untuk email, kalender, tugas, dan komunikasi","vocabulary":"asisten eksekutif email kalender tugas triase briefing","embed_threshold":0.74}
-{"lang":"it","description":"Assistente esecutivo per email, calendario, attività e comunicazioni","vocabulary":"assistente esecutivo email calendario attività triage briefing","embed_threshold":0.72}
-{"lang":"ja","description":"メール・カレンダー・タスク・コミュニケーションを統括するエグゼクティブアシスタント","vocabulary":"エグゼクティブアシスタント 秘書 受信トレイ トリアージ 日程 アジェンダ","embed_threshold":0.62}
-{"lang":"ko","description":"이메일, 캘린더, 작업 및 커뮤니케이션을 위한 비서","vocabulary":"비서 이메일 캘린더 작업 분류 브리핑 커뮤니케이션","embed_threshold":0.81}
-{"lang":"pl","description":"Asystent wykonawczy do zarządzania pocztą, kalendarzem, zadaniami i komunikacją","vocabulary":"asystent triażowanie briefing skrzynka planowanie agenda konta zarządzanie","embed_threshold":0.68}
-{"lang":"pt-br","description":"Assistente executivo para gerenciar e-mail, calendário, tarefas e comunicações","vocabulary":"assistente executivo triagem briefing caixa de entrada agenda calendário contas gerenciar","embed_threshold":0.65}
-{"lang":"ru","description":"Исполнительный ассистент для управления почтой, календарём, задачами и коммуникациями","vocabulary":"ассистент секретарь триаж брифинг почта календарь задачи управление","embed_threshold":0.66}
-{"lang":"th","description":"ผู้ช่วยผู้บริหารสำหรับอีเมล ปฏิทิน งาน และการสื่อสาร","vocabulary":"ผู้ช่วย บริหาร คัดกรอง บรีฟฟิ่ง กล่องจดหมาย ตาราง วาระ จัดการ","embed_threshold":0.75}
-{"lang":"tr","description":"E-posta, takvim, görevler ve iletişim için yönetici asistanı","vocabulary":"asistan yönetici triaj brifing gelen kutusu program gündem yönetim","embed_threshold":0.67}
-{"lang":"uk","description":"Виконавчий асистент для електронної пошти, календаря, завдань та комунікацій","vocabulary":"асистент виконавчий тріаж брифінг вхідні розклад порядок денний керування","embed_threshold":0.71}
-{"lang":"vi","description":"Trợ lý điều hành cho email, lịch, công việc và liên lạc","vocabulary":"trợ lý điều hành phân loại tóm tắt hộp thư lịch trình chương trình quản lý","embed_threshold":0.68}
-{"lang":"zh","description":"跨多账户管理邮件、日历、任务和通讯的执行助手","vocabulary":"助手 执行 分类 简报 收件箱 日程 议程 管理 账户","embed_threshold":0.75}
+{"lang":"ar","description":"المساعد التنفيذي — إدارة البريد والتقويم والمهام","vocabulary":"مساعد تنفيذي بريد إلكتروني تقويم مهام إدارة","embed_threshold":0.65}
+{"lang":"de","description":"Persönliche Assistenz für E-Mail, Posteingang, Kalender, Aufgaben und Kommunikation über mehrere Konten hinweg","vocabulary":"Assistenz Triage Briefing aufholen Posteingang Tagesablauf Terminplan Agenda Konten Arbeitsbereich verwalten helfen","embed_threshold":0.67}
+{"lang":"es","description":"Asistente ejecutivo para correo, bandeja de entrada, calendario, tareas y comunicaciones","vocabulary":"asistente ejecutivo triaje briefing bandeja de entrada agenda calendario","embed_threshold":0.71}
+{"lang":"fr","description":"Assistant exécutif pour email, calendrier, tâches et communications","vocabulary":"assistant exécutif triage briefing boîte de réception calendrier agenda","embed_threshold":0.72}
+{"lang":"hi","description":"ईमेल, कैलेंडर, कार्य और संचार के लिए एक्जीक्यूटिव असिस्टेंट","vocabulary":"एक्जीक्यूटिव असिस्टेंट ईमेल कैलेंडर कार्य ट्राइएज ब्रीफिंग","embed_threshold":0.61}
+{"lang":"id","description":"Asisten eksekutif untuk email, kalender, tugas, dan komunikasi","vocabulary":"asisten eksekutif email kalender tugas triase briefing","embed_threshold":0.72}
+{"lang":"it","description":"Assistente esecutivo per email, calendario, attività e comunicazioni","vocabulary":"assistente esecutivo email calendario attività triage briefing","embed_threshold":0.71}
+{"lang":"ja","description":"メール・カレンダー・タスク・コミュニケーションを統括するエグゼクティブアシスタント","vocabulary":"エグゼクティブアシスタント 秘書 受信トレイ トリアージ 日程 アジェンダ","embed_threshold":0.68}
+{"lang":"ko","description":"이메일, 캘린더, 작업 및 커뮤니케이션을 위한 비서","vocabulary":"비서 이메일 캘린더 작업 분류 브리핑 커뮤니케이션","embed_threshold":0.79}
+{"lang":"pl","description":"Asystent wykonawczy do zarządzania pocztą, kalendarzem, zadaniami i komunikacją","vocabulary":"asystent triażowanie briefing skrzynka planowanie agenda konta zarządzanie","embed_threshold":0.66}
+{"lang":"pt-br","description":"Assistente executivo para gerenciar e-mail, calendário, tarefas e comunicações","vocabulary":"assistente executivo triagem briefing caixa de entrada agenda calendário contas gerenciar","embed_threshold":0.63}
+{"lang":"ru","description":"Исполнительный ассистент для управления почтой, календарём, задачами и коммуникациями","vocabulary":"ассистент секретарь триаж брифинг почта календарь задачи управление","embed_threshold":0.65}
+{"lang":"th","description":"ผู้ช่วยผู้บริหารสำหรับอีเมล ปฏิทิน งาน และการสื่อสาร","vocabulary":"ผู้ช่วย บริหาร คัดกรอง บรีฟฟิ่ง กล่องจดหมาย ตาราง วาระ จัดการ","embed_threshold":0.74}
+{"lang":"tr","description":"E-posta, takvim, görevler ve iletişim için yönetici asistanı","vocabulary":"asistan yönetici triaj brifing gelen kutusu program gündem yönetim","embed_threshold":0.66}
+{"lang":"uk","description":"Виконавчий асистент для електронної пошти, календаря, завдань та комунікацій","vocabulary":"асистент виконавчий тріаж брифінг вхідні розклад порядок денний керування","embed_threshold":0.7}
+{"lang":"vi","description":"Trợ lý điều hành cho email, lịch, công việc và liên lạc","vocabulary":"trợ lý điều hành phân loại tóm tắt hộp thư lịch trình chương trình quản lý","embed_threshold":0.66}
+{"lang":"zh","description":"跨多账户管理邮件、日历、任务和通讯的执行助手","vocabulary":"助手 执行 分类 简报 收件箱 日程 议程 管理 账户","embed_threshold":0.74}

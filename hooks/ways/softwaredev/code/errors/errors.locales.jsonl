@@ -1,17 +1,17 @@
-{"lang":"ar","description":"أنماط معالجة الأخطاء والاستثناءات","vocabulary":"أخطاء معالجة استثناءات خطأ التقاط رسائل","embed_threshold":0.69}
-{"lang":"de","description":"Fehlerbehandlungsmuster, Ausnahmemanagement, Try-Catch-Grenzen, Fehlerweitergabe und -umhüllung","vocabulary":"Ausnahme Fehlerbehandlung catch throw Grenze umhüllen weiterwerfen Fallback Wiederherstellung Weitergabe unbehandelt","embed_threshold":0.73}
-{"lang":"es","description":"Patrones de manejo de errores — excepciones, codigos de error, recuperacion","vocabulary":"errores excepciones manejo capturar lanzar recuperacion fallo mensaje traza pila","embed_threshold":0.72}
+{"lang":"ar","description":"أنماط معالجة الأخطاء والاستثناءات","vocabulary":"أخطاء معالجة استثناءات خطأ التقاط رسائل","embed_threshold":0.67}
+{"lang":"de","description":"Fehlerbehandlungsmuster, Ausnahmemanagement, Try-Catch-Grenzen, Fehlerweitergabe und -umhüllung","vocabulary":"Ausnahme Fehlerbehandlung catch throw Grenze umhüllen weiterwerfen Fallback Wiederherstellung Weitergabe unbehandelt","embed_threshold":0.71}
+{"lang":"es","description":"Patrones de manejo de errores — excepciones, codigos de error, recuperacion","vocabulary":"errores excepciones manejo capturar lanzar recuperacion fallo mensaje traza pila","embed_threshold":0.7}
 {"lang":"fr","description":"Modèles de gestion des erreurs, gestion des exceptions","vocabulary":"exception erreur gestion capturer lancer envelopper secours récupération","embed_threshold":0.68}
-{"lang":"hi","description":"त्रुटि हैंडलिंग पैटर्न, अपवाद प्रबंधन, try-catch","vocabulary":"त्रुटि अपवाद हैंडलिंग try catch फॉलबैक रिकवरी लॉग","embed_threshold":0.72}
-{"lang":"id","description":"Pola penanganan error, manajemen exception, try-catch","vocabulary":"error exception penanganan try catch fallback pemulihan log","embed_threshold":0.73}
-{"lang":"it","description":"Pattern di gestione errori, gestione eccezioni, try-catch","vocabulary":"errore eccezione gestione try catch fallback recupero log","embed_threshold":0.73}
-{"lang":"ja","description":"エラーハンドリングのパターン、例外管理","vocabulary":"例外処理 エラーハンドリング キャッチ スロー ラップ フォールバック 回復","embed_threshold":0.74}
-{"lang":"ko","description":"에러 처리 패턴, 예외 관리, try-catch","vocabulary":"에러 예외 처리 try catch 폴백 복구 로그","embed_threshold":0.68}
-{"lang":"pl","description":"Wzorce obsługi błędów, zarządzanie wyjątkami","vocabulary":"wyjątek błąd obsługa przechwycić rzucić owinąć zapasowy odzyskiwanie","embed_threshold":0.67}
-{"lang":"pt-br","description":"Padrões de tratamento de erros, gestão de exceções","vocabulary":"exceção erro tratamento capturar lançar encapsular fallback recuperação","embed_threshold":0.69}
-{"lang":"ru","description":"Паттерны обработки ошибок, управление исключениями","vocabulary":"исключение ошибка обработка перехват выброс обёртка откат восстановление","embed_threshold":0.64}
+{"lang":"hi","description":"त्रुटि हैंडलिंग पैटर्न, अपवाद प्रबंधन, try-catch","vocabulary":"त्रुटि अपवाद हैंडलिंग try catch फॉलबैक रिकवरी लॉग","embed_threshold":0.7}
+{"lang":"id","description":"Pola penanganan error, manajemen exception, try-catch","vocabulary":"error exception penanganan try catch fallback pemulihan log","embed_threshold":0.72}
+{"lang":"it","description":"Pattern di gestione errori, gestione eccezioni, try-catch","vocabulary":"errore eccezione gestione try catch fallback recupero log","embed_threshold":0.71}
+{"lang":"ja","description":"エラーハンドリングのパターン、例外管理","vocabulary":"例外処理 エラーハンドリング キャッチ スロー ラップ フォールバック 回復","embed_threshold":0.73}
+{"lang":"ko","description":"에러 처리 패턴, 예외 관리, try-catch","vocabulary":"에러 예외 처리 try catch 폴백 복구 로그","embed_threshold":0.67}
+{"lang":"pl","description":"Wzorce obsługi błędów, zarządzanie wyjątkami","vocabulary":"wyjątek błąd obsługa przechwycić rzucić owinąć zapasowy odzyskiwanie","embed_threshold":0.68}
+{"lang":"pt-br","description":"Padrões de tratamento de erros, gestão de exceções","vocabulary":"exceção erro tratamento capturar lançar encapsular fallback recuperação","embed_threshold":0.68}
+{"lang":"ru","description":"Паттерны обработки ошибок, управление исключениями","vocabulary":"исключение ошибка обработка перехват выброс обёртка откат восстановление","embed_threshold":0.63}
 {"lang":"th","description":"รูปแบบการจัดการข้อผิดพลาด การจัดการข้อยกเว้น","vocabulary":"ข้อยกเว้น จัดการ จับ โยน ขอบเขต ห่อหุ้ม สำรอง กู้คืน","embed_threshold":0.65}
-{"lang":"tr","description":"Hata yönetim kalıpları, istisna yönetimi","vocabulary":"istisna yakalama fırlatma sınır sarmalama yedek kurtarma","embed_threshold":0.62}
-{"lang":"uk","description":"Шаблони обробки помилок, управління виключеннями","vocabulary":"виключення обробка перехоплення кидок межа обгортка резерв відновлення","embed_threshold":0.66}
-{"lang":"vi","description":"Mẫu xử lý lỗi, quản lý ngoại lệ","vocabulary":"ngoại lệ xử lý bắt ném ranh giới bọc dự phòng phục hồi","embed_threshold":0.62}
-{"lang":"zh","description":"错误处理模式、异常管理","vocabulary":"异常 处理 捕获 抛出 边界 包装 回退 恢复","embed_threshold":0.75}
+{"lang":"tr","description":"Hata yönetim kalıpları, istisna yönetimi","vocabulary":"istisna yakalama fırlatma sınır sarmalama yedek kurtarma","embed_threshold":0.61}
+{"lang":"uk","description":"Шаблони обробки помилок, управління виключеннями","vocabulary":"виключення обробка перехоплення кидок межа обгортка резерв відновлення","embed_threshold":0.65}
+{"lang":"vi","description":"Mẫu xử lý lỗi, quản lý ngoại lệ","vocabulary":"ngoại lệ xử lý bắt ném ranh giới bọc dự phòng phục hồi","embed_threshold":0.61}
+{"lang":"zh","description":"错误处理模式、异常管理","vocabulary":"异常 处理 捕获 抛出 边界 包装 回退 恢复","embed_threshold":0.74}

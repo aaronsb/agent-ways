@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الإصدارات وسجل التغييرات والإصدار الدلالي","vocabulary":"إصدار سجل تغييرات دلالي نشر ملاحظات","embed_threshold":0.66}
-{"lang":"de","description":"Software-Releases — Changelog, Versionierung und semantische Versionsnummern","vocabulary":"Release Changelog Version Versionsbump Semver Tag veröffentlichen ausliefern Freigabe Versionserhöhung","embed_threshold":0.59}
-{"lang":"es","description":"Lanzamientos — changelog, versionado semantico, etiquetas, notas de version","vocabulary":"lanzamiento release changelog semver versionado etiqueta tag notas version publicar","embed_threshold":0.58}
-{"lang":"fr","description":"Versions logicielles, journal des modifications, versionnage sémantique","vocabulary":"version changelog versionnage semver tag publier livrer","embed_threshold":0.6}
-{"lang":"hi","description":"सॉफ्टवेयर रिलीज, चेंजलॉग जनरेशन, वर्जन बम्पिंग","vocabulary":"रिलीज चेंजलॉग वर्जन बम्प टैग semver प्रकाशित","embed_threshold":0.67}
-{"lang":"id","description":"Rilis perangkat lunak, pembuatan changelog, peningkatan versi","vocabulary":"rilis changelog versi bump tag semver publikasi","embed_threshold":0.62}
-{"lang":"it","description":"Rilasci software, generazione changelog, incremento versione","vocabulary":"rilascio changelog versione incremento tag semver pubblicazione","embed_threshold":0.63}
-{"lang":"ja","description":"ソフトウェアリリース、変更履歴、バージョン管理、semver","vocabulary":"リリース 変更履歴 バージョン semver タグ 公開 出荷","embed_threshold":0.68}
-{"lang":"ko","description":"소프트웨어 릴리스, 체인지로그 생성, 버전 범핑","vocabulary":"릴리스 체인지로그 버전 범프 태그 semver 게시","embed_threshold":0.71}
-{"lang":"pl","description":"Wydania oprogramowania, dziennik zmian, wersjonowanie semantyczne","vocabulary":"wydanie changelog wersja semver tag publikowanie dostarczanie","embed_threshold":0.66}
-{"lang":"pt-br","description":"Releases de software, changelog, versionamento semântico","vocabulary":"release changelog versão semver tag publicar entregar","embed_threshold":0.65}
-{"lang":"ru","description":"Релизы ПО, журнал изменений, семантическое версионирование","vocabulary":"релиз changelog версия semver тег публикация доставка","embed_threshold":0.68}
-{"lang":"th","description":"การเผยแพร่ซอฟต์แวร์ การสร้าง changelog การกำหนดเวอร์ชันตามหลัก semantic","vocabulary":"release changelog เวอร์ชัน semver tag เผยแพร่ ส่งมอบ","embed_threshold":0.68}
-{"lang":"tr","description":"Yazılım yayınları, değişiklik günlüğü oluşturma, semantik sürümleme","vocabulary":"yayın changelog sürüm semver etiket yayınlama teslim","embed_threshold":0.64}
-{"lang":"uk","description":"Програмні релізи, генерація журналу змін, семантичне версіонування","vocabulary":"реліз changelog версія semver тег публікація доставка","embed_threshold":0.62}
-{"lang":"vi","description":"Phát hành phần mềm, tạo changelog, phiên bản ngữ nghĩa","vocabulary":"phát hành changelog phiên bản semver tag xuất bản giao","embed_threshold":0.63}
-{"lang":"zh","description":"软件发布、变更日志生成、语义化版本","vocabulary":"发布 changelog 版本 semver 标签 发布 交付","embed_threshold":0.79}
+{"lang":"ar","description":"الإصدارات وسجل التغييرات والإصدار الدلالي","vocabulary":"إصدار سجل تغييرات دلالي نشر ملاحظات","embed_threshold":0.72}
+{"lang":"de","description":"Software-Releases — Changelog, Versionierung und semantische Versionsnummern","vocabulary":"Release Changelog Version Versionsbump Semver Tag veröffentlichen ausliefern Freigabe Versionserhöhung","embed_threshold":0.74}
+{"lang":"es","description":"Lanzamientos — changelog, versionado semantico, etiquetas, notas de version","vocabulary":"lanzamiento release changelog semver versionado etiqueta tag notas version publicar","embed_threshold":0.64}
+{"lang":"fr","description":"Versions logicielles, journal des modifications, versionnage sémantique","vocabulary":"version changelog versionnage semver tag publier livrer","embed_threshold":0.69}
+{"lang":"hi","description":"सॉफ्टवेयर रिलीज, चेंजलॉग जनरेशन, वर्जन बम्पिंग","vocabulary":"रिलीज चेंजलॉग वर्जन बम्प टैग semver प्रकाशित","embed_threshold":0.65}
+{"lang":"id","description":"Rilis perangkat lunak, pembuatan changelog, peningkatan versi","vocabulary":"rilis changelog versi bump tag semver publikasi","embed_threshold":0.69}
+{"lang":"it","description":"Rilasci software, generazione changelog, incremento versione","vocabulary":"rilascio changelog versione incremento tag semver pubblicazione","embed_threshold":0.75}
+{"lang":"ja","description":"ソフトウェアリリース、変更履歴、バージョン管理、semver","vocabulary":"リリース 変更履歴 バージョン semver タグ 公開 出荷","embed_threshold":0.75}
+{"lang":"ko","description":"소프트웨어 릴리스, 체인지로그 생성, 버전 범핑","vocabulary":"릴리스 체인지로그 버전 범프 태그 semver 게시","embed_threshold":0.69}
+{"lang":"pl","description":"Wydania oprogramowania, dziennik zmian, wersjonowanie semantyczne","vocabulary":"wydanie changelog wersja semver tag publikowanie dostarczanie","embed_threshold":0.71}
+{"lang":"pt-br","description":"Releases de software, changelog, versionamento semântico","vocabulary":"release changelog versão semver tag publicar entregar","embed_threshold":0.76}
+{"lang":"ru","description":"Релизы ПО, журнал изменений, семантическое версионирование","vocabulary":"релиз changelog версия semver тег публикация доставка","embed_threshold":0.72}
+{"lang":"th","description":"การเผยแพร่ซอฟต์แวร์ การสร้าง changelog การกำหนดเวอร์ชันตามหลัก semantic","vocabulary":"release changelog เวอร์ชัน semver tag เผยแพร่ ส่งมอบ","embed_threshold":0.75}
+{"lang":"tr","description":"Yazılım yayınları, değişiklik günlüğü oluşturma, semantik sürümleme","vocabulary":"yayın changelog sürüm semver etiket yayınlama teslim","embed_threshold":0.75}
+{"lang":"uk","description":"Програмні релізи, генерація журналу змін, семантичне версіонування","vocabulary":"реліз changelog версія semver тег публікація доставка","embed_threshold":0.75}
+{"lang":"vi","description":"Phát hành phần mềm, tạo changelog, phiên bản ngữ nghĩa","vocabulary":"phát hành changelog phiên bản semver tag xuất bản giao","embed_threshold":0.65}
+{"lang":"zh","description":"软件发布、变更日志生成、语义化版本","vocabulary":"发布 changelog 版本 semver 标签 发布 交付","embed_threshold":0.78}

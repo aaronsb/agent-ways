@@ -1,17 +1,17 @@
-{"lang":"ar","description":"أمان تبعيات Node.js","vocabulary":"Node.js تبعيات أمان npm حزم فحص ثغرات","embed_threshold":0.55}
-{"lang":"de","description":"Node.js-Abhängigkeitssicherheit, npm-audit, Postinstall-Skripte, Typosquatting","vocabulary":"npm-audit package-lock.json node_modules postinstall preinstall yarn pnpm npx Typosquatting JavaScript TypeScript","embed_threshold":0.57}
-{"lang":"es","description":"Seguridad de dependencias en Node.js — npm audit, paquetes maliciosos","vocabulary":"Node npm audit dependencias seguridad paquete malicioso vulnerabilidad node_modules actualizar","embed_threshold":0.72}
-{"lang":"fr","description":"Sécurité des dépendances Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.48}
-{"lang":"hi","description":"Node.js डिपेंडेंसी सुरक्षा, npm audit, postinstall स्क्रिप्ट","vocabulary":"Node.js npm audit postinstall सुरक्षा डिपेंडेंसी पैकेज","embed_threshold":0.54}
-{"lang":"id","description":"Keamanan dependensi Node.js, npm audit, skrip postinstall","vocabulary":"Node.js npm audit postinstall keamanan dependensi paket","embed_threshold":0.59}
-{"lang":"it","description":"Sicurezza dipendenze Node.js, npm audit, script postinstall","vocabulary":"Node.js npm audit postinstall sicurezza dipendenza pacchetto","embed_threshold":0.59}
+{"lang":"ar","description":"أمان تبعيات Node.js","vocabulary":"Node.js تبعيات أمان npm حزم فحص ثغرات","embed_threshold":0.58}
+{"lang":"de","description":"Node.js-Abhängigkeitssicherheit, npm-audit, Postinstall-Skripte, Typosquatting","vocabulary":"npm-audit package-lock.json node_modules postinstall preinstall yarn pnpm npx Typosquatting JavaScript TypeScript","embed_threshold":0.61}
+{"lang":"es","description":"Seguridad de dependencias en Node.js — npm audit, paquetes maliciosos","vocabulary":"Node npm audit dependencias seguridad paquete malicioso vulnerabilidad node_modules actualizar","embed_threshold":0.7}
+{"lang":"fr","description":"Sécurité des dépendances Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.57}
+{"lang":"hi","description":"Node.js डिपेंडेंसी सुरक्षा, npm audit, postinstall स्क्रिप्ट","vocabulary":"Node.js npm audit postinstall सुरक्षा डिपेंडेंसी पैकेज","embed_threshold":0.56}
+{"lang":"id","description":"Keamanan dependensi Node.js, npm audit, skrip postinstall","vocabulary":"Node.js npm audit postinstall keamanan dependensi paket","embed_threshold":0.58}
+{"lang":"it","description":"Sicurezza dipendenze Node.js, npm audit, script postinstall","vocabulary":"Node.js npm audit postinstall sicurezza dipendenza pacchetto","embed_threshold":0.6}
 {"lang":"ja","description":"Node.jsの依存関係セキュリティ、npm audit","vocabulary":"npm audit package-lock.json postinstall タイポスクワッティング","embed_threshold":0.52}
-{"lang":"ko","description":"Node.js 의존성 보안, npm audit, postinstall 스크립트","vocabulary":"Node.js npm audit postinstall 보안 의존성 패키지","embed_threshold":0.52}
-{"lang":"pl","description":"Bezpieczeństwo zależności Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.55}
-{"lang":"pt-br","description":"Segurança de dependências Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.52}
-{"lang":"ru","description":"Безопасность зависимостей Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.54}
-{"lang":"th","description":"ความปลอดภัย dependency ของ Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.53}
-{"lang":"tr","description":"Node.js bağımlılık güvenliği, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.5}
-{"lang":"uk","description":"Безпека залежностей Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.5}
-{"lang":"vi","description":"Bảo mật phụ thuộc Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.51}
-{"lang":"zh","description":"Node.js 依赖安全、npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.53}
+{"lang":"ko","description":"Node.js 의존성 보안, npm audit, postinstall 스크립트","vocabulary":"Node.js npm audit postinstall 보안 의존성 패키지","embed_threshold":0.55}
+{"lang":"pl","description":"Bezpieczeństwo zależności Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.62}
+{"lang":"pt-br","description":"Segurança de dependências Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.6}
+{"lang":"ru","description":"Безопасность зависимостей Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.61}
+{"lang":"th","description":"ความปลอดภัย dependency ของ Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.6}
+{"lang":"tr","description":"Node.js bağımlılık güvenliği, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.58}
+{"lang":"uk","description":"Безпека залежностей Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.58}
+{"lang":"vi","description":"Bảo mật phụ thuộc Node.js, npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.57}
+{"lang":"zh","description":"Node.js 依赖安全、npm audit","vocabulary":"npm audit package-lock.json postinstall typosquatting Node.js","embed_threshold":0.61}

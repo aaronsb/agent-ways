@@ -1,17 +1,17 @@
-{"lang":"ar","description":"التطوير الموجه بالاختبارات","vocabulary":"تطوير موجه اختبارات أحمر أخضر إعادة هيكلة دورة","embed_threshold":0.61}
-{"lang":"de","description":"Testgetriebene Entwicklung, TDD Red-Green-Refactor-Zyklus, zuerst den fehlschlagenden Test schreiben","vocabulary":"TDD Red Green Refactor Test zuerst Implementierung fehlschlagend testgetrieben","embed_threshold":0.59}
-{"lang":"es","description":"Desarrollo guiado por pruebas — ciclo rojo-verde-refactorizar, diseno emergente","vocabulary":"TDD desarrollo-guiado-por-pruebas rojo verde refactorizar ciclo primero-prueba diseno emergente","embed_threshold":0.58}
-{"lang":"fr","description":"Développement piloté par les tests, cycle rouge-vert-refactoriser","vocabulary":"TDD développement tests rouge vert refactoriser cycle test d'abord","embed_threshold":0.6}
-{"lang":"hi","description":"टेस्ट-ड्रिवन डेवलपमेंट, TDD रेड-ग्रीन-रिफैक्टर चक्र","vocabulary":"TDD टेस्ट-ड्रिवन रेड ग्रीन रिफैक्टर चक्र फेलिंग टेस्ट","embed_threshold":0.66}
-{"lang":"id","description":"Pengembangan berbasis tes, siklus TDD red-green-refactor","vocabulary":"TDD berbasis-tes merah hijau refaktor siklus tes gagal","embed_threshold":0.56}
-{"lang":"it","description":"Sviluppo guidato dai test, ciclo TDD red-green-refactor","vocabulary":"TDD guidato-dai-test rosso verde refactoring ciclo test fallito","embed_threshold":0.58}
-{"lang":"ja","description":"テスト駆動開発、レッド・グリーン・リファクタのサイクル","vocabulary":"TDD テスト駆動 レッド グリーン リファクタ テストファースト 失敗テスト","embed_threshold":0.62}
-{"lang":"ko","description":"테스트 주도 개발, TDD 레드-그린-리팩토링 사이클","vocabulary":"TDD 테스트주도 레드 그린 리팩토링 사이클 실패 테스트","embed_threshold":0.63}
-{"lang":"pl","description":"Rozwój sterowany testami, cykl czerwony-zielony-refaktoryzacja","vocabulary":"TDD rozwój testy czerwony zielony refaktoryzacja cykl test najpierw","embed_threshold":0.54}
-{"lang":"pt-br","description":"Desenvolvimento orientado a testes, ciclo red-green-refactor","vocabulary":"TDD desenvolvimento testes vermelho verde refatorar ciclo teste primeiro","embed_threshold":0.58}
-{"lang":"ru","description":"Разработка через тестирование, цикл красный-зелёный-рефакторинг","vocabulary":"TDD разработка тесты красный зелёный рефакторинг цикл тест сначала","embed_threshold":0.58}
-{"lang":"th","description":"การพัฒนาขับเคลื่อนด้วยการทดสอบ วงจรแดง-เขียว-รีแฟคเตอร์","vocabulary":"TDD พัฒนา ทดสอบ แดง เขียว รีแฟคเตอร์ วงจร ทดสอบก่อน","embed_threshold":0.7}
-{"lang":"tr","description":"Test güdümlü geliştirme, kırmızı-yeşil-yeniden düzenleme döngüsü","vocabulary":"TDD geliştirme test kırmızı yeşil yeniden düzenleme döngü test önce","embed_threshold":0.64}
-{"lang":"uk","description":"Розробка через тестування, цикл червоний-зелений-рефакторинг","vocabulary":"TDD розробка тест червоний зелений рефакторинг цикл тест спочатку","embed_threshold":0.56}
-{"lang":"vi","description":"Phát triển hướng kiểm thử, chu trình đỏ-xanh-tái cấu trúc","vocabulary":"TDD phát triển kiểm thử đỏ xanh tái cấu trúc chu trình kiểm thử trước","embed_threshold":0.72}
-{"lang":"zh","description":"测试驱动开发、红-绿-重构循环","vocabulary":"TDD 开发 测试 红 绿 重构 循环 测试先行","embed_threshold":0.63}
+{"lang":"ar","description":"التطوير الموجه بالاختبارات","vocabulary":"تطوير موجه اختبارات أحمر أخضر إعادة هيكلة دورة","embed_threshold":0.64}
+{"lang":"de","description":"Testgetriebene Entwicklung, TDD Red-Green-Refactor-Zyklus, zuerst den fehlschlagenden Test schreiben","vocabulary":"TDD Red Green Refactor Test zuerst Implementierung fehlschlagend testgetrieben","embed_threshold":0.66}
+{"lang":"es","description":"Desarrollo guiado por pruebas — ciclo rojo-verde-refactorizar, diseno emergente","vocabulary":"TDD desarrollo-guiado-por-pruebas rojo verde refactorizar ciclo primero-prueba diseno emergente","embed_threshold":0.64}
+{"lang":"fr","description":"Développement piloté par les tests, cycle rouge-vert-refactoriser","vocabulary":"TDD développement tests rouge vert refactoriser cycle test d'abord","embed_threshold":0.69}
+{"lang":"hi","description":"टेस्ट-ड्रिवन डेवलपमेंट, TDD रेड-ग्रीन-रिफैक्टर चक्र","vocabulary":"TDD टेस्ट-ड्रिवन रेड ग्रीन रिफैक्टर चक्र फेलिंग टेस्ट","embed_threshold":0.71}
+{"lang":"id","description":"Pengembangan berbasis tes, siklus TDD red-green-refactor","vocabulary":"TDD berbasis-tes merah hijau refaktor siklus tes gagal","embed_threshold":0.65}
+{"lang":"it","description":"Sviluppo guidato dai test, ciclo TDD red-green-refactor","vocabulary":"TDD guidato-dai-test rosso verde refactoring ciclo test fallito","embed_threshold":0.65}
+{"lang":"ja","description":"テスト駆動開発、レッド・グリーン・リファクタのサイクル","vocabulary":"TDD テスト駆動 レッド グリーン リファクタ テストファースト 失敗テスト","embed_threshold":0.67}
+{"lang":"ko","description":"테스트 주도 개발, TDD 레드-그린-리팩토링 사이클","vocabulary":"TDD 테스트주도 레드 그린 리팩토링 사이클 실패 테스트","embed_threshold":0.67}
+{"lang":"pl","description":"Rozwój sterowany testami, cykl czerwony-zielony-refaktoryzacja","vocabulary":"TDD rozwój testy czerwony zielony refaktoryzacja cykl test najpierw","embed_threshold":0.64}
+{"lang":"pt-br","description":"Desenvolvimento orientado a testes, ciclo red-green-refactor","vocabulary":"TDD desenvolvimento testes vermelho verde refatorar ciclo teste primeiro","embed_threshold":0.67}
+{"lang":"ru","description":"Разработка через тестирование, цикл красный-зелёный-рефакторинг","vocabulary":"TDD разработка тесты красный зелёный рефакторинг цикл тест сначала","embed_threshold":0.67}
+{"lang":"th","description":"การพัฒนาขับเคลื่อนด้วยการทดสอบ วงจรแดง-เขียว-รีแฟคเตอร์","vocabulary":"TDD พัฒนา ทดสอบ แดง เขียว รีแฟคเตอร์ วงจร ทดสอบก่อน","embed_threshold":0.72}
+{"lang":"tr","description":"Test güdümlü geliştirme, kırmızı-yeşil-yeniden düzenleme döngüsü","vocabulary":"TDD geliştirme test kırmızı yeşil yeniden düzenleme döngü test önce","embed_threshold":0.72}
+{"lang":"uk","description":"Розробка через тестування, цикл червоний-зелений-рефакторинг","vocabulary":"TDD розробка тест червоний зелений рефакторинг цикл тест спочатку","embed_threshold":0.67}
+{"lang":"vi","description":"Phát triển hướng kiểm thử, chu trình đỏ-xanh-tái cấu trúc","vocabulary":"TDD phát triển kiểm thử đỏ xanh tái cấu trúc chu trình kiểm thử trước","embed_threshold":0.71}
+{"lang":"zh","description":"测试驱动开发、红-绿-重构循环","vocabulary":"TDD 开发 测试 红 绿 重构 循环 测试先行","embed_threshold":0.7}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"جودة الكود وإعادة الهيكلة ومبادئ SOLID","vocabulary":"جودة كود إعادة هيكلة مبادئ نظافة صيانة","embed_threshold":0.78}
-{"lang":"de","description":"Codequalität, Refactoring, SOLID-Prinzipien, Code-Review-Standards, technische Schulden, Wartbarkeit","vocabulary":"refaktorisieren Qualität SOLID Prinzip zerlegen Methode extrahieren Verantwortung Kopplung Kohäsion Wartbarkeit Lesbarkeit","embed_threshold":0.82}
-{"lang":"es","description":"Calidad de codigo — refactorizacion, principios SOLID, codigo limpio","vocabulary":"calidad refactorizar SOLID principios limpio legible mantenible acoplamiento cohesion deuda-tecnica","embed_threshold":0.69}
-{"lang":"fr","description":"Qualité du code, refactorisation, principes SOLID","vocabulary":"refactoriser qualité SOLID principe décomposer couplage cohésion maintenabilité","embed_threshold":0.7}
-{"lang":"hi","description":"कोड गुणवत्ता, रिफैक्टरिंग, SOLID सिद्धांत, कोड समीक्षा","vocabulary":"गुणवत्ता रिफैक्टर SOLID समीक्षा क्लीन कोड रखरखाव लिंट","embed_threshold":0.81}
-{"lang":"id","description":"Kualitas kode, refactoring, prinsip SOLID, code review","vocabulary":"kualitas refaktor SOLID tinjauan kode bersih pemeliharaan lint","embed_threshold":0.79}
-{"lang":"it","description":"Qualità del codice, refactoring, principi SOLID, code review","vocabulary":"qualità refactoring SOLID revisione codice pulito manutenzione lint","embed_threshold":0.82}
-{"lang":"ja","description":"コード品質の向上、リファクタリング、SOLID原則","vocabulary":"リファクタリング 品質 SOLID 原則 分解 結合度 凝集度 保守性","embed_threshold":0.73}
-{"lang":"ko","description":"코드 품질, 리팩토링, SOLID 원칙, 코드 리뷰","vocabulary":"품질 리팩토링 SOLID 리뷰 클린코드 유지보수 린트","embed_threshold":0.83}
-{"lang":"pl","description":"Jakość kodu, refaktoryzacja, zasady SOLID","vocabulary":"refaktoryzacja jakość SOLID zasada dekompozycja sprzężenie spójność utrzymywalność","embed_threshold":0.63}
-{"lang":"pt-br","description":"Qualidade de código, refatoração, princípios SOLID","vocabulary":"refatorar qualidade SOLID princípio decompor acoplamento coesão manutenibilidade","embed_threshold":0.64}
-{"lang":"ru","description":"Качество кода, рефакторинг, принципы SOLID","vocabulary":"рефакторинг качество SOLID принцип декомпозиция связанность сцепление поддерживаемость","embed_threshold":0.66}
-{"lang":"th","description":"คุณภาพโค้ด รีแฟคเตอร์ หลักการ SOLID การตรวจโค้ด","vocabulary":"รีแฟคเตอร์ คุณภาพ SOLID หลักการ แยกส่วน ความรับผิดชอบ การเชื่อมต่อ","embed_threshold":0.85}
-{"lang":"tr","description":"Kod kalitesi, yeniden düzenleme, SOLID ilkeleri, kod incelemesi","vocabulary":"yeniden düzenleme kalite SOLID ilke ayrıştırma çıkarma sorumluluk bağımlılık","embed_threshold":0.68}
-{"lang":"uk","description":"Якість коду, рефакторинг, принципи SOLID, огляд коду","vocabulary":"рефакторинг якість SOLID принцип декомпозиція витягнення відповідальність зв'язність","embed_threshold":0.69}
+{"lang":"ar","description":"جودة الكود وإعادة الهيكلة ومبادئ SOLID","vocabulary":"جودة كود إعادة هيكلة مبادئ نظافة صيانة","embed_threshold":0.77}
+{"lang":"de","description":"Codequalität, Refactoring, SOLID-Prinzipien, Code-Review-Standards, technische Schulden, Wartbarkeit","vocabulary":"refaktorisieren Qualität SOLID Prinzip zerlegen Methode extrahieren Verantwortung Kopplung Kohäsion Wartbarkeit Lesbarkeit","embed_threshold":0.85}
+{"lang":"es","description":"Calidad de codigo — refactorizacion, principios SOLID, codigo limpio","vocabulary":"calidad refactorizar SOLID principios limpio legible mantenible acoplamiento cohesion deuda-tecnica","embed_threshold":0.73}
+{"lang":"fr","description":"Qualité du code, refactorisation, principes SOLID","vocabulary":"refactoriser qualité SOLID principe décomposer couplage cohésion maintenabilité","embed_threshold":0.68}
+{"lang":"hi","description":"कोड गुणवत्ता, रिफैक्टरिंग, SOLID सिद्धांत, कोड समीक्षा","vocabulary":"गुणवत्ता रिफैक्टर SOLID समीक्षा क्लीन कोड रखरखाव लिंट","embed_threshold":0.79}
+{"lang":"id","description":"Kualitas kode, refactoring, prinsip SOLID, code review","vocabulary":"kualitas refaktor SOLID tinjauan kode bersih pemeliharaan lint","embed_threshold":0.77}
+{"lang":"it","description":"Qualità del codice, refactoring, principi SOLID, code review","vocabulary":"qualità refactoring SOLID revisione codice pulito manutenzione lint","embed_threshold":0.8}
+{"lang":"ja","description":"コード品質の向上、リファクタリング、SOLID原則","vocabulary":"リファクタリング 品質 SOLID 原則 分解 結合度 凝集度 保守性","embed_threshold":0.72}
+{"lang":"ko","description":"코드 품질, 리팩토링, SOLID 원칙, 코드 리뷰","vocabulary":"품질 리팩토링 SOLID 리뷰 클린코드 유지보수 린트","embed_threshold":0.81}
+{"lang":"pl","description":"Jakość kodu, refaktoryzacja, zasady SOLID","vocabulary":"refaktoryzacja jakość SOLID zasada dekompozycja sprzężenie spójność utrzymywalność","embed_threshold":0.61}
+{"lang":"pt-br","description":"Qualidade de código, refatoração, princípios SOLID","vocabulary":"refatorar qualidade SOLID princípio decompor acoplamento coesão manutenibilidade","embed_threshold":0.62}
+{"lang":"ru","description":"Качество кода, рефакторинг, принципы SOLID","vocabulary":"рефакторинг качество SOLID принцип декомпозиция связанность сцепление поддерживаемость","embed_threshold":0.64}
+{"lang":"th","description":"คุณภาพโค้ด รีแฟคเตอร์ หลักการ SOLID การตรวจโค้ด","vocabulary":"รีแฟคเตอร์ คุณภาพ SOLID หลักการ แยกส่วน ความรับผิดชอบ การเชื่อมต่อ","embed_threshold":0.83}
+{"lang":"tr","description":"Kod kalitesi, yeniden düzenleme, SOLID ilkeleri, kod incelemesi","vocabulary":"yeniden düzenleme kalite SOLID ilke ayrıştırma çıkarma sorumluluk bağımlılık","embed_threshold":0.67}
+{"lang":"uk","description":"Якість коду, рефакторинг, принципи SOLID, огляд коду","vocabulary":"рефакторинг якість SOLID принцип декомпозиція витягнення відповідальність зв'язність","embed_threshold":0.68}
 {"lang":"vi","description":"Chất lượng mã, tái cấu trúc, nguyên tắc SOLID, đánh giá mã","vocabulary":"tái cấu trúc chất lượng SOLID nguyên tắc phân tách trích xuất trách nhiệm liên kết","embed_threshold":0.71}
-{"lang":"zh","description":"代码质量、重构、SOLID 原则、代码审查","vocabulary":"重构 质量 SOLID 原则 分解 提取 职责 耦合","embed_threshold":0.75}
+{"lang":"zh","description":"代码质量、重构、SOLID 原则、代码审查","vocabulary":"重构 质量 SOLID 原则 分解 提取 职责 耦合","embed_threshold":0.73}

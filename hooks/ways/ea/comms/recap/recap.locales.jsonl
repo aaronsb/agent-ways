@@ -1,17 +1,17 @@
-{"lang":"ar","description":"ملخصات الاجتماعات والنصوص المفرغة وبنود العمل","vocabulary":"ملخص اجتماع تفريغ بنود عمل محضر نقاط رئيسية","embed_threshold":0.79}
-{"lang":"de","description":"Besprechungszusammenfassungen, Transkripte, KI-generierte Meeting-Protokolle, Aktionspunkte aus Meetings","vocabulary":"Zusammenfassung Transkript Protokoll Besprechungsnotizen Aufzeichnung Aktionspunkte besprochen Nachbereitung Teilnehmer Rückblick","embed_threshold":0.74}
+{"lang":"ar","description":"ملخصات الاجتماعات والنصوص المفرغة وبنود العمل","vocabulary":"ملخص اجتماع تفريغ بنود عمل محضر نقاط رئيسية","embed_threshold":0.78}
+{"lang":"de","description":"Besprechungszusammenfassungen, Transkripte, KI-generierte Meeting-Protokolle, Aktionspunkte aus Meetings","vocabulary":"Zusammenfassung Transkript Protokoll Besprechungsnotizen Aufzeichnung Aktionspunkte besprochen Nachbereitung Teilnehmer Rückblick","embed_threshold":0.72}
 {"lang":"es","description":"Resúmenes de reuniones, transcripciones, acciones pendientes de reuniones","vocabulary":"resumen transcripción acta reunión notas grabación acciones pendientes","embed_threshold":0.71}
-{"lang":"fr","description":"Résumés de réunions, transcriptions, points d'action","vocabulary":"résumé transcription compte-rendu réunion notes enregistrement actions suivi","embed_threshold":0.69}
+{"lang":"fr","description":"Résumés de réunions, transcriptions, points d'action","vocabulary":"résumé transcription compte-rendu réunion notes enregistrement actions suivi","embed_threshold":0.67}
 {"lang":"hi","description":"मीटिंग रीकैप, ट्रांसक्रिप्ट, एक्शन आइटम","vocabulary":"रीकैप ट्रांसक्रिप्ट सारांश मीटिंग नोट्स रिकॉर्डिंग एक्शन आइटम","embed_threshold":0.66}
-{"lang":"id","description":"Ringkasan rapat, transkrip, poin tindakan dari rapat","vocabulary":"ringkasan transkrip notulen rapat catatan rekaman tindakan butir","embed_threshold":0.7}
-{"lang":"it","description":"Riepiloghi di riunioni, trascrizioni, punti d'azione dalle riunioni","vocabulary":"riepilogo trascrizione verbale riunione appunti registrazione azione punto","embed_threshold":0.74}
-{"lang":"ja","description":"会議の振り返り、議事録、アクションアイテムの整理","vocabulary":"議事録 振り返り 要約 アクションアイテム 録音 文字起こし 会議メモ","embed_threshold":0.69}
-{"lang":"ko","description":"회의 요약, 녹취록, 회의에서 나온 액션 아이템","vocabulary":"요약 녹취록 회의록 회의 메모 녹음 액션 아이템 후속조치","embed_threshold":0.68}
-{"lang":"pl","description":"Podsumowania spotkań, transkrypcje, punkty do działania ze spotkań","vocabulary":"podsumowanie transkrypcja protokół spotkanie nagranie punkty działania notatki","embed_threshold":0.72}
-{"lang":"pt-br","description":"Resumos de reuniões, transcrições, itens de ação das reuniões","vocabulary":"resumo transcrição ata reunião gravação itens de ação anotações acompanhamento","embed_threshold":0.74}
-{"lang":"ru","description":"Итоги встреч, стенограммы, пункты действий из совещаний","vocabulary":"итоги стенограмма протокол встреча запись действия заметки обзор","embed_threshold":0.74}
-{"lang":"th","description":"สรุปการประชุม บันทึกคำพูด รายการสิ่งที่ต้องทำจากการประชุม","vocabulary":"สรุป ประชุม ถอดความ บันทึก รายการดำเนินการ หมายเหตุ บันทึกเสียง","embed_threshold":0.7}
-{"lang":"tr","description":"Toplantı özetleri, transkriptler, toplantılardan eylem maddeleri","vocabulary":"özet toplantı transkript tutanak eylem maddeleri notlar kayıt","embed_threshold":0.71}
-{"lang":"uk","description":"Підсумки зустрічей, транскрипти, пункти дій із зустрічей","vocabulary":"підсумок зустріч транскрипт протокол пункти дій нотатки запис","embed_threshold":0.71}
-{"lang":"vi","description":"Tóm tắt cuộc họp, bản ghi chép, các hành động cần thực hiện","vocabulary":"tóm tắt họp bản ghi biên bản hành động ghi chú bản ghi âm","embed_threshold":0.67}
-{"lang":"zh","description":"会议摘要、会议记录、待办行动项","vocabulary":"摘要 会议 转录 纪要 行动项 笔记 录音 回顾","embed_threshold":0.79}
+{"lang":"id","description":"Ringkasan rapat, transkrip, poin tindakan dari rapat","vocabulary":"ringkasan transkrip notulen rapat catatan rekaman tindakan butir","embed_threshold":0.68}
+{"lang":"it","description":"Riepiloghi di riunioni, trascrizioni, punti d'azione dalle riunioni","vocabulary":"riepilogo trascrizione verbale riunione appunti registrazione azione punto","embed_threshold":0.73}
+{"lang":"ja","description":"会議の振り返り、議事録、アクションアイテムの整理","vocabulary":"議事録 振り返り 要約 アクションアイテム 録音 文字起こし 会議メモ","embed_threshold":0.68}
+{"lang":"ko","description":"회의 요약, 녹취록, 회의에서 나온 액션 아이템","vocabulary":"요약 녹취록 회의록 회의 메모 녹음 액션 아이템 후속조치","embed_threshold":0.67}
+{"lang":"pl","description":"Podsumowania spotkań, transkrypcje, punkty do działania ze spotkań","vocabulary":"podsumowanie transkrypcja protokół spotkanie nagranie punkty działania notatki","embed_threshold":0.7}
+{"lang":"pt-br","description":"Resumos de reuniões, transcrições, itens de ação das reuniões","vocabulary":"resumo transcrição ata reunião gravação itens de ação anotações acompanhamento","embed_threshold":0.72}
+{"lang":"ru","description":"Итоги встреч, стенограммы, пункты действий из совещаний","vocabulary":"итоги стенограмма протокол встреча запись действия заметки обзор","embed_threshold":0.72}
+{"lang":"th","description":"สรุปการประชุม บันทึกคำพูด รายการสิ่งที่ต้องทำจากการประชุม","vocabulary":"สรุป ประชุม ถอดความ บันทึก รายการดำเนินการ หมายเหตุ บันทึกเสียง","embed_threshold":0.69}
+{"lang":"tr","description":"Toplantı özetleri, transkriptler, toplantılardan eylem maddeleri","vocabulary":"özet toplantı transkript tutanak eylem maddeleri notlar kayıt","embed_threshold":0.7}
+{"lang":"uk","description":"Підсумки зустрічей, транскрипти, пункти дій із зустрічей","vocabulary":"підсумок зустріч транскрипт протокол пункти дій нотатки запис","embed_threshold":0.69}
+{"lang":"vi","description":"Tóm tắt cuộc họp, bản ghi chép, các hành động cần thực hiện","vocabulary":"tóm tắt họp bản ghi biên bản hành động ghi chú bản ghi âm","embed_threshold":0.66}
+{"lang":"zh","description":"会议摘要、会议记录、待办行动项","vocabulary":"摘要 会议 转录 纪要 行动项 笔记 录音 回顾","embed_threshold":0.78}

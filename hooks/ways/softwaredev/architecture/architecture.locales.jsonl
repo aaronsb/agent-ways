@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تصميم الأنظمة والتفكير الهيكلي","vocabulary":"هندسة معمارية تصميم نظام هيكل بنية مكونات","embed_threshold":0.69}
-{"lang":"de","description":"Systemdesign, Architekturentscheidungen und strukturelles Denken über Softwareorganisation","vocabulary":"Architektur Design System Struktur Entscheidung Abwägung Muster Komponente Dienst Modul Schicht Schnittstelle Vertrag Abhängigkeit Kopplung Kohäsion","embed_threshold":0.78}
-{"lang":"es","description":"Diseno de sistemas — estructura, componentes, patrones arquitectonicos","vocabulary":"arquitectura diseno sistema estructura componentes modulos capas patron escalabilidad","embed_threshold":0.61}
-{"lang":"fr","description":"Conception de systèmes, décisions d'architecture, pensée structurelle","vocabulary":"architecture conception système structure décision compromis patron composant module","embed_threshold":0.79}
-{"lang":"hi","description":"सिस्टम डिज़ाइन, आर्किटेक्चर निर्णय, संरचनात्मक सोच","vocabulary":"आर्किटेक्चर डिज़ाइन सिस्टम संरचना निर्णय पैटर्न ट्रेडऑफ","embed_threshold":0.82}
-{"lang":"id","description":"Desain sistem, keputusan arsitektur, pemikiran struktural","vocabulary":"arsitektur desain sistem struktur keputusan pola pertukaran","embed_threshold":0.76}
-{"lang":"it","description":"Progettazione di sistema, decisioni architetturali, pensiero strutturale","vocabulary":"architettura progettazione sistema struttura decisione pattern compromesso","embed_threshold":0.8}
-{"lang":"ja","description":"システム設計、アーキテクチャの意思決定、構造的な思考","vocabulary":"アーキテクチャ 設計 システム 構造 判断 パターン コンポーネント モジュール","embed_threshold":0.79}
-{"lang":"ko","description":"시스템 설계, 아키텍처 결정, 구조적 사고","vocabulary":"아키텍처 설계 시스템 구조 결정 패턴 트레이드오프","embed_threshold":0.77}
-{"lang":"pl","description":"Projektowanie systemów, decyzje architektoniczne, myślenie strukturalne","vocabulary":"architektura projektowanie system struktura decyzja kompromis wzorzec komponent moduł","embed_threshold":0.79}
-{"lang":"pt-br","description":"Design de sistemas, decisões de arquitetura, pensamento estrutural","vocabulary":"arquitetura design sistema estrutura decisão tradeoff padrão componente módulo","embed_threshold":0.81}
-{"lang":"ru","description":"Проектирование систем, архитектурные решения, структурное мышление","vocabulary":"архитектура проектирование система структура решение компромисс паттерн компонент модуль","embed_threshold":0.75}
-{"lang":"th","description":"การออกแบบระบบ การตัดสินใจด้านสถาปัตยกรรม การคิดเชิงโครงสร้าง","vocabulary":"สถาปัตยกรรม ออกแบบ ระบบ โครงสร้าง ตัดสินใจ แลกเปลี่ยน รูปแบบ ส่วนประกอบ โมดูล","embed_threshold":0.76}
-{"lang":"tr","description":"Sistem tasarımı, mimari kararlar, yapısal düşünce","vocabulary":"mimari tasarım sistem yapı karar ödünleşim kalıp bileşen modül","embed_threshold":0.8}
-{"lang":"uk","description":"Проєктування систем, архітектурні рішення, структурне мислення","vocabulary":"архітектура дизайн система структура рішення компроміс шаблон компонент модуль","embed_threshold":0.78}
-{"lang":"vi","description":"Thiết kế hệ thống, quyết định kiến trúc, tư duy cấu trúc","vocabulary":"kiến trúc thiết kế hệ thống cấu trúc quyết định đánh đổi mẫu thành phần module","embed_threshold":0.78}
-{"lang":"zh","description":"系统设计、架构决策、结构化思维","vocabulary":"架构 设计 系统 结构 决策 权衡 模式 组件 模块","embed_threshold":0.8}
+{"lang":"ar","description":"تصميم الأنظمة والتفكير الهيكلي","vocabulary":"هندسة معمارية تصميم نظام هيكل بنية مكونات","embed_threshold":0.73}
+{"lang":"de","description":"Systemdesign, Architekturentscheidungen und strukturelles Denken über Softwareorganisation","vocabulary":"Architektur Design System Struktur Entscheidung Abwägung Muster Komponente Dienst Modul Schicht Schnittstelle Vertrag Abhängigkeit Kopplung Kohäsion","embed_threshold":0.76}
+{"lang":"es","description":"Diseno de sistemas — estructura, componentes, patrones arquitectonicos","vocabulary":"arquitectura diseno sistema estructura componentes modulos capas patron escalabilidad","embed_threshold":0.6}
+{"lang":"fr","description":"Conception de systèmes, décisions d'architecture, pensée structurelle","vocabulary":"architecture conception système structure décision compromis patron composant module","embed_threshold":0.77}
+{"lang":"hi","description":"सिस्टम डिज़ाइन, आर्किटेक्चर निर्णय, संरचनात्मक सोच","vocabulary":"आर्किटेक्चर डिज़ाइन सिस्टम संरचना निर्णय पैटर्न ट्रेडऑफ","embed_threshold":0.8}
+{"lang":"id","description":"Desain sistem, keputusan arsitektur, pemikiran struktural","vocabulary":"arsitektur desain sistem struktur keputusan pola pertukaran","embed_threshold":0.75}
+{"lang":"it","description":"Progettazione di sistema, decisioni architetturali, pensiero strutturale","vocabulary":"architettura progettazione sistema struttura decisione pattern compromesso","embed_threshold":0.78}
+{"lang":"ja","description":"システム設計、アーキテクチャの意思決定、構造的な思考","vocabulary":"アーキテクチャ 設計 システム 構造 判断 パターン コンポーネント モジュール","embed_threshold":0.77}
+{"lang":"ko","description":"시스템 설계, 아키텍처 결정, 구조적 사고","vocabulary":"아키텍처 설계 시스템 구조 결정 패턴 트레이드오프","embed_threshold":0.76}
+{"lang":"pl","description":"Projektowanie systemów, decyzje architektoniczne, myślenie strukturalne","vocabulary":"architektura projektowanie system struktura decyzja kompromis wzorzec komponent moduł","embed_threshold":0.77}
+{"lang":"pt-br","description":"Design de sistemas, decisões de arquitetura, pensamento estrutural","vocabulary":"arquitetura design sistema estrutura decisão tradeoff padrão componente módulo","embed_threshold":0.8}
+{"lang":"ru","description":"Проектирование систем, архитектурные решения, структурное мышление","vocabulary":"архитектура проектирование система структура решение компромисс паттерн компонент модуль","embed_threshold":0.74}
+{"lang":"th","description":"การออกแบบระบบ การตัดสินใจด้านสถาปัตยกรรม การคิดเชิงโครงสร้าง","vocabulary":"สถาปัตยกรรม ออกแบบ ระบบ โครงสร้าง ตัดสินใจ แลกเปลี่ยน รูปแบบ ส่วนประกอบ โมดูล","embed_threshold":0.8}
+{"lang":"tr","description":"Sistem tasarımı, mimari kararlar, yapısal düşünce","vocabulary":"mimari tasarım sistem yapı karar ödünleşim kalıp bileşen modül","embed_threshold":0.78}
+{"lang":"uk","description":"Проєктування систем, архітектурні рішення, структурне мислення","vocabulary":"архітектура дизайн система структура рішення компроміс шаблон компонент модуль","embed_threshold":0.76}
+{"lang":"vi","description":"Thiết kế hệ thống, quyết định kiến trúc, tư duy cấu trúc","vocabulary":"kiến trúc thiết kế hệ thống cấu trúc quyết định đánh đổi mẫu thành phần module","embed_threshold":0.77}
+{"lang":"zh","description":"系统设计、架构决策、结构化思维","vocabulary":"架构 设计 系统 结构 决策 权衡 模式 组件 模块","embed_threshold":0.79}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"توثيق الكود والتعليقات التوضيحية","vocabulary":"توثيق كود تعليقات توضيحية وصف دوال واجهة","embed_threshold":0.67}
-{"lang":"de","description":"Codedokumentation — Docstrings, JSDoc, Inline-Kommentare und Annotationen","vocabulary":"Docstring JSDoc GoDoc PyDoc RustDoc Kommentar Annotation Codedokumentation Inline-Dokumentation Funktionsbeschreibung","embed_threshold":0.69}
-{"lang":"es","description":"Documentacion de codigo — docstrings, comentarios, anotaciones de tipo","vocabulary":"docstring comentario documentar funcion parametro retorno tipo anotacion JSDoc pydoc","embed_threshold":0.63}
-{"lang":"fr","description":"Documentation du code, docstrings, JSDoc, commentaires inline","vocabulary":"docstring JSDoc commentaire annotation code documentation description","embed_threshold":0.71}
-{"lang":"hi","description":"कोड प्रलेखन, डॉकस्ट्रिंग, JSDoc, Godoc, rustdoc","vocabulary":"डॉकस्ट्रिंग JSDoc Godoc rustdoc इनलाइन दस्तावेज टिप्पणी","embed_threshold":0.61}
-{"lang":"id","description":"Dokumentasi kode, docstring, JSDoc, Godoc, rustdoc","vocabulary":"docstring JSDoc Godoc rustdoc inline dokumentasi komentar","embed_threshold":0.68}
-{"lang":"it","description":"Documentazione codice, docstring, JSDoc, Godoc, rustdoc","vocabulary":"docstring JSDoc Godoc rustdoc inline documentazione commento","embed_threshold":0.68}
-{"lang":"ja","description":"コードドキュメント、docstring、JSDoc、インラインコメント","vocabulary":"docstring JSDoc コメント アノテーション コード文書化 説明","embed_threshold":0.62}
-{"lang":"ko","description":"코드 문서화, 독스트링, JSDoc, Godoc, rustdoc","vocabulary":"독스트링 JSDoc Godoc rustdoc 인라인 문서화 주석","embed_threshold":0.72}
-{"lang":"pl","description":"Dokumentacja kodu — docstringi, JSDoc, komentarze inline, adnotacje","vocabulary":"docstring JSDoc komentarz adnotacja dokumentacja kodu opis","embed_threshold":0.71}
-{"lang":"pt-br","description":"Documentação de código — docstrings, JSDoc, comentários inline, anotações","vocabulary":"docstring JSDoc comentário anotação documentação de código descrição","embed_threshold":0.77}
-{"lang":"ru","description":"Документирование кода — docstrings, JSDoc, инлайн-комментарии, аннотации","vocabulary":"docstring JSDoc комментарий аннотация документирование кода описание","embed_threshold":0.7}
-{"lang":"th","description":"การจัดทำเอกสารโค้ด — docstring, JSDoc, inline comment, annotation","vocabulary":"docstring JSDoc comment annotation เอกสาร โค้ด คำอธิบาย","embed_threshold":0.72}
-{"lang":"tr","description":"Kod dokümantasyonu — docstring, JSDoc, satır içi yorumlar, annotasyonlar","vocabulary":"docstring JSDoc yorum annotasyon dokümantasyon kod açıklama","embed_threshold":0.67}
+{"lang":"ar","description":"توثيق الكود والتعليقات التوضيحية","vocabulary":"توثيق كود تعليقات توضيحية وصف دوال واجهة","embed_threshold":0.69}
+{"lang":"de","description":"Codedokumentation — Docstrings, JSDoc, Inline-Kommentare und Annotationen","vocabulary":"Docstring JSDoc GoDoc PyDoc RustDoc Kommentar Annotation Codedokumentation Inline-Dokumentation Funktionsbeschreibung","embed_threshold":0.67}
+{"lang":"es","description":"Documentacion de codigo — docstrings, comentarios, anotaciones de tipo","vocabulary":"docstring comentario documentar funcion parametro retorno tipo anotacion JSDoc pydoc","embed_threshold":0.62}
+{"lang":"fr","description":"Documentation du code, docstrings, JSDoc, commentaires inline","vocabulary":"docstring JSDoc commentaire annotation code documentation description","embed_threshold":0.69}
+{"lang":"hi","description":"कोड प्रलेखन, डॉकस्ट्रिंग, JSDoc, Godoc, rustdoc","vocabulary":"डॉकस्ट्रिंग JSDoc Godoc rustdoc इनलाइन दस्तावेज टिप्पणी","embed_threshold":0.59}
+{"lang":"id","description":"Dokumentasi kode, docstring, JSDoc, Godoc, rustdoc","vocabulary":"docstring JSDoc Godoc rustdoc inline dokumentasi komentar","embed_threshold":0.67}
+{"lang":"it","description":"Documentazione codice, docstring, JSDoc, Godoc, rustdoc","vocabulary":"docstring JSDoc Godoc rustdoc inline documentazione commento","embed_threshold":0.66}
+{"lang":"ja","description":"コードドキュメント、docstring、JSDoc、インラインコメント","vocabulary":"docstring JSDoc コメント アノテーション コード文書化 説明","embed_threshold":0.61}
+{"lang":"ko","description":"코드 문서화, 독스트링, JSDoc, Godoc, rustdoc","vocabulary":"독스트링 JSDoc Godoc rustdoc 인라인 문서화 주석","embed_threshold":0.7}
+{"lang":"pl","description":"Dokumentacja kodu — docstringi, JSDoc, komentarze inline, adnotacje","vocabulary":"docstring JSDoc komentarz adnotacja dokumentacja kodu opis","embed_threshold":0.69}
+{"lang":"pt-br","description":"Documentação de código — docstrings, JSDoc, comentários inline, anotações","vocabulary":"docstring JSDoc comentário anotação documentação de código descrição","embed_threshold":0.76}
+{"lang":"ru","description":"Документирование кода — docstrings, JSDoc, инлайн-комментарии, аннотации","vocabulary":"docstring JSDoc комментарий аннотация документирование кода описание","embed_threshold":0.69}
+{"lang":"th","description":"การจัดทำเอกสารโค้ด — docstring, JSDoc, inline comment, annotation","vocabulary":"docstring JSDoc comment annotation เอกสาร โค้ด คำอธิบาย","embed_threshold":0.71}
+{"lang":"tr","description":"Kod dokümantasyonu — docstring, JSDoc, satır içi yorumlar, annotasyonlar","vocabulary":"docstring JSDoc yorum annotasyon dokümantasyon kod açıklama","embed_threshold":0.66}
 {"lang":"uk","description":"Документація коду — docstring, JSDoc, inline-коментарі, анотації","vocabulary":"docstring JSDoc коментар анотація документація код опис","embed_threshold":0.69}
-{"lang":"vi","description":"Tài liệu mã — docstring, JSDoc, comment inline, annotation","vocabulary":"docstring JSDoc comment annotation tài liệu mã mô tả","embed_threshold":0.65}
+{"lang":"vi","description":"Tài liệu mã — docstring, JSDoc, comment inline, annotation","vocabulary":"docstring JSDoc comment annotation tài liệu mã mô tả","embed_threshold":0.66}
 {"lang":"zh","description":"代码文档 — docstring、JSDoc、行内注释、注解","vocabulary":"docstring JSDoc 注释 注解 文档 代码 描述","embed_threshold":0.65}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تأليف طرق محايدة تجاه الأدوات","vocabulary":"محايد أدوات تأليف طرق عام غير مرتبط","embed_threshold":0.69}
-{"lang":"de","description":"Ways schreiben, die Muster und Absichten beschreiben statt konkrete Werkzeugnamen, MCP-Server oder CLI-Befehle zu referenzieren","vocabulary":"werkzeugunabhängig herstellerneutral portabel abstrakt Absicht Muster MCP CLI spezifisch","embed_threshold":0.59}
-{"lang":"es","description":"Escribir ways con patrones en vez de referencias a herramientas específicas","vocabulary":"agnóstico herramienta neutral portable abstracto intención patrón vendor","embed_threshold":0.63}
-{"lang":"fr","description":"Écrire des ways avec des patterns plutôt que des références à des outils spécifiques","vocabulary":"outil agnostique neutre portable abstrait intention pattern indépendant","embed_threshold":0.62}
-{"lang":"hi","description":"विशिष्ट टूल के बजाय पैटर्न और इरादे वर्णित करने वाले ways लिखना","vocabulary":"टूल अज्ञेय पोर्टेबल अमूर्त पैटर्न इरादा वेंडर तटस्थ","embed_threshold":0.66}
-{"lang":"id","description":"Menulis ways yang mendeskripsikan pola dan intensi, bukan alat tertentu","vocabulary":"alat agnostik netral portabel abstrak pola intensi vendor","embed_threshold":0.59}
-{"lang":"it","description":"Scrivere ways che descrivono schemi e intenzioni, non strumenti specifici","vocabulary":"strumento agnostico neutrale portabile astratto schema intenzione vendor","embed_threshold":0.66}
-{"lang":"ja","description":"特定ツールに依存しないパターンでwayを書く","vocabulary":"ツール非依存 ベンダー中立 汎用 抽象化 パターン 移植性","embed_threshold":0.57}
-{"lang":"ko","description":"특정 도구가 아닌 패턴과 의도를 설명하는 ways 작성","vocabulary":"도구 불가지론 중립 이식성 추상 패턴 의도 벤더","embed_threshold":0.63}
-{"lang":"pl","description":"Pisanie ways z wzorcami zamiast odwołań do konkretnych narzędzi","vocabulary":"narzędzie agnostyczny neutralny przenośny abstrakcyjny intencja wzorzec niezależny","embed_threshold":0.68}
+{"lang":"ar","description":"تأليف طرق محايدة تجاه الأدوات","vocabulary":"محايد أدوات تأليف طرق عام غير مرتبط","embed_threshold":0.68}
+{"lang":"de","description":"Ways schreiben, die Muster und Absichten beschreiben statt konkrete Werkzeugnamen, MCP-Server oder CLI-Befehle zu referenzieren","vocabulary":"werkzeugunabhängig herstellerneutral portabel abstrakt Absicht Muster MCP CLI spezifisch","embed_threshold":0.57}
+{"lang":"es","description":"Escribir ways con patrones en vez de referencias a herramientas específicas","vocabulary":"agnóstico herramienta neutral portable abstracto intención patrón vendor","embed_threshold":0.61}
+{"lang":"fr","description":"Écrire des ways avec des patterns plutôt que des références à des outils spécifiques","vocabulary":"outil agnostique neutre portable abstrait intention pattern indépendant","embed_threshold":0.63}
+{"lang":"hi","description":"विशिष्ट टूल के बजाय पैटर्न और इरादे वर्णित करने वाले ways लिखना","vocabulary":"टूल अज्ञेय पोर्टेबल अमूर्त पैटर्न इरादा वेंडर तटस्थ","embed_threshold":0.65}
+{"lang":"id","description":"Menulis ways yang mendeskripsikan pola dan intensi, bukan alat tertentu","vocabulary":"alat agnostik netral portabel abstrak pola intensi vendor","embed_threshold":0.58}
+{"lang":"it","description":"Scrivere ways che descrivono schemi e intenzioni, non strumenti specifici","vocabulary":"strumento agnostico neutrale portabile astratto schema intenzione vendor","embed_threshold":0.65}
+{"lang":"ja","description":"特定ツールに依存しないパターンでwayを書く","vocabulary":"ツール非依存 ベンダー中立 汎用 抽象化 パターン 移植性","embed_threshold":0.61}
+{"lang":"ko","description":"특정 도구가 아닌 패턴과 의도를 설명하는 ways 작성","vocabulary":"도구 불가지론 중립 이식성 추상 패턴 의도 벤더","embed_threshold":0.61}
+{"lang":"pl","description":"Pisanie ways z wzorcami zamiast odwołań do konkretnych narzędzi","vocabulary":"narzędzie agnostyczny neutralny przenośny abstrakcyjny intencja wzorzec niezależny","embed_threshold":0.67}
 {"lang":"pt-br","description":"Escrever ways com padrões ao invés de referências a ferramentas específicas","vocabulary":"ferramenta agnóstico neutro portável abstrato intenção padrão independente","embed_threshold":0.62}
-{"lang":"ru","description":"Написание ways с паттернами вместо ссылок на конкретные инструменты","vocabulary":"инструмент агностический нейтральный переносимый абстрактный намерение паттерн независимый","embed_threshold":0.63}
-{"lang":"th","description":"เขียน ways โดยใช้รูปแบบแทนการอ้างอิงเครื่องมือเฉพาะ","vocabulary":"เครื่องมือ ไม่เจาะจง เป็นกลาง พกพา นามธรรม เจตนา รูปแบบ อิสระ","embed_threshold":0.65}
-{"lang":"tr","description":"Belirli araçlara atıfta bulunmak yerine kalıplarla ways yazma","vocabulary":"araç bağımsız tarafsız taşınabilir soyut niyet kalıp bağımsız","embed_threshold":0.58}
-{"lang":"uk","description":"Написання ways з використанням шаблонів замість посилань на конкретні інструменти","vocabulary":"інструмент агностичний нейтральний портативний абстрактний намір шаблон незалежний","embed_threshold":0.57}
+{"lang":"ru","description":"Написание ways с паттернами вместо ссылок на конкретные инструменты","vocabulary":"инструмент агностический нейтральный переносимый абстрактный намерение паттерн независимый","embed_threshold":0.62}
+{"lang":"th","description":"เขียน ways โดยใช้รูปแบบแทนการอ้างอิงเครื่องมือเฉพาะ","vocabulary":"เครื่องมือ ไม่เจาะจง เป็นกลาง พกพา นามธรรม เจตนา รูปแบบ อิสระ","embed_threshold":0.67}
+{"lang":"tr","description":"Belirli araçlara atıfta bulunmak yerine kalıplarla ways yazma","vocabulary":"araç bağımsız tarafsız taşınabilir soyut niyet kalıp bağımsız","embed_threshold":0.57}
+{"lang":"uk","description":"Написання ways з використанням шаблонів замість посилань на конкретні інструменти","vocabulary":"інструмент агностичний нейтральний портативний абстрактний намір шаблон незалежний","embed_threshold":0.59}
 {"lang":"vi","description":"Viết ways sử dụng mẫu thay vì tham chiếu công cụ cụ thể","vocabulary":"công cụ bất khả tri trung lập di động trừu tượng ý định mẫu độc lập","embed_threshold":0.58}
-{"lang":"zh","description":"使用模式编写 ways 而非引用特定工具","vocabulary":"工具 无关 中立 可移植 抽象 意图 模式 独立","embed_threshold":0.61}
+{"lang":"zh","description":"使用模式编写 ways 而非引用特定工具","vocabulary":"工具 无关 中立 可移植 抽象 意图 模式 独立","embed_threshold":0.64}

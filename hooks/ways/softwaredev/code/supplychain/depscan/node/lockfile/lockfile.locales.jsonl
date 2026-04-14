@@ -1,17 +1,17 @@
-{"lang":"ar","description":"نظافة ملفات القفل وتثبيت الإصدارات","vocabulary":"ملف قفل إصدارات تثبيت نظافة تبعيات npm","embed_threshold":0.63}
-{"lang":"de","description":"Lockfile-Hygiene, Versionspinning, Supply-Chain-Angriffe durch Abhängigkeitsauflösung verhindern","vocabulary":"Lockfile package-lock.json yarn.lock pnpm-lock pinnen exakte Version Caret Semver npm-ci transitiv Auflösung","embed_threshold":0.52}
-{"lang":"es","description":"Higiene de archivos de bloqueo — package-lock.json, integridad, consistencia","vocabulary":"lockfile bloqueo package-lock integridad consistencia npm yarn pnpm reproducible deterministico","embed_threshold":0.62}
-{"lang":"fr","description":"Hygiène de lockfile, verrouillage des versions, prévention des attaques de chaîne d'approvisionnement","vocabulary":"lockfile package-lock.json yarn.lock verrouiller version semver","embed_threshold":0.61}
-{"lang":"hi","description":"लॉकफाइल स्वच्छता, वर्जन पिनिंग, सप्लाई चेन हमला रोकना","vocabulary":"लॉकफाइल पिनिंग package-lock.json yarn.lock स्वच्छता सत्यापन","embed_threshold":0.64}
-{"lang":"id","description":"Kebersihan lockfile, pinning versi, pencegahan serangan supply chain","vocabulary":"lockfile pinning package-lock.json yarn.lock kebersihan verifikasi","embed_threshold":0.66}
-{"lang":"it","description":"Igiene lockfile, pinning versioni, prevenzione attacchi supply chain","vocabulary":"lockfile pinning package-lock.json yarn.lock igiene verifica","embed_threshold":0.58}
-{"lang":"ja","description":"ロックファイルの衛生管理、バージョン固定、サプライチェーン攻撃対策","vocabulary":"ロックファイル package-lock.json yarn.lock バージョン固定 semver","embed_threshold":0.56}
-{"lang":"ko","description":"락파일 위생, 버전 피닝, 공급망 공격 방지","vocabulary":"락파일 피닝 package-lock.json yarn.lock 위생 검증","embed_threshold":0.56}
-{"lang":"pl","description":"Higiena lockfile, przypinanie wersji, zapobieganie atakom łańcucha dostaw","vocabulary":"lockfile package-lock.json yarn.lock przypiąć wersja semver","embed_threshold":0.58}
-{"lang":"pt-br","description":"Higiene de lockfile, fixação de versões, prevenção de ataques à cadeia de suprimentos","vocabulary":"lockfile package-lock.json yarn.lock fixar versão semver","embed_threshold":0.56}
-{"lang":"ru","description":"Гигиена lockfile, фиксация версий, предотвращение атак на цепочку поставок","vocabulary":"lockfile package-lock.json yarn.lock фиксация версия semver","embed_threshold":0.56}
-{"lang":"th","description":"สุขอนามัย lockfile การล็อกเวอร์ชัน การป้องกัน supply chain attack","vocabulary":"lockfile package-lock.json yarn.lock ล็อก เวอร์ชัน semver","embed_threshold":0.6}
-{"lang":"tr","description":"Lockfile hijyeni, versiyon sabitleme, tedarik zinciri saldırılarını önleme","vocabulary":"lockfile package-lock.json yarn.lock sabitleme versiyon semver","embed_threshold":0.59}
-{"lang":"uk","description":"Гігієна lockfile, фіксація версій, запобігання атакам на ланцюг постачання","vocabulary":"lockfile package-lock.json yarn.lock фіксація версія semver","embed_threshold":0.55}
-{"lang":"vi","description":"Vệ sinh lockfile, ghim phiên bản, phòng chống tấn công chuỗi cung ứng","vocabulary":"lockfile package-lock.json yarn.lock ghim phiên bản semver","embed_threshold":0.57}
-{"lang":"zh","description":"Lockfile 卫生、版本锁定、供应链攻击防护","vocabulary":"lockfile package-lock.json yarn.lock 锁定 版本 semver","embed_threshold":0.58}
+{"lang":"ar","description":"نظافة ملفات القفل وتثبيت الإصدارات","vocabulary":"ملف قفل إصدارات تثبيت نظافة تبعيات npm","embed_threshold":0.64}
+{"lang":"de","description":"Lockfile-Hygiene, Versionspinning, Supply-Chain-Angriffe durch Abhängigkeitsauflösung verhindern","vocabulary":"Lockfile package-lock.json yarn.lock pnpm-lock pinnen exakte Version Caret Semver npm-ci transitiv Auflösung","embed_threshold":0.61}
+{"lang":"es","description":"Higiene de archivos de bloqueo — package-lock.json, integridad, consistencia","vocabulary":"lockfile bloqueo package-lock integridad consistencia npm yarn pnpm reproducible deterministico","embed_threshold":0.61}
+{"lang":"fr","description":"Hygiène de lockfile, verrouillage des versions, prévention des attaques de chaîne d'approvisionnement","vocabulary":"lockfile package-lock.json yarn.lock verrouiller version semver","embed_threshold":0.6}
+{"lang":"hi","description":"लॉकफाइल स्वच्छता, वर्जन पिनिंग, सप्लाई चेन हमला रोकना","vocabulary":"लॉकफाइल पिनिंग package-lock.json yarn.lock स्वच्छता सत्यापन","embed_threshold":0.62}
+{"lang":"id","description":"Kebersihan lockfile, pinning versi, pencegahan serangan supply chain","vocabulary":"lockfile pinning package-lock.json yarn.lock kebersihan verifikasi","embed_threshold":0.65}
+{"lang":"it","description":"Igiene lockfile, pinning versioni, prevenzione attacchi supply chain","vocabulary":"lockfile pinning package-lock.json yarn.lock igiene verifica","embed_threshold":0.56}
+{"lang":"ja","description":"ロックファイルの衛生管理、バージョン固定、サプライチェーン攻撃対策","vocabulary":"ロックファイル package-lock.json yarn.lock バージョン固定 semver","embed_threshold":0.54}
+{"lang":"ko","description":"락파일 위생, 버전 피닝, 공급망 공격 방지","vocabulary":"락파일 피닝 package-lock.json yarn.lock 위생 검증","embed_threshold":0.6}
+{"lang":"pl","description":"Higiena lockfile, przypinanie wersji, zapobieganie atakom łańcucha dostaw","vocabulary":"lockfile package-lock.json yarn.lock przypiąć wersja semver","embed_threshold":0.57}
+{"lang":"pt-br","description":"Higiene de lockfile, fixação de versões, prevenção de ataques à cadeia de suprimentos","vocabulary":"lockfile package-lock.json yarn.lock fixar versão semver","embed_threshold":0.55}
+{"lang":"ru","description":"Гигиена lockfile, фиксация версий, предотвращение атак на цепочку поставок","vocabulary":"lockfile package-lock.json yarn.lock фиксация версия semver","embed_threshold":0.55}
+{"lang":"th","description":"สุขอนามัย lockfile การล็อกเวอร์ชัน การป้องกัน supply chain attack","vocabulary":"lockfile package-lock.json yarn.lock ล็อก เวอร์ชัน semver","embed_threshold":0.58}
+{"lang":"tr","description":"Lockfile hijyeni, versiyon sabitleme, tedarik zinciri saldırılarını önleme","vocabulary":"lockfile package-lock.json yarn.lock sabitleme versiyon semver","embed_threshold":0.58}
+{"lang":"uk","description":"Гігієна lockfile, фіксація версій, запобігання атакам на ланцюг постачання","vocabulary":"lockfile package-lock.json yarn.lock фіксація версія semver","embed_threshold":0.54}
+{"lang":"vi","description":"Vệ sinh lockfile, ghim phiên bản, phòng chống tấn công chuỗi cung ứng","vocabulary":"lockfile package-lock.json yarn.lock ghim phiên bản semver","embed_threshold":0.55}
+{"lang":"zh","description":"Lockfile 卫生、版本锁定、供应链攻击防护","vocabulary":"lockfile package-lock.json yarn.lock 锁定 版本 semver","embed_threshold":0.57}

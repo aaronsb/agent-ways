@@ -1,17 +1,17 @@
-{"lang":"ar","description":"أمان سلسلة توريد البرمجيات","vocabulary":"سلسلة توريد أمان برمجيات تبعيات حماية","embed_threshold":0.78}
-{"lang":"de","description":"Lieferkettensicherheit, Repository-Vertrauensbewertung, Code aus unbekannten Quellen evaluieren","vocabulary":"Lieferkette Vertrauensbewertung geforktes Repo unbekanntes Repo Audit Abhängigkeitsscan Schwachstelle Backdoor Herkunft Klon Fork extern Drittanbieter","embed_threshold":0.7}
-{"lang":"es","description":"Seguridad de la cadena de suministro — dependencias, procedencia, integridad","vocabulary":"cadena-de-suministro seguridad dependencias procedencia integridad SBOM firma verificar confianza","embed_threshold":0.67}
-{"lang":"fr","description":"Sécurité de la chaîne d'approvisionnement, évaluation de la confiance du dépôt","vocabulary":"chaîne approvisionnement sécurité confiance évaluation audit dépendance vulnérabilité","embed_threshold":0.79}
+{"lang":"ar","description":"أمان سلسلة توريد البرمجيات","vocabulary":"سلسلة توريد أمان برمجيات تبعيات حماية","embed_threshold":0.83}
+{"lang":"de","description":"Lieferkettensicherheit, Repository-Vertrauensbewertung, Code aus unbekannten Quellen evaluieren","vocabulary":"Lieferkette Vertrauensbewertung geforktes Repo unbekanntes Repo Audit Abhängigkeitsscan Schwachstelle Backdoor Herkunft Klon Fork extern Drittanbieter","embed_threshold":0.69}
+{"lang":"es","description":"Seguridad de la cadena de suministro — dependencias, procedencia, integridad","vocabulary":"cadena-de-suministro seguridad dependencias procedencia integridad SBOM firma verificar confianza","embed_threshold":0.66}
+{"lang":"fr","description":"Sécurité de la chaîne d'approvisionnement, évaluation de la confiance du dépôt","vocabulary":"chaîne approvisionnement sécurité confiance évaluation audit dépendance vulnérabilité","embed_threshold":0.77}
 {"lang":"hi","description":"सप्लाई चेन सुरक्षा, रिपॉजिटरी विश्वास मूल्यांकन","vocabulary":"सप्लाई चेन सुरक्षा रिपॉजिटरी विश्वास मूल्यांकन डिपेंडेंसी","embed_threshold":0.68}
 {"lang":"id","description":"Keamanan supply chain, penilaian kepercayaan repositori","vocabulary":"supply chain keamanan repositori kepercayaan penilaian dependensi","embed_threshold":0.7}
-{"lang":"it","description":"Sicurezza supply chain, valutazione fiducia repository","vocabulary":"supply chain sicurezza repository fiducia valutazione dipendenza","embed_threshold":0.67}
-{"lang":"ja","description":"サプライチェーンセキュリティ、リポジトリの信頼性評価","vocabulary":"サプライチェーン 信頼性 評価 監査 依存関係 脆弱性 悪意あるコード","embed_threshold":0.78}
-{"lang":"ko","description":"공급망 보안, 저장소 신뢰 평가","vocabulary":"공급망 보안 저장소 신뢰 평가 의존성","embed_threshold":0.72}
-{"lang":"pl","description":"Bezpieczeństwo łańcucha dostaw, ocena wiarygodności repozytoriów","vocabulary":"łańcuch dostaw bezpieczeństwo zaufanie ocena audyt zależność podatność","embed_threshold":0.7}
-{"lang":"pt-br","description":"Segurança da cadeia de suprimentos, avaliação de confiança de repositórios","vocabulary":"cadeia suprimentos segurança confiança avaliação auditoria dependência vulnerabilidade","embed_threshold":0.77}
-{"lang":"ru","description":"Безопасность цепочки поставок, оценка доверия к репозиториям","vocabulary":"цепочка поставок безопасность доверие оценка аудит зависимость уязвимость","embed_threshold":0.79}
-{"lang":"th","description":"ความปลอดภัยห่วงโซ่อุปทาน การประเมินความน่าเชื่อถือของ repository","vocabulary":"ห่วงโซ่อุปทาน ความปลอดภัย ความไว้วางใจ ประเมิน ตรวจสอบ dependency ช่องโหว่","embed_threshold":0.77}
-{"lang":"tr","description":"Tedarik zinciri güvenliği, depo güven değerlendirmesi","vocabulary":"tedarik zinciri güvenlik güven değerlendirme denetim bağımlılık zafiyet","embed_threshold":0.82}
-{"lang":"uk","description":"Безпека ланцюга постачання, оцінка довіри до репозиторіїв","vocabulary":"ланцюг постачання безпека довіра оцінка аудит залежність вразливість","embed_threshold":0.8}
-{"lang":"vi","description":"Bảo mật chuỗi cung ứng, đánh giá tin cậy kho mã nguồn","vocabulary":"chuỗi cung ứng bảo mật tin cậy đánh giá kiểm toán phụ thuộc lỗ hổng","embed_threshold":0.69}
-{"lang":"zh","description":"供应链安全、仓库信任评估","vocabulary":"供应链 安全 信任 评估 审计 依赖 漏洞","embed_threshold":0.75}
+{"lang":"it","description":"Sicurezza supply chain, valutazione fiducia repository","vocabulary":"supply chain sicurezza repository fiducia valutazione dipendenza","embed_threshold":0.68}
+{"lang":"ja","description":"サプライチェーンセキュリティ、リポジトリの信頼性評価","vocabulary":"サプライチェーン 信頼性 評価 監査 依存関係 脆弱性 悪意あるコード","embed_threshold":0.76}
+{"lang":"ko","description":"공급망 보안, 저장소 신뢰 평가","vocabulary":"공급망 보안 저장소 신뢰 평가 의존성","embed_threshold":0.7}
+{"lang":"pl","description":"Bezpieczeństwo łańcucha dostaw, ocena wiarygodności repozytoriów","vocabulary":"łańcuch dostaw bezpieczeństwo zaufanie ocena audyt zależność podatność","embed_threshold":0.73}
+{"lang":"pt-br","description":"Segurança da cadeia de suprimentos, avaliação de confiança de repositórios","vocabulary":"cadeia suprimentos segurança confiança avaliação auditoria dependência vulnerabilidade","embed_threshold":0.75}
+{"lang":"ru","description":"Безопасность цепочки поставок, оценка доверия к репозиториям","vocabulary":"цепочка поставок безопасность доверие оценка аудит зависимость уязвимость","embed_threshold":0.77}
+{"lang":"th","description":"ความปลอดภัยห่วงโซ่อุปทาน การประเมินความน่าเชื่อถือของ repository","vocabulary":"ห่วงโซ่อุปทาน ความปลอดภัย ความไว้วางใจ ประเมิน ตรวจสอบ dependency ช่องโหว่","embed_threshold":0.76}
+{"lang":"tr","description":"Tedarik zinciri güvenliği, depo güven değerlendirmesi","vocabulary":"tedarik zinciri güvenlik güven değerlendirme denetim bağımlılık zafiyet","embed_threshold":0.8}
+{"lang":"uk","description":"Безпека ланцюга постачання, оцінка довіри до репозиторіїв","vocabulary":"ланцюг постачання безпека довіра оцінка аудит залежність вразливість","embed_threshold":0.79}
+{"lang":"vi","description":"Bảo mật chuỗi cung ứng, đánh giá tin cậy kho mã nguồn","vocabulary":"chuỗi cung ứng bảo mật tin cậy đánh giá kiểm toán phụ thuộc lỗ hổng","embed_threshold":0.67}
+{"lang":"zh","description":"供应链安全、仓库信任评估","vocabulary":"供应链 安全 信任 评估 审计 依赖 漏洞","embed_threshold":0.73}

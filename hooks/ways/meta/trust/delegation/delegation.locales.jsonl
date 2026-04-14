@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الاستخدام المسؤول لحسابات المستخدم","vocabulary":"تفويض حسابات مسؤولية استخدام نيابة صلاحيات","embed_threshold":0.62}
-{"lang":"de","description":"Verantwortungsvoller Umgang mit Konten, Werkzeugen und Infrastruktur des Menschen — E-Mail-Postfächer, Repos, APIs als geliehene Ressourcen","vocabulary":"Konto Postfach senden veröffentlichen erstellen löschen Zugriff Berechtigung geliehen Ressource verifizieren sicher ungesendet Konsequenzen stellvertretend","embed_threshold":0.63}
-{"lang":"es","description":"Usar cuentas del humano responsablemente — recursos prestados","vocabulary":"cuenta bandeja enviar publicar acceso permiso prestar consecuencias","embed_threshold":0.61}
-{"lang":"fr","description":"Utilisation responsable des comptes de l'utilisateur — ressources empruntées","vocabulary":"compte boîte de réception envoyer publier accès permission emprunt ressource","embed_threshold":0.59}
-{"lang":"hi","description":"मानव के खातों, उपकरणों और बुनियादी ढांचे का जिम्मेदार उपयोग","vocabulary":"खाता इनबॉक्स भेजें प्रकाशित बनाएं पहुंच अनुमति उधार संसाधन","embed_threshold":0.61}
+{"lang":"ar","description":"الاستخدام المسؤول لحسابات المستخدم","vocabulary":"تفويض حسابات مسؤولية استخدام نيابة صلاحيات","embed_threshold":0.64}
+{"lang":"de","description":"Verantwortungsvoller Umgang mit Konten, Werkzeugen und Infrastruktur des Menschen — E-Mail-Postfächer, Repos, APIs als geliehene Ressourcen","vocabulary":"Konto Postfach senden veröffentlichen erstellen löschen Zugriff Berechtigung geliehen Ressource verifizieren sicher ungesendet Konsequenzen stellvertretend","embed_threshold":0.62}
+{"lang":"es","description":"Usar cuentas del humano responsablemente — recursos prestados","vocabulary":"cuenta bandeja enviar publicar acceso permiso prestar consecuencias","embed_threshold":0.63}
+{"lang":"fr","description":"Utilisation responsable des comptes de l'utilisateur — ressources empruntées","vocabulary":"compte boîte de réception envoyer publier accès permission emprunt ressource","embed_threshold":0.63}
+{"lang":"hi","description":"मानव के खातों, उपकरणों और बुनियादी ढांचे का जिम्मेदार उपयोग","vocabulary":"खाता इनबॉक्स भेजें प्रकाशित बनाएं पहुंच अनुमति उधार संसाधन","embed_threshold":0.59}
 {"lang":"id","description":"Penggunaan akun, alat, dan infrastruktur manusia secara bertanggung jawab","vocabulary":"akun kotak masuk kirim publikasi buat akses izin pinjaman sumber daya","embed_threshold":0.57}
-{"lang":"it","description":"Uso responsabile degli account, strumenti e infrastruttura dell'utente","vocabulary":"account posta inviare pubblicare creare accesso permesso prestito risorsa","embed_threshold":0.58}
+{"lang":"it","description":"Uso responsabile degli account, strumenti e infrastruttura dell'utente","vocabulary":"account posta inviare pubblicare creare accesso permesso prestito risorsa","embed_threshold":0.61}
 {"lang":"ja","description":"ユーザーのアカウントを責任を持って使用する — 借りたリソース","vocabulary":"アカウント 受信トレイ 送信 公開 アクセス 権限 責任 委譲","embed_threshold":0.66}
 {"lang":"ko","description":"사용자의 계정, 도구, 인프라를 책임감 있게 사용하기","vocabulary":"계정 받은편지함 전송 게시 생성 접근 권한 빌린 리소스","embed_threshold":0.62}
-{"lang":"pl","description":"Odpowiedzialne korzystanie z kont użytkownika — pożyczone zasoby","vocabulary":"konto skrzynka wysłać opublikować dostęp uprawnienie pożyczony zasób","embed_threshold":0.57}
-{"lang":"pt-br","description":"Uso responsável das contas do usuário — recursos emprestados","vocabulary":"conta caixa de entrada enviar publicar acesso permissão empréstimo recurso","embed_threshold":0.54}
-{"lang":"ru","description":"Ответственное использование аккаунтов пользователя — заимствованные ресурсы","vocabulary":"аккаунт почтовый ящик отправить опубликовать доступ разрешение заимствование ресурс","embed_threshold":0.57}
-{"lang":"th","description":"การใช้บัญชีผู้ใช้อย่างรับผิดชอบ — ทรัพยากรที่ยืม","vocabulary":"บัญชี กล่องจดหมาย ส่ง เผยแพร่ เข้าถึง อนุญาต ยืม ทรัพยากร","embed_threshold":0.63}
-{"lang":"tr","description":"Kullanıcı hesaplarının sorumlu kullanımı — ödünç alınan kaynaklar","vocabulary":"hesap gelen kutusu gönderme yayınlama erişim izin ödünç kaynak","embed_threshold":0.58}
-{"lang":"uk","description":"Відповідальне використання облікових записів користувача — позичені ресурси","vocabulary":"обліковий запис вхідні надсилання публікація доступ дозвіл позика ресурс","embed_threshold":0.57}
-{"lang":"vi","description":"Sử dụng tài khoản người dùng có trách nhiệm — tài nguyên mượn","vocabulary":"tài khoản hộp thư gửi xuất bản truy cập quyền mượn tài nguyên","embed_threshold":0.54}
-{"lang":"zh","description":"负责任地使用用户账户 — 借用的资源","vocabulary":"账户 收件箱 发送 发布 访问 权限 借用 资源","embed_threshold":0.61}
+{"lang":"pl","description":"Odpowiedzialne korzystanie z kont użytkownika — pożyczone zasoby","vocabulary":"konto skrzynka wysłać opublikować dostęp uprawnienie pożyczony zasób","embed_threshold":0.66}
+{"lang":"pt-br","description":"Uso responsável das contas do usuário — recursos emprestados","vocabulary":"conta caixa de entrada enviar publicar acesso permissão empréstimo recurso","embed_threshold":0.6}
+{"lang":"ru","description":"Ответственное использование аккаунтов пользователя — заимствованные ресурсы","vocabulary":"аккаунт почтовый ящик отправить опубликовать доступ разрешение заимствование ресурс","embed_threshold":0.62}
+{"lang":"th","description":"การใช้บัญชีผู้ใช้อย่างรับผิดชอบ — ทรัพยากรที่ยืม","vocabulary":"บัญชี กล่องจดหมาย ส่ง เผยแพร่ เข้าถึง อนุญาต ยืม ทรัพยากร","embed_threshold":0.67}
+{"lang":"tr","description":"Kullanıcı hesaplarının sorumlu kullanımı — ödünç alınan kaynaklar","vocabulary":"hesap gelen kutusu gönderme yayınlama erişim izin ödünç kaynak","embed_threshold":0.64}
+{"lang":"uk","description":"Відповідальне використання облікових записів користувача — позичені ресурси","vocabulary":"обліковий запис вхідні надсилання публікація доступ дозвіл позика ресурс","embed_threshold":0.61}
+{"lang":"vi","description":"Sử dụng tài khoản người dùng có trách nhiệm — tài nguyên mượn","vocabulary":"tài khoản hộp thư gửi xuất bản truy cập quyền mượn tài nguyên","embed_threshold":0.64}
+{"lang":"zh","description":"负责任地使用用户账户 — 借用的资源","vocabulary":"账户 收件箱 发送 发布 访问 权限 借用 资源","embed_threshold":0.64}

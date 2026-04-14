@@ -1,17 +1,17 @@
-{"lang":"ar","description":"ترحيل قواعد البيانات","vocabulary":"ترحيل قاعدة بيانات مخطط تحديث هجرة تغيير","embed_threshold":0.62}
-{"lang":"de","description":"Datenbankmigrationen — Schemaänderungen, Rollbacks und Seed-Daten","vocabulary":"Migration Schema Tabelle Spalte Index Rollback Seed DDL Schemaänderung Datenbankmigration Rückführung","embed_threshold":0.56}
-{"lang":"es","description":"Migraciones de base de datos — esquema, versionado, rollback, datos","vocabulary":"migracion base-de-datos esquema versionado rollback ALTER tabla columna datos reversible","embed_threshold":0.57}
-{"lang":"fr","description":"Migrations de base de données, modifications de schéma, rollback","vocabulary":"migration schéma table colonne index rollback DDL modification","embed_threshold":0.57}
-{"lang":"hi","description":"डेटाबेस माइग्रेशन, स्कीमा बदलाव, टेबल बदलाव, रोलबैक","vocabulary":"माइग्रेशन स्कीमा टेबल बदलाव रोलबैक डेटाबेस ALTER","embed_threshold":0.62}
+{"lang":"ar","description":"ترحيل قواعد البيانات","vocabulary":"ترحيل قاعدة بيانات مخطط تحديث هجرة تغيير","embed_threshold":0.6}
+{"lang":"de","description":"Datenbankmigrationen — Schemaänderungen, Rollbacks und Seed-Daten","vocabulary":"Migration Schema Tabelle Spalte Index Rollback Seed DDL Schemaänderung Datenbankmigration Rückführung","embed_threshold":0.55}
+{"lang":"es","description":"Migraciones de base de datos — esquema, versionado, rollback, datos","vocabulary":"migracion base-de-datos esquema versionado rollback ALTER tabla columna datos reversible","embed_threshold":0.59}
+{"lang":"fr","description":"Migrations de base de données, modifications de schéma, rollback","vocabulary":"migration schéma table colonne index rollback DDL modification","embed_threshold":0.56}
+{"lang":"hi","description":"डेटाबेस माइग्रेशन, स्कीमा बदलाव, टेबल बदलाव, रोलबैक","vocabulary":"माइग्रेशन स्कीमा टेबल बदलाव रोलबैक डेटाबेस ALTER","embed_threshold":0.63}
 {"lang":"id","description":"Migrasi database, perubahan skema, perubahan tabel, rollback","vocabulary":"migrasi skema tabel perubahan rollback database ALTER","embed_threshold":0.6}
-{"lang":"it","description":"Migrazioni database, modifiche schema, alterazioni tabelle, rollback","vocabulary":"migrazione schema tabella modifica rollback database ALTER","embed_threshold":0.6}
-{"lang":"ja","description":"データベースマイグレーション、スキーマ変更、ロールバック","vocabulary":"マイグレーション スキーマ テーブル変更 カラム インデックス ロールバック DDL","embed_threshold":0.68}
+{"lang":"it","description":"Migrazioni database, modifiche schema, alterazioni tabelle, rollback","vocabulary":"migrazione schema tabella modifica rollback database ALTER","embed_threshold":0.62}
+{"lang":"ja","description":"データベースマイグレーション、スキーマ変更、ロールバック","vocabulary":"マイグレーション スキーマ テーブル変更 カラム インデックス ロールバック DDL","embed_threshold":0.7}
 {"lang":"ko","description":"데이터베이스 마이그레이션, 스키마 변경, 테이블 변경, 롤백","vocabulary":"마이그레이션 스키마 테이블 변경 롤백 데이터베이스 ALTER","embed_threshold":0.69}
-{"lang":"pl","description":"Migracje baz danych, zmiany schematu, rollback","vocabulary":"migracja schemat tabela kolumna indeks rollback DDL zmiana","embed_threshold":0.55}
+{"lang":"pl","description":"Migracje baz danych, zmiany schematu, rollback","vocabulary":"migracja schemat tabela kolumna indeks rollback DDL zmiana","embed_threshold":0.61}
 {"lang":"pt-br","description":"Migrações de banco de dados, alterações de schema, rollback","vocabulary":"migração schema tabela coluna índice rollback DDL alteração","embed_threshold":0.59}
-{"lang":"ru","description":"Миграции баз данных, изменения схемы, откат","vocabulary":"миграция схема таблица столбец индекс откат DDL изменение","embed_threshold":0.66}
-{"lang":"th","description":"การย้ายฐานข้อมูล การเปลี่ยนแปลงสคีมา การย้อนกลับ","vocabulary":"migration schema ตาราง คอลัมน์ index rollback DDL เปลี่ยนแปลง","embed_threshold":0.54}
-{"lang":"tr","description":"Veritabanı geçişleri, şema değişiklikleri, geri alma prosedürleri","vocabulary":"geçiş şema tablo sütun dizin geri alma DDL değişiklik","embed_threshold":0.57}
-{"lang":"uk","description":"Міграції бази даних, зміни схеми, процедури відкату","vocabulary":"міграція схема таблиця колонка індекс відкат DDL зміна","embed_threshold":0.61}
-{"lang":"vi","description":"Di chuyển cơ sở dữ liệu, thay đổi lược đồ, thủ tục rollback","vocabulary":"di chuyển lược đồ bảng cột chỉ mục rollback DDL thay đổi","embed_threshold":0.56}
-{"lang":"zh","description":"数据库迁移、模式变更、回滚程序","vocabulary":"迁移 模式 表 列 索引 回滚 DDL 变更","embed_threshold":0.67}
+{"lang":"ru","description":"Миграции баз данных, изменения схемы, откат","vocabulary":"миграция схема таблица столбец индекс откат DDL изменение","embed_threshold":0.64}
+{"lang":"th","description":"การย้ายฐานข้อมูล การเปลี่ยนแปลงสคีมา การย้อนกลับ","vocabulary":"migration schema ตาราง คอลัมน์ index rollback DDL เปลี่ยนแปลง","embed_threshold":0.58}
+{"lang":"tr","description":"Veritabanı geçişleri, şema değişiklikleri, geri alma prosedürleri","vocabulary":"geçiş şema tablo sütun dizin geri alma DDL değişiklik","embed_threshold":0.61}
+{"lang":"uk","description":"Міграції бази даних, зміни схеми, процедури відкату","vocabulary":"міграція схема таблиця колонка індекс відкат DDL зміна","embed_threshold":0.59}
+{"lang":"vi","description":"Di chuyển cơ sở dữ liệu, thay đổi lược đồ, thủ tục rollback","vocabulary":"di chuyển lược đồ bảng cột chỉ mục rollback DDL thay đổi","embed_threshold":0.55}
+{"lang":"zh","description":"数据库迁移、模式变更、回滚程序","vocabulary":"迁移 模式 表 列 索引 回滚 DDL 变更","embed_threshold":0.66}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"نظرة عامة على نظام الطرق","vocabulary":"طرق نظام معرفة توجيه إرشاد هيكل","embed_threshold":0.61}
-{"lang":"de","description":"Überblick über das Ways-System — wie Ways, Skills und Hooks zusammenhängen, Domänenorganisation, Matching-Modi","vocabulary":"Ways Way Wissen Anleitung Kontext einbinden Hook Trigger Matching semantisch Vokabular Domäne","embed_threshold":0.66}
-{"lang":"es","description":"Visión general del sistema de ways — ways, skills, hooks","vocabulary":"ways conocimiento guía contexto hook disparador coincidencia vocabulario","embed_threshold":0.66}
-{"lang":"fr","description":"Vue d'ensemble du système ways — comment ways, skills et hooks fonctionnent ensemble","vocabulary":"ways connaissance guidage contexte hook déclencheur correspondance domaine","embed_threshold":0.61}
+{"lang":"ar","description":"نظرة عامة على نظام الطرق","vocabulary":"طرق نظام معرفة توجيه إرشاد هيكل","embed_threshold":0.65}
+{"lang":"de","description":"Überblick über das Ways-System — wie Ways, Skills und Hooks zusammenhängen, Domänenorganisation, Matching-Modi","vocabulary":"Ways Way Wissen Anleitung Kontext einbinden Hook Trigger Matching semantisch Vokabular Domäne","embed_threshold":0.65}
+{"lang":"es","description":"Visión general del sistema de ways — ways, skills, hooks","vocabulary":"ways conocimiento guía contexto hook disparador coincidencia vocabulario","embed_threshold":0.64}
+{"lang":"fr","description":"Vue d'ensemble du système ways — comment ways, skills et hooks fonctionnent ensemble","vocabulary":"ways connaissance guidage contexte hook déclencheur correspondance domaine","embed_threshold":0.59}
 {"lang":"hi","description":"ways सिस्टम का अवलोकन — ways, skills और hooks कैसे जुड़े हैं","vocabulary":"ways ज्ञान मार्गदर्शन संदर्भ hook trigger मैचिंग डोमेन","embed_threshold":0.58}
-{"lang":"id","description":"Gambaran sistem ways — bagaimana ways, skills, dan hooks saling terhubung","vocabulary":"ways pengetahuan panduan konteks hook pemicu pencocokan domain","embed_threshold":0.55}
-{"lang":"it","description":"Panoramica del sistema ways — come ways, skills e hooks si collegano","vocabulary":"ways conoscenza guida contesto hook trigger corrispondenza dominio","embed_threshold":0.57}
-{"lang":"ja","description":"waysシステムの概要 — way、スキル、フックの仕組み","vocabulary":"ways ナレッジ ガイダンス コンテキスト フック トリガー マッチング","embed_threshold":0.62}
-{"lang":"ko","description":"ways 시스템 개요 — ways, skills, hooks의 관계와 도메인 구성","vocabulary":"ways 지식 안내 컨텍스트 hook 트리거 매칭 도메인","embed_threshold":0.64}
-{"lang":"pl","description":"Przegląd systemu ways — jak ways, skills i hooks współpracują","vocabulary":"ways wiedza wskazówki kontekst hook wyzwalacz dopasowanie domena","embed_threshold":0.64}
-{"lang":"pt-br","description":"Visão geral do sistema ways — como ways, skills e hooks funcionam juntos","vocabulary":"ways conhecimento orientação contexto hook gatilho correspondência domínio","embed_threshold":0.58}
-{"lang":"ru","description":"Обзор системы ways — как ways, skills и hooks связаны между собой","vocabulary":"ways знания руководство контекст hook триггер сопоставление домен","embed_threshold":0.6}
-{"lang":"th","description":"ภาพรวมระบบ ways — ways, skills และ hooks ทำงานร่วมกันอย่างไร","vocabulary":"ways ความรู้ แนวทาง บริบท hook ทริกเกอร์ จับคู่ โดเมน","embed_threshold":0.62}
-{"lang":"tr","description":"Ways sistemine genel bakış — ways, skills ve hooks nasıl birlikte çalışır","vocabulary":"ways bilgi rehber bağlam hook tetikleyici eşleşme alan","embed_threshold":0.58}
-{"lang":"uk","description":"Огляд системи ways — як ways, skills та hooks працюють разом","vocabulary":"ways знання керівництво контекст hook тригер відповідність домен","embed_threshold":0.61}
-{"lang":"vi","description":"Tổng quan hệ thống ways — cách ways, skills và hooks hoạt động cùng nhau","vocabulary":"ways kiến thức hướng dẫn ngữ cảnh hook kích hoạt khớp miền","embed_threshold":0.6}
-{"lang":"zh","description":"Ways 系统概览 — ways、skills 和 hooks 如何协同工作","vocabulary":"ways 知识 指导 上下文 hook 触发 匹配 领域","embed_threshold":0.6}
+{"lang":"id","description":"Gambaran sistem ways — bagaimana ways, skills, dan hooks saling terhubung","vocabulary":"ways pengetahuan panduan konteks hook pemicu pencocokan domain","embed_threshold":0.57}
+{"lang":"it","description":"Panoramica del sistema ways — come ways, skills e hooks si collegano","vocabulary":"ways conoscenza guida contesto hook trigger corrispondenza dominio","embed_threshold":0.56}
+{"lang":"ja","description":"waysシステムの概要 — way、スキル、フックの仕組み","vocabulary":"ways ナレッジ ガイダンス コンテキスト フック トリガー マッチング","embed_threshold":0.6}
+{"lang":"ko","description":"ways 시스템 개요 — ways, skills, hooks의 관계와 도메인 구성","vocabulary":"ways 지식 안내 컨텍스트 hook 트리거 매칭 도메인","embed_threshold":0.62}
+{"lang":"pl","description":"Przegląd systemu ways — jak ways, skills i hooks współpracują","vocabulary":"ways wiedza wskazówki kontekst hook wyzwalacz dopasowanie domena","embed_threshold":0.62}
+{"lang":"pt-br","description":"Visão geral do sistema ways — como ways, skills e hooks funcionam juntos","vocabulary":"ways conhecimento orientação contexto hook gatilho correspondência domínio","embed_threshold":0.61}
+{"lang":"ru","description":"Обзор системы ways — как ways, skills и hooks связаны между собой","vocabulary":"ways знания руководство контекст hook триггер сопоставление домен","embed_threshold":0.58}
+{"lang":"th","description":"ภาพรวมระบบ ways — ways, skills และ hooks ทำงานร่วมกันอย่างไร","vocabulary":"ways ความรู้ แนวทาง บริบท hook ทริกเกอร์ จับคู่ โดเมน","embed_threshold":0.61}
+{"lang":"tr","description":"Ways sistemine genel bakış — ways, skills ve hooks nasıl birlikte çalışır","vocabulary":"ways bilgi rehber bağlam hook tetikleyici eşleşme alan","embed_threshold":0.59}
+{"lang":"uk","description":"Огляд системи ways — як ways, skills та hooks працюють разом","vocabulary":"ways знання керівництво контекст hook тригер відповідність домен","embed_threshold":0.59}
+{"lang":"vi","description":"Tổng quan hệ thống ways — cách ways, skills và hooks hoạt động cùng nhau","vocabulary":"ways kiến thức hướng dẫn ngữ cảnh hook kích hoạt khớp miền","embed_threshold":0.59}
+{"lang":"zh","description":"Ways 系统概览 — ways、skills 和 hooks 如何协同工作","vocabulary":"ways 知识 指导 上下文 hook 触发 匹配 领域","embed_threshold":0.64}

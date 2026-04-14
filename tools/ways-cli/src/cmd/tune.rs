@@ -436,7 +436,7 @@ fn tune_way(
                 "--query",
                 &query,
                 "--threshold",
-                "-1",
+                "0.0",
             ])
             .output()
             .with_context(|| format!("way-embed match for {}/{}", way_id, entry.lang))?;
@@ -484,20 +484,41 @@ fn tune_way(
             }
         }
 
-        let best_self = self_scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        // Treat all same-way stubs as positives (cross-lingual equivalence):
+        // the threshold must admit the *tightest* positive, so use min not max.
+        let min_self = self_scores
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min);
+        let best_self = if min_self.is_finite() {
+            min_self
+        } else {
+            f64::NEG_INFINITY
+        };
         let best_non_self = non_self_entries
             .first()
             .map(|(_, s)| *s)
             .unwrap_or(f64::NEG_INFINITY);
 
-        let gap = if best_non_self > f64::NEG_INFINITY {
+        let gap = if best_non_self > f64::NEG_INFINITY && best_self > f64::NEG_INFINITY {
             best_self - best_non_self
-        } else {
+        } else if best_self > f64::NEG_INFINITY {
             best_self // no confusers at all = perfect discrimination
+        } else {
+            0.0
         };
 
-        let optimal = if best_non_self > f64::NEG_INFINITY {
-            (best_non_self + margin).min(best_self - 0.01)
+        let optimal = if best_self > f64::NEG_INFINITY && best_non_self > f64::NEG_INFINITY {
+            // Midpoint if there's a clean gap; otherwise fall back to
+            // tightest positive minus margin so we still catch all stubs.
+            if best_self > best_non_self + 2.0 * margin {
+                (best_self + best_non_self) / 2.0
+            } else {
+                (best_self - margin).max(best_non_self + margin / 2.0)
+            }
+        } else if best_self > f64::NEG_INFINITY {
+            // No confusers — just below tightest positive.
+            best_self - margin
         } else {
             0.15
         };

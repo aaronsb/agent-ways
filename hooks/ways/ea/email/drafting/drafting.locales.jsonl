@@ -1,17 +1,17 @@
-{"lang":"ar","description":"صياغة الردود على رسائل البريد الإلكتروني","vocabulary":"صياغة رد بريد إلكتروني كتابة رسالة مسودة","embed_threshold":0.68}
-{"lang":"de","description":"E-Mail-Entwürfe schreiben, Schreibstil kalibrieren, Antworten mit korrektem Threading erstellen","vocabulary":"Entwurf Antwort verfassen E-Mail schreiben Nachricht Tonfall Stil Thread Anhang formulieren","embed_threshold":0.7}
-{"lang":"es","description":"Redactar respuestas de correo, estilo de escritura, borradores de email","vocabulary":"borrador respuesta redactar correo escribir mensaje tono estilo hilo","embed_threshold":0.76}
-{"lang":"fr","description":"Rédaction de brouillons d'email, calibrage du style d'écriture, réponses","vocabulary":"brouillon réponse rédiger email écrire message ton style fil","embed_threshold":0.79}
-{"lang":"hi","description":"ईमेल जवाब का ड्राफ्ट, लेखन शैली, ड्राफ्ट बनाना","vocabulary":"ड्राफ्ट जवाब लिखना ईमेल संदेश टोन शैली थ्रेड","embed_threshold":0.74}
-{"lang":"id","description":"Menyusun draf balasan email, kalibrasi gaya penulisan, draf","vocabulary":"draf balasan menulis email pesan nada gaya utas","embed_threshold":0.74}
-{"lang":"it","description":"Bozze di risposte email, calibrazione dello stile di scrittura","vocabulary":"bozza risposta scrivere email messaggio tono stile thread","embed_threshold":0.71}
-{"lang":"ja","description":"メールの返信作成、文体調整、下書き","vocabulary":"メール下書き 返信 作成 文体 トーン スレッド 文章","embed_threshold":0.81}
-{"lang":"ko","description":"이메일 답장 초안 작성, 글쓰기 스타일 조정, 초안","vocabulary":"초안 답장 작성 이메일 메시지 톤 스타일 스레드","embed_threshold":0.73}
-{"lang":"pl","description":"Tworzenie szkiców odpowiedzi na e-maile, kalibracja stylu pisania","vocabulary":"szkic odpowiedź redagowanie e-mail pisanie wiadomość ton styl wątek","embed_threshold":0.67}
-{"lang":"pt-br","description":"Redigir respostas de e-mail, calibrar estilo de escrita, criar rascunhos","vocabulary":"rascunho resposta redigir e-mail escrever mensagem tom estilo conversa","embed_threshold":0.72}
+{"lang":"ar","description":"صياغة الردود على رسائل البريد الإلكتروني","vocabulary":"صياغة رد بريد إلكتروني كتابة رسالة مسودة","embed_threshold":0.69}
+{"lang":"de","description":"E-Mail-Entwürfe schreiben, Schreibstil kalibrieren, Antworten mit korrektem Threading erstellen","vocabulary":"Entwurf Antwort verfassen E-Mail schreiben Nachricht Tonfall Stil Thread Anhang formulieren","embed_threshold":0.75}
+{"lang":"es","description":"Redactar respuestas de correo, estilo de escritura, borradores de email","vocabulary":"borrador respuesta redactar correo escribir mensaje tono estilo hilo","embed_threshold":0.78}
+{"lang":"fr","description":"Rédaction de brouillons d'email, calibrage du style d'écriture, réponses","vocabulary":"brouillon réponse rédiger email écrire message ton style fil","embed_threshold":0.77}
+{"lang":"hi","description":"ईमेल जवाब का ड्राफ्ट, लेखन शैली, ड्राफ्ट बनाना","vocabulary":"ड्राफ्ट जवाब लिखना ईमेल संदेश टोन शैली थ्रेड","embed_threshold":0.72}
+{"lang":"id","description":"Menyusun draf balasan email, kalibrasi gaya penulisan, draf","vocabulary":"draf balasan menulis email pesan nada gaya utas","embed_threshold":0.72}
+{"lang":"it","description":"Bozze di risposte email, calibrazione dello stile di scrittura","vocabulary":"bozza risposta scrivere email messaggio tono stile thread","embed_threshold":0.74}
+{"lang":"ja","description":"メールの返信作成、文体調整、下書き","vocabulary":"メール下書き 返信 作成 文体 トーン スレッド 文章","embed_threshold":0.79}
+{"lang":"ko","description":"이메일 답장 초안 작성, 글쓰기 스타일 조정, 초안","vocabulary":"초안 답장 작성 이메일 메시지 톤 스타일 스레드","embed_threshold":0.74}
+{"lang":"pl","description":"Tworzenie szkiców odpowiedzi na e-maile, kalibracja stylu pisania","vocabulary":"szkic odpowiedź redagowanie e-mail pisanie wiadomość ton styl wątek","embed_threshold":0.72}
+{"lang":"pt-br","description":"Redigir respostas de e-mail, calibrar estilo de escrita, criar rascunhos","vocabulary":"rascunho resposta redigir e-mail escrever mensagem tom estilo conversa","embed_threshold":0.73}
 {"lang":"ru","description":"Составление черновиков ответов на электронные письма, калибровка стиля написания","vocabulary":"черновик ответ составление электронная почта написание сообщение тон стиль цепочка","embed_threshold":0.75}
-{"lang":"th","description":"ร่างตอบอีเมล ปรับแต่งสไตล์การเขียน สร้างแบบร่าง","vocabulary":"ร่าง ตอบ อีเมล เขียน ข้อความ โทน สไตล์ เธรด","embed_threshold":0.77}
-{"lang":"tr","description":"E-posta yanıtı taslağı oluşturma, yazım stili kalibrasyonu","vocabulary":"taslak yanıt e-posta yazmak mesaj ton stil konu zinciri","embed_threshold":0.72}
-{"lang":"uk","description":"Створення чернеток відповідей на електронні листи, калібрування стилю","vocabulary":"чернетка відповідь електронна пошта написання повідомлення тон стиль ланцюжок","embed_threshold":0.7}
-{"lang":"vi","description":"Soạn thảo trả lời email, điều chỉnh phong cách viết, tạo bản nháp","vocabulary":"nháp trả lời email viết tin nhắn giọng phong cách chuỗi","embed_threshold":0.73}
-{"lang":"zh","description":"撰写邮件回复草稿，校准写作风格，保持正确的邮件线程","vocabulary":"草稿 回复 撰写 邮件 写作 语气 风格 线程 附件","embed_threshold":0.77}
+{"lang":"th","description":"ร่างตอบอีเมล ปรับแต่งสไตล์การเขียน สร้างแบบร่าง","vocabulary":"ร่าง ตอบ อีเมล เขียน ข้อความ โทน สไตล์ เธรด","embed_threshold":0.76}
+{"lang":"tr","description":"E-posta yanıtı taslağı oluşturma, yazım stili kalibrasyonu","vocabulary":"taslak yanıt e-posta yazmak mesaj ton stil konu zinciri","embed_threshold":0.71}
+{"lang":"uk","description":"Створення чернеток відповідей на електронні листи, калібрування стилю","vocabulary":"чернетка відповідь електронна пошта написання повідомлення тон стиль ланцюжок","embed_threshold":0.71}
+{"lang":"vi","description":"Soạn thảo trả lời email, điều chỉnh phong cách viết, tạo bản nháp","vocabulary":"nháp trả lời email viết tin nhắn giọng phong cách chuỗi","embed_threshold":0.75}
+{"lang":"zh","description":"撰写邮件回复草稿，校准写作风格，保持正确的邮件线程","vocabulary":"草稿 回复 撰写 邮件 写作 语气 风格 线程 附件","embed_threshold":0.76}

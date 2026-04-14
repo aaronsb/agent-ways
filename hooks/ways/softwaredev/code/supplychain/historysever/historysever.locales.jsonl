@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تسطيح تاريخ Git وقطع السجلات","vocabulary":"تاريخ Git تسطيح قطع سجلات تنظيف","embed_threshold":0.79}
-{"lang":"de","description":"Git-Historienbereinigung, Fork-Trennung, BFG-Cleanup, Geheimnisse aus Git-Historie entfernen","vocabulary":"Orphan-Branch Historie abflachen Fork trennen BFG git-reflog gc prune eigenständig Fork löschen Historienbereinigung","embed_threshold":0.65}
-{"lang":"es","description":"Aplanamiento de historial git — squash, rebase, limpieza de ramas","vocabulary":"historial git aplanar squash rebase limpiar rama commits condensar simplificar","embed_threshold":0.55}
+{"lang":"ar","description":"تسطيح تاريخ Git وقطع السجلات","vocabulary":"تاريخ Git تسطيح قطع سجلات تنظيف","embed_threshold":0.78}
+{"lang":"de","description":"Git-Historienbereinigung, Fork-Trennung, BFG-Cleanup, Geheimnisse aus Git-Historie entfernen","vocabulary":"Orphan-Branch Historie abflachen Fork trennen BFG git-reflog gc prune eigenständig Fork löschen Historienbereinigung","embed_threshold":0.68}
+{"lang":"es","description":"Aplanamiento de historial git — squash, rebase, limpieza de ramas","vocabulary":"historial git aplanar squash rebase limpiar rama commits condensar simplificar","embed_threshold":0.54}
 {"lang":"fr","description":"Aplatissement de l'historique git, séparation de fork, nettoyage BFG","vocabulary":"orphan branche historique aplatissement bfg reflog gc prune nettoyage","embed_threshold":0.6}
-{"lang":"hi","description":"Git इतिहास फ्लैटनिंग, फोर्क सेवरिंग, BFG क्लीनअप","vocabulary":"git इतिहास फ्लैटन फोर्क सेवर BFG क्लीनअप रिबेस स्क्वैश","embed_threshold":0.69}
-{"lang":"id","description":"Perataan riwayat Git, pemutusan fork, pembersihan BFG","vocabulary":"git riwayat ratakan fork putus BFG pembersihan rebase squash","embed_threshold":0.65}
-{"lang":"it","description":"Appiattimento cronologia Git, separazione fork, pulizia BFG","vocabulary":"git cronologia appiattire fork separare BFG pulizia rebase squash","embed_threshold":0.56}
-{"lang":"ja","description":"git履歴のフラット化、フォーク切断、BFGクリーンアップ","vocabulary":"孤立ブランチ 履歴切断 フラット化 bfg reflog gc prune","embed_threshold":0.65}
-{"lang":"ko","description":"Git 이력 평탄화, 포크 분리, BFG 정리","vocabulary":"git 이력 평탄화 포크 분리 BFG 정리 리베이스 스쿼시","embed_threshold":0.64}
-{"lang":"pl","description":"Spłaszczanie historii git, odcinanie forka, czyszczenie BFG","vocabulary":"orphan branch historia spłaszczenie bfg reflog gc prune czyszczenie","embed_threshold":0.67}
-{"lang":"pt-br","description":"Achatamento do histórico git, separação de fork, limpeza BFG","vocabulary":"orphan branch histórico achatamento bfg reflog gc prune limpeza","embed_threshold":0.63}
+{"lang":"hi","description":"Git इतिहास फ्लैटनिंग, फोर्क सेवरिंग, BFG क्लीनअप","vocabulary":"git इतिहास फ्लैटन फोर्क सेवर BFG क्लीनअप रिबेस स्क्वैश","embed_threshold":0.68}
+{"lang":"id","description":"Perataan riwayat Git, pemutusan fork, pembersihan BFG","vocabulary":"git riwayat ratakan fork putus BFG pembersihan rebase squash","embed_threshold":0.64}
+{"lang":"it","description":"Appiattimento cronologia Git, separazione fork, pulizia BFG","vocabulary":"git cronologia appiattire fork separare BFG pulizia rebase squash","embed_threshold":0.59}
+{"lang":"ja","description":"git履歴のフラット化、フォーク切断、BFGクリーンアップ","vocabulary":"孤立ブランチ 履歴切断 フラット化 bfg reflog gc prune","embed_threshold":0.66}
+{"lang":"ko","description":"Git 이력 평탄화, 포크 분리, BFG 정리","vocabulary":"git 이력 평탄화 포크 분리 BFG 정리 리베이스 스쿼시","embed_threshold":0.68}
+{"lang":"pl","description":"Spłaszczanie historii git, odcinanie forka, czyszczenie BFG","vocabulary":"orphan branch historia spłaszczenie bfg reflog gc prune czyszczenie","embed_threshold":0.68}
+{"lang":"pt-br","description":"Achatamento do histórico git, separação de fork, limpeza BFG","vocabulary":"orphan branch histórico achatamento bfg reflog gc prune limpeza","embed_threshold":0.61}
 {"lang":"ru","description":"Выравнивание истории git, отсечение форка, очистка BFG","vocabulary":"orphan ветка история выравнивание bfg reflog gc prune очистка","embed_threshold":0.7}
-{"lang":"th","description":"ทำให้ประวัติ Git แบน ตัด fork ทำความสะอาดด้วย BFG","vocabulary":"orphan branch ประวัติ แบน bfg reflog gc prune ทำความสะอาด","embed_threshold":0.65}
-{"lang":"tr","description":"Git geçmişi düzleştirme, fork ayırma, BFG temizleme","vocabulary":"orphan dal geçmiş düzleştirme bfg reflog gc prune temizleme","embed_threshold":0.58}
-{"lang":"uk","description":"Вирівнювання історії Git, відокремлення fork, очищення BFG","vocabulary":"orphan гілка історія вирівнювання bfg reflog gc prune очищення","embed_threshold":0.64}
-{"lang":"vi","description":"Làm phẳng lịch sử Git, tách fork, dọn dẹp BFG","vocabulary":"orphan branch lịch sử làm phẳng bfg reflog gc prune dọn dẹp","embed_threshold":0.65}
-{"lang":"zh","description":"Git 历史扁平化、fork 切断、BFG 清理","vocabulary":"orphan 分支 历史 扁平化 bfg reflog gc prune 清理","embed_threshold":0.68}
+{"lang":"th","description":"ทำให้ประวัติ Git แบน ตัด fork ทำความสะอาดด้วย BFG","vocabulary":"orphan branch ประวัติ แบน bfg reflog gc prune ทำความสะอาด","embed_threshold":0.63}
+{"lang":"tr","description":"Git geçmişi düzleştirme, fork ayırma, BFG temizleme","vocabulary":"orphan dal geçmiş düzleştirme bfg reflog gc prune temizleme","embed_threshold":0.57}
+{"lang":"uk","description":"Вирівнювання історії Git, відокремлення fork, очищення BFG","vocabulary":"orphan гілка історія вирівнювання bfg reflog gc prune очищення","embed_threshold":0.66}
+{"lang":"vi","description":"Làm phẳng lịch sử Git, tách fork, dọn dẹp BFG","vocabulary":"orphan branch lịch sử làm phẳng bfg reflog gc prune dọn dẹp","embed_threshold":0.63}
+{"lang":"zh","description":"Git 历史扁平化、fork 切断、BFG 清理","vocabulary":"orphan 分支 历史 扁平化 bfg reflog gc prune 清理","embed_threshold":0.67}

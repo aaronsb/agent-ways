@@ -1,17 +1,17 @@
-{"lang":"ar","description":"أتمتة دفاتر التشغيل وإجراءات العمل القياسية","vocabulary":"دفتر تشغيل أتمتة إجراءات قياسية تشغيل آلي","embed_threshold":0.66}
-{"lang":"de","description":"Runbook-Automatisierung, ausführbare Playbooks, SOPs als Code, Betriebsverfahren","vocabulary":"Runbook Playbook SOP Betriebsverfahren Automatisierung ausführbar Checkliste Schritt-für-Schritt Betriebsablauf","embed_threshold":0.57}
-{"lang":"es","description":"Automatización de runbooks, playbooks ejecutables, procedimientos operativos","vocabulary":"runbook playbook procedimiento operativo automatización guía operacional","embed_threshold":0.55}
-{"lang":"fr","description":"Automatisation de runbooks, guides exécutables, procédures opérationnelles","vocabulary":"runbook guide procédure opérationnel automatisation exécutable liste de contrôle étapes","embed_threshold":0.59}
-{"lang":"hi","description":"रनबुक ऑटोमेशन, एक्जीक्यूटेबल प्लेबुक, ऑपरेशनल प्रक्रियाएं","vocabulary":"रनबुक प्लेबुक SOP प्रक्रिया ऑटोमेशन चेकलिस्ट ऑपरेशनल स्टेप","embed_threshold":0.63}
+{"lang":"ar","description":"أتمتة دفاتر التشغيل وإجراءات العمل القياسية","vocabulary":"دفتر تشغيل أتمتة إجراءات قياسية تشغيل آلي","embed_threshold":0.64}
+{"lang":"de","description":"Runbook-Automatisierung, ausführbare Playbooks, SOPs als Code, Betriebsverfahren","vocabulary":"Runbook Playbook SOP Betriebsverfahren Automatisierung ausführbar Checkliste Schritt-für-Schritt Betriebsablauf","embed_threshold":0.56}
+{"lang":"es","description":"Automatización de runbooks, playbooks ejecutables, procedimientos operativos","vocabulary":"runbook playbook procedimiento operativo automatización guía operacional","embed_threshold":0.58}
+{"lang":"fr","description":"Automatisation de runbooks, guides exécutables, procédures opérationnelles","vocabulary":"runbook guide procédure opérationnel automatisation exécutable liste de contrôle étapes","embed_threshold":0.6}
+{"lang":"hi","description":"रनबुक ऑटोमेशन, एक्जीक्यूटेबल प्लेबुक, ऑपरेशनल प्रक्रियाएं","vocabulary":"रनबुक प्लेबुक SOP प्रक्रिया ऑटोमेशन चेकलिस्ट ऑपरेशनल स्टेप","embed_threshold":0.61}
 {"lang":"id","description":"Otomatisasi runbook, playbook yang dapat dieksekusi, prosedur operasional","vocabulary":"runbook playbook SOP prosedur otomatisasi daftar periksa operasional langkah","embed_threshold":0.63}
-{"lang":"it","description":"Automazione runbook, playbook eseguibili, procedure operative","vocabulary":"runbook playbook SOP procedura automazione checklist operativo passaggi","embed_threshold":0.58}
-{"lang":"ja","description":"ランブック自動化、実行可能な手順書、標準作業手順書","vocabulary":"ランブック 手順書 運用手順 自動化 プレイブック 標準作業手順","embed_threshold":0.66}
-{"lang":"ko","description":"런북 자동화, 실행 가능한 플레이북, 운영 절차","vocabulary":"런북 플레이북 SOP 절차 자동화 체크리스트 운영 단계","embed_threshold":0.58}
-{"lang":"pl","description":"Automatyzacja runbooków, wykonywalne podręczniki, procedury operacyjne","vocabulary":"runbook podręcznik procedura operacyjna automatyzacja wykonywalny lista kontrolna kroki","embed_threshold":0.57}
-{"lang":"pt-br","description":"Automação de runbooks, playbooks executáveis, procedimentos operacionais","vocabulary":"runbook playbook procedimento operacional automação executável checklist passos","embed_threshold":0.58}
-{"lang":"ru","description":"Автоматизация рабочих инструкций, исполняемые плейбуки, операционные процедуры","vocabulary":"рабочая инструкция плейбук процедура операционная автоматизация исполняемый чек-лист шаги","embed_threshold":0.65}
-{"lang":"th","description":"การทำงานอัตโนมัติของ Runbook ขั้นตอนปฏิบัติการมาตรฐาน","vocabulary":"runbook คู่มือ SOP ขั้นตอน อัตโนมัติ รายการตรวจสอบ ปฏิบัติการ","embed_threshold":0.64}
-{"lang":"tr","description":"Runbook otomasyonu, çalıştırılabilir prosedürler, operasyonel SOP'lar","vocabulary":"runbook prosedür SOP otomasyon çalıştırılabilir kontrol listesi operasyonel","embed_threshold":0.59}
-{"lang":"uk","description":"Автоматизація ранбуків, виконувані процедури, операційні SOP","vocabulary":"ранбук процедура SOP автоматизація виконуваний чекліст операційний","embed_threshold":0.59}
-{"lang":"vi","description":"Tự động hóa runbook, quy trình thực thi, SOP vận hành","vocabulary":"runbook quy trình SOP tự động thực thi danh sách kiểm tra vận hành","embed_threshold":0.62}
-{"lang":"zh","description":"运维手册自动化、可执行操作手册、标准操作流程","vocabulary":"运维手册 流程 SOP 自动化 可执行 检查清单 操作","embed_threshold":0.67}
+{"lang":"it","description":"Automazione runbook, playbook eseguibili, procedure operative","vocabulary":"runbook playbook SOP procedura automazione checklist operativo passaggi","embed_threshold":0.6}
+{"lang":"ja","description":"ランブック自動化、実行可能な手順書、標準作業手順書","vocabulary":"ランブック 手順書 運用手順 自動化 プレイブック 標準作業手順","embed_threshold":0.64}
+{"lang":"ko","description":"런북 자동화, 실행 가능한 플레이북, 운영 절차","vocabulary":"런북 플레이북 SOP 절차 자동화 체크리스트 운영 단계","embed_threshold":0.57}
+{"lang":"pl","description":"Automatyzacja runbooków, wykonywalne podręczniki, procedury operacyjne","vocabulary":"runbook podręcznik procedura operacyjna automatyzacja wykonywalny lista kontrolna kroki","embed_threshold":0.61}
+{"lang":"pt-br","description":"Automação de runbooks, playbooks executáveis, procedimentos operacionais","vocabulary":"runbook playbook procedimento operacional automação executável checklist passos","embed_threshold":0.57}
+{"lang":"ru","description":"Автоматизация рабочих инструкций, исполняемые плейбуки, операционные процедуры","vocabulary":"рабочая инструкция плейбук процедура операционная автоматизация исполняемый чек-лист шаги","embed_threshold":0.66}
+{"lang":"th","description":"การทำงานอัตโนมัติของ Runbook ขั้นตอนปฏิบัติการมาตรฐาน","vocabulary":"runbook คู่มือ SOP ขั้นตอน อัตโนมัติ รายการตรวจสอบ ปฏิบัติการ","embed_threshold":0.67}
+{"lang":"tr","description":"Runbook otomasyonu, çalıştırılabilir prosedürler, operasyonel SOP'lar","vocabulary":"runbook prosedür SOP otomasyon çalıştırılabilir kontrol listesi operasyonel","embed_threshold":0.58}
+{"lang":"uk","description":"Автоматизація ранбуків, виконувані процедури, операційні SOP","vocabulary":"ранбук процедура SOP автоматизація виконуваний чекліст операційний","embed_threshold":0.6}
+{"lang":"vi","description":"Tự động hóa runbook, quy trình thực thi, SOP vận hành","vocabulary":"runbook quy trình SOP tự động thực thi danh sách kiểm tra vận hành","embed_threshold":0.6}
+{"lang":"zh","description":"运维手册自动化、可执行操作手册、标准操作流程","vocabulary":"运维手册 流程 SOP 自动化 可执行 检查清单 操作","embed_threshold":0.66}

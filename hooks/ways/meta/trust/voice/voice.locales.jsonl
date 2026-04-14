@@ -1,17 +1,17 @@
-{"lang":"ar","description":"اختيار الأسلوب المناسب في التواصل","vocabulary":"صوت أسلوب نبرة تواصل كتابة لهجة","embed_threshold":0.69}
-{"lang":"de","description":"Wessen Stimme beim Schreiben über menschliche Kommunikationskanäle verwenden — Ghostwriting, namentlich, kollaborative Modi","vocabulary":"Stimme Zuschreibung Ghostwriting Tonfall Stil Identität Modus namentlich Inhalt Perspektive Empfänger geprüft freigegeben","embed_threshold":0.63}
-{"lang":"es","description":"Elegir la voz apropiada para canales de comunicación","vocabulary":"voz atribución ghostwrite tono estilo identidad modo acreditado","embed_threshold":0.56}
-{"lang":"fr","description":"Choisir la voix appropriée pour les canaux de communication","vocabulary":"voix attribution écriture fantôme ton style identité mode","embed_threshold":0.61}
-{"lang":"hi","description":"मानव संचार चैनलों के माध्यम से लिखते समय किसकी आवाज़ का उपयोग करें","vocabulary":"आवाज़ आरोपण घोस्टराइट टोन शैली पहचान मोड","embed_threshold":0.68}
-{"lang":"id","description":"Memilih suara siapa saat menulis melalui saluran komunikasi manusia","vocabulary":"suara atribusi ghostwrite nada gaya identitas mode","embed_threshold":0.58}
-{"lang":"it","description":"Scegliere la voce da usare quando si scrive attraverso canali di comunicazione umani","vocabulary":"voce attribuzione ghostwrite tono stile identità modalità","embed_threshold":0.6}
-{"lang":"ja","description":"コミュニケーションチャネルでの声の使い分け","vocabulary":"声 帰属 代筆 トーン スタイル 名義 モード","embed_threshold":0.68}
-{"lang":"ko","description":"인간 커뮤니케이션 채널을 통해 글을 쓸 때 누구의 목소리를 사용할지","vocabulary":"목소리 귀속 대필 톤 스타일 정체성 모드","embed_threshold":0.73}
-{"lang":"pl","description":"Wybór odpowiedniego głosu dla kanałów komunikacji — ghostwriting, podpisany, współpraca","vocabulary":"głos atrybucja ghostwriting ton styl tożsamość tryb podpisany","embed_threshold":0.6}
-{"lang":"pt-br","description":"Escolher a voz adequada para canais de comunicação — ghostwriting, atribuído, colaborativo","vocabulary":"voz atribuição ghostwriting tom estilo identidade modo creditado","embed_threshold":0.55}
-{"lang":"ru","description":"Выбор голоса для коммуникационных каналов — гострайтинг, авторство, совместный режим","vocabulary":"голос атрибуция гострайтинг тон стиль идентичность режим авторство","embed_threshold":0.59}
-{"lang":"th","description":"เลือกน้ำเสียงที่เหมาะสมสำหรับช่องทางการสื่อสาร","vocabulary":"เสียง การระบุตัว ghostwriting โทน สไตล์ ตัวตน โหมด","embed_threshold":0.57}
-{"lang":"tr","description":"İletişim kanalları için uygun sesi seçme","vocabulary":"ses atıf ghostwriting ton stil kimlik mod","embed_threshold":0.55}
-{"lang":"uk","description":"Вибір відповідного голосу для каналів комунікації","vocabulary":"голос атрибуція ghostwriting тон стиль ідентичність режим","embed_threshold":0.55}
-{"lang":"vi","description":"Chọn giọng phù hợp cho các kênh giao tiếp","vocabulary":"giọng ghi nhận ghostwriting tông phong cách danh tính chế độ","embed_threshold":0.56}
-{"lang":"zh","description":"为通信渠道选择合适的声音","vocabulary":"声音 署名 代笔 语气 风格 身份 模式","embed_threshold":0.66}
+{"lang":"ar","description":"اختيار الأسلوب المناسب في التواصل","vocabulary":"صوت أسلوب نبرة تواصل كتابة لهجة","embed_threshold":0.67}
+{"lang":"de","description":"Wessen Stimme beim Schreiben über menschliche Kommunikationskanäle verwenden — Ghostwriting, namentlich, kollaborative Modi","vocabulary":"Stimme Zuschreibung Ghostwriting Tonfall Stil Identität Modus namentlich Inhalt Perspektive Empfänger geprüft freigegeben","embed_threshold":0.61}
+{"lang":"es","description":"Elegir la voz apropiada para canales de comunicación","vocabulary":"voz atribución ghostwrite tono estilo identidad modo acreditado","embed_threshold":0.6}
+{"lang":"fr","description":"Choisir la voix appropriée pour les canaux de communication","vocabulary":"voix attribution écriture fantôme ton style identité mode","embed_threshold":0.67}
+{"lang":"hi","description":"मानव संचार चैनलों के माध्यम से लिखते समय किसकी आवाज़ का उपयोग करें","vocabulary":"आवाज़ आरोपण घोस्टराइट टोन शैली पहचान मोड","embed_threshold":0.66}
+{"lang":"id","description":"Memilih suara siapa saat menulis melalui saluran komunikasi manusia","vocabulary":"suara atribusi ghostwrite nada gaya identitas mode","embed_threshold":0.61}
+{"lang":"it","description":"Scegliere la voce da usare quando si scrive attraverso canali di comunicazione umani","vocabulary":"voce attribuzione ghostwrite tono stile identità modalità","embed_threshold":0.64}
+{"lang":"ja","description":"コミュニケーションチャネルでの声の使い分け","vocabulary":"声 帰属 代筆 トーン スタイル 名義 モード","embed_threshold":0.67}
+{"lang":"ko","description":"인간 커뮤니케이션 채널을 통해 글을 쓸 때 누구의 목소리를 사용할지","vocabulary":"목소리 귀속 대필 톤 스타일 정체성 모드","embed_threshold":0.71}
+{"lang":"pl","description":"Wybór odpowiedniego głosu dla kanałów komunikacji — ghostwriting, podpisany, współpraca","vocabulary":"głos atrybucja ghostwriting ton styl tożsamość tryb podpisany","embed_threshold":0.63}
+{"lang":"pt-br","description":"Escolher a voz adequada para canais de comunicação — ghostwriting, atribuído, colaborativo","vocabulary":"voz atribuição ghostwriting tom estilo identidade modo creditado","embed_threshold":0.58}
+{"lang":"ru","description":"Выбор голоса для коммуникационных каналов — гострайтинг, авторство, совместный режим","vocabulary":"голос атрибуция гострайтинг тон стиль идентичность режим авторство","embed_threshold":0.63}
+{"lang":"th","description":"เลือกน้ำเสียงที่เหมาะสมสำหรับช่องทางการสื่อสาร","vocabulary":"เสียง การระบุตัว ghostwriting โทน สไตล์ ตัวตน โหมด","embed_threshold":0.6}
+{"lang":"tr","description":"İletişim kanalları için uygun sesi seçme","vocabulary":"ses atıf ghostwriting ton stil kimlik mod","embed_threshold":0.61}
+{"lang":"uk","description":"Вибір відповідного голосу для каналів комунікації","vocabulary":"голос атрибуція ghostwriting тон стиль ідентичність режим","embed_threshold":0.6}
+{"lang":"vi","description":"Chọn giọng phù hợp cho các kênh giao tiếp","vocabulary":"giọng ghi nhận ghostwriting tông phong cách danh tính chế độ","embed_threshold":0.6}
+{"lang":"zh","description":"为通信渠道选择合适的声音","vocabulary":"声音 署名 代笔 语气 风格 身份 模式","embed_threshold":0.64}

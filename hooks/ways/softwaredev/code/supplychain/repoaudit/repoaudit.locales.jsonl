@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تدقيق تاريخ Git والكشف عن الأسرار المسربة","vocabulary":"تدقيق مستودع تاريخ أسرار مسربة فحص كشف","embed_threshold":0.65}
-{"lang":"de","description":"Git-Historien-Audit, Erkennung geleakter Geheimnisse, Binärdateien in Repositories aufspüren","vocabulary":"Git-Historie große Objekte geleakte Geheimnisse committed gitignored Binärdatei Blob git-rev-list Repogröße Geheimnisscan API-Schlüssel Token Passwort","embed_threshold":0.76}
-{"lang":"es","description":"Auditoria de historial git — secretos filtrados, archivos sensibles, limpieza","vocabulary":"auditoria git historial secretos filtrados sensible limpiar BFG trufflehog gitleaks","embed_threshold":0.72}
-{"lang":"fr","description":"Audit de l'historique git, détection de secrets exposés, blobs binaires","vocabulary":"git historique secrets fuite binaire blob identifiants scan audit","embed_threshold":0.75}
-{"lang":"hi","description":"Git इतिहास ऑडिट, लीक हुए सीक्रेट खोज, बाइनरी ब्लॉब खोज","vocabulary":"git ऑडिट सीक्रेट लीक बाइनरी ब्लॉब इतिहास स्कैन","embed_threshold":0.7}
-{"lang":"id","description":"Audit riwayat Git, deteksi rahasia bocor, pencarian binary blob","vocabulary":"git audit rahasia bocor biner blob riwayat pemindaian","embed_threshold":0.78}
-{"lang":"it","description":"Audit cronologia Git, rilevamento segreti trapelati, ricerca binary blob","vocabulary":"git audit segreto trapelato binario blob cronologia scansione","embed_threshold":0.68}
-{"lang":"ja","description":"git履歴の監査、漏洩シークレットの検出、バイナリブロブの調査","vocabulary":"git履歴 シークレット漏洩 バイナリブロブ 認証情報 スキャン 監査","embed_threshold":0.73}
-{"lang":"ko","description":"Git 이력 감사, 유출된 시크릿 탐지, 바이너리 블롭 검색","vocabulary":"git 감사 시크릿 유출 바이너리 블롭 이력 스캔","embed_threshold":0.73}
-{"lang":"pl","description":"Audyt historii git, wykrywanie wycieków sekretów, binarne bloby","vocabulary":"git historia sekrety wyciek binarny blob poświadczenia skanowanie audyt","embed_threshold":0.69}
-{"lang":"pt-br","description":"Auditoria do histórico git, detecção de segredos vazados, blobs binários","vocabulary":"git histórico segredos vazamento binário blob credenciais escaneamento auditoria","embed_threshold":0.73}
-{"lang":"ru","description":"Аудит истории git, обнаружение утечек секретов, бинарные блобы","vocabulary":"git история секреты утечка бинарный блоб учётные данные сканирование аудит","embed_threshold":0.71}
-{"lang":"th","description":"ตรวจสอบประวัติ Git ตรวจจับความลับที่รั่วไหล ค้นหา binary blob","vocabulary":"git ประวัติ ความลับ รั่วไหล binary blob ข้อมูลรับรอง สแกน ตรวจสอบ","embed_threshold":0.77}
-{"lang":"tr","description":"Git geçmişi denetimi, sızan gizli bilgi tespiti, ikili bloblar","vocabulary":"git geçmiş gizli bilgi sızıntı ikili blob kimlik bilgisi tarama denetim","embed_threshold":0.73}
-{"lang":"uk","description":"Аудит історії Git, виявлення витоку секретів, бінарні blob","vocabulary":"git історія секрети витік бінарний blob обліковий сканування аудит","embed_threshold":0.71}
-{"lang":"vi","description":"Kiểm toán lịch sử Git, phát hiện bí mật bị rò rỉ, blob nhị phân","vocabulary":"git lịch sử bí mật rò rỉ nhị phân blob thông tin xác thực quét kiểm toán","embed_threshold":0.68}
-{"lang":"zh","description":"Git 历史审计、泄露密钥检测、二进制 blob 发现","vocabulary":"git 历史 密钥 泄露 二进制 blob 凭证 扫描 审计","embed_threshold":0.72}
+{"lang":"ar","description":"تدقيق تاريخ Git والكشف عن الأسرار المسربة","vocabulary":"تدقيق مستودع تاريخ أسرار مسربة فحص كشف","embed_threshold":0.74}
+{"lang":"de","description":"Git-Historien-Audit, Erkennung geleakter Geheimnisse, Binärdateien in Repositories aufspüren","vocabulary":"Git-Historie große Objekte geleakte Geheimnisse committed gitignored Binärdatei Blob git-rev-list Repogröße Geheimnisscan API-Schlüssel Token Passwort","embed_threshold":0.74}
+{"lang":"es","description":"Auditoria de historial git — secretos filtrados, archivos sensibles, limpieza","vocabulary":"auditoria git historial secretos filtrados sensible limpiar BFG trufflehog gitleaks","embed_threshold":0.78}
+{"lang":"fr","description":"Audit de l'historique git, détection de secrets exposés, blobs binaires","vocabulary":"git historique secrets fuite binaire blob identifiants scan audit","embed_threshold":0.73}
+{"lang":"hi","description":"Git इतिहास ऑडिट, लीक हुए सीक्रेट खोज, बाइनरी ब्लॉब खोज","vocabulary":"git ऑडिट सीक्रेट लीक बाइनरी ब्लॉब इतिहास स्कैन","embed_threshold":0.75}
+{"lang":"id","description":"Audit riwayat Git, deteksi rahasia bocor, pencarian binary blob","vocabulary":"git audit rahasia bocor biner blob riwayat pemindaian","embed_threshold":0.77}
+{"lang":"it","description":"Audit cronologia Git, rilevamento segreti trapelati, ricerca binary blob","vocabulary":"git audit segreto trapelato binario blob cronologia scansione","embed_threshold":0.71}
+{"lang":"ja","description":"git履歴の監査、漏洩シークレットの検出、バイナリブロブの調査","vocabulary":"git履歴 シークレット漏洩 バイナリブロブ 認証情報 スキャン 監査","embed_threshold":0.72}
+{"lang":"ko","description":"Git 이력 감사, 유출된 시크릿 탐지, 바이너리 블롭 검색","vocabulary":"git 감사 시크릿 유출 바이너리 블롭 이력 스캔","embed_threshold":0.71}
+{"lang":"pl","description":"Audyt historii git, wykrywanie wycieków sekretów, binarne bloby","vocabulary":"git historia sekrety wyciek binarny blob poświadczenia skanowanie audyt","embed_threshold":0.68}
+{"lang":"pt-br","description":"Auditoria do histórico git, detecção de segredos vazados, blobs binários","vocabulary":"git histórico segredos vazamento binário blob credenciais escaneamento auditoria","embed_threshold":0.72}
+{"lang":"ru","description":"Аудит истории git, обнаружение утечек секретов, бинарные блобы","vocabulary":"git история секреты утечка бинарный блоб учётные данные сканирование аудит","embed_threshold":0.75}
+{"lang":"th","description":"ตรวจสอบประวัติ Git ตรวจจับความลับที่รั่วไหล ค้นหา binary blob","vocabulary":"git ประวัติ ความลับ รั่วไหล binary blob ข้อมูลรับรอง สแกน ตรวจสอบ","embed_threshold":0.75}
+{"lang":"tr","description":"Git geçmişi denetimi, sızan gizli bilgi tespiti, ikili bloblar","vocabulary":"git geçmiş gizli bilgi sızıntı ikili blob kimlik bilgisi tarama denetim","embed_threshold":0.72}
+{"lang":"uk","description":"Аудит історії Git, виявлення витоку секретів, бінарні blob","vocabulary":"git історія секрети витік бінарний blob обліковий сканування аудит","embed_threshold":0.72}
+{"lang":"vi","description":"Kiểm toán lịch sử Git, phát hiện bí mật bị rò rỉ, blob nhị phân","vocabulary":"git lịch sử bí mật rò rỉ nhị phân blob thông tin xác thực quét kiểm toán","embed_threshold":0.75}
+{"lang":"zh","description":"Git 历史审计、泄露密钥检测、二进制 blob 发现","vocabulary":"git 历史 密钥 泄露 二进制 blob 凭证 扫描 审计","embed_threshold":0.78}

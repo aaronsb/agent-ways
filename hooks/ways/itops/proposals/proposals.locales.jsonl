@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الموافقة البشرية على العمليات عالية المخاطر","vocabulary":"موافقة بشرية مخاطر عالية اقتراح مراجعة تصريح","embed_threshold":0.74}
+{"lang":"ar","description":"الموافقة البشرية على العمليات عالية المخاطر","vocabulary":"موافقة بشرية مخاطر عالية اقتراح مراجعة تصريح","embed_threshold":0.72}
 {"lang":"de","description":"Strukturierte Vorschläge zur menschlichen Freigabe vor risikoreichen Operationen, Mensch-in-der-Schleife-Workflows","vocabulary":"Vorschlag Freigabe Genehmigung Mensch Prüfung bestätigen gefährliche Operation Lebenszyklus Anfrage Berechtigung Autorisierung","embed_threshold":0.65}
-{"lang":"es","description":"Propuestas estructuradas para aprobación humana, operaciones de alto riesgo","vocabulary":"propuesta aprobación humano revisar confirmar peligroso autorizar","embed_threshold":0.74}
-{"lang":"fr","description":"Propositions structurées pour approbation humaine avant des opérations à haut risque","vocabulary":"proposition approbation humain revue confirmation opération dangereuse autorisation","embed_threshold":0.72}
-{"lang":"hi","description":"उच्च-जोखिम ऑपरेशन से पहले मानव अनुमोदन के लिए संरचित प्रस्ताव","vocabulary":"प्रस्ताव अनुमोदन मानव समीक्षा पुष्टि खतरनाक ऑपरेशन अधिकृत","embed_threshold":0.66}
-{"lang":"id","description":"Proposal terstruktur untuk persetujuan manusia sebelum operasi berisiko tinggi","vocabulary":"proposal persetujuan manusia tinjauan konfirmasi berbahaya operasi otorisasi","embed_threshold":0.64}
-{"lang":"it","description":"Proposte strutturate per approvazione umana prima di operazioni ad alto rischio","vocabulary":"proposta approvazione umano revisione conferma pericoloso operazione autorizzazione","embed_threshold":0.73}
-{"lang":"ja","description":"高リスク操作の承認フロー、人間による確認が必要な提案","vocabulary":"提案 承認 確認 レビュー 危険操作 認可 承認フロー","embed_threshold":0.84}
+{"lang":"es","description":"Propuestas estructuradas para aprobación humana, operaciones de alto riesgo","vocabulary":"propuesta aprobación humano revisar confirmar peligroso autorizar","embed_threshold":0.72}
+{"lang":"fr","description":"Propositions structurées pour approbation humaine avant des opérations à haut risque","vocabulary":"proposition approbation humain revue confirmation opération dangereuse autorisation","embed_threshold":0.7}
+{"lang":"hi","description":"उच्च-जोखिम ऑपरेशन से पहले मानव अनुमोदन के लिए संरचित प्रस्ताव","vocabulary":"प्रस्ताव अनुमोदन मानव समीक्षा पुष्टि खतरनाक ऑपरेशन अधिकृत","embed_threshold":0.68}
+{"lang":"id","description":"Proposal terstruktur untuk persetujuan manusia sebelum operasi berisiko tinggi","vocabulary":"proposal persetujuan manusia tinjauan konfirmasi berbahaya operasi otorisasi","embed_threshold":0.63}
+{"lang":"it","description":"Proposte strutturate per approvazione umana prima di operazioni ad alto rischio","vocabulary":"proposta approvazione umano revisione conferma pericoloso operazione autorizzazione","embed_threshold":0.71}
+{"lang":"ja","description":"高リスク操作の承認フロー、人間による確認が必要な提案","vocabulary":"提案 承認 確認 レビュー 危険操作 認可 承認フロー","embed_threshold":0.82}
 {"lang":"ko","description":"고위험 작업 전 인간 승인을 위한 구조화된 제안","vocabulary":"제안 승인 인간 검토 확인 위험 작업 인가","embed_threshold":0.71}
-{"lang":"pl","description":"Strukturalne propozycje zatwierdzenia przez człowieka przed operacjami wysokiego ryzyka","vocabulary":"propozycja zatwierdzenie człowiek przegląd potwierdzenie niebezpieczna operacja autoryzacja","embed_threshold":0.79}
-{"lang":"pt-br","description":"Propostas estruturadas para aprovação humana antes de operações de alto risco","vocabulary":"proposta aprovação humano revisão confirmação operação perigosa autorização fluxo","embed_threshold":0.69}
+{"lang":"pl","description":"Strukturalne propozycje zatwierdzenia przez człowieka przed operacjami wysokiego ryzyka","vocabulary":"propozycja zatwierdzenie człowiek przegląd potwierdzenie niebezpieczna operacja autoryzacja","embed_threshold":0.78}
+{"lang":"pt-br","description":"Propostas estruturadas para aprovação humana antes de operações de alto risco","vocabulary":"proposta aprovação humano revisão confirmação operação perigosa autorização fluxo","embed_threshold":0.67}
 {"lang":"ru","description":"Структурированные предложения для одобрения человеком перед выполнением опасных операций","vocabulary":"предложение одобрение человек проверка подтверждение опасная операция авторизация","embed_threshold":0.71}
-{"lang":"th","description":"ข้อเสนอแบบมีโครงสร้างเพื่อขออนุมัติก่อนดำเนินการที่มีความเสี่ยง","vocabulary":"ข้อเสนอ อนุมัติ ตรวจสอบ ยืนยัน การดำเนินงาน วงจรชีวิต","embed_threshold":0.76}
-{"lang":"tr","description":"Yüksek riskli işlemler öncesi yapılandırılmış onay teklifleri","vocabulary":"teklif onay inceleme doğrulama işlem yaşam döngüsü","embed_threshold":0.73}
-{"lang":"uk","description":"Структуровані пропозиції для затвердження перед виконанням ризикованих операцій","vocabulary":"пропозиція затвердження перегляд підтвердження операція життєвий цикл","embed_threshold":0.74}
-{"lang":"vi","description":"Đề xuất có cấu trúc để phê duyệt trước khi thực hiện thao tác rủi ro","vocabulary":"đề xuất phê duyệt xem xét xác nhận thao tác vòng đời","embed_threshold":0.7}
-{"lang":"zh","description":"高风险操作执行前的结构化审批提案","vocabulary":"提案 审批 审查 确认 操作 生命周期 人工审核","embed_threshold":0.79}
+{"lang":"th","description":"ข้อเสนอแบบมีโครงสร้างเพื่อขออนุมัติก่อนดำเนินการที่มีความเสี่ยง","vocabulary":"ข้อเสนอ อนุมัติ ตรวจสอบ ยืนยัน การดำเนินงาน วงจรชีวิต","embed_threshold":0.74}
+{"lang":"tr","description":"Yüksek riskli işlemler öncesi yapılandırılmış onay teklifleri","vocabulary":"teklif onay inceleme doğrulama işlem yaşam döngüsü","embed_threshold":0.72}
+{"lang":"uk","description":"Структуровані пропозиції для затвердження перед виконанням ризикованих операцій","vocabulary":"пропозиція затвердження перегляд підтвердження операція життєвий цикл","embed_threshold":0.72}
+{"lang":"vi","description":"Đề xuất có cấu trúc để phê duyệt trước khi thực hiện thao tác rủi ro","vocabulary":"đề xuất phê duyệt xem xét xác nhận thao tác vòng đời","embed_threshold":0.69}
+{"lang":"zh","description":"高风险操作执行前的结构化审批提案","vocabulary":"提案 审批 审查 确认 操作 生命周期 人工审核","embed_threshold":0.78}

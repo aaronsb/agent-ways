@@ -1,17 +1,17 @@
-{"lang":"ar","description":"معايير الفريق واتفاقياته","vocabulary":"معايير اتفاقيات فريق قواعد نمط توحيد","embed_threshold":0.54}
-{"lang":"de","description":"Teamstandards — Coding-Konventionen, Testphilosophie und Stilrichtlinien","vocabulary":"Konvention Norm Richtlinie Barrierefreiheit Stilrichtlinie Linting Codestandard Programmierrichtlinie Teamvereinbarung","embed_threshold":0.62}
-{"lang":"es","description":"Normas y convenciones del equipo — estilo, nomenclatura, acuerdos","vocabulary":"normas convenciones estilo nomenclatura acuerdo equipo estandar guia-de-estilo consistencia","embed_threshold":0.56}
-{"lang":"fr","description":"Standards d'équipe, conventions de codage, guides de style","vocabulary":"convention standard règle directive style linting codage","embed_threshold":0.66}
-{"lang":"hi","description":"टीम मानक स्थापित करना, कोडिंग सम्मेलन, टेस्टिंग दर्शन","vocabulary":"मानक सम्मेलन कोडिंग टेस्टिंग दर्शन दिशानिर्देश नियम","embed_threshold":0.75}
-{"lang":"id","description":"Menetapkan norma tim, konvensi pengkodean, filosofi pengujian","vocabulary":"standar konvensi pengkodean pengujian filosofi pedoman aturan","embed_threshold":0.7}
-{"lang":"it","description":"Stabilire norme di team, convenzioni di codifica, filosofia di testing","vocabulary":"standard convenzione codifica testing filosofia linea guida regola","embed_threshold":0.72}
-{"lang":"ja","description":"チームの規約、コーディング規約、テスト方針","vocabulary":"規約 ルール ガイドライン アクセシビリティ スタイルガイド リンティング","embed_threshold":0.65}
-{"lang":"ko","description":"팀 표준 수립, 코딩 관례, 테스팅 철학","vocabulary":"표준 관례 코딩 테스팅 철학 가이드라인 규칙","embed_threshold":0.71}
-{"lang":"pl","description":"Standardy zespołu — konwencje kodowania, filozofia testowania, wytyczne stylu","vocabulary":"konwencja standard wytyczne dostępność przewodnik stylu linting standard kodu","embed_threshold":0.71}
-{"lang":"pt-br","description":"Padrões de equipe — convenções de codificação, filosofia de testes, guias de estilo","vocabulary":"convenção padrão diretriz acessibilidade guia de estilo linting padrão de código","embed_threshold":0.69}
-{"lang":"ru","description":"Стандарты команды — соглашения по коду, философия тестирования, руководства по стилю","vocabulary":"соглашение стандарт руководство доступность руководство по стилю линтинг стандарт кода","embed_threshold":0.7}
-{"lang":"th","description":"มาตรฐานของทีม — หลักการเขียนโค้ด ปรัชญาการทดสอบ คู่มือสไตล์","vocabulary":"หลักการ มาตรฐาน แนวทาง การเข้าถึง คู่มือสไตล์ linting กฎ","embed_threshold":0.64}
-{"lang":"tr","description":"Takım standartları — kodlama kuralları, test felsefesi, stil kılavuzları","vocabulary":"kural standart yönerge erişilebilirlik stil kılavuzu linting kural","embed_threshold":0.63}
-{"lang":"uk","description":"Командні стандарти — конвенції кодування, філософія тестування","vocabulary":"конвенція стандарт настанова доступність посібник стилю linting правило","embed_threshold":0.7}
-{"lang":"vi","description":"Tiêu chuẩn đội — quy ước mã, triết lý kiểm thử, hướng dẫn phong cách","vocabulary":"quy ước tiêu chuẩn hướng dẫn truy cập hướng dẫn phong cách linting quy tắc","embed_threshold":0.67}
-{"lang":"zh","description":"团队规范 — 编码约定、测试理念、风格指南","vocabulary":"约定 规范 指南 可访问性 风格指南 linting 规则","embed_threshold":0.7}
+{"lang":"ar","description":"معايير الفريق واتفاقياته","vocabulary":"معايير اتفاقيات فريق قواعد نمط توحيد","embed_threshold":0.63}
+{"lang":"de","description":"Teamstandards — Coding-Konventionen, Testphilosophie und Stilrichtlinien","vocabulary":"Konvention Norm Richtlinie Barrierefreiheit Stilrichtlinie Linting Codestandard Programmierrichtlinie Teamvereinbarung","embed_threshold":0.64}
+{"lang":"es","description":"Normas y convenciones del equipo — estilo, nomenclatura, acuerdos","vocabulary":"normas convenciones estilo nomenclatura acuerdo equipo estandar guia-de-estilo consistencia","embed_threshold":0.58}
+{"lang":"fr","description":"Standards d'équipe, conventions de codage, guides de style","vocabulary":"convention standard règle directive style linting codage","embed_threshold":0.68}
+{"lang":"hi","description":"टीम मानक स्थापित करना, कोडिंग सम्मेलन, टेस्टिंग दर्शन","vocabulary":"मानक सम्मेलन कोडिंग टेस्टिंग दर्शन दिशानिर्देश नियम","embed_threshold":0.73}
+{"lang":"id","description":"Menetapkan norma tim, konvensi pengkodean, filosofi pengujian","vocabulary":"standar konvensi pengkodean pengujian filosofi pedoman aturan","embed_threshold":0.69}
+{"lang":"it","description":"Stabilire norme di team, convenzioni di codifica, filosofia di testing","vocabulary":"standard convenzione codifica testing filosofia linea guida regola","embed_threshold":0.71}
+{"lang":"ja","description":"チームの規約、コーディング規約、テスト方針","vocabulary":"規約 ルール ガイドライン アクセシビリティ スタイルガイド リンティング","embed_threshold":0.63}
+{"lang":"ko","description":"팀 표준 수립, 코딩 관례, 테스팅 철학","vocabulary":"표준 관례 코딩 테스팅 철학 가이드라인 규칙","embed_threshold":0.7}
+{"lang":"pl","description":"Standardy zespołu — konwencje kodowania, filozofia testowania, wytyczne stylu","vocabulary":"konwencja standard wytyczne dostępność przewodnik stylu linting standard kodu","embed_threshold":0.69}
+{"lang":"pt-br","description":"Padrões de equipe — convenções de codificação, filosofia de testes, guias de estilo","vocabulary":"convenção padrão diretriz acessibilidade guia de estilo linting padrão de código","embed_threshold":0.68}
+{"lang":"ru","description":"Стандарты команды — соглашения по коду, философия тестирования, руководства по стилю","vocabulary":"соглашение стандарт руководство доступность руководство по стилю линтинг стандарт кода","embed_threshold":0.69}
+{"lang":"th","description":"มาตรฐานของทีม — หลักการเขียนโค้ด ปรัชญาการทดสอบ คู่มือสไตล์","vocabulary":"หลักการ มาตรฐาน แนวทาง การเข้าถึง คู่มือสไตล์ linting กฎ","embed_threshold":0.67}
+{"lang":"tr","description":"Takım standartları — kodlama kuralları, test felsefesi, stil kılavuzları","vocabulary":"kural standart yönerge erişilebilirlik stil kılavuzu linting kural","embed_threshold":0.62}
+{"lang":"uk","description":"Командні стандарти — конвенції кодування, філософія тестування","vocabulary":"конвенція стандарт настанова доступність посібник стилю linting правило","embed_threshold":0.68}
+{"lang":"vi","description":"Tiêu chuẩn đội — quy ước mã, triết lý kiểm thử, hướng dẫn phong cách","vocabulary":"quy ước tiêu chuẩn hướng dẫn truy cập hướng dẫn phong cách linting quy tắc","embed_threshold":0.68}
+{"lang":"zh","description":"团队规范 — 编码约定、测试理念、风格指南","vocabulary":"约定 规范 指南 可访问性 风格指南 linting 规则","embed_threshold":0.69}

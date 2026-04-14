@@ -1,17 +1,17 @@
-{"lang":"ar","description":"بدائل الاختبار والمحاكاة","vocabulary":"محاكاة بدائل اختبار وهمي تقليد حقن","embed_threshold":0.61}
-{"lang":"de","description":"Abhängigkeiten mocken, Testdoubles, Fakes, Stubs, Spies, Dependency Injection für Tests","vocabulary":"Mock Fake Stub Spy Double Abhängigkeit injizieren extern isolieren Testdouble","embed_threshold":0.59}
-{"lang":"es","description":"Dobles de prueba — mocks, stubs, espias, inyeccion de dependencias","vocabulary":"mock stub espia doble prueba simular inyeccion dependencia falso aislamiento","embed_threshold":0.71}
-{"lang":"fr","description":"Simulation de dépendances, doublures de test, fakes, stubs, spies","vocabulary":"mock fake stub spy doublure dépendance injection isolation","embed_threshold":0.6}
-{"lang":"hi","description":"डिपेंडेंसी मॉकिंग, टेस्ट डबल्स, फेक, स्टब, स्पाई","vocabulary":"मॉक स्टब फेक स्पाई टेस्ट डबल डिपेंडेंसी इंजेक्शन","embed_threshold":0.64}
-{"lang":"id","description":"Mocking dependensi, test doubles, fake, stub, spy","vocabulary":"mock stub fake spy test double dependensi injeksi","embed_threshold":0.61}
-{"lang":"it","description":"Mocking dipendenze, test double, fake, stub, spy","vocabulary":"mock stub fake spy test doppio dipendenza iniezione","embed_threshold":0.61}
-{"lang":"ja","description":"依存関係のモック化、テストダブル、フェイク、スパイ","vocabulary":"モック フェイク スタブ スパイ テストダブル 依存注入 分離","embed_threshold":0.66}
-{"lang":"ko","description":"의존성 모킹, 테스트 더블, 페이크, 스텁, 스파이","vocabulary":"모킹 스텁 페이크 스파이 테스트 더블 의존성 인젝션","embed_threshold":0.83}
-{"lang":"pl","description":"Symulowanie zależności, dublery testowe, fake, stub, spy","vocabulary":"mock fake stub spy dubler zależność wstrzykiwanie izolacja","embed_threshold":0.64}
-{"lang":"pt-br","description":"Simulação de dependências, duplos de teste, fakes, stubs, spies","vocabulary":"mock fake stub spy duplo dependência injeção isolamento","embed_threshold":0.65}
-{"lang":"ru","description":"Имитация зависимостей, тестовые дублёры, фейки, стабы, шпионы","vocabulary":"мок фейк стаб шпион дублёр зависимость инъекция изоляция","embed_threshold":0.63}
-{"lang":"th","description":"การจำลอง dependency, test double, fakes, stubs, spies","vocabulary":"mock fake stub spy double dependency injection แยก","embed_threshold":0.64}
-{"lang":"tr","description":"Bağımlılık simülasyonu, test ikizleri, fakes, stubs, spies","vocabulary":"mock fake stub spy ikiz bağımlılık enjeksiyon izolasyon","embed_threshold":0.61}
-{"lang":"uk","description":"Мокування залежностей, тестові двійники, fakes, stubs, spies","vocabulary":"mock fake stub spy двійник залежність ін'єкція ізоляція","embed_threshold":0.6}
-{"lang":"vi","description":"Giả lập phụ thuộc, bản sao kiểm thử, fakes, stubs, spies","vocabulary":"mock fake stub spy bản sao phụ thuộc tiêm phụ thuộc cô lập","embed_threshold":0.67}
-{"lang":"zh","description":"依赖模拟、测试替身、fakes、stubs、spies","vocabulary":"mock fake stub spy 替身 依赖 注入 隔离","embed_threshold":0.62}
+{"lang":"ar","description":"بدائل الاختبار والمحاكاة","vocabulary":"محاكاة بدائل اختبار وهمي تقليد حقن","embed_threshold":0.73}
+{"lang":"de","description":"Abhängigkeiten mocken, Testdoubles, Fakes, Stubs, Spies, Dependency Injection für Tests","vocabulary":"Mock Fake Stub Spy Double Abhängigkeit injizieren extern isolieren Testdouble","embed_threshold":0.58}
+{"lang":"es","description":"Dobles de prueba — mocks, stubs, espias, inyeccion de dependencias","vocabulary":"mock stub espia doble prueba simular inyeccion dependencia falso aislamiento","embed_threshold":0.74}
+{"lang":"fr","description":"Simulation de dépendances, doublures de test, fakes, stubs, spies","vocabulary":"mock fake stub spy doublure dépendance injection isolation","embed_threshold":0.58}
+{"lang":"hi","description":"डिपेंडेंसी मॉकिंग, टेस्ट डबल्स, फेक, स्टब, स्पाई","vocabulary":"मॉक स्टब फेक स्पाई टेस्ट डबल डिपेंडेंसी इंजेक्शन","embed_threshold":0.62}
+{"lang":"id","description":"Mocking dependensi, test doubles, fake, stub, spy","vocabulary":"mock stub fake spy test double dependensi injeksi","embed_threshold":0.59}
+{"lang":"it","description":"Mocking dipendenze, test double, fake, stub, spy","vocabulary":"mock stub fake spy test doppio dipendenza iniezione","embed_threshold":0.59}
+{"lang":"ja","description":"依存関係のモック化、テストダブル、フェイク、スパイ","vocabulary":"モック フェイク スタブ スパイ テストダブル 依存注入 分離","embed_threshold":0.65}
+{"lang":"ko","description":"의존성 모킹, 테스트 더블, 페이크, 스텁, 스파이","vocabulary":"모킹 스텁 페이크 스파이 테스트 더블 의존성 인젝션","embed_threshold":0.81}
+{"lang":"pl","description":"Symulowanie zależności, dublery testowe, fake, stub, spy","vocabulary":"mock fake stub spy dubler zależność wstrzykiwanie izolacja","embed_threshold":0.62}
+{"lang":"pt-br","description":"Simulação de dependências, duplos de teste, fakes, stubs, spies","vocabulary":"mock fake stub spy duplo dependência injeção isolamento","embed_threshold":0.63}
+{"lang":"ru","description":"Имитация зависимостей, тестовые дублёры, фейки, стабы, шпионы","vocabulary":"мок фейк стаб шпион дублёр зависимость инъекция изоляция","embed_threshold":0.62}
+{"lang":"th","description":"การจำลอง dependency, test double, fakes, stubs, spies","vocabulary":"mock fake stub spy double dependency injection แยก","embed_threshold":0.63}
+{"lang":"tr","description":"Bağımlılık simülasyonu, test ikizleri, fakes, stubs, spies","vocabulary":"mock fake stub spy ikiz bağımlılık enjeksiyon izolasyon","embed_threshold":0.59}
+{"lang":"uk","description":"Мокування залежностей, тестові двійники, fakes, stubs, spies","vocabulary":"mock fake stub spy двійник залежність ін'єкція ізоляція","embed_threshold":0.59}
+{"lang":"vi","description":"Giả lập phụ thuộc, bản sao kiểm thử, fakes, stubs, spies","vocabulary":"mock fake stub spy bản sao phụ thuộc tiêm phụ thuộc cô lập","embed_threshold":0.66}
+{"lang":"zh","description":"依赖模拟、测试替身、fakes、stubs、spies","vocabulary":"mock fake stub spy 替身 依赖 注入 隔离","embed_threshold":0.61}

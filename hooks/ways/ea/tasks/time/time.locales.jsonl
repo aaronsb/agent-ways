@@ -1,17 +1,17 @@
-{"lang":"ar","description":"تتبع الوقت والساعات القابلة للفوترة وإعداد الفواتير","vocabulary":"تتبع وقت ساعات فوترة فاتورة حساب زمن","embed_threshold":0.73}
-{"lang":"de","description":"Zeiterfassung, abrechenbare Stunden buchen, Zeiteinträge, Rechnungsstellung, Tagesabschluss","vocabulary":"Zeiterfassung Stunden buchen abrechenbar Stundenzettel Feierabend Tagesabschluss Rechnung Abrechnung Projekt Wochenbericht","embed_threshold":0.81}
-{"lang":"es","description":"Control de tiempo, horas facturables, facturación","vocabulary":"control tiempo horas facturable hoja de horas factura facturación reporte","embed_threshold":0.77}
-{"lang":"fr","description":"Suivi du temps, heures facturables, facturation","vocabulary":"suivi temps heures facturable feuille de temps facture rapport projet","embed_threshold":0.77}
-{"lang":"hi","description":"समय ट्रैकिंग, बिल योग्य घंटे लॉग करना, इनवॉइसिंग","vocabulary":"समय ट्रैकिंग घंटे बिल टाइमशीट इनवॉइस रिपोर्ट प्रोजेक्ट","embed_threshold":0.73}
-{"lang":"id","description":"Pelacakan waktu, pencatatan jam yang dapat ditagih, penagihan","vocabulary":"pelacakan waktu jam tagihan lembar waktu faktur laporan proyek","embed_threshold":0.66}
-{"lang":"it","description":"Tracciamento tempo, registrazione ore fatturabili, fatturazione","vocabulary":"tracciamento tempo ore fatturabile foglio ore fattura report progetto","embed_threshold":0.73}
-{"lang":"ja","description":"時間追跡、請求可能時間、タイムシート、請求書作成","vocabulary":"時間管理 タイムトラッキング 工数 請求 タイムシート 稼働時間 レポート","embed_threshold":0.8}
-{"lang":"ko","description":"시간 추적, 청구 가능 시간 기록, 인보이스 발행","vocabulary":"시간 추적 시간기록 청구 타임시트 인보이스 보고서 프로젝트","embed_threshold":0.65}
-{"lang":"pl","description":"Śledzenie czasu, rejestrowanie godzin rozliczeniowych, fakturowanie","vocabulary":"śledzenie czasu godziny rozliczeniowe karta czasu faktura fakturowanie projekt raport","embed_threshold":0.79}
-{"lang":"pt-br","description":"Controle de horas, registro de horas faturáveis, faturamento","vocabulary":"controle horas faturável planilha de horas fatura faturamento projeto relatório","embed_threshold":0.73}
-{"lang":"ru","description":"Учёт рабочего времени, биллинг часов, выставление счетов","vocabulary":"учёт времени часы биллинг табель счёт выставление проект отчёт","embed_threshold":0.8}
-{"lang":"th","description":"ติดตามเวลาทำงาน บันทึกชั่วโมงเรียกเก็บเงิน ออกใบแจ้งหนี้","vocabulary":"เวลา ชั่วโมง บันทึก เรียกเก็บ ใบแจ้งหนี้ ลูกค้า โครงการ รายงาน","embed_threshold":0.79}
-{"lang":"tr","description":"Zaman takibi, faturalandırılabilir saatleri kaydetme, faturalama","vocabulary":"zaman saat takip faturalandırılabilir zaman çizelgesi fatura müşteri proje rapor","embed_threshold":0.72}
-{"lang":"uk","description":"Облік часу, запис оплачуваних годин, виставлення рахунків","vocabulary":"час години облік оплачуваний табель рахунок клієнт проєкт звіт","embed_threshold":0.75}
-{"lang":"vi","description":"Theo dõi thời gian, ghi nhận giờ tính phí, lập hóa đơn","vocabulary":"thời gian giờ theo dõi tính phí bảng chấm công hóa đơn khách hàng dự án báo cáo","embed_threshold":0.7}
-{"lang":"zh","description":"时间追踪、记录计费小时、开具发票","vocabulary":"时间 小时 追踪 计费 时间表 发票 客户 项目 报告","embed_threshold":0.82}
+{"lang":"ar","description":"تتبع الوقت والساعات القابلة للفوترة وإعداد الفواتير","vocabulary":"تتبع وقت ساعات فوترة فاتورة حساب زمن","embed_threshold":0.71}
+{"lang":"de","description":"Zeiterfassung, abrechenbare Stunden buchen, Zeiteinträge, Rechnungsstellung, Tagesabschluss","vocabulary":"Zeiterfassung Stunden buchen abrechenbar Stundenzettel Feierabend Tagesabschluss Rechnung Abrechnung Projekt Wochenbericht","embed_threshold":0.79}
+{"lang":"es","description":"Control de tiempo, horas facturables, facturación","vocabulary":"control tiempo horas facturable hoja de horas factura facturación reporte","embed_threshold":0.76}
+{"lang":"fr","description":"Suivi du temps, heures facturables, facturation","vocabulary":"suivi temps heures facturable feuille de temps facture rapport projet","embed_threshold":0.75}
+{"lang":"hi","description":"समय ट्रैकिंग, बिल योग्य घंटे लॉग करना, इनवॉइसिंग","vocabulary":"समय ट्रैकिंग घंटे बिल टाइमशीट इनवॉइस रिपोर्ट प्रोजेक्ट","embed_threshold":0.72}
+{"lang":"id","description":"Pelacakan waktu, pencatatan jam yang dapat ditagih, penagihan","vocabulary":"pelacakan waktu jam tagihan lembar waktu faktur laporan proyek","embed_threshold":0.65}
+{"lang":"it","description":"Tracciamento tempo, registrazione ore fatturabili, fatturazione","vocabulary":"tracciamento tempo ore fatturabile foglio ore fattura report progetto","embed_threshold":0.72}
+{"lang":"ja","description":"時間追跡、請求可能時間、タイムシート、請求書作成","vocabulary":"時間管理 タイムトラッキング 工数 請求 タイムシート 稼働時間 レポート","embed_threshold":0.78}
+{"lang":"ko","description":"시간 추적, 청구 가능 시간 기록, 인보이스 발행","vocabulary":"시간 추적 시간기록 청구 타임시트 인보이스 보고서 프로젝트","embed_threshold":0.64}
+{"lang":"pl","description":"Śledzenie czasu, rejestrowanie godzin rozliczeniowych, fakturowanie","vocabulary":"śledzenie czasu godziny rozliczeniowe karta czasu faktura fakturowanie projekt raport","embed_threshold":0.77}
+{"lang":"pt-br","description":"Controle de horas, registro de horas faturáveis, faturamento","vocabulary":"controle horas faturável planilha de horas fatura faturamento projeto relatório","embed_threshold":0.72}
+{"lang":"ru","description":"Учёт рабочего времени, биллинг часов, выставление счетов","vocabulary":"учёт времени часы биллинг табель счёт выставление проект отчёт","embed_threshold":0.78}
+{"lang":"th","description":"ติดตามเวลาทำงาน บันทึกชั่วโมงเรียกเก็บเงิน ออกใบแจ้งหนี้","vocabulary":"เวลา ชั่วโมง บันทึก เรียกเก็บ ใบแจ้งหนี้ ลูกค้า โครงการ รายงาน","embed_threshold":0.78}
+{"lang":"tr","description":"Zaman takibi, faturalandırılabilir saatleri kaydetme, faturalama","vocabulary":"zaman saat takip faturalandırılabilir zaman çizelgesi fatura müşteri proje rapor","embed_threshold":0.7}
+{"lang":"uk","description":"Облік часу, запис оплачуваних годин, виставлення рахунків","vocabulary":"час години облік оплачуваний табель рахунок клієнт проєкт звіт","embed_threshold":0.74}
+{"lang":"vi","description":"Theo dõi thời gian, ghi nhận giờ tính phí, lập hóa đơn","vocabulary":"thời gian giờ theo dõi tính phí bảng chấm công hóa đơn khách hàng dự án báo cáo","embed_threshold":0.68}
+{"lang":"zh","description":"时间追踪、记录计费小时、开具发票","vocabulary":"时间 小时 追踪 计费 时间表 发票 客户 项目 报告","embed_threshold":0.8}

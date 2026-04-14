@@ -1,17 +1,17 @@
 {"lang":"ar","description":"تخطيط التنفيذ بعد القرار المعماري","vocabulary":"تنفيذ تخطيط بعد قرار معماري خطوات مهام","embed_threshold":0.9}
-{"lang":"de","description":"Umsetzung nach ADR-Entscheidung — Arbeitspakete schneiden und parallelisieren","vocabulary":"implementieren umsetzen bauen beginnen starten ausführen Plan Arbeitspaket aufteilen parallelisieren Umsetzung Durchführung","embed_threshold":0.66}
-{"lang":"es","description":"Planificacion de implementacion post-ADR — desglose de tareas, secuencia, riesgos","vocabulary":"implementar planificar tarea desglose secuencia riesgo alcance fase iteracion post-ADR","embed_threshold":0.65}
-{"lang":"fr","description":"Implémentation post-ADR — découpage des lots de travail, parallélisation","vocabulary":"implémenter construire démarrer exécuter plan découpage parallélisation","embed_threshold":0.69}
-{"lang":"hi","description":"ADR के बाद कार्यान्वयन — कार्य विभाजन, सुरक्षित समानांतर कार्य","vocabulary":"कार्यान्वयन विभाजन कार्य ADR समानांतर सुरक्षित योजना","embed_threshold":0.7}
-{"lang":"id","description":"Implementasi pasca-ADR — pembagian kerja, pekerjaan paralel aman","vocabulary":"implementasi pembagian tugas ADR paralel aman rencana","embed_threshold":0.69}
-{"lang":"it","description":"Implementazione post-ADR — suddivisione lavoro, lavoro parallelo sicuro","vocabulary":"implementazione suddivisione compito ADR parallelo sicuro piano","embed_threshold":0.69}
-{"lang":"ja","description":"ADR後の実装 — 作業分解、並列化の計画","vocabulary":"実装 構築 開始 実行 計画 作業分解 並列化","embed_threshold":0.75}
-{"lang":"ko","description":"ADR 이후 구현 — 작업 분해, 안전한 병렬 작업","vocabulary":"구현 분해 작업 ADR 병렬 안전 계획","embed_threshold":0.73}
-{"lang":"pl","description":"Implementacja po ADR — podział paczek pracy, zrównoleglenie","vocabulary":"implementować budować rozpocząć wykonać plan podział zrównoleglenie","embed_threshold":0.74}
-{"lang":"pt-br","description":"Implementação pós-ADR — divisão de pacotes de trabalho, paralelização","vocabulary":"implementar construir iniciar executar plano divisão paralelização","embed_threshold":0.64}
-{"lang":"ru","description":"Реализация после ADR — разбиение рабочих ��акетов, распараллеливание","vocabulary":"реализовать построить начать выполнить план разбиение распараллеливание","embed_threshold":0.68}
-{"lang":"th","description":"การนำไปปฏิบัติหลัง ADR — แบ่งงาน ทำงานขนาน","vocabulary":"นำไปปฏิบัติ สร้าง เริ่ม ดำเนินการ แผน แบ่งงาน ขนาน","embed_threshold":0.75}
-{"lang":"tr","description":"ADR sonrası uygulama — iş paketlerini bölme, paralel çalışma","vocabulary":"uygulama inşa başlama yürütme plan bölme paralelleştirme","embed_threshold":0.65}
-{"lang":"uk","description":"Реалізація після ADR — розбиття роботи, паралелізація","vocabulary":"реалізація побудова початок виконання план розбиття паралелізація","embed_threshold":0.66}
-{"lang":"vi","description":"Triển khai sau ADR — phân chia công việc, song song hóa","vocabulary":"triển khai xây dựng bắt đầu thực thi kế hoạch phân chia song song","embed_threshold":0.7}
-{"lang":"zh","description":"ADR 后实现 — 工作分解、并行化","vocabulary":"实现 构建 开始 执行 计划 分解 并行","embed_threshold":0.72}
+{"lang":"de","description":"Umsetzung nach ADR-Entscheidung — Arbeitspakete schneiden und parallelisieren","vocabulary":"implementieren umsetzen bauen beginnen starten ausführen Plan Arbeitspaket aufteilen parallelisieren Umsetzung Durchführung","embed_threshold":0.7}
+{"lang":"es","description":"Planificacion de implementacion post-ADR — desglose de tareas, secuencia, riesgos","vocabulary":"implementar planificar tarea desglose secuencia riesgo alcance fase iteracion post-ADR","embed_threshold":0.68}
+{"lang":"fr","description":"Implémentation post-ADR — découpage des lots de travail, parallélisation","vocabulary":"implémenter construire démarrer exécuter plan découpage parallélisation","embed_threshold":0.68}
+{"lang":"hi","description":"ADR के बाद कार्यान्वयन — कार्य विभाजन, सुरक्षित समानांतर कार्य","vocabulary":"कार्यान्वयन विभाजन कार्य ADR समानांतर सुरक्षित योजना","embed_threshold":0.69}
+{"lang":"id","description":"Implementasi pasca-ADR — pembagian kerja, pekerjaan paralel aman","vocabulary":"implementasi pembagian tugas ADR paralel aman rencana","embed_threshold":0.68}
+{"lang":"it","description":"Implementazione post-ADR — suddivisione lavoro, lavoro parallelo sicuro","vocabulary":"implementazione suddivisione compito ADR parallelo sicuro piano","embed_threshold":0.67}
+{"lang":"ja","description":"ADR後の実装 — 作業分解、並列化の計画","vocabulary":"実装 構築 開始 実行 計画 作業分解 並列化","embed_threshold":0.74}
+{"lang":"ko","description":"ADR 이후 구현 — 작업 분해, 안전한 병렬 작업","vocabulary":"구현 분해 작업 ADR 병렬 안전 계획","embed_threshold":0.71}
+{"lang":"pl","description":"Implementacja po ADR — podział paczek pracy, zrównoleglenie","vocabulary":"implementować budować rozpocząć wykonać plan podział zrównoleglenie","embed_threshold":0.73}
+{"lang":"pt-br","description":"Implementação pós-ADR — divisão de pacotes de trabalho, paralelização","vocabulary":"implementar construir iniciar executar plano divisão paralelização","embed_threshold":0.69}
+{"lang":"ru","description":"Реализация после ADR — разбиение рабочих ��акетов, распараллеливание","vocabulary":"реализовать построить начать выполнить план разбиение распараллеливание","embed_threshold":0.67}
+{"lang":"th","description":"การนำไปปฏิบัติหลัง ADR — แบ่งงาน ทำงานขนาน","vocabulary":"นำไปปฏิบัติ สร้าง เริ่ม ดำเนินการ แผน แบ่งงาน ขนาน","embed_threshold":0.74}
+{"lang":"tr","description":"ADR sonrası uygulama — iş paketlerini bölme, paralel çalışma","vocabulary":"uygulama inşa başlama yürütme plan bölme paralelleştirme","embed_threshold":0.66}
+{"lang":"uk","description":"Реалізація після ADR — розбиття роботи, паралелізація","vocabulary":"реалізація побудова початок виконання план розбиття паралелізація","embed_threshold":0.64}
+{"lang":"vi","description":"Triển khai sau ADR — phân chia công việc, song song hóa","vocabulary":"triển khai xây dựng bắt đầu thực thi kế hoạch phân chia song song","embed_threshold":0.68}
+{"lang":"zh","description":"ADR 后实现 — 工作分解、并行化","vocabulary":"实现 构建 开始 执行 计划 分解 并行","embed_threshold":0.7}
