@@ -13,5 +13,5 @@
 {"lang":"th","description":"การใช้บัญชีผู้ใช้อย่างรับผิดชอบ — ทรัพยากรที่ยืม","vocabulary":"บัญชี กล่องจดหมาย ส่ง เผยแพร่ เข้าถึง อนุญาต ยืม ทรัพยากร","embed_threshold":0.67}
 {"lang":"tr","description":"Kullanıcı hesaplarının sorumlu kullanımı — ödünç alınan kaynaklar","vocabulary":"hesap gelen kutusu gönderme yayınlama erişim izin ödünç kaynak","embed_threshold":0.64}
 {"lang":"uk","description":"Відповідальне використання облікових записів користувача — позичені ресурси","vocabulary":"обліковий запис вхідні надсилання публікація доступ дозвіл позика ресурс","embed_threshold":0.61}
-{"lang":"vi","description":"Sử dụng tài khoản người dùng có trách nhiệm — tài nguyên mượn","vocabulary":"tài khoản hộp thư gửi xuất bản truy cập quyền mượn tài nguyên","embed_threshold":0.64}
+{"lang":"vi","description":"Sử dụng tài khoản người dùng có trách nhiệm — tài nguyên mượn","vocabulary":"tài khoản hộp thư gửi xuất bản truy cập quyền mượn tài nguyên","embed_threshold":0.63}
 {"lang":"zh","description":"负责任地使用用户账户 — 借用的资源","vocabulary":"账户 收件箱 发送 发布 访问 权限 借用 资源","embed_threshold":0.64}

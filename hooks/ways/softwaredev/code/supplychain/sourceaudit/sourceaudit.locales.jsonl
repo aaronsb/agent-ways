@@ -1,4 +1,4 @@
-{"lang":"ar","description":"تدقيق أمان الكود المصدري","vocabulary":"تدقيق كود مصدري أمان مراجعة فحص ثغرات","embed_threshold":0.83}
+{"lang":"ar","description":"تدقيق أمان الكود المصدري","vocabulary":"تدقيق كود مصدري أمان مراجعة فحص ثغرات","embed_threshold":0.81}
 {"lang":"de","description":"Quellcode-Sicherheitsaudit auf gefährliche Muster, Verschleierung, Datenexfiltration","vocabulary":"eval exec verschleiert base64 pickle Deserialisierung Exfiltration Shell-Injection Subprocess os.system innerHTML gefährliches Muster Codeaudit Quellcodeprüfung","embed_threshold":0.68}
 {"lang":"es","description":"Auditoria de seguridad de codigo fuente — revision manual, patrones peligrosos","vocabulary":"auditoria codigo-fuente revision seguridad patron peligroso manual inspeccion hallazgos riesgo","embed_threshold":0.78}
 {"lang":"fr","description":"Audit de sécurité du code source, détection de patterns dangereux","vocabulary":"eval exec obfuscation base64 exfiltration shell injection pattern dangereux audit","embed_threshold":0.69}

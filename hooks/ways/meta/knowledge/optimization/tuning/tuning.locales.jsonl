@@ -1,17 +1,17 @@
-{"lang":"ar","description":"ضبط عتبات اللغات تلقائياً ومراجعة التمييز وإصلاح الأوصاف الغامضة","vocabulary":"ضبط عتبة تمييز مراجعة غموض إشارة ضوضاء حساسية","embed_threshold":0.71}
-{"lang":"de","description":"Schwellenwerte automatisch optimieren, Diskriminierungsaudit, mehrdeutige Beschreibungen korrigieren","vocabulary":"Tuning Schwellenwert Diskriminierung Audit mehrdeutig Signal Rauschen Empfindlichkeit","embed_threshold":0.65}
-{"lang":"es","description":"Ajuste automático de umbrales, auditoría de discriminación, corregir descripciones ambiguas","vocabulary":"ajuste umbral discriminación auditoría ambiguo señal ruido sensibilidad","embed_threshold":0.66}
-{"lang":"fr","description":"Ajustement automatique des seuils, audit de discrimination, correction des descriptions ambiguës","vocabulary":"ajustement seuil discrimination audit ambigu signal bruit sensibilité","embed_threshold":0.68}
+{"lang":"ar","description":"ضبط عتبات اللغات تلقائياً ومراجعة التمييز وإصلاح الأوصاف الغامضة","vocabulary":"ضبط عتبة تمييز مراجعة غموض إشارة ضوضاء حساسية","embed_threshold":0.67}
+{"lang":"de","description":"Schwellenwerte automatisch optimieren, Diskriminierungsaudit, mehrdeutige Beschreibungen korrigieren","vocabulary":"Tuning Schwellenwert Diskriminierung Audit mehrdeutig Signal Rauschen Empfindlichkeit","embed_threshold":0.64}
+{"lang":"es","description":"Ajuste automático de umbrales, auditoría de discriminación, corregir descripciones ambiguas","vocabulary":"ajuste umbral discriminación auditoría ambiguo señal ruido sensibilidad","embed_threshold":0.64}
+{"lang":"fr","description":"Ajustement automatique des seuils, audit de discrimination, correction des descriptions ambiguës","vocabulary":"ajustement seuil discrimination audit ambigu signal bruit sensibilité","embed_threshold":0.61}
 {"lang":"hi","description":"लोकेल थ्रेशोल्ड ऑटो-ट्यून, भेदभाव ऑडिट, अस्पष्ट विवरण ठीक करना","vocabulary":"ट्यून थ्रेशोल्ड ऑटो-ट्यून भेदभाव ऑडिट अस्पष्ट सिग्नल","embed_threshold":0.59}
-{"lang":"id","description":"Auto-tuning ambang batas lokal, audit diskriminasi, perbaikan deskripsi ambigu","vocabulary":"tuning ambang batas otomatis diskriminasi audit ambigu sinyal noise","embed_threshold":0.64}
-{"lang":"it","description":"Auto-tuning delle soglie locali, audit di discriminazione, correzione descrizioni ambigue","vocabulary":"tuning soglia automatico discriminazione audit ambiguo segnale rumore","embed_threshold":0.64}
-{"lang":"ja","description":"しきい値の自動チューニング、識別監査、曖昧な説明の修正","vocabulary":"チューニング しきい値 識別 監査 曖昧 信号 ノイズ 感度","embed_threshold":0.74}
+{"lang":"id","description":"Auto-tuning ambang batas lokal, audit diskriminasi, perbaikan deskripsi ambigu","vocabulary":"tuning ambang batas otomatis diskriminasi audit ambigu sinyal noise","embed_threshold":0.61}
+{"lang":"it","description":"Auto-tuning delle soglie locali, audit di discriminazione, correzione descrizioni ambigue","vocabulary":"tuning soglia automatico discriminazione audit ambiguo segnale rumore","embed_threshold":0.61}
+{"lang":"ja","description":"しきい値の自動チューニング、識別監査、曖昧な説明の修正","vocabulary":"チューニング しきい値 識別 監査 曖昧 信号 ノイズ 感度","embed_threshold":0.68}
 {"lang":"ko","description":"로케일 임계값 자동 튜닝, 판별력 감사, 모호한 설명 수정","vocabulary":"튜닝 임계값 자동 판별 감사 모호 신호 노이즈","embed_threshold":0.84}
-{"lang":"pl","description":"Automatyczne strojenie progów, audyt dyskryminacji, poprawianie niejednoznacznych opisów","vocabulary":"strojenie próg dyskryminacja audyt niejednoznaczny sygnał szum czułość","embed_threshold":0.64}
-{"lang":"pt-br","description":"Ajuste automático de limiares, auditoria de discriminação, correção de descrições ambíguas","vocabulary":"ajuste limiar discriminação auditoria ambíguo sinal ruído sensibilidade","embed_threshold":0.65}
+{"lang":"pl","description":"Automatyczne strojenie progów, audyt dyskryminacji, poprawianie niejednoznacznych opisów","vocabulary":"strojenie próg dyskryminacja audyt niejednoznaczny sygnał szum czułość","embed_threshold":0.61}
+{"lang":"pt-br","description":"Ajuste automático de limiares, auditoria de discriminação, correção de descrições ambíguas","vocabulary":"ajuste limiar discriminação auditoria ambíguo sinal ruído sensibilidade","embed_threshold":0.59}
 {"lang":"ru","description":"Автоматическая настройка порогов, аудит различения, исправление неоднозначных описаний","vocabulary":"настройка порог различение аудит неоднозначный сигнал шум чувствительность","embed_threshold":0.67}
-{"lang":"th","description":"การปรับเกณฑ์อัตโนมัติ การตรวจสอบการแยกแยะ การแก้ไขคำอธิบายที่คลุมเครือ","vocabulary":"ปรับแต่ง เกณฑ์ การแยกแยะ ตรวจสอบ คลุมเครือ สัญญาณ สัญญาณรบกวน ความไว","embed_threshold":0.72}
+{"lang":"th","description":"การปรับเกณฑ์อัตโนมัติ การตรวจสอบการแยกแยะ การแก้ไขคำอธิบายที่คลุมเครือ","vocabulary":"ปรับแต่ง เกณฑ์ การแยกแยะ ตรวจสอบ คลุมเครือ สัญญาณ สัญญาณรบกวน ความไว","embed_threshold":0.68}
 {"lang":"tr","description":"Otomatik eşik ayarı, ayrımcılık denetimi, belirsiz açıklamaların düzeltilmesi","vocabulary":"ayar eşik ayrımcılık denetim belirsiz sinyal gürültü duyarlılık","embed_threshold":0.62}
 {"lang":"uk","description":"Автоматичне налаштування порогів, аудит дискримінації, виправлення неоднозначних описів","vocabulary":"налаштування поріг дискримінація аудит неоднозначний сигнал шум чутливість","embed_threshold":0.64}
-{"lang":"vi","description":"Tự động điều chỉnh ngưỡng, kiểm toán phân biệt, sửa mô tả mơ hồ","vocabulary":"điều chỉnh ngưỡng phân biệt kiểm toán mơ hồ tín hiệu nhiễu độ nhạy","embed_threshold":0.67}
-{"lang":"zh","description":"自动阈值调优、区分度审计、修复模糊描述","vocabulary":"调优 阈值 区分度 审计 模糊 信号 噪声 灵敏度","embed_threshold":0.71}
+{"lang":"vi","description":"Tự động điều chỉnh ngưỡng, kiểm toán phân biệt, sửa mô tả mơ hồ","vocabulary":"điều chỉnh ngưỡng phân biệt kiểm toán mơ hồ tín hiệu nhiễu độ nhạy","embed_threshold":0.64}
+{"lang":"zh","description":"自动阈值调优、区分度审计、修复模糊描述","vocabulary":"调优 阈值 区分度 审计 模糊 信号 噪声 灵敏度","embed_threshold":0.64}

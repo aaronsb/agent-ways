@@ -5,7 +5,7 @@
 {"lang":"hi","description":"विशिष्ट टूल के बजाय पैटर्न और इरादे वर्णित करने वाले ways लिखना","vocabulary":"टूल अज्ञेय पोर्टेबल अमूर्त पैटर्न इरादा वेंडर तटस्थ","embed_threshold":0.65}
 {"lang":"id","description":"Menulis ways yang mendeskripsikan pola dan intensi, bukan alat tertentu","vocabulary":"alat agnostik netral portabel abstrak pola intensi vendor","embed_threshold":0.58}
 {"lang":"it","description":"Scrivere ways che descrivono schemi e intenzioni, non strumenti specifici","vocabulary":"strumento agnostico neutrale portabile astratto schema intenzione vendor","embed_threshold":0.65}
-{"lang":"ja","description":"特定ツールに依存しないパターンでwayを書く","vocabulary":"ツール非依存 ベンダー中立 汎用 抽象化 パターン 移植性","embed_threshold":0.61}
+{"lang":"ja","description":"特定ツールに依存しないパターンでwayを書く","vocabulary":"ツール非依存 ベンダー中立 汎用 抽象化 パターン 移植性","embed_threshold":0.59}
 {"lang":"ko","description":"특정 도구가 아닌 패턴과 의도를 설명하는 ways 작성","vocabulary":"도구 불가지론 중립 이식성 추상 패턴 의도 벤더","embed_threshold":0.61}
 {"lang":"pl","description":"Pisanie ways z wzorcami zamiast odwołań do konkretnych narzędzi","vocabulary":"narzędzie agnostyczny neutralny przenośny abstrakcyjny intencja wzorzec niezależny","embed_threshold":0.67}
 {"lang":"pt-br","description":"Escrever ways com padrões ao invés de referências a ferramentas específicas","vocabulary":"ferramenta agnóstico neutro portável abstrato intenção padrão independente","embed_threshold":0.62}

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الإعدادات ومتغيرات البيئة","vocabulary":"إعدادات تكوين متغيرات بيئة ضبط تهيئة","embed_threshold":0.75}
-{"lang":"de","description":"Konfiguration und Umgebungsvariablen — dotenv-Dateien und Verbindungseinstellungen","vocabulary":"dotenv Umgebungsvariable Konfiguration envvar Config Verbindung Port Einstellung Konfigurationsdatei","embed_threshold":0.54}
-{"lang":"es","description":"Configuracion — variables de entorno, archivos de configuracion, dotenv","vocabulary":"configuracion variable-entorno dotenv env archivo config ajustes parametro perfil","embed_threshold":0.63}
-{"lang":"fr","description":"Configuration et variables d'environnement, fichiers dotenv","vocabulary":"dotenv variable environnement configuration paramètre connexion port","embed_threshold":0.51}
+{"lang":"ar","description":"الإعدادات ومتغيرات البيئة","vocabulary":"إعدادات تكوين متغيرات بيئة ضبط تهيئة","embed_threshold":0.61}
+{"lang":"de","description":"Konfiguration und Umgebungsvariablen — dotenv-Dateien und Verbindungseinstellungen","vocabulary":"dotenv Umgebungsvariable Konfiguration envvar Config Verbindung Port Einstellung Konfigurationsdatei","embed_threshold":0.53}
+{"lang":"es","description":"Configuracion — variables de entorno, archivos de configuracion, dotenv","vocabulary":"configuracion variable-entorno dotenv env archivo config ajustes parametro perfil","embed_threshold":0.59}
+{"lang":"fr","description":"Configuration et variables d'environnement, fichiers dotenv","vocabulary":"dotenv variable environnement configuration paramètre connexion port","embed_threshold":0.46}
 {"lang":"hi","description":"कॉन्फिगरेशन, एनवायरनमेंट वेरिएबल, dotenv फाइलें, कनेक्शन","vocabulary":"कॉन्फिग एनवायरनमेंट वेरिएबल dotenv .env कनेक्शन सेटिंग","embed_threshold":0.67}
-{"lang":"id","description":"Konfigurasi, variabel lingkungan, file dotenv, koneksi","vocabulary":"konfigurasi lingkungan variabel dotenv .env koneksi pengaturan","embed_threshold":0.61}
-{"lang":"it","description":"Configurazione, variabili d'ambiente, file dotenv, connessioni","vocabulary":"configurazione ambiente variabile dotenv .env connessione impostazione","embed_threshold":0.6}
-{"lang":"ja","description":"設定管理、環境変数、dotenvファイル","vocabulary":"dotenv 環境変数 設定 コンフィグ 接続 ポート 構成","embed_threshold":0.56}
-{"lang":"ko","description":"설정, 환경 변수, dotenv 파일, 연결","vocabulary":"설정 환경 변수 dotenv .env 연결 세팅","embed_threshold":0.59}
-{"lang":"pl","description":"Konfiguracja i zmienne środowiskowe, pliki dotenv","vocabulary":"dotenv zmienna środowiskowa konfiguracja ustawienie połączenie port","embed_threshold":0.55}
-{"lang":"pt-br","description":"Configuração e variáveis de ambiente, arquivos dotenv","vocabulary":"dotenv variável ambiente configuração definição conexão porta","embed_threshold":0.56}
-{"lang":"ru","description":"Конфигурация и переменные окружения, файлы dotenv","vocabulary":"dotenv переменная окружения конфигурация настройка подключение порт","embed_threshold":0.58}
-{"lang":"th","description":"การกำหนดค่า ตัวแปรสภาพแวดล้อม ไฟล์ dotenv","vocabulary":"dotenv สภาพแวดล้อม การกำหนดค่า การตั้งค่า การเชื่อมต่อ พอร์ต","embed_threshold":0.56}
-{"lang":"tr","description":"Yapılandırma, ortam değişkenleri, dotenv dosyaları","vocabulary":"dotenv ortam yapılandırma ayar bağlantı port","embed_threshold":0.62}
-{"lang":"uk","description":"Конфігурація, змінні середовища, файли dotenv","vocabulary":"dotenv середовище конфігурація налаштування з'єднання порт","embed_threshold":0.59}
-{"lang":"vi","description":"Cấu hình, biến môi trường, tệp dotenv","vocabulary":"dotenv môi trường cấu hình cài đặt kết nối cổng","embed_threshold":0.56}
-{"lang":"zh","description":"配置、环境变量、dotenv 文件","vocabulary":"dotenv 环境 配置 设置 连接 端口","embed_threshold":0.57}
+{"lang":"id","description":"Konfigurasi, variabel lingkungan, file dotenv, koneksi","vocabulary":"konfigurasi lingkungan variabel dotenv .env koneksi pengaturan","embed_threshold":0.58}
+{"lang":"it","description":"Configurazione, variabili d'ambiente, file dotenv, connessioni","vocabulary":"configurazione ambiente variabile dotenv .env connessione impostazione","embed_threshold":0.56}
+{"lang":"ja","description":"設定管理、環境変数、dotenvファイル","vocabulary":"dotenv 環境変数 設定 コンフィグ 接続 ポート 構成","embed_threshold":0.52}
+{"lang":"ko","description":"설정, 환경 변수, dotenv 파일, 연결","vocabulary":"설정 환경 변수 dotenv .env 연결 세팅","embed_threshold":0.5}
+{"lang":"pl","description":"Konfiguracja i zmienne środowiskowe, pliki dotenv","vocabulary":"dotenv zmienna środowiskowa konfiguracja ustawienie połączenie port","embed_threshold":0.53}
+{"lang":"pt-br","description":"Configuração e variáveis de ambiente, arquivos dotenv","vocabulary":"dotenv variável ambiente configuração definição conexão porta","embed_threshold":0.53}
+{"lang":"ru","description":"Конфигурация и переменные окружения, файлы dotenv","vocabulary":"dotenv переменная окружения конфигурация настройка подключение порт","embed_threshold":0.5}
+{"lang":"th","description":"การกำหนดค่า ตัวแปรสภาพแวดล้อม ไฟล์ dotenv","vocabulary":"dotenv สภาพแวดล้อม การกำหนดค่า การตั้งค่า การเชื่อมต่อ พอร์ต","embed_threshold":0.55}
+{"lang":"tr","description":"Yapılandırma, ortam değişkenleri, dotenv dosyaları","vocabulary":"dotenv ortam yapılandırma ayar bağlantı port","embed_threshold":0.52}
+{"lang":"uk","description":"Конфігурація, змінні середовища, файли dotenv","vocabulary":"dotenv середовище конфігурація налаштування з'єднання порт","embed_threshold":0.56}
+{"lang":"vi","description":"Cấu hình, biến môi trường, tệp dotenv","vocabulary":"dotenv môi trường cấu hình cài đặt kết nối cổng","embed_threshold":0.51}
+{"lang":"zh","description":"配置、环境变量、dotenv 文件","vocabulary":"dotenv 环境 配置 设置 连接 端口","embed_threshold":0.52}

@@ -3,7 +3,7 @@
 {"lang":"es","description":"Gestion de dependencias — instalar, actualizar, resolver conflictos","vocabulary":"dependencias gestionar instalar actualizar resolver conflicto version paquete gestor lock","embed_threshold":0.64}
 {"lang":"fr","description":"Gestion des dépendances, installation de paquets","vocabulary":"dépendance paquet bibliothèque installer mettre à jour audit vulnérabilité","embed_threshold":0.81}
 {"lang":"hi","description":"डिपेंडेंसी प्रबंधन, पैकेज इंस्टॉलेशन, लाइब्रेरी","vocabulary":"डिपेंडेंसी पैकेज इंस्टॉल लाइब्रेरी npm pip cargo","embed_threshold":0.65}
-{"lang":"id","description":"Manajemen dependensi, instalasi paket, pustaka","vocabulary":"dependensi paket instalasi pustaka npm pip cargo","embed_threshold":0.64}
+{"lang":"id","description":"Manajemen dependensi, instalasi paket, pustaka","vocabulary":"dependensi paket instalasi pustaka npm pip cargo","embed_threshold":0.62}
 {"lang":"it","description":"Gestione dipendenze, installazione pacchetti, librerie","vocabulary":"dipendenza pacchetto installazione libreria npm pip cargo","embed_threshold":0.66}
 {"lang":"ja","description":"依存関係管理、パッケージのインストール","vocabulary":"依存関係 パッケージ ライブラリ インストール アップグレード 監査 脆弱性","embed_threshold":0.7}
 {"lang":"ko","description":"의존성 관리, 패키지 설치, 라이브러리","vocabulary":"의존성 패키지 설치 라이브러리 npm pip cargo","embed_threshold":0.63}

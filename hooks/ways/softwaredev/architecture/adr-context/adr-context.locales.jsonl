@@ -1,17 +1,17 @@
 {"lang":"ar","description":"التخطيط لنهج التنفيذ بعد القرار المعماري","vocabulary":"سياق تنفيذ تخطيط نهج قرار معماري","embed_threshold":0.9}
 {"lang":"de","description":"Feature-Umsetzung planen, Ansatz wählen, bestehende Projektentscheidungen verstehen, untersuchen warum etwas so gebaut wurde","vocabulary":"planen Ansatz debattieren umsetzen bauen arbeiten verstehen untersuchen warum wie Entscheidung Kontext Abwägung bewerten Option Umfang","embed_threshold":0.73}
 {"lang":"es","description":"Planificar el enfoque de implementacion tras una decision de arquitectura","vocabulary":"contexto ADR planificar implementacion enfoque estrategia alcance fases pasos","embed_threshold":0.74}
-{"lang":"fr","description":"Planifier l'approche d'implémentation, comprendre les décisions existantes","vocabulary":"plan approche implémentation construire investiguer décision contexte évaluation","embed_threshold":0.71}
-{"lang":"hi","description":"फीचर कैसे लागू करें इसकी योजना, दृष्टिकोण तय करना","vocabulary":"योजना दृष्टिकोण कार्यान्वयन फीचर निर्णय डिजाइन रणनीति","embed_threshold":0.78}
-{"lang":"id","description":"Merencanakan implementasi fitur, memutuskan pendekatan","vocabulary":"rencana pendekatan implementasi fitur keputusan desain strategi","embed_threshold":0.76}
-{"lang":"it","description":"Pianificare l'implementazione di una funzionalità, decidere l'approccio","vocabulary":"piano approccio implementazione funzionalità decisione design strategia","embed_threshold":0.8}
-{"lang":"ja","description":"実装計画の策定、アプローチの検討、過去の決定の理解","vocabulary":"計画 アプローチ 実装 構築 調査 判断 コンテキスト 評価","embed_threshold":0.79}
-{"lang":"ko","description":"기능 구현 계획, 접근 방식 결정","vocabulary":"계획 접근법 구현 기능 결정 설계 전략","embed_threshold":0.8}
-{"lang":"pl","description":"Planowanie podejścia do implementacji, zrozumienie istniejących decyzji","vocabulary":"plan podejście implementacja budowanie badanie decyzja kontekst ocena","embed_threshold":0.73}
-{"lang":"pt-br","description":"Planejar a abordagem de implementação, entender decisões existentes","vocabulary":"plano abordagem implementação construir investigar decisão contexto avaliação","embed_threshold":0.71}
+{"lang":"fr","description":"Planifier l'approche d'implémentation, comprendre les décisions existantes","vocabulary":"plan approche implémentation construire investiguer décision contexte évaluation","embed_threshold":0.7}
+{"lang":"hi","description":"फीचर कैसे लागू करें इसकी योजना, दृष्टिकोण तय करना","vocabulary":"योजना दृष्टिकोण कार्यान्वयन फीचर निर्णय डिजाइन रणनीति","embed_threshold":0.66}
+{"lang":"id","description":"Merencanakan implementasi fitur, memutuskan pendekatan","vocabulary":"rencana pendekatan implementasi fitur keputusan desain strategi","embed_threshold":0.69}
+{"lang":"it","description":"Pianificare l'implementazione di una funzionalità, decidere l'approccio","vocabulary":"piano approccio implementazione funzionalità decisione design strategia","embed_threshold":0.7}
+{"lang":"ja","description":"実装計画の策定、アプローチの検討、過去の決定の理解","vocabulary":"計画 アプローチ 実装 構築 調査 判断 コンテキスト 評価","embed_threshold":0.75}
+{"lang":"ko","description":"기능 구현 계획, 접근 방식 결정","vocabulary":"계획 접근법 구현 기능 결정 설계 전략","embed_threshold":0.78}
+{"lang":"pl","description":"Planowanie podejścia do implementacji, zrozumienie istniejących decyzji","vocabulary":"plan podejście implementacja budowanie badanie decyzja kontekst ocena","embed_threshold":0.71}
+{"lang":"pt-br","description":"Planejar a abordagem de implementação, entender decisões existentes","vocabulary":"plano abordagem implementação construir investigar decisão contexto avaliação","embed_threshold":0.7}
 {"lang":"ru","description":"Планирование подхода к реализации, понимание существующих решений","vocabulary":"план подход реализация построение исследование решение контекст оценка","embed_threshold":0.7}
 {"lang":"th","description":"วางแผนแนวทางการนำไปใช้ ทำความเข้าใจการตัดสินใจที่มีอยู่","vocabulary":"แผน แนวทาง นำไปใช้ สร้าง สืบค้น ตัดสินใจ บริบท ประเมิน","embed_threshold":0.73}
 {"lang":"tr","description":"Uygulama yaklaşımı planlama, mevcut kararları anlama","vocabulary":"plan yaklaşım uygulama inşa araştırma karar bağlam değerlendirme","embed_threshold":0.71}
-{"lang":"uk","description":"Планування підходу до реалізації, розуміння існуючих рішень","vocabulary":"план підхід реалізація побудова дослідження рішення контекст оцінка","embed_threshold":0.72}
+{"lang":"uk","description":"Планування підходу до реалізації, розуміння існуючих рішень","vocabulary":"план підхід реалізація побудова дослідження рішення контекст оцінка","embed_threshold":0.7}
 {"lang":"vi","description":"Lập kế hoạch cách triển khai, hiểu các quyết định hiện có","vocabulary":"kế hoạch cách tiếp cận triển khai xây dựng khảo sát quyết định bối cảnh đánh giá","embed_threshold":0.73}
 {"lang":"zh","description":"规划实现方法、理解现有决策","vocabulary":"计划 方法 实现 构建 调查 决策 上下文 评估","embed_threshold":0.75}

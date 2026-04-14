@@ -1,17 +1,17 @@
 {"lang":"ar","description":"إنشاء وإدارة سجلات القرارات المعمارية","vocabulary":"سجل قرار معماري تصميم مفاضلة مبررات بدائل","embed_threshold":0.9}
 {"lang":"de","description":"Architecture Decision Records — ADRs erstellen, verwalten und referenzieren für technische Entscheidungen","vocabulary":"ADR Architekturentscheidung Entwurfsentscheidung Designmuster technische Wahl Abwägung Begründung Alternative","embed_threshold":0.76}
 {"lang":"es","description":"Registros de decisiones de arquitectura — documentar y rastrear decisiones tecnicas","vocabulary":"ADR decision arquitectura registro documentar justificacion contexto consecuencias estado","embed_threshold":0.76}
-{"lang":"fr","description":"Registres de décisions d'architecture — créer et gérer des ADR","vocabulary":"ADR décision architecture registre conception compromis justification alternatives","embed_threshold":0.71}
+{"lang":"fr","description":"Registres de décisions d'architecture — créer et gérer des ADR","vocabulary":"ADR décision architecture registre conception compromis justification alternatives","embed_threshold":0.68}
 {"lang":"hi","description":"आर्किटेक्चर डिसीजन रिकॉर्ड — ADR बनाना, प्रबंधित करना, संदर्भ देना","vocabulary":"ADR आर्किटेक्चर निर्णय रिकॉर्ड बनाएं प्रबंधित संदर्भ प्रस्ताव","embed_threshold":0.71}
 {"lang":"id","description":"Catatan Keputusan Arsitektur — membuat, mengelola, dan mereferensikan ADR","vocabulary":"ADR arsitektur keputusan catatan membuat mengelola referensi proposal","embed_threshold":0.75}
 {"lang":"it","description":"Record di Decisioni Architetturali — creare, gestire e referenziare ADR","vocabulary":"ADR architettura decisione record creare gestire riferimento proposta","embed_threshold":0.75}
-{"lang":"ja","description":"アーキテクチャ決定記録の作成と管理","vocabulary":"ADR アーキテクチャ決定記録 設計判断 トレードオフ 根拠","embed_threshold":0.74}
-{"lang":"ko","description":"아키텍처 결정 기록 — ADR 생성, 관리, 참조","vocabulary":"ADR 아키텍처 결정 기록 생성 관리 참조 제안","embed_threshold":0.81}
+{"lang":"ja","description":"アーキテクチャ決定記録の作成と管理","vocabulary":"ADR アーキテクチャ決定記録 設計判断 トレードオフ 根拠","embed_threshold":0.72}
+{"lang":"ko","description":"아키텍처 결정 기록 — ADR 생성, 관리, 참조","vocabulary":"ADR 아키텍처 결정 기록 생성 관리 참조 제안","embed_threshold":0.78}
 {"lang":"pl","description":"Rekordy decyzji architektonicznych — tworzenie i zarządzanie ADR","vocabulary":"ADR architektura decyzja rekord projekt kompromis uzasadnienie alternatywy","embed_threshold":0.73}
-{"lang":"pt-br","description":"Registros de decisões de arquitetura — criar e gerenciar ADRs","vocabulary":"ADR arquitetura decisão registro design tradeoff justificativa alternativas","embed_threshold":0.71}
-{"lang":"ru","description":"Записи архитектурных решений — создание и управление ADR","vocabulary":"ADR архитектура решение запись дизайн компромисс обоснование альтернативы","embed_threshold":0.75}
+{"lang":"pt-br","description":"Registros de decisões de arquitetura — criar e gerenciar ADRs","vocabulary":"ADR arquitetura decisão registro design tradeoff justificativa alternativas","embed_threshold":0.7}
+{"lang":"ru","description":"Записи архитектурных решений — создание и управление ADR","vocabulary":"ADR архитектура решение запись дизайн компромисс обоснование альтернативы","embed_threshold":0.74}
 {"lang":"th","description":"บันทึกการตัดสินใจด้านสถาปัตยกรรม — สร้างและจัดการ ADR","vocabulary":"ADR สถาปัตยกรรม การตัดสินใจ บันทึก ออกแบบ ข้อแลกเปลี่ยน เหตุผล ทางเลือก","embed_threshold":0.77}
-{"lang":"tr","description":"Mimari karar kayıtları — ADR oluşturma ve yönetimi","vocabulary":"ADR mimari karar kayıt tasarım ödünleşim gerekçe alternatif","embed_threshold":0.74}
-{"lang":"uk","description":"Записи архітектурних рішень — створення та управління ADR","vocabulary":"ADR архітектура рішення запис дизайн компроміс обґрунтування альтернативи","embed_threshold":0.77}
-{"lang":"vi","description":"Hồ sơ quyết định kiến trúc — tạo và quản lý ADR","vocabulary":"ADR kiến trúc quyết định hồ sơ thiết kế đánh đổi lý do thay thế","embed_threshold":0.8}
-{"lang":"zh","description":"架构决策记录 — 创建和管理 ADR","vocabulary":"ADR 架构 决策 记录 设计 权衡 理由 替代方案","embed_threshold":0.76}
+{"lang":"tr","description":"Mimari karar kayıtları — ADR oluşturma ve yönetimi","vocabulary":"ADR mimari karar kayıt tasarım ödünleşim gerekçe alternatif","embed_threshold":0.73}
+{"lang":"uk","description":"Записи архітектурних рішень — створення та управління ADR","vocabulary":"ADR архітектура рішення запис дизайн компроміс обґрунтування альтернативи","embed_threshold":0.71}
+{"lang":"vi","description":"Hồ sơ quyết định kiến trúc — tạo và quản lý ADR","vocabulary":"ADR kiến trúc quyết định hồ sơ thiết kế đánh đổi lý do thay thế","embed_threshold":0.7}
+{"lang":"zh","description":"架构决策记录 — 创建和管理 ADR","vocabulary":"ADR 架构 决策 记录 设计 权衡 理由 替代方案","embed_threshold":0.73}

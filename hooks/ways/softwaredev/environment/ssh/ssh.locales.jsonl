@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الوصول عن بعد عبر SSH","vocabulary":"SSH وصول بعيد اتصال آمن مفاتيح نفق","embed_threshold":0.67}
-{"lang":"de","description":"SSH-Fernzugriff — Schlüsselverwaltung, sichere Übertragung und Tunneling","vocabulary":"SSH Fernzugriff Schlüssel SCP Rsync Bastion Jumphost Tunnel Portweiterleitung Schlüsselverwaltung","embed_threshold":0.67}
-{"lang":"es","description":"Acceso remoto SSH — claves, tuneles, configuracion, agente","vocabulary":"SSH remoto clave publica privada tunel configuracion agente acceso servidor conexion","embed_threshold":0.68}
+{"lang":"ar","description":"الوصول عن بعد عبر SSH","vocabulary":"SSH وصول بعيد اتصال آمن مفاتيح نفق","embed_threshold":0.64}
+{"lang":"de","description":"SSH-Fernzugriff — Schlüsselverwaltung, sichere Übertragung und Tunneling","vocabulary":"SSH Fernzugriff Schlüssel SCP Rsync Bastion Jumphost Tunnel Portweiterleitung Schlüsselverwaltung","embed_threshold":0.62}
+{"lang":"es","description":"Acceso remoto SSH — claves, tuneles, configuracion, agente","vocabulary":"SSH remoto clave publica privada tunel configuracion agente acceso servidor conexion","embed_threshold":0.66}
 {"lang":"fr","description":"Accès distant SSH, gestion des clés, transfert sécurisé","vocabulary":"SSH distant clé SCP rsync bastion tunnel port redirection","embed_threshold":0.66}
 {"lang":"hi","description":"SSH रिमोट एक्सेस, कुंजी प्रबंधन, सुरक्षित फाइल ट्रांसफर","vocabulary":"SSH कुंजी रिमोट एक्सेस scp sftp agent टनल कनेक्ट","embed_threshold":0.68}
-{"lang":"id","description":"Akses remote SSH, manajemen kunci, transfer file aman","vocabulary":"SSH kunci remote akses scp sftp agent tunnel koneksi","embed_threshold":0.73}
-{"lang":"it","description":"Accesso remoto SSH, gestione chiavi, trasferimento file sicuro","vocabulary":"SSH chiave remoto accesso scp sftp agent tunnel connessione","embed_threshold":0.73}
-{"lang":"ja","description":"SSHリモートアクセス、鍵管理、セキュア転送","vocabulary":"SSH リモート 鍵 SCP rsync 踏み台 トンネル ポートフォワーディング","embed_threshold":0.7}
-{"lang":"ko","description":"SSH 원격 접속, 키 관리, 안전한 파일 전송","vocabulary":"SSH 키 원격 접속 scp sftp agent 터널 연결","embed_threshold":0.74}
-{"lang":"pl","description":"Zdalny dostęp SSH, zarządzanie kluczami, bezpieczny transfer","vocabulary":"SSH zdalny klucz SCP rsync bastion tunel port przekierowanie","embed_threshold":0.69}
-{"lang":"pt-br","description":"Acesso remoto SSH, gerenciamento de chaves, transferência segura","vocabulary":"SSH remoto chave SCP rsync bastion túnel porta encaminhamento","embed_threshold":0.72}
-{"lang":"ru","description":"Удалённый доступ SSH, управление ключами, безопасная передача","vocabulary":"SSH удалённый ключ SCP rsync бастион туннель порт проброс","embed_threshold":0.68}
-{"lang":"th","description":"การเข้าถึงระยะไกล SSH การจัดการกุญแจ การถ่ายโอนที่ปลอดภัย","vocabulary":"SSH ระยะไกล กุญแจ SCP rsync bastion tunnel port forwarding","embed_threshold":0.71}
-{"lang":"tr","description":"SSH uzak erişim, anahtar yönetimi, güvenli dosya aktarımı","vocabulary":"SSH uzak anahtar SCP rsync bastion tünel port yönlendirme","embed_threshold":0.69}
-{"lang":"uk","description":"Віддалений доступ SSH, управління ключами, безпечна передача","vocabulary":"SSH віддалений ключ SCP rsync bastion тунель порт переадресація","embed_threshold":0.7}
-{"lang":"vi","description":"Truy cập từ xa SSH, quản lý khóa, truyền tệp an toàn","vocabulary":"SSH từ xa khóa SCP rsync bastion tunnel cổng chuyển tiếp","embed_threshold":0.71}
-{"lang":"zh","description":"SSH 远程访问、密钥管理、安全文件传输","vocabulary":"SSH 远程 密钥 SCP rsync bastion 隧道 端口 转发","embed_threshold":0.72}
+{"lang":"id","description":"Akses remote SSH, manajemen kunci, transfer file aman","vocabulary":"SSH kunci remote akses scp sftp agent tunnel koneksi","embed_threshold":0.69}
+{"lang":"it","description":"Accesso remoto SSH, gestione chiavi, trasferimento file sicuro","vocabulary":"SSH chiave remoto accesso scp sftp agent tunnel connessione","embed_threshold":0.7}
+{"lang":"ja","description":"SSHリモートアクセス、鍵管理、セキュア転送","vocabulary":"SSH リモート 鍵 SCP rsync 踏み台 トンネル ポートフォワーディング","embed_threshold":0.68}
+{"lang":"ko","description":"SSH 원격 접속, 키 관리, 안전한 파일 전송","vocabulary":"SSH 키 원격 접속 scp sftp agent 터널 연결","embed_threshold":0.7}
+{"lang":"pl","description":"Zdalny dostęp SSH, zarządzanie kluczami, bezpieczny transfer","vocabulary":"SSH zdalny klucz SCP rsync bastion tunel port przekierowanie","embed_threshold":0.67}
+{"lang":"pt-br","description":"Acesso remoto SSH, gerenciamento de chaves, transferência segura","vocabulary":"SSH remoto chave SCP rsync bastion túnel porta encaminhamento","embed_threshold":0.7}
+{"lang":"ru","description":"Удалённый доступ SSH, управление ключами, безопасная передача","vocabulary":"SSH удалённый ключ SCP rsync бастион туннель порт проброс","embed_threshold":0.65}
+{"lang":"th","description":"การเข้าถึงระยะไกล SSH การจัดการกุญแจ การถ่ายโอนที่ปลอดภัย","vocabulary":"SSH ระยะไกล กุญแจ SCP rsync bastion tunnel port forwarding","embed_threshold":0.66}
+{"lang":"tr","description":"SSH uzak erişim, anahtar yönetimi, güvenli dosya aktarımı","vocabulary":"SSH uzak anahtar SCP rsync bastion tünel port yönlendirme","embed_threshold":0.66}
+{"lang":"uk","description":"Віддалений доступ SSH, управління ключами, безпечна передача","vocabulary":"SSH віддалений ключ SCP rsync bastion тунель порт переадресація","embed_threshold":0.67}
+{"lang":"vi","description":"Truy cập từ xa SSH, quản lý khóa, truyền tệp an toàn","vocabulary":"SSH từ xa khóa SCP rsync bastion tunnel cổng chuyển tiếp","embed_threshold":0.65}
+{"lang":"zh","description":"SSH 远程访问、密钥管理、安全文件传输","vocabulary":"SSH 远程 密钥 SCP rsync bastion 隧道 端口 转发","embed_threshold":0.69}

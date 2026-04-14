@@ -1,12 +1,12 @@
-{"lang":"ar","description":"إدارة محادثات الفريق ومنصات التراسل","vocabulary":"محادثة فريق رسائل تواصل منصة تراسل","embed_threshold":0.67}
+{"lang":"ar","description":"إدارة محادثات الفريق ومنصات التراسل","vocabulary":"محادثة فريق رسائل تواصل منصة تراسل","embed_threshold":0.65}
 {"lang":"de","description":"Team-Chat und Messaging-Plattformen, Nachrichten lesen und mit Freigabe senden, Kommunikationskanäle","vocabulary":"Teams Chat Nachricht Slack Kanal ungelesen Konversation Direktnachricht Gruppenchat senden antworten Benachrichtigung Erwähnung","embed_threshold":0.72}
 {"lang":"es","description":"Chat de equipo y plataformas de mensajería, envío de mensajes","vocabulary":"teams chat mensaje slack canal no leído conversación respuesta notificación","embed_threshold":0.7}
 {"lang":"fr","description":"Chat d'équipe et plateformes de messagerie, lecture et envoi de messages","vocabulary":"chat message équipe canal non lu conversation réponse notification","embed_threshold":0.64}
 {"lang":"hi","description":"टीम चैट और मैसेजिंग प्लेटफॉर्म, संदेश पढ़ना और भेजना","vocabulary":"चैट संदेश टीम चैनल अपठित बातचीत जवाब सूचना","embed_threshold":0.72}
 {"lang":"id","description":"Chat tim dan platform pesan, membaca dan mengirim pesan","vocabulary":"chat pesan tim kanal belum dibaca percakapan balas notifikasi","embed_threshold":0.66}
 {"lang":"it","description":"Chat di team e piattaforme di messaggistica, leggere e inviare messaggi","vocabulary":"chat messaggio team canale non letto conversazione risposta notifica","embed_threshold":0.69}
-{"lang":"ja","description":"チームチャットやメッセージングの管理、メッセージ送信","vocabulary":"チャット メッセージ 通知 チャンネル 返信 未読 会話 連絡","embed_threshold":0.7}
-{"lang":"ko","description":"팀 채팅 및 메시징 플랫폼, 메시지 읽기 및 보내기","vocabulary":"채팅 메시지 팀 채널 읽지않음 대화 답장 알림","embed_threshold":0.66}
+{"lang":"ja","description":"チームチャットやメッセージングの管理、メッセージ送信","vocabulary":"チャット メッセージ 通知 チャンネル 返信 未読 会話 連絡","embed_threshold":0.69}
+{"lang":"ko","description":"팀 채팅 및 메시징 플랫폼, 메시지 읽기 및 보내기","vocabulary":"채팅 메시지 팀 채널 읽지않음 대화 답장 알림","embed_threshold":0.65}
 {"lang":"pl","description":"Czat zespołowy i platformy komunikacyjne, czytanie i wysyłanie wiadomości","vocabulary":"czat wiadomości teams slack kanał nieprzeczytane rozmowa odpowiedź powiadomienie","embed_threshold":0.69}
 {"lang":"pt-br","description":"Chat de equipe e plataformas de mensagens, ler e enviar mensagens","vocabulary":"chat mensagens teams slack canal não lida conversa resposta notificação","embed_threshold":0.67}
 {"lang":"ru","description":"Командный чат и платформы обмена сообщениями, чтение и отправка сообщений","vocabulary":"чат сообщения teams slack канал непрочитанное переписка ответ уведомление","embed_threshold":0.71}

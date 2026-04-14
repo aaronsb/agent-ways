@@ -3,7 +3,7 @@
 {"lang":"es","description":"Filosofia de documentacion — escribir para la audiencia, mantener actualizado","vocabulary":"documentacion escribir guia manual audiencia mantener actualizar claro conciso","embed_threshold":0.75}
 {"lang":"fr","description":"Philosophie de documentation, conventions Markdown","vocabulary":"documentation markdown technique prose projet guide manuel","embed_threshold":0.73}
 {"lang":"hi","description":"प्रलेखन दर्शन, मार्कडाउन सम्मेलन, कब लिखना","vocabulary":"प्रलेखन मार्कडाउन सम्मेलन लिखना दर्शन टिप्पणी","embed_threshold":0.65}
-{"lang":"id","description":"Filosofi dokumentasi, konvensi markdown, kapan menulis","vocabulary":"dokumentasi markdown konvensi menulis filosofi komentar","embed_threshold":0.62}
+{"lang":"id","description":"Filosofi dokumentasi, konvensi markdown, kapan menulis","vocabulary":"dokumentasi markdown konvensi menulis filosofi komentar","embed_threshold":0.61}
 {"lang":"it","description":"Filosofia della documentazione, convenzioni markdown, quando scrivere","vocabulary":"documentazione markdown convenzione scrittura filosofia commento","embed_threshold":0.68}
 {"lang":"ja","description":"ドキュメントの考え方、Markdownの規約","vocabulary":"ドキュメント マークダウン 技術文書 プロジェクト文書 文書化","embed_threshold":0.76}
 {"lang":"ko","description":"문서화 철학, 마크다운 관례, 언제 작성할지","vocabulary":"문서화 마크다운 관례 작성 철학 주석","embed_threshold":0.7}

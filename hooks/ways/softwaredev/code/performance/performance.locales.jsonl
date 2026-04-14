@@ -5,7 +5,7 @@
 {"lang":"hi","description":"प्रदर्शन अनुकूलन, प्रोफाइलिंग, बेंचमार्किंग, लेटेंसी","vocabulary":"प्रदर्शन अनुकूलन प्रोफाइल बेंचमार्क लेटेंसी कैश मेमोरी CPU","embed_threshold":0.65}
 {"lang":"id","description":"Optimalisasi performa, profiling, benchmarking, latensi","vocabulary":"performa optimalisasi profil benchmark latensi cache memori CPU","embed_threshold":0.6}
 {"lang":"it","description":"Ottimizzazione delle prestazioni, profiling, benchmarking, latenza","vocabulary":"prestazioni ottimizzazione profiling benchmark latenza cache memoria CPU","embed_threshold":0.62}
-{"lang":"ja","description":"パフォーマンス最適化、プロファイリング、ベンチマーク","vocabulary":"最適化 プロファイル ベンチマーク レイテンシ スループット メモリ キャッシュ ボトルネック","embed_threshold":0.65}
+{"lang":"ja","description":"パフォーマンス最適化、プロファイリング、ベンチマーク","vocabulary":"最適化 プロファイル ベンチマーク レイテンシ スループット メモリ キャッシュ ボトルネック","embed_threshold":0.63}
 {"lang":"ko","description":"성능 최적화, 프로파일링, 벤치마킹, 지연시간","vocabulary":"성능 최적화 프로파일 벤치마크 지연시간 캐시 메모리 CPU","embed_threshold":0.64}
 {"lang":"pl","description":"Optymalizacja wydajności, profilowanie, benchmarking","vocabulary":"optymalizacja profilowanie benchmark opóźnienie przepustowość pamięć cache wąskie gardło","embed_threshold":0.71}
 {"lang":"pt-br","description":"Otimização de performance, profiling, benchmarking","vocabulary":"otimização profiling benchmark latência throughput memória cache gargalo","embed_threshold":0.67}

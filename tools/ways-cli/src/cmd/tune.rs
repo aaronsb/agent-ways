@@ -463,6 +463,11 @@ fn tune_way(
 
             if id == way_id {
                 self_scores.push(score);
+            } else if is_hierarchical(id, way_id) {
+                // Parent/child/ancestor matches are expected — they share
+                // vocabulary by design, and runtime fires them together via
+                // parent_threshold_multiplier. Don't count them as confusers.
+                continue;
             } else {
                 non_self_entries.push((id.to_string(), score));
             }
@@ -559,6 +564,48 @@ fn tune_way(
         tuned_entries,
         original_entries: entries,
     })
+}
+
+/// True iff one way_id is an ancestor of the other in the path hierarchy.
+/// Way IDs are slash-separated paths (e.g. `softwaredev/delivery/github`).
+fn is_hierarchical(a: &str, b: &str) -> bool {
+    let (shorter, longer) = if a.len() < b.len() { (a, b) } else { (b, a) };
+    longer.starts_with(shorter) && longer.as_bytes().get(shorter.len()) == Some(&b'/')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_hierarchical;
+
+    #[test]
+    fn detects_parent_child() {
+        assert!(is_hierarchical("softwaredev/delivery", "softwaredev/delivery/github"));
+        assert!(is_hierarchical("softwaredev/delivery/github", "softwaredev/delivery"));
+    }
+
+    #[test]
+    fn detects_grandparent() {
+        assert!(is_hierarchical("softwaredev", "softwaredev/delivery/github"));
+    }
+
+    #[test]
+    fn rejects_siblings() {
+        assert!(!is_hierarchical(
+            "softwaredev/delivery/github",
+            "softwaredev/delivery/branching"
+        ));
+    }
+
+    #[test]
+    fn rejects_prefix_collision() {
+        // "softwaredev/deli" is NOT an ancestor of "softwaredev/delivery"
+        assert!(!is_hierarchical("softwaredev/deli", "softwaredev/delivery"));
+    }
+
+    #[test]
+    fn rejects_unrelated() {
+        assert!(!is_hierarchical("meta/trust", "softwaredev/delivery"));
+    }
 }
 
 fn find_way_embed() -> Option<PathBuf> {

@@ -1,17 +1,17 @@
-{"lang":"ar","description":"التمثيلات البصرية والمرئية","vocabulary":"تمثيل بصري مرئي رسم عرض تصور بيانات","embed_threshold":0.68}
+{"lang":"ar","description":"التمثيلات البصرية والمرئية","vocabulary":"تمثيل بصري مرئي رسم عرض تصور بيانات","embed_threshold":0.53}
 {"lang":"de","description":"Visuelle Darstellungen vorschlagen — Systeme durch Diagramme und Abläufe erklären","vocabulary":"durchgehen erklären zeigen beschreiben Überblick Ablauf Prozess Architektur Darstellung Veranschaulichung Systemübersicht","embed_threshold":0.69}
-{"lang":"es","description":"Representaciones visuales — diagramas, graficos, tablas, arte ASCII","vocabulary":"visualizacion representacion diagrama grafico tabla ASCII arte terminal formato presentar","embed_threshold":0.73}
-{"lang":"fr","description":"Proposer des représentations visuelles lors de l'explication de systèmes","vocabulary":"expliquer aperçu flux processus architecture visualisation illustration","embed_threshold":0.66}
-{"lang":"hi","description":"समझाते समय दृश्य प्रतिनिधित्व सुझाएं","vocabulary":"विजुअल डायग्राम चार्ट ग्राफ चित्र रेंडर दिखावट","embed_threshold":0.77}
-{"lang":"id","description":"Sarankan representasi visual saat menjelaskan","vocabulary":"visual diagram grafik graf gambar render tampilan","embed_threshold":0.8}
-{"lang":"it","description":"Suggerire rappresentazioni visive durante le spiegazioni","vocabulary":"visuale diagramma grafico grafo immagine renderizzare visualizzazione","embed_threshold":0.75}
+{"lang":"es","description":"Representaciones visuales — diagramas, graficos, tablas, arte ASCII","vocabulary":"visualizacion representacion diagrama grafico tabla ASCII arte terminal formato presentar","embed_threshold":0.56}
+{"lang":"fr","description":"Proposer des représentations visuelles lors de l'explication de systèmes","vocabulary":"expliquer aperçu flux processus architecture visualisation illustration","embed_threshold":0.61}
+{"lang":"hi","description":"समझाते समय दृश्य प्रतिनिधित्व सुझाएं","vocabulary":"विजुअल डायग्राम चार्ट ग्राफ चित्र रेंडर दिखावट","embed_threshold":0.54}
+{"lang":"id","description":"Sarankan representasi visual saat menjelaskan","vocabulary":"visual diagram grafik graf gambar render tampilan","embed_threshold":0.58}
+{"lang":"it","description":"Suggerire rappresentazioni visive durante le spiegazioni","vocabulary":"visuale diagramma grafico grafo immagine renderizzare visualizzazione","embed_threshold":0.57}
 {"lang":"ja","description":"システム説明時に適切な視覚表現を提案","vocabulary":"説明 概要 フロー プロセス アーキテクチャ 可視化 図解","embed_threshold":0.71}
-{"lang":"ko","description":"설명할 때 시각적 표현 제안","vocabulary":"시각적 다이어그램 차트 그래프 이미지 렌더링 시각화","embed_threshold":0.83}
-{"lang":"pl","description":"Proponowanie wizualnych reprezentacji przy wyjaśnianiu systemów","vocabulary":"wyjaśniać przegląd przepływ proces architektura wizualizacja ilustracja","embed_threshold":0.69}
-{"lang":"pt-br","description":"Propor representações visuais ao explicar sistemas","vocabulary":"explicar visão geral fluxo processo arquitetura visualização ilustração","embed_threshold":0.66}
-{"lang":"ru","description":"Предложение визуальных представлений при объяснении систем","vocabulary":"объяснить обзор поток процесс архитектура визуализация иллюстрация","embed_threshold":0.66}
-{"lang":"th","description":"เสนอการแสดงภาพเมื่ออธิบายระบบ","vocabulary":"อธิบาย ภาพรวม โฟลว์ กระบวนการ สถาปัตยกรรม แสดงผล ภาพประกอบ","embed_threshold":0.72}
-{"lang":"tr","description":"Sistemleri açıklarken görsel temsiller önermek","vocabulary":"açıklamak genel bakış akış süreç mimari görselleştirme illüstrasyon","embed_threshold":0.66}
-{"lang":"uk","description":"Пропонування візуальних представлень при поясненні систем","vocabulary":"пояснити огляд потік процес архітектура візуалізація ілюстрація","embed_threshold":0.69}
+{"lang":"ko","description":"설명할 때 시각적 표현 제안","vocabulary":"시각적 다이어그램 차트 그래프 이미지 렌더링 시각화","embed_threshold":0.6}
+{"lang":"pl","description":"Proponowanie wizualnych reprezentacji przy wyjaśnianiu systemów","vocabulary":"wyjaśniać przegląd przepływ proces architektura wizualizacja ilustracja","embed_threshold":0.65}
+{"lang":"pt-br","description":"Propor representações visuais ao explicar sistemas","vocabulary":"explicar visão geral fluxo processo arquitetura visualização ilustração","embed_threshold":0.62}
+{"lang":"ru","description":"Предложение визуальных представлений при объяснении систем","vocabulary":"объяснить обзор поток процесс архитектура визуализация иллюстрация","embed_threshold":0.62}
+{"lang":"th","description":"เสนอการแสดงภาพเมื่ออธิบายระบบ","vocabulary":"อธิบาย ภาพรวม โฟลว์ กระบวนการ สถาปัตยกรรม แสดงผล ภาพประกอบ","embed_threshold":0.64}
+{"lang":"tr","description":"Sistemleri açıklarken görsel temsiller önermek","vocabulary":"açıklamak genel bakış akış süreç mimari görselleştirme illüstrasyon","embed_threshold":0.63}
+{"lang":"uk","description":"Пропонування візуальних представлень при поясненні систем","vocabulary":"пояснити огляд потік процес архітектура візуалізація ілюстрація","embed_threshold":0.64}
 {"lang":"vi","description":"Đề xuất biểu diễn trực quan khi giải thích hệ thống","vocabulary":"giải thích tổng quan luồng quy trình kiến trúc trực quan minh họa","embed_threshold":0.71}
 {"lang":"zh","description":"在解释系统时建议使用可视化表示","vocabulary":"解释 概览 流程 过程 架构 可视化 图示","embed_threshold":0.69}

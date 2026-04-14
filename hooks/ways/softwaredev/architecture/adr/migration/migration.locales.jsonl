@@ -1,17 +1,17 @@
-{"lang":"ar","description":"الترحيل إلى أدوات سجلات القرارات المعمارية","vocabulary":"ترحيل أدوات سجلات قرارات تحويل انتقال","embed_threshold":0.74}
-{"lang":"de","description":"Migration zu ADR-Werkzeugen, ADR-Einführung, bestehende Entscheidungen konvertieren, adr.yaml einrichten, Architekturaufzeichnungen bootstrappen","vocabulary":"migrieren einführen konvertieren bootstrappen einrichten Greenfield Legacy umbenennen nummerieren Frontmatter YAML Gerüst importieren","embed_threshold":0.62}
+{"lang":"ar","description":"الترحيل إلى أدوات سجلات القرارات المعمارية","vocabulary":"ترحيل أدوات سجلات قرارات تحويل انتقال","embed_threshold":0.68}
+{"lang":"de","description":"Migration zu ADR-Werkzeugen, ADR-Einführung, bestehende Entscheidungen konvertieren, adr.yaml einrichten, Architekturaufzeichnungen bootstrappen","vocabulary":"migrieren einführen konvertieren bootstrappen einrichten Greenfield Legacy umbenennen nummerieren Frontmatter YAML Gerüst importieren","embed_threshold":0.59}
 {"lang":"es","description":"Migrar al sistema de herramientas ADR — transicion de formato y flujo de trabajo","vocabulary":"migracion ADR migrar transicion herramientas formato convertir actualizar legacy","embed_threshold":0.63}
-{"lang":"fr","description":"Migration vers les outils ADR, conversion des décisions existantes","vocabulary":"migration ADR adoption conversion configuration hérité scaffold import","embed_threshold":0.64}
-{"lang":"hi","description":"ADR टूलिंग में माइग्रेशन, ADR अपनाना, मौजूदा निर्णय परिवर्तित करना","vocabulary":"माइग्रेशन ADR अपनाएं परिवर्तित आयात ढांचा टूलिंग","embed_threshold":0.69}
+{"lang":"fr","description":"Migration vers les outils ADR, conversion des décisions existantes","vocabulary":"migration ADR adoption conversion configuration hérité scaffold import","embed_threshold":0.62}
+{"lang":"hi","description":"ADR टूलिंग में माइग्रेशन, ADR अपनाना, मौजूदा निर्णय परिवर्तित करना","vocabulary":"माइग्रेशन ADR अपनाएं परिवर्तित आयात ढांचा टूलिंग","embed_threshold":0.62}
 {"lang":"id","description":"Migrasi ke tooling ADR, adopsi ADR, konversi keputusan yang ada","vocabulary":"migrasi ADR adopsi konversi impor kerangka kerja tooling","embed_threshold":0.73}
 {"lang":"it","description":"Migrazione al tooling ADR, adozione ADR, conversione decisioni esistenti","vocabulary":"migrazione ADR adozione conversione importazione framework tooling","embed_threshold":0.62}
-{"lang":"ja","description":"ADRツールへの移行、既存の決定の変換","vocabulary":"移行 導入 変換 ブートストラップ セットアップ レガシー 足場","embed_threshold":0.76}
-{"lang":"ko","description":"ADR 도구로의 마이그레이션, ADR 채택, 기존 결정 변환","vocabulary":"마이그레이션 ADR 채택 변환 가져오기 프레임워크 도구","embed_threshold":0.81}
-{"lang":"pl","description":"Migracja do narzędzi ADR, konwersja istniejących decyzji","vocabulary":"migracja ADR adopcja konwersja konfiguracja legacy scaffold importowanie","embed_threshold":0.65}
-{"lang":"pt-br","description":"Migração para ferramentas ADR, conversão de decisões existentes","vocabulary":"migração ADR adoção conversão configuração legado scaffold importar","embed_threshold":0.63}
-{"lang":"ru","description":"Миграция на инструменты ADR, конвертация существующих решений","vocabulary":"миграция ADR внедрение конвертация настройка легаси scaffold импорт","embed_threshold":0.61}
-{"lang":"th","description":"ย้ายไปใช้เครื่องมือ ADR แปลงการตัดสินใจที่มีอยู่","vocabulary":"ย้าย ADR นำไปใช้ แปลง ตั้งค่า legacy scaffold นำเข้า","embed_threshold":0.78}
-{"lang":"tr","description":"ADR araçlarına geçiş, mevcut kararların dönüştürülmesi","vocabulary":"geçiş ADR benimseme dönüştürme yapılandırma eski scaffold içe aktarma","embed_threshold":0.79}
-{"lang":"uk","description":"Міграція на інструменти ADR, конвертація існуючих рішень","vocabulary":"міграція ADR прийняття конвертація налаштування legacy scaffold імпорт","embed_threshold":0.66}
-{"lang":"vi","description":"Di chuyển sang công cụ ADR, chuyển đổi các quyết định hiện có","vocabulary":"di chuyển ADR áp dụng chuyển đổi cấu hình legacy scaffold nhập","embed_threshold":0.8}
-{"lang":"zh","description":"迁移至 ADR 工具、转换现有决策","vocabulary":"迁移 ADR 采用 转换 配置 遗留 scaffold 导入","embed_threshold":0.78}
+{"lang":"ja","description":"ADRツールへの移行、既存の決定の変換","vocabulary":"移行 導入 変換 ブートストラップ セットアップ レガシー 足場","embed_threshold":0.72}
+{"lang":"ko","description":"ADR 도구로의 마이그레이션, ADR 채택, 기존 결정 변환","vocabulary":"마이그레이션 ADR 채택 변환 가져오기 프레임워크 도구","embed_threshold":0.7}
+{"lang":"pl","description":"Migracja do narzędzi ADR, konwersja istniejących decyzji","vocabulary":"migracja ADR adopcja konwersja konfiguracja legacy scaffold importowanie","embed_threshold":0.57}
+{"lang":"pt-br","description":"Migração para ferramentas ADR, conversão de decisões existentes","vocabulary":"migração ADR adoção conversão configuração legado scaffold importar","embed_threshold":0.6}
+{"lang":"ru","description":"Миграция на инструменты ADR, конвертация существующих решений","vocabulary":"миграция ADR внедрение конвертация настройка легаси scaffold импорт","embed_threshold":0.56}
+{"lang":"th","description":"ย้ายไปใช้เครื่องมือ ADR แปลงการตัดสินใจที่มีอยู่","vocabulary":"ย้าย ADR นำไปใช้ แปลง ตั้งค่า legacy scaffold นำเข้า","embed_threshold":0.62}
+{"lang":"tr","description":"ADR araçlarına geçiş, mevcut kararların dönüştürülmesi","vocabulary":"geçiş ADR benimseme dönüştürme yapılandırma eski scaffold içe aktarma","embed_threshold":0.7}
+{"lang":"uk","description":"Міграція на інструменти ADR, конвертація існуючих рішень","vocabulary":"міграція ADR прийняття конвертація налаштування legacy scaffold імпорт","embed_threshold":0.59}
+{"lang":"vi","description":"Di chuyển sang công cụ ADR, chuyển đổi các quyết định hiện có","vocabulary":"di chuyển ADR áp dụng chuyển đổi cấu hình legacy scaffold nhập","embed_threshold":0.65}
+{"lang":"zh","description":"迁移至 ADR 工具、转换现有决策","vocabulary":"迁移 ADR 采用 转换 配置 遗留 scaffold 导入","embed_threshold":0.69}

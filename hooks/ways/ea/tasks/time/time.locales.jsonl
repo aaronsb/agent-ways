@@ -10,8 +10,8 @@
 {"lang":"pl","description":"Śledzenie czasu, rejestrowanie godzin rozliczeniowych, fakturowanie","vocabulary":"śledzenie czasu godziny rozliczeniowe karta czasu faktura fakturowanie projekt raport","embed_threshold":0.77}
 {"lang":"pt-br","description":"Controle de horas, registro de horas faturáveis, faturamento","vocabulary":"controle horas faturável planilha de horas fatura faturamento projeto relatório","embed_threshold":0.72}
 {"lang":"ru","description":"Учёт рабочего времени, биллинг часов, выставление счетов","vocabulary":"учёт времени часы биллинг табель счёт выставление проект отчёт","embed_threshold":0.78}
-{"lang":"th","description":"ติดตามเวลาทำงาน บันทึกชั่วโมงเรียกเก็บเงิน ออกใบแจ้งหนี้","vocabulary":"เวลา ชั่วโมง บันทึก เรียกเก็บ ใบแจ้งหนี้ ลูกค้า โครงการ รายงาน","embed_threshold":0.78}
+{"lang":"th","description":"ติดตามเวลาทำงาน บันทึกชั่วโมงเรียกเก็บเงิน ออกใบแจ้งหนี้","vocabulary":"เวลา ชั่วโมง บันทึก เรียกเก็บ ใบแจ้งหนี้ ลูกค้า โครงการ รายงาน","embed_threshold":0.72}
 {"lang":"tr","description":"Zaman takibi, faturalandırılabilir saatleri kaydetme, faturalama","vocabulary":"zaman saat takip faturalandırılabilir zaman çizelgesi fatura müşteri proje rapor","embed_threshold":0.7}
-{"lang":"uk","description":"Облік часу, запис оплачуваних годин, виставлення рахунків","vocabulary":"час години облік оплачуваний табель рахунок клієнт проєкт звіт","embed_threshold":0.74}
+{"lang":"uk","description":"Облік часу, запис оплачуваних годин, виставлення рахунків","vocabulary":"час години облік оплачуваний табель рахунок клієнт проєкт звіт","embed_threshold":0.69}
 {"lang":"vi","description":"Theo dõi thời gian, ghi nhận giờ tính phí, lập hóa đơn","vocabulary":"thời gian giờ theo dõi tính phí bảng chấm công hóa đơn khách hàng dự án báo cáo","embed_threshold":0.68}
 {"lang":"zh","description":"时间追踪、记录计费小时、开具发票","vocabulary":"时间 小时 追踪 计费 时间表 发票 客户 项目 报告","embed_threshold":0.8}

@@ -1,17 +1,17 @@
 {"lang":"ar","description":"شحن الكود إلى بيئة الإنتاج","vocabulary":"تسليم شحن إنتاج نشر إطلاق توزيع","embed_threshold":0.59}
-{"lang":"de","description":"Code ausliefern — Commits, Pull Requests, Releases und Deployment in Produktion","vocabulary":"ausliefern deployen veröffentlichen Release Commit pushen mergen Pull-Request Pipeline Produktion Bereitstellung Auslieferung","embed_threshold":0.56}
+{"lang":"de","description":"Code ausliefern — Commits, Pull Requests, Releases und Deployment in Produktion","vocabulary":"ausliefern deployen veröffentlichen Release Commit pushen mergen Pull-Request Pipeline Produktion Bereitstellung Auslieferung","embed_threshold":0.55}
 {"lang":"es","description":"Entrega de software — enviar codigo a produccion, despliegue, pipeline","vocabulary":"entrega despliegue produccion pipeline enviar lanzar CI CD automatizar flujo","embed_threshold":0.66}
 {"lang":"fr","description":"Livraison de code — commits, PRs, releases, déploiement en production","vocabulary":"livraison déploiement release commit publier merge pipeline production","embed_threshold":0.65}
-{"lang":"hi","description":"कोड शिपिंग — कमिट, PR, रिलीज, माइग्रेशन","vocabulary":"शिप डिलीवरी कमिट PR रिलीज माइग्रेशन डिप्लॉय","embed_threshold":0.67}
-{"lang":"id","description":"Pengiriman kode — commit, PR, rilis, migrasi","vocabulary":"kirim pengiriman commit PR rilis migrasi deploy","embed_threshold":0.61}
-{"lang":"it","description":"Consegna codice — commit, PR, rilasci, migrazioni","vocabulary":"consegna commit PR rilascio migrazione deploy","embed_threshold":0.64}
+{"lang":"hi","description":"कोड शिपिंग — कमिट, PR, रिलीज, माइग्रेशन","vocabulary":"शिप डिलीवरी कमिट PR रिलीज माइग्रेशन डिप्लॉय","embed_threshold":0.65}
+{"lang":"id","description":"Pengiriman kode — commit, PR, rilis, migrasi","vocabulary":"kirim pengiriman commit PR rilis migrasi deploy","embed_threshold":0.59}
+{"lang":"it","description":"Consegna codice — commit, PR, rilasci, migrazioni","vocabulary":"consegna commit PR rilascio migrazione deploy","embed_threshold":0.6}
 {"lang":"ja","description":"コードの出荷 — コミット、PR、リリース、本番環境へのデプロイ","vocabulary":"出荷 デリバリー デプロイ リリース コミット プッシュ マージ パイプライン 本番","embed_threshold":0.62}
 {"lang":"ko","description":"코드 배포 — 커밋, PR, 릴리스, 마이그레이션","vocabulary":"배포 딜리버리 커밋 PR 릴리스 마이그레이션 디플로이","embed_threshold":0.75}
 {"lang":"pl","description":"Dostarczanie kodu — commity, PRy, wydania, wdrożenie na produkcję","vocabulary":"dostarczanie wdrożenie wydanie commit publikowanie merge pipeline produkcja","embed_threshold":0.62}
 {"lang":"pt-br","description":"Entrega de código — commits, PRs, releases, deploy em produção","vocabulary":"entrega deploy release commit publicar merge pipeline produção","embed_threshold":0.64}
-{"lang":"ru","description":"Доставка кода — коммиты, PR, релизы, развёртывание в продакшн","vocabulary":"доставка развёртывание релиз коммит публикация merge pipeline продакшн","embed_threshold":0.62}
+{"lang":"ru","description":"Доставка кода — коммиты, PR, релизы, развёртывание в продакшн","vocabulary":"доставка развёртывание релиз коммит публикация merge pipeline продакшн","embed_threshold":0.6}
 {"lang":"th","description":"การส่งมอบโค้ด — commits, PR, releases, เส้นทางสู่โปรดักชัน","vocabulary":"ส่งมอบ deploy release commit เผยแพร่ merge pipeline โปรดักชัน","embed_threshold":0.71}
 {"lang":"tr","description":"Kod teslimi — commitler, PR'ler, yayınlar, üretime giden yol","vocabulary":"teslim deploy yayın commit yayınlama merge pipeline üretim","embed_threshold":0.61}
 {"lang":"uk","description":"Доставка коду — коміти, PR, релізи, шлях до продакшну","vocabulary":"доставка deploy реліз коміт публікація merge pipeline продакшн","embed_threshold":0.65}
 {"lang":"vi","description":"Giao mã — commits, PR, releases, đường đến production","vocabulary":"giao deploy release commit xuất bản merge pipeline production","embed_threshold":0.66}
-{"lang":"zh","description":"代码交付 — 提交、PR、发布、到生产的路径","vocabulary":"交付 部署 发布 提交 发布 merge pipeline 生产","embed_threshold":0.62}
+{"lang":"zh","description":"代码交付 — 提交、PR、发布、到生产的路径","vocabulary":"交付 部署 发布 提交 发布 merge pipeline 生产","embed_threshold":0.6}

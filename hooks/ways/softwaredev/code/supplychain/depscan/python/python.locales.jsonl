@@ -1,12 +1,12 @@
-{"lang":"ar","description":"أمان تبعيات Python","vocabulary":"Python تبعيات أمان pip حزم فحص ثغرات","embed_threshold":0.62}
+{"lang":"ar","description":"أمان تبعيات Python","vocabulary":"Python تبعيات أمان pip حزم فحص ثغرات","embed_threshold":0.59}
 {"lang":"de","description":"Python-Abhängigkeitssicherheit, pip-audit, setup.py-Risiken, PyPI-Typosquatting","vocabulary":"pip-audit setup.py pyproject.toml requirements.txt Wheel sdist PyPI Typosquatting Safety pip-install Python Paket","embed_threshold":0.64}
-{"lang":"es","description":"Seguridad de dependencias en Python — pip audit, safety, entornos virtuales","vocabulary":"Python pip audit safety dependencias seguridad requirements virtualenv vulnerabilidad PyPI","embed_threshold":0.62}
+{"lang":"es","description":"Seguridad de dependencias en Python — pip audit, safety, entornos virtuales","vocabulary":"Python pip audit safety dependencias seguridad requirements virtualenv vulnerabilidad PyPI","embed_threshold":0.6}
 {"lang":"fr","description":"Sécurité des dépendances Python, pip-audit","vocabulary":"pip-audit setup.py pyproject.toml requirements.txt typosquatting Python","embed_threshold":0.62}
-{"lang":"hi","description":"Python डिपेंडेंसी सुरक्षा, pip-audit, setup.py जोखिम","vocabulary":"Python pip-audit setup.py PyPI सुरक्षा डिपेंडेंसी requirements","embed_threshold":0.64}
-{"lang":"id","description":"Keamanan dependensi Python, pip-audit, risiko setup.py","vocabulary":"Python pip-audit setup.py PyPI keamanan dependensi requirements","embed_threshold":0.67}
-{"lang":"it","description":"Sicurezza dipendenze Python, pip-audit, rischi setup.py","vocabulary":"Python pip-audit setup.py PyPI sicurezza dipendenza requirements","embed_threshold":0.67}
+{"lang":"hi","description":"Python डिपेंडेंसी सुरक्षा, pip-audit, setup.py जोखिम","vocabulary":"Python pip-audit setup.py PyPI सुरक्षा डिपेंडेंसी requirements","embed_threshold":0.62}
+{"lang":"id","description":"Keamanan dependensi Python, pip-audit, risiko setup.py","vocabulary":"Python pip-audit setup.py PyPI keamanan dependensi requirements","embed_threshold":0.64}
+{"lang":"it","description":"Sicurezza dipendenze Python, pip-audit, rischi setup.py","vocabulary":"Python pip-audit setup.py PyPI sicurezza dipendenza requirements","embed_threshold":0.63}
 {"lang":"ja","description":"Pythonの依存関係セキュリティ、pip-audit","vocabulary":"pip-audit setup.py pyproject.toml requirements.txt タイポスクワッティング","embed_threshold":0.63}
-{"lang":"ko","description":"Python 의존성 보안, pip-audit, setup.py 위험","vocabulary":"Python pip-audit setup.py PyPI 보안 의존성 requirements","embed_threshold":0.64}
+{"lang":"ko","description":"Python 의존성 보안, pip-audit, setup.py 위험","vocabulary":"Python pip-audit setup.py PyPI 보안 의존성 requirements","embed_threshold":0.62}
 {"lang":"pl","description":"Bezpieczeństwo zależności Python, pip-audit","vocabulary":"pip-audit setup.py pyproject.toml requirements.txt typosquatting Python","embed_threshold":0.63}
 {"lang":"pt-br","description":"Segurança de dependências Python, pip-audit","vocabulary":"pip-audit setup.py pyproject.toml requirements.txt typosquatting Python","embed_threshold":0.65}
 {"lang":"ru","description":"Безопасность зависимостей Python, pip-audit","vocabulary":"pip-audit setup.py pyproject.toml requirements.txt typosquatting Python","embed_threshold":0.65}

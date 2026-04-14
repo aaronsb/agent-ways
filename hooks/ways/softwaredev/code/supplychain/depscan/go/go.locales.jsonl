@@ -1,11 +1,11 @@
-{"lang":"ar","description":"أمان تبعيات لغة Go","vocabulary":"Go تبعيات أمان وحدات فحص ثغرات","embed_threshold":0.67}
-{"lang":"de","description":"Go-Abhängigkeitssicherheit, govulncheck, Modulverifizierung, Replace-Direktiven","vocabulary":"govulncheck go.sum go.mod Replace-Direktive go-install go-get Modul Proxy Prüfsumme","embed_threshold":0.52}
-{"lang":"es","description":"Seguridad de dependencias en Go — modulos, govulncheck, actualizaciones","vocabulary":"Go modulos govulncheck dependencias seguridad go.mod go.sum vulnerabilidad actualizar","embed_threshold":0.65}
-{"lang":"fr","description":"Sécurité des dépendances Go, govulncheck","vocabulary":"govulncheck go.sum go.mod module proxy checksum Go","embed_threshold":0.51}
+{"lang":"ar","description":"أمان تبعيات لغة Go","vocabulary":"Go تبعيات أمان وحدات فحص ثغرات","embed_threshold":0.64}
+{"lang":"de","description":"Go-Abhängigkeitssicherheit, govulncheck, Modulverifizierung, Replace-Direktiven","vocabulary":"govulncheck go.sum go.mod Replace-Direktive go-install go-get Modul Proxy Prüfsumme","embed_threshold":0.51}
+{"lang":"es","description":"Seguridad de dependencias en Go — modulos, govulncheck, actualizaciones","vocabulary":"Go modulos govulncheck dependencias seguridad go.mod go.sum vulnerabilidad actualizar","embed_threshold":0.64}
+{"lang":"fr","description":"Sécurité des dépendances Go, govulncheck","vocabulary":"govulncheck go.sum go.mod module proxy checksum Go","embed_threshold":0.5}
 {"lang":"hi","description":"Go डिपेंडेंसी सुरक्षा, govulncheck, मॉड्यूल सत्यापन","vocabulary":"Go govulncheck मॉड्यूल सत्यापन go.sum रिप्लेस डायरेक्ट","embed_threshold":0.61}
 {"lang":"id","description":"Keamanan dependensi Go, govulncheck, verifikasi modul","vocabulary":"Go govulncheck modul verifikasi go.sum replace direct","embed_threshold":0.56}
 {"lang":"it","description":"Sicurezza dipendenze Go, govulncheck, verifica moduli","vocabulary":"Go govulncheck modulo verifica go.sum replace direct","embed_threshold":0.54}
-{"lang":"ja","description":"Goの依存関係セキュリティ、govulncheck","vocabulary":"govulncheck go.sum go.mod モジュール プロキシ チェックサム","embed_threshold":0.62}
+{"lang":"ja","description":"Goの依存関係セキュリティ、govulncheck","vocabulary":"govulncheck go.sum go.mod モジュール プロキシ チェックサム","embed_threshold":0.61}
 {"lang":"ko","description":"Go 의존성 보안, govulncheck, 모듈 검증","vocabulary":"Go govulncheck 모듈 검증 go.sum replace direct","embed_threshold":0.57}
 {"lang":"pl","description":"Bezpieczeństwo zależności Go, govulncheck","vocabulary":"govulncheck go.sum go.mod moduł proxy suma kontrolna Go","embed_threshold":0.55}
 {"lang":"pt-br","description":"Segurança de dependências Go, govulncheck","vocabulary":"govulncheck go.sum go.mod módulo proxy checksum Go","embed_threshold":0.56}

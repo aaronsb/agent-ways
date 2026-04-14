@@ -1,6 +1,6 @@
 {"lang":"ar","description":"نظرة عامة على نظام الطرق","vocabulary":"طرق نظام معرفة توجيه إرشاد هيكل","embed_threshold":0.65}
-{"lang":"de","description":"Überblick über das Ways-System — wie Ways, Skills und Hooks zusammenhängen, Domänenorganisation, Matching-Modi","vocabulary":"Ways Way Wissen Anleitung Kontext einbinden Hook Trigger Matching semantisch Vokabular Domäne","embed_threshold":0.65}
-{"lang":"es","description":"Visión general del sistema de ways — ways, skills, hooks","vocabulary":"ways conocimiento guía contexto hook disparador coincidencia vocabulario","embed_threshold":0.64}
+{"lang":"de","description":"Überblick über das Ways-System — wie Ways, Skills und Hooks zusammenhängen, Domänenorganisation, Matching-Modi","vocabulary":"Ways Way Wissen Anleitung Kontext einbinden Hook Trigger Matching semantisch Vokabular Domäne","embed_threshold":0.64}
+{"lang":"es","description":"Visión general del sistema de ways — ways, skills, hooks","vocabulary":"ways conocimiento guía contexto hook disparador coincidencia vocabulario","embed_threshold":0.59}
 {"lang":"fr","description":"Vue d'ensemble du système ways — comment ways, skills et hooks fonctionnent ensemble","vocabulary":"ways connaissance guidage contexte hook déclencheur correspondance domaine","embed_threshold":0.59}
 {"lang":"hi","description":"ways सिस्टम का अवलोकन — ways, skills और hooks कैसे जुड़े हैं","vocabulary":"ways ज्ञान मार्गदर्शन संदर्भ hook trigger मैचिंग डोमेन","embed_threshold":0.58}
 {"lang":"id","description":"Gambaran sistem ways — bagaimana ways, skills, dan hooks saling terhubung","vocabulary":"ways pengetahuan panduan konteks hook pemicu pencocokan domain","embed_threshold":0.57}

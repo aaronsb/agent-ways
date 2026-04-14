@@ -6,7 +6,7 @@
 {"lang":"id","description":"Pesan commit Git, penamaan branch, conventional commits","vocabulary":"commit pesan branch penamaan konvensional git log amend","embed_threshold":0.68}
 {"lang":"it","description":"Messaggi di commit Git, naming dei branch, conventional commits","vocabulary":"commit messaggio branch naming convenzionale git log amend","embed_threshold":0.74}
 {"lang":"ja","description":"gitコミットメッセージ、コンベンショナルコミット","vocabulary":"コミット メッセージ ブランチ コンベンショナル feat fix スコープ","embed_threshold":0.7}
-{"lang":"ko","description":"Git 커밋 메시지, 브랜치 명명, 컨벤셔널 커밋","vocabulary":"커밋 메시지 브랜치 명명 컨벤셔널 git 로그 amend","embed_threshold":0.74}
+{"lang":"ko","description":"Git 커밋 메시지, 브랜치 명명, 컨벤셔널 커밋","vocabulary":"커밋 메시지 브랜치 명명 컨벤셔널 git 로그 amend","embed_threshold":0.68}
 {"lang":"pl","description":"Wiadomości commitów Git, konwencjonalne commity","vocabulary":"commit wiadomość gałąź konwencjonalny feat fix zakres atomowy","embed_threshold":0.65}
 {"lang":"pt-br","description":"Mensagens de commit Git, commits convencionais","vocabulary":"commit mensagem branch convencional feat fix escopo atômico","embed_threshold":0.69}
 {"lang":"ru","description":"закоммитить и запушить — оформление коммитов, комментарий к коммиту, правила описания изменений, conventional commits, семантика коммитов, атомарные коммиты, git commit и git push в удалённый репозиторий","vocabulary":"коммит закоммитить коммитить пуш запушить пушить комментарий сообщение описание оформление правила семантика conventional feat fix refactor rebase squash amend stash ребейзить сквошить замержить черри-пикнуть сташить бранч ветка атомарный удалённый origin upstream remote","embed_threshold":0.66}
