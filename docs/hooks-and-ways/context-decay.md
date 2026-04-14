@@ -1,14 +1,29 @@
 # The Context Decay Model: Why Timed Injection Beats Front-Loading
 
-Ways are a progressive disclosure system for LLM context. This document explains the attention mechanics that make timed injection outperform monolithic system prompts — not as analogy, but as a description of the inference dynamics that govern how models use instructions. A companion document, [Formal Foundations](context-decay-formal-foundations.md), grounds each claim here in published transformer research, control theory, and human operator modeling.
+Ways are a progressive disclosure system for LLM context. This document explains why timed injection outperforms monolithic system prompts by modeling the *presentation economics* of long-context inference: how guidance retains or loses its effective influence on generation as context accumulates. A companion document, [Formal Foundations](context-decay-formal-foundations.md), grounds each claim here in published transformer research, control theory, and human operator modeling. The architectural decisions that operationalize this model for firing dynamics live in [ADR-123: Firing dynamics — progression-axis unification for attend and ways](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md).
+
+## What this model captures — and what it doesn't
+
+Before the formulas: a note on scope. The decay model below is a pedagogical approximation of *presentation economics*, not a literal description of what happens inside a trained transformer's attention mechanism. It answers the question **"on aggregate, how much effective influence does a piece of guidance retain as context accumulates past it?"** It does not answer "what does attention actually do with this specific token at this specific layer?"
+
+Two separate things can be true:
+
+1. **The baseline positional prior** for attention decays with distance. RoPE (rotary positional embedding) imposes a long-term decay in the inner product of query/key vectors as their positional distance grows. This is a structural property of the encoding, and it's what the model below is approximating.
+2. **Trained attention heads override the baseline** for content they've learned is salient. Modern LLMs — Claude included — are explicitly trained for needle-in-a-haystack retrieval. An attention head that has learned a pattern like "retrieve specific rule tokens when generating commit messages" will reach back 100k+ tokens with near-full salience, ignoring the baseline decay prior. The empirical retention curves in [model-context-decay/README.md](../reference/model-context-decay/README.md) show exactly this: Opus 4.6 retains ~78% retrieval accuracy at 1M tokens, which is much better than any smooth exponential would predict.
+
+Both facts matter, but for *firing decisions* — deciding when to re-inject a way so its guidance is freshly available — what we care about is the **aggregate effective retention** across the mix of attention heads that will actually run during generation. That aggregate is close enough to the baseline decay prior that the model below is a useful decision rule. Firing on token-distance is *presentation economics*, not *attention internals*. We inject when the aggregate has faded below useful, regardless of whether some specific head could still retrieve it.
+
+The rest of this document describes the presentation-economics model. Read the formulas as useful approximations, not as direct claims about transformer mechanics.
 
 ## The Decay Problem
 
-During inference, a model's adherence to system prompt instructions decays with two independent factors:
+During inference, a model's adherence to system prompt instructions drops as context accumulates past it. The drop can be decomposed into two granularities of the same underlying thing — accumulated token distance since the guidance was injected:
 
-1. **Turn decay** ($n^{-\alpha}$): As conversation turns accumulate, the system prompt recedes in positional distance. Each turn pushes it further from the attention cursor. The model's peak adherence to those instructions drops monotonically.
+1. **Turn decay** ($n^{-\alpha}$): Each additional conversation turn pushes the system prompt further from the attention cursor in token distance. Turn count is a coarse proxy for token accumulation — a convenient one because it's easy to count and humans think in turns, but the underlying measure is tokens.
 
-2. **Within-generation decay** ($t_\mathrm{local}^{\ -\beta}$): Within a single generation, attention to the system prompt fades as more tokens are produced. Each token the model generates competes for the same attention budget.
+2. **Within-generation decay** ($t_\mathrm{local}^{\ -\beta}$): Within a single generation, each token the model produces advances the distance from the system prompt. Same mechanism as turn decay, just observed at finer granularity.
+
+**Turn count and local token count are not independent axes — they are the same axis at different zoom levels.** A very long turn, by itself, can close the salience window for guidance injected before it, because the token advance that happens *during* that turn is indistinguishable from the token advance that would happen *across several turns* of equivalent total length. One deep-reasoning turn that generates 8k tokens displaces earlier context the same way eight shorter turns of 1k each would. The $n^{-\alpha}$ and $t_\mathrm{local}^{\ -\beta}$ terms in the formula are not physically separate; they are a two-scale approximation of a single process — **monotonic token advance since injection**.
 
 The combined effect:
 
@@ -113,9 +128,13 @@ The system prompt provides the baseline. Ways provide the reinforcement signal t
 
 ## Relationship to Other Documentation
 
-This document describes the attention mechanics — the *how* of context decay and injection topology.
+This document describes the presentation-economics model — the *how* of context decay and injection topology, framed as useful approximation rather than claims about attention internals.
 
-For the formal mathematical proofs — RoPE decay derivations, multi-layer amplification, cascade control theory, McRuer's crossover model applied to human-LLM steering, and steady-state adherence conditions — see [context-decay-formal-foundations.md](context-decay-formal-foundations.md).
+For the architecture that operationalizes this model for firing dynamics across ways and attend — including the progression-axis framing, curve-as-first-class-parameter, and why ways' tick is token position while attend's is wall-clock — see [ADR-123: Firing dynamics — progression-axis unification](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md). That ADR is the canonical source for how this model gets converted into actual firing decisions.
+
+For the formal mathematical grounding — RoPE decay derivations, multi-layer amplification, cascade control theory, McRuer's crossover model applied to human-LLM steering, and steady-state adherence conditions — see [context-decay-formal-foundations.md](context-decay-formal-foundations.md). Note that the RoPE section there should be read alongside the "What this model captures" section above: RoPE gives the baseline positional prior, but trained attention heads can override it for salient retrieval.
+
+For empirical retention benchmarks across models (Opus/Sonnet MRCR v2 and GraphWalks BFS at 128K–1M context) — see [model-context-decay/README.md](../reference/model-context-decay/README.md). These numbers quantify the aggregate effective retention that the formulas above approximate.
 
 For the cognitive science foundations — active inference, predictive processing, situated cognition — see [rationale.md](rationale.md).
 

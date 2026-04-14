@@ -2,6 +2,10 @@
 
 **A companion to [The Context Decay Model: Why Timed Injection Beats Front-Loading](context-decay.md)**
 
+**See also:** [ADR-123: Firing dynamics — progression-axis unification](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) — the architecture that operationalizes this model for ways and attend, including why token position (not turn count, not wall clock) is the correct progression axis for transformer-hosted ways.
+
+> **Read section 1.1a before citing this document.** The RoPE decay derivation below is the *baseline positional prior*, not a complete model of trained-attention retrieval behavior. Modern LLMs override the baseline for salient content via head specialization, and empirical retention is substantially better than the baseline curve predicts. The decay model is used here as an approximation of *aggregate presentation economics*, which is the right quantity for firing decisions — but it is not a direct model of attention internals.
+
 ## In Plain Terms
 
 AI assistants like Claude forget their instructions as conversations get longer. Not because they're broken — it's how the underlying attention mechanism works. The further away an instruction is from what the model is currently generating, the less influence it has. Research confirms this: information in the middle of a long conversation can lose over 30% of its effectiveness.
@@ -16,15 +20,15 @@ This document maps the context decay model to established research in transforme
 
 ---
 
-## 1. Positional Attention Decay: From Intuition to Proof
+## 1. Positional Attention Decay: Baseline Prior and Its Limits
 
 The context decay model posits that system prompt adherence follows a damped sawtooth:
 
 $$A(t) \approx A_0 \cdot n^{-\alpha} \cdot t_\mathrm{local}^{\ -\beta}$$
 
-This is not a heuristic. It is a direct consequence of how positional encodings modulate attention scores in transformer architectures.
+This is a presentation-economics approximation of a more complex underlying mechanism. It captures the **baseline positional prior** that transformer architectures impose on attention — a prior that is real, measurable, and architecturally grounded. What it does *not* capture is the ability of trained attention heads to override that prior for specific content they have learned to retrieve. Both halves of this picture matter, and the sections below lay out both.
 
-### 1.1 The Mechanism: Positional Encoding Decay
+### 1.1 The Baseline Mechanism: Positional Encoding Decay
 
 Modern LLMs use Rotary Position Embeddings (RoPE), which encode relative position by rotating query and key vectors. The attention score between tokens at positions $i$ and $j$ is modulated by a function of their distance $|i - j|$.
 
@@ -42,11 +46,21 @@ where $b$ is the base (typically 10000) and $d$ is the model dimension. Each fre
 
 $$a_{ij} \propto \sum_k \cos\left((i - j)\,\theta_k\right)$$
 
-Low-frequency components (small $\theta_k$) decay slowly and distinguish distant positions. High-frequency components decay rapidly and encode fine-grained local structure. The aggregate effect is that **attention weights diminish severely beyond approximately 20 tokens of distance**, after which the model struggles to learn useful positional patterns (Attention Needs to Focus, 2026).
+Low-frequency components (small $\theta_k$) decay slowly and distinguish distant positions. High-frequency components decay rapidly and encode fine-grained local structure. The aggregate structural effect is that **the baseline attention prior diminishes with distance**, reaching the point where the encoding alone cannot distinguish useful positional patterns beyond roughly 20 tokens (Attention Needs to Focus, 2026). This is the structural *prior*, not the final attention weight.
 
 <img src="../images/formal-rope-decay.png" alt="RoPE positional decay: frequency band decomposition showing how high-frequency bands oscillate rapidly while low-frequency bands decay slowly, with the aggregate attention score dropping sharply beyond ~20 tokens" width="100%" />
 
-This is the $t_\mathrm{local}^{\ -\beta}$ term: within a single generation, each new token the model produces increases its distance from the system prompt, and the attention weight assigned to those prompt tokens decreases monotonically.
+### 1.1a Why the Baseline Is Not the Whole Story
+
+If the baseline prior were the whole story, long-context models would be useless and needle-in-a-haystack retrieval would be impossible. Neither is true. Trained attention heads — especially in instruction-tuned models like Claude — *learn to override the RoPE-imposed baseline* for specific token patterns the training objective rewards retrieving from distance. A head that has learned "retrieve rule tokens when generating commit messages" applies near-full attention to rule tokens 100k+ positions back, effectively ignoring the structural decay.
+
+This is empirically confirmed. Anthropic's Claude 4.6 model card ([model-context-decay/README.md](../reference/model-context-decay/README.md)) reports that Opus 4.6 retains **78.3% retrieval accuracy at 1M tokens** on MRCR v2 (8-needle). A clean exponential or inverse-power decay along token distance would predict accuracy in the single digits at that range. The gap between "what RoPE's structural prior predicts" and "what trained models actually achieve" is the entire story of attention head specialization for retrieval.
+
+**What this means for the decay model:** the $A(t) \approx A_0 \cdot n^{-\alpha} \cdot t_\mathrm{local}^{\ -\beta}$ formula is most usefully read as an approximation of **aggregate effective adherence across a mixture of attention heads** — some of which honor the baseline decay, some of which override it. For decisions about *when to re-inject a way* (presentation economics), this aggregate is the right thing to track: we don't care whether some specific head could still retrieve the guidance, we care whether the overall generation behavior is still being steered by it. For decisions about *whether a model can retrieve a specific fact from distance* (the needle-in-haystack question), the formula significantly underestimates actual performance.
+
+Firing dynamics operate on the aggregate, not the specific retrieval curve. This is why the model below remains useful despite the gap between it and what attention actually does.
+
+This is the $t_\mathrm{local}^{\ -\beta}$ term — with the caveat that "$\beta$ under trained retrieval" is not the same as "$\beta$ under the pure RoPE baseline." The formula compresses both into one exponent; reality separates them.
 
 ### 1.2 Multi-Layer Amplification: Why Decay Compounds
 
@@ -80,6 +94,8 @@ Key findings:
 The U-shape corresponds to two competing biases: RoPE's recency bias (favoring tokens near the generation cursor) and causal masking's primacy bias (favoring early tokens). The system prompt, being at position zero, benefits from primacy but is vulnerable to distance decay as the context grows.
 
 In the context decay model's terms: the system prompt starts with high effective adherence ($A_0$) due to primacy, but the $n^{-\alpha}$ envelope eventually pushes it below the noise floor where neither primacy nor recency can rescue it.
+
+**Caveat from section 1.1a:** Liu et al. were studying models from 2023; attention retrieval behavior has improved substantially since. Later benchmarks ([model-context-decay/README.md](../reference/model-context-decay/README.md)) show Opus 4.6 at 78% retrieval at 1M tokens — well above the "lost in the middle" curve's predictions. The U-shape still exists but is much shallower in well-trained modern models. This does not invalidate the decay model for presentation economics (which tracks the aggregate, not the specific retrieval curve), but it does mean any quantitative claim derived from Lost in the Middle should be read as a 2023-era baseline, not current performance.
 
 ```mermaid
 graph TD
