@@ -7,6 +7,7 @@ on:
     paths:
       - 'tools/attend/**'
       - 'tools/agent-fmt/**'
+      - 'tools/sensor-*/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-attend.yml'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'tools/attend/**'
       - 'tools/agent-fmt/**'
+      - 'tools/sensor-*/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-attend.yml'
