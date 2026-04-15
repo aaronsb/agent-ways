@@ -22,7 +22,6 @@ const GOVERNOR_KEYS: &[&str] = &["base_cooldown", "max_per_window", "rate_window
 /// Valid keys under `engagement:`. See ADR-123 + docs/attend-and-monitor/
 /// configuration.md for the yaml-to-runtime mapping.
 const ENGAGEMENT_KEYS: &[&str] = &[
-    "burst_window",        // DEPRECATED, but still an accepted key
     "burst_threshold",
     "step_multiplier",
     "absolute_refractory",
@@ -31,14 +30,16 @@ const ENGAGEMENT_KEYS: &[&str] = &[
 ];
 
 /// Engagement keys that are still parsed for back-compat but have no
-/// runtime effect under ADR-123. These produce DEPRECATED warnings
-/// instead of UNKNOWN, so they're distinguishable from typos.
-const ENGAGEMENT_DEPRECATED: &[(&str, &str)] = &[(
-    "burst_window",
-    "parsed for back-compat — under ADR-123 the burst window is implicit \
-     in multiplier_half_life (derived from decay_per_minute) rather than a \
-     standalone tick span",
-)];
+/// runtime effect under ADR-123. Currently empty — `burst_window` was
+/// the only entry, and ADR-123 phase 2 (issue #50) removed it from the
+/// parser entirely, so `attend run` now hard-rejects the legacy key at
+/// load time via `config::detect_legacy_burst_window`. The linter still
+/// flags a leftover `burst_window:` line as UNKNOWN (same as any foreign
+/// key) and `--fix` removes it surgically, which is the supported
+/// migration path. This array stays declared so the classification
+/// pipeline keeps the DEPRECATED category wired up for the next time a
+/// soft deprecation is needed.
+const ENGAGEMENT_DEPRECATED: &[(&str, &str)] = &[];
 
 /// Valid keys under `cleanup:`.
 const CLEANUP_KEYS: &[&str] = &["enabled", "interval", "retention"];
@@ -490,17 +491,22 @@ mod tests {
     }
 
     #[test]
-    fn classify_engagement_keys_and_deprecation() {
+    fn classify_engagement_keys() {
         assert_eq!(
             classify_section_key("engagement", "burst_threshold"),
             KeyClass::Known
         );
-        match classify_section_key("engagement", "burst_window") {
-            KeyClass::Deprecated(reason) => {
-                assert!(reason.contains("back-compat"));
-            }
-            other => panic!("expected Deprecated, got {:?}", other),
-        }
+        assert_eq!(
+            classify_section_key("engagement", "decay_per_minute"),
+            KeyClass::Known
+        );
+        // burst_window is no longer in the schema at all — linter sees
+        // it as a generic unknown key (and `--fix` removes it). The
+        // parser hard-rejects it separately before attend run.
+        assert_eq!(
+            classify_section_key("engagement", "burst_window"),
+            KeyClass::Unknown
+        );
         assert_eq!(
             classify_section_key("engagement", "bogus"),
             KeyClass::Unknown

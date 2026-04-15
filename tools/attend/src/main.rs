@@ -1435,17 +1435,8 @@ fn display_config(cfg: &config::Config) {
     t.add(vec!["", "", ""]);
 
     // Engagement section (ADR-119 action potential, unified in ADR-123)
-    let engagement_header: &str = "engagement";
-    let burst_window_display;
-    let burst_threshold_first_col: &str = if let Some(bw) = cfg.engagement.burst_window {
-        burst_window_display = format!("{}s", bw.as_secs());
-        t.add(vec![engagement_header, "burst_window", &burst_window_display]);
-        ""
-    } else {
-        engagement_header
-    };
     t.add(vec![
-        burst_threshold_first_col,
+        "engagement",
         "burst_threshold",
         &cfg.engagement.burst_threshold.to_string(),
     ]);

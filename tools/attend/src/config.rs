@@ -99,12 +99,6 @@ pub struct GovernorConfig {
 /// `attend tune` to auto-derive values from real session history.
 #[derive(Debug, Clone)]
 pub struct EngagementConfig {
-    /// DEPRECATED (ADR-123): pre-unification burst-window parameter.
-    /// The effective window is now implicit via `multiplier_half_life` on
-    /// `Curve::ActionPotential`. Retained as `Option` so legacy files still
-    /// parse and `attend config lint` can flag the key; `None` means "absent
-    /// from the user's file", which is the correct steady state.
-    pub burst_window: Option<Duration>,
     /// Disclosures needed to trigger refractory.
     pub burst_threshold: usize,
     /// Multiplier added per disclosure past the burst threshold.
@@ -121,9 +115,6 @@ pub struct EngagementConfig {
 impl Default for EngagementConfig {
     fn default() -> Self {
         Self {
-            // ADR-123: no synthesized default. `None` means "absent in the
-            // user's file", which is the correct steady state post-unification.
-            burst_window: None,
             burst_threshold: 3,
             step_multiplier: 1.25,
             // One Claude turn (~60s median) of complete silence after burst.
@@ -227,6 +218,7 @@ impl Config {
         let user_path = user_config_path();
         if user_path.exists() {
             if let Ok(content) = fs::read_to_string(&user_path) {
+                reject_legacy_or_exit(&user_path, &content);
                 apply_config(&mut config, &content);
                 eprintln!("[attend] config: loaded {}", user_path.display());
             }
@@ -236,6 +228,7 @@ impl Config {
         let project_path = Path::new(working_dir).join(".claude").join("attend.yaml");
         if project_path.exists() {
             if let Ok(content) = fs::read_to_string(&project_path) {
+                reject_legacy_or_exit(&project_path, &content);
                 apply_config(&mut config, &content);
                 eprintln!("[attend] config: loaded {}", project_path.display());
             }
@@ -390,6 +383,44 @@ fn user_config_path() -> PathBuf {
     config_dir.join("attend").join("config.yaml")
 }
 
+/// Scan raw YAML for the ADR-123 legacy `burst_window` key and return an
+/// error if it appears anywhere at engagement-scope indentation. Mirrors
+/// `ways-cli::frontmatter::detect_legacy_redisclose` — the shape is
+/// "scan lines, hit legacy key, return a clear migration pointer."
+/// Phase-2 of the ADR-123 soft removal: the Phase-1 `Option<Duration>`
+/// parsing path is gone and any leftover key is a hard error.
+fn detect_legacy_burst_window(yaml_str: &str) -> Result<(), String> {
+    for line in yaml_str.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("burst_window:") {
+            return Err(
+                "legacy `engagement.burst_window` field is no longer supported — \
+                 under ADR-123 the burst window is implicit in multiplier_half_life \
+                 (derived from decay_per_minute). Run `attend config lint --fix` \
+                 to remove the key from your config. See \
+                 docs/architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md \
+                 for migration guidance."
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Thin wrapper around `detect_legacy_burst_window` that prints a loud,
+/// operator-friendly error and terminates the process. Kept separate so
+/// `detect_legacy_burst_window` itself stays pure and unit-testable
+/// (mirroring the ways `detect_legacy_redisclose` test shape).
+fn reject_legacy_or_exit(path: &Path, content: &str) {
+    if let Err(msg) = detect_legacy_burst_window(content) {
+        eprintln!();
+        eprintln!("[attend] config error in {}:", path.display());
+        eprintln!("  {}", msg);
+        eprintln!();
+        std::process::exit(2);
+    }
+}
+
 /// Apply a YAML config string to an existing Config, overriding values.
 /// Handles the +/- sensor syntax for project-scope overlays.
 fn apply_config(config: &mut Config, content: &str) {
@@ -502,11 +533,6 @@ fn apply_config(config: &mut Config, content: &str) {
             } else if current_section == "engagement" {
                 if let Some((key, value)) = parse_kv(trimmed) {
                     match key {
-                        "burst_window" => {
-                            if let Ok(v) = value.parse::<u64>() {
-                                config.engagement.burst_window = Some(Duration::from_secs(v));
-                            }
-                        }
                         "burst_threshold" => {
                             if let Ok(v) = value.parse::<usize>() {
                                 config.engagement.burst_threshold = v;
@@ -833,5 +859,32 @@ mod tests {
             git.requires,
             vec!["Bash(git:*)".to_string(), "Read".to_string()]
         );
+    }
+
+    // ── detect_legacy_burst_window (ADR-123 phase 2) ───────────────────
+
+    #[test]
+    fn detect_legacy_burst_window_flags_key_at_any_indent() {
+        let yaml = "engagement:\n  burst_window: 900\n  burst_threshold: 3\n";
+        let err = detect_legacy_burst_window(yaml).expect_err("should reject");
+        assert!(err.contains("burst_window"));
+        assert!(err.contains("ADR-123"));
+        assert!(err.contains("attend config lint --fix"));
+    }
+
+    #[test]
+    fn detect_legacy_burst_window_passes_clean_config() {
+        let yaml = "engagement:\n  burst_threshold: 3\n  decay_per_minute: 0.1\n";
+        detect_legacy_burst_window(yaml).expect("clean config should pass");
+    }
+
+    #[test]
+    fn detect_legacy_burst_window_ignores_unrelated_text() {
+        let yaml = "# burst_window is ancient history under ADR-123\n\
+                    engagement:\n  burst_threshold: 3\n";
+        // The comment starts with `#` so its first non-whitespace token
+        // is not `burst_window:` — the permissive scanner should let it
+        // through. (Mirrors the ways detector's permissive stance.)
+        detect_legacy_burst_window(yaml).expect("comments should pass");
     }
 }

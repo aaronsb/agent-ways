@@ -47,11 +47,10 @@ governor:
   max_per_window: 3          # max disclosures in rate_window
   rate_window: 120           # seconds of the rolling rate window
 
-# Action potential engagement model (ADR-119)
+# Action potential engagement model (ADR-119, unified in ADR-123)
 # Run `attend tune` to auto-derive these from real session history
 engagement:
-  burst_window: 900          # seconds — window for counting recent disclosures
-  burst_threshold: 3         # disclosures within burst_window before refractory kicks in
+  burst_threshold: 3         # disclosures before refractory kicks in
   step_multiplier: 1.25      # per-disclosure threshold elevation past burst_threshold
   absolute_refractory: 60    # seconds of complete suppression after burst
   decay_per_minute: 0.1      # rate at which elevated threshold returns to baseline
@@ -121,8 +120,9 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 - **`step_multiplier`** (float, default 1.25): contributes to the peak refractory multiplier as `peak_multiplier = 1.0 + step_multiplier`. At the default, the peak multiplier is 2.25 — the effective threshold just after a burst is 2.25× the base threshold.
 - **`absolute_refractory`** (seconds, default 60): complete suppression after a burst. No events fire during this window regardless of magnitude. Directly mapped to `Curve::ActionPotential::absolute_refractory` in ticks (= seconds for attend).
 - **`decay_per_minute`** (float, default 0.1): exponential decay rate for the relative-refractory multiplier. At load time attend converts this to `multiplier_half_life = ln(0.5) / ln(1 - decay_per_minute) × 60` seconds. At `0.1`, the half-life is ≈ 395 s (~6.6 min); at `0.0256` (typical tune output), ≈ 1611 s (~27 min).
-- **`burst_window`** (seconds, default 900): **DEPRECATED**. Parsed for back-compat but no longer a runtime parameter. Under ADR-123 the burst window is implicit in the multiplier's half-life — a history entry counts toward burst detection while its exponential contribution is still above ~1% epsilon. `attend tune` still emits this field because tune's internal heuristic uses it to derive `decay_per_minute`, but the live engine ignores it. `attend config lint` flags this key as `DEPRECATED` and `attend config lint --fix` will remove it from your config in-place.
 - **`peer_activity_window`** (seconds, default 900): sliding window used by `sensor-peers` for the per-peer engagement boost. This *is* still tick-windowed — sensor-peers implements its own count-in-window logic rather than going through the shared curve engine, because the per-peer boost is a different shape than per-sensor refractory.
+
+> **Legacy `burst_window`.** Pre-ADR-123 configs carried a `burst_window` key. It was soft-deprecated in ADR-123 phase 1 (parsed but ignored, flagged by `attend config lint`) and fully removed in phase 2 — attend now rejects the key at load time with a pointer to `attend config lint --fix`. If `attend run` fails on startup complaining about `burst_window`, run the lint fixer once and the key will be removed in place.
 
 **Yaml field stability.** The yaml keys are deliberately preserved from pre-ADR-123 attend configs, so existing tuned configs keep loading without changes. Internally the keys are translated to the `Curve::ActionPotential` parameters attend actually runs on. The doc-level mapping is:
 
@@ -132,7 +132,6 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 | `step_multiplier`     | `peak_multiplier = 1.0 + step_multiplier`          |
 | `absolute_refractory` | `absolute_refractory` (seconds)                    |
 | `decay_per_minute`    | `multiplier_half_life = ln(0.5)/ln(1-rate) × 60`   |
-| `burst_window`        | *no runtime effect* (implicit via half-life)       |
 
 **Auto-tuning.** Run `attend tune` to derive these from real session history. See [`engagement.md`](engagement.md#tuning-with-attend-tune) for how tuning works and how the linear-derived `decay_per_minute` relates to the engine's exponential half-life.
 
