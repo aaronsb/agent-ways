@@ -323,7 +323,18 @@ fn lint_one_file(path: &Path, fix: bool, ctx: &mut LintContext) {
     }
 
     if fix && !removable_lines.is_empty() {
-        let new_content = rewrite_without_lines(&content, &removable_lines);
+        let lines: Vec<&str> = content.lines().collect();
+        let mut drop_set: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+        for &anchor in &removable_lines {
+            let (start, end) = expand_block_at(&lines, anchor);
+            for i in start..end {
+                drop_set.insert(i);
+            }
+        }
+        let mut drops: Vec<usize> = drop_set.into_iter().collect();
+        drops.sort_unstable();
+        let new_content = rewrite_without_lines(&content, &drops);
         if let Err(e) = std::fs::write(path, &new_content) {
             eprintln!("  ERROR: could not write fix to {}: {}", path.display(), e);
             ctx.errors += 1;
@@ -368,6 +379,81 @@ fn report_deprecated(
         );
         ctx.warnings += 1;
     }
+}
+
+/// Given an anchor line index, return the range `[start, end)` of lines
+/// to drop: the anchor plus its indented continuation. Continuation is
+/// every following line that is either blank or has strictly deeper
+/// indentation than the anchor — so removing a block-valued key pulls
+/// its nested mapping or list items out with it. Trailing blank lines
+/// inside that range are rewound so a blank separator before the next
+/// sibling key stays put instead of being silently coalesced.
+///
+/// Mirrors the continuation semantic in ways-cli's
+/// `cmd::lint::helpers::remove_top_level_field`, generalized to any
+/// indent level so attend can apply it to nested section keys and
+/// sensor properties.
+fn expand_block_at(lines: &[&str], anchor: usize) -> (usize, usize) {
+    if anchor >= lines.len() {
+        return (anchor, anchor);
+    }
+    let anchor_line = lines[anchor];
+    let anchor_indent = anchor_line.len() - anchor_line.trim_start().len();
+
+    let mut end = anchor + 1;
+    while end < lines.len() {
+        let line = lines[end];
+        if line.is_empty() {
+            end += 1;
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent > anchor_indent {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    while end > anchor + 1 && lines[end - 1].is_empty() {
+        end -= 1;
+    }
+    (anchor, end)
+}
+
+/// Remove a top-level (indent-0) YAML key plus any indented
+/// continuation. Returns `None` if the field isn't present at the top
+/// level. Semantic parity with ways-cli's
+/// `cmd::lint::helpers::remove_top_level_field` so both tools apply the
+/// same block-removal logic on equivalent fixtures. The attend fix
+/// pipeline doesn't currently remove top-level keys (top level is
+/// sections, which `--fix` never drops), but this primitive exists so
+/// future schema changes can reuse it directly.
+#[allow(dead_code)]
+fn remove_top_level_field(content: &str, field_name: &str) -> Option<String> {
+    let field_prefix = format!("{field_name}:");
+    let lines: Vec<&str> = content.lines().collect();
+
+    let anchor = lines
+        .iter()
+        .position(|l| l.starts_with(&field_prefix) || *l == field_name)?;
+    // Must actually be top-level (no leading whitespace).
+    if lines[anchor]
+        .chars()
+        .next()
+        .map(|c| c.is_whitespace())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let (start, end) = expand_block_at(&lines, anchor);
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len() - (end - start));
+    kept.extend_from_slice(&lines[..start]);
+    kept.extend_from_slice(&lines[end..]);
+    let mut out = kept.join("\n");
+    if content.ends_with('\n') {
+        out.push('\n');
+    }
+    Some(out)
 }
 
 /// Rewrite `content` with the given line indices (0-based) removed.
@@ -453,5 +539,88 @@ mod tests {
         let src = "a\nb\nc";
         let out = rewrite_without_lines(src, &[1]);
         assert_eq!(out, "a\nc");
+    }
+
+    // Block-continuation helpers — mirror of ways-cli::cmd::lint::helpers
+    // tests so both tools can be cross-verified on equivalent fixtures.
+
+    #[test]
+    fn remove_top_level_scalar_field() {
+        let src = "description: x\nbogus: should go\nthreshold: 2.0\n";
+        let out = remove_top_level_field(src, "bogus").expect("found");
+        assert_eq!(out, "description: x\nthreshold: 2.0\n");
+    }
+
+    #[test]
+    fn remove_top_level_block_field_with_continuation() {
+        let src = "description: x\ncurve:\n  type: Exponential\n  half_life: 100\nthreshold: 2.0\n";
+        let out = remove_top_level_field(src, "curve").expect("found");
+        assert_eq!(out, "description: x\nthreshold: 2.0\n");
+    }
+
+    #[test]
+    fn remove_top_level_missing_returns_none() {
+        let src = "description: x\n";
+        assert!(remove_top_level_field(src, "nope").is_none());
+    }
+
+    #[test]
+    fn remove_top_level_ignores_indented_match() {
+        // A key nested under a section should not match the top-level helper.
+        let src = "engagement:\n  bogus: 1\n";
+        assert!(remove_top_level_field(src, "bogus").is_none());
+    }
+
+    #[test]
+    fn expand_block_at_scalar_anchor_is_single_line() {
+        let lines = vec!["engagement:", "  bogus: 1", "  keep: 2"];
+        assert_eq!(expand_block_at(&lines, 1), (1, 2));
+    }
+
+    #[test]
+    fn expand_block_at_block_anchor_consumes_nested_mapping() {
+        let lines = vec![
+            "engagement:",
+            "  progressive_staircase:",
+            "    - [0, 1.0]",
+            "    - [15000, 0.5]",
+            "  burst_threshold: 3.0",
+        ];
+        assert_eq!(expand_block_at(&lines, 1), (1, 4));
+    }
+
+    #[test]
+    fn expand_block_at_rewinds_trailing_blank_before_sibling() {
+        let lines = vec![
+            "engagement:",
+            "  curve:",
+            "    type: Exponential",
+            "",
+            "  burst_threshold: 3.0",
+        ];
+        // The blank at index 3 separates curve from burst_threshold — it
+        // should stay with burst_threshold, not be eaten by the removal.
+        assert_eq!(expand_block_at(&lines, 1), (1, 3));
+    }
+
+    #[test]
+    fn fix_removes_unknown_block_value_without_orphans() {
+        // End-to-end: lint_one_file should drop a block-valued unknown
+        // engagement key *and* its nested list items.
+        let src = "\
+engagement:
+  bogus_block:
+    - [0, 1.0]
+    - [15000, 0.5]
+  burst_threshold: 3.0
+";
+        let lines: Vec<&str> = src.lines().collect();
+        // The scanner would flag line index 1 (`  bogus_block:`) as
+        // UNKNOWN. Simulate the post-scan expansion path.
+        let (start, end) = expand_block_at(&lines, 1);
+        assert_eq!((start, end), (1, 4));
+        let drops: Vec<usize> = (start..end).collect();
+        let out = rewrite_without_lines(src, &drops);
+        assert_eq!(out, "engagement:\n  burst_threshold: 3.0\n");
     }
 }
