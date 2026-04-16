@@ -3,6 +3,7 @@ mod config;
 mod config_lint;
 mod emit;
 mod groups;
+mod identity_view;
 mod scenes;
 mod sensors;
 mod state;

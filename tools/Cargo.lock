@@ -18,6 +18,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-identity"
+version = "0.1.0"
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -218,6 +222,7 @@ name = "attend"
 version = "0.6.0"
 dependencies = [
  "agent-fmt",
+ "agent-identity",
  "sensor-context",
  "sensor-disclosure",
  "sensor-git",
@@ -230,6 +235,7 @@ dependencies = [
 name = "attend-chat"
 version = "0.1.0"
 dependencies = [
+ "agent-identity",
  "async-channel",
  "iocraft",
  "notify",

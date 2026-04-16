@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agent-fmt",
+    "agent-identity",
     "sensor-trait",
     "sensor-git",
     "sensor-context",

@@ -6,5 +6,6 @@
 //! via `#[path]`.
 
 pub mod app;
+pub mod chip;
 pub mod signal;
 pub mod watcher;

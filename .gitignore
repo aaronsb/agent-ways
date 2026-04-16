@@ -133,6 +133,8 @@ hooks/ways/.obsidian/
 !tools/mmaid/*
 !tools/agent-fmt/
 !tools/agent-fmt/**
+!tools/agent-identity/
+!tools/agent-identity/**
 !tools/sensor-trait/
 !tools/sensor-trait/**
 !tools/sensor-git/

@@ -19,6 +19,7 @@ sensor-disclosure = ["dep:sensor-disclosure"]
 
 [dependencies]
 agent-fmt = { path = "../agent-fmt" }
+agent-identity = { path = "../agent-identity" }
 sensor-trait = { path = "../sensor-trait" }
 sensor-git = { path = "../sensor-git", optional = true }
 sensor-context = { path = "../sensor-context", optional = true }

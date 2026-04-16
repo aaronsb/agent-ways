@@ -11,17 +11,17 @@
 //! No sidebar, no focus filter, no threading render — those land in
 //! follow-up PRs on ADR-120.
 
+use agent_identity::TermCaps;
 use async_channel::Receiver;
 use iocraft::prelude::*;
 
+use crate::chip::{chip_for, color_for, CHIP_WIDTH};
 use crate::signal::{write_broadcast, Signal};
 
 #[derive(Default, Props)]
 pub struct AppProps {
     pub receiver: Option<Receiver<Signal>>,
 }
-
-const CHIP_WIDTH: u32 = 20;
 
 /// Upper bound on the in-memory message buffer. At typical chat rates
 /// this is unreachable; the cap only matters for runaway conditions
@@ -177,11 +177,17 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
         system.exit();
     }
 
+    // Detect terminal capability once per render pass and reuse for
+    // every chip. Cheap env reads, but doing it in the per-signal map
+    // would still be pointless repetition.
+    let caps = TermCaps::detect();
     let rows: Vec<_> = signals
         .read()
         .iter()
         .map(|s| {
-            let (who, scope) = prettify(&s.from, &s.project, &s.cwd);
+            let chip = chip_for(&s.from, &s.project, &s.cwd, caps);
+            let weight = if chip.style.bold { Weight::Bold } else { Weight::Normal };
+            let color = color_for(chip.palette, caps);
             element! {
                 View(flex_direction: FlexDirection::Row, margin_bottom: 1) {
                     View(
@@ -193,8 +199,14 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         flex_direction: FlexDirection::Column,
                         flex_shrink: 0.0,
                     ) {
-                        Text(color: Color::Cyan, content: who, wrap: TextWrap::NoWrap)
-                        Text(color: Color::DarkGrey, content: scope, wrap: TextWrap::NoWrap)
+                        Text(
+                            color,
+                            weight,
+                            italic: chip.style.italic,
+                            content: chip.primary,
+                            wrap: TextWrap::NoWrap,
+                        )
+                        Text(color: Color::DarkGrey, content: chip.secondary, wrap: TextWrap::NoWrap)
                     }
                     View(
                         flex_grow: 1.0,
@@ -266,55 +278,6 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 Text(color: Color::DarkGrey, content: status.to_string(), wrap: TextWrap::NoWrap)
             }
         }
-    }
-}
-
-/// Condense the wire `from`/`project`/`cwd` triple into two short
-/// labels for the sender chip. Goals: never exceed the chip's interior
-/// width, stay readable, give the human just enough to tell who sent
-/// what.
-fn prettify(from: &str, project: &str, cwd: &str) -> (String, String) {
-    // Interior = chip width - 2 border columns - 2 padding columns.
-    let interior = (CHIP_WIDTH as usize).saturating_sub(4);
-
-    let who = if let Some(rest) = from.strip_prefix("claude:") {
-        // UUIDs are 36 chars — "c:" + first 7 of the id keeps us
-        // unique enough for a handful of concurrent sessions without
-        // overflowing the chip.
-        let tag = rest.get(0..7).unwrap_or(rest);
-        format!("c:{}", tag)
-    } else if let Some(rest) = from.strip_prefix("external:") {
-        // Drop the terminal suffix ("aaron@kitty" → "aaron") so humans
-        // read as themselves, not as their terminal emulator.
-        rest.split('@').next().unwrap_or(rest).to_string()
-    } else {
-        from.to_string()
-    };
-
-    // Scope: prefer the last path segment of the cwd over the raw
-    // project name, since cwd is always a full path while project is
-    // whatever the sender chose to pass. Fall back to project if cwd
-    // is empty.
-    let scope_src = if cwd.is_empty() { project } else { cwd };
-    let segment = scope_src.rsplit('/').next().unwrap_or(scope_src);
-    let scope = if segment.is_empty() {
-        "broadcast".to_string()
-    } else {
-        segment.to_string()
-    };
-
-    (truncate(&who, interior), truncate(&scope, interior))
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else if max <= 1 {
-        s.chars().take(max).collect()
-    } else {
-        let mut out: String = s.chars().take(max - 1).collect();
-        out.push('…');
-        out
     }
 }
 
@@ -426,34 +389,3 @@ mod cursor_tests {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prettify_claude_sender() {
-        let (who, scope) = prettify("claude:e74a4a4b-7e3b-49bc-8404-216162e54ba8", "claude", "/home/aaron/.claude");
-        assert_eq!(who, "c:e74a4a4");
-        assert_eq!(scope, ".claude");
-    }
-
-    #[test]
-    fn prettify_scope_prefers_cwd_basename() {
-        let (_, scope) = prettify("external:aaron", "ignored", "/home/aaron/temp");
-        assert_eq!(scope, "temp");
-    }
-
-    #[test]
-    fn prettify_external_strips_terminal() {
-        let (who, _) = prettify("external:aaron@kitty", "proj", "/home/aaron");
-        assert_eq!(who, "aaron");
-    }
-
-    #[test]
-    fn prettify_scope_truncates_long_segment() {
-        // Interior is 16 chars for CHIP_WIDTH=20 (2 borders + 2 padding).
-        let (_, scope) = prettify("external:aaron", "x", "/tmp/some-very-long-directory-name");
-        assert!(scope.chars().count() <= 16);
-        assert!(scope.ends_with('…'));
-    }
-}

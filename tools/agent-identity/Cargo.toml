@@ -1,0 +1,10 @@
+[package]
+name = "agent-identity"
+version = "0.1.0"
+edition = "2021"
+description = "Display-layer identity for agent-ways tools: stable nicknames, color palette, and terminal capability detection"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "agent_identity"
+path = "src/lib.rs"

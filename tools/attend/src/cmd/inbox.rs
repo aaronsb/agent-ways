@@ -6,7 +6,9 @@
 //! the right direction of dependency: the parser owns what a valid id
 //! looks like, senders consult it.
 
+use crate::identity_view::render_sender_label;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
+use agent_identity::TermCaps;
 
 /// Parsed signal record (ADR-120 wire format).
 ///
@@ -15,6 +17,8 @@ use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 /// allocation-free at the hot path.
 pub(crate) struct ParsedSignal<'a> {
     pub(crate) from: &'a str,
+    #[allow(dead_code)] // Retained in the parse so callers that need it
+    // (e.g. non-cwd sender hints) can read it without re-parsing.
     pub(crate) project: &'a str,
     pub(crate) cwd: &'a str,
     pub(crate) reply_to: Option<&'a str>,
@@ -101,15 +105,8 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
                 return;
             }
         };
-        let from = sig.from;
-        let project = sig.project;
-        let source_cwd = sig.cwd;
-        let (kind, identity) = from.split_once(':').unwrap_or(("?", from));
-        let sender = match kind {
-            "claude" => format!("claude/{source_cwd}"),
-            "external" => identity.to_string(),
-            _ => format!("{project} ({from})"),
-        };
+        let caps = TermCaps::detect();
+        let sender = render_sender_label(sig.from, sig.cwd, caps);
         println!("From: {sender}");
         println!("ID:   {msg_id}");
         if let Some(re_id) = sig.reply_to {
@@ -202,12 +199,8 @@ pub(crate) fn cmd_inbox() {
                 }
             }
 
-            let (kind, identity) = sig.from.split_once(':').unwrap_or(("unknown", sig.from));
-            let sender = match kind {
-                "claude" => format!("claude/{}", sig.cwd),
-                "external" => identity.to_string(),
-                _ => format!("{} ({})", sig.project, sig.from),
-            };
+            let caps = TermCaps::detect();
+            let sender = render_sender_label(sig.from, sig.cwd, caps);
 
             let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
 
