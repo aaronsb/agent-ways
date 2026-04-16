@@ -40,7 +40,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-117](./system/ADR-117-sensor-crate-extraction-and-feature-flags.md) | Sensor Crate Extraction and Feature Flags | Accepted |
 | [ADR-118](./system/ADR-118-focus-groups-dynamic-agent-grouping.md) | Focus Groups — Dynamic Agent Grouping | Accepted |
 | [ADR-119](./system/ADR-119-action-potential-engagement-model.md) | Action Potential Engagement Model | Superseded |
-| [ADR-120](./system/ADR-120-interactive-chat-tui-human-in-the-signal-loop.md) | Interactive Chat TUI — Human in the Signal Loop | Draft |
+| [ADR-120](./system/ADR-120-interactive-chat-tui-human-in-the-signal-loop.md) | Interactive Chat TUI — Human in the Signal Loop | Accepted |
 | [ADR-121](./system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) | Salience decay for signal presentation — turn-based exponential | Superseded |
 | [ADR-122](./system/ADR-122-attend-disclosure-sensor-token-gated-affordance-reheat.md) | Attend disclosure sensor — token-gated affordance reheat | Draft |
 | [ADR-123](./system/ADR-123-firing-dynamics-progression-axis-unification.md) | Firing dynamics — progression-axis unification for attend and ways | Accepted |
