@@ -30,6 +30,20 @@ fn main() {
         Some("send") => {
             cmd::send::cmd_send(&args[1..]);
         }
+        Some("chat") => {
+            // `attend chat` is a thin shim that execs the standalone
+            // `attend-chat` binary. Keeping the iocraft dependency
+            // (and its async runtime) out of the attend crate means
+            // `attend status`, `attend send`, and the sensor loop stay
+            // cheap to cold-start from hooks. See ADR-120.
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new("attend-chat")
+                .args(&args[1..])
+                .exec();
+            eprintln!("attend chat: failed to launch attend-chat: {}", err);
+            eprintln!("  (is `attend-chat` on PATH? run `make install` from the repo root)");
+            std::process::exit(1);
+        }
         Some("reply") => {
             cmd::send::cmd_reply(&args[1..]);
         }
@@ -108,6 +122,7 @@ fn main() {
                     ("inbox", "Read pending messages from peers"),
                     ("send", "Send a signal to peer sessions"),
                     ("reply", "Reply to the most recent peer message (auto-threaded)"),
+                    ("chat", "Launch the interactive chat TUI (ADR-120)"),
                     ("focus", "Manage attention groups (on, off, list, all, clear, pin, dissolve)"),
                     ("scene", "Activate a named scene (reconfigure focus)"),
                     ("scenes", "List available scenes"),

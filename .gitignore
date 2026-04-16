@@ -153,6 +153,10 @@ tools/ways-cli/target/
 !tools/attend/**
 # attend build artifacts
 tools/attend/target/
+!tools/attend-chat/
+!tools/attend-chat/**
+# attend-chat build artifacts (workspace target, but listed for clarity)
+tools/attend-chat/target/
 # Workspace-level Cargo files
 !tools/Cargo.toml
 !tools/Cargo.lock

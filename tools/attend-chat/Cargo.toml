@@ -1,0 +1,16 @@
+[package]
+name = "attend-chat"
+version = "0.1.0"
+edition = "2021"
+description = "Interactive chat TUI for attend — human seat at the signal bus (ADR-120)"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "attend-chat"
+path = "src/main.rs"
+
+[dependencies]
+iocraft = "0.8"
+notify = "6"
+async-channel = "2"
+smol = "2"

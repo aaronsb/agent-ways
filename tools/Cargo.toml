@@ -9,6 +9,7 @@ members = [
     "sensor-disclosure",
     "ways-cli",
     "attend",
+    "attend-chat",
 ]
 resolver = "2"
 
