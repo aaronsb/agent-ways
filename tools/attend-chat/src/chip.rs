@@ -14,6 +14,8 @@
 use agent_identity::{Identity, PaletteEntry, Style, TermCaps};
 use iocraft::prelude::Color;
 
+use crate::signal::Signal;
+
 /// Width of the chip box in columns. Interior width for text =
 /// `CHIP_WIDTH - 2 (border) - 2 (padding)`.
 pub const CHIP_WIDTH: u32 = 20;
@@ -93,6 +95,87 @@ pub fn color_for(p: PaletteEntry, caps: TermCaps) -> Color {
         TermCaps::Rich => Color::Rgb { r: p.rgb.0, g: p.rgb.1, b: p.rgb.2 },
         TermCaps::Basic | TermCaps::Mono => Color::AnsiValue(p.ansi16),
     }
+}
+
+/// One identity known to the TUI, extracted from buffered signals.
+/// Carries enough to render the legend and resolve an `@name` to its
+/// routing destination.
+#[derive(Clone, Debug)]
+pub struct KnownIdentity {
+    /// Nickname derived from the sender's cwd (claude) or username
+    /// (external). This is what `@foo` in the input matches against.
+    pub nickname: String,
+    /// Full cwd of the sender. For claudes this is the routing key:
+    /// a directed `@Nickname` message writes to `signals_base/<encoded-cwd>/`.
+    /// For humans the cwd is their working directory when they sent —
+    /// we still carry it so the legend can show `@aaron (Projects)`.
+    pub cwd: String,
+    /// Whether this identity is a claude (routable) or an external
+    /// human (not routable to a cwd inbox).
+    pub is_claude: bool,
+    pub palette: PaletteEntry,
+    pub style: Style,
+}
+
+/// Build the registry of known identities from a slice of buffered
+/// signals. Pure function — no IO, no state. Called every render;
+/// the buffer cap keeps the work bounded.
+///
+/// Ordering: most-recently-seen first, then stable by nickname. That
+/// way the legend strip tends to put active peers at the front
+/// without flickering if two peers have the same last-seen tick.
+pub fn known_identities(signals: &[Signal], caps: TermCaps) -> Vec<KnownIdentity> {
+    // Walk from newest to oldest so the first time we see a cwd we
+    // also capture its most-recent-seen position. A HashSet of cwd
+    // strings keeps dedup O(n) without depending on a hasher.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<KnownIdentity> = Vec::new();
+    for sig in signals.iter().rev() {
+        let (primary_label, is_claude, id) = if sig.from.strip_prefix("claude:").is_some() {
+            let id = Identity::for_cwd(&sig.cwd, caps);
+            (id.nickname.to_string(), true, id)
+        } else if let Some(rest) = sig.from.strip_prefix("external:") {
+            let username = rest.split('@').next().unwrap_or(rest).to_string();
+            let scope = agent_identity::cwd_basename(&sig.cwd);
+            let id = Identity::for_user(&username, &scope, caps);
+            (username, false, id)
+        } else {
+            continue; // unknown prefix — don't pollute the legend
+        };
+
+        // Dedupe on (nickname, is_claude, cwd) — same claude can appear
+        // many times in the buffer; same username across different
+        // cwds should still surface once per cwd so legend can show
+        // them distinctly.
+        let key = format!("{}\x1f{}\x1f{}", primary_label, is_claude as u8, sig.cwd);
+        if seen.insert(key) {
+            out.push(KnownIdentity {
+                nickname: primary_label,
+                cwd: sig.cwd.clone(),
+                is_claude,
+                palette: id.palette,
+                style: id.style,
+            });
+        }
+    }
+    out
+}
+
+/// Resolve an `@Nickname` token to a routable cwd.
+///
+/// Returns `Some(cwd)` only for claude identities — humans don't have
+/// a signal inbox we can post into. Case-insensitive match to be
+/// gentle on typos (the nickname pool is case-distinct, but a user
+/// typing `@tamsin` should still hit `Tamsin`).
+pub fn resolve_nickname(
+    name: &str,
+    known: &[KnownIdentity],
+) -> Option<String> {
+    let lc = name.to_ascii_lowercase();
+    known
+        .iter()
+        .find(|k| k.is_claude && k.nickname.to_ascii_lowercase() == lc)
+        .map(|k| k.cwd.clone())
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -190,5 +273,75 @@ mod tests {
             Color::AnsiValue(v) => assert_eq!(v, 9),
             other => panic!("expected AnsiValue, got {other:?}"),
         }
+    }
+
+    fn sig(from: &str, cwd: &str) -> Signal {
+        Signal {
+            id: "t".into(),
+            from: from.into(),
+            project: cwd.rsplit('/').next().unwrap_or("?").into(),
+            cwd: cwd.into(),
+            reply_to: None,
+            message: "msg".into(),
+            ts: 0,
+        }
+    }
+
+    #[test]
+    fn registry_dedupes_repeat_senders() {
+        let buf = vec![
+            sig("claude:a", "/home/x"),
+            sig("claude:a", "/home/x"), // same cwd, should dedup
+            sig("claude:b", "/home/y"),
+        ];
+        let reg = known_identities(&buf, TermCaps::Rich);
+        assert_eq!(reg.len(), 2, "expected 2 unique identities, got {}", reg.len());
+    }
+
+    #[test]
+    fn registry_newest_first() {
+        let buf = vec![
+            sig("claude:a", "/home/x"),
+            sig("claude:b", "/home/y"),
+        ];
+        let reg = known_identities(&buf, TermCaps::Rich);
+        // Buffer order is oldest→newest; registry should surface the
+        // most-recent cwd first so active peers lead the legend.
+        let y_id = Identity::for_cwd("/home/y", TermCaps::Rich);
+        assert_eq!(reg[0].nickname, y_id.nickname);
+    }
+
+    #[test]
+    fn registry_includes_humans() {
+        let buf = vec![sig("external:aaron@kitty", "/home/aaron/Projects")];
+        let reg = known_identities(&buf, TermCaps::Rich);
+        assert_eq!(reg.len(), 1);
+        assert_eq!(reg[0].nickname, "aaron");
+        assert!(!reg[0].is_claude);
+    }
+
+    #[test]
+    fn registry_skips_unknown_prefix() {
+        let buf = vec![sig("mystery:abc", "/tmp")];
+        let reg = known_identities(&buf, TermCaps::Rich);
+        assert!(reg.is_empty(), "unknown prefix should be ignored, got {reg:?}");
+    }
+
+    #[test]
+    fn resolve_nickname_case_insensitive_claude_only() {
+        let buf = vec![
+            sig("claude:a", "/home/repo"),
+            sig("external:aaron@kitty", "/home/aaron/Projects"),
+        ];
+        let reg = known_identities(&buf, TermCaps::Rich);
+        let claude_nick = &reg.iter().find(|k| k.is_claude).unwrap().nickname;
+        // Case-insensitive match hits the claude cwd.
+        let lowered = claude_nick.to_ascii_lowercase();
+        assert_eq!(resolve_nickname(&lowered, &reg), Some("/home/repo".into()));
+        // Humans are not routable — `@aaron` returns None even
+        // though the human appears in the registry.
+        assert_eq!(resolve_nickname("aaron", &reg), None);
+        // Unknown nickname → None.
+        assert_eq!(resolve_nickname("NotReal", &reg), None);
     }
 }

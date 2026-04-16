@@ -33,6 +33,26 @@ pub fn broadcast_dir() -> PathBuf {
     signals_base().join("_broadcast")
 }
 
+/// Encode a cwd path into the signal directory name the peer sensor
+/// scans. Must stay byte-identical to `attend::util::encode_project`
+/// (same `/`, `_`, `.` → `-` transform). See the mirror note on
+/// `write_broadcast` — same contract, different layer.
+pub fn encode_cwd(path: &str) -> String {
+    path.chars()
+        .map(|c| match c {
+            '/' | '_' | '.' => '-',
+            _ => c,
+        })
+        .collect()
+}
+
+/// Directory that delivers signals to the claude session rooted at
+/// `cwd`. The peer sensor scans `signals_base/<encoded>/` for
+/// messages addressed specifically to it.
+pub fn cwd_dir(cwd: &str) -> PathBuf {
+    signals_base().join(encode_cwd(cwd))
+}
+
 /// Parse a `.signal` file. Supports both the legacy
 /// `from|project|cwd|message` format and the threaded
 /// `from|project|cwd|re:signal-id|message` extension. Returns `None`
@@ -93,8 +113,14 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
 /// a compile error. Threaded replies (`re:<id>`) are produced by
 /// `cmd_send` only; the TUI does not originate threaded sends yet.
 pub fn write_broadcast(message: &str) -> io::Result<String> {
-    let dir = broadcast_dir();
-    fs::create_dir_all(&dir)?;
+    write_signal(&broadcast_dir(), message)
+}
+
+/// Write a signal into an arbitrary destination directory. The
+/// broadcast and directed (`@Nickname`) paths both ride this — same
+/// wire format, same atomic tmp+rename, only the target differs.
+pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
+    fs::create_dir_all(dest)?;
 
     let (sender_id, kind) = identify_sender();
     let from = format!("{}:{}", kind, sender_id);
@@ -110,8 +136,8 @@ pub fn write_broadcast(message: &str) -> io::Result<String> {
     let filename = format!("{}-{}.signal", sender_id.replace('/', "-"), ts);
     let content = format!("{}|{}|{}|{}\n", from, project, cwd, message);
 
-    let tmp = dir.join(format!("{}.tmp", filename));
-    let final_path = dir.join(&filename);
+    let tmp = dest.join(format!("{}.tmp", filename));
+    let final_path = dest.join(&filename);
     fs::write(&tmp, content)?;
     fs::rename(&tmp, &final_path)?;
     Ok(filename)
@@ -300,6 +326,34 @@ mod tests {
                 std::env::set_var(k, v);
             }
         }
+    }
+
+    #[test]
+    fn encode_cwd_matches_attend_convention() {
+        // Same transform as attend::util::encode_project — `/`, `_`,
+        // `.` collapse to `-`. This is the path the peer sensor
+        // scans when looking for messages directed at a specific
+        // cwd, so drift here breaks direct routing silently.
+        assert_eq!(encode_cwd("/home/aaron/.claude"), "-home-aaron--claude");
+        assert_eq!(encode_cwd("/tmp/foo_bar"), "-tmp-foo-bar");
+        assert_eq!(encode_cwd(""), "");
+    }
+
+    #[test]
+    fn cwd_dir_is_under_signals_base() {
+        // Point $HOME at a temp dir so signals_base resolves there.
+        let home = tempdir_like();
+        std::env::set_var("HOME", &home);
+        let d = cwd_dir("/home/aaron/proj");
+        assert!(
+            d.starts_with(signals_base()),
+            "cwd_dir {d:?} should live under {:?}",
+            signals_base()
+        );
+        assert_eq!(
+            d.file_name().and_then(|s| s.to_str()),
+            Some("-home-aaron-proj")
+        );
     }
 
     fn tempdir_like() -> PathBuf {

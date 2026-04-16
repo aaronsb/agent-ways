@@ -7,5 +7,6 @@
 
 pub mod app;
 pub mod chip;
+pub mod legend;
 pub mod signal;
 pub mod watcher;

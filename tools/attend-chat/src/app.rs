@@ -15,8 +15,11 @@ use agent_identity::TermCaps;
 use async_channel::Receiver;
 use iocraft::prelude::*;
 
-use crate::chip::{chip_for, color_for, CHIP_WIDTH};
-use crate::signal::{write_broadcast, Signal};
+use crate::chip::{chip_for, color_for, known_identities, resolve_nickname, CHIP_WIDTH};
+use crate::legend::{
+    apply_completion, best_completion, find_trailing_mention, legend_row, parse_addressed,
+};
+use crate::signal::{cwd_dir, write_broadcast, write_signal, Signal};
 
 #[derive(Default, Props)]
 pub struct AppProps {
@@ -83,13 +86,53 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 KeyCode::Enter => {
                     let msg = input.read().trim_end().to_string();
                     if !msg.is_empty() {
-                        match write_broadcast(&msg) {
-                            Ok(name) => {
-                                status.set(format!("sent: {}", name));
+                        let caps = TermCaps::detect();
+                        let registry = known_identities(&signals.read(), caps);
+                        let result = match parse_addressed(&msg) {
+                            Some(addressed) => match resolve_nickname(addressed, &registry) {
+                                Some(target_cwd) => {
+                                    write_signal(&cwd_dir(&target_cwd), &msg)
+                                        .map(|n| format!("sent → @{addressed}: {n}"))
+                                }
+                                None => {
+                                    // Unknown nickname — don't silently
+                                    // broadcast; the user likely typed it
+                                    // expecting delivery. Fail loud.
+                                    Err(std::io::Error::new(
+                                        std::io::ErrorKind::NotFound,
+                                        format!("@{addressed}: unknown nickname"),
+                                    ))
+                                }
+                            },
+                            None => write_broadcast(&msg).map(|n| format!("sent: {n}")),
+                        };
+                        match result {
+                            Ok(s) => {
+                                status.set(s);
                                 input.set(String::new());
                                 cursor.set(0);
                             }
                             Err(e) => status.set(format!("send failed: {}", e)),
+                        }
+                    }
+                }
+                KeyCode::Tab => {
+                    // Autocomplete a trailing `@partial`. No-op if the
+                    // caret isn't at the end of the buffer or there's
+                    // no `@` context — avoids surprising edits in the
+                    // middle of a sentence.
+                    let buf = input.read().clone();
+                    let pos = cursor.get();
+                    if pos != buf.chars().count() {
+                        return;
+                    }
+                    let caps = TermCaps::detect();
+                    let registry = known_identities(&signals.read(), caps);
+                    if let Some(mention) = find_trailing_mention(&buf) {
+                        if let Some(hit) = best_completion(mention.partial, &registry) {
+                            let (next, new_cursor) = apply_completion(&buf, &mention, &hit.nickname);
+                            input.set(next);
+                            cursor.set(new_cursor);
                         }
                     }
                 }
@@ -181,6 +224,12 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // every chip. Cheap env reads, but doing it in the per-signal map
     // would still be pointless repetition.
     let caps = TermCaps::detect();
+    // Registry and trailing-partial for the legend + completion
+    // highlight. Re-derived each render — `known_identities` dedupes
+    // in O(n) over the capped buffer, so the work is bounded.
+    let known = known_identities(&signals.read(), caps);
+    let current_partial: Option<String> = find_trailing_mention(&input.read())
+        .map(|m| m.partial.to_string());
     let rows: Vec<_> = signals
         .read()
         .iter()
@@ -274,6 +323,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     )
                 }
             }
+            #(legend_row(&known, current_partial.as_deref()))
             View(height: 1, padding_left: 1) {
                 Text(color: Color::DarkGrey, content: status.to_string(), wrap: TextWrap::NoWrap)
             }
