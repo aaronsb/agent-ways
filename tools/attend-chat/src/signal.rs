@@ -84,6 +84,14 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
 /// Write a broadcast signal to `_broadcast/` using the atomic
 /// tmp+rename pattern `cmd_send` uses, so readers (including our own
 /// watcher) never see a half-written file.
+///
+/// **Wire-format mirror.** The line format here must stay byte-
+/// identical to the legacy branch of `cmd_send` in
+/// `tools/attend/src/cmd/send.rs`. If you change one, change both —
+/// we intentionally didn't extract a shared crate while there are
+/// only two writers, so drift is a per-PR review concern rather than
+/// a compile error. Threaded replies (`re:<id>`) are produced by
+/// `cmd_send` only; the TUI does not originate threaded sends yet.
 pub fn write_broadcast(message: &str) -> io::Result<String> {
     let dir = broadcast_dir();
     fs::create_dir_all(&dir)?;

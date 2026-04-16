@@ -151,6 +151,10 @@ pub(crate) fn cmd_send(args: &[String]) {
     // `from|project|cwd|re:signal-id|message` (threaded reply). The `re:`
     // field is only emitted when --re was given; unthreaded sends stay
     // byte-identical to the pre-ADR-120 format.
+    //
+    // **Wire-format mirror.** `tools/attend-chat/src/signal.rs::write_broadcast`
+    // produces the legacy branch of this format. Keep the two in
+    // lockstep; there is no shared crate gating the contract.
     let content = match &reply_to {
         Some(id) => format!("{}|{}|{}|re:{}|{}\n", from, project, cwd, id, message),
         None => format!("{}|{}|{}|{}\n", from, project, cwd, message),

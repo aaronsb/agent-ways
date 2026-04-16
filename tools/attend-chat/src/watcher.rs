@@ -1,20 +1,27 @@
 //! Directory watcher that streams signals into the TUI.
 //!
-//! `spawn_watcher` does two things, in order:
+//! `spawn_watcher` does three things, in order:
 //!
 //!   1. scans the directory for existing `.signal` files (sorted by
 //!      mtime ascending) so a freshly-started TUI catches up on recent
 //!      traffic instead of opening empty;
 //!   2. installs a `notify` recommended watcher; creates and writes
-//!      are forwarded as [`Signal`] values onto the caller's channel.
+//!      are forwarded as [`Signal`] values onto the caller's channel;
+//!   3. parks the watcher on a dedicated thread so its lifetime is
+//!      tied to the process, not to any caller scope.
 //!
-//! The watcher runs in a dedicated thread. `notify`'s callback is
-//! synchronous, so we bridge to the async channel with
-//! [`async_channel::Sender::send_blocking`]. Keeping the watcher
-//! thread off smol means a slow renderer can't back-pressure the
+//! `notify`'s callback is synchronous, so we bridge to the async
+//! channel with [`async_channel::Sender::send_blocking`]. Keeping the
+//! watcher off smol means a slow renderer can't back-pressure the
 //! filesystem listener into dropping events.
+//!
+//! Initialisation failures (watcher construction, `.watch()`) are
+//! returned to the caller so it can decide whether to fall back or
+//! abort — post-init errors from inside the callback are best-effort
+//! and swallowed, because surfacing them into the TUI would require a
+//! status channel we don't need yet.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
@@ -24,7 +31,7 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 
 use crate::signal::{parse_file, Signal};
 
-pub fn spawn_watcher(dir: PathBuf, tx: Sender<Signal>) {
+pub fn spawn_watcher(dir: PathBuf, tx: Sender<Signal>) -> notify::Result<()> {
     std::fs::create_dir_all(&dir).ok();
 
     // Backfill existing signals so the stream isn't empty on launch.
@@ -45,62 +52,51 @@ pub fn spawn_watcher(dir: PathBuf, tx: Sender<Signal>) {
         }
     }
 
-    thread::spawn(move || {
-        let tx_cb = tx.clone();
-        let watch_dir = dir.clone();
-        let mut watcher: RecommendedWatcher = match RecommendedWatcher::new(
-            move |res: notify::Result<Event>| {
-                let Ok(event) = res else { return };
-                // An atomic rename fires two events — `Name(To)` and
-                // `Name(Both)` — both referencing the final filename.
-                // We accept `Create(_)` (platforms that emit it) and
-                // `Modify(Name(To))` (the rename-destination arrival
-                // on Linux), and explicitly drop `Name(Both)` and
-                // `Name(From)` so we don't deliver each signal twice.
-                let accept = matches!(
-                    event.kind,
-                    EventKind::Create(_)
-                        | EventKind::Modify(ModifyKind::Name(RenameMode::To))
-                );
-                if !accept {
-                    return;
-                }
-                for path in event.paths {
-                    if path.extension().and_then(|s| s.to_str()) != Some("signal") {
-                        continue;
-                    }
-                    if let Some(sig) = parse_file(&path) {
-                        let _ = tx_cb.send_blocking(sig);
-                    }
-                }
-            },
-            Config::default().with_poll_interval(Duration::from_millis(250)),
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                eprintln!("attend-chat: watcher init failed: {}", e);
+    let tx_cb = tx.clone();
+    let mut watcher = RecommendedWatcher::new(
+        move |res: notify::Result<Event>| {
+            let Ok(event) = res else { return };
+            // An atomic rename fires two events — `Name(To)` and
+            // `Name(Both)` — both referencing the final filename. We
+            // accept `Create(_)` (platforms that emit it, notably
+            // kqueue) and `Modify(Name(To))` (the rename-destination
+            // arrival on Linux), and explicitly drop `Name(Both)` and
+            // `Name(From)` so we don't deliver each signal twice.
+            //
+            // TODO(bsd): kqueue reports bare `Modify(_)` rather than
+            // the RenameMode subvariants on some BSD builds of notify;
+            // if we start running on FreeBSD this matcher may miss
+            // events. Revisit with a platform-specific test when we
+            // add BSD CI.
+            let accept = matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(RenameMode::To))
+            );
+            if !accept {
                 return;
             }
-        };
+            for path in event.paths {
+                if path.extension().and_then(|s| s.to_str()) != Some("signal") {
+                    continue;
+                }
+                if let Some(sig) = parse_file(&path) {
+                    let _ = tx_cb.send_blocking(sig);
+                }
+            }
+        },
+        Config::default().with_poll_interval(Duration::from_millis(250)),
+    )?;
+    watcher.watch(&dir, RecursiveMode::NonRecursive)?;
 
-        if let Err(e) = watcher.watch(&watch_dir, RecursiveMode::NonRecursive) {
-            eprintln!(
-                "attend-chat: watch({}) failed: {}",
-                watch_dir.display(),
-                e
-            );
-            return;
-        }
-
-        // Keep the watcher alive for the life of the thread.
+    // Park the watcher on a dedicated thread so its handle (and its
+    // inotify descriptor on Linux) lives for the rest of the process.
+    // Dropping the handle would stop the watcher.
+    thread::spawn(move || {
+        let _keep_alive = watcher;
         loop {
             thread::park();
         }
     });
-}
 
-/// Re-export so the caller doesn't need to import `Path`.
-#[allow(dead_code)]
-pub fn is_signal(path: &Path) -> bool {
-    path.extension().and_then(|s| s.to_str()) == Some("signal")
+    Ok(())
 }

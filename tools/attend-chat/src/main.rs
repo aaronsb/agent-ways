@@ -26,7 +26,13 @@ fn main() {
     }
 
     let (tx, rx) = async_channel::unbounded::<signal::Signal>();
-    watcher::spawn_watcher(signal::broadcast_dir(), tx);
+    let dir = signal::broadcast_dir();
+    if let Err(e) = watcher::spawn_watcher(dir.clone(), tx) {
+        eprintln!("attend-chat: failed to start signal watcher: {}", e);
+        eprintln!("  signals dir: {}", dir.display());
+        eprintln!("  (no point opening the TUI — nothing would stream in.)");
+        std::process::exit(1);
+    }
 
     let result = smol::block_on(
         element! {
