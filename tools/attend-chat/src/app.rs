@@ -16,8 +16,11 @@ use async_channel::Receiver;
 use iocraft::prelude::*;
 
 use crate::chip::{chip_for, color_for, known_identities, resolve_nickname, CHIP_WIDTH};
+use crate::text_layout::{render_cursor, split_at_char, visual_line_count};
+use crate::groups::{groups_for_session, resolve_group_dir, scan as scan_groups};
 use crate::legend::{
-    apply_completion, best_completion, find_trailing_mention, legend_row, parse_addressed,
+    apply_completion, best_completion, best_group_completion, find_trailing_mention,
+    group_legend_row, legend_row, parse_addressed, Addressed, Sigil,
 };
 use crate::signal::{cwd_dir, write_broadcast, write_signal, Signal};
 
@@ -87,22 +90,25 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     let msg = input.read().trim_end().to_string();
                     if !msg.is_empty() {
                         let caps = TermCaps::detect();
-                        let registry = known_identities(&signals.read(), caps);
+                        let agents = known_identities(&signals.read(), caps);
                         let result = match parse_addressed(&msg) {
-                            Some(addressed) => match resolve_nickname(addressed, &registry) {
-                                Some(target_cwd) => {
-                                    write_signal(&cwd_dir(&target_cwd), &msg)
-                                        .map(|n| format!("sent → @{addressed}: {n}"))
-                                }
-                                None => {
-                                    // Unknown nickname — don't silently
-                                    // broadcast; the user likely typed it
-                                    // expecting delivery. Fail loud.
-                                    Err(std::io::Error::new(
+                            Some(Addressed::Agent(name)) => {
+                                match resolve_nickname(name, &agents) {
+                                    Some(target_cwd) => write_signal(&cwd_dir(&target_cwd), &msg)
+                                        .map(|n| format!("sent → @{name}: {n}")),
+                                    None => Err(std::io::Error::new(
                                         std::io::ErrorKind::NotFound,
-                                        format!("@{addressed}: unknown nickname"),
-                                    ))
+                                        format!("@{name}: unknown nickname"),
+                                    )),
                                 }
+                            }
+                            Some(Addressed::Group(name)) => match resolve_group_dir(name) {
+                                Some(dir) => write_signal(&dir, &msg)
+                                    .map(|n| format!("sent → #{name}: {n}")),
+                                None => Err(std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    format!("#{name}: unknown group"),
+                                )),
                             },
                             None => write_broadcast(&msg).map(|n| format!("sent: {n}")),
                         };
@@ -117,23 +123,33 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     }
                 }
                 KeyCode::Tab => {
-                    // Autocomplete a trailing `@partial`. No-op if the
-                    // caret isn't at the end of the buffer or there's
-                    // no `@` context — avoids surprising edits in the
-                    // middle of a sentence.
+                    // Autocomplete a trailing mention. Dispatches by
+                    // sigil: `@partial` → agent pool, `#partial` →
+                    // group pool. No-op if the caret isn't at the end
+                    // of the buffer or there's no mention context —
+                    // avoids surprising edits mid-sentence.
                     let buf = input.read().clone();
                     let pos = cursor.get();
                     if pos != buf.chars().count() {
                         return;
                     }
                     let caps = TermCaps::detect();
-                    let registry = known_identities(&signals.read(), caps);
-                    if let Some(mention) = find_trailing_mention(&buf) {
-                        if let Some(hit) = best_completion(mention.partial, &registry) {
-                            let (next, new_cursor) = apply_completion(&buf, &mention, &hit.nickname);
-                            input.set(next);
-                            cursor.set(new_cursor);
+                    let Some(mention) = find_trailing_mention(&buf) else { return };
+                    let completed: Option<(String, usize)> = match mention.sigil {
+                        Sigil::Agent => {
+                            let agents = known_identities(&signals.read(), caps);
+                            best_completion(mention.partial, &agents)
+                                .map(|hit| apply_completion(&buf, &mention, &hit.nickname))
                         }
+                        Sigil::Group => {
+                            let groups = scan_groups(caps);
+                            best_group_completion(mention.partial, &groups)
+                                .map(|hit| apply_completion(&buf, &mention, &hit.group.name))
+                        }
+                    };
+                    if let Some((next, new_cursor)) = completed {
+                        input.set(next);
+                        cursor.set(new_cursor);
                     }
                 }
                 KeyCode::Backspace => {
@@ -224,11 +240,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // every chip. Cheap env reads, but doing it in the per-signal map
     // would still be pointless repetition.
     let caps = TermCaps::detect();
-    // Registry and trailing-partial for the legend + completion
-    // highlight. Re-derived each render — `known_identities` dedupes
-    // in O(n) over the capped buffer, so the work is bounded.
+    // Registries and trailing-partial for the legend + completion
+    // highlight. Re-derived each render:
+    // - `known_identities`: dedupes in O(n) over the capped signal
+    //   buffer; bounded.
+    // - `scan_groups`: one `read_dir` + one YAML parse per render.
+    //   The YAML is tiny (it has per-group membership, not message
+    //   history), so the cost is negligible next to the render we'd
+    //   do anyway. Simpler than caching with invalidation.
     let known = known_identities(&signals.read(), caps);
-    let current_partial: Option<String> = find_trailing_mention(&input.read())
+    let groups_known = scan_groups(caps);
+    // `input.read()` returns a read guard — borrow it into a local
+    // binding so `find_trailing_mention`'s `&str` doesn't outlive
+    // the temporary guard.
+    let input_snapshot = input.read().clone();
+    let mention_ctx = find_trailing_mention(&input_snapshot);
+    let agent_partial: Option<String> = mention_ctx
+        .as_ref()
+        .filter(|m| m.sigil == Sigil::Agent)
+        .map(|m| m.partial.to_string());
+    let group_partial: Option<String> = mention_ctx
+        .as_ref()
+        .filter(|m| m.sigil == Sigil::Group)
         .map(|m| m.partial.to_string());
     let rows: Vec<_> = signals
         .read()
@@ -237,6 +270,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             let chip = chip_for(&s.from, &s.project, &s.cwd, caps);
             let weight = if chip.style.bold { Weight::Bold } else { Weight::Normal };
             let color = color_for(chip.palette, caps);
+            // Group glyphs for this chip: cross-reference the
+            // sender's session UUID against _groups.yaml membership.
+            // Humans have no session_id yet, so their chips stay
+            // glyph-less until PR 4 derives a membership key for
+            // them.
+            let group_chips: Vec<AnyElement<'static>> = match chip.session_id.as_deref() {
+                Some(uuid) => groups_for_session(uuid, &groups_known)
+                    .into_iter()
+                    .map(|kg| {
+                        let gcolor = color_for(kg.group.palette, caps);
+                        element! {
+                            Text(
+                                color: gcolor,
+                                content: format!("{} ", kg.group.glyph),
+                                wrap: TextWrap::NoWrap,
+                            )
+                        }
+                        .into_any()
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
             element! {
                 View(flex_direction: FlexDirection::Row, margin_bottom: 1) {
                     View(
@@ -256,6 +311,9 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             wrap: TextWrap::NoWrap,
                         )
                         Text(color: Color::DarkGrey, content: chip.secondary, wrap: TextWrap::NoWrap)
+                        View(flex_direction: FlexDirection::Row) {
+                            #(group_chips)
+                        }
                     }
                     View(
                         flex_grow: 1.0,
@@ -285,6 +343,11 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
 
     element! {
         View(flex_direction: FlexDirection::Column, width, height) {
+            // Group legend strip at the top — fixed one-row height.
+            // Each group renders `<glyph> #name` in its hashed color,
+            // so the user can see at a glance which focus groups
+            // exist and in what color they'll appear on agent chips.
+            #(group_legend_row(&groups_known, group_partial.as_deref()))
             // `min_height: 0` + `overflow: Hidden` keep this pane
             // inside its flex-grown slot instead of expanding to the
             // intrinsic height of the message list — without them, a
@@ -323,7 +386,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     )
                 }
             }
-            #(legend_row(&known, current_partial.as_deref()))
+            #(legend_row(&known, agent_partial.as_deref()))
             View(height: 1, padding_left: 1) {
                 Text(color: Color::DarkGrey, content: status.to_string(), wrap: TextWrap::NoWrap)
             }
@@ -331,111 +394,4 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     }
 }
 
-/// Count how many *rendered* rows `text` occupies inside a box of
-/// `interior` columns. Approximate: counts chars, ignores grapheme
-/// width — good enough for sizing a chat compose box where the exact
-/// last-column edge doesn't matter.
-fn visual_line_count(text: &str, interior: usize) -> usize {
-    if interior == 0 {
-        return 1;
-    }
-    let mut rows = 0usize;
-    for line in text.split('\n') {
-        let len = line.chars().count();
-        rows += if len == 0 { 1 } else { len.div_ceil(interior) };
-    }
-    rows.max(1)
-}
-
-/// Split a string at a *char* offset (not a byte offset). If the
-/// offset runs past the end of the string, the tail is empty.
-fn split_at_char(s: &str, n: usize) -> (&str, &str) {
-    match s.char_indices().nth(n) {
-        Some((byte, _)) => s.split_at(byte),
-        None => (s, ""),
-    }
-}
-
-/// Render the compose buffer with a block cursor at `pos`. The cursor
-/// sits *on* the char at `pos` (that char is replaced visually by the
-/// block) or past the end if `pos == len`. Matches how most terminal
-/// editors render a block cursor.
-fn render_cursor(text: &str, pos: usize) -> String {
-    let total = text.chars().count();
-    if pos >= total {
-        return format!("{}\u{2588}", text);
-    }
-    let (before, rest) = split_at_char(text, pos);
-    // Skip the char under the cursor so the block doesn't overlap it.
-    let after: String = rest.chars().skip(1).collect();
-    format!("{}\u{2588}{}", before, after)
-}
-
-#[cfg(test)]
-mod layout_tests {
-    use super::visual_line_count;
-
-    #[test]
-    fn short_line_is_one_row() {
-        assert_eq!(visual_line_count("hi", 20), 1);
-    }
-
-    #[test]
-    fn wrap_on_width() {
-        // 21 chars in a 10-wide box → 3 rows.
-        assert_eq!(visual_line_count("abcdefghijklmnopqrstu", 10), 3);
-    }
-
-    #[test]
-    fn explicit_newlines_count() {
-        assert_eq!(visual_line_count("a\nb\nc", 20), 3);
-    }
-
-    #[test]
-    fn combined_wrap_and_newline() {
-        // "abcdefghij" (10 chars) wraps once in 5-wide → 2 rows
-        // followed by "x" on its own line → 1 row = 3 total.
-        assert_eq!(visual_line_count("abcdefghij\nx", 5), 3);
-    }
-}
-
-#[cfg(test)]
-mod cursor_tests {
-    use super::{render_cursor, split_at_char};
-
-    #[test]
-    fn split_within_ascii() {
-        assert_eq!(split_at_char("hello", 2), ("he", "llo"));
-    }
-
-    #[test]
-    fn split_past_end() {
-        assert_eq!(split_at_char("hi", 10), ("hi", ""));
-    }
-
-    #[test]
-    fn split_respects_char_boundaries() {
-        // "héllo" — 'é' is 2 bytes. Splitting at char 2 should land
-        // between 'é' and 'l', not mid-byte.
-        let (before, after) = split_at_char("héllo", 2);
-        assert_eq!(before, "hé");
-        assert_eq!(after, "llo");
-    }
-
-    #[test]
-    fn cursor_at_end_appends_block() {
-        assert_eq!(render_cursor("hi", 2), "hi\u{2588}");
-    }
-
-    #[test]
-    fn cursor_mid_text_replaces_char_visually() {
-        // Cursor at position 1 over "abc" → 'a' + block + 'c'.
-        assert_eq!(render_cursor("abc", 1), "a\u{2588}c");
-    }
-
-    #[test]
-    fn cursor_on_empty_buffer() {
-        assert_eq!(render_cursor("", 0), "\u{2588}");
-    }
-}
 

@@ -21,10 +21,12 @@
 //!   in ADR-118 and the consumer crates.
 
 pub mod ansi;
+pub mod groups;
 pub mod identity;
 pub mod names;
 pub mod palette;
 
+pub use groups::{Group, GLYPHS};
 pub use identity::{cwd_basename, Identity};
 pub use palette::{
     resolve, PaletteEntry, Resolved, Style, TermCaps, BASIC_PALETTE, RICH_PALETTE,

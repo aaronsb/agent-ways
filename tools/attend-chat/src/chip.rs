@@ -28,6 +28,12 @@ pub struct ChipInfo {
     pub secondary: String,
     pub palette: PaletteEntry,
     pub style: Style,
+    /// Session UUID for claude senders, `None` for humans or
+    /// unknown prefixes. The chip's group-glyph decoration cross-
+    /// references this against `_groups.yaml` membership. Humans
+    /// will get their own derivable key in PR 4 once the CRUD
+    /// path needs to address them.
+    pub session_id: Option<String>,
 }
 
 /// Derive the chip from the wire `from`/`project`/`cwd` triple.
@@ -50,17 +56,20 @@ pub fn chip_for(from: &str, project: &str, cwd: &str, caps: TermCaps) -> ChipInf
         scope_segment.to_string()
     };
 
-    if from.strip_prefix("claude:").is_some() {
+    if let Some(uuid) = from.strip_prefix("claude:") {
         // For claude senders the cwd is the stable identity key. We
         // don't hash the session UUID — two sequential claudes in the
         // same dir should wear the same name, matching the user's
-        // mental model of "the agent that lives here".
+        // mental model of "the agent that lives here". The UUID
+        // flows to ChipInfo.session_id so the chip can look up
+        // group membership against _groups.yaml.
         let id = Identity::for_cwd(cwd, caps);
         ChipInfo {
             primary: truncate(id.nickname, interior),
             secondary: truncate(&scope, interior),
             palette: id.palette,
             style: id.style,
+            session_id: Some(uuid.to_string()),
         }
     } else if let Some(rest) = from.strip_prefix("external:") {
         // Strip the terminal suffix ("aaron@kitty" → "aaron") so the
@@ -72,6 +81,7 @@ pub fn chip_for(from: &str, project: &str, cwd: &str, caps: TermCaps) -> ChipInf
             secondary: truncate(&scope, interior),
             palette: id.palette,
             style: id.style,
+            session_id: None,
         }
     } else {
         // Unknown sender kind — key the color off the raw `from` so
@@ -83,6 +93,7 @@ pub fn chip_for(from: &str, project: &str, cwd: &str, caps: TermCaps) -> ChipInf
             secondary: truncate(&scope, interior),
             palette: id.palette,
             style: id.style,
+            session_id: None,
         }
     }
 }

@@ -25,10 +25,14 @@ fn main() {
     }
 
     let (tx, rx) = async_channel::unbounded::<signal::Signal>();
-    let dir = signal::broadcast_dir();
-    if let Err(e) = watcher::spawn_watcher(dir.clone(), tx) {
+    let base = signal::signals_base();
+    let own_cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let own_encoded = signal::encode_cwd(&own_cwd);
+    if let Err(e) = watcher::spawn_watcher(base.clone(), own_encoded, tx) {
         eprintln!("attend-chat: failed to start signal watcher: {}", e);
-        eprintln!("  signals dir: {}", dir.display());
+        eprintln!("  signals base: {}", base.display());
         eprintln!("  (no point opening the TUI — nothing would stream in.)");
         std::process::exit(1);
     }

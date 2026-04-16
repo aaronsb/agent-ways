@@ -52,7 +52,15 @@ fn write_broadcast_arrives_through_watcher() {
     std::env::set_var("HOME", &home);
 
     let (tx, rx) = async_channel::unbounded::<signal::Signal>();
-    watcher::spawn_watcher(signal::broadcast_dir(), tx)
+    // PR 3 made the watcher recursive over the whole signals base so
+    // it picks up focus-group dirs + the directed-send inbox. The
+    // integration path stays the same for broadcast, but we now pass
+    // the base plus our own cwd's encoded name.
+    let own_cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let own_encoded = signal::encode_cwd(&own_cwd);
+    watcher::spawn_watcher(signal::signals_base(), own_encoded, tx)
         .expect("watcher must initialise against a fresh temp dir");
 
     // Drain anything the backfill produced (should be nothing in a

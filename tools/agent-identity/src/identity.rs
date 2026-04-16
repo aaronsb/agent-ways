@@ -87,7 +87,10 @@ pub fn cwd_basename(path: &str) -> String {
 
 /// FNV-1a 64-bit. Deterministic across runs and targets — this is the
 /// property we need, and why we don't use `std::hash::DefaultHasher`.
-fn fnv1a_64(bytes: &[u8]) -> u64 {
+/// Crate-internal (`pub(crate)`) so the groups module shares the exact
+/// same hash; any divergence would make group / user / cwd seats
+/// silently non-comparable.
+pub(crate) fn fnv1a_64(bytes: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash = OFFSET;

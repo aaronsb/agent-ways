@@ -15,53 +15,79 @@ use agent_identity::TermCaps;
 use iocraft::prelude::*;
 
 use crate::chip::{color_for, KnownIdentity};
+use crate::groups::KnownGroup;
 
-/// Output of parsing the input buffer for a trailing `@partial`.
+/// Which sigil-kind of mention we're matching. A single grammar
+/// serves both `@agent` and `#group`; they differ only in the sigil
+/// char and the completion pool.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Sigil {
+    Agent,
+    Group,
+}
+
+/// Output of parsing the input buffer for a trailing `<sigil>partial`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Mention<'a> {
-    /// The part of the input up to (and including) the `@` sigil.
-    /// Completion replaces everything after the `@` without touching
+    /// The part of the input up to (and including) the sigil.
+    /// Completion replaces everything after it without touching
     /// what came before.
     pub prefix: &'a str,
-    /// The characters already typed after the `@`, or `""` if the
-    /// user just typed `@` and hasn't typed anything else yet.
+    /// The characters already typed after the sigil, or `""` if the
+    /// user just typed the sigil and hasn't typed anything else yet.
     pub partial: &'a str,
+    /// Which sigil kicked this mention off.
+    pub sigil: Sigil,
 }
 
 /// Parse a trailing mention at the end of `input`.
 ///
-/// A mention is `@<word>` where `<word>` contains only ASCII alnum
-/// characters (mirrors what our nickname pool allows). Returns `None`
-/// if the last word doesn't start with `@`, or if there's a space
-/// after the `@<word>` (caret isn't inside the mention any more).
+/// A mention is `@<word>` or `#<word>` where `<word>` contains only
+/// ASCII alnum characters plus `-` (mirrors what attend's group-name
+/// validator allows; nicknames are a strict subset). Returns `None`
+/// if the last word doesn't start with a mention sigil, or if there's
+/// a space after it (caret isn't inside the mention any more).
+///
+/// When both `@` and `#` appear trailing, the rightmost sigil wins —
+/// that's the one the caret is adjacent to.
 ///
 /// Cursor position isn't consulted — we only offer completion when
 /// the cursor is at the end of the buffer, which the caller enforces.
 pub fn find_trailing_mention(input: &str) -> Option<Mention<'_>> {
-    let at_pos = input.rfind('@')?;
-    let after_at = &input[at_pos + 1..];
-    // Everything after the `@` must be ASCII alnum (no spaces, no
-    // punctuation) for us to treat it as a mention in progress.
-    if !after_at.chars().all(|c| c.is_ascii_alphanumeric()) {
+    let (pos, sigil) = [
+        (input.rfind('@'), Sigil::Agent),
+        (input.rfind('#'), Sigil::Group),
+    ]
+    .into_iter()
+    .filter_map(|(p, s)| p.map(|p| (p, s)))
+    .max_by_key(|(p, _)| *p)?;
+    let after = &input[pos + 1..];
+    // Everything after the sigil must be ASCII alnum or `-` for
+    // us to treat it as a mention in progress. `-` is allowed
+    // because attend's group-name validator permits it
+    // (`my-group` is a real thing).
+    if !after.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
     }
-    // The char *before* the `@` must be whitespace or start-of-input —
-    // otherwise we're inside an email address or URL, not a mention.
-    if at_pos > 0 {
-        // `at_pos > 0` means `input[..at_pos]` is non-empty, so
-        // `.chars().last()` always yields Some — the unwrap is safe
-        // by construction.
-        let prev = input[..at_pos]
+    // The char *before* the sigil must be whitespace or
+    // start-of-input — otherwise we're inside an email address,
+    // a URL, or the middle of some other token, not a mention.
+    if pos > 0 {
+        // `pos > 0` means `input[..pos]` is non-empty, so
+        // `.chars().last()` always yields Some — the expect is
+        // safe by construction.
+        let prev = input[..pos]
             .chars()
             .last()
-            .expect("at_pos > 0 implies non-empty prefix");
+            .expect("pos > 0 implies non-empty prefix");
         if !prev.is_whitespace() {
             return None;
         }
     }
     Some(Mention {
-        prefix: &input[..=at_pos],
-        partial: after_at,
+        prefix: &input[..=pos],
+        partial: after,
+        sigil,
     })
 }
 
@@ -84,41 +110,76 @@ pub fn best_completion<'a>(
         .find(|k| k.nickname.to_ascii_lowercase().starts_with(&lc))
 }
 
-/// If `msg` is addressed to an `@Nickname` as its first token,
-/// return the nickname (without the `@`). Routing uses this to
-/// decide whether to broadcast or direct-send to that claude's cwd
-/// dir. Keeps the `@Nickname` in the outgoing body so receivers
-/// still see the address.
-pub fn parse_addressed(msg: &str) -> Option<&str> {
+/// Find the best completion for `partial` among `known` groups.
+///
+/// Parallel to `best_completion` for agents — shared grammar, two
+/// distinct registries. The `-` is tolerated in group names so
+/// `#my-g` → `my-group` matches.
+pub fn best_group_completion<'a>(
+    partial: &str,
+    known: &'a [KnownGroup],
+) -> Option<&'a KnownGroup> {
+    let lc = partial.to_ascii_lowercase();
+    known
+        .iter()
+        .find(|k| k.group.name.to_ascii_lowercase().starts_with(&lc))
+}
+
+/// Parsed routing hint extracted from a message's first token.
+/// Either the message addresses a specific agent (`@Nick body`) or
+/// a focus group (`#group body`), or neither. The routing layer in
+/// `app.rs` dispatches on this.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Addressed<'a> {
+    Agent(&'a str),
+    Group(&'a str),
+}
+
+/// If `msg` starts with an addressing sigil + name, return the kind
+/// + name (without the sigil). Both `@Name` and `#Name` work. Keeps
+/// the original token in the outgoing body so receivers still see
+/// the address they were matched on.
+pub fn parse_addressed(msg: &str) -> Option<Addressed<'_>> {
     let trimmed = msg.trim_start();
-    let rest = trimmed.strip_prefix('@')?;
-    // First alnum run is the nickname; anything after must be
-    // whitespace or nothing. Matches the nickname pool's constraints
-    // (ASCII letters only, short).
+    let mut chars = trimmed.chars();
+    let sigil = chars.next()?;
+    let kind = match sigil {
+        '@' => Sigil::Agent,
+        '#' => Sigil::Group,
+        _ => return None,
+    };
+    let rest = &trimmed[sigil.len_utf8()..];
+    // First alnum + `-` run is the name; anything after must be
+    // whitespace or nothing. Groups allow `-`; nicknames don't use
+    // it today but accepting it in both keeps the grammar uniform
+    // (and worst case the resolver just returns None).
     let end = rest
         .char_indices()
-        .find(|(_, c)| !c.is_ascii_alphanumeric())
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '-'))
         .map(|(i, _)| i)
         .unwrap_or(rest.len());
     if end == 0 {
         return None;
     }
-    let nick = &rest[..end];
+    let name = &rest[..end];
     let after = &rest[end..];
-    // Allow `@Nick` alone (entire message is the address, followed by
-    // nothing) — lets users send a bare ping. Otherwise require a
-    // space so `@Nick,` doesn't route.
+    // Allow sigil-plus-name alone (a bare ping), otherwise require a
+    // space so `@Nick,` or `#group.` don't route.
     if after.is_empty() || after.starts_with(char::is_whitespace) {
-        Some(nick)
+        Some(match kind {
+            Sigil::Agent => Addressed::Agent(name),
+            Sigil::Group => Addressed::Group(name),
+        })
     } else {
         None
     }
 }
 
-/// Render one legend row: `@Name @Name ...` across the width of the
-/// input, each name in its own identity color. If the user is in the
-/// middle of typing a mention (`current_partial` is `Some`), names
-/// that prefix-match get an underline so the Tab target is visible.
+/// Render the **agent** legend row: `@Name @Name ...` across the
+/// width of the input, each name in its own identity color. If the
+/// user is in the middle of typing an agent mention (`@partial`),
+/// names that prefix-match get an underline so the Tab target is
+/// visible.
 ///
 /// Returns a `Vec` so the caller can splat it into an `element!`
 /// children slot with `#(...)`.
@@ -144,6 +205,55 @@ pub fn legend_row(
                 TextDecoration::None
             };
             let content = format!("@{} ", k.nickname);
+            element! {
+                Text(color, weight, italic, decoration, content, wrap: TextWrap::NoWrap)
+            }
+            .into_any()
+        })
+        .collect();
+    vec![element! {
+        View(
+            flex_direction: FlexDirection::Row,
+            padding_left: 1,
+            padding_right: 1,
+            height: 1u32,
+            flex_shrink: 0.0,
+            overflow: Overflow::Hidden,
+        ) {
+            #(chips)
+        }
+    }
+    .into_any()]
+}
+
+/// Render the **group** legend row: `<glyph> #name` per group, each
+/// in its own hashed color. Sits at the top of the TUI so the user
+/// can see at a glance what focus groups exist and in what color
+/// they'll appear on agent chips.
+///
+/// If the user is mid-`#partial`, prefix-matching group names get
+/// an underline so Tab-target is obvious. Glyphs stay single-width;
+/// the name-color matches the glyph-color (same palette entry) so
+/// visual recognition carries even if the glyph degrades on a
+/// limited terminal.
+pub fn group_legend_row(
+    known: &[KnownGroup],
+    current_partial: Option<&str>,
+) -> Vec<AnyElement<'static>> {
+    let caps = TermCaps::detect();
+    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
+    let chips: Vec<AnyElement<'static>> = known
+        .iter()
+        .map(|k| {
+            let matches = lc_partial
+                .as_ref()
+                .map(|p| !p.is_empty() && k.group.name.to_ascii_lowercase().starts_with(p))
+                .unwrap_or(false);
+            let color = color_for(k.group.palette, caps);
+            let weight = if k.group.style.bold || matches { Weight::Bold } else { Weight::Normal };
+            let italic = k.group.style.italic;
+            let decoration = if matches { TextDecoration::Underline } else { TextDecoration::None };
+            let content = format!("{} #{} ", k.group.glyph, k.group.name);
             element! {
                 Text(color, weight, italic, decoration, content, wrap: TextWrap::NoWrap)
             }
@@ -203,6 +313,7 @@ mod tests {
         let m = find_trailing_mention("hi @Tam").unwrap();
         assert_eq!(m.prefix, "hi @");
         assert_eq!(m.partial, "Tam");
+        assert_eq!(m.sigil, Sigil::Agent);
     }
 
     #[test]
@@ -210,12 +321,40 @@ mod tests {
         let m = find_trailing_mention("@Tam").unwrap();
         assert_eq!(m.prefix, "@");
         assert_eq!(m.partial, "Tam");
+        assert_eq!(m.sigil, Sigil::Agent);
     }
 
     #[test]
     fn bare_at_sign_is_empty_partial() {
         let m = find_trailing_mention("hello @").unwrap();
         assert_eq!(m.partial, "");
+        assert_eq!(m.sigil, Sigil::Agent);
+    }
+
+    #[test]
+    fn trailing_hash_is_group_mention() {
+        let m = find_trailing_mention("hi #dep").unwrap();
+        assert_eq!(m.partial, "dep");
+        assert_eq!(m.sigil, Sigil::Group);
+    }
+
+    #[test]
+    fn group_with_dash_accepted() {
+        // attend's validator permits `-` in group names; the
+        // mention grammar must match so `#my-g` is a valid
+        // prefix of `my-group`.
+        let m = find_trailing_mention("#my-g").unwrap();
+        assert_eq!(m.partial, "my-g");
+    }
+
+    #[test]
+    fn rightmost_sigil_wins() {
+        // If both sigils appear and are both trailing-legal,
+        // whichever is closer to the caret is the mention.
+        let m = find_trailing_mention("#dep @Tam").unwrap();
+        assert_eq!(m.sigil, Sigil::Agent);
+        let m = find_trailing_mention("@Tam #dep").unwrap();
+        assert_eq!(m.sigil, Sigil::Group);
     }
 
     #[test]
@@ -288,18 +427,18 @@ mod tests {
 
     #[test]
     fn addressed_at_start_with_body() {
-        assert_eq!(parse_addressed("@Tamsin hello"), Some("Tamsin"));
+        assert_eq!(parse_addressed("@Tamsin hello"), Some(Addressed::Agent("Tamsin")));
     }
 
     #[test]
     fn addressed_bare_ping() {
         // `@Nick` with nothing after is a valid addressed ping.
-        assert_eq!(parse_addressed("@Urban"), Some("Urban"));
+        assert_eq!(parse_addressed("@Urban"), Some(Addressed::Agent("Urban")));
     }
 
     #[test]
     fn addressed_with_leading_whitespace() {
-        assert_eq!(parse_addressed("   @Tamsin hello"), Some("Tamsin"));
+        assert_eq!(parse_addressed("   @Tamsin hello"), Some(Addressed::Agent("Tamsin")));
     }
 
     #[test]
@@ -318,5 +457,25 @@ mod tests {
     fn not_addressed_on_bare_at_sign() {
         assert_eq!(parse_addressed("@ hi"), None);
         assert_eq!(parse_addressed("@"), None);
+    }
+
+    #[test]
+    fn addressed_group_with_body() {
+        assert_eq!(parse_addressed("#deploy rollout at 3pm"), Some(Addressed::Group("deploy")));
+    }
+
+    #[test]
+    fn addressed_group_with_dash() {
+        assert_eq!(parse_addressed("#my-team ping"), Some(Addressed::Group("my-team")));
+    }
+
+    #[test]
+    fn addressed_group_bare_ping() {
+        assert_eq!(parse_addressed("#infra"), Some(Addressed::Group("infra")));
+    }
+
+    #[test]
+    fn addressed_group_rejects_punctuation() {
+        assert_eq!(parse_addressed("#deploy, now"), None);
     }
 }
