@@ -23,12 +23,22 @@ pub struct AppProps {
 
 const CHIP_WIDTH: u32 = 20;
 
+/// Upper bound on the in-memory message buffer. At typical chat rates
+/// this is unreachable; the cap only matters for runaway conditions
+/// (overnight runs, a misbehaving peer, a loop). When we hit it, drop
+/// from the head so the newest history stays visible and the clone-
+/// per-append stays O(cap).
+const MAX_SIGNALS: usize = 5000;
+
 #[component]
 pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let mut system = hooks.use_context_mut::<SystemContext>();
     let (width, height) = hooks.use_terminal_size();
     let mut signals = hooks.use_state::<Vec<Signal>, _>(Vec::new);
     let mut input = hooks.use_state(String::new);
+    // Cursor position measured in *chars*, not bytes. Clamped into
+    // `[0, input.chars().count()]` on every mutation.
+    let mut cursor = hooks.use_state(|| 0usize);
     let mut should_exit = hooks.use_state(|| false);
     let mut status = hooks.use_state(String::new);
 
@@ -38,6 +48,10 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             while let Ok(sig) = rx.recv().await {
                 let mut v = signals.read().clone();
                 v.push(sig);
+                if v.len() > MAX_SIGNALS {
+                    let drop_n = v.len() - MAX_SIGNALS;
+                    v.drain(0..drop_n);
+                }
                 signals.set(v);
             }
         });
@@ -55,14 +69,16 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 KeyCode::Enter
                     if modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
                 {
-                    // Shift-Enter / Alt-Enter → insert newline.
-                    // Both paths are here because Shift-Enter only
-                    // arrives as a distinguishable event on terminals
-                    // that speak the kitty keyboard protocol; Alt-Enter
-                    // is a cross-terminal fallback.
-                    let mut v = input.read().clone();
-                    v.push('\n');
-                    input.set(v);
+                    // Shift-Enter / Alt-Enter → insert newline at the
+                    // cursor. Shift-Enter only comes through on
+                    // terminals that speak the kitty keyboard
+                    // protocol; Alt-Enter is a cross-terminal
+                    // fallback.
+                    let v = input.read().clone();
+                    let (before, after) = split_at_char(&v, cursor.get());
+                    let next = format!("{}\n{}", before, after);
+                    input.set(next);
+                    cursor.set(cursor.get() + 1);
                 }
                 KeyCode::Enter => {
                     let msg = input.read().trim_end().to_string();
@@ -71,23 +87,85 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             Ok(name) => {
                                 status.set(format!("sent: {}", name));
                                 input.set(String::new());
+                                cursor.set(0);
                             }
                             Err(e) => status.set(format!("send failed: {}", e)),
                         }
                     }
                 }
                 KeyCode::Backspace => {
-                    let mut v = input.read().clone();
-                    v.pop();
-                    input.set(v);
+                    let v = input.read().clone();
+                    let pos = cursor.get();
+                    if pos == 0 {
+                        return;
+                    }
+                    let (before, after) = split_at_char(&v, pos);
+                    // Drop one char off the end of `before`.
+                    let trimmed: String = before
+                        .chars()
+                        .take(pos.saturating_sub(1))
+                        .collect();
+                    input.set(format!("{}{}", trimmed, after));
+                    cursor.set(pos - 1);
+                }
+                KeyCode::Delete => {
+                    let v = input.read().clone();
+                    let pos = cursor.get();
+                    let total = v.chars().count();
+                    if pos >= total {
+                        return;
+                    }
+                    let (before, after) = split_at_char(&v, pos);
+                    // Drop the first char of `after`.
+                    let trimmed: String = after.chars().skip(1).collect();
+                    input.set(format!("{}{}", before, trimmed));
+                }
+                KeyCode::Left => {
+                    let p = cursor.get();
+                    if p > 0 {
+                        cursor.set(p - 1);
+                    }
+                }
+                KeyCode::Right => {
+                    let p = cursor.get();
+                    let total = input.read().chars().count();
+                    if p < total {
+                        cursor.set(p + 1);
+                    }
+                }
+                KeyCode::Home => {
+                    // Jump to the start of the current logical line.
+                    let v = input.read().clone();
+                    let p = cursor.get();
+                    let (before, _) = split_at_char(&v, p);
+                    let line_start = before.rfind('\n').map(|i| {
+                        // chars-before count = char count of
+                        // `before[..=i]`.
+                        before[..=i].chars().count()
+                    });
+                    cursor.set(line_start.unwrap_or(0));
+                }
+                KeyCode::End => {
+                    // Jump to the end of the current logical line.
+                    let v = input.read().clone();
+                    let p = cursor.get();
+                    let (_, after) = split_at_char(&v, p);
+                    let line_end_in_after = after.find('\n');
+                    let add = match line_end_in_after {
+                        Some(byte) => after[..byte].chars().count(),
+                        None => after.chars().count(),
+                    };
+                    cursor.set(p + add);
                 }
                 KeyCode::Char(c)
                     if !modifiers
                         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                 {
-                    let mut v = input.read().clone();
-                    v.push(c);
-                    input.set(v);
+                    let v = input.read().clone();
+                    let pos = cursor.get();
+                    let (before, after) = split_at_char(&v, pos);
+                    input.set(format!("{}{}{}", before, c, after));
+                    cursor.set(pos + 1);
                 }
                 _ => {}
             },
@@ -131,13 +209,15 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
         })
         .collect();
 
-    // Grow the input box vertically to match the *visual* line count,
-    // not just the logical-line count, so a long wrapped message also
-    // expands the box instead of spilling onto the border or the
-    // status row. Interior width = total - 2 border cols - 2 padding
-    // cols - 2 prompt cols.
+    // Render the input buffer with a block cursor sitting on the char
+    // at `cursor`. `format!` allocates once per frame; cheap at chat-
+    // compose scale and not worth caching into state.
     let input_value = input.to_string();
-    let display_with_cursor = format!("{}\u{2588}", input_value);
+    let display_with_cursor = render_cursor(&input_value, cursor.get());
+    // Interior width = total - 2 border cols - 2 padding cols - 2
+    // prompt cols. We grow the box to the visual row count so a long
+    // wrapped message expands it instead of spilling onto the border
+    // or status row.
     let interior = (width as usize).saturating_sub(6).max(1);
     let visual = visual_line_count(&display_with_cursor, interior);
     let input_height = (visual.clamp(1, 10) as u32) + 2;
@@ -254,6 +334,30 @@ fn visual_line_count(text: &str, interior: usize) -> usize {
     rows.max(1)
 }
 
+/// Split a string at a *char* offset (not a byte offset). If the
+/// offset runs past the end of the string, the tail is empty.
+fn split_at_char(s: &str, n: usize) -> (&str, &str) {
+    match s.char_indices().nth(n) {
+        Some((byte, _)) => s.split_at(byte),
+        None => (s, ""),
+    }
+}
+
+/// Render the compose buffer with a block cursor at `pos`. The cursor
+/// sits *on* the char at `pos` (that char is replaced visually by the
+/// block) or past the end if `pos == len`. Matches how most terminal
+/// editors render a block cursor.
+fn render_cursor(text: &str, pos: usize) -> String {
+    let total = text.chars().count();
+    if pos >= total {
+        return format!("{}\u{2588}", text);
+    }
+    let (before, rest) = split_at_char(text, pos);
+    // Skip the char under the cursor so the block doesn't overlap it.
+    let after: String = rest.chars().skip(1).collect();
+    format!("{}\u{2588}{}", before, after)
+}
+
 #[cfg(test)]
 mod layout_tests {
     use super::visual_line_count;
@@ -279,6 +383,46 @@ mod layout_tests {
         // "abcdefghij" (10 chars) wraps once in 5-wide → 2 rows
         // followed by "x" on its own line → 1 row = 3 total.
         assert_eq!(visual_line_count("abcdefghij\nx", 5), 3);
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::{render_cursor, split_at_char};
+
+    #[test]
+    fn split_within_ascii() {
+        assert_eq!(split_at_char("hello", 2), ("he", "llo"));
+    }
+
+    #[test]
+    fn split_past_end() {
+        assert_eq!(split_at_char("hi", 10), ("hi", ""));
+    }
+
+    #[test]
+    fn split_respects_char_boundaries() {
+        // "héllo" — 'é' is 2 bytes. Splitting at char 2 should land
+        // between 'é' and 'l', not mid-byte.
+        let (before, after) = split_at_char("héllo", 2);
+        assert_eq!(before, "hé");
+        assert_eq!(after, "llo");
+    }
+
+    #[test]
+    fn cursor_at_end_appends_block() {
+        assert_eq!(render_cursor("hi", 2), "hi\u{2588}");
+    }
+
+    #[test]
+    fn cursor_mid_text_replaces_char_visually() {
+        // Cursor at position 1 over "abc" → 'a' + block + 'c'.
+        assert_eq!(render_cursor("abc", 1), "a\u{2588}c");
+    }
+
+    #[test]
+    fn cursor_on_empty_buffer() {
+        assert_eq!(render_cursor("", 0), "\u{2588}");
     }
 }
 

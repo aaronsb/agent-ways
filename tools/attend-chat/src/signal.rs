@@ -220,6 +220,88 @@ mod tests {
         assert!(sig.reply_to.is_none());
     }
 
+    #[test]
+    fn sender_id_env_precedence() {
+        // Several pieces of state here are process-global (env vars),
+        // so we run the whole precedence lattice inside one test and
+        // reset between cases instead of relying on cargo's parallel
+        // runner to serialise us.
+        let original: Vec<(&str, Option<String>)> = [
+            "USER",
+            "LOGNAME",
+            "KITTY_PID",
+            "ALACRITTY_SOCKET",
+            "WEZTERM_PANE",
+            "TMUX",
+            "STY",
+            "TERM_PROGRAM",
+            "SSH_CONNECTION",
+            "TERMINAL",
+        ]
+        .iter()
+        .map(|k| (*k, std::env::var(*k).ok()))
+        .collect();
+
+        let clear_all = || {
+            for (k, _) in &original {
+                std::env::remove_var(k);
+            }
+        };
+
+        // Kitty wins over TERM_PROGRAM when both are set.
+        clear_all();
+        std::env::set_var("USER", "tester");
+        std::env::set_var("KITTY_PID", "123");
+        std::env::set_var("TERM_PROGRAM", "Apple_Terminal");
+        let (id, kind) = identify_sender();
+        assert_eq!(kind, "external");
+        assert_eq!(id, "tester@kitty");
+
+        // TERM_PROGRAM is the fallback when no specific-terminal env
+        // is set, and it's lowercased.
+        clear_all();
+        std::env::set_var("USER", "tester");
+        std::env::set_var("TERM_PROGRAM", "iTerm.app");
+        let (id, _) = identify_sender();
+        assert_eq!(id, "tester@iterm.app");
+
+        // TMUX beats TERM_PROGRAM (multiplexer wins over host
+        // terminal emulator).
+        clear_all();
+        std::env::set_var("USER", "tester");
+        std::env::set_var("TMUX", "/tmp/tmux-0/default,123,0");
+        std::env::set_var("TERM_PROGRAM", "Apple_Terminal");
+        let (id, _) = identify_sender();
+        assert_eq!(id, "tester@tmux");
+
+        // SSH is the final fallback before TERMINAL / bare user.
+        clear_all();
+        std::env::set_var("USER", "tester");
+        std::env::set_var("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22");
+        let (id, _) = identify_sender();
+        assert_eq!(id, "tester@ssh");
+
+        // No terminal identifiers → bare user.
+        clear_all();
+        std::env::set_var("USER", "tester");
+        let (id, _) = identify_sender();
+        assert_eq!(id, "tester");
+
+        // LOGNAME fills in when USER is missing.
+        clear_all();
+        std::env::set_var("LOGNAME", "backup_name");
+        let (id, _) = identify_sender();
+        assert_eq!(id, "backup_name");
+
+        // Restore prior environment so we don't pollute sibling tests.
+        clear_all();
+        for (k, v) in original {
+            if let Some(v) = v {
+                std::env::set_var(k, v);
+            }
+        }
+    }
+
     fn tempdir_like() -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "attend-chat-test-{}-{}",

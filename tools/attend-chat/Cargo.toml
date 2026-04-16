@@ -5,6 +5,10 @@ edition = "2021"
 description = "Interactive chat TUI for attend — human seat at the signal bus (ADR-120)"
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "attend_chat"
+path = "src/lib.rs"
+
 [[bin]]
 name = "attend-chat"
 path = "src/main.rs"

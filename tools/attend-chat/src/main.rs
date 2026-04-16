@@ -1,7 +1,4 @@
-mod app;
-mod signal;
-mod watcher;
-
+use attend_chat::{app, signal, watcher};
 use iocraft::prelude::*;
 
 fn main() {
@@ -22,6 +19,8 @@ fn main() {
         println!("  Esc                       exit");
         println!("  Enter                     send to broadcast");
         println!("  Shift-Enter / Alt-Enter   insert newline");
+        println!("  Left / Right / Home / End move cursor");
+        println!("  Backspace / Delete        edit");
         return;
     }
 
@@ -34,11 +33,17 @@ fn main() {
         std::process::exit(1);
     }
 
+    // `.disable_mouse_capture()` opts out of iocraft's default
+    // fullscreen mouse capture so the host terminal keeps native
+    // select / copy / paste. We don't consume mouse events today;
+    // when the sidebar lands and we want click-to-reply, we'll
+    // re-enable capture scoped to that region.
     let result = smol::block_on(
         element! {
             app::App(receiver: Some(rx))
         }
-        .fullscreen(),
+        .fullscreen()
+        .disable_mouse_capture(),
     );
     if let Err(e) = result {
         eprintln!("attend-chat: {}", e);
