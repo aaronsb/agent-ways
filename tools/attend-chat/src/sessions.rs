@@ -19,8 +19,13 @@ use std::path::PathBuf;
 
 /// Minimal view of a claude session file — only the fields the TUI
 /// needs to produce an `Identity`. We purposely don't carry `pid`
-/// (we're not checking liveness) or the full session_id (nothing in
-/// the attend-chat registry keys on it today).
+/// (we're not checking liveness in this PR).
+///
+/// `session_id` is carried even though `KnownIdentity` doesn't use it
+/// yet — ADR-124's group-membership glyph lookup wants to match a
+/// seeded peer's session UUID against `_groups.yaml` members. The
+/// field exists now so the seed path is forward-compatible; the
+/// consumer lands in a follow-up PR.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSession {
     pub cwd: String,
@@ -63,9 +68,11 @@ pub fn discover_in(dir: &std::path::Path) -> Vec<DiscoveredSession> {
     out
 }
 
-/// Quick-and-dirty JSON string extractor mirroring sensor-peers.
-/// Good enough for Claude Code's stable session-file format.
-/// We avoid pulling in serde_json just for two fields.
+/// Quick-and-dirty JSON string extractor. Byte-identical to
+/// `sensor-peers/src/lib.rs::extract_json_string`; duplicated here
+/// so attend-chat doesn't depend on sensor-peers for two fields of
+/// a stable Claude Code file. If either copy changes (e.g., to
+/// handle escape sequences), update both.
 fn extract_json_string(json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{}\":\"", key);
     let start = json.find(&pattern)? + pattern.len();

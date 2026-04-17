@@ -413,6 +413,24 @@ mod tests {
     }
 
     #[test]
+    fn registry_signal_entries_precede_seed_only_entries() {
+        // Ordering invariant: signal-derived entries keep their
+        // newest-first position; seed-only entries fall in after.
+        // A loop-order refactor that swapped the two passes would
+        // flip this. `/X` is the signal, `/Y` is the seed — `/X`
+        // must appear first so active peers lead the legend.
+        let buf = vec![sig("claude:a", "/X")];
+        let seeds = vec![DiscoveredSession {
+            cwd: "/Y".to_string(),
+            session_id: "sy".into(),
+        }];
+        let reg = known_identities(&buf, &seeds, TermCaps::Rich);
+        assert_eq!(reg.len(), 2);
+        assert_eq!(reg[0].cwd, "/X", "signal-derived entry must lead");
+        assert_eq!(reg[1].cwd, "/Y", "seed-only entry falls in after");
+    }
+
+    #[test]
     fn registry_seed_doesnt_duplicate_signal_derived_entry() {
         // If the same cwd is in both the signal buffer and the seed,
         // we must not list it twice.
