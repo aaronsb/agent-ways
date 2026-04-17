@@ -16,6 +16,7 @@ use async_channel::Receiver;
 use iocraft::prelude::*;
 
 use crate::chip::{chip_for, color_for, known_identities, resolve_nickname, CHIP_WIDTH};
+use crate::sessions::discover as discover_sessions;
 use crate::text_layout::{render_cursor, split_at_char, visual_line_count};
 use crate::groups::{resolve_group_dir, scan as scan_groups};
 use crate::legend::{
@@ -90,7 +91,8 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     let msg = input.read().trim_end().to_string();
                     if !msg.is_empty() {
                         let caps = TermCaps::detect();
-                        let agents = known_identities(&signals.read(), caps);
+                        let seeds = discover_sessions();
+                        let agents = known_identities(&signals.read(), &seeds, caps);
                         let result = match parse_addressed(&msg) {
                             Some(Addressed::Agent(name)) => {
                                 match resolve_nickname(name, &agents) {
@@ -137,7 +139,8 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     let Some(mention) = find_trailing_mention(&buf) else { return };
                     let completed: Option<(String, usize)> = match mention.sigil {
                         Sigil::Agent => {
-                            let agents = known_identities(&signals.read(), caps);
+                            let seeds = discover_sessions();
+                            let agents = known_identities(&signals.read(), &seeds, caps);
                             best_completion(mention.partial, &agents)
                                 .map(|hit| apply_completion(&buf, &mention, &hit.nickname))
                         }
@@ -248,7 +251,8 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     //   The YAML is tiny (it has per-group membership, not message
     //   history), so the cost is negligible next to the render we'd
     //   do anyway. Simpler than caching with invalidation.
-    let known = known_identities(&signals.read(), caps);
+    let seed_sessions = discover_sessions();
+    let known = known_identities(&signals.read(), &seed_sessions, caps);
     let groups_known = scan_groups(caps);
     // Pre-index session-id → groups once per render so the chip
     // loop is O(signals) instead of O(signals · groups · members).

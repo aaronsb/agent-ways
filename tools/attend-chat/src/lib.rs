@@ -9,6 +9,7 @@ pub mod app;
 pub mod chip;
 pub mod groups;
 pub mod legend;
+pub mod sessions;
 pub mod signal;
 pub mod text_layout;
 pub mod watcher;
