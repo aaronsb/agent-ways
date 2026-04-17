@@ -48,7 +48,13 @@ pub fn find_trailing_mention(input: &str) -> Option<Mention<'_>> {
     // The char *before* the `@` must be whitespace or start-of-input —
     // otherwise we're inside an email address or URL, not a mention.
     if at_pos > 0 {
-        let prev = input[..at_pos].chars().last().unwrap();
+        // `at_pos > 0` means `input[..at_pos]` is non-empty, so
+        // `.chars().last()` always yields Some — the unwrap is safe
+        // by construction.
+        let prev = input[..at_pos]
+            .chars()
+            .last()
+            .expect("at_pos > 0 implies non-empty prefix");
         if !prev.is_whitespace() {
             return None;
         }
@@ -61,12 +67,13 @@ pub fn find_trailing_mention(input: &str) -> Option<Mention<'_>> {
 
 /// Find the best completion for `partial` among `known` identities.
 ///
-/// Case-insensitive prefix match. Prefers longer existing matches
-/// over shorter ones — if `partial="Ta"` and both `Tamsin` and `Tal`
-/// are in the registry, we pick neither deterministically unless one
-/// is strictly a prefix of the user's typing. First hit in registry
-/// order wins; the registry is already ordered most-recent-first so
-/// this favors active peers.
+/// Case-insensitive prefix match. First hit in registry order wins —
+/// because `known_identities` surfaces the most-recent-seen identity
+/// first, that means active peers beat quiet ones. When several
+/// identities share the same prefix (e.g. `partial="Ta"` against a
+/// registry containing `Tamsin` and `Tal`), the caller gets whichever
+/// appears first. No longer-is-better heuristic; recency is the
+/// tiebreak.
 pub fn best_completion<'a>(
     partial: &str,
     known: &'a [KnownIdentity],
