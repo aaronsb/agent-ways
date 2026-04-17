@@ -17,7 +17,7 @@ use iocraft::prelude::*;
 
 use crate::chip::{chip_for, color_for, known_identities, resolve_nickname, CHIP_WIDTH};
 use crate::text_layout::{render_cursor, split_at_char, visual_line_count};
-use crate::groups::{groups_for_session, resolve_group_dir, scan as scan_groups};
+use crate::groups::{resolve_group_dir, scan as scan_groups};
 use crate::legend::{
     apply_completion, best_completion, best_group_completion, find_trailing_mention,
     group_legend_row, legend_row, parse_addressed, Addressed, Sigil,
@@ -250,6 +250,20 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     //   do anyway. Simpler than caching with invalidation.
     let known = known_identities(&signals.read(), caps);
     let groups_known = scan_groups(caps);
+    // Pre-index session-id → groups once per render so the chip
+    // loop is O(signals) instead of O(signals · groups · members).
+    // At today's scale neither form matters, but the render path is
+    // hot and the reindex is trivial.
+    let session_to_groups: std::collections::HashMap<&str, Vec<&crate::groups::KnownGroup>> = {
+        let mut m: std::collections::HashMap<&str, Vec<&crate::groups::KnownGroup>> =
+            std::collections::HashMap::new();
+        for kg in &groups_known {
+            for member in &kg.membership.members {
+                m.entry(member.as_str()).or_default().push(kg);
+            }
+        }
+        m
+    };
     // `input.read()` returns a read guard — borrow it into a local
     // binding so `find_trailing_mention`'s `&str` doesn't outlive
     // the temporary guard.
@@ -275,23 +289,27 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             // Humans have no session_id yet, so their chips stay
             // glyph-less until PR 4 derives a membership key for
             // them.
-            let group_chips: Vec<AnyElement<'static>> = match chip.session_id.as_deref() {
-                Some(uuid) => groups_for_session(uuid, &groups_known)
-                    .into_iter()
-                    .map(|kg| {
-                        let gcolor = color_for(kg.group.palette, caps);
-                        element! {
-                            Text(
-                                color: gcolor,
-                                content: format!("{} ", kg.group.glyph),
-                                wrap: TextWrap::NoWrap,
-                            )
-                        }
-                        .into_any()
-                    })
-                    .collect(),
-                None => Vec::new(),
-            };
+            let group_chips: Vec<AnyElement<'static>> = chip
+                .session_id
+                .as_deref()
+                .and_then(|uuid| session_to_groups.get(uuid))
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .map(|kg| {
+                            let gcolor = color_for(kg.group.palette, caps);
+                            element! {
+                                Text(
+                                    color: gcolor,
+                                    content: format!("{} ", kg.group.glyph),
+                                    wrap: TextWrap::NoWrap,
+                                )
+                            }
+                            .into_any()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             element! {
                 View(flex_direction: FlexDirection::Row, margin_bottom: 1) {
                     View(

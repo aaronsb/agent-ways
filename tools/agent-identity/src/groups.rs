@@ -54,7 +54,9 @@ impl Group {
         let seed = fnv1a_64(key.as_bytes());
         let glyph = GLYPHS[(seed as usize) % GLYPHS.len()];
         // Stir before resolving so glyph and color aren't trivially
-        // correlated — same trick as `Identity::for_key`.
+        // correlated — same trick as `Identity::for_key`. Constant is
+        // φ·2^64 (golden-ratio hash), matching the mixing pattern in
+        // `boost::hash_combine` and the Rust standard-library hasher.
         let Resolved { entry, style } = resolve(seed ^ 0x9e37_79b9_7f4a_7c15, caps);
         Group {
             name: name.to_string(),
@@ -111,7 +113,7 @@ mod tests {
         // single-column rendering is safe.
         for g in GLYPHS {
             assert!(!g.is_ascii(), "glyph {g:?} is ASCII — use `char` shapes");
-            assert_eq!(g.len_utf8() >= 3, true, "glyph {g:?} unexpectedly narrow");
+            assert!(g.len_utf8() >= 3, "glyph {g:?} unexpectedly narrow");
         }
     }
 

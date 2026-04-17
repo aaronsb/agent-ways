@@ -412,4 +412,42 @@ mod tests {
     fn test_encode_project() {
         assert_eq!(encode_project("/home/aaron/.claude"), "-home-aaron--claude");
     }
+
+    /// The exact byte sequence parsed by the drift-detection test.
+    /// Mirrored in `tools/attend-chat/src/groups.rs::tests::GROUPS_YAML_GOLDEN`.
+    /// If you change this string, update the mirror — and add whatever
+    /// new feature (new field, new nesting) to both parsers.
+    pub(super) const GROUPS_YAML_GOLDEN: &str = concat!(
+        "\n",
+        "# leading comment\n",
+        "deploy:\n",
+        "  pinned: true\n",
+        "  members:\n",
+        "    - sess-a\n",
+        "    - sess-b\n",
+        "\n",
+        "infra:\n",
+        "  pinned: false\n",
+        "  members: []\n",
+        "collab:\n",
+        "  pinned: false\n",
+        "  members:\n",
+        "    - sess-c\n",
+    );
+
+    #[test]
+    fn golden_matches_mirror_parser() {
+        // Wire-format drift guard. The attend-chat mirror parser has
+        // an identical test with the same golden string — if either
+        // parser stops producing this exact HashMap, one of the two
+        // has drifted and the mirror contract is broken.
+        let parsed = parse_groups_yaml(GROUPS_YAML_GOLDEN);
+        assert_eq!(parsed.len(), 3);
+        assert!(parsed["deploy"].pinned);
+        assert_eq!(parsed["deploy"].members, vec!["sess-a", "sess-b"]);
+        assert!(!parsed["infra"].pinned);
+        assert!(parsed["infra"].members.is_empty());
+        assert!(!parsed["collab"].pinned);
+        assert_eq!(parsed["collab"].members, vec!["sess-c"]);
+    }
 }

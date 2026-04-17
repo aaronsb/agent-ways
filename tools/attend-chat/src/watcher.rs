@@ -164,7 +164,14 @@ pub fn spawn_watcher(base: PathBuf, own_encoded: String, tx: Sender<Signal>) -> 
 /// backfill on startup. Kept separate from the event filter because
 /// backfill walks the fs once up front — the filter runs per event.
 fn scan_targets(base: &Path, own_encoded: &str) -> Vec<PathBuf> {
-    let mut dirs = vec![base.join("_broadcast"), base.join(own_encoded)];
+    let mut dirs = vec![base.join("_broadcast")];
+    // Mirror the guard in `spawn_watcher`: when `env::current_dir()`
+    // fails, `own_encoded` is empty and `base.join("")` degenerates
+    // to `base` — we'd then walk the whole top level for no good
+    // reason. Skip that dir when there's nothing to watch.
+    if !own_encoded.is_empty() {
+        dirs.push(base.join(own_encoded));
+    }
     if let Ok(entries) = std::fs::read_dir(base) {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -224,6 +231,18 @@ mod tests {
     #[test]
     fn rejects_path_outside_base() {
         let p = PathBuf::from("/etc/passwd");
+        assert!(!accept_path(&base(), "-home-me", &p));
+    }
+
+    #[test]
+    fn rejects_traversal_style_paths() {
+        // Defence-in-depth: the filter sees full paths from notify,
+        // but a `.signal`-suffixed traversal segment inside the base
+        // must not appear to be broadcast/group/own. We rely on
+        // `strip_prefix` + `Components` for safety, which normalizes
+        // `..` as a ParentDir component that can't equal `_broadcast`,
+        // `@<name>`, or our own_encoded.
+        let p = base().join("..").join("outside").join("x.signal");
         assert!(!accept_path(&base(), "-home-me", &p));
     }
 }

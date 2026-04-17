@@ -286,4 +286,42 @@ mod tests {
         let groups = scan_in(&base, TermCaps::Rich);
         assert!(groups.is_empty());
     }
+
+    /// Mirror of `tools/attend/src/groups.rs::tests::GROUPS_YAML_GOLDEN`.
+    /// Any edit here requires the matching edit there — both parsers
+    /// must agree on the identical byte sequence. Drift-detection via
+    /// `golden_matches_mirror_parser` below.
+    const GROUPS_YAML_GOLDEN: &str = concat!(
+        "\n",
+        "# leading comment\n",
+        "deploy:\n",
+        "  pinned: true\n",
+        "  members:\n",
+        "    - sess-a\n",
+        "    - sess-b\n",
+        "\n",
+        "infra:\n",
+        "  pinned: false\n",
+        "  members: []\n",
+        "collab:\n",
+        "  pinned: false\n",
+        "  members:\n",
+        "    - sess-c\n",
+    );
+
+    #[test]
+    fn golden_matches_mirror_parser() {
+        // Wire-format drift guard. `tools/attend/src/groups.rs` has
+        // an identical test with the same golden string — if either
+        // parser stops producing this exact HashMap, the mirror
+        // contract is broken and one side has drifted.
+        let parsed = parse_groups_yaml(GROUPS_YAML_GOLDEN);
+        assert_eq!(parsed.len(), 3);
+        assert!(parsed["deploy"].pinned);
+        assert_eq!(parsed["deploy"].members, vec!["sess-a", "sess-b"]);
+        assert!(!parsed["infra"].pinned);
+        assert!(parsed["infra"].members.is_empty());
+        assert!(!parsed["collab"].pinned);
+        assert_eq!(parsed["collab"].members, vec!["sess-c"]);
+    }
 }
