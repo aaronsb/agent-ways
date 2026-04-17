@@ -17,8 +17,9 @@ use agent_identity::TermCaps;
 /// allocation-free at the hot path.
 pub(crate) struct ParsedSignal<'a> {
     pub(crate) from: &'a str,
-    #[allow(dead_code)] // Retained in the parse so callers that need it
-    // (e.g. non-cwd sender hints) can read it without re-parsing.
+    /// Parsed but currently unread by any caller. Retained so future
+    /// sender-hint rendering (non-cwd) can read it without re-parsing.
+    #[allow(dead_code)]
     pub(crate) project: &'a str,
     pub(crate) cwd: &'a str,
     pub(crate) reply_to: Option<&'a str>,

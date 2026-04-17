@@ -16,6 +16,15 @@ use agent_identity::{ansi, Identity, TermCaps};
 /// way — keyed on username, not cwd, so the same human shows up
 /// consistently across projects. Unknown prefixes fall through
 /// showing the raw `from` value, colored off its own hash.
+///
+/// Scope derivation deliberately differs from `attend-chat::chip::chip_for`:
+/// that renderer falls back to the `project` field when `cwd` is
+/// empty (because the chat TUI has room for a secondary line and
+/// wants the best-effort label). This label is a single-line CLI
+/// output where `(home)` is an acceptable empty-cwd marker, so we
+/// keep the code simple and ignore `project`. Production signals
+/// populate `cwd` either way — the divergence only manifests on
+/// hand-crafted signals, which shouldn't be a hot path.
 pub(crate) fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> String {
     if from.strip_prefix("claude:").is_some() {
         let id = Identity::for_cwd(cwd, caps);
