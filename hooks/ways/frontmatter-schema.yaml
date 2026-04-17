@@ -112,6 +112,10 @@ way:
       values: [context-threshold, file-exists, session-start]
       required: optional
       role: State-based trigger type (instead of pattern/semantic)
+    threshold:
+      type: number
+      required: conditional  # required when trigger is context-threshold
+      role: Percentage (0-100) of context-window fill that fires the way. Only read for trigger, context-threshold.
     repeat:
       type: boolean
       required: optional
