@@ -5,7 +5,7 @@ pattern: slow|optimi|latency|profile|performance|speed.?up|benchmark|bottleneck|
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: heuristic -->
 # Performance Way

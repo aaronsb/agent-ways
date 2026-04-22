@@ -4,7 +4,7 @@ vocabulary: mock fake stub spy double dependency inject external isolate test do
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: heuristic -->
 # Mocking Way

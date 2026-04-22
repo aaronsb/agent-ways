@@ -5,7 +5,7 @@ commands: npm\ test|yarn\ test|jest|pytest|cargo\ test|go\ test|rspec
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: convention -->
 # Testing Way

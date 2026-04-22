@@ -4,7 +4,7 @@ vocabulary: tdd red green refactor test first implementation failing
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: heuristic -->
 # TDD Way

@@ -5,7 +5,7 @@ pattern: error.?handl|exception|try.?catch|throw|catch
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: heuristic -->
 # Error Handling Way

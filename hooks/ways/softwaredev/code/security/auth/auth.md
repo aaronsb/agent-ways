@@ -4,7 +4,7 @@ vocabulary: authentication authorization middleware guard permission role rbac a
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: constraint -->
 # Auth Way

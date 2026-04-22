@@ -4,7 +4,7 @@ vocabulary: refactor quality solid principle decompose extract method responsibi
 pattern: solid.?principle|refactor|code.?review|code.?quality|clean.?up|simplify|decompos|extract.?method|tech.?debt
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 macro: append
 scan_exclude: \.md$|\.lock$|\.min\.(js|css)$|\.generated\.|\.bundle\.|vendor/|node_modules/|dist/|build/|__pycache__/
 scope: agent, subagent

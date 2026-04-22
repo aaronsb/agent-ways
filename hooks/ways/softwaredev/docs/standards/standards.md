@@ -4,7 +4,7 @@ vocabulary: convention norm guideline accessibility style guide linting rule agr
 scope: agent, subagent
 curve:
   type: Exponential
-  half_life: 30000
+  half_life: 200000
 ---
 <!-- epistemic: convention -->
 # Standards Way
