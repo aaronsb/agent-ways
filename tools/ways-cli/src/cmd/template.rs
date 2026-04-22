@@ -52,6 +52,7 @@ pub fn run(
         r#"---
 description: {description}
 vocabulary: {vocab}
+refire: 0.15
 scope: {scope}
 ---
 <!-- epistemic: convention -->
