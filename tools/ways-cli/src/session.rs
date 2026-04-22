@@ -236,10 +236,20 @@ pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
 }
 
 /// Scan a transcript to detect model and return context window size in tokens.
+/// Honors `CLAUDE_CONTEXT_WINDOW` as an override — the same contract
+/// `cmd::context::get_context` uses, so window fallbacks stay consistent
+/// across all fire-evaluation paths (show, list, rethink).
 fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
+    let fallback = || {
+        std::env::var("CLAUDE_CONTEXT_WINDOW")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(200_000)
+    };
+
     let content = match std::fs::read_to_string(transcript) {
         Ok(c) => c,
-        Err(_) => return 200_000,
+        Err(_) => return fallback(),
     };
 
     for line in content.lines().rev() {
@@ -254,7 +264,7 @@ fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
             }
         }
     }
-    200_000
+    fallback()
 }
 
 // ── Check fire count ────────────────────────────────────────────

@@ -200,11 +200,23 @@ fn scan_ways_dir(dir: &Path, id_prefix: &str, excluded: &[String], w: &mut impl 
     locale_files.sort();
 
     // Pass 1: process .md files (including any external locale override .lang.md files)
+    let presets = &crate::config::global().refire_presets;
     for path in &md_files {
         let fm = match frontmatter::parse(path) {
             Ok(fm) => fm,
             Err(_) => continue,
         };
+
+        // ADR-126: surface malformed refire specs at corpus time. Corpus is a
+        // frequently-invoked gate (CI, local rebuilds), so typos caught here
+        // don't have to wait for a session to misfire. Warnings are
+        // stderr-only — `ways lint` is the hard gate and escalates.
+        if let Some(spec) = &fm.refire {
+            if let Err(msg) = spec.validate(presets) {
+                let rel = path.strip_prefix(dir).unwrap_or(path);
+                eprintln!("[ways corpus] WARN: {} — {msg}", rel.display());
+            }
+        }
 
         // Skip ways without semantic fields (corpus is for matching engines)
         if fm.description.is_empty() || fm.vocabulary.is_none() {

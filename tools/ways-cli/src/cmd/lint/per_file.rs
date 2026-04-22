@@ -137,15 +137,24 @@ pub(super) fn lint_file(
         }
     }
 
-    // ADR-126: fire-bearing ways (ways with description + vocabulary that
-    // participate in semantic matching) should carry a `refire:` field.
-    // Check files and attend signal handlers are exempt — checks ride on
-    // their parent way's firing, and attend handlers are triggered by
-    // signal name rather than the refire engine. Missing refire: on a
-    // fire-bearing way means it fires once and never re-discloses, which
-    // is a valid but uncommon shape — warn so authors confirm intent.
+    // ADR-126: fire-bearing ways should carry a `refire:` field. A way is
+    // fire-bearing if any of its trigger channels are wired: semantic
+    // (description + vocabulary), regex (pattern/files/commands), or state
+    // (trigger:). Check files and attend signal handlers are exempt —
+    // checks ride on their parent way's firing, and attend handlers are
+    // triggered by signal name rather than the refire engine.
     let has_refire = has_field(&fm_str, "refire");
-    let is_fire_bearing = !is_check && has_desc && has_vocab && !is_attend;
+    let has_curve = has_field(&fm_str, "curve");
+    let has_pattern = has_field(&fm_str, "pattern");
+    let has_files = has_field(&fm_str, "files");
+    let has_commands = has_field(&fm_str, "commands");
+    let has_trigger = has_field(&fm_str, "trigger");
+    let fires_on_something = (has_desc && has_vocab)
+        || has_pattern
+        || has_files
+        || has_commands
+        || has_trigger;
+    let is_fire_bearing = !is_check && !is_attend && fires_on_something;
     if is_fire_bearing && !has_refire {
         eprintln!(
             "  WARNING: {rel} — no `refire:` field (ADR-126). \
@@ -153,6 +162,37 @@ pub(super) fn lint_file(
              Add `refire: <fraction|preset>` (e.g., `refire: 0.15` or `refire: normal`)."
         );
         *warnings += 1;
+    }
+
+    // ADR-126: refire: and curve: should not coexist. refire: wins at
+    // runtime (via Frontmatter::resolved_curve), but the duplication is
+    // almost always a migration mistake. Emit a specific warning distinct
+    // from the generic UNKNOWN-field warning for curve: alone.
+    if has_refire && has_curve {
+        eprintln!(
+            "  WARNING: {rel} — both `refire:` and legacy `curve:` present. \
+             `refire:` wins at runtime; remove the `curve:` block."
+        );
+        *warnings += 1;
+    }
+
+    // ADR-126: fail-closed preset/numeric validation. Lint is the primary
+    // gate for typo detection; corpus-generation echoes this check. Fire
+    // time has a soft fallback (see RefireSpec::fraction) so a bypassed
+    // lint doesn't crash a live session, but that path logs to stderr.
+    if has_refire {
+        if let Some(raw) = get_field_value(&fm_str, "refire") {
+            let spec = if let Ok(n) = raw.trim().parse::<f64>() {
+                crate::frontmatter::RefireSpec::Numeric(n)
+            } else {
+                crate::frontmatter::RefireSpec::Preset(raw.trim().to_string())
+            };
+            let presets = &crate::config::global().refire_presets;
+            if let Err(msg) = spec.validate(presets) {
+                eprintln!("  ERROR: {rel} — {msg}");
+                *errors += 1;
+            }
+        }
     }
 
     // Threshold is numeric

@@ -90,11 +90,16 @@ refire: normal       # preset: resolved via config.refire_presets
 - **Numeric form** (`0.0 – 1.0+`) pins the cadence to today's model. Use when you want precise control or when the intent is model-specific.
 - **Preset form** (string name) looks up the project's `refire_presets` config section. Built-in defaults: `once` (1.0), `rare` (0.4), `normal` (0.15), `frequent` (0.05). Use for portability — re-tuning happens globally via one config edit.
 
-Common choices:
-- Static-heavy payloads (heuristic tables, long checklists): `refire: 0.2` or `refire: rare`
-- Load-bearing guidance (typical case, ~3 fires per session): `refire: 0.15` or `refire: normal`
-- Procedural event handlers (fires often relative to session): `refire: 0.05` or `refire: frequent`
-- Disclose-once: `refire: 1.0` or `refire: once`
+Common choices (numeric ↔ preset, matching the built-in defaults):
+
+| Intent | Numeric | Preset |
+|---|---|---|
+| Static-heavy payloads (heuristic tables, long checklists) | `0.4` | `rare` |
+| Load-bearing guidance (typical case, ~3 fires per session) | `0.15` | `normal` |
+| Procedural event handlers (fires often relative to session) | `0.05` | `frequent` |
+| Disclose once per session | `1.0` | `once` |
+
+Numeric values between these presets are fine — for example, the 14 ways migrated from ADR-127's 1M-Opus hack sit at `refire: 0.2` (between `normal` and `rare`), deliberately pinned to today's model.
 
 Missing `refire:` on a fire-bearing way means the way fires once and never re-discloses — valid but uncommon, and `ways lint` warns on it. Check files and `trigger: attend` handlers are exempt (checks ride on parent way firing; attend handlers are signal-triggered).
 

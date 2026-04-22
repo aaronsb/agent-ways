@@ -85,8 +85,11 @@ refire: rare          # reference: tracks the project's preset config
   not auto-scale if the operator later swaps to a model with different
   attention characteristics.
 - A **string** is looked up in the `refire_presets` config section at fire
-  time. Unknown names are an error (likely typo; failing closed is safer than
-  silent default).
+  time. Unknown names fail closed at two upstream gates — `ways lint` and
+  `ways corpus` both reject unknown preset names and abort/warn. Fire-time
+  resolution has a fail-soft fallback to `normal` (0.15) with a stderr
+  warning, so a bypassed lint doesn't crash a live session, but the error
+  path is intended to be caught upstream.
 
 ### Preset configuration
 
@@ -172,23 +175,29 @@ ways. `attend`'s exhaustive matches on `Curve` are untouched.
    populated from the new YAML section. Built-in defaults match the table
    above.
 
-3. **`ways lint`** — two binary checks that together enforce the new schema:
-   - **Warning** when a fire-bearing way (has `description` + `vocabulary`,
-     not an `attend` handler, not a check file) has no `refire:` field. The
-     way would fire once and never re-disclose — a valid but uncommon shape
-     that deserves explicit author confirmation.
-   - **UNKNOWN (foreign-field warning)** when a `curve:` block is present.
-     The schema no longer lists `curve:` as a valid field, so existing
-     unknown-field logic flags it without special-case code. Running
-     `ways lint --fix` would remove the block entirely; authors that
-     genuinely want a non-Exponential shape (Flat, ActionPotential) would
-     re-add `curve:` to the schema first.
+3. **`ways lint`** — four diagnostics covering presence, shape, and drift:
+   - **Warning** when a fire-bearing way (any trigger channel wired:
+     description+vocabulary, pattern, files, commands, or trigger; not an
+     attend handler; not a check file) has no `refire:` field.
+   - **Warning** when both `refire:` and legacy `curve:` coexist, pointing
+     authors at the `curve:` block to remove.
+   - **UNKNOWN (foreign-field warning)** when a `curve:` block is present
+     alone. The schema no longer lists `curve:` as a valid field, so the
+     existing unknown-field logic flags it without special-case code.
+   - **Error** when `refire:` is malformed — a numeric value outside
+     `[0.0, 10.0]` (e.g., a raw token count like `30000` accidentally
+     pasted in) or a preset name not present in `config.refire_presets`.
+     Fail-closed: lint is the primary typo gate.
 
-   These two checks are deliberately simple — one "is the new field
-   present" and one "is the old field absent." They give authors an
-   unambiguous signal about whether a way file conforms to the post-ADR-126
-   shape and are sufficient to find any remaining non-conforming frontmatter
-   in the tree.
+4. **`ways corpus`** — echoes the malformed-refire check as a stderr
+   WARNING during corpus generation. Corpus is run frequently (CI, local
+   rebuilds) and hits every way file, so catching typos here prevents them
+   from reaching a live session even when lint isn't invoked.
+
+   These checks give authors an unambiguous signal about whether a way file
+   conforms to the post-ADR-126 shape at two independent gates (lint +
+   corpus), with a fire-time fallback that keeps sessions running even
+   when both gates are bypassed.
 
 ## Migration
 
@@ -224,6 +233,15 @@ Side-effect: the 81 unhacked files that are currently broken on 1M (firing
 resolver multiplies `refire: 0.15` by the actual 1M window. An unintentional
 but welcome fix, consistent with the intent the author expressed when they
 wrote `half_life: 30000` against a 200k window.
+
+Second-order effect: three attend handlers (`meta/attend/build-complete`,
+`context-pressure`, `reflection-overdue`) inherited `refire: 0.15` from the
+migration. On 1M Opus, their effective suppression grows from 30k to 150k
+half-life — a signal-debounce change, not a disclosure-decay change. This may
+be too sticky for rapid-signal handlers; individual attend handlers can be
+re-tuned per-signal (e.g. `refire: 0.03` to preserve the pre-migration 30k
+behavior on 1M). Separate concern from the primary way-disclosure cadence
+this ADR addresses.
 
 **Phase 3 — opt into presets (per-way judgment).** For ways whose intent is
 genuinely model-portable ("be load-bearing in any session"), authors replace

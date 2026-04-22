@@ -1,7 +1,13 @@
 use anyhow::{anyhow, Context, Result};
 use sensor_trait::Curve;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Sensible upper bound on numeric `refire:` values. Well above any realistic
+/// cadence; catches typos like `refire: 200000` (legacy raw-tokens pasted
+/// into the new field).
+const REFIRE_NUMERIC_MAX: f64 = 10.0;
 
 /// ADR-126 refire specification: either a numeric fraction of the session
 /// context window, or a preset name resolved via the config's
@@ -23,26 +29,25 @@ pub enum RefireSpec {
 }
 
 impl RefireSpec {
-    /// Resolve to the concrete fraction for this spec. Preset names look up
-    /// the active config; unknown names fall back to the built-in `normal`
-    /// value and log a stderr warning (fail-soft at fire time; `ways lint`
-    /// catches typos at parse time — see ADR-126 Frontmatter/lint changes).
-    pub fn fraction(&self) -> f64 {
+    /// Resolve preset names against the supplied table. Unknown names
+    /// fail-soft — fall back to the built-in `normal` value and log a
+    /// stderr warning. This is the runtime safety net; `ways lint` and
+    /// `ways corpus` both reject unknown preset names upstream so fire-time
+    /// typos shouldn't happen in practice.
+    pub fn fraction_with(&self, presets: &HashMap<String, f64>) -> f64 {
         match self {
             Self::Numeric(v) => *v,
-            Self::Preset(name) => {
-                let cfg = crate::config::global();
-                match cfg.refire_presets.get(name) {
-                    Some(v) => *v,
-                    None => {
-                        eprintln!(
-                            "[ways] unknown refire preset `{}`; falling back to `normal` (0.15)",
-                            name
-                        );
-                        0.15
-                    }
+            Self::Preset(name) => match presets.get(name) {
+                Some(v) => *v,
+                None => {
+                    eprintln!(
+                        "[ways] unknown refire preset `{}`; falling back to `normal` (0.15). \
+                        Run `ways lint` to locate the source.",
+                        name
+                    );
+                    0.15
                 }
-            }
+            },
         }
     }
 
@@ -51,9 +56,54 @@ impl RefireSpec {
     /// to avoid a zero-half-life degenerate that would cause immediate
     /// re-fire on every check).
     pub fn to_curve(&self, window: u64) -> Curve {
-        let half_life = (self.fraction() * window as f64).round() as u64;
+        self.to_curve_with(window, &crate::config::global().refire_presets)
+    }
+
+    /// Same as [`to_curve`] but resolves preset names against the supplied
+    /// table.
+    pub fn to_curve_with(&self, window: u64, presets: &HashMap<String, f64>) -> Curve {
+        let half_life = (self.fraction_with(presets) * window as f64).round() as u64;
         Curve::Exponential {
             half_life: half_life.max(1),
+        }
+    }
+
+    /// Strict validation for lint and corpus-generation paths. Returns an
+    /// error string (ready for a `ways lint` ERROR line) when the spec is
+    /// malformed — numeric out of sane range, or preset name not in the
+    /// supplied table. Fail-closed at these upstream gates so fire-time
+    /// always sees a spec that resolves cleanly.
+    pub fn validate(&self, presets: &HashMap<String, f64>) -> Result<(), String> {
+        match self {
+            Self::Numeric(v) => {
+                if !v.is_finite() {
+                    return Err(format!("refire numeric {v} is not a finite number"));
+                }
+                if *v < 0.0 {
+                    return Err(format!(
+                        "refire numeric {v} is negative (fractions must be ≥ 0)"
+                    ));
+                }
+                if *v > REFIRE_NUMERIC_MAX {
+                    return Err(format!(
+                        "refire numeric {v} exceeds the sane upper bound {REFIRE_NUMERIC_MAX} — \
+                        values > 1.0 are valid but rare; {v} is almost certainly a raw token \
+                        count accidentally pasted into the new field"
+                    ));
+                }
+                Ok(())
+            }
+            Self::Preset(name) => {
+                if presets.contains_key(name) {
+                    Ok(())
+                } else {
+                    let mut valid: Vec<&String> = presets.keys().collect();
+                    valid.sort();
+                    Err(format!(
+                        "refire preset `{name}` is not defined in config.refire_presets (valid: {valid:?})"
+                    ))
+                }
+            }
         }
     }
 }
@@ -427,6 +477,79 @@ curve:
             Curve::Exponential { half_life } => assert_eq!(half_life, 1),
             other => panic!("expected Exponential, got {:?}", other),
         }
+    }
+
+    fn preset_table() -> HashMap<String, f64> {
+        let mut m = HashMap::new();
+        m.insert("once".to_string(), 1.0);
+        m.insert("rare".to_string(), 0.4);
+        m.insert("normal".to_string(), 0.15);
+        m.insert("frequent".to_string(), 0.05);
+        m
+    }
+
+    #[test]
+    fn refire_preset_resolves_via_table() {
+        let presets = preset_table();
+        let spec = RefireSpec::Preset("rare".to_string());
+        assert!((spec.fraction_with(&presets) - 0.4).abs() < 1e-9);
+
+        // to_curve_with uses the same resolution
+        let curve = spec.to_curve_with(1_000_000, &presets);
+        match curve {
+            Curve::Exponential { half_life } => assert_eq!(half_life, 400_000),
+            other => panic!("expected Exponential, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn refire_preset_unknown_falls_back_to_normal() {
+        // Fire-time path: unknown preset shouldn't panic. Falls back to 0.15
+        // (normal-equivalent) so the session keeps working. Stderr warning
+        // is emitted but not asserted on here.
+        let presets = preset_table();
+        let spec = RefireSpec::Preset("nonexistent".to_string());
+        assert!((spec.fraction_with(&presets) - 0.15).abs() < 1e-9);
+    }
+
+    #[test]
+    fn validate_accepts_known_preset() {
+        let presets = preset_table();
+        let spec = RefireSpec::Preset("normal".to_string());
+        assert!(spec.validate(&presets).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_preset() {
+        let presets = preset_table();
+        let spec = RefireSpec::Preset("nonexistent".to_string());
+        let err = spec.validate(&presets).unwrap_err();
+        assert!(err.contains("nonexistent"));
+        assert!(err.contains("valid:"));
+    }
+
+    #[test]
+    fn validate_accepts_numeric_in_range() {
+        let presets = preset_table();
+        for v in [0.0_f64, 0.05, 0.15, 0.4, 1.0, 2.0] {
+            let spec = RefireSpec::Numeric(v);
+            assert!(
+                spec.validate(&presets).is_ok(),
+                "expected {v} to validate"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_numeric_out_of_range() {
+        let presets = preset_table();
+        // Negative
+        assert!(RefireSpec::Numeric(-0.1).validate(&presets).is_err());
+        // Way above the cap (e.g., raw tokens pasted into new field)
+        assert!(RefireSpec::Numeric(30_000.0).validate(&presets).is_err());
+        // Non-finite
+        assert!(RefireSpec::Numeric(f64::NAN).validate(&presets).is_err());
+        assert!(RefireSpec::Numeric(f64::INFINITY).validate(&presets).is_err());
     }
 
     #[test]
