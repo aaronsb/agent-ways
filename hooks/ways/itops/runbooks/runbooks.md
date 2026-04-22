@@ -3,9 +3,7 @@ description: Runbook automation, executable playbooks, SOPs as code, operational
 vocabulary: runbook playbook sop procedure operational automation executable standard checklist step-by-step operations
 pattern: runbook|runbook.?(automation|executable)|playbook|sop.?(automation|as.?code)|operational.?procedure
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Runbooks Way

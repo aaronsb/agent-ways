@@ -2,9 +2,7 @@
 description: structured reasoning, thinking frameworks, cognitive scaffolding for complex decisions
 vocabulary: explore options approaches trade-off balance alternatives stuck principle abstract reasoning framework systematic
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: premise -->
 # Structured Thinking

@@ -3,9 +3,7 @@ description: GitHub pull requests, issues, code review, CI checks, repository ma
 vocabulary: pr pullrequest issue review checks ci label milestone fork repository upstream draft ship land merge squash rebase
 pattern: github|\ issue|pull.?request|\ pr\ |\ pr$|review.?(pr|comment)|merge.?request|ship.?(it|this|the)|land.?(it|this)|merge.?(it|this)|squash.?merge|rebase.?merge
 commands: ^gh\ |^gh$
-curve:
-  type: Exponential
-  half_life: 20000
+refire: 0.1
 macro: prepend
 scope: agent, subagent
 requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(jq:*)", "Bash(rm:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(tr:*)", "Bash(wc:*)"]

@@ -4,9 +4,7 @@ vocabulary: ssh remote key scp rsync bastion jumphost tunnel forwarding batchmod
 pattern: ssh|remote.?server|remote.?host|sshpass
 commands: ^ssh\ |^scp\ |^rsync.*:|\bsshpass\b
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: constraint -->
 # SSH Way

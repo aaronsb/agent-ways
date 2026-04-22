@@ -3,9 +3,7 @@ description: supply chain security, repository trust assessment, evaluating code
 vocabulary: supply chain trust assessment forked repo untrusted repo audit repo hygiene dependency scan vulnerability malicious backdoor provenance clone fork grab use try found shared unfamiliar external third party
 commands: git\ clone
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: premise -->
 # Supply Chain Trust Assessment

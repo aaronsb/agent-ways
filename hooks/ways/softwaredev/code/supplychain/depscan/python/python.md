@@ -2,9 +2,7 @@
 description: Python dependency security, pip-audit, setup.py risks, PyPI typosquatting
 vocabulary: pip-audit setup.py pyproject.toml requirements.txt wheel sdist PyPI typosquat safety pip install python package
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Python Dependency Security

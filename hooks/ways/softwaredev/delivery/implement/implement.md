@@ -4,9 +4,7 @@ vocabulary: implement build begin start work execute plan breakdown parallelize 
 macro: append
 scope: agent
 requires: ["Read", "Bash(cat:*)", "Bash(find:*)", "Bash(wc:*)"]
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Implementation Way

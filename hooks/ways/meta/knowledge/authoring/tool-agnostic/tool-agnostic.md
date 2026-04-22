@@ -3,9 +3,7 @@ description: writing ways that describe patterns and intentions rather than refe
 vocabulary: tool agnostic vendor neutral portable abstract intention pattern mcp cli specific
 files: \.claude/(hooks/)?ways/.*way\.md$
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: premise -->
 # Tool-Agnostic Ways

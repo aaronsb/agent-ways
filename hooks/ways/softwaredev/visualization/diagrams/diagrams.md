@@ -4,9 +4,7 @@ vocabulary: mermaid diagram flowchart sequence state class er entity relationshi
 pattern: mermaid|diagram|flowchart|sequence.*diagram|state.*diagram|er.*diagram|class.*diagram|gantt|mindmap|visuali[sz]e.*architecture
 embed_threshold: 0.35
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Terminal Diagrams with mmaid

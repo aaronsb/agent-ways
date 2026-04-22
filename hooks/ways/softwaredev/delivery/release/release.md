@@ -1,9 +1,7 @@
 ---
 description: software releases, changelog generation, version bumping, semantic versioning, tagging
 vocabulary: release changelog version bump semver tag publish ship major minor breaking
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 pattern: release|changelog|tag|version.?bump|bump.?version|npm.?publish|cargo.?publish
 scope: agent, subagent
 ---

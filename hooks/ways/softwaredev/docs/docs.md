@@ -4,9 +4,7 @@ vocabulary: documentation markdown technical prose project docs
 pattern: readme|documentation|docs|document.*project|explain.*repo
 files: README\.md$|docs/.*\.md$
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Documentation Way

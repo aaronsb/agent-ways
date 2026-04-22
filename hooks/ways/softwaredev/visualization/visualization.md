@@ -4,9 +4,7 @@ vocabulary: walk me through explain how show me describe overview understand flo
 pattern: walk.*through|explain.*how|show.*how|describe.*flow|step.by.step|how.*work|overview.*system
 embed_threshold: 0.28
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Visualization Opportunity

@@ -5,9 +5,7 @@ trigger:
   signals:
     - context-pressure
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 
 Context is approaching compaction. Before the window closes:

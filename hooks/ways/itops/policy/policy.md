@@ -3,9 +3,7 @@ description: Operation classification, policy enforcement, approval gates, blast
 vocabulary: operation class policy enforcement approval gate workflow blast radius risk score level dangerous safe critical
 pattern: operation.?class|policy.?(engine|enforcement)|approval.?(gate|level|workflow)|blast.?radius|risk.?(class|level|score)
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: constraint -->
 # Policy Way

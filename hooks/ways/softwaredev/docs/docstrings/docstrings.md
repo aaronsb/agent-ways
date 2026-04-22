@@ -2,9 +2,7 @@
 description: code documentation, docstrings, JSDoc, Godoc, rustdoc, inline comments
 vocabulary: docstring jsdoc godoc pydoc rustdoc comment annotation type hint documentation
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Docstrings Way

@@ -4,9 +4,7 @@ vocabulary: chart visualize graph sparkline histogram plot trend metric compare 
 pattern: chart|visuali[sz]|graph|sparkline|histogram|plot|bar.?chart|trend|metric
 embed_threshold: 0.32
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Charts Way

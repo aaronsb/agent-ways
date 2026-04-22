@@ -2,9 +2,7 @@
 description: authentication, authorization, access control, middleware guards, RBAC, permissions
 vocabulary: authentication authorization middleware guard permission role rbac access control login session jwt csrf cors
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: constraint -->
 # Auth Way

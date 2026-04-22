@@ -2,9 +2,7 @@
 description: team chat and messaging platforms, reading chat messages, sending messages with approval, communication channels
 vocabulary: teams chat message slack channel unread conversation direct message group chat send reply mention notification
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Communications — Chat & Messaging

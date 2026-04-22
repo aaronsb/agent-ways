@@ -2,9 +2,7 @@
 description: test-driven development, TDD red-green-refactor cycle, failing test first
 vocabulary: tdd red green refactor test first implementation failing
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: heuristic -->
 # TDD Way

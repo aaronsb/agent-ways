@@ -2,9 +2,7 @@
 trigger: context-threshold
 threshold: 95
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Compaction Checkpoint

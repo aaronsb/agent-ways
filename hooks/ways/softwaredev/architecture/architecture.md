@@ -3,9 +3,7 @@ description: System design, architecture decisions, and structural thinking abou
 vocabulary: architecture design system structure decision trade-off pattern component service module layer boundary interface contract dependency coupling cohesion separation concern
 embed_threshold: 0.30
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: premise -->
 # Architecture

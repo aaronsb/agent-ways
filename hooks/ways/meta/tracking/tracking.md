@@ -4,9 +4,7 @@ vocabulary: tracking cross-session multi-session persistent todo picking resume 
 pattern: tracking.?file|cross.?session|multi.?session|picking.?up|\.claude/todo
 files: \.claude/todo-.*\.md$
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Work Tracking Way

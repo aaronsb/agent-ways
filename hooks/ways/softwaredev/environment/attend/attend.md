@@ -4,9 +4,7 @@ vocabulary: attend attend-run attend-send attend-focus attend-peers attend-statu
 embed_threshold: 0.28
 pattern: attend|awareness.?layer|peer.?session|peer.?discover|signal.?file|focus.?group|sensor.?loop
 commands: attend
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 macro: append
 scope: agent, subagent
 requires: ["Bash(attend:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(sed:*)"]

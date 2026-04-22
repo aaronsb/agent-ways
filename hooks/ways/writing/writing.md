@@ -4,9 +4,7 @@ vocabulary: write draft compose author proposal report presentation deck slides 
 macro: append
 scope: agent
 requires: ["Bash(grep:*)"]
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Writing Way

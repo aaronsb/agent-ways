@@ -2,9 +2,7 @@
 description: security overview, secure coding defaults, security review checklist
 vocabulary: security vulnerability protect defense secure harden owasp
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: convention -->
 # Security Way

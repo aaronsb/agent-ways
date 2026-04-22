@@ -1,9 +1,7 @@
 ---
 trigger: session-start
 scope: teammate
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Teammate Coordination

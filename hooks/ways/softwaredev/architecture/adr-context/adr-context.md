@@ -4,9 +4,7 @@ vocabulary: plan approach debate implement build work pick understand investigat
 scope: agent, subagent
 macro: prepend
 requires: ["Read", "Bash(find:*)", "Bash(wc:*)"]
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # ADR Context — Read Before You Build

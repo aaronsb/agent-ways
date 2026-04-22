@@ -3,9 +3,7 @@ description: Development environment — configuration, dependencies, debugging,
 vocabulary: environment setup config configure dependency install package build tool debug troubleshoot ssh remote connect server dev local machine workspace
 embed_threshold: 0.30
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: premise -->
 # Environment

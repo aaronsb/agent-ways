@@ -3,9 +3,7 @@ description: dependency management, package installation, library evaluation, se
 vocabulary: dependency package library install upgrade outdated audit vulnerability license bundle npm pip cargo
 pattern: dependenc|package|library|npm.?install|pip.?install|upgrade.*version
 commands: npm\ install|yarn\ add|pip\ install|cargo\ add|go\ get
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: heuristic -->

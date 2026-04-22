@@ -3,9 +3,7 @@ description: test coverage, test structure, assertions, fixtures, what and how t
 vocabulary: test coverage assertion framework spec fixture describe expect verify unit integration
 commands: npm\ test|yarn\ test|jest|pytest|cargo\ test|go\ test|rspec
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: convention -->
 # Testing Way

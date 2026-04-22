@@ -3,9 +3,7 @@ description: database migrations, schema changes, table alterations, rollback pr
 vocabulary: migration schema alter table column index rollback seed ddl prisma alembic knex flyway
 pattern: migrat|schema|database.?change|alter.?table|alembic|prisma.?migrate|knex.?migrate|flyway|liquibase
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Migrations Way

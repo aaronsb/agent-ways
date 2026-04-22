@@ -2,9 +2,7 @@
 description: locale alias fidelity and discrimination audit, ways tune workflow, fixing ambiguous stubs
 vocabulary: tune tuning audit fidelity discrimination confuser peer alias gap margin re-author stub locales
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Locale Alias Audit

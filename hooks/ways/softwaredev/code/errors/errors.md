@@ -3,9 +3,7 @@ description: error handling patterns, exception management, try-catch boundaries
 vocabulary: exception handling catch throw boundary wrap rethrow fallback graceful recovery propagate unhandled
 pattern: error.?handl|exception|try.?catch|throw|catch
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: heuristic -->
 # Error Handling Way

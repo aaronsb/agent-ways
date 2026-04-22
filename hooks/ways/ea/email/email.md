@@ -2,9 +2,7 @@
 description: triage my email, scan inbox for unread messages, classify and filter email threads, what needs a reply
 vocabulary: triage inbox unread email scan messages filter noise priority action required check email review mail urgent reply thread
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Email Triage

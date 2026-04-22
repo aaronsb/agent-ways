@@ -2,9 +2,7 @@
 description: README authoring, project overview, getting started guide, README structure
 vocabulary: readme project overview getting started quick start onboarding introduction about what is this
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # README Way

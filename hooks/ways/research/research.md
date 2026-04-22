@@ -4,9 +4,7 @@ vocabulary: research investigate explore find out compare evaluate analyze synth
 macro: append
 scope: agent
 requires: ["Bash(grep:*)"]
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Research Way

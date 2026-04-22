@@ -2,9 +2,7 @@
 description: establishing team norms, coding conventions, testing philosophy, dependency policy, accessibility requirements
 vocabulary: convention norm guideline accessibility style guide linting rule agreement philosophy
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: convention -->
 # Standards Way

@@ -1,9 +1,7 @@
 ---
 macro: prepend
 requires: ["Bash(awk:*)", "Bash(grep:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(tr:*)", "Bash(wc:*)"]
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 # Core Ways of Working
 

@@ -2,9 +2,7 @@
 description: git history flattening, fork severing, BFG cleanup, removing secrets from git history
 vocabulary: orphan branch sever history flatten history fork sever bfg git reflog gc prune standalone delete fork
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # History Severing

@@ -4,9 +4,7 @@ vocabulary: upstream changelog release version claude-code update adr status rec
 scope: agent
 when:
   project: ~/.claude
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Project Health

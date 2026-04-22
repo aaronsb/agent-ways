@@ -5,9 +5,7 @@ trigger:
   signals:
     - reflection-overdue
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 
 Context usage is elevated and no reflection has been captured recently.

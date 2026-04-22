@@ -3,9 +3,7 @@ description: Shipping code — commits, pull requests, releases, migrations, and
 vocabulary: ship deliver deploy release commit push merge pull request pr land code review changelog version tag branch workflow ci cd pipeline promote stage production
 embed_threshold: 0.30
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: premise -->
 # Delivery

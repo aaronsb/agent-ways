@@ -3,9 +3,7 @@ description: Code quality, testing, security, and performance — the craft of w
 vocabulary: code quality clean refactor improve test secure perform optimize review best practice pattern antipattern smell tech debt maintainability readability
 embed_threshold: 0.30
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: premise -->
 # Code Craft

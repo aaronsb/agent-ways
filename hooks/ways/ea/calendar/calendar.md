@@ -2,9 +2,7 @@
 description: schedule a meeting, check my availability, block time on my calendar, create calendar events, find a free slot
 vocabulary: schedule calendar availability block time event meeting invite reminder reschedule free busy slot book appointment timezone
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Calendar Management

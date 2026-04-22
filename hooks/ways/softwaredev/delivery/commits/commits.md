@@ -3,9 +3,7 @@ description: git commit messages, branch naming, conventional commits, atomic ch
 vocabulary: commit message branch conventional feat fix refactor scope atomic squash amend stash rebase cherry
 pattern: commit|push.*(remote|origin|upstream)
 commands: git\ commit
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: convention -->

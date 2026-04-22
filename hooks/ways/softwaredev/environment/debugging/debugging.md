@@ -2,9 +2,7 @@
 description: debugging, troubleshooting failures, investigating broken behavior
 vocabulary: debug breakpoint stacktrace investigate troubleshoot regression bisect crash crashes crashing error fail bug log trace exception segfault hang timeout step broken
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Debugging Way

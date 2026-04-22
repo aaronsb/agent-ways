@@ -3,9 +3,7 @@ description: Sub-agent delegation — when and how to spawn specialized sub-agen
 vocabulary: subagent delegate spawn background task parallel worker teammate
 pattern: subagent|delegat|spawn.*agent|review.*pr|plan.*task|organiz.*docs
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Sub-Agents Way

@@ -2,9 +2,7 @@
 description: drafting email replies, writing style calibration, creating email drafts with proper threading
 vocabulary: draft reply respond compose email write message tone voice style thread attachment
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Email Drafting

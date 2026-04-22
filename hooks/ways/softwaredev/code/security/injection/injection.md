@@ -2,9 +2,7 @@
 description: injection prevention, SQL injection, XSS, command injection, input sanitization
 vocabulary: injection sql xss innerHTML parameterized sanitize escape shell command template interpolation
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: constraint -->
 # Injection Prevention Way

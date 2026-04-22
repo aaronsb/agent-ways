@@ -2,9 +2,7 @@
 description: Node.js dependency security, npm audit, postinstall scripts, typosquatting
 vocabulary: npm audit package-lock.json node_modules postinstall preinstall yarn pnpm npx typosquat javascript typescript
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Node.js Dependency Security

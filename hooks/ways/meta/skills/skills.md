@@ -3,9 +3,7 @@ description: Claude Code skills — SKILL.md format, creation, discovery, slash 
 vocabulary: skill slash command SKILL.md create author invoke user-invocable plugin
 pattern: skill|SKILL\.md|skill.?(creation|author|write)|claude.?code.?skill|~\/\.claude\/skills
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Skills Way

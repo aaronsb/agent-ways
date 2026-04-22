@@ -3,9 +3,7 @@ description: Structured proposals for human approval before executing high-risk 
 vocabulary: proposal approval human loop review confirm dangerous operation lifecycle primitive structured request permission sign-off authorize before running
 pattern: proposal.?(primitive|lifecycle|structure)|human.?in.?(the.?)?loop|approval.?workflow|operation.?proposal
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: constraint -->
 # Proposals Way

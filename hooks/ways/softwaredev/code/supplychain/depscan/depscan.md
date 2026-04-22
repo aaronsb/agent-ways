@@ -2,9 +2,7 @@
 description: dependency vulnerability scanning, lockfile auditing, package security
 vocabulary: osv-scanner pip-audit npm audit cargo audit govulncheck dependency scan vulnerability CVE lockfile requirements package-lock Cargo.lock go.sum SBOM
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Dependency Scanning

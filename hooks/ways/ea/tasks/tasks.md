@@ -2,9 +2,7 @@
 description: personal task management, action items, obligations, task lifecycle, create update complete cleanup tasks
 vocabulary: task action item to-do obligation track create complete update overdue pending priority due date assign stale cleanup eisenhower
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: constraint -->
 # Task Lifecycle

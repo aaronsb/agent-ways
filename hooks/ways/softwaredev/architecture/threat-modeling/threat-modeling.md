@@ -2,9 +2,7 @@
 description: threat modeling, STRIDE analysis, trust boundaries, attack surface assessment, security design review
 vocabulary: threat model stride attack surface trust boundary mitigation adversary dread spoofing tampering repudiation elevation
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Threat Modeling Way

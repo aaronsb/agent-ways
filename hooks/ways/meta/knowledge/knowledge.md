@@ -3,9 +3,7 @@ description: Overview of the ways system — how ways, skills, and hooks relate,
 vocabulary: ways way knowledge guidance context inject hook trigger matching semantic vocabulary domain
 pattern: (^| )ways?( |$)|knowledge|guidance|context.?inject
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Knowledge Way

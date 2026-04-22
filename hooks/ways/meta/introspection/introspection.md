@@ -6,9 +6,7 @@ commands: gh\ pr\ create
 macro: prepend
 scope: agent
 requires: ["Bash(jq:*)", "Bash(ways:*)"]
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Introspection Way

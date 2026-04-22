@@ -2,9 +2,7 @@
 description: security scanning automation, GitHub Actions, Dependabot, CodeQL, Makefile audit targets
 vocabulary: github action dependabot codeql security scanning automation ci pipeline sbom scorecard make audit workflow security policy
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Scanning Automation

@@ -3,9 +3,7 @@ description: lockfile hygiene, version pinning, preventing supply chain attacks 
 vocabulary: lockfile package-lock.json yarn.lock pnpm-lock pin exact version caret semver npm-ci transitive resolution
 files: package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: lesson-learned -->
 # Lockfile Hygiene

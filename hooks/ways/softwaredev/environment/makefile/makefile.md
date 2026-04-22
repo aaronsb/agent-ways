@@ -3,9 +3,7 @@ description: Makefile as the standard project task runner — build, test, lint,
 vocabulary: makefile make target build lint linter test format clean install publish release dist docs help phony check adr npm cargo pip docker repo artifacts dependencies quality ci runner
 files: Makefile$|makefile$|GNUmakefile$|\.mk$
 commands: make
-curve:
-  type: Exponential
-  half_life: 20000
+refire: 0.1
 scope: agent, subagent
 macro: append
 requires: ["Bash(awk:*)", "Bash(make:*)", "Bash(sort:*)", "Bash(tr:*)"]

@@ -2,9 +2,7 @@
 description: catch me up morning briefing, what happened overnight while I was away, start of day summary across all inboxes and calendars
 vocabulary: catch up morning briefing what's my day start of day need to know overnight summary today agenda priorities
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 <!-- epistemic: convention -->
 # Catch-Me-Up Briefing

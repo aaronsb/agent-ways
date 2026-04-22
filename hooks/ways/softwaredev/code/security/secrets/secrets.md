@@ -2,9 +2,7 @@
 description: secrets management, credential hygiene, .env files, API keys, password storage
 vocabulary: secret credential password token key env api-key rotate expose exposed .env gitignore bcrypt hash encrypt
 scope: agent, subagent
-curve:
-  type: Exponential
-  half_life: 200000
+refire: 0.2
 ---
 <!-- epistemic: constraint -->
 # Secrets Way
