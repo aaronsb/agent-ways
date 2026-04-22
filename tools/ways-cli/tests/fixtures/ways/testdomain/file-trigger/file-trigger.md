@@ -3,9 +3,7 @@ description: environment configuration dotenv secrets
 vocabulary: env config dotenv secrets environment variable
 files: \.env$
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 # Environment Config
 

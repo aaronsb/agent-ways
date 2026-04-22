@@ -3,9 +3,7 @@ description: session start state triggered way
 vocabulary: state session startup
 trigger: session-start
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 # State Trigger Test Way
 

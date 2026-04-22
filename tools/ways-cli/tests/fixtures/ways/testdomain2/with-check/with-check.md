@@ -4,9 +4,7 @@ vocabulary: dependency supply chain package audit vulnerability npm pip cargo cr
 pattern: (?i)(supply.?chain|dependency|audit|vulnerability)
 commands: ^(npm|pip|cargo)\ (install|add)
 scope: agent
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 # Supply Chain
 

@@ -5,9 +5,7 @@ pattern: (?i)(code|project|gated|configuration|quality)
 scope: agent
 when:
   project: /tmp/test-project-sim
-curve:
-  type: Exponential
-  half_life: 30000
+refire: 0.15
 ---
 # Gated Way
 
