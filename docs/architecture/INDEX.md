@@ -46,6 +46,9 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-123](./system/ADR-123-firing-dynamics-progression-axis-unification.md) | Firing dynamics — progression-axis unification for attend and ways | Accepted |
 | [ADR-124](./system/ADR-124-channel-bar-ordering-open-as-base.md) | TUI Legend Architecture — Base Channel, Liveness, and Ordering | Accepted |
 | [ADR-125](./system/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) | Authored Disclosure Graph and Removal of BM25 | Draft |
+| [ADR-126](./system/ADR-126-window-relative-refire.md) | Window-relative refire with named presets | Draft |
+| [ADR-127](./system/ADR-127-reject-full-body-embedding-corpus.md) | Full-body embedding corpus for way matching | Rejected |
+| [ADR-128](./system/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md) | Memory as repo-portable ways — seed routing over accumulated snapshots | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
