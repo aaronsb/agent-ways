@@ -23,48 +23,24 @@ way:
       required: optional
       default: 0.35
       role: Cosine similarity threshold for the embedding engine (0.0-1.0, higher = stricter). One per node (English frontmatter); no per-locale override — ADR-125.
-    curve:
-      type: block
+    refire:
+      type: scalar
       required: recommended
       role: |
-        ADR-123 firing-dynamics curve. Shapes how salience decays and how
-        refractory gates behave against the way's progression axis (token
-        position). One of four variants: Exponential, ActionPotential,
-        ProgressiveStaircase, Flat. See ADR-123 Decision 2.
-      subfields:
-        type:
-          type: enum
-          values: [Exponential, ActionPotential, ProgressiveStaircase, Flat]
-          required: true
-          role: Curve variant
-        half_life:
-          type: number
-          required: conditional  # required for Exponential
-          role: Half-life in ticks (tokens for ways) for exponential decay
-        burst_threshold:
-          type: number
-          required: conditional  # required for ActionPotential
-          role: Fires in recent history to trigger a burst
-        peak_multiplier:
-          type: number
-          required: conditional  # required for ActionPotential
-          role: Multiplier at burst peak
-        absolute_refractory:
-          type: number
-          required: conditional  # required for ActionPotential
-          role: Hard-suppression window in ticks after a burst
-        multiplier_half_life:
-          type: number
-          required: conditional  # required for ActionPotential
-          role: Half-life of the refractory multiplier decay in ticks
-        steps:
-          type: array
-          required: conditional  # required for ProgressiveStaircase
-          role: List of [tick_delta, salience] pairs for staircase re-fire
-        suppression:
-          type: number
-          required: conditional  # required for Flat
-          role: Suppression window in ticks (step function)
+        ADR-126 refire specification. Half-life as a fraction of the session
+        context window, resolved against model_to_window() at fire time so
+        way files stay portable across agent frameworks and model
+        generations. Accepts either a numeric fraction (e.g., 0.2) to pin
+        the cadence to today's model, or a preset name (once, rare, normal,
+        frequent, or any custom name defined in config.refire_presets) that
+        tracks the project's current tuning. Fire-bearing ways should carry
+        this field; absence triggers a lint warning.
+
+        The legacy `curve:` block (ADR-123) is no longer recognized by the
+        schema — lint flags it as unknown/foreign, and existing ways were
+        migrated to `refire:` in PR #71. Non-Exponential shapes (Flat,
+        ActionPotential, ProgressiveStaircase) are not currently in use and
+        would need schema re-addition to author again.
     pattern:
       type: regex
       required: optional

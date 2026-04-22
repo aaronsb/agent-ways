@@ -172,15 +172,23 @@ ways. `attend`'s exhaustive matches on `Curve` are untouched.
    populated from the new YAML section. Built-in defaults match the table
    above.
 
-3. **`ways lint`** — two new behaviors:
-   - **Info-level suggestion** when a numeric `refire:` value matches a preset
-     within epsilon (e.g., `refire: 0.15` → "matches preset `normal`; run
-     `ways lint --fix-preset` to convert for model-portability").
-   - **Error** when `refire:` references an unknown preset name (fail-closed).
+3. **`ways lint`** — two binary checks that together enforce the new schema:
+   - **Warning** when a fire-bearing way (has `description` + `vocabulary`,
+     not an `attend` handler, not a check file) has no `refire:` field. The
+     way would fire once and never re-disclose — a valid but uncommon shape
+     that deserves explicit author confirmation.
+   - **UNKNOWN (foreign-field warning)** when a `curve:` block is present.
+     The schema no longer lists `curve:` as a valid field, so existing
+     unknown-field logic flags it without special-case code. Running
+     `ways lint --fix` would remove the block entirely; authors that
+     genuinely want a non-Exponential shape (Flat, ActionPotential) would
+     re-add `curve:` to the schema first.
 
-4. **`ways lint --fix-preset`** — new lint action that converts numeric
-   `refire:` values to matching preset names where applicable. Explicit opt-in,
-   never auto-applied.
+   These two checks are deliberately simple — one "is the new field
+   present" and one "is the old field absent." They give authors an
+   unambiguous signal about whether a way file conforms to the post-ADR-126
+   shape and are sufficient to find any remaining non-conforming frontmatter
+   in the tree.
 
 ## Migration
 

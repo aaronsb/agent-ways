@@ -137,6 +137,24 @@ pub(super) fn lint_file(
         }
     }
 
+    // ADR-126: fire-bearing ways (ways with description + vocabulary that
+    // participate in semantic matching) should carry a `refire:` field.
+    // Check files and attend signal handlers are exempt — checks ride on
+    // their parent way's firing, and attend handlers are triggered by
+    // signal name rather than the refire engine. Missing refire: on a
+    // fire-bearing way means it fires once and never re-discloses, which
+    // is a valid but uncommon shape — warn so authors confirm intent.
+    let has_refire = has_field(&fm_str, "refire");
+    let is_fire_bearing = !is_check && has_desc && has_vocab && !is_attend;
+    if is_fire_bearing && !has_refire {
+        eprintln!(
+            "  WARNING: {rel} — no `refire:` field (ADR-126). \
+             Fire-bearing way will never re-disclose after first fire. \
+             Add `refire: <fraction|preset>` (e.g., `refire: 0.15` or `refire: normal`)."
+        );
+        *warnings += 1;
+    }
+
     // Threshold is numeric
     if let Some(val) = get_field_value(&fm_str, "threshold") {
         if val.parse::<f64>().is_err() {
