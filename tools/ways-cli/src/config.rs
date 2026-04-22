@@ -6,6 +6,7 @@
 //!   3. $XDG_CONFIG_HOME/ways/config.yaml (user scope)
 //!   4. $PROJECT/.claude/ways.yaml (project scope)
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -53,10 +54,21 @@ pub struct Config {
     /// models produce scores in different distributions, so comparing
     /// them directly (max, average) is apples-to-oranges.
     pub default_multi_embed_threshold: f64,
+    /// Refire presets (ADR-126). Each value is a fraction of the session
+    /// context window. At fire evaluation time, a way's `refire: <name>`
+    /// resolves by looking up the preset here and multiplying by the
+    /// operator's current context window.
+    pub refire_presets: HashMap<String, f64>,
 }
 
 impl Default for Config {
     fn default() -> Self {
+        let mut refire_presets = HashMap::new();
+        refire_presets.insert("once".to_string(), 1.0);
+        refire_presets.insert("rare".to_string(), 0.4);
+        refire_presets.insert("normal".to_string(), 0.15);
+        refire_presets.insert("frequent".to_string(), 0.05);
+
         Self {
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
@@ -65,6 +77,7 @@ impl Default for Config {
             parent_boost_floor: 0.40,
             default_embed_threshold: 0.40,
             default_multi_embed_threshold: 0.55,
+            refire_presets,
         }
     }
 }
@@ -148,6 +161,13 @@ impl Config {
         if let Some(v) = doc.get("default_multi_embed_threshold").and_then(|v| v.as_f64()) {
             self.default_multi_embed_threshold = v;
         }
+        if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
+            for (k, v) in m {
+                if let (Some(name), Some(fraction)) = (k.as_str(), v.as_f64()) {
+                    self.refire_presets.insert(name.to_string(), fraction);
+                }
+            }
+        }
     }
 
     /// Initialize user config at XDG path.
@@ -203,6 +223,26 @@ mod tests {
         assert_eq!(cfg.parent_boost_floor, 0.40);
         assert_eq!(cfg.default_embed_threshold, 0.40);
         assert_eq!(cfg.default_multi_embed_threshold, 0.55);
+        assert_eq!(cfg.refire_presets.get("once").copied(), Some(1.0));
+        assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
+        assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
+        assert_eq!(cfg.refire_presets.get("frequent").copied(), Some(0.05));
+    }
+
+    #[test]
+    fn apply_yaml_refire_presets_override() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml(
+            "refire_presets:\n  \
+             normal: 0.20\n  \
+             perpetual: 0.01\n",
+        );
+        // Override existing
+        assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.20));
+        // Add new custom preset
+        assert_eq!(cfg.refire_presets.get("perpetual").copied(), Some(0.01));
+        // Untouched preset still present
+        assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
     }
 
     #[test]

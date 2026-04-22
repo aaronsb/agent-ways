@@ -138,17 +138,24 @@ fn load_engagement_for_tick(
 }
 
 /// Resolve a way's re-fire threshold in thousands of tokens by reading
-/// its frontmatter curve and asking `Curve::refire_delta(REFIRE_FLOOR)`.
+/// its frontmatter, resolving its refire spec against the session's
+/// context window (ADR-126), and asking `Curve::refire_delta(REFIRE_FLOOR)`.
 /// Used by `ways list` / `ways rethink` to render per-way bar positions.
 ///
+/// Callers pass the session's current context window (typically from
+/// `cmd::context::get_context(...).tokens_total`) so the `refire:` fraction
+/// resolves to a concrete half-life. Hoisting the fetch to the caller keeps
+/// this function cheap enough to loop over every way in a tree render.
+///
 /// Returns `None` when the way file cannot be resolved, its frontmatter
-/// cannot be parsed, or its `curve:` field is missing or its curve never
-/// falls below the floor. Callers pick a sensible fallback — typically
-/// 25% of the context window to preserve the old visual baseline.
-pub fn way_refire_threshold_k(way_id: &str, project_dir: &str) -> Option<u64> {
+/// cannot be parsed, neither `refire:` nor `curve:` is present, or its
+/// resolved curve never falls below the floor. Callers pick a sensible
+/// fallback — typically 25% of the context window to preserve the old
+/// visual baseline.
+pub fn way_refire_threshold_k(way_id: &str, project_dir: &str, window: u64) -> Option<u64> {
     let (way_file, _) = resolve_way_file(way_id, project_dir)?;
     let fm = crate::frontmatter::parse(&way_file).ok()?;
-    let curve = fm.curve?;
+    let curve = fm.resolved_curve(window)?;
     let delta = curve.refire_delta(REFIRE_FLOOR)?;
     Some(delta / 1000)
 }

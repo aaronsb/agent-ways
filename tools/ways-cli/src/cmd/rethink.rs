@@ -155,7 +155,8 @@ pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, lis
         return Ok(());
     }
 
-    let context_window_k = session::detect_context_window_for(&project_name, &session_id) / 1000;
+    let context_window = session::detect_context_window_for(&project_name, &session_id);
+    let context_window_k = context_window / 1000;
     let token_timeline = build_token_timeline(&project_name, &session_id);
     // Pre-resolve per-way refire thresholds once per session. Rethink is
     // a replay, so if a way's curve has been edited since the recorded
@@ -167,7 +168,7 @@ pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, lis
         if ev.way.is_empty() || refire_cache.contains_key(&ev.way) {
             continue;
         }
-        let threshold_k = session::way_refire_threshold_k(&ev.way, &project_name)
+        let threshold_k = session::way_refire_threshold_k(&ev.way, &project_name, context_window)
             .unwrap_or(fallback_refire_k);
         refire_cache.insert(ev.way.clone(), threshold_k);
     }

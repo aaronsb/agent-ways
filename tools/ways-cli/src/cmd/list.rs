@@ -57,12 +57,13 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     let current_epoch = session::get_epoch(&session_id);
 
     // Use accurate context data from transcript when available
-    let (current_tokens_k, context_window_k) = match context::get_context(None) {
-        Ok(ctx) => (ctx.tokens_used / 1000, ctx.tokens_total / 1000),
+    let (current_tokens_k, context_window_k, context_window) = match context::get_context(None) {
+        Ok(ctx) => (ctx.tokens_used / 1000, ctx.tokens_total / 1000, ctx.tokens_total),
         Err(_) => {
             // Fallback to session markers
             let tok = session::get_token_position(&session_id) / 1000;
-            (tok, if tok > 200 { 1000 } else { 200 })
+            let window_k = if tok > 200 { 1000 } else { 200 };
+            (tok, window_k, window_k * 1000)
         }
     };
     // Fallback refire threshold for ways with missing/unparsable curves —
@@ -75,7 +76,13 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     let metrics = load_metrics(&session_id);
 
     // Collect all fired ways from markers
-    let mut ways = collect_fired_ways(&session_id, &metrics, &project_dir, fallback_refire_k);
+    let mut ways = collect_fired_ways(
+        &session_id,
+        &metrics,
+        &project_dir,
+        fallback_refire_k,
+        context_window,
+    );
 
     if ways.is_empty() {
         println!("No ways triggered yet this session.");
@@ -145,6 +152,7 @@ fn collect_fired_ways(
     metrics: &HashMap<String, MetricEntry>,
     project_dir: &str,
     fallback_refire_k: u64,
+    context_window: u64,
 ) -> Vec<FiredWay> {
     let way_epochs = session::list_way_epochs(session_id);
 
@@ -159,7 +167,7 @@ fn collect_fired_ways(
                 .map(|m| (m.trigger.clone(), m.depth, m.parent.clone(), m.agent_id.clone()))
                 .unwrap_or_else(|| ("unknown".to_string(), 0, "none".to_string(), "main".to_string()));
 
-            let refire_threshold_k = session::way_refire_threshold_k(&way_id, project_dir)
+            let refire_threshold_k = session::way_refire_threshold_k(&way_id, project_dir, context_window)
                 .unwrap_or(fallback_refire_k);
 
             FiredWay {

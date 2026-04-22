@@ -3,6 +3,61 @@ use sensor_trait::Curve;
 use serde::Deserialize;
 use std::path::Path;
 
+/// ADR-126 refire specification: either a numeric fraction of the session
+/// context window, or a preset name resolved via the config's
+/// `refire_presets` table at fire-evaluation time.
+///
+/// Untagged deserialization: a YAML scalar parses as `Numeric` if it's a
+/// number, otherwise as `Preset`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum RefireSpec {
+    /// Explicit fraction of the context window. `0.2` means "half-life =
+    /// 20% of the current session's context window." Pinned to today's
+    /// model by the author's choice to write a number.
+    Numeric(f64),
+    /// Preset name (e.g., `rare`, `normal`). Resolved per-fire against the
+    /// `refire_presets` section of the config file, so operators can re-tune
+    /// the whole tree with a single config edit.
+    Preset(String),
+}
+
+impl RefireSpec {
+    /// Resolve to the concrete fraction for this spec. Preset names look up
+    /// the active config; unknown names fall back to the built-in `normal`
+    /// value and log a stderr warning (fail-soft at fire time; `ways lint`
+    /// catches typos at parse time — see ADR-126 Frontmatter/lint changes).
+    pub fn fraction(&self) -> f64 {
+        match self {
+            Self::Numeric(v) => *v,
+            Self::Preset(name) => {
+                let cfg = crate::config::global();
+                match cfg.refire_presets.get(name) {
+                    Some(v) => *v,
+                    None => {
+                        eprintln!(
+                            "[ways] unknown refire preset `{}`; falling back to `normal` (0.15)",
+                            name
+                        );
+                        0.15
+                    }
+                }
+            }
+        }
+    }
+
+    /// Resolve to a concrete `Curve::Exponential` given the session's
+    /// context window. Half-life = `fraction × window` (clamped to at least 1
+    /// to avoid a zero-half-life degenerate that would cause immediate
+    /// re-fire on every check).
+    pub fn to_curve(&self, window: u64) -> Curve {
+        let half_life = (self.fraction() * window as f64).round() as u64;
+        Curve::Exponential {
+            half_life: half_life.max(1),
+        }
+    }
+}
+
 /// Parsed YAML frontmatter from a way file.
 #[derive(Debug, Deserialize, Default)]
 pub struct Frontmatter {
@@ -20,6 +75,28 @@ pub struct Frontmatter {
     /// consumers (tune/corpus/graph) that don't invoke the engine.
     #[serde(default)]
     pub curve: Option<Curve>,
+    /// ADR-126 window-relative refire. When present, takes precedence over
+    /// `curve:` at fire-evaluation time (via `resolved_curve`). Holds the
+    /// unresolved spec so config edits take effect mid-session — resolution
+    /// happens per fire against the then-current window and preset table.
+    #[serde(default)]
+    pub refire: Option<RefireSpec>,
+}
+
+impl Frontmatter {
+    /// Resolve the effective curve for fire evaluation, given the session's
+    /// current context window. Precedence (ADR-126): `refire:` wins over
+    /// `curve:` when both are present (lint warns about the duplication).
+    ///
+    /// Returns `None` when neither field is set — static consumers like
+    /// `ways tune` and `ways corpus` that don't invoke the engine can still
+    /// parse a way file without requiring either.
+    pub fn resolved_curve(&self, window: u64) -> Option<Curve> {
+        if let Some(spec) = &self.refire {
+            return Some(spec.to_curve(window));
+        }
+        self.curve.clone()
+    }
 }
 
 /// Extract YAML frontmatter from a way file.
@@ -256,6 +333,100 @@ curve:
         // session.rs enforces presence at the fire site.
         let fm = parse_yaml("description: no curve\n");
         assert!(fm.curve.is_none());
+        assert!(fm.refire.is_none());
+    }
+
+    #[test]
+    fn parses_refire_numeric() {
+        let fm = parse_yaml("description: test\nrefire: 0.2\n");
+        match fm.refire {
+            Some(RefireSpec::Numeric(v)) => assert!((v - 0.2).abs() < 1e-9),
+            other => panic!("expected Numeric(0.2), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_refire_preset_name() {
+        let fm = parse_yaml("description: test\nrefire: rare\n");
+        match fm.refire {
+            Some(RefireSpec::Preset(name)) => assert_eq!(name, "rare"),
+            other => panic!("expected Preset(\"rare\"), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn refire_numeric_resolves_to_exponential_at_window() {
+        // 0.2 of a 1M window = 200k half-life.
+        let fm = parse_yaml("description: test\nrefire: 0.2\n");
+        let curve = fm.resolved_curve(1_000_000).expect("should resolve");
+        match curve {
+            Curve::Exponential { half_life } => assert_eq!(half_life, 200_000),
+            other => panic!("expected Exponential, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn refire_numeric_scales_with_window() {
+        // Same fraction on a 200k window = 40k half-life.
+        let fm = parse_yaml("description: test\nrefire: 0.2\n");
+        let curve = fm.resolved_curve(200_000).expect("should resolve");
+        match curve {
+            Curve::Exponential { half_life } => assert_eq!(half_life, 40_000),
+            other => panic!("expected Exponential, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn refire_wins_over_curve_when_both_present() {
+        // ADR-126: `refire:` takes precedence over `curve:`.
+        let fm = parse_yaml(
+            "description: test\n\
+             refire: 0.3\n\
+             curve:\n  \
+             type: Exponential\n  \
+             half_life: 99999\n",
+        );
+        let curve = fm.resolved_curve(1_000_000).expect("should resolve");
+        match curve {
+            Curve::Exponential { half_life } => {
+                // 0.3 × 1M = 300k, not the 99_999 from the `curve:` block.
+                assert_eq!(half_life, 300_000);
+            }
+            other => panic!("expected Exponential, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn curve_fallback_when_no_refire() {
+        // Non-Exponential shapes still live in `curve:`. If `refire:` is
+        // absent, `resolved_curve` returns the raw curve untouched.
+        let fm = parse_yaml(
+            "description: test\n\
+             curve:\n  \
+             type: Flat\n  \
+             suppression: 15000\n",
+        );
+        let curve = fm.resolved_curve(1_000_000).expect("should resolve");
+        assert!(matches!(curve, Curve::Flat { suppression: 15_000 }));
+    }
+
+    #[test]
+    fn resolved_curve_is_none_when_neither_field_set() {
+        let fm = parse_yaml("description: static consumer only\n");
+        assert!(fm.resolved_curve(1_000_000).is_none());
+    }
+
+    #[test]
+    fn refire_half_life_clamped_to_one() {
+        // Defensive: zero fraction → zero half_life would degenerate
+        // Curve::salience_at to 0.0 at delta=0, causing immediate re-fire.
+        // Clamp to 1 so the curve is well-defined even on pathological input.
+        let spec = RefireSpec::Numeric(0.0);
+        let curve = spec.to_curve(1_000_000);
+        match curve {
+            Curve::Exponential { half_life } => assert_eq!(half_life, 1),
+            other => panic!("expected Exponential, got {:?}", other),
+        }
     }
 
     #[test]

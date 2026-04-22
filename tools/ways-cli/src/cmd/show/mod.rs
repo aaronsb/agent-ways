@@ -40,12 +40,19 @@ pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
     }
 
     // Session firing gate (ADR-123): consult the engine with this way's
-    // explicit curve. First-fire always allowed; re-fire when the outward
+    // resolved curve. First-fire always allowed; re-fire when the outward
     // gate's salience has decayed below REFIRE_FLOOR; otherwise suppress.
+    //
+    // ADR-126: `refire:` (fraction of window) wins over `curve:` when both
+    // present. The session's current window is fetched from the active
+    // transcript; 200k is the conservative fallback when detection fails.
     let fm = frontmatter::parse(&way_file)?;
-    let curve = fm.curve.clone().ok_or_else(|| {
+    let window = crate::cmd::context::get_context(Some(&project_dir))
+        .map(|c| c.tokens_total)
+        .unwrap_or(200_000);
+    let curve = fm.resolved_curve(window).ok_or_else(|| {
         anyhow::anyhow!(
-            "way {} is missing the required `curve:` block in its frontmatter (ADR-123)",
+            "way {} is missing both `refire:` and `curve:` in its frontmatter (ADR-123/126)",
             id
         )
     })?;
