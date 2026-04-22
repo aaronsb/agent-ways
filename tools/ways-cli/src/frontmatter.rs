@@ -149,6 +149,34 @@ impl Frontmatter {
     }
 }
 
+/// Frontmatter fields that wire a way into a runtime dispatch channel.
+/// A way carrying any of these participates in firing and therefore needs
+/// a `refire:` field (ADR-126). The semantic channel (description +
+/// vocabulary) is checked separately by [`fires_on_something`] because it
+/// requires both fields together.
+///
+/// **Adding a channel:** extending this list picks the new field up in
+/// `ways lint`'s fire-eligibility check automatically. The corresponding
+/// dispatch entry point in `cmd/scan/` still needs wiring separately — this
+/// const is the advisory declaration, not the dispatcher.
+pub const FIRE_BEARING_FIELDS: &[&str] = &["pattern", "files", "commands", "trigger"];
+
+/// Does this frontmatter wire the way into any firing channel?
+/// Used by `ways lint` to flag fire-bearing ways that lack a `refire:` field.
+///
+/// Operates on the raw YAML string rather than the parsed [`Frontmatter`]
+/// struct because several channel fields (`pattern`, `files`, `commands`,
+/// `trigger`) aren't modeled on the serde type. Keeping the predicate
+/// string-based lets it run against partially-valid frontmatter during lint.
+pub fn fires_on_something(fm_str: &str) -> bool {
+    fn has(fm: &str, name: &str) -> bool {
+        let prefix = format!("{name}:");
+        fm.lines().any(|l| l.starts_with(&prefix))
+    }
+    let has_desc_vocab = has(fm_str, "description") && has(fm_str, "vocabulary");
+    has_desc_vocab || FIRE_BEARING_FIELDS.iter().any(|f| has(fm_str, f))
+}
+
 /// Extract YAML frontmatter from a way file.
 pub fn parse(path: &Path) -> Result<Frontmatter> {
     let content = std::fs::read_to_string(path)
@@ -570,6 +598,54 @@ curve:
   half_life: 50000
 "#;
         detect_legacy_redisclose(yaml).expect("clean yaml should pass");
+    }
+
+    #[test]
+    fn fires_on_semantic_channel() {
+        assert!(fires_on_something("description: x\nvocabulary: y\n"));
+    }
+
+    #[test]
+    fn does_not_fire_on_description_alone() {
+        // Semantic channel needs both — description without vocabulary is
+        // flagged by a separate lint rule, not by fire-eligibility.
+        assert!(!fires_on_something("description: x\n"));
+    }
+
+    #[test]
+    fn does_not_fire_on_vocabulary_alone() {
+        assert!(!fires_on_something("vocabulary: x\n"));
+    }
+
+    #[test]
+    fn fires_on_each_declared_channel() {
+        // Every field in FIRE_BEARING_FIELDS must flip the predicate on its
+        // own — this test catches a new channel being added to the const but
+        // the iteration logic drifting away from it.
+        for field in FIRE_BEARING_FIELDS {
+            let fm = format!("{field}: something\n");
+            assert!(
+                fires_on_something(&fm),
+                "expected fire on {field}-only frontmatter"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_fire_on_empty_or_non_channel_fields() {
+        assert!(!fires_on_something(""));
+        assert!(!fires_on_something("scope: user\n"));
+        assert!(!fires_on_something("embed_threshold: 0.5\n"));
+        // curve: and refire: are cadence fields, not firing channels
+        assert!(!fires_on_something("curve:\n  type: Flat\n"));
+        assert!(!fires_on_something("refire: 0.2\n"));
+    }
+
+    #[test]
+    fn fires_on_combined_channels() {
+        // A typical way with semantic + pattern — both channels wired.
+        let fm = "description: x\nvocabulary: y\npattern: '^foo'\n";
+        assert!(fires_on_something(fm));
     }
 
     #[test]

@@ -137,24 +137,16 @@ pub(super) fn lint_file(
         }
     }
 
-    // ADR-126: fire-bearing ways should carry a `refire:` field. A way is
-    // fire-bearing if any of its trigger channels are wired: semantic
-    // (description + vocabulary), regex (pattern/files/commands), or state
-    // (trigger:). Check files and attend signal handlers are exempt —
-    // checks ride on their parent way's firing, and attend handlers are
-    // triggered by signal name rather than the refire engine.
+    // ADR-126: fire-bearing ways should carry a `refire:` field. Fire
+    // eligibility (which frontmatter fields count as firing channels) is
+    // declared in `frontmatter::FIRE_BEARING_FIELDS` so adding a new channel
+    // flows through automatically. Check files and attend signal handlers
+    // are exempt — checks ride on their parent way's firing, and attend
+    // handlers are triggered by signal name rather than the refire engine.
     let has_refire = has_field(&fm_str, "refire");
     let has_curve = has_field(&fm_str, "curve");
-    let has_pattern = has_field(&fm_str, "pattern");
-    let has_files = has_field(&fm_str, "files");
-    let has_commands = has_field(&fm_str, "commands");
-    let has_trigger = has_field(&fm_str, "trigger");
-    let fires_on_something = (has_desc && has_vocab)
-        || has_pattern
-        || has_files
-        || has_commands
-        || has_trigger;
-    let is_fire_bearing = !is_check && !is_attend && fires_on_something;
+    let is_fire_bearing =
+        !is_check && !is_attend && crate::frontmatter::fires_on_something(&fm_str);
     if is_fire_bearing && !has_refire {
         eprintln!(
             "  WARNING: {rel} — no `refire:` field (ADR-126). \
