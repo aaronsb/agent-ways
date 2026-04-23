@@ -118,13 +118,53 @@ pub(crate) fn cmd_send(args: &[String]) {
         }
     }
 
+    let r = get_groups();
+
+    // Validate --focus name against `_groups.yaml`. A signal written to a
+    // group nobody has joined sits unread in `@<name>/` until cleanup
+    // sweeps it; the sender only sees "signal written" and assumes
+    // delivery. Mirror the --to check: refuse the send and point at the
+    // broadcast default, which is the path that always routes.
+    if let Some(ref name) = target_focus {
+        let groups = r.all_groups();
+        let entry = groups.iter().find(|(n, _, _)| n == name);
+        let self_in_group = r.joined_group_names().iter().any(|n| n == name);
+        let peer_count = match entry {
+            Some((_, count, _)) => {
+                if self_in_group { count.saturating_sub(1) } else { *count }
+            }
+            None => 0,
+        };
+        if peer_count == 0 {
+            if entry.is_none() {
+                eprintln!("error: no focus group named '{}'", name);
+            } else if self_in_group {
+                eprintln!("error: you are the only member of focus group '{}'", name);
+            } else {
+                eprintln!("error: focus group '{}' has no members", name);
+            }
+            if groups.is_empty() {
+                eprintln!("\nno active focus groups");
+            } else {
+                eprintln!("\nactive focus groups:");
+                for (gname, count, pinned) in &groups {
+                    let pin = if *pinned { " (pinned)" } else { "" };
+                    let suffix = if *count == 1 { "" } else { "s" };
+                    eprintln!("  {} — {} member{}{}", gname, count, suffix, pin);
+                }
+            }
+            eprintln!("\ndrop --focus to broadcast (reaches every peer):");
+            eprintln!("  attend send <message>");
+            std::process::exit(1);
+        }
+    }
+
     // Determine target directories.
     // Default is broadcast — simplest possible routing: every send reaches
     // every peer. Escape hatches remain for humans and scripts:
     //   --to <path>: specific project only
     //   --focus <name>: specific focus group only
     //   --broadcast: explicit (same as default)
-    let r = get_groups();
     let dest_dirs: Vec<std::path::PathBuf> = if let Some(ref focus_name) = target_focus {
         vec![r.group_dir(focus_name)]
     } else if let Some(ref path) = target_dir {
