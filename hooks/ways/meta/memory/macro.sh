@@ -9,7 +9,7 @@ if command -v ways &>/dev/null; then
   if [[ -n "$JSON" ]]; then
     REMAINING=$(echo "$JSON" | jq -r '.tokens_remaining')
     PCT=$(echo "$JSON" | jq -r '.pct_remaining')
-    echo "**Context budget: ~${REMAINING} tokens remaining (${PCT}% of window).** After compaction, session details are summarized and specifics are lost. Anything not saved to MEMORY.md or captured as a way will not carry forward."
+    echo "**Context budget: ~${REMAINING} tokens remaining (${PCT}% of window).** After compaction, session details are summarized and specifics are lost. Per ADR-128: project knowledge belongs in ways/ADRs/notes/issues/PRs — MEMORY.md is narrow (short cross-project user facts only). Before saving a memory entry, check: could this be a way?"
     echo ""
   fi
 fi
@@ -20,10 +20,10 @@ MEMORY_DIR="$HOME/.claude/projects/${NORMALIZED}/memory"
 MEMORY_FILE="$MEMORY_DIR/MEMORY.md"
 
 if [ ! -f "$MEMORY_FILE" ]; then
-    echo "**MEMORY.md does not exist yet for this project.** This is a fresh start — create it now."
+    echo "**MEMORY.md does not exist yet for this project.** Run \`ways init\` to seed it (ADR-128)."
 elif [ ! -s "$MEMORY_FILE" ]; then
-    echo "**MEMORY.md exists but is empty.** Seed it with learnings from this session."
+    echo "**MEMORY.md exists but is empty.** Run \`ways init\` to seed it (ADR-128)."
 else
     LINES=$(wc -l < "$MEMORY_FILE")
-    echo "**MEMORY.md has ${LINES} lines.** Review and update with new insights from this session."
+    echo "**MEMORY.md has ${LINES} lines.** Review for drift against the ADR-128 seed; add only cross-project user facts under \`## User Context\`."
 fi
