@@ -74,6 +74,8 @@
 !hooks/
 !hooks/*.sh
 !hooks/pre-commit
+!hooks/memory-seed/
+!hooks/memory-seed/*.md
 !hooks/ways/
 !hooks/ways/*.md
 !hooks/ways/*.sh

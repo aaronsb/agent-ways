@@ -36,29 +36,28 @@ Mechanism:
 
 **a. Seed template** shipped with the ways tooling. Opens with the "Memory short-circuits discipline" thesis, names the friction-enforcing artifacts, includes an anti-rationalization table pre-empting common capture-skip patterns.
 
-**b. Frontmatter-bearing verification.** The seed begins with YAML frontmatter:
+**b. Frontmatter-bearing identification.** The seed begins with YAML frontmatter:
 
 ```yaml
 ---
 seed: claude-code-memory
 seed-version: 1
-seed-sha256: <hash of seeded body up to and including the `## User Context` heading>
 ---
 ```
 
-Scoping the hash to the *seeded portion* (not the whole file) means user-added entries below `## User Context` are orthogonal to the integrity check and preserved across re-seeds.
+**c. Byte-equality integrity check against an embedded canonical.** The canonical seeded body is baked into the ways binary at build time via Rust's `include_str!`. The binary physically carries the canonical bytes, so verification is pure byte comparison — no hash, no runtime crypto dependency, no "chasing" a moving hash value. Scoping the compared region to the body between frontmatter and the `## User Context` heading means user-added entries below that heading are orthogonal to the integrity check and preserved across re-seeds.
 
-**c. SessionStart hook** runs on every Claude invocation. Verifies the seed:
+**d. SessionStart integration via `ways init`** runs on every Claude invocation. The existing `ways init` subcommand (already registered in `SessionStart` settings.json hooks) now also verifies the seed:
 
 - `MEMORY.md` missing → write current seed.
-- Frontmatter parses + `seed == claude-code-memory` + `seed-version` matches + `seed-sha256` matches → no-op.
-- Any check fails → save unified diff of current vs. canonical seed to `MEMORY.diff.YYYY-MM-DD.NNN.md` (serial increment), write fresh seed preserving everything from `## User Context` onward. If the `## User Context` marker is structurally missing, diff the whole file and rewrite in full.
+- Frontmatter parses + `seed == claude-code-memory` + `seed-version` matches + extracted body bytes equal `canonical_body()` → no-op.
+- Any check fails → save unified diff of current content to `MEMORY.diff.YYYY-MM-DD.NNN.md` (serial increment), write fresh seed preserving everything from `## User Context` onward. If the `## User Context` marker is structurally missing, diff the whole file and rewrite in full.
 
-**d. Memory-seed files** are a new artifact class — frontmatter-bearing, hash-verified, managed by ways tooling, but destination is the harness's memory slot rather than the ways tree. The vocabulary matters: a future reader sees `seed: claude-code-memory` and has a word for what they're looking at.
+**e. Memory-seed files** are a new artifact class — frontmatter-bearing, byte-compared against an embedded canonical, managed by ways tooling, destination the harness's memory slot rather than the ways tree. The vocabulary matters: a future reader sees `seed: claude-code-memory` and has a word for what they're looking at.
 
-**e. Defense-in-depth via the memory way.** `hooks/ways/meta/memory/memory.md` carries the same routing table and anti-rationalization block. Surfaces when the way fires mid-session on "remember this" prompts, after the seed has already framed the session at startup.
+**f. Defense-in-depth via the memory way.** `hooks/ways/meta/memory/memory.md` carries the same routing table and anti-rationalization block. Surfaces when the way fires mid-session on "remember this" prompts, after the seed has already framed the session at startup.
 
-**f. Drift triggers session-time review.** A state-trigger way (`hooks/ways/meta/memory/drift-review/drift-review.md`) fires on the presence of unreviewed `MEMORY.diff.*` files. Its body is the actionable prompt: apply the routing table to each diff hunk — convert repo-relevant content to ways/ADRs/design notes/issues, discard what doesn't warrant preservation, re-add only genuine cross-project user facts under `## User Context`. The way marks each diff reviewed (via a `.reviewed` sidecar or directory move) so it doesn't re-fire on the same file. Compaction output is no longer a silent silo — it's a conversion queue the session actively triages.
+**g. Drift surfaces as session-time review via hook stdout.** When `ways init` detects drift and writes a diff file, it emits a review prompt to stdout. The `SessionStart` hook pipeline captures that stdout into the session's initial context, giving Claude an actionable triage instruction: apply the routing table (see point `f`) to each diff entry — convert repo-relevant content to ways/ADRs/design notes/issues, discard what doesn't warrant preservation, re-add only genuine cross-project user facts under `## User Context`. Compaction output is no longer a silent silo — it's a conversion queue the session actively triages. No separate state-trigger way is needed; the init hook's own stdout is the surfacing mechanism.
 
 Claude remains free to write memory — no permission changes, no harness modification. The intervention is purely framing: the memory attractor gets redirected toward the repo-portable artifacts the project already maintains, and any output that accumulates despite the framing gets actively reviewed and re-routed at the next session.
 

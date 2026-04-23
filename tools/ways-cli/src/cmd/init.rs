@@ -113,5 +113,9 @@ pub fn run(project: Option<&str>) -> Result<()> {
         eprintln!("Created project ways template: {}", template.display());
     }
 
+    // ADR-128: seed MEMORY.md with routing guidance, detect drift, preserve
+    // diffs. Idempotent — only emits output when drift is detected.
+    super::memory_seed::apply(&project_dir)?;
+
     Ok(())
 }

@@ -9,6 +9,7 @@ pub mod language;
 pub mod lint;
 pub mod list;
 pub mod match_cmd;
+pub mod memory_seed;
 pub mod permissions;
 pub mod provenance;
 pub mod render;
