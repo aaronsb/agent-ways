@@ -148,6 +148,15 @@ impl Groups {
         self.load_state().contains_key(name)
     }
 
+    /// List session IDs in a named group, or None if the group does not exist.
+    /// Returns raw `_groups.yaml` membership — callers that need a
+    /// liveness-checked view should intersect with
+    /// `PeerSensor::live_session_ids` (see `cmd_send` for the routing-
+    /// validation shape).
+    pub fn members(&self, name: &str) -> Option<Vec<String>> {
+        self.load_state().get(name).map(|e| e.members.clone())
+    }
+
     /// List all active rooms with member counts and pin state.
     pub fn all_groups(&self) -> Vec<(String, usize, bool)> {
         let state = self.load_state();

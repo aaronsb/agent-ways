@@ -192,6 +192,16 @@ impl PeerSensor {
         result
     }
 
+    /// Return the set of live Claude session IDs currently visible to
+    /// the peer sensor. Callers cross-reference this against
+    /// `_groups.yaml` member lists when they need a liveness-checked
+    /// view (focus-group routing in `attend send --focus`, etc.) — the
+    /// yaml count alone trusts `Groups::session_alive`, which is a
+    /// best-effort placeholder that returns `true` for everyone.
+    pub fn live_session_ids(&self) -> std::collections::HashSet<String> {
+        self.discover_peers().into_keys().collect()
+    }
+
     /// Read signal files from peers. Scans own project dir, broadcast dir,
     /// focus list, and joined rooms. Returns observations for new signals.
     fn read_signals(&mut self, focus: &Focus) -> Vec<(f64, String)> {

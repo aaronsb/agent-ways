@@ -49,12 +49,17 @@ pub(crate) fn cmd_peers() {
     if !peers.is_empty() {
         t.add(vec!["", "", "", ""]);
         for (peer_cwd, _project, status, ctx) in &peers {
-            // Same-cwd peers used to render "(project)" in the Focus
-            // column; that string is misleading (it is not a focus
-            // group anyone joined) and the cwd basename is already
-            // visible in the Agent column's dim parens. Leave the
-            // Focus cell empty for project-only peers.
-            let focus_label = String::new();
+            // Same-cwd peers previously rendered "(project)" in the
+            // Focus column — a string that primed agents into running
+            // `attend send --focus project`, a group nobody had
+            // joined. "(here)" pairs with the self row's "(self)"
+            // marker, preserves the same-cwd visual scan, and uses
+            // parentheses to make clear it is not a focus group name.
+            let focus_label = if *peer_cwd == cwd {
+                "(here)".to_string()
+            } else {
+                String::new()
+            };
             let peer_id = Identity::for_cwd(peer_cwd, caps);
             let label = render_agent_label(&peer_id, caps);
             t.add_owned(vec![
