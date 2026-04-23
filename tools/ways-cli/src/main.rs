@@ -125,7 +125,7 @@ enum Commands {
         #[arg(long, default_value = "2")]
         min_freq: u32,
     },
-    /// Initialize project .claude/ways/ structure
+    /// Initialize project .claude/ways/ structure and MEMORY.md seed (ADR-128)
     Init {
         /// Project directory (default: CLAUDE_PROJECT_DIR or cwd)
         #[arg(long)]
