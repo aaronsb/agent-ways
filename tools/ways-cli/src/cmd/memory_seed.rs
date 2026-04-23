@@ -91,7 +91,11 @@ fn project_memory_dir(project_dir: &str) -> PathBuf {
 }
 
 fn write_seed(path: &Path, user_context: Option<&str>) -> Result<()> {
-    let user_body = user_context.unwrap_or(USER_CONTEXT_STUB).trim_end();
+    // `trim()` (both ends) — parsed user context begins with a blank line
+    // left over from the previous file's `\n\n{marker}\n\n{user}` layout.
+    // Trimming both ends lets the format string insert exactly one blank
+    // line before the content regardless of the input shape.
+    let user_body = user_context.unwrap_or(USER_CONTEXT_STUB).trim();
     let content = format!(
         "---\nseed: {seed}\nseed-version: {ver}\n---\n\n{body}\n\n{marker}\n\n{user}\n",
         seed = SEED_ID,
@@ -289,6 +293,29 @@ mod tests {
     fn parse_returns_none_for_non_seed_markdown() {
         let content = "# Not a seed file\n\nJust a regular markdown doc.\n";
         assert!(parse_seeded_memory(content).is_none());
+    }
+
+    #[test]
+    fn reseed_normalizes_user_context_spacing() {
+        // Regression: a preserved user_context captured with a leading
+        // blank line would compound with the format's `\n\n{user}` pattern
+        // and produce two blank lines between `## User Context` and the
+        // first entry. `trim()` on the user_body prevents it.
+        let dir = std::env::temp_dir().join(format!("ways-seed-spacing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("MEMORY.md");
+
+        // Simulate the shape produced by a round-trip: user_context starts
+        // with a stray newline from the original file.
+        let with_leading_blank = "\n- Entry one.\n- Entry two.";
+        write_seed(&path, Some(with_leading_blank)).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+
+        // Exactly one blank line between the marker and the first entry.
+        assert!(after.contains(&format!("{USER_CONTEXT_MARKER}\n\n- Entry one.\n")));
+        assert!(!after.contains(&format!("{USER_CONTEXT_MARKER}\n\n\n")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
