@@ -97,6 +97,10 @@
           },
           {
             "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/resolve-plugins.sh"
+          },
+          {
+            "type": "command",
             "command": "${HOME}/.claude/bin/ways corpus --if-stale --quiet"
           }
         ]
@@ -254,6 +258,13 @@
         "source": "github",
         "repo": "anthropics/knowledge-work-plugins"
       }
+    },
+    "tracer-plugins": {
+      "source": {
+        "source": "directory",
+        "path": "/Users/tracer/claude-plugins"
+      }
     }
-  }
+  },
+  "model": "opus"
 }

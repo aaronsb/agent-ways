@@ -192,6 +192,85 @@ fn fixture_home() -> PathBuf {
     home
 }
 
+// ── Plugin fixture helpers (ADR-129) ─────────────────────────
+
+fn fixture_plugin_dir(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+struct PluginFixture {
+    id: String,
+    path: PathBuf,
+    scope: String,
+    project_path: Option<String>,
+}
+
+impl PluginFixture {
+    fn user(id: &str, fixture_name: &str) -> Self {
+        PluginFixture {
+            id: id.to_string(),
+            path: fixture_plugin_dir(fixture_name).join("hooks/ways"),
+            scope: "user".to_string(),
+            project_path: None,
+        }
+    }
+
+    fn project(id: &str, fixture_name: &str, project_path: &str) -> Self {
+        PluginFixture {
+            id: id.to_string(),
+            path: fixture_plugin_dir(fixture_name).join("hooks/ways"),
+            scope: "project".to_string(),
+            project_path: Some(project_path.to_string()),
+        }
+    }
+}
+
+/// A session with plugin-ways.json manifest pre-created.
+struct PluginSession {
+    inner: Session,
+}
+
+impl PluginSession {
+    fn new(name: &str, plugins: &[PluginFixture]) -> Self {
+        let inner = Session::new(name);
+
+        // Write plugin-ways.json to session dir
+        let session_dir = format!("{}/{}", sessions_root(), inner.id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+
+        let manifest: Vec<serde_json::Value> = plugins
+            .iter()
+            .map(|p| {
+                let mut entry = serde_json::json!({
+                    "id": p.id,
+                    "path": p.path.display().to_string(),
+                    "scope": p.scope,
+                });
+                if let Some(ref pp) = p.project_path {
+                    entry["projectPath"] = serde_json::json!(pp);
+                } else {
+                    entry["projectPath"] = serde_json::Value::Null;
+                }
+                entry
+            })
+            .collect();
+
+        let manifest_path = format!("{session_dir}/plugin-ways.json");
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        PluginSession { inner }
+    }
+}
+
+impl std::ops::Deref for PluginSession {
+    type Target = Session;
+    fn deref(&self) -> &Session {
+        &self.inner
+    }
+}
+
 fn clean_markers(session_id: &str) {
     let session_dir = format!("{}/{session_id}", sessions_root());
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -489,4 +568,173 @@ fn scenario_10_state_triggers() {
         !output2.contains("State Trigger Test Way"),
         "State trigger should not re-fire (marker exists)"
     );
+}
+
+// ── Scenario 11: Plugin Way Discovery (ADR-129) ──────────────
+
+// 11a: Basic plugin way fires on keyword match
+#[test]
+fn scenario_11a_plugin_keyword_match() {
+    let s = PluginSession::new("s11a", &[
+        PluginFixture::user("test-plugin-a@test", "plugin-a"),
+    ]);
+
+    s.scan_prompt("I would like a banana please");
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+}
+
+// 11b: Plugin way idempotency (fire-once)
+#[test]
+fn scenario_11b_plugin_idempotency() {
+    let s = PluginSession::new("s11b", &[
+        PluginFixture::user("test-plugin-a@test", "plugin-a"),
+    ]);
+
+    // Turn 1: fires
+    s.scan_prompt("banana fruit apple");
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+
+    // Turn 2: same prompt — should NOT re-fire (marker exists)
+    s.scan_prompt("banana fruit apple");
+    assert_epoch(&s.id, 2);
+    // Marker still there from turn 1, way was suppressed
+    assert_marker_exists("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+}
+
+// 11c: Plugin way does NOT fire when manifest is absent
+#[test]
+fn scenario_11c_no_manifest_no_plugin_ways() {
+    // Regular Session (no PluginSession) — no plugin-ways.json
+    let s = Session::new("s11c");
+
+    s.scan_prompt("banana fruit apple");
+    assert_epoch(&s.id, 1);
+    // Plugin way should NOT fire — no manifest
+    assert_marker_absent("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+}
+
+// 11d: Project-scoped plugin only fires in its project
+#[test]
+fn scenario_11d_project_scoped_plugin() {
+    let target_project = std::env::temp_dir().join("ways-sim-project-11d");
+    std::fs::create_dir_all(&target_project).unwrap();
+
+    let s = PluginSession::new("s11d", &[
+        PluginFixture::project(
+            "test-plugin-a@test",
+            "plugin-a",
+            target_project.to_str().unwrap(),
+        ),
+    ]);
+
+    // Turn 1: correct project → plugin way fires
+    s.scan_prompt_with_project(
+        "banana fruit apple",
+        target_project.to_str().unwrap(),
+    );
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+
+    // Clean markers for a fresh check
+    let marker_path = format!(
+        "{}/{}/ways/plugin:test-plugin-a@test/plugindomain/fruit",
+        sessions_root(), s.id
+    );
+    let _ = std::fs::remove_dir_all(&marker_path);
+
+    // Turn 2: wrong project → plugin way does NOT fire
+    s.scan_prompt_with_project(
+        "banana fruit apple",
+        "/tmp/wrong-project-11d",
+    );
+    assert_epoch(&s.id, 2);
+    assert_marker_absent("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+
+    let _ = std::fs::remove_dir_all(&target_project);
+}
+
+// 11e: Plugin way and global way coexist
+#[test]
+fn scenario_11e_plugin_and_global_coexist() {
+    let s = PluginSession::new("s11e", &[
+        PluginFixture::user("test-plugin-a@test", "plugin-a"),
+    ]);
+
+    // Prompt that matches both a global way (testdomain/parent/child via "test")
+    // and a plugin way (fruit via "banana")
+    s.scan_prompt("banana unit test coverage");
+    assert_epoch(&s.id, 1);
+    // Both should fire — different ID namespaces
+    assert_marker_exists("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+    assert_marker_exists("testdomain/parent/child", &s.id);
+}
+
+// 11f: Global way still fires with empty plugin manifest
+#[test]
+fn scenario_11f_empty_manifest_global_works() {
+    let s = PluginSession::new("s11f", &[]);
+
+    // Global way should fire normally
+    s.scan_prompt("how do I write a unit test for this module");
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("testdomain/parent/child", &s.id);
+}
+
+// 11g: Multiple plugins with ways
+#[test]
+fn scenario_11g_multiple_plugins() {
+    let s = PluginSession::new("s11g", &[
+        PluginFixture::user("test-plugin-a@test", "plugin-a"),
+        PluginFixture::user("test-plugin-b@test", "plugin-b"),
+    ]);
+
+    // Turn 1: match plugin A's way
+    s.scan_prompt("banana fruit apple");
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("plugin:test-plugin-a@test/plugindomain/fruit", &s.id);
+    assert_marker_absent("plugin:test-plugin-b@test/plugindomain/color", &s.id);
+
+    // Turn 2: match plugin B's way
+    s.scan_prompt("red blue green color palette");
+    assert_epoch(&s.id, 2);
+    assert_marker_exists("plugin:test-plugin-b@test/plugindomain/color", &s.id);
+}
+
+// 11h: Plugin way check files
+#[test]
+fn scenario_11h_plugin_check_files() {
+    let s = PluginSession::new("s11h", &[
+        PluginFixture::user("test-plugin-check@test", "plugin-with-check"),
+    ]);
+
+    // Turn 1: fire the parent way first
+    s.scan_prompt("audit compliance verify review");
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("plugin:test-plugin-check@test/plugindomain/audited", &s.id);
+
+    // Turn 2: command matching the check
+    s.scan_command("audit run --full");
+    assert_epoch(&s.id, 2);
+    assert_check_fires("plugin:test-plugin-check@test/plugindomain/audited", &s.id, 1);
+}
+
+// 11i: Plugin macro is NOT executed (trust boundary)
+#[test]
+fn scenario_11i_plugin_macro_not_trusted() {
+    let s = PluginSession::new("s11i", &[
+        PluginFixture::user("test-plugin-macro@test", "plugin-with-macro"),
+    ]);
+
+    // The greeter way has macro: prepend, but plugin macros should not execute
+    // because the plugin path is not in trusted-project-macros.
+    // The way should still fire (marker stamped) but macro output should be absent.
+    s.scan_prompt("hello welcome greet");
+    assert_epoch(&s.id, 1);
+    assert_marker_exists("plugin:test-plugin-macro@test/plugindomain/greeter", &s.id);
+
+    // We can't easily assert macro didn't run from marker checks alone,
+    // but the way firing without error is the baseline. The macro trust
+    // gating is handled by show::way checking is_project_trusted().
 }

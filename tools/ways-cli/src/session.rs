@@ -54,6 +54,30 @@ fn ensure_parent(path: &Path) {
     }
 }
 
+// ── Plugin way manifest (ADR-129) ─────────────────────────────
+
+/// A plugin way directory resolved at session start.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PluginWayEntry {
+    pub id: String,
+    pub path: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(rename = "projectPath")]
+    pub project_path: Option<String>,
+}
+
+/// Read the plugin-ways manifest for a session.
+/// Returns an empty vec if the manifest doesn't exist (graceful fallback).
+pub fn plugin_way_dirs(session_id: &str) -> Vec<PluginWayEntry> {
+    let manifest = session_dir(session_id).join("plugin-ways.json");
+    let content = match std::fs::read_to_string(&manifest) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
 // ── Way markers ─────────────────────────────────────────────────
 
 /// Check if a way has been shown this session.
@@ -434,7 +458,30 @@ pub fn domain_disabled(domain: &str) -> bool {
 
 /// Resolve a way ID to its file path. Project-local takes precedence.
 /// Returns (path, is_project_local).
+///
+/// Plugin way IDs (prefixed with `plugin:{id}/`) are resolved via the
+/// plugin's install path from installed_plugins.json (ADR-129).
+/// Use `resolve_way_file_in_session` when session_id is available for
+/// fallback to the session manifest.
 pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, bool)> {
+    resolve_way_file_in_session(way_id, project_dir, "")
+}
+
+/// Resolve a way ID with session context for plugin fallback.
+pub fn resolve_way_file_in_session(way_id: &str, project_dir: &str, session_id: &str) -> Option<(PathBuf, bool)> {
+    // Plugin way: plugin:{plugin_id}/{way_path}
+    if let Some(rest) = way_id.strip_prefix("plugin:") {
+        if let Some((plugin_id, way_path)) = rest.split_once('/') {
+            if let Some(dir) = resolve_plugin_way_dir(plugin_id, session_id) {
+                let way_dir = dir.join(way_path);
+                if let Some(f) = find_way_in_dir(&way_dir) {
+                    return Some((f, false));
+                }
+            }
+        }
+        return None;
+    }
+
     let local_dir = PathBuf::from(project_dir).join(format!(".claude/ways/{way_id}"));
     if let Some(f) = find_way_in_dir(&local_dir) {
         return Some((f, true));
@@ -450,6 +497,24 @@ pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, boo
 
 /// Resolve a way ID to its check file path.
 pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, bool)> {
+    resolve_check_file_in_session(way_id, project_dir, "")
+}
+
+/// Resolve a check file with session context for plugin fallback.
+pub fn resolve_check_file_in_session(way_id: &str, project_dir: &str, session_id: &str) -> Option<(PathBuf, bool)> {
+    // Plugin check: plugin:{plugin_id}/{way_path}
+    if let Some(rest) = way_id.strip_prefix("plugin:") {
+        if let Some((plugin_id, way_path)) = rest.split_once('/') {
+            if let Some(dir) = resolve_plugin_way_dir(plugin_id, session_id) {
+                let way_dir = dir.join(way_path);
+                if let Some(f) = find_check_in_dir(&way_dir) {
+                    return Some((f, false));
+                }
+            }
+        }
+        return None;
+    }
+
     let local_dir = PathBuf::from(project_dir).join(format!(".claude/ways/{way_id}"));
     if let Some(f) = find_check_in_dir(&local_dir) {
         return Some((f, true));
@@ -461,6 +526,54 @@ pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, b
     }
 
     None
+}
+
+/// Resolve a plugin ID to its hooks/ways/ directory.
+/// Tries installed_plugins.json first, falls back to the session manifest.
+fn resolve_plugin_way_dir(plugin_id: &str, session_id: &str) -> Option<PathBuf> {
+    // Try installed_plugins.json first (works outside sessions, e.g. corpus)
+    if let Some(install_path) = resolve_plugin_install_path(plugin_id) {
+        let dir = PathBuf::from(&install_path).join("hooks/ways");
+        if dir.is_dir() {
+            return Some(dir);
+        }
+    }
+
+    // Fall back to session manifest (works in tests and when plugins.json is unavailable)
+    if !session_id.is_empty() {
+        for entry in plugin_way_dirs(session_id) {
+            if entry.id == plugin_id {
+                let dir = PathBuf::from(&entry.path);
+                if dir.is_dir() {
+                    return Some(dir);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Resolve a plugin ID to its install path from installed_plugins.json.
+/// Reads the file directly (stable format) to avoid needing session state.
+fn resolve_plugin_install_path(plugin_id: &str) -> Option<String> {
+    let plugins_file = home_dir().join(".claude/plugins/installed_plugins.json");
+    let content = std::fs::read_to_string(&plugins_file).ok()?;
+    let data: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let plugins = data.get("plugins")?.as_object()?;
+
+    // Plugin entries are arrays (multiple versions possible)
+    let entries = plugins.get(plugin_id)?.as_array()?;
+
+    // Use the entry with the latest lastUpdated timestamp
+    entries.iter()
+        .filter_map(|e| {
+            let path = e.get("installPath")?.as_str()?.to_string();
+            let updated = e.get("lastUpdated")?.as_str()?.to_string();
+            Some((path, updated))
+        })
+        .max_by(|a, b| a.1.cmp(&b.1))
+        .map(|(path, _)| path)
 }
 
 fn find_way_in_dir(dir: &Path) -> Option<PathBuf> {

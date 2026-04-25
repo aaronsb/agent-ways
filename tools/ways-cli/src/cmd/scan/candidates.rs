@@ -9,23 +9,26 @@ use super::WayCandidate;
 
 // ── Collection ─────────────────────────────────────────────────
 
-pub(crate) fn collect_candidates(project_dir: &str) -> Vec<WayCandidate> {
+pub(crate) fn collect_candidates(project_dir: &str, session_id: &str) -> Vec<WayCandidate> {
     let mut candidates = Vec::new();
 
-    // Project-local first
+    // Project-local first (highest priority)
     let project_ways = PathBuf::from(project_dir).join(".claude/ways");
     if project_ways.is_dir() {
         collect_from_dir(&project_ways, &mut candidates);
     }
 
-    // Global
+    // Plugin ways (middle priority — ADR-129)
+    collect_plugin_candidates(session_id, project_dir, &mut candidates, false);
+
+    // Global (lowest priority)
     let global_ways = super::scoring::home_dir().join(".claude/hooks/ways");
     collect_from_dir(&global_ways, &mut candidates);
 
     candidates
 }
 
-pub(crate) fn collect_checks(project_dir: &str) -> Vec<WayCandidate> {
+pub(crate) fn collect_checks(project_dir: &str, session_id: &str) -> Vec<WayCandidate> {
     let mut candidates = Vec::new();
 
     let project_ways = PathBuf::from(project_dir).join(".claude/ways");
@@ -33,10 +36,49 @@ pub(crate) fn collect_checks(project_dir: &str) -> Vec<WayCandidate> {
         collect_checks_from_dir(&project_ways, &mut candidates);
     }
 
+    // Plugin checks (ADR-129)
+    collect_plugin_candidates(session_id, project_dir, &mut candidates, true);
+
     let global_ways = super::scoring::home_dir().join(".claude/hooks/ways");
     collect_checks_from_dir(&global_ways, &mut candidates);
 
     candidates
+}
+
+/// Collect way candidates from enabled plugins (ADR-129).
+///
+/// Reads the session plugin-ways manifest and scans each plugin's
+/// hooks/ways/ directory. Plugin way IDs are prefixed with `plugin:{id}/`.
+/// Project-scoped plugins are filtered to the current project.
+fn collect_plugin_candidates(session_id: &str, project_dir: &str, out: &mut Vec<WayCandidate>, checks_only: bool) {
+    let entries = crate::session::plugin_way_dirs(session_id);
+
+    // Filter project-scoped plugins to current project
+    let entries: Vec<_> = entries.into_iter().filter(|e| {
+        match (&e.scope as &str, &e.project_path) {
+            ("project", Some(pp)) => {
+                // Canonicalize both to handle symlinks/trailing slashes
+                let pp_canon = std::fs::canonicalize(pp).unwrap_or_else(|_| PathBuf::from(pp));
+                let pd_canon = std::fs::canonicalize(project_dir).unwrap_or_else(|_| PathBuf::from(project_dir));
+                pp_canon == pd_canon
+            }
+            ("project", None) => false,
+            _ => true, // user-scoped plugins always included
+        }
+    }).collect();
+
+    for entry in &entries {
+        let dir = Path::new(&entry.path);
+        if !dir.is_dir() {
+            continue;
+        }
+        let prefix = format!("plugin:{}/", entry.id);
+        if checks_only {
+            collect_checks_from_dir_with_prefix(dir, &prefix, out);
+        } else {
+            collect_from_dir_with_prefix(dir, &prefix, out);
+        }
+    }
 }
 
 fn collect_from_dir(dir: &Path, out: &mut Vec<WayCandidate>) {
@@ -74,6 +116,84 @@ fn collect_from_dir(dir: &Path, out: &mut Vec<WayCandidate>) {
         }
 
         if let Some(candidate) = parse_candidate(&id, path, &content) {
+            out.push(candidate);
+        }
+    }
+}
+
+fn collect_from_dir_with_prefix(dir: &Path, id_prefix: &str, out: &mut Vec<WayCandidate>) {
+    for entry in WalkDir::new(dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.contains(".check.") {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !content.starts_with("---\n") {
+            continue;
+        }
+
+        let raw_id = way_id_from_path(path, dir);
+        if raw_id.is_empty() {
+            continue;
+        }
+        let id = format!("{id_prefix}{raw_id}");
+
+        let domain = raw_id.split('/').next().unwrap_or(&raw_id);
+        if session::domain_disabled(domain) {
+            continue;
+        }
+
+        if let Some(mut candidate) = parse_candidate(&id, path, &content) {
+            // Store original path for file resolution
+            candidate.path = path.to_path_buf();
+            out.push(candidate);
+        }
+    }
+}
+
+fn collect_checks_from_dir_with_prefix(dir: &Path, id_prefix: &str, out: &mut Vec<WayCandidate>) {
+    for entry in WalkDir::new(dir)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !name.ends_with(".check.md") {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !content.starts_with("---\n") {
+            continue;
+        }
+
+        let raw_id = way_id_from_path(path, dir);
+        if raw_id.is_empty() {
+            continue;
+        }
+        let id = format!("{id_prefix}{raw_id}");
+
+        if let Some(mut candidate) = parse_candidate(&id, path, &content) {
+            candidate.path = path.to_path_buf();
             out.push(candidate);
         }
     }

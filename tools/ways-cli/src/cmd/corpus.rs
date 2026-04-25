@@ -118,15 +118,43 @@ pub fn run(ways_dir: Option<String>, quiet: bool, if_stale: bool) -> Result<()> 
         }
     }
 
+    // Scan enabled plugin ways (ADR-129)
+    let mut plugin_total = 0;
+    let mut manifest_plugins: HashMap<String, serde_json::Value> = HashMap::new();
+
+    for (plugin_id, ways_path) in discover_plugin_way_dirs() {
+        if !seen_ways_dirs.insert(ways_path.clone()) {
+            continue;
+        }
+        let prefix = format!("plugin:{plugin_id}/");
+        let plugin_count = scan_ways_dir(&ways_path, &prefix, &excluded, &mut w)?;
+        if plugin_count > 0 {
+            plugin_total += plugin_count;
+            let plugin_hash = content_hash(&ways_path);
+            log(&format!(
+                "  plugin {plugin_id}: {plugin_count} ways (hash: {}...)",
+                &plugin_hash[..16.min(plugin_hash.len())]
+            ));
+            manifest_plugins.insert(
+                plugin_id.clone(),
+                json!({
+                    "path": ways_path.display().to_string(),
+                    "ways_hash": plugin_hash,
+                    "ways_count": plugin_count,
+                }),
+            );
+        }
+    }
+
     w.flush()?;
     drop(w);
 
     // Atomic move
     std::fs::rename(&tmpfile, &output)?;
 
-    let total = global_count + project_total;
+    let total = global_count + project_total + plugin_total;
     log(&format!(
-        "Generated {}: {total} ways ({global_count} global, {project_total} project)",
+        "Generated {}: {total} ways ({global_count} global, {project_total} project, {plugin_total} plugin)",
         output.display()
     ));
 
@@ -137,8 +165,10 @@ pub fn run(ways_dir: Option<String>, quiet: bool, if_stale: bool) -> Result<()> 
     let manifest = json!({
         "global_hash": global_hash,
         "global_count": global_count,
+        "plugin_count": plugin_total,
         "total_count": total,
         "projects": manifest_projects,
+        "plugins": manifest_plugins,
     });
     let manifest_path = xdg_way.join("embed-manifest.json");
     std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
@@ -503,6 +533,72 @@ fn content_hash(dir: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Discover enabled plugins that ship hooks/ways/ directories (ADR-129).
+///
+/// Reads installed_plugins.json and settings.json directly — corpus
+/// generation runs outside any session context, so there's no session
+/// manifest to read.
+fn discover_plugin_way_dirs() -> Vec<(String, PathBuf)> {
+    let home = home_dir();
+    let plugins_file = home.join(".claude/plugins/installed_plugins.json");
+    let settings_file = home.join(".claude/settings.json");
+
+    let plugins_content = match std::fs::read_to_string(&plugins_file) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let plugins_data: serde_json::Value = match serde_json::from_str(&plugins_content) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let settings_content = std::fs::read_to_string(&settings_file).unwrap_or_default();
+    let settings_data: serde_json::Value =
+        serde_json::from_str(&settings_content).unwrap_or_default();
+    let enabled_plugins = settings_data
+        .get("enabledPlugins")
+        .and_then(|v| v.as_object());
+
+    let plugins = match plugins_data.get("plugins").and_then(|v| v.as_object()) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    let mut result = Vec::new();
+
+    for (plugin_id, entries) in plugins {
+        // Check enabled in settings
+        let is_enabled = enabled_plugins
+            .and_then(|ep| ep.get(plugin_id))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !is_enabled {
+            continue;
+        }
+
+        let entries = match entries.as_array() {
+            Some(a) => a,
+            None => continue,
+        };
+
+        // Pick the entry with the latest lastUpdated
+        let best = entries.iter().filter_map(|e| {
+            let path = e.get("installPath")?.as_str()?;
+            let updated = e.get("lastUpdated")?.as_str()?.to_string();
+            Some((path.to_string(), updated))
+        }).max_by(|a, b| a.1.cmp(&b.1));
+
+        if let Some((install_path, _)) = best {
+            let ways_dir = PathBuf::from(&install_path).join("hooks/ways");
+            if ways_dir.is_dir() {
+                result.push((plugin_id.clone(), ways_dir));
+            }
+        }
+    }
+
+    result
+}
+
 use crate::util::{home_dir, xdg_cache_dir};
 
 /// Check if any way file is newer than the manifest.
@@ -537,6 +633,23 @@ fn is_stale(manifest: &Path, global_dir: &Path, project_dir: &str) -> bool {
                     if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
                         return true;
                     }
+                }
+            }
+        }
+    }
+
+    // Check plugin ways (ADR-129)
+    for (_plugin_id, ways_dir) in discover_plugin_way_dirs() {
+        for entry in WalkDir::new(&ways_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() {
+                let ext = path.extension().and_then(|e| e.to_str());
+                if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
+                    return true;
                 }
             }
         }

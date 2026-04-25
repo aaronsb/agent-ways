@@ -148,6 +148,140 @@ Turn N: prompt → same way fires AGAIN (re-disclosure)
 
 Tests: token position tracking, context window detection, re-disclosure threshold.
 
+### Scenario 9: Plugin Way Discovery (ADR-129)
+
+Plugin ways are discovered from a session manifest (`plugin-ways.json`) written at session start. They sit between project-local and global in priority.
+
+#### 9a: Basic plugin way fires on keyword match
+
+```
+Setup: plugin-ways.json manifest with one plugin pointing at a fixture plugin dir
+Turn 1: prompt matching plugin way's pattern → expect plugin:{id}/{way} fires
+```
+
+Tests: plugin manifest reading, `collect_from_dir_with_prefix`, plugin way ID namespacing (`plugin:{id}/`).
+
+#### 9b: Plugin way fires on semantic match
+
+```
+Setup: plugin way with description+vocabulary in corpus
+Turn 1: prompt semantically matching plugin way → expect plugin way fires
+```
+
+Tests: corpus generation includes plugin ways, embedding scoring works for plugin-prefixed IDs.
+
+#### 9c: Plugin way idempotency (fire-once)
+
+```
+Setup: plugin-ways.json manifest
+Turn 1: prompt matching plugin way → fires
+Turn 2: same prompt → does NOT re-fire (marker exists)
+```
+
+Tests: session markers work for `plugin:` prefixed IDs.
+
+#### 9d: Plugin way does NOT fire when manifest is absent
+
+```
+Setup: no plugin-ways.json in session dir
+Turn 1: prompt that would match a plugin way → nothing fires
+```
+
+Tests: graceful fallback when manifest is missing (no errors, no plugin ways).
+
+#### 9e: Project-scoped plugin filtering
+
+```
+Setup: plugin-ways.json with a project-scoped plugin (scope=project, projectPath=/specific/project)
+Turn 1 (project=/specific/project): prompt → plugin way fires
+Turn 2 (project=/different/project): same prompt → plugin way does NOT fire
+```
+
+Tests: project-scoped plugins only contribute ways in their target project.
+
+#### 9f: Plugin way does not shadow global way
+
+```
+Setup: plugin way with ID that differs from any global way
+Turn 1: prompt matching both a plugin way and a global way → both fire
+```
+
+Tests: plugin and global ways coexist (different ID namespaces).
+
+#### 9g: Global way still fires with empty plugin manifest
+
+```
+Setup: plugin-ways.json = [] (empty array)
+Turn 1: prompt matching a global way → global way fires normally
+```
+
+Tests: empty manifest doesn't break the existing two-source discovery.
+
+#### 9h: Plugin way check files
+
+```
+Setup: plugin with a .check.md file in hooks/ways/
+Turn 1: command matching the check's commands pattern → check fires with score
+```
+
+Tests: `collect_checks_from_dir_with_prefix`, check scoring works for plugin ways.
+
+#### 9i: Plugin way resolve for show
+
+```
+Setup: plugin-ways.json, plugin way fires
+Verify: resolve_way_file("plugin:{id}/{way}", project_dir) returns the correct path
+```
+
+Tests: `resolve_plugin_install_path` reads installed_plugins.json, path reconstruction works.
+
+#### 9j: Multiple plugins with ways
+
+```
+Setup: plugin-ways.json with two plugins, each having different ways
+Turn 1: prompt matching plugin A's way → fires with plugin:A/{way} ID
+Turn 2: prompt matching plugin B's way → fires with plugin:B/{way} ID
+```
+
+Tests: multiple plugin sources scanned, IDs namespaced independently.
+
+#### 9k: Plugin macro trust gating
+
+```
+Setup: plugin way with macro: prepend and macro.sh
+Turn 1: prompt matching plugin way → way fires but macro is skipped (not trusted)
+```
+
+Tests: plugin macros are not executed by default (security boundary).
+
+### Scenario 9 Fixture Requirements
+
+```
+tests/fixtures/
+├── ways/                          # existing fixture ways
+├── plugin-a/                      # fixture plugin A
+│   └── hooks/ways/
+│       └── plugindomain/
+│           └── fruit/
+│               └── fruit.md       # pattern: banana|apple, refire: 0.15
+├── plugin-b/                      # fixture plugin B
+│   └── hooks/ways/
+│       └── plugindomain/
+│           └── color/
+│               └── color.md       # pattern: red|blue|green, refire: 0.15
+└── plugin-with-check/
+    └── hooks/ways/
+        └── plugindomain/
+            └── audited/
+                ├── audited.md
+                └── audited.check.md
+
+Session helper: Session::with_plugins(name, plugins: &[PluginFixture]) that:
+  1. Creates plugin-ways.json in the session dir
+  2. Points at fixture plugin dirs
+  3. Optionally creates a fake installed_plugins.json for resolve tests
+```
+
 ## Implementation Design
 
 ### Language

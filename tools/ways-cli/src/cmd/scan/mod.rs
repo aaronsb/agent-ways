@@ -48,7 +48,7 @@ pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()
     session::bump_epoch(session_id);
 
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let candidates = collect_candidates(&project_dir, session_id);
 
     let embed_matches = batch_embed_score(query);
 
@@ -90,7 +90,7 @@ pub fn task(
         .unwrap_or_else(default_project);
 
     let is_teammate = team.is_some();
-    let candidates = collect_candidates(&project_dir);
+    let candidates = collect_candidates(&project_dir, session_id);
 
     let embed_matches = batch_embed_score(query);
 
@@ -172,7 +172,7 @@ pub fn command(
 
     session::bump_epoch(session_id);
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let candidates = collect_candidates(&project_dir, session_id);
 
     let mut context = String::new();
 
@@ -212,7 +212,7 @@ pub fn command(
     }
 
     // Check matching: commands regex + semantic scoring
-    let checks = collect_checks(&project_dir);
+    let checks = collect_checks(&project_dir, session_id);
     let query_for_checks = format!(
         "{} {}",
         cmd,
@@ -272,7 +272,7 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
 
     session::bump_epoch(session_id);
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let candidates = collect_candidates(&project_dir, session_id);
 
     let mut context = String::new();
 
@@ -294,7 +294,7 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
         }
     }
 
-    let checks = collect_checks(&project_dir);
+    let checks = collect_checks(&project_dir, session_id);
     let embed_matches = batch_embed_score(filepath);
 
     for check in &checks {
@@ -453,7 +453,7 @@ pub fn state(
         .unwrap_or_else(default_project);
 
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let candidates = collect_candidates(&project_dir, session_id);
 
     let mut context = String::new();
 

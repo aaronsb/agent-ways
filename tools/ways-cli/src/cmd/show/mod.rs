@@ -27,7 +27,7 @@ pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
 
     // Scope check
     let scope = session::detect_scope(session_id);
-    let (way_file, is_project_local) = match session::resolve_way_file(id, &project_dir) {
+    let (way_file, is_project_local) = match session::resolve_way_file_in_session(id, &project_dir, session_id) {
         Some(r) => r,
         None => return Ok(String::new()),
     };
@@ -178,7 +178,7 @@ pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Res
     // Scope check
     let scope = session::detect_scope(session_id);
 
-    let (check_file, _is_project_local) = match session::resolve_check_file(id, &project_dir) {
+    let (check_file, _is_project_local) = match session::resolve_check_file_in_session(id, &project_dir, session_id) {
         Some(r) => r,
         None => return Ok(String::new()),
     };
