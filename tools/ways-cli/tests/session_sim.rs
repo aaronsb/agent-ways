@@ -207,11 +207,24 @@ struct PluginFixture {
     project_path: Option<String>,
 }
 
+/// Resolve the ways directory for a fixture plugin.
+/// Plugin convention: $PLUGIN_INSTALL_PATH/ways/
+fn resolve_fixture_ways_path(fixture_name: &str) -> PathBuf {
+    let dir = fixture_plugin_dir(fixture_name).join("ways");
+    assert!(
+        dir.is_dir(),
+        "Fixture plugin '{}' missing ways/ at {}",
+        fixture_name,
+        dir.display()
+    );
+    dir
+}
+
 impl PluginFixture {
     fn user(id: &str, fixture_name: &str) -> Self {
         PluginFixture {
             id: id.to_string(),
-            path: fixture_plugin_dir(fixture_name).join("hooks/ways"),
+            path: resolve_fixture_ways_path(fixture_name),
             scope: "user".to_string(),
             project_path: None,
         }
@@ -220,7 +233,7 @@ impl PluginFixture {
     fn project(id: &str, fixture_name: &str, project_path: &str) -> Self {
         PluginFixture {
             id: id.to_string(),
-            path: fixture_plugin_dir(fixture_name).join("hooks/ways"),
+            path: resolve_fixture_ways_path(fixture_name),
             scope: "project".to_string(),
             project_path: Some(project_path.to_string()),
         }

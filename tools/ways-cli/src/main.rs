@@ -216,6 +216,12 @@ enum Commands {
     /// Reset session state when ways stop firing or fire incorrectly.
     ///
     /// Clears markers, epoch counters, and check fire counts from /tmp.
+    /// Resolve enabled plugin way-paths and write plugin-ways.json to session dir
+    ResolvePlugins {
+        /// Session ID (required)
+        #[arg(long)]
+        session: String,
+    },
     /// Use when: a way should fire but doesn't (stale marker), checks
     /// fire too aggressively (inflated epoch), or after debugging the
     /// way tree. Default is dry run — add --confirm to actually delete.
@@ -567,6 +573,9 @@ fn main() -> Result<()> {
         }
         Commands::TuneCurves { apply, min_fires, project, way } => {
             cmd::tune_curves::run(apply, min_fires, project, way)
+        }
+        Commands::ResolvePlugins { session } => {
+            session::write_plugin_manifest(&session)
         }
         Commands::Reset { session, all, confirm } => {
             cmd::reset::run(session.as_deref(), all, confirm)

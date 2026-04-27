@@ -78,6 +78,64 @@ pub fn plugin_way_dirs(session_id: &str) -> Vec<PluginWayEntry> {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
+/// Resolve plugin way entries live by running `claude plugin list --json`.
+/// Used by `list --available` when no session manifest exists.
+/// Returns an empty vec on any failure (CLI not found, parse error, etc.).
+pub fn resolve_plugins_live() -> Vec<PluginWayEntry> {
+    let output = match std::process::Command::new("claude")
+        .args(["plugin", "list", "--json"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+
+    let plugins: Vec<serde_json::Value> = match serde_json::from_slice(&output) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    plugins
+        .into_iter()
+        .filter(|p| p["enabled"].as_bool() == Some(true))
+        .filter_map(|p| {
+            let install_path = p["installPath"].as_str()?;
+            let ways_dir = resolve_plugin_ways_path(install_path)?;
+            Some(PluginWayEntry {
+                id: p["id"].as_str()?.to_string(),
+                path: ways_dir.display().to_string(),
+                scope: p["scope"].as_str().unwrap_or("user").to_string(),
+                project_path: p["projectPath"].as_str().map(|s| s.to_string()),
+            })
+        })
+        .collect()
+}
+
+/// Resolve plugins live and write plugin-ways.json to the session directory.
+/// Called by `ways resolve-plugins --session <id>` at session start.
+pub fn write_plugin_manifest(session_id: &str) -> anyhow::Result<()> {
+    let entries = resolve_plugins_live();
+    let dir = session_dir(session_id);
+    std::fs::create_dir_all(&dir)?;
+
+    // Serialize with projectPath field name matching the manifest schema
+    let manifest: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id,
+                "path": e.path,
+                "scope": e.scope,
+                "projectPath": e.project_path,
+            })
+        })
+        .collect();
+
+    let path = dir.join("plugin-ways.json");
+    std::fs::write(&path, serde_json::to_string(&manifest)?)?;
+    Ok(())
+}
+
 // ── Way markers ─────────────────────────────────────────────────
 
 /// Check if a way has been shown this session.
@@ -528,13 +586,12 @@ pub fn resolve_check_file_in_session(way_id: &str, project_dir: &str, session_id
     None
 }
 
-/// Resolve a plugin ID to its hooks/ways/ directory.
+/// Resolve a plugin ID to its ways directory (ways/ or hooks/ways/).
 /// Tries installed_plugins.json first, falls back to the session manifest.
 fn resolve_plugin_way_dir(plugin_id: &str, session_id: &str) -> Option<PathBuf> {
     // Try installed_plugins.json first (works outside sessions, e.g. corpus)
     if let Some(install_path) = resolve_plugin_install_path(plugin_id) {
-        let dir = PathBuf::from(&install_path).join("hooks/ways");
-        if dir.is_dir() {
+        if let Some(dir) = resolve_plugin_ways_path(&install_path) {
             return Some(dir);
         }
     }
@@ -574,6 +631,17 @@ fn resolve_plugin_install_path(plugin_id: &str) -> Option<String> {
         })
         .max_by(|a, b| a.1.cmp(&b.1))
         .map(|(path, _)| path)
+}
+
+/// Resolve a plugin install path to its ways directory.
+/// Plugin convention: $PLUGIN_INSTALL_PATH/ways/
+pub fn resolve_plugin_ways_path(install_path: &str) -> Option<PathBuf> {
+    let dir = PathBuf::from(install_path).join("ways");
+    if dir.is_dir() {
+        Some(dir)
+    } else {
+        None
+    }
 }
 
 fn find_way_in_dir(dir: &Path) -> Option<PathBuf> {

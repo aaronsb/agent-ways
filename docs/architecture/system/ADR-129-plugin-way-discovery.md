@@ -18,7 +18,7 @@ Way discovery is currently hardcoded to two filesystem locations:
 1. **Project-local**: `$PROJECT/.claude/ways/`
 2. **Global**: `~/.claude/hooks/ways/`
 
-Claude Code plugins can ship `hooks/ways/` directories inside their install paths (demonstrated by the `x@tracer-plugins` plugin which contains `hooks/ways/fruity/way.md`). However, the ways system has no mechanism to discover or scan these. Plugin-shipped ways are invisible.
+Claude Code plugins can ship `ways/` directories inside their install paths (matching the project-local convention, demonstrated by the `x@tracer-plugins` plugin which contains `.claude/ways/fruity/way.md`). However, the ways system has no mechanism to discover or scan these. Plugin-shipped ways are invisible.
 
 Claude Code provides a stable CLI interface for querying plugin state:
 
@@ -57,7 +57,7 @@ A new step in the `SessionStart` hook chain (after `ways init`, before `ways cor
 
 1. Run `claude plugin list --json`
 2. Filter to `enabled == true`
-3. For each, check if `$installPath/hooks/ways/` exists on disk
+3. For each, check if `$installPath/ways/` exists on disk
 4. Deduplicate by plugin name: if multiple versions, keep the one with the latest `lastUpdated`
 5. Write the list of way-paths to `$SESSION_DIR/plugin-ways.json`
 
@@ -67,7 +67,7 @@ The manifest format:
 [
   {
     "id": "x@tracer-plugins",
-    "path": "/Users/tracer/.claude/plugins/cache/tracer-plugins/x/1.0.0/hooks/ways"
+    "path": "/Users/tracer/.claude/plugins/cache/tracer-plugins/x/1.0.0/ways"
   }
 ]
 ```
@@ -78,7 +78,7 @@ The manifest format:
 
 ```
 1. $PROJECT/.claude/ways/              — project-local (highest priority)
-2. $PLUGIN/hooks/ways/                 — per enabled plugin (middle priority)
+2. $PLUGIN/ways/                 — per enabled plugin (middle priority)
 3. ~/.claude/hooks/ways/               — global (lowest priority)
 ```
 
@@ -126,6 +126,18 @@ Plugin macros (`macro.sh` files inside plugin ways) are third-party code. They f
 - **Mid-session plugin changes**: If a user installs/removes/toggles a plugin during a session, the manifest is stale until the next session or compaction. Acceptable — plugin changes are rare and a session restart is natural.
 - **Manifest missing**: If the session manifest doesn't exist (e.g., older ways binary, failed resolution), `collect_candidates()` falls back to the current two-source behavior. No breakage.
 - **Plugin path instability**: Plugin install paths include version strings that change on update. The session manifest captures the path at resolution time, so this is fine within a session. Cross-session, the next start re-resolves.
+
+### Way file path convention
+
+Each way lives in its own directory, named to match the way file. This enables sibling files (`.check.md`, `macro.sh`) alongside the way definition.
+
+| Scope | Full path |
+|-------|-----------|
+| Global | `~/.claude/hooks/ways/{domain}/{way}/{way}.md` |
+| Project-local | `$PROJECT/.claude/ways/{domain}/{way}/{way}.md` |
+| Plugin | `$PLUGIN_INSTALL_PATH/ways/{domain}/{way}/{way}.md` |
+
+Plugins use `ways/` at the plugin install root. Global ways use `hooks/ways/` under `~/.claude/` because they sit alongside other hook types.
 
 ## Implementation
 

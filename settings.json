@@ -70,6 +70,7 @@
     ],
     "defaultMode": "default"
   },
+  "model": "sonnet[1m]",
   "hooks": {
     "SessionStart": [
       {
@@ -265,6 +266,5 @@
         "path": "/Users/tracer/claude-plugins"
       }
     }
-  },
-  "model": "opus"
+  }
 }

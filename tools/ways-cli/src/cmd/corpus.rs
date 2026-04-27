@@ -533,7 +533,7 @@ fn content_hash(dir: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-/// Discover enabled plugins that ship hooks/ways/ directories (ADR-129).
+/// Discover enabled plugins that ship ways/ directories (ADR-129).
 ///
 /// Reads installed_plugins.json and settings.json directly — corpus
 /// generation runs outside any session context, so there's no session
@@ -589,8 +589,7 @@ fn discover_plugin_way_dirs() -> Vec<(String, PathBuf)> {
         }).max_by(|a, b| a.1.cmp(&b.1));
 
         if let Some((install_path, _)) = best {
-            let ways_dir = PathBuf::from(&install_path).join("hooks/ways");
-            if ways_dir.is_dir() {
+            if let Some(ways_dir) = crate::session::resolve_plugin_ways_path(&install_path) {
                 result.push((plugin_id.clone(), ways_dir));
             }
         }

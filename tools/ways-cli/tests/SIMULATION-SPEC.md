@@ -92,7 +92,7 @@ Tests: `commands:` regex matching, multiple independent triggers.
 ```
 Turn 1: edit ".env" → expect environment/config
 Turn 2: edit "src/api/routes.ts" → nothing (no files: pattern)
-Turn 3: edit ".claude/ways/custom/custom.md" → expect knowledge/authoring
+Turn 3: edit "ways/custom/custom.md" → expect knowledge/authoring
 ```
 
 Tests: `files:` regex matching, project path filtering.
@@ -258,23 +258,28 @@ Tests: plugin macros are not executed by default (security boundary).
 
 ```
 tests/fixtures/
-├── ways/                          # existing fixture ways
+├── ways/                          # existing fixture ways (global convention)
 ├── plugin-a/                      # fixture plugin A
-│   └── hooks/ways/
+│   └── ways/
 │       └── plugindomain/
 │           └── fruit/
 │               └── fruit.md       # pattern: banana|apple, refire: 0.15
 ├── plugin-b/                      # fixture plugin B
-│   └── hooks/ways/
+│   └── ways/
 │       └── plugindomain/
 │           └── color/
 │               └── color.md       # pattern: red|blue|green, refire: 0.15
-└── plugin-with-check/
-    └── hooks/ways/
+├── plugin-with-check/
+│   └── ways/
+│       └── plugindomain/
+│           └── audited/
+│               ├── audited.md
+│               └── audited.check.md
+└── plugin-with-macro/
+    └── ways/
         └── plugindomain/
-            └── audited/
-                ├── audited.md
-                └── audited.check.md
+            └── greeter/
+                └── greeter.md
 
 Session helper: Session::with_plugins(name, plugins: &[PluginFixture]) that:
   1. Creates plugin-ways.json in the session dir
