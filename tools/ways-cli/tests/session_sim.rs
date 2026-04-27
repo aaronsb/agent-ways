@@ -157,6 +157,22 @@ impl Session {
         String::from_utf8_lossy(&output.stdout).to_string()
     }
 
+    fn list_available(&self, project: &str) -> String {
+        let output = Command::new(ways_bin())
+            .args([
+                "list", "--available",
+                "--session", &self.id,
+                "--project", project,
+                "--json",
+            ])
+            .env("HOME", fixture_home())
+            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
+            .output()
+            .expect("Failed to run ways list --available");
+
+        String::from_utf8_lossy(&output.stdout).to_string()
+    }
+
     fn scan_state(&self) -> String {
         let output = Command::new(ways_bin())
             .args([
@@ -287,6 +303,46 @@ impl std::ops::Deref for PluginSession {
 fn clean_markers(session_id: &str) {
     let session_dir = format!("{}/{session_id}", sessions_root());
     let _ = std::fs::remove_dir_all(&session_dir);
+}
+
+// ── List --available assertion helpers ─────────────────────────
+
+/// Parse way IDs from `ways list --available --json` output.
+fn available_way_ids(json_output: &str) -> Vec<String> {
+    let v: serde_json::Value = serde_json::from_str(json_output)
+        .unwrap_or_else(|e| panic!("Failed to parse list --available JSON: {e}\nOutput: {json_output}"));
+    v["ways"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|w| w["id"].as_str().map(|s| s.to_string()))
+        .collect()
+}
+
+/// Parse way source from `ways list --available --json` output.
+fn available_way_source(json_output: &str, way_id: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json_output).ok()?;
+    v["ways"]
+        .as_array()?
+        .iter()
+        .find(|w| w["id"].as_str() == Some(way_id))
+        .and_then(|w| w["source"].as_str().map(|s| s.to_string()))
+}
+
+fn assert_available_contains(json_output: &str, way_id: &str) {
+    let ids = available_way_ids(json_output);
+    assert!(
+        ids.iter().any(|id| id == way_id),
+        "Expected '{way_id}' in available ways but not found.\nGot: {ids:?}"
+    );
+}
+
+fn assert_available_not_contains(json_output: &str, way_id: &str) {
+    let ids = available_way_ids(json_output);
+    assert!(
+        !ids.iter().any(|id| id == way_id),
+        "Expected '{way_id}' NOT in available ways but it was found."
+    );
 }
 
 // ── Assertion helpers ──────────────────────────────────────────
@@ -750,4 +806,71 @@ fn scenario_11i_plugin_macro_not_trusted() {
     // We can't easily assert macro didn't run from marker checks alone,
     // but the way firing without error is the baseline. The macro trust
     // gating is handled by show::way checking is_project_trusted().
+}
+
+// ── Scenario 12: ways list --available ──────────────────────────
+
+// 12a: Global ways appear in available list
+#[test]
+fn scenario_12a_available_shows_global_ways() {
+    let s = Session::new("s12a");
+
+    let output = s.list_available("/tmp/nonexistent-project");
+    assert_available_contains(&output, "testdomain/parent");
+    assert_available_contains(&output, "testdomain/parent/child");
+    assert_available_contains(&output, "testdomain/cmd-trigger");
+    assert_available_contains(&output, "testdomain/file-trigger");
+
+    // Verify source is "global"
+    assert_eq!(available_way_source(&output, "testdomain/parent").as_deref(), Some("global"));
+}
+
+// 12b: Plugin ways require live `claude` CLI — tested manually, not in CI.
+// (resolve_plugins_live() shells out to `claude plugin list --json`)
+// Plugin discovery in sessions is covered by scenarios 11a-11i via the manifest.
+
+// 12c: No plugins in test env (no `claude` CLI) — global ways still work
+#[test]
+fn scenario_12c_available_no_plugins_without_cli() {
+    let s = Session::new("s12c");
+
+    let output = s.list_available("/tmp/nonexistent-project");
+    // No plugin ways — resolve_plugins_live() returns empty without `claude` CLI
+    let ids = available_way_ids(&output);
+    assert!(!ids.iter().any(|id| id.starts_with("plugin:")));
+
+    // Global ways still work
+    assert_available_contains(&output, "testdomain/parent");
+}
+
+// 12f: Global discovery unaffected by absence of plugins
+#[test]
+fn scenario_12f_available_empty_manifest() {
+    let s = PluginSession::new("s12f", &[]);
+
+    let output = s.list_available("/tmp/nonexistent-project");
+    // No plugin ways
+    let ids = available_way_ids(&output);
+    assert!(!ids.iter().any(|id| id.starts_with("plugin:")), "No plugin ways expected with empty manifest");
+
+    // Global ways still work
+    assert_available_contains(&output, "testdomain/parent");
+}
+
+// 12g: When preconditions filter available ways
+#[test]
+fn scenario_12g_available_respects_when_preconditions() {
+    let s = Session::new("s12g");
+
+    // gated-way has when: { project: /tmp/test-project-sim }
+    // Wrong project → gated-way should NOT appear
+    let output = s.list_available("/tmp/wrong-project");
+    assert_available_not_contains(&output, "testdomain/gated-way");
+
+    // Correct project → gated-way SHOULD appear
+    std::fs::create_dir_all("/tmp/test-project-sim").unwrap();
+    let output = s.list_available("/tmp/test-project-sim");
+    assert_available_contains(&output, "testdomain/gated-way");
+
+    let _ = std::fs::remove_dir("/tmp/test-project-sim");
 }

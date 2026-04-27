@@ -3,7 +3,7 @@
 //! Combines file walking, frontmatter extraction, matching (pattern + semantic),
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
-mod candidates;
+pub(crate) mod candidates;
 mod scoring;
 pub(crate) use scoring::batch_embed_score;
 
@@ -13,7 +13,8 @@ use std::path::PathBuf;
 
 use crate::session;
 
-use candidates::{check_when, collect_candidates, collect_checks};
+use candidates::{collect_candidates, collect_checks};
+pub(crate) use candidates::check_when;
 use scoring::{capture_show_check, capture_show_way, default_project, EmbedScores};
 
 pub(crate) struct WayCandidate {

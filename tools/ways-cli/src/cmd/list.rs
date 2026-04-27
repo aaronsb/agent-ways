@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use crate::cmd::context;
 use crate::cmd::render::{self, WayRow};
+use crate::cmd::scan::candidates::{check_when, collect_candidates_with_plugins};
 use crate::session;
 
 /// A fired way with all its session state.
@@ -279,6 +280,147 @@ fn latest_session_for_project(project: &str) -> Option<String> {
 }
 
 use crate::util::detect_project_dir;
+
+// ── Available mode ────────────────────────────────────────────
+
+pub fn run_available(project: Option<&str>, _session: Option<&str>, json_out: bool) -> Result<()> {
+    let project_dir = project
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
+        .unwrap_or_else(|| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+
+    // Always resolve plugins live — --available answers "what's available now",
+    // not "what was available when the session started".
+    let plugins = session::resolve_plugins_live();
+
+    let mut candidates = collect_candidates_with_plugins(&project_dir, &plugins);
+
+    // Apply when: preconditions (project gate, file_exists gate)
+    candidates.retain(|c| check_when(&c.when_project, &c.when_file_exists, &project_dir));
+
+    // Sort by ID for stable output
+    candidates.sort_by(|a, b| a.id.cmp(&b.id));
+
+    if json_out {
+        let entries: Vec<serde_json::Value> = candidates
+            .iter()
+            .map(|c| {
+                let source = if c.id.starts_with("plugin:") {
+                    "plugin"
+                } else if c.path.to_string_lossy().contains("/.claude/ways/") {
+                    "project"
+                } else {
+                    "global"
+                };
+                let mut trigger = Vec::new();
+                if c.pattern.is_some() { trigger.push("pattern"); }
+                if c.commands.is_some() { trigger.push("commands"); }
+                if c.files.is_some() { trigger.push("files"); }
+                if c.trigger.is_some() { trigger.push(c.trigger.as_deref().unwrap_or("custom")); }
+                if !c.description.is_empty() && trigger.is_empty() { trigger.push("semantic"); }
+
+                json!({
+                    "id": c.id,
+                    "source": source,
+                    "scope": c.scope,
+                    "path": c.path.display().to_string(),
+                    "description": c.description,
+                    "trigger": trigger,
+                })
+            })
+            .collect();
+
+        let output = json!({
+            "project": project_dir,
+            "ways_count": entries.len(),
+            "ways": entries,
+        });
+        println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+        return Ok(());
+    }
+
+    if candidates.is_empty() {
+        println!("No ways available for {project_dir}");
+        return Ok(());
+    }
+
+    // Group by source
+    let mut global = Vec::new();
+    let mut project_local = Vec::new();
+    let mut plugin = Vec::new();
+
+    for c in &candidates {
+        if c.id.starts_with("plugin:") {
+            plugin.push(c);
+        } else if c.path.to_string_lossy().contains("/.claude/ways/") {
+            project_local.push(c);
+        } else {
+            global.push(c);
+        }
+    }
+
+    println!();
+    println!(
+        "\x1b[1mAvailable ways\x1b[0m for \x1b[2m{}\x1b[0m  ({} total)",
+        project_dir,
+        candidates.len()
+    );
+    println!();
+
+    if !project_local.is_empty() {
+        println!("  \x1b[1;33mproject\x1b[0m ({}):", project_local.len());
+        for c in &project_local {
+            print_way_line(c);
+        }
+        println!();
+    }
+
+    if !plugin.is_empty() {
+        println!("  \x1b[1;35mplugin\x1b[0m ({}):", plugin.len());
+        for c in &plugin {
+            print_way_line(c);
+        }
+        println!();
+    }
+
+    if !global.is_empty() {
+        println!("  \x1b[1;36mglobal\x1b[0m ({}):", global.len());
+        for c in &global {
+            print_way_line(c);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_way_line(c: &crate::cmd::scan::WayCandidate) {
+    let trigger = if c.pattern.is_some() {
+        "pattern"
+    } else if c.commands.is_some() {
+        "commands"
+    } else if c.files.is_some() {
+        "files"
+    } else if c.trigger.is_some() {
+        c.trigger.as_deref().unwrap_or("custom")
+    } else if !c.description.is_empty() {
+        "semantic"
+    } else {
+        "?"
+    };
+
+    let desc = if !c.description.is_empty() {
+        let d = &c.description;
+        if d.len() > 60 { &d[..60] } else { d }
+    } else {
+        ""
+    };
+
+    println!(
+        "    \x1b[1m{}\x1b[0m  \x1b[2m[{}]\x1b[0m  {}",
+        c.id, trigger, desc
+    );
+}
 
 fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64) {
     let entries: Vec<serde_json::Value> = ways

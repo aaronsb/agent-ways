@@ -10,6 +10,11 @@ use super::WayCandidate;
 // ── Collection ─────────────────────────────────────────────────
 
 pub(crate) fn collect_candidates(project_dir: &str, session_id: &str) -> Vec<WayCandidate> {
+    let plugins = crate::session::plugin_way_dirs(session_id);
+    collect_candidates_with_plugins(project_dir, &plugins)
+}
+
+pub(crate) fn collect_candidates_with_plugins(project_dir: &str, plugins: &[crate::session::PluginWayEntry]) -> Vec<WayCandidate> {
     let mut candidates = Vec::new();
 
     // Project-local first (highest priority)
@@ -19,7 +24,7 @@ pub(crate) fn collect_candidates(project_dir: &str, session_id: &str) -> Vec<Way
     }
 
     // Plugin ways (middle priority — ADR-129)
-    collect_plugin_candidates(session_id, project_dir, &mut candidates, false);
+    collect_plugin_candidates_from(plugins, project_dir, &mut candidates, false);
 
     // Global (lowest priority)
     let global_ways = super::scoring::home_dir().join(".claude/hooks/ways");
@@ -29,6 +34,7 @@ pub(crate) fn collect_candidates(project_dir: &str, session_id: &str) -> Vec<Way
 }
 
 pub(crate) fn collect_checks(project_dir: &str, session_id: &str) -> Vec<WayCandidate> {
+    let plugins = crate::session::plugin_way_dirs(session_id);
     let mut candidates = Vec::new();
 
     let project_ways = PathBuf::from(project_dir).join(".claude/ways");
@@ -37,7 +43,7 @@ pub(crate) fn collect_checks(project_dir: &str, session_id: &str) -> Vec<WayCand
     }
 
     // Plugin checks (ADR-129)
-    collect_plugin_candidates(session_id, project_dir, &mut candidates, true);
+    collect_plugin_candidates_from(&plugins, project_dir, &mut candidates, true);
 
     let global_ways = super::scoring::home_dir().join(".claude/hooks/ways");
     collect_checks_from_dir(&global_ways, &mut candidates);
@@ -45,16 +51,14 @@ pub(crate) fn collect_checks(project_dir: &str, session_id: &str) -> Vec<WayCand
     candidates
 }
 
-/// Collect way candidates from enabled plugins (ADR-129).
+/// Collect way candidates from plugin entries (ADR-129).
 ///
-/// Reads the session plugin-ways manifest and scans each plugin's
-/// hooks/ways/ directory. Plugin way IDs are prefixed with `plugin:{id}/`.
-/// Project-scoped plugins are filtered to the current project.
-fn collect_plugin_candidates(session_id: &str, project_dir: &str, out: &mut Vec<WayCandidate>, checks_only: bool) {
-    let entries = crate::session::plugin_way_dirs(session_id);
-
+/// Scans each plugin's ways/ directory. Plugin way IDs are prefixed
+/// with `plugin:{id}/`. Project-scoped plugins are filtered to the
+/// current project.
+fn collect_plugin_candidates_from(entries: &[crate::session::PluginWayEntry], project_dir: &str, out: &mut Vec<WayCandidate>, checks_only: bool) {
     // Filter project-scoped plugins to current project
-    let entries: Vec<_> = entries.into_iter().filter(|e| {
+    let entries: Vec<_> = entries.iter().filter(|e| {
         match (&e.scope as &str, &e.project_path) {
             ("project", Some(pp)) => {
                 // Canonicalize both to handle symlinks/trailing slashes

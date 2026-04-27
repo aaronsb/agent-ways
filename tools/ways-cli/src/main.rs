@@ -186,6 +186,12 @@ enum Commands {
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
+        /// List all discoverable ways for a project path (not just fired ones)
+        #[arg(long)]
+        available: bool,
+        /// Project path for --available (default: CLAUDE_PROJECT_DIR or cwd)
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
@@ -503,7 +509,13 @@ fn main() -> Result<()> {
         Commands::Stats { days, project, json, global } => {
             cmd::stats::run(days, project.as_deref(), json, global)
         }
-        Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
+        Commands::List { session, sort, json, available, project } => {
+            if available {
+                cmd::list::run_available(project.as_deref(), session.as_deref(), json)
+            } else {
+                cmd::list::run(session.as_deref(), &sort, json)
+            }
+        }
         Commands::Rethink { session, project, speed, list } => {
             cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list)
         }
