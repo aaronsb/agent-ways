@@ -120,8 +120,7 @@ pub(super) fn maybe_self_reload(
 
     use std::os::unix::process::CommandExt;
     let args: Vec<String> = std::env::args().collect();
-    let argv0 = args.first().cloned().unwrap_or_default();
-    let err = std::process::Command::new(&argv0)
+    let err = std::process::Command::new(&args[0])
         .args(&args[1..])
         .env("ATTEND_RELOADED_FROM", &prev_version)
         .exec();

@@ -120,8 +120,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 }
                 KeyCode::Enter => {
                     let v = input.read().clone();
-                    let sigs = signals.read().clone();
-                    match handle_enter(&v, &sigs) {
+                    // Hold the read guard rather than clone — Rust
+                    // deref-coerces `&Ref<Vec<Signal>>` to `&[Signal]`,
+                    // so the handler sees a borrowed slice without
+                    // copying the (capped, but potentially 5000-entry)
+                    // signal buffer on every keypress.
+                    let sigs_guard = signals.read();
+                    match handle_enter(&v, &sigs_guard) {
                         EnterAction::None => {}
                         EnterAction::ClearWithStatus(s) => {
                             status.set(s);
@@ -135,8 +140,11 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     let buf = input.read().clone();
                     let cur = cursor.get();
                     let cycle = tab_cycle.read().clone();
-                    let sigs = signals.read().clone();
-                    let res = handle_tab(&buf, cur, cycle, &sigs);
+                    // Same borrow-not-clone discipline as Enter — Tab
+                    // fires more often (every keystroke when cycling
+                    // completions), so the per-press cost matters.
+                    let sigs_guard = signals.read();
+                    let res = handle_tab(&buf, cur, cycle, &sigs_guard);
                     input.set(res.new_buf);
                     cursor.set(res.new_cursor);
                     tab_cycle.set(res.new_cycle);
