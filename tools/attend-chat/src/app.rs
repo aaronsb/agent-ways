@@ -18,7 +18,7 @@ use iocraft::prelude::*;
 use crate::chip::{chip_for, color_for, known_identities, resolve_nickname, CHIP_WIDTH};
 use crate::sessions::discover as discover_sessions;
 use crate::text_layout::{render_cursor, split_at_char, visual_line_count};
-use crate::groups::{channels, resolve_group_dir};
+use crate::groups::{channels, live_peer_count, resolve_group_dir};
 use crate::helper::{self, HelperMode};
 use crate::legend::{
     apply_completion, best_completion, best_group_completion, find_trailing_mention,
@@ -148,8 +148,30 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                                 }
                             }
                             Some(Addressed::Group(name)) => match resolve_group_dir(name) {
-                                Some(dir) => write_signal(&dir, &msg)
-                                    .map(|n| format!("sent → #{name}: {n}")),
+                                // Empty-group rejection (ADR-129
+                                // follow-up). Mirrors PR #75's
+                                // `attend send --focus` discipline:
+                                // a `#groupname` send to a group
+                                // with zero live members would land
+                                // in `@<name>/` and sit unread until
+                                // cleanup, with the chat reporting
+                                // "sent" so the user assumes
+                                // delivery. The base channel
+                                // (`#open`) bypasses the check —
+                                // it rides `_broadcast/`, where
+                                // every attend scans regardless
+                                // of group membership.
+                                Some(dir) if live_peer_count(name) > 0 => {
+                                    write_signal(&dir, &msg)
+                                        .map(|n| format!("sent → #{name}: {n}"))
+                                }
+                                Some(_) => Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    format!(
+                                        "#{name}: no live peers — message would not be read. \
+                                         Try #open to broadcast."
+                                    ),
+                                )),
                                 None => Err(std::io::Error::new(
                                     std::io::ErrorKind::NotFound,
                                     format!("#{name}: unknown group"),

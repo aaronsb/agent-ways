@@ -225,6 +225,47 @@ pub fn resolve_group_dir(name: &str) -> Option<PathBuf> {
     }
 }
 
+/// Count of live (heartbeat-fresh) members of a focus group, derived
+/// from `_groups.yaml` membership intersected with the heartbeat
+/// liveness gate (ADR-129).
+///
+/// Mirrors the discipline `attend send --focus` enforces in
+/// `tools/attend/src/cmd/send.rs` — closes the same silent-routing
+/// trap (PR #75) on the attend-chat `#groupname` send path. A
+/// signal written to a group with no live listeners would sit in
+/// `@<name>/` until cleanup, with the sender seeing a confirmation
+/// while no peer ever scans the file.
+///
+/// The base channel `#open` always returns a non-zero count — it
+/// rides `_broadcast/`, which every attend scans, so liveness
+/// validation is both unnecessary and would block legitimate
+/// broadcasts when no other peers are present (a human typing in
+/// chat is a valid send-only scenario).
+pub fn live_peer_count(name: &str) -> usize {
+    live_peer_count_in(&signals_base(), name)
+}
+
+/// Test-seam counterpart to [`live_peer_count`] — same logic against
+/// an arbitrary base directory. Tests can populate `_groups.yaml`
+/// + heartbeats under a tempdir without touching `$HOME`.
+pub fn live_peer_count_in(base: &Path, name: &str) -> usize {
+    if name == BASE_CHANNEL_NAME {
+        // Base channel is always reachable; bypass the check.
+        return usize::MAX;
+    }
+    let memberships = load_memberships(base);
+    let Some(membership) = memberships.get(name) else {
+        return 0;
+    };
+    membership
+        .members
+        .iter()
+        .filter(|sid| {
+            attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE)
+        })
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +328,36 @@ mod tests {
         // follows. The on-disk `@open/` is filtered out.
         assert_eq!(names, vec!["open", "deploy"]);
         assert!(ch[0].is_base);
+    }
+
+    #[test]
+    fn live_peer_count_zero_for_unknown_group() {
+        let base = tempdir_like();
+        // No yaml, no entry → 0.
+        assert_eq!(live_peer_count_in(&base, "ghost"), 0);
+    }
+
+    #[test]
+    fn live_peer_count_zero_for_group_with_no_fresh_members() {
+        // The yaml lists a member, but the heartbeat for that member
+        // is missing — `is_fresh` returns false, so the live count
+        // is zero. This is the silent-routing trap fix: a group
+        // entry that survives an exited peer must not validate.
+        let base = tempdir_like();
+        write_yaml(
+            &base,
+            "temp:\n  pinned: false\n  members:\n    - dead-session-id\n",
+        );
+        assert_eq!(live_peer_count_in(&base, "temp"), 0);
+    }
+
+    #[test]
+    fn live_peer_count_open_channel_is_unbounded() {
+        // The base channel always returns a non-zero count so a
+        // human typing `#open hello` is never blocked by the
+        // "no live peers" check — broadcasts are always reachable.
+        let base = tempdir_like();
+        assert!(live_peer_count_in(&base, BASE_CHANNEL_NAME) > 0);
     }
 
     #[test]
