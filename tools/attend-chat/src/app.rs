@@ -155,7 +155,19 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         }
                         let caps = TermCaps::detect();
                         let seeds = discover_sessions();
-                        let agents = known_identities(&signals.read(), &seeds, caps);
+                        // Local instance cache for this Enter-handler
+                        // invocation. Distinct from the per-render
+                        // cache because key handlers are not on the
+                        // render path — they fire on demand and
+                        // resolve against the current registry state.
+                        let instance_cache =
+                            attend_instances::SnapshotCache::new();
+                        let agents = known_identities(
+                            &signals.read(),
+                            &seeds,
+                            caps,
+                            &instance_cache,
+                        );
                         let result = match parse_addressed(&msg) {
                             Some(Addressed::Agent(name)) => {
                                 match resolve_nickname(name, &agents) {
@@ -299,10 +311,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     let candidates: Vec<String> = match mention.sigil {
                         Sigil::Agent => {
                             let seeds = discover_sessions();
+                            let instance_cache =
+                                attend_instances::SnapshotCache::new();
                             let agents = known_identities(
                                 &signals.read(),
                                 &seeds,
                                 caps,
+                                &instance_cache,
                             );
                             all_completions(mention.partial, &agents)
                         }
@@ -420,6 +435,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // reactive graph. Drives time-based discovery (new peers
     // appear, stale peers disappear) without requiring a key event.
     let _refresh = tick.get();
+    // Per-render instance-registry cache (ADR-129; PR #77 review).
+    // Built once at the top of each render and passed down to every
+    // chip / known_identities call so the registry yaml is read at
+    // most once per distinct cwd per render. Deliberately scoped to
+    // this function — never share across renders, since the
+    // registry can change between renders (peer registers, GC).
+    let instance_cache = attend_instances::SnapshotCache::new();
     // Registries and trailing-partial for the legend + completion
     // highlight. Re-derived each render:
     // - `known_identities`: dedupes in O(n) over the capped signal
@@ -429,7 +451,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     //   history), so the cost is negligible next to the render we'd
     //   do anyway. Simpler than caching with invalidation.
     let seed_sessions = discover_sessions();
-    let known = known_identities(&signals.read(), &seed_sessions, caps);
+    let known = known_identities(&signals.read(), &seed_sessions, caps, &instance_cache);
     // `channels` prepends the synthetic `#open` base and drops any
     // lingering literal `open` group so the legend has a single
     // commons chip (ADR-124 §1–§2). The base entry has empty
@@ -472,7 +494,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
         .read()
         .iter()
         .map(|s| {
-            let chip = chip_for(&s.from, &s.project, &s.cwd, caps);
+            let chip = chip_for(&s.from, &s.project, &s.cwd, caps, &instance_cache);
             let weight = if chip.style.bold { Weight::Bold } else { Weight::Normal };
             let color = color_for(chip.palette, caps);
             // Group glyphs for this chip: cross-reference the

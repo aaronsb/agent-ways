@@ -12,6 +12,7 @@
 //! than a growing `app.rs`.
 
 use agent_identity::{Identity, PaletteEntry, Style, TermCaps};
+use attend_instances::SnapshotCache;
 use iocraft::prelude::Color;
 
 use crate::sessions::DiscoveredSession;
@@ -40,14 +41,26 @@ pub struct ChipInfo {
 /// Derive the chip from the wire `from`/`project`/`cwd` triple.
 ///
 /// Claudes get a stable nickname keyed on their full cwd path (see
-/// `agent_identity::Identity::for_cwd`). Humans keep their username
-/// but still pick up a color + style from the identity table so the
-/// avatar is visually consistent everywhere the same user shows up.
+/// `agent_identity::Identity::for_cwd`) plus an instance suffix
+/// resolved through `instances` (ADR-129). Humans keep their
+/// username but still pick up a color + style from the identity
+/// table so the avatar is visually consistent everywhere the same
+/// user shows up.
+///
+/// `instances` is a per-render cache that collapses repeat lookups
+/// for the same cwd into a single registry read. Build it once at
+/// the top of a render pass and pass it through to every chip.
 ///
 /// This function never touches the wire format — identity is pure
 /// receiver-side rendering. If the signal's `from` doesn't match a
 /// known prefix, we fall through to showing the raw value.
-pub fn chip_for(from: &str, project: &str, cwd: &str, caps: TermCaps) -> ChipInfo {
+pub fn chip_for(
+    from: &str,
+    project: &str,
+    cwd: &str,
+    caps: TermCaps,
+    instances: &SnapshotCache,
+) -> ChipInfo {
     let interior = (CHIP_WIDTH as usize).saturating_sub(4);
     let scope_src = if cwd.is_empty() { project } else { cwd };
     let scope_segment = scope_src.rsplit('/').next().unwrap_or(scope_src);
@@ -63,7 +76,7 @@ pub fn chip_for(from: &str, project: &str, cwd: &str, caps: TermCaps) -> ChipInf
         // same dir wear the same nickname stem, with a per-session
         // instance suffix (ADR-129) appended to disambiguate.
         let id = Identity::for_cwd(cwd, caps);
-        let display = with_instance(id.nickname, cwd, uuid);
+        let display = with_instance(id.nickname, cwd, uuid, instances);
         ChipInfo {
             primary: truncate(&display, interior),
             secondary: truncate(&scope, interior),
@@ -142,9 +155,10 @@ pub fn known_identities(
     signals: &[Signal],
     seeds: &[DiscoveredSession],
     caps: TermCaps,
+    instances: &SnapshotCache,
 ) -> Vec<KnownIdentity> {
     // Production wrapper: gate on heartbeat freshness (ADR-129).
-    known_identities_with_liveness(signals, seeds, caps, claude_is_live)
+    known_identities_with_liveness(signals, seeds, caps, claude_is_live, instances)
 }
 
 /// Same as [`known_identities`] but with an injectable claude-liveness
@@ -157,6 +171,7 @@ pub fn known_identities_with_liveness<F>(
     seeds: &[DiscoveredSession],
     caps: TermCaps,
     is_live: F,
+    instances: &SnapshotCache,
 ) -> Vec<KnownIdentity>
 where
     F: Fn(&str) -> bool,
@@ -180,7 +195,7 @@ where
             // Instance suffix: `@Tamsin-alpha` is the addressable name
             // — same-cwd siblings differ on the suffix and dedupe as
             // distinct entries in the legend.
-            let display = with_instance(id.nickname, &sig.cwd, sid);
+            let display = with_instance(id.nickname, &sig.cwd, sid, instances);
             (display, true, id)
         } else if let Some(rest) = sig.from.strip_prefix("external:") {
             // Humans are not liveness-filtered — they have no heartbeat
@@ -229,7 +244,7 @@ where
             continue;
         }
         let id = Identity::for_cwd(&seed.cwd, caps);
-        let display = with_instance(id.nickname, &seed.cwd, &seed.session_id);
+        let display = with_instance(id.nickname, &seed.cwd, &seed.session_id, instances);
         let key = format!("{}\x1f1\x1f{}", display, seed.cwd);
         if seen.insert(key) {
             out.push(KnownIdentity {
@@ -255,8 +270,13 @@ fn claude_is_live(session_id: &str) -> bool {
 /// Falls back to the bare nickname when the registry has no entry —
 /// only happens in the moments before a session has registered, or
 /// when the registry file is unreadable.
-fn with_instance(nickname: &str, cwd: &str, session_id: &str) -> String {
-    match attend_instances::Registry::new().lookup(cwd, session_id) {
+///
+/// Reads through `instances`, which caches per-cwd snapshots for
+/// the lifetime of one render pass. Without this cache the render
+/// path read + parsed the registry yaml once per chip; with it,
+/// the read is amortized to once per distinct cwd per render.
+fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &SnapshotCache) -> String {
+    match instances.lookup(cwd, session_id) {
         Some(inst) => format!("{nickname}-{inst}"),
         None => nickname.to_string(),
     }
@@ -364,6 +384,15 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
+    /// Synthetic test session_ids never have registry entries, so a
+    /// fresh cache always returns `None` from `lookup` and the suffix
+    /// path falls back to bare nicknames. Tests that already worked
+    /// against the un-cached `with_instance` continue to pass; the
+    /// per-render cache is purely a performance addition.
+    fn empty_cache() -> SnapshotCache {
+        SnapshotCache::new()
+    }
+
     #[test]
     fn claude_sender_uses_derived_nickname() {
         // A claude in /home/aaron/.claude gets a nickname from the
@@ -373,6 +402,7 @@ mod tests {
             "claude",
             "/home/aaron/.claude",
             TermCaps::Rich,
+            &empty_cache(),
         );
         let expected = Identity::for_cwd("/home/aaron/.claude", TermCaps::Rich);
         assert_eq!(chip.primary, expected.nickname);
@@ -384,20 +414,20 @@ mod tests {
         // Two sequential claudes in the same cwd should show the same
         // name — the session UUID changes but identity is keyed on
         // cwd, not session.
-        let a = chip_for("claude:aaaa-1", "p", "/home/x", TermCaps::Rich);
-        let b = chip_for("claude:bbbb-2", "p", "/home/x", TermCaps::Rich);
+        let a = chip_for("claude:aaaa-1", "p", "/home/x", TermCaps::Rich, &empty_cache());
+        let b = chip_for("claude:bbbb-2", "p", "/home/x", TermCaps::Rich, &empty_cache());
         assert_eq!(a.primary, b.primary);
     }
 
     #[test]
     fn scope_prefers_cwd_basename_over_project() {
-        let chip = chip_for("external:aaron", "ignored", "/home/aaron/temp", TermCaps::Rich);
+        let chip = chip_for("external:aaron", "ignored", "/home/aaron/temp", TermCaps::Rich, &empty_cache());
         assert_eq!(chip.secondary, "temp");
     }
 
     #[test]
     fn external_strips_terminal_suffix() {
-        let chip = chip_for("external:aaron@kitty", "proj", "/home/aaron", TermCaps::Rich);
+        let chip = chip_for("external:aaron@kitty", "proj", "/home/aaron", TermCaps::Rich, &empty_cache());
         assert_eq!(chip.primary, "aaron");
     }
 
@@ -409,6 +439,7 @@ mod tests {
             "x",
             "/tmp/some-very-long-directory-name",
             TermCaps::Rich,
+            &empty_cache(),
         );
         assert!(chip.secondary.chars().count() <= 16);
         assert!(chip.secondary.ends_with('…'));
@@ -418,8 +449,8 @@ mod tests {
     fn unknown_sender_still_colored() {
         // Something that isn't claude: or external: — we don't crash,
         // we show the raw value and pick a color off it.
-        let a = chip_for("mystery:abc", "", "/tmp", TermCaps::Rich);
-        let b = chip_for("mystery:xyz", "", "/tmp", TermCaps::Rich);
+        let a = chip_for("mystery:abc", "", "/tmp", TermCaps::Rich, &empty_cache());
+        let b = chip_for("mystery:xyz", "", "/tmp", TermCaps::Rich, &empty_cache());
         // Different senders → different colors most of the time. We
         // don't assert inequality (palette is finite), just that the
         // code path doesn't panic and produces valid output.
@@ -464,7 +495,7 @@ mod tests {
             sig("claude:a", "/home/x"), // same cwd, should dedup
             sig("claude:b", "/home/y"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2, "expected 2 unique identities, got {}", reg.len());
     }
 
@@ -474,7 +505,7 @@ mod tests {
             sig("claude:a", "/home/x"),
             sig("claude:b", "/home/y"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         // Buffer order is oldest→newest; registry should surface the
         // most-recent cwd first so active peers lead the legend.
         let y_id = Identity::for_cwd("/home/y", TermCaps::Rich);
@@ -484,7 +515,7 @@ mod tests {
     #[test]
     fn registry_includes_humans() {
         let buf = vec![sig("external:aaron@kitty", "/home/aaron/Projects")];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         assert_eq!(reg.len(), 1);
         assert_eq!(reg[0].nickname, "aaron");
         assert!(!reg[0].is_claude);
@@ -500,7 +531,7 @@ mod tests {
             sig("external:aaron@kitty", "/home/aaron/Projects"),
             sig("external:aaron@kitty", "/home/aaron/.claude"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         let aarons: Vec<_> = reg.iter().filter(|k| k.nickname == "aaron").collect();
         assert_eq!(aarons.len(), 1, "expected a single aaron entry, got {}", aarons.len());
     }
@@ -513,14 +544,14 @@ mod tests {
             sig("claude:a", "/home/me/proj-a"),
             sig("claude:b", "/home/me/proj-b"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2);
     }
 
     #[test]
     fn registry_skips_unknown_prefix() {
         let buf = vec![sig("mystery:abc", "/tmp")];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         assert!(reg.is_empty(), "unknown prefix should be ignored, got {reg:?}");
     }
 
@@ -532,7 +563,7 @@ mod tests {
             DiscoveredSession { cwd: "/home/x".to_string(), session_id: "sx".into() },
             DiscoveredSession { cwd: "/home/y".to_string(), session_id: "sy".into() },
         ];
-        let reg = known_identities_with_liveness(&[], &seeds, TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&[], &seeds, TermCaps::Rich, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2);
         assert!(reg.iter().all(|k| k.is_claude));
     }
@@ -549,7 +580,7 @@ mod tests {
             cwd: "/Y".to_string(),
             session_id: "sy".into(),
         }];
-        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2);
         assert_eq!(reg[0].cwd, "/X", "signal-derived entry must lead");
         assert_eq!(reg[1].cwd, "/Y", "seed-only entry falls in after");
@@ -564,7 +595,7 @@ mod tests {
             cwd: "/home/x".to_string(),
             session_id: "sx".into(),
         }];
-        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true, &empty_cache());
         assert_eq!(reg.len(), 1);
     }
 
@@ -574,7 +605,7 @@ mod tests {
             sig("claude:a", "/home/repo"),
             sig("external:aaron@kitty", "/home/aaron/Projects"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
         let claude_nick = &reg.iter().find(|k| k.is_claude).unwrap().nickname;
         // Case-insensitive match hits the claude cwd.
         let lowered = claude_nick.to_ascii_lowercase();

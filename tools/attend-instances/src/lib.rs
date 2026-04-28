@@ -50,7 +50,8 @@
 //! have been reclaimed. Acceptable — a week-stale resume is far from
 //! the "I just stepped away and came back" case.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -267,6 +268,62 @@ impl Registry {
 }
 
 impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Per-cwd cache layered over a [`Registry`]. Built once at the top
+/// of a render pass and passed down to every render site that needs
+/// to resolve a `(cwd, session_id) → instance` lookup. Each cwd is
+/// read at most once per cache instance, regardless of how many
+/// chips reference it.
+///
+/// PR #77 review: the previous render path called
+/// `Registry::new().lookup(cwd, sid)` once per chip — N file reads
+/// + N parses every render even when most chips share a cwd. This
+/// cache collapses that to one read per distinct cwd per render.
+///
+/// **Lifetime is exactly one render.** Construct fresh; do not
+/// share across renders. The registry on disk can change between
+/// renders (peer registers, GC fires), and a cache that survives
+/// a render would serve stale instance assignments. The render
+/// loop in attend-chat already runs cheap wall-clock-driven work,
+/// so a fresh `SnapshotCache::new()` per render is the
+/// invalidation strategy.
+pub struct SnapshotCache {
+    registry: Registry,
+    cache: RefCell<HashMap<String, BTreeMap<String, InstanceEntry>>>,
+}
+
+impl SnapshotCache {
+    /// Construct using the default registry root.
+    pub fn new() -> Self {
+        Self::with_registry(Registry::new())
+    }
+
+    /// Construct over a caller-supplied registry — useful for tests.
+    pub fn with_registry(registry: Registry) -> Self {
+        Self {
+            registry,
+            cache: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Resolve `(cwd, session_id) → instance` with per-cwd caching.
+    /// First call for a cwd hits the disk via `Registry::snapshot`;
+    /// subsequent calls for the same cwd return from the in-memory
+    /// map. Lookup miss inside a snapshot returns `None`.
+    pub fn lookup(&self, cwd: &str, session_id: &str) -> Option<String> {
+        let mut cache = self.cache.borrow_mut();
+        let snap = cache
+            .entry(cwd.to_string())
+            .or_insert_with(|| self.registry.snapshot(cwd));
+        snap.get(session_id).map(|e| e.instance.clone())
+    }
+}
+
+impl Default for SnapshotCache {
     fn default() -> Self {
         Self::new()
     }
@@ -667,6 +724,47 @@ sess-a:
         taken.insert("gamma");
         // Gap before delta — allocator picks the lowest-index hole.
         assert_eq!(next_free_instance(&taken), "delta");
+    }
+
+    #[test]
+    fn snapshot_cache_returns_same_instance_for_repeated_lookups() {
+        let _g = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let base = fresh_base();
+        let reg = Registry::with_base(base.clone());
+        let assigned = reg.register("/cwd", "sess-a").unwrap();
+
+        let cache = SnapshotCache::with_registry(Registry::with_base(base.clone()));
+        // First lookup must reflect what we just registered.
+        assert_eq!(cache.lookup("/cwd", "sess-a").as_deref(), Some(assigned.as_str()));
+        // Repeat lookups for the same (cwd, sid) return the same value
+        // — and, important to the perf claim, the second call hits
+        // the in-memory map rather than re-reading the yaml.
+        assert_eq!(cache.lookup("/cwd", "sess-a").as_deref(), Some(assigned.as_str()));
+        // Lookup miss returns None and is also cached implicitly via
+        // the per-cwd snapshot the entry-API populated on first call.
+        assert_eq!(cache.lookup("/cwd", "no-such-session"), None);
+
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn snapshot_cache_isolates_per_cwd() {
+        let _g = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let base = fresh_base();
+        let reg = Registry::with_base(base.clone());
+        reg.register("/cwd-a", "sess-a").unwrap();
+        reg.register("/cwd-b", "sess-b").unwrap();
+
+        let cache = SnapshotCache::with_registry(Registry::with_base(base.clone()));
+        // Each cwd is an independent snapshot — no cross-contamination
+        // between paths even though both rolled their own `alpha`.
+        assert_eq!(cache.lookup("/cwd-a", "sess-a").as_deref(), Some("alpha"));
+        assert_eq!(cache.lookup("/cwd-b", "sess-b").as_deref(), Some("alpha"));
+        // A session_id from one cwd does not resolve in the other.
+        assert_eq!(cache.lookup("/cwd-a", "sess-b"), None);
+        assert_eq!(cache.lookup("/cwd-b", "sess-a"), None);
+
+        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
