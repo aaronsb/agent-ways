@@ -170,6 +170,10 @@ tools/attend-chat/target/
 !tools/attend-heartbeat/**
 # attend-heartbeat build artifacts (workspace target, but listed for clarity)
 tools/attend-heartbeat/target/
+!tools/attend-instances/
+!tools/attend-instances/**
+# attend-instances build artifacts (workspace target, but listed for clarity)
+tools/attend-instances/target/
 # Workspace-level Cargo files
 !tools/Cargo.toml
 !tools/Cargo.lock

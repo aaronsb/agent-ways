@@ -12,6 +12,7 @@ members = [
     "attend",
     "attend-chat",
     "attend-heartbeat",
+    "attend-instances",
 ]
 resolver = "2"
 

@@ -1,0 +1,13 @@
+[package]
+name = "attend-instances"
+version = "0.1.0"
+edition = "2021"
+description = "Per-cwd session instance registry for attend (ADR-129)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "attend_instances"
+path = "src/lib.rs"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
