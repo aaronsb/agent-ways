@@ -247,6 +247,9 @@ dependencies = [
 [[package]]
 name = "attend-heartbeat"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "autocfg"

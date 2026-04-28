@@ -8,3 +8,6 @@ license = "MIT OR Apache-2.0"
 [lib]
 name = "attend_heartbeat"
 path = "src/lib.rs"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

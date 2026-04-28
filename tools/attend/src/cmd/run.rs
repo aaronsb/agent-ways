@@ -120,6 +120,55 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
 
     // Initialize rooms for signal routing (ADR-118)
     let session_id = own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
+
+    // Duplicate-attend guard (ADR-129). Acquire an exclusive flock on
+    // our heartbeat file so a second attend process cannot start for
+    // the same session. The lock is released by the kernel on process
+    // exit, so a panicking or killed attend does not need a janitor.
+    //
+    // Self-reload exec() keeps file descriptors and their flocks open,
+    // so the post-exec process *should* already hold the lock through
+    // FD inheritance. Re-acquiring with a fresh FD on that path will
+    // therefore return EWOULDBLOCK — we treat that as success on the
+    // reload path (gated on `ATTEND_RELOADED_FROM`).
+    //
+    // We still attempt the acquire on the reload path so the
+    // bootstrap migration works: when an older binary that did not
+    // take a lock execs into a new binary that does, the new process
+    // has no inherited lock, and the attempt below cleanly grabs one.
+    //
+    // The lock value lives on the stack until `cmd_run` returns; the
+    // sensor loop never returns under normal operation, so the lock
+    // effectively lives for the life of the process.
+    let reloaded = std::env::var("ATTEND_RELOADED_FROM").is_ok();
+    let _session_lock = match attend_heartbeat::try_acquire_session_lock(&session_id) {
+        Ok(Some(lock)) => Some(lock),
+        Ok(None) if reloaded => {
+            // The old binary's lock is still held through the inherited
+            // FD — that is the running attend, which is now us. No new
+            // lock object to track; the pre-exec FD continues to hold
+            // the kernel state until process exit.
+            None
+        }
+        Ok(None) => {
+            eprintln!(
+                "[attend] another attend is already running for session {session_id}; exiting cleanly"
+            );
+            return;
+        }
+        Err(e) => {
+            // Best-effort: log and proceed without a lock. A failed
+            // open is rare (permissions, missing dir), and exiting
+            // attend over a transient FS error would be a worse
+            // failure mode than running without the duplicate guard
+            // for one session.
+            emit::log(&format!(
+                "session lock unavailable ({e}); proceeding without duplicate-attend guard"
+            ));
+            None
+        }
+    };
+
     let group_mgr = groups::Groups::new(&signals_base(), &session_id);
 
     // ADR-124 one-shot: fold any lingering `@open/` group into the

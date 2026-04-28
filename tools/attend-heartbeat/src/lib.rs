@@ -24,6 +24,9 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+
 /// Default grace window. A session whose heartbeat is older than this
 /// is considered stale. Sized to 3× attend's base sensor interval so a
 /// single missed tick does not flip liveness.
@@ -98,6 +101,58 @@ pub fn clear(session_id: &str) -> io::Result<()> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
+    }
+}
+
+/// Holder for an exclusive process-level lock on a session's heartbeat
+/// file. While the value is alive the kernel guarantees no other
+/// process holds the lock for the same path. Drop the value (or the
+/// process exits) and the kernel releases automatically.
+///
+/// Implementation: non-blocking `flock(LOCK_EX | LOCK_NB)` on the
+/// heartbeat file's fd. We keep the `File` open for the lock's
+/// lifetime. Lock state is OS-managed — even a panicking attend
+/// releases on process exit, so recovery does not need a janitor.
+#[cfg(unix)]
+pub struct SessionLock {
+    _file: fs::File,
+}
+
+/// Try to acquire the exclusive process lock for a session. Returns
+/// `Ok(Some(_))` when this process owns the lock, `Ok(None)` when
+/// another process already holds it (caller should exit cleanly), or
+/// `Err` for IO failures opening the file.
+///
+/// This is the duplicate-attend guard. The orphan / re-launched
+/// attend case (parent shell killed, child reparented to init,
+/// then a new attend started) is exactly what `flock` is designed
+/// for: the orphan still holds the kernel lock, so the new attend's
+/// `LOCK_NB` attempt fails fast instead of silently double-running.
+///
+/// Self-reload via `exec()` keeps the same PID, but file
+/// descriptors are normally inherited (no `O_CLOEXEC`), and the
+/// kernel's flock state is keyed on the open-file-description. The
+/// new code path inherits the lock automatically — it does not have
+/// to re-acquire. Callers in the reload path should skip the lock
+/// attempt entirely (e.g., gated on `ATTEND_RELOADED_FROM`).
+#[cfg(unix)]
+pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLock>> {
+    fs::create_dir_all(heartbeat_dir())?;
+    let path = heartbeat_path(session_id);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)?;
+    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if ret == 0 {
+        return Ok(Some(SessionLock { _file: file }));
+    }
+    let err = io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        Ok(None)
+    } else {
+        Err(err)
     }
 }
 
@@ -184,6 +239,44 @@ mod tests {
             // no-op, not an error — supports clean-shutdown paths
             // that do not know whether they ever touched.
             assert!(clear("never-existed").is_ok());
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn first_lock_acquires_second_returns_none() {
+        with_home(|_| {
+            let first = try_acquire_session_lock("sess-lock-a")
+                .expect("first acquire io ok")
+                .expect("first acquire holds lock");
+            // Second concurrent acquire on the same session-id must
+            // return Ok(None) — Some(_) would mean both processes
+            // think they own the lock, which is the exact bug the
+            // duplicate-attend guard is meant to catch.
+            let second = try_acquire_session_lock("sess-lock-a")
+                .expect("second acquire io ok");
+            assert!(second.is_none(), "second acquire must observe first's lock");
+            drop(first);
+            // Once the first lock drops, a fresh acquire should win.
+            let third = try_acquire_session_lock("sess-lock-a")
+                .expect("third acquire io ok")
+                .expect("third acquire after drop");
+            drop(third);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn distinct_session_ids_lock_independently() {
+        with_home(|_| {
+            let a = try_acquire_session_lock("sess-lock-x")
+                .expect("a io ok")
+                .expect("a holds");
+            let b = try_acquire_session_lock("sess-lock-y")
+                .expect("b io ok")
+                .expect("b holds — different session must not contend");
+            drop(a);
+            drop(b);
         });
     }
 
