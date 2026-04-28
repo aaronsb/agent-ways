@@ -309,7 +309,22 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     let mut last_reload_check = Instant::now();
     let reload_check_interval = Duration::from_secs(10);
 
+    // Heartbeat identifier (ADR-129). Real session id when resolvable,
+    // otherwise a pid-based fallback so a heartbeat exists even when
+    // session resolution is racing claude's startup. Re-derived here
+    // because the canonical `session_id` was shadowed by `state_store`'s
+    // Option<String> form.
+    let heartbeat_id =
+        own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
+
     loop {
+        // Heartbeat — touched at the top of every tick so a single
+        // skipped poll cannot evict this session from peer liveness
+        // checks (groups::session_alive, attend-chat known_identities
+        // filter). Best-effort: a missing write is recoverable on the
+        // next iteration.
+        attend_heartbeat::touch(&heartbeat_id).ok();
+
         // Check for binary change
         if last_reload_check.elapsed() >= reload_check_interval {
             if let (Some(ref exe), Some(ref orig_mtime)) = (&self_exe, &initial_mtime) {

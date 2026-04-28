@@ -343,13 +343,17 @@ pub fn migrate_legacy_open_group(signals_base: &Path, groups: &Groups) -> Option
     Some(moved)
 }
 
-/// Check if a Claude Code session is still alive by looking for its lock dir.
+/// Check whether a Claude Code session is still alive, using attend's
+/// heartbeat sidecar (ADR-129). A session whose attend has touched its
+/// heartbeat within `DEFAULT_GRACE` (90s) is considered live; everything
+/// else — claude exited, attend never started, attend stalled — is
+/// stale.
+///
+/// PID-aliveness is intentionally not checked: a claude with no running
+/// attend cannot participate in the focus-group mesh, so for cleanup
+/// purposes it is functionally identical to a dead claude.
 fn session_alive(session_id: &str) -> bool {
-    // Claude sessions create dirs under ~/.claude/projects/
-    // A session is alive if its PID parent process exists
-    // For now, be conservative: assume alive (stale cleanup is best-effort)
-    let _ = session_id;
-    true // TODO: implement proper liveness check
+    attend_heartbeat::is_fresh(session_id, attend_heartbeat::DEFAULT_GRACE)
 }
 
 /// Encode a project path: '/', '_', '.' → '-'

@@ -1,0 +1,10 @@
+[package]
+name = "attend-heartbeat"
+version = "0.1.0"
+edition = "2021"
+description = "Per-session liveness heartbeat for attend (ADR-129)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "attend_heartbeat"
+path = "src/lib.rs"

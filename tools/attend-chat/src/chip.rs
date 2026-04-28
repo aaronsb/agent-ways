@@ -144,16 +144,45 @@ pub fn known_identities(
     seeds: &[DiscoveredSession],
     caps: TermCaps,
 ) -> Vec<KnownIdentity> {
+    // Production wrapper: gate on heartbeat freshness (ADR-129).
+    known_identities_with_liveness(signals, seeds, caps, claude_is_live)
+}
+
+/// Same as [`known_identities`] but with an injectable claude-liveness
+/// predicate. Production calls the wrapper above (which uses the
+/// heartbeat sidecar); tests pass `|_| true` so they can drive the
+/// dedup / ordering invariants without standing up a heartbeat
+/// fixture for every synthetic session id.
+pub fn known_identities_with_liveness<F>(
+    signals: &[Signal],
+    seeds: &[DiscoveredSession],
+    caps: TermCaps,
+    is_live: F,
+) -> Vec<KnownIdentity>
+where
+    F: Fn(&str) -> bool,
+{
     // Walk from newest to oldest so the first time we see a cwd we
     // also capture its most-recent-seen position. A HashSet of cwd
     // strings keeps dedup O(n) without depending on a hasher.
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<KnownIdentity> = Vec::new();
     for sig in signals.iter().rev() {
-        let (primary_label, is_claude, id) = if sig.from.strip_prefix("claude:").is_some() {
+        let (primary_label, is_claude, id) = if let Some(sid) = sig.from.strip_prefix("claude:") {
+            // Liveness gate (ADR-129): a claude whose attend has not
+            // touched its heartbeat within grace is dropped from the
+            // legend. The signal stays in history (with its dim chip),
+            // but `@`-completion and the agent legend should not point
+            // at peers nobody can reach.
+            if !is_live(sid) {
+                continue;
+            }
             let id = Identity::for_cwd(&sig.cwd, caps);
             (id.nickname.to_string(), true, id)
         } else if let Some(rest) = sig.from.strip_prefix("external:") {
+            // Humans are not liveness-filtered — they have no heartbeat
+            // and an `@<user>` mention does not route to a session
+            // inbox. Their legend entry is informational only.
             let username = rest.split('@').next().unwrap_or(rest).to_string();
             let scope = agent_identity::cwd_basename(&sig.cwd);
             let id = Identity::for_user(&username, &scope, caps);
@@ -190,7 +219,12 @@ pub fn known_identities(
     // Seed from discovered sessions — any claude cwd we haven't
     // already registered from a signal. Keys match the signal-
     // branch format so the same cwd doesn't double-register.
+    // Same liveness gate applies: a session.json on disk is not
+    // sufficient evidence that attend is running for that session.
     for seed in seeds {
+        if !is_live(&seed.session_id) {
+            continue;
+        }
         let id = Identity::for_cwd(&seed.cwd, caps);
         let key = format!("{}\x1f1\x1f{}", id.nickname, seed.cwd);
         if seen.insert(key) {
@@ -204,6 +238,13 @@ pub fn known_identities(
         }
     }
     out
+}
+
+/// Heartbeat-based liveness check (ADR-129). Wrapped here so the
+/// known_identities filter has a single name for the gate; the
+/// underlying `attend_heartbeat::is_fresh` is the source of truth.
+fn claude_is_live(session_id: &str) -> bool {
+    attend_heartbeat::is_fresh(session_id, attend_heartbeat::DEFAULT_GRACE)
 }
 
 /// Resolve an `@Nickname` token to a routable cwd.
@@ -339,7 +380,7 @@ mod tests {
             sig("claude:a", "/home/x"), // same cwd, should dedup
             sig("claude:b", "/home/y"),
         ];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         assert_eq!(reg.len(), 2, "expected 2 unique identities, got {}", reg.len());
     }
 
@@ -349,7 +390,7 @@ mod tests {
             sig("claude:a", "/home/x"),
             sig("claude:b", "/home/y"),
         ];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         // Buffer order is oldest→newest; registry should surface the
         // most-recent cwd first so active peers lead the legend.
         let y_id = Identity::for_cwd("/home/y", TermCaps::Rich);
@@ -359,7 +400,7 @@ mod tests {
     #[test]
     fn registry_includes_humans() {
         let buf = vec![sig("external:aaron@kitty", "/home/aaron/Projects")];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         assert_eq!(reg.len(), 1);
         assert_eq!(reg[0].nickname, "aaron");
         assert!(!reg[0].is_claude);
@@ -375,7 +416,7 @@ mod tests {
             sig("external:aaron@kitty", "/home/aaron/Projects"),
             sig("external:aaron@kitty", "/home/aaron/.claude"),
         ];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         let aarons: Vec<_> = reg.iter().filter(|k| k.nickname == "aaron").collect();
         assert_eq!(aarons.len(), 1, "expected a single aaron entry, got {}", aarons.len());
     }
@@ -388,14 +429,14 @@ mod tests {
             sig("claude:a", "/home/me/proj-a"),
             sig("claude:b", "/home/me/proj-b"),
         ];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         assert_eq!(reg.len(), 2);
     }
 
     #[test]
     fn registry_skips_unknown_prefix() {
         let buf = vec![sig("mystery:abc", "/tmp")];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         assert!(reg.is_empty(), "unknown prefix should be ignored, got {reg:?}");
     }
 
@@ -407,7 +448,7 @@ mod tests {
             DiscoveredSession { cwd: "/home/x".to_string(), session_id: "sx".into() },
             DiscoveredSession { cwd: "/home/y".to_string(), session_id: "sy".into() },
         ];
-        let reg = known_identities(&[], &seeds, TermCaps::Rich);
+        let reg = known_identities_with_liveness(&[], &seeds, TermCaps::Rich, |_| true);
         assert_eq!(reg.len(), 2);
         assert!(reg.iter().all(|k| k.is_claude));
     }
@@ -424,7 +465,7 @@ mod tests {
             cwd: "/Y".to_string(),
             session_id: "sy".into(),
         }];
-        let reg = known_identities(&buf, &seeds, TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true);
         assert_eq!(reg.len(), 2);
         assert_eq!(reg[0].cwd, "/X", "signal-derived entry must lead");
         assert_eq!(reg[1].cwd, "/Y", "seed-only entry falls in after");
@@ -439,7 +480,7 @@ mod tests {
             cwd: "/home/x".to_string(),
             session_id: "sx".into(),
         }];
-        let reg = known_identities(&buf, &seeds, TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true);
         assert_eq!(reg.len(), 1);
     }
 
@@ -449,7 +490,7 @@ mod tests {
             sig("claude:a", "/home/repo"),
             sig("external:aaron@kitty", "/home/aaron/Projects"),
         ];
-        let reg = known_identities(&buf, &[], TermCaps::Rich);
+        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true);
         let claude_nick = &reg.iter().find(|k| k.is_claude).unwrap().nickname;
         // Case-insensitive match hits the claude cwd.
         let lowered = claude_nick.to_ascii_lowercase();
