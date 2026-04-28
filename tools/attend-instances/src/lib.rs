@@ -49,6 +49,14 @@
 //! resumes after >7 days inactive may be renamed since their slot may
 //! have been reclaimed. Acceptable — a week-stale resume is far from
 //! the "I just stepped away and came back" case.
+//!
+//! ## File size note
+//!
+//! Total file length crosses the 800-line code-quality threshold, but
+//! production code is ~290 lines (this section ends near `mod tests`);
+//! the remainder is the `#[cfg(test)]` block. Issue #78 left this as-is
+//! deliberately rather than mechanically splitting tests into a
+//! sibling file.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
