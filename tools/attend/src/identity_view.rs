@@ -26,9 +26,13 @@ use agent_identity::{ansi, Identity, TermCaps};
 /// populate `cwd` either way — the divergence only manifests on
 /// hand-crafted signals, which shouldn't be a hot path.
 pub(crate) fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> String {
-    if from.strip_prefix("claude:").is_some() {
+    if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, caps);
-        compose(id.nickname, &id.cwd_basename, &id, caps)
+        // Instance suffix (ADR-129). Always rendered when present so
+        // pattern matching on the display name is consistent — solo
+        // and multi-session cwds both look the same.
+        let primary = with_instance(id.nickname, cwd, sid);
+        compose(&primary, &id.cwd_basename, &id, caps)
     } else if let Some(rest) = from.strip_prefix("external:") {
         let username = rest.split('@').next().unwrap_or(rest);
         let scope = agent_identity::cwd_basename(cwd);
@@ -38,6 +42,17 @@ pub(crate) fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> Stri
         let scope = agent_identity::cwd_basename(cwd);
         let id = Identity::for_user(from, &scope, caps);
         compose(from, &id.cwd_basename, &id, caps)
+    }
+}
+
+/// Compose `<nickname>-<instance>` for a claude session. Falls back to
+/// the bare nickname when the registry has no entry — only happens
+/// transiently before the session has registered, or when the
+/// registry file is unreadable.
+fn with_instance(nickname: &str, cwd: &str, session_id: &str) -> String {
+    match attend_instances::Registry::new().lookup(cwd, session_id) {
+        Some(inst) => format!("{nickname}-{inst}"),
+        None => nickname.to_string(),
     }
 }
 

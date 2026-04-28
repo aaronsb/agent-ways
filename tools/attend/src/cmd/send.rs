@@ -97,8 +97,8 @@ pub(crate) fn cmd_send(args: &[String]) {
             sensor.list_peers()
         };
         #[cfg(not(feature = "sensor-peers"))]
-        let peers: Vec<(String, String, String, String)> = Vec::new();
-        let peer_paths: Vec<&str> = peers.iter().map(|(cwd, _, _, _)| cwd.as_str()).collect();
+        let peers: Vec<(String, String, String, String, f64)> = Vec::new();
+        let peer_paths: Vec<&str> = peers.iter().map(|(_, cwd, _, _, _)| cwd.as_str()).collect();
 
         if !peer_paths.contains(&resolved.as_str()) {
             eprintln!("error: no active peer at {}", resolved);
@@ -106,7 +106,7 @@ pub(crate) fn cmd_send(args: &[String]) {
                 eprintln!("\nno active peer sessions found");
             } else {
                 eprintln!("\nactive peers:");
-                for (peer_cwd, project, _, _) in &peers {
+                for (_sid, peer_cwd, project, _, _) in &peers {
                     eprintln!("  {} ({})", peer_cwd, project);
                 }
                 // Fuzzy suggest: find closest match by path suffix

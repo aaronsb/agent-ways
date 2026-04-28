@@ -60,13 +60,12 @@ pub fn chip_for(from: &str, project: &str, cwd: &str, caps: TermCaps) -> ChipInf
     if let Some(uuid) = from.strip_prefix("claude:") {
         // For claude senders the cwd is the stable identity key. We
         // don't hash the session UUID — two sequential claudes in the
-        // same dir should wear the same name, matching the user's
-        // mental model of "the agent that lives here". The UUID
-        // flows to ChipInfo.session_id so the chip can look up
-        // group membership against _groups.yaml.
+        // same dir wear the same nickname stem, with a per-session
+        // instance suffix (ADR-129) appended to disambiguate.
         let id = Identity::for_cwd(cwd, caps);
+        let display = with_instance(id.nickname, cwd, uuid);
         ChipInfo {
-            primary: truncate(id.nickname, interior),
+            primary: truncate(&display, interior),
             secondary: truncate(&scope, interior),
             palette: id.palette,
             style: id.style,
@@ -178,7 +177,11 @@ where
                 continue;
             }
             let id = Identity::for_cwd(&sig.cwd, caps);
-            (id.nickname.to_string(), true, id)
+            // Instance suffix: `@Tamsin-alpha` is the addressable name
+            // — same-cwd siblings differ on the suffix and dedupe as
+            // distinct entries in the legend.
+            let display = with_instance(id.nickname, &sig.cwd, sid);
+            (display, true, id)
         } else if let Some(rest) = sig.from.strip_prefix("external:") {
             // Humans are not liveness-filtered — they have no heartbeat
             // and an `@<user>` mention does not route to a session
@@ -226,10 +229,11 @@ where
             continue;
         }
         let id = Identity::for_cwd(&seed.cwd, caps);
-        let key = format!("{}\x1f1\x1f{}", id.nickname, seed.cwd);
+        let display = with_instance(id.nickname, &seed.cwd, &seed.session_id);
+        let key = format!("{}\x1f1\x1f{}", display, seed.cwd);
         if seen.insert(key) {
             out.push(KnownIdentity {
-                nickname: id.nickname.to_string(),
+                nickname: display,
                 cwd: seed.cwd.clone(),
                 is_claude: true,
                 palette: id.palette,
@@ -245,6 +249,17 @@ where
 /// underlying `attend_heartbeat::is_fresh` is the source of truth.
 fn claude_is_live(session_id: &str) -> bool {
     attend_heartbeat::is_fresh(session_id, attend_heartbeat::DEFAULT_GRACE)
+}
+
+/// Compose `<nickname>-<instance>` for a claude session (ADR-129).
+/// Falls back to the bare nickname when the registry has no entry —
+/// only happens in the moments before a session has registered, or
+/// when the registry file is unreadable.
+fn with_instance(nickname: &str, cwd: &str, session_id: &str) -> String {
+    match attend_instances::Registry::new().lookup(cwd, session_id) {
+        Some(inst) => format!("{nickname}-{inst}"),
+        None => nickname.to_string(),
+    }
 }
 
 /// Resolve an `@Nickname` token to a routable cwd.

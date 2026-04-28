@@ -169,6 +169,32 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         }
     };
 
+    // Instance registry (ADR-129). Register or reclaim our slot in
+    // this cwd. Logged at startup so the operator can correlate a
+    // running attend with its discriminator suffix without reading
+    // the on-disk yaml. Registration is read-modify-write under
+    // flock — if another attend is racing for the same slot, CAS
+    // resolves it; we always end up with a deterministic instance.
+    //
+    // Failure here is non-fatal — the registry file is on the same
+    // ~/.cache path as everything else; if writes fail the rest of
+    // attend will fail similarly. Log and continue with no
+    // discriminator so renders fall back to the bare nickname.
+    let instance_registry = attend_instances::Registry::new();
+    let my_instance = match instance_registry.register(&focus.working_dir, &session_id) {
+        Ok(s) => {
+            emit::log(&format!("instance: {s} (cwd: {})", focus.working_dir));
+            Some(s)
+        }
+        Err(e) => {
+            emit::log(&format!(
+                "instance registry unavailable ({e}); rendering without suffix"
+            ));
+            None
+        }
+    };
+    let _ = &my_instance; // consumed by render layer once the suffix is wired in
+
     let group_mgr = groups::Groups::new(&signals_base(), &session_id);
 
     // ADR-124 one-shot: fold any lingering `@open/` group into the
@@ -325,6 +351,14 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // Checkpoint timer — save state every 30s
     let mut last_checkpoint = Instant::now();
     let checkpoint_interval = Duration::from_secs(30);
+
+    // Instance registry refresh (ADR-129). Touches our row's
+    // `last_seen` so the 7-day GC clock cannot expire an active
+    // session. Touch is a small flock-protected read-modify-write,
+    // and last_seen is only used for GC, so once-per-minute is more
+    // than enough headroom against the day-scale grace window.
+    let mut last_instance_touch = Instant::now();
+    let instance_touch_interval = Duration::from_secs(60);
 
     // Auto-cleanup timer — prune stale signal files and empty project dirs.
     // Default 30-day retention + 10-minute sweep interval (see CleanupConfig).
@@ -536,6 +570,19 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             let snapshot = collect_snapshot(&slots);
             state_store.checkpoint(&snapshot);
             last_checkpoint = Instant::now();
+        }
+
+        // Periodic instance-registry touch — refresh last_seen so the
+        // GC clock cannot expire an active session. Cheap when we
+        // already know we have an entry; no-op when registration
+        // failed at startup. Use heartbeat_id (the String form
+        // resolved at startup, before `session_id` was shadowed by
+        // the state_store's Option<String> form).
+        if last_instance_touch.elapsed() >= instance_touch_interval {
+            instance_registry
+                .touch(&focus.working_dir, &heartbeat_id)
+                .ok();
+            last_instance_touch = Instant::now();
         }
 
         // Periodic cleanup sweep — remove stale signal files and empty

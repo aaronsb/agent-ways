@@ -182,13 +182,24 @@ impl PeerSensor {
         }
     }
 
-    /// Return a list of active peer sessions as (cwd, project_name, status, context_percent).
-    pub fn list_peers(&self) -> Vec<(String, String, String, f64)> {
+    /// Return a list of active peer sessions as
+    /// `(session_id, cwd, project_name, status, context_percent)`.
+    ///
+    /// `session_id` is included so renderers can look up the
+    /// per-cwd instance suffix (ADR-129) without separately
+    /// re-walking session.json files.
+    pub fn list_peers(&self) -> Vec<(String, String, String, String, f64)> {
         let peers = self.discover_peers();
-        let mut result: Vec<_> = peers.values()
-            .map(|p| (p.cwd.clone(), p.project_name.clone(), p.status.to_string(), p.context_percent))
+        let mut result: Vec<_> = peers.iter()
+            .map(|(sid, p)| (
+                sid.clone(),
+                p.cwd.clone(),
+                p.project_name.clone(),
+                p.status.to_string(),
+                p.context_percent,
+            ))
             .collect();
-        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result.sort_by(|a, b| a.1.cmp(&b.1));
         result
     }
 

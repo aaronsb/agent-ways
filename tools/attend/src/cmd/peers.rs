@@ -1,6 +1,6 @@
 //! `attend peers` — list active Claude Code sessions and focus groups.
 
-use crate::util::get_groups;
+use crate::util::{get_groups, own_session_id};
 use agent_identity::{ansi, Identity, TermCaps};
 
 pub(crate) fn cmd_peers() {
@@ -13,9 +13,10 @@ pub(crate) fn cmd_peers() {
         sensor.list_peers()
     };
     #[cfg(not(feature = "sensor-peers"))]
-    let peers: Vec<(String, String, String, f64)> = Vec::new();
+    let peers: Vec<(String, String, String, String, f64)> = Vec::new();
 
     let my_focus = r.my_groups();
+    let registry = attend_instances::Registry::new();
 
     let mut t = agent_fmt::Table::new(&["Focus", "Agent", "Status", "Context"]);
     t.max_width(1, 28);
@@ -26,7 +27,15 @@ pub(crate) fn cmd_peers() {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     let self_id = Identity::for_cwd(&cwd, caps);
-    let self_label = render_agent_label(&self_id, caps);
+    // Look up our own instance suffix (ADR-129). Falls back to the
+    // bare nickname when the registry is unreadable or our session
+    // somehow has no entry — neither should happen in practice
+    // since `attend run` registers at startup.
+    let self_sid = own_session_id();
+    let self_instance = self_sid
+        .as_deref()
+        .and_then(|sid| registry.lookup(&cwd, sid));
+    let self_label = render_agent_label(&self_id, self_instance.as_deref(), caps);
     // Self-row Focus cell: "(self)" identifies which row IS the runner of
     // `attend peers`, without using the literal string "project" — that
     // priming caused agents to reach for `attend send --focus project`
@@ -48,7 +57,7 @@ pub(crate) fn cmd_peers() {
     // Show peers
     if !peers.is_empty() {
         t.add(vec!["", "", "", ""]);
-        for (peer_cwd, _project, status, ctx) in &peers {
+        for (peer_sid, peer_cwd, _project, status, ctx) in &peers {
             // Same-cwd peers previously rendered "(project)" in the
             // Focus column — a string that primed agents into running
             // `attend send --focus project`, a group nobody had
@@ -61,7 +70,8 @@ pub(crate) fn cmd_peers() {
                 String::new()
             };
             let peer_id = Identity::for_cwd(peer_cwd, caps);
-            let label = render_agent_label(&peer_id, caps);
+            let peer_instance = registry.lookup(peer_cwd, peer_sid);
+            let label = render_agent_label(&peer_id, peer_instance.as_deref(), caps);
             t.add_owned(vec![
                 focus_label,
                 label,
@@ -86,12 +96,22 @@ pub(crate) fn cmd_peers() {
     );
 }
 
-/// Compose the "Agent" column cell: nickname in identity color, cwd
-/// basename in parens in dim. The agent-fmt table measures visible
-/// length correctly even with ANSI codes embedded, so we can style
-/// freely without breaking alignment.
-fn render_agent_label(id: &Identity, caps: TermCaps) -> String {
-    let nick = ansi::wrap(id.nickname, &id.palette, id.style, caps);
+/// Compose the "Agent" column cell: nickname (with instance suffix
+/// when present, ADR-129) in identity color, cwd basename in parens
+/// in dim. The agent-fmt table measures visible length correctly
+/// even with ANSI codes embedded, so we can style freely without
+/// breaking alignment.
+///
+/// The suffix is concatenated *before* color wrapping so the whole
+/// `Tamsin-alpha` token shares the identity color — keeps the visual
+/// scan tight and matches the wire identity (a single addressable
+/// name, not a colored stem with a plain tail).
+fn render_agent_label(id: &Identity, instance: Option<&str>, caps: TermCaps) -> String {
+    let display = match instance {
+        Some(inst) => format!("{}-{}", id.nickname, inst),
+        None => id.nickname.to_string(),
+    };
+    let nick = ansi::wrap(&display, &id.palette, id.style, caps);
     let dim_basename = format!("\x1b[2m({})\x1b[0m", id.cwd_basename);
     format!("{nick} {dim_basename}")
 }

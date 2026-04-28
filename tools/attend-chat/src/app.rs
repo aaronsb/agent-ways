@@ -51,6 +51,26 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let mut should_exit = hooks.use_state(|| false);
     let mut status = hooks.use_state(String::new);
 
+    // Time-based refresh tick (ADR-129). Bumped every 5 seconds so the
+    // render path re-runs `discover_sessions` + `known_identities` on a
+    // human-scale clock rather than only on signal/keypress events. A
+    // peer that boots up without sending anything appears in the legend
+    // within one tick; a peer whose attend stops shows up as stale once
+    // its heartbeat ages past grace, also within one tick. The chat is
+    // a turn-blind surface — wall-clock time is the right axis here.
+    //
+    // 5s is a balance: short enough that "I just launched another
+    // claude" feels live, long enough that we are not re-walking
+    // ~/.claude/sessions/*.json several times per second on idle.
+    let mut tick = hooks.use_state(|| 0u64);
+    hooks.use_future(async move {
+        loop {
+            smol::Timer::after(std::time::Duration::from_secs(5)).await;
+            let next = tick.get().wrapping_add(1);
+            tick.set(next);
+        }
+    });
+
     // Drain the watcher into state.
     if let Some(rx) = props.receiver.clone() {
         hooks.use_future(async move {
@@ -279,6 +299,12 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // every chip. Cheap env reads, but doing it in the per-signal map
     // would still be pointless repetition.
     let caps = TermCaps::detect();
+    // Subscribe to the wall-clock refresh tick so iocraft re-renders
+    // when the timer future bumps it. The value itself is not used —
+    // we only need the read to register the dependency in the
+    // reactive graph. Drives time-based discovery (new peers
+    // appear, stale peers disappear) without requiring a key event.
+    let _refresh = tick.get();
     // Registries and trailing-partial for the legend + completion
     // highlight. Re-derived each render:
     // - `known_identities`: dedupes in O(n) over the capped signal
