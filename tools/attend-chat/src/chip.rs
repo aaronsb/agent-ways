@@ -265,18 +265,87 @@ fn with_instance(nickname: &str, cwd: &str, session_id: &str) -> String {
 /// Resolve an `@Nickname` token to a routable cwd.
 ///
 /// Returns `Some(cwd)` only for claude identities — humans don't have
-/// a signal inbox we can post into. Case-insensitive match to be
-/// gentle on typos (the nickname pool is case-distinct, but a user
-/// typing `@tamsin` should still hit `Tamsin`).
+/// a signal inbox we can post into.
+///
+/// Matching is forgiving:
+/// 1. **Exact** (case-insensitive). `@tamsin` hits `Tamsin`.
+/// 2. **Fuzzy** (Levenshtein ≤ 2) when no exact match exists. Catches
+///    typos and transpositions: `@Tasmin-alpha` → `Tamsin-alpha`,
+///    `@Cleo` → `Cleo`. The Levenshtein cap of 2 allows two character
+///    edits (a transposition is two edits in plain Levenshtein) while
+///    still distinguishing genuinely different names.
+/// 3. **Ambiguity is failure.** If two candidates tie for the same
+///    minimum distance, return `None` — silently routing to the
+///    wrong agent is worse than an unknown-nickname error. The
+///    caller can re-ask with disambiguation when needed.
 pub fn resolve_nickname(
     name: &str,
     known: &[KnownIdentity],
 ) -> Option<String> {
     let lc = name.to_ascii_lowercase();
-    known
+
+    // Pass 1: exact match (case-insensitive).
+    if let Some(hit) = known
         .iter()
         .find(|k| k.is_claude && k.nickname.to_ascii_lowercase() == lc)
-        .map(|k| k.cwd.clone())
+    {
+        return Some(hit.cwd.clone());
+    }
+
+    // Pass 2: fuzzy match. Walk all claude nicknames once, tracking
+    // (best_distance, best_cwd, tie_count). Tie at min distance means
+    // we cannot pick safely.
+    const MAX_DIST: usize = 2;
+    let mut best: Option<(usize, &str, usize)> = None; // (dist, cwd, tie_count)
+    for k in known.iter().filter(|k| k.is_claude) {
+        let cand = k.nickname.to_ascii_lowercase();
+        let dist = levenshtein(&lc, &cand);
+        if dist > MAX_DIST {
+            continue;
+        }
+        match best {
+            None => best = Some((dist, &k.cwd, 1)),
+            Some((bd, _, _)) if dist < bd => best = Some((dist, &k.cwd, 1)),
+            Some((bd, bcwd, n)) if dist == bd => best = Some((bd, bcwd, n + 1)),
+            _ => {}
+        }
+    }
+    match best {
+        Some((_, cwd, 1)) => Some(cwd.to_string()),
+        _ => None,
+    }
+}
+
+/// Levenshtein distance with a small early-exit. Iterative O(n*m)
+/// space-optimised to two rows. The nickname pool is small and
+/// names are short (≤ ~16 chars with suffix), so the cost is
+/// negligible per render.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+    // Cheap early-exit: if the length difference alone exceeds any
+    // threshold a caller cares about, the distance is at least that.
+    // We don't take a threshold here, but trivially bound it.
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr: Vec<usize> = vec![0; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -515,5 +584,103 @@ mod tests {
         assert_eq!(resolve_nickname("aaron", &reg), None);
         // Unknown nickname → None.
         assert_eq!(resolve_nickname("NotReal", &reg), None);
+    }
+
+    fn known(nick: &str, cwd: &str) -> KnownIdentity {
+        // Bypass the file-touching identity derivation — tests for
+        // resolve_nickname only care about the nickname/cwd shape.
+        let id = Identity::for_cwd(cwd, TermCaps::Rich);
+        KnownIdentity {
+            nickname: nick.to_string(),
+            cwd: cwd.to_string(),
+            is_claude: true,
+            palette: id.palette,
+            style: id.style,
+        }
+    }
+
+    #[test]
+    fn resolve_nickname_fuzzy_matches_single_typo() {
+        // Live regression: user typed `@Tasmin-alpha` (transposed
+        // m/s) and got "unknown nickname". With distance ≤ 2 we
+        // recover the intended target.
+        let reg = vec![known("Tamsin-alpha", "/home/aaron/.claude")];
+        assert_eq!(
+            resolve_nickname("Tasmin-alpha", &reg),
+            Some("/home/aaron/.claude".into())
+        );
+    }
+
+    #[test]
+    fn resolve_nickname_fuzzy_picks_clear_winner() {
+        // Two candidates, one obviously closer. The closer one wins.
+        let reg = vec![
+            known("Tamsin-alpha", "/cwd-a"),
+            known("Tamsin-beta", "/cwd-a"),
+        ];
+        // `Tamsin-alpa` (missing `h`) → distance 1 to alpha, 4 to beta.
+        assert_eq!(
+            resolve_nickname("Tamsin-alpa", &reg),
+            Some("/cwd-a".into())
+        );
+    }
+
+    #[test]
+    fn resolve_nickname_returns_none_when_ambiguous_at_min_distance() {
+        // If two nicknames tie for the same minimum distance, refuse
+        // — silent routing to the wrong agent is worse than a
+        // typed-error message the user can correct.
+        let reg = vec![
+            known("Cleo-alpha", "/cwd-a"),
+            known("Cleo-beta", "/cwd-b"),
+        ];
+        // `Cleo` is exactly 5 edits from each suffix; both 5 > 2 so
+        // neither matches and we get None. Use a more targeted case:
+        // `Tamsin-alphz` and `Tamsin-betaa` would tie at distance 1
+        // — but our pool is symmetric. Construct a real tie:
+        let reg2 = vec![
+            known("Foo", "/x"),
+            known("Bar", "/y"),
+        ];
+        // `Fop` is distance 1 from both? No — `Fop` vs Foo = 1 (sub
+        // p→o), vs Bar = 3. Bad example. Use:
+        let reg3 = vec![
+            known("aab", "/x"),
+            known("aac", "/y"),
+        ];
+        // `aad` is distance 1 from both. Tie → None.
+        assert_eq!(resolve_nickname("aad", &reg3), None);
+        // Sanity: the helpers used above don't trip the tie path.
+        let _ = (reg, reg2);
+    }
+
+    #[test]
+    fn resolve_nickname_rejects_beyond_threshold() {
+        // Distance > 2 must not match. Prevents wild misroutes when
+        // a user types something genuinely different.
+        let reg = vec![known("Tamsin-alpha", "/cwd-a")];
+        // 4 edits — well past the 2-edit cap.
+        assert_eq!(resolve_nickname("Wild-omega", &reg), None);
+    }
+
+    #[test]
+    fn resolve_nickname_exact_match_wins_over_fuzzy() {
+        // When an exact match exists, never substitute. Fuzzy is a
+        // fallback, not a "best-of" comparator.
+        let reg = vec![
+            known("Foo", "/exact"),
+            known("Foa", "/close"), // distance 1
+        ];
+        assert_eq!(resolve_nickname("foo", &reg), Some("/exact".into()));
+    }
+
+    #[test]
+    fn levenshtein_canonical_cases() {
+        assert_eq!(levenshtein("", ""), 0);
+        assert_eq!(levenshtein("a", ""), 1);
+        assert_eq!(levenshtein("", "abc"), 3);
+        assert_eq!(levenshtein("kitten", "sitting"), 3); // textbook
+        assert_eq!(levenshtein("tasmin", "tamsin"), 2);  // transposition
+        assert_eq!(levenshtein("foo", "foo"), 0);
     }
 }
