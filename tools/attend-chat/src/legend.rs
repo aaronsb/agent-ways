@@ -110,6 +110,37 @@ pub fn best_completion<'a>(
         .find(|k| k.nickname.to_ascii_lowercase().starts_with(&lc))
 }
 
+/// Every claude nickname that prefix-matches `partial`, in registry
+/// order. Used by Tab-cycle: the first Tab takes [0], the second
+/// takes [1], etc., wrapping at the end. Same case-insensitive
+/// match rule as [`best_completion`] — recency-biased ordering
+/// flows from `known_identities` putting active peers first.
+pub fn all_completions(
+    partial: &str,
+    known: &[KnownIdentity],
+) -> Vec<String> {
+    let lc = partial.to_ascii_lowercase();
+    known
+        .iter()
+        .filter(|k| k.is_claude && k.nickname.to_ascii_lowercase().starts_with(&lc))
+        .map(|k| k.nickname.clone())
+        .collect()
+}
+
+/// Group-side counterpart to [`all_completions`]. Same prefix rule
+/// applied to the channel pool (`KnownGroup`).
+pub fn all_group_completions(
+    partial: &str,
+    known: &[KnownGroup],
+) -> Vec<String> {
+    let lc = partial.to_ascii_lowercase();
+    known
+        .iter()
+        .filter(|k| k.group.name.to_ascii_lowercase().starts_with(&lc))
+        .map(|k| k.group.name.clone())
+        .collect()
+}
+
 /// Find the best completion for `partial` among `known` groups.
 ///
 /// Parallel to `best_completion` for agents — shared grammar, two
@@ -408,6 +439,54 @@ mod tests {
         let known = vec![ident("Tamsin", "/a", true), ident("Urban", "/b", true)];
         let m = best_completion("", &known).unwrap();
         assert_eq!(m.nickname, "Tamsin");
+    }
+
+    #[test]
+    fn all_completions_returns_every_prefix_match_in_order() {
+        // Tab-cycle relies on this: candidates [0], [1], … define
+        // the cycle order, so the slice must preserve registry
+        // order rather than re-sorting.
+        let known = vec![
+            ident("Tamsin-alpha", "/a", true),
+            ident("Tamsin-beta", "/b", true),
+            ident("Urban-alpha", "/c", true),
+        ];
+        let cands = all_completions("tam", &known);
+        assert_eq!(cands, vec!["Tamsin-alpha", "Tamsin-beta"]);
+    }
+
+    #[test]
+    fn all_completions_skips_humans() {
+        // Only claudes route to a cwd inbox, so Tab-cycle must not
+        // surface human entries even though they appear in the
+        // legend for visibility.
+        let known = vec![
+            ident("Tamsin-alpha", "/a", true),
+            ident("aaron", "/h", false),
+        ];
+        let cands = all_completions("", &known);
+        assert_eq!(cands, vec!["Tamsin-alpha"]);
+    }
+
+    #[test]
+    fn all_completions_empty_when_no_match() {
+        let known = vec![ident("Tamsin", "/a", true)];
+        let cands = all_completions("zzz", &known);
+        assert!(cands.is_empty());
+    }
+
+    #[test]
+    fn all_group_completions_returns_every_prefix_match() {
+        use agent_identity::Group;
+        use crate::groups::{GroupMembership, KnownGroup};
+        let mk = |name: &str| KnownGroup {
+            group: Group::for_name(name, TermCaps::Rich),
+            membership: GroupMembership::default(),
+            is_base: false,
+        };
+        let known = vec![mk("deploy"), mk("deploy-prod"), mk("infra")];
+        let cands = all_group_completions("dep", &known);
+        assert_eq!(cands, vec!["deploy", "deploy-prod"]);
     }
 
     #[test]
