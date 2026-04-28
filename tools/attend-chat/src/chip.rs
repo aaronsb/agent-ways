@@ -288,7 +288,12 @@ fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &Snapsh
 /// a signal inbox we can post into.
 ///
 /// Matching is forgiving:
-/// 1. **Exact** (case-insensitive). `@tamsin` hits `Tamsin`.
+/// 1. **Exact** (case-insensitive). `@tamsin` hits `Tamsin`. If two
+///    distinct cwds happen to share the exact same nickname stem
+///    (rare cross-cwd hash collision in `agent_identity::names` —
+///    pre-existing but visible now that suffixes can coincide), the
+///    resolver refuses rather than silently routing to whichever
+///    appeared first in the legend.
 /// 2. **Fuzzy** (Levenshtein ≤ 2) when no exact match exists. Catches
 ///    typos and transpositions: `@Tasmin-alpha` → `Tamsin-alpha`,
 ///    `@Cleo` → `Cleo`. The Levenshtein cap of 2 allows two character
@@ -304,12 +309,19 @@ pub fn resolve_nickname(
 ) -> Option<String> {
     let lc = name.to_ascii_lowercase();
 
-    // Pass 1: exact match (case-insensitive).
-    if let Some(hit) = known
+    // Pass 1: exact match (case-insensitive). Refuse on ambiguity —
+    // if two claudes from different cwds collide on the same
+    // nickname (their cwd hashes both landed on the same name pool
+    // index, then both registered the same per-cwd `alpha`), we
+    // must not route to whichever was discovered first.
+    let exact: Vec<&KnownIdentity> = known
         .iter()
-        .find(|k| k.is_claude && k.nickname.to_ascii_lowercase() == lc)
-    {
-        return Some(hit.cwd.clone());
+        .filter(|k| k.is_claude && k.nickname.to_ascii_lowercase() == lc)
+        .collect();
+    match exact.as_slice() {
+        [single] => return Some(single.cwd.clone()),
+        [] => {}
+        _ => return None, // ambiguous — refuse to misroute
     }
 
     // Pass 2: fuzzy match. Walk all claude nicknames once, tracking
@@ -703,6 +715,37 @@ mod tests {
             known("Foa", "/close"), // distance 1
         ];
         assert_eq!(resolve_nickname("foo", &reg), Some("/exact".into()));
+    }
+
+    #[test]
+    fn resolve_nickname_refuses_cross_cwd_exact_collision() {
+        // PR #77 review concern. Two distinct cwds whose hashes happen
+        // to land on the same name pool index (rare but real — pool
+        // is finite, ~200 entries) AND both registered as `alpha` in
+        // their respective per-cwd registries collide on the same
+        // displayed nickname. Pre-fix, `find` returned whichever
+        // appeared first in the legend; the message would silently
+        // misroute. Now we count and refuse.
+        let reg = vec![
+            known("Tamsin-alpha", "/cwd-1"),
+            known("Tamsin-alpha", "/cwd-2"),
+        ];
+        assert_eq!(resolve_nickname("Tamsin-alpha", &reg), None);
+    }
+
+    #[test]
+    fn resolve_nickname_exact_still_routes_when_unique() {
+        // Sanity counterpart: a single exact match resolves. The
+        // ambiguity check should not introduce a false-negative for
+        // the common case.
+        let reg = vec![
+            known("Tamsin-alpha", "/cwd-1"),
+            known("Cleo-alpha", "/cwd-2"),
+        ];
+        assert_eq!(
+            resolve_nickname("Tamsin-alpha", &reg),
+            Some("/cwd-1".into())
+        );
     }
 
     #[test]
