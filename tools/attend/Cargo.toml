@@ -1,6 +1,6 @@
 [package]
 name = "attend"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Active awareness module — adaptive sensing and disclosure for Claude Code sessions"
 license = "MIT"
