@@ -108,6 +108,18 @@ impl Registry {
         self.base_dir.join(format!("{}.yaml", encode_cwd(cwd)))
     }
 
+    /// Path to the sentinel lockfile for a cwd. The data file gets
+    /// atomically renamed during commit; flock state lives on the
+    /// open-file-description (i.e. inode), not the path, so a lock
+    /// taken on the data file before the rename does not contend
+    /// with a fresh opener of the path after the rename. The
+    /// lockfile is never renamed — it stays on the same inode for
+    /// the life of the registry, so flock() against it serializes
+    /// concurrent registers correctly across processes and threads.
+    fn lock_path(&self, cwd: &str) -> PathBuf {
+        self.base_dir.join(format!("{}.yaml.lock", encode_cwd(cwd)))
+    }
+
     /// Look up the instance assigned to `session_id` in `cwd`. Read
     /// only — no allocation, no GC, no write. Returns `None` when
     /// the registry file is absent or the session has no entry.
@@ -127,10 +139,17 @@ impl Registry {
     /// - During allocation, prune entries past `DEFAULT_GC_AGE` so
     ///   long-dead sessions stop blocking slots.
     ///
-    /// Read-modify-write under `flock(LOCK_EX)` on the registry file —
-    /// concurrent registrations on the same cwd serialize cleanly,
-    /// and a crash between read and write leaves only the previous
-    /// committed state on disk (the rename is atomic).
+    /// Read-modify-write under `flock(LOCK_EX)` on a sentinel
+    /// `<cwd>.yaml.lock` file (PR #77 review fix). Locking on the
+    /// data file directly would not serialize concurrent registers:
+    /// the data file is renamed atomically during commit, and flock
+    /// state lives on the inode rather than the path, so a fresh
+    /// opener after the rename gets a different lock. The sentinel
+    /// is never renamed, so its inode (and thus its flock state)
+    /// is the authoritative serializer.
+    ///
+    /// A crash between read and write leaves only the previous
+    /// committed state on disk; the rename is atomic.
     pub fn register(&self, cwd: &str, session_id: &str) -> io::Result<String> {
         self.register_with_age(cwd, session_id, DEFAULT_GC_AGE, now_secs())
     }
@@ -146,20 +165,26 @@ impl Registry {
     ) -> io::Result<String> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
+        let lock_path = self.lock_path(cwd);
 
-        // Open / create the registry file under exclusive flock so
-        // concurrent registers do not interleave their reads and
-        // writes. Lock is held until the File is dropped at the end
-        // of this function.
+        // Sentinel lockfile (PR #77 review fix). The data file is
+        // atomically renamed during commit; locking it before the
+        // rename does not serialize correctly because flock state
+        // is keyed on the open-file-description (inode), not the
+        // path — a fresh opener after the rename gets a different
+        // inode and a different lock.
+        //
+        // Lock the never-renamed sentinel instead. Held until the
+        // File is dropped at the end of this function.
         let lock_file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
-            .read(true)
             .write(true)
-            .open(&path)?;
+            .open(&lock_path)?;
         acquire_exclusive(&lock_file)?;
 
-        // Read current state (the same FD we hold the lock on).
+        // Read current state. Safe under the lock — no other
+        // register/touch on this cwd can be mid-write.
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut map = parse_registry(&content);
 
@@ -207,10 +232,16 @@ impl Registry {
         if !path.exists() {
             return Ok(());
         }
+        // Same sentinel-lockfile discipline as `register_with_age`
+        // (PR #77 review fix). flock() against the data file would
+        // not serialize correctly with concurrent registers, since
+        // the data file is renamed under us during commit.
+        let lock_path = self.lock_path(cwd);
         let lock_file = fs::OpenOptions::new()
-            .read(true)
+            .create(true)
+            .truncate(false)
             .write(true)
-            .open(&path)?;
+            .open(&lock_path)?;
         acquire_exclusive(&lock_file)?;
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut map = parse_registry(&content);
@@ -636,5 +667,65 @@ sess-a:
         taken.insert("gamma");
         // Gap before delta — allocator picks the lowest-index hole.
         assert_eq!(next_free_instance(&taken), "delta");
+    }
+
+    #[test]
+    fn concurrent_registers_assign_distinct_instances() {
+        // PR #77 review regression: concurrent registers MUST
+        // serialize through the lockfile and produce distinct
+        // instances. The pre-fix code locked the data file
+        // directly, which after the atomic rename did not
+        // contend across openers — two threads could both pass
+        // their critical sections and produce the same
+        // assignment, with one update silently dropped on
+        // last-rename-wins.
+        //
+        // Thread-level concurrency is sufficient to expose the
+        // bug because flock() in std (via libc) operates on the
+        // open-file-description, and `OpenOptions::open` returns
+        // a fresh FD per call. Two threads opening the same path
+        // get independent FDs that contend on the same inode
+        // with the OLD code only if the file is NOT renamed
+        // mid-flight. The fix uses a sentinel `*.lock` file that
+        // is never renamed, so contention is preserved.
+        use std::sync::Arc;
+        use std::thread;
+
+        let _g = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let base = fresh_base();
+        let reg = Arc::new(Registry::with_base(base.clone()));
+
+        const THREADS: usize = 12;
+        let handles: Vec<_> = (0..THREADS)
+            .map(|i| {
+                let reg = Arc::clone(&reg);
+                thread::spawn(move || {
+                    reg.register("/concurrent", &format!("sess-{i:02}"))
+                        .expect("register io ok")
+                })
+            })
+            .collect();
+
+        let assigned: Vec<String> = handles
+            .into_iter()
+            .map(|h| h.join().expect("thread join"))
+            .collect();
+
+        // 12 threads → 12 distinct instances. If the lock fails,
+        // duplicates appear (two threads see the same starting
+        // map and pick the same next-free letter).
+        let unique: std::collections::HashSet<&String> = assigned.iter().collect();
+        assert_eq!(
+            unique.len(),
+            THREADS,
+            "expected {THREADS} distinct instances, got {} duplicates among {assigned:?}",
+            THREADS - unique.len()
+        );
+
+        // The on-disk registry must contain all 12 entries.
+        let snap = reg.snapshot("/concurrent");
+        assert_eq!(snap.len(), THREADS, "registry yaml lost entries: {snap:?}");
+
+        fs::remove_dir_all(&base).ok();
     }
 }
