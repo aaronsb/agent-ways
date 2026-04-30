@@ -51,8 +51,8 @@ fn session_dir(session_id: &str) -> PathBuf {
 /// hook (`check-response.sh`) and consumed on the next turn by
 /// `check-prompt.sh` to enrich prompt matching with topics from Claude's
 /// last reply. Lives outside `sessions_root()` because it predates that
-/// hierarchy and the path is hardcoded in shell hooks; canonicalized here
-/// so reset, the writer, and the consumer cannot drift.
+/// hierarchy. Canonical here so reset, the writer, and the consumer all
+/// resolve through one source of truth and cannot drift.
 pub fn response_topics_path(session_id: &str) -> PathBuf {
     PathBuf::from(format!("/tmp/claude-response-topics-{session_id}"))
 }
