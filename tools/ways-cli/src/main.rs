@@ -230,6 +230,13 @@ enum Commands {
         #[arg(long)]
         confirm: bool,
     },
+    /// Print the per-session response-topics state file path (single source
+    /// of truth for the Stop hook writer, the UserPromptSubmit consumer, and
+    /// `ways reset`'s side-file cleanup).
+    ResponseTopicsPath {
+        /// Session ID
+        session: String,
+    },
     /// Manage configuration (init/show/path)
     Config {
         #[command(subcommand)]
@@ -576,6 +583,10 @@ fn main() -> Result<()> {
         }
         Commands::Reset { session, all, confirm } => {
             cmd::reset::run(session.as_deref(), all, confirm)
+        }
+        Commands::ResponseTopicsPath { session } => {
+            println!("{}", session::response_topics_path(&session).display());
+            Ok(())
         }
         Commands::Permissions { action, global } => {
             match action {

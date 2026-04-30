@@ -20,7 +20,9 @@ STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 # Need transcript
 [[ ! -f "$TRANSCRIPT" ]] && exit 0
 
-STATE_FILE="/tmp/claude-response-topics-${SESSION_ID}"
+# Path resolves through the binary so this writer, the consumer
+# (check-prompt.sh), and `ways reset` cannot drift.
+STATE_FILE=$("${HOME}/.claude/bin/ways" response-topics-path "$SESSION_ID")
 
 # Extract last assistant message from transcript (JSONL format)
 # Use tail instead of tac to avoid reading entire file

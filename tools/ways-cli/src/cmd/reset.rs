@@ -15,9 +15,10 @@ use crate::session;
 /// Return paths to off-root, per-session state files that hooks write
 /// outside `sessions_root()`. Reset must clear these alongside the main
 /// session directory or matching can be biased by stale topic context
-/// after a reset.
+/// after a reset. Each path resolves through its canonical helper so
+/// reset and the writing/reading hooks can never drift.
 fn session_side_files(sid: &str) -> Vec<PathBuf> {
-    vec![PathBuf::from(format!("/tmp/claude-response-topics-{sid}"))]
+    vec![session::response_topics_path(sid)]
 }
 
 
