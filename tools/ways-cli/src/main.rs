@@ -359,8 +359,9 @@ enum ScanCommand {
         #[arg(long)]
         transcript: Option<String>,
         /// Hook event that invoked this scan (drives output envelope shape).
-        /// UserPromptSubmit needs `hookSpecificOutput`; other events use the
-        /// simpler `additionalContext` shape. Defaults to SessionStart.
+        /// `hookSpecificOutput` is canonical for all events; `SessionStart`
+        /// and `PreToolUse` are the only events that take the legacy
+        /// top-level `additionalContext` shape. Defaults to SessionStart.
         #[arg(long, default_value = "SessionStart")]
         hook_event: String,
     },

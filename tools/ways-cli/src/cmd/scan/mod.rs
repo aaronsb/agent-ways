@@ -42,10 +42,11 @@ pub(crate) struct WayCandidate {
 /// Match user prompt against ways and emit matched bodies for the agent.
 ///
 /// Wired only from the `UserPromptSubmit` hook (`check-prompt.sh`), so the
-/// envelope is hardcoded. If this is ever reused from another hook event,
-/// take a `hook_event` parameter and route through `emit_hook_context` —
-/// `SessionStart` and `PreToolUse` accept the simpler `additionalContext`
-/// shape, while `UserPromptSubmit` requires `hookSpecificOutput`.
+/// envelope event name is hardcoded. The call routes through the canonical
+/// `hookSpecificOutput` default branch of `emit_hook_context`. If this is
+/// ever reused from another hook event, just pass that event's name —
+/// `SessionStart` and `PreToolUse` are the only events that take the
+/// legacy top-level `additionalContext` envelope.
 pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
@@ -459,20 +460,24 @@ fn regex_matches(pattern: &str, text: &str) -> bool {
 }
 
 /// Emit accumulated context using the envelope shape required by the
-/// invoking hook event. UserPromptSubmit needs `hookSpecificOutput`
-/// per the Claude Code hook contract; SessionStart and PreToolUse use
-/// the simpler top-level `additionalContext` and continue to surface
-/// as visible attachments.
+/// invoking hook event. The Claude Code hook contract treats
+/// `hookSpecificOutput` as canonical for all events; the simpler top-level
+/// `additionalContext` is a legacy tolerance accepted only on
+/// `SessionStart` and `PreToolUse` (where it surfaces as a visible
+/// attachment). Defaulting to canonical means new event wirings
+/// (`Stop`, `PreCompact`, ...) get the right shape automatically rather
+/// than silently re-hitting the bug PR #80 fixed.
 fn emit_hook_context(hook_event: &str, context: &str) {
-    let payload = if hook_event == "UserPromptSubmit" {
-        serde_json::json!({
+    let payload = match hook_event {
+        "SessionStart" | "PreToolUse" => {
+            serde_json::json!({ "additionalContext": context })
+        }
+        _ => serde_json::json!({
             "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
+                "hookEventName": hook_event,
                 "additionalContext": context,
             }
-        })
-    } else {
-        serde_json::json!({ "additionalContext": context })
+        }),
     };
     println!("{payload}");
 }
