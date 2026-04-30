@@ -1,6 +1,6 @@
 [package]
 name = "ways"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2021"
 description = "Unified CLI for ways — knowledge guidance for Claude Code"
 license = "MIT"
