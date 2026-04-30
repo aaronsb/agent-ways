@@ -158,18 +158,33 @@ impl Session {
     }
 
     fn scan_state(&self) -> String {
+        self.scan_state_full(None).0
+    }
+
+    /// Run `ways scan state`, optionally passing `--hook-event`, and return
+    /// `(stdout, stderr)`. Lets tests assert both content delivery and the
+    /// misroute warning channel.
+    fn scan_state_full(&self, hook_event: Option<&str>) -> (String, String) {
+        let mut args: Vec<&str> = vec![
+            "scan", "state",
+            "--session", &self.id,
+            "--project", "/tmp/nonexistent-project",
+        ];
+        if let Some(ev) = hook_event {
+            args.push("--hook-event");
+            args.push(ev);
+        }
         let output = Command::new(ways_bin())
-            .args([
-                "scan", "state",
-                "--session", &self.id,
-                "--project", "/tmp/nonexistent-project",
-            ])
+            .args(&args)
             .env("HOME", fixture_home())
             .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan state");
 
-        String::from_utf8_lossy(&output.stdout).to_string()
+        (
+            String::from_utf8_lossy(&output.stdout).to_string(),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        )
     }
 }
 
@@ -515,5 +530,30 @@ fn scenario_10_state_triggers() {
     assert!(
         !output2.contains("State Trigger Test Way"),
         "State trigger should not re-fire (marker exists)"
+    );
+}
+
+// ── Scenario 11: Hook-event misroute trace ─────────────────────
+
+#[test]
+fn scenario_11_hook_event_misroute_warning() {
+    // `ways scan state` invoked without `--hook-event` falls back to
+    // SessionStart, which is also the shell's jq fallback in
+    // `check-state.sh` — two layers of the same default mean a misrouted
+    // hook would silently emit the wrong envelope shape. The fallback
+    // itself is preserved (behavior unchanged) but a defensive stderr
+    // trace surfaces the misroute in hook-execution logs.
+    let s = Session::new("s11");
+
+    // Without --hook-event: stderr trace must surface, stdout must still
+    // carry content (the SessionStart fallback still runs).
+    let (stdout, stderr) = s.scan_state_full(None);
+    assert!(
+        stderr.contains("[ways]") && stderr.contains("--hook-event"),
+        "scan state without --hook-event must emit a [ways] stderr trace mentioning the missing flag; got stderr: {stderr:?}"
+    );
+    assert!(
+        stdout.contains("State Trigger Test Way"),
+        "scan state without --hook-event must still default-fire SessionStart; got stdout: {stdout:?}"
     );
 }
