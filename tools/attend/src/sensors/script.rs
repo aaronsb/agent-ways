@@ -56,6 +56,14 @@ impl Sensor for ScriptSensor {
         &self.name
     }
 
+    fn description(&self) -> &str {
+        "user-defined script sensor"
+    }
+
+    fn source(&self) -> String {
+        self.resolve_script().to_string_lossy().into_owned()
+    }
+
     fn poll(&mut self, _focus: &Focus) -> Vec<(f64, String)> {
         let script_path = self.resolve_script();
 

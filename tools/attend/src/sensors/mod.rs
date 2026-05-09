@@ -167,3 +167,272 @@ pub fn register_sensors(
 
     (slots, enabled_names)
 }
+
+// ── Sensor enumeration (for `attend sensors`) ───────────────────
+
+/// Lightweight metadata for one sensor — used by `attend sensors` to
+/// report what's compiled, configured, and active.
+pub struct SensorEntry {
+    pub name: String,
+    pub kind: SensorKind,
+    pub state: SensorState,
+    pub description: String,
+    pub source: String,
+    pub interval: Duration,
+    pub min_interval: Duration,
+}
+
+#[derive(Clone, Copy)]
+pub enum SensorKind {
+    Builtin,
+    Script,
+}
+
+impl SensorKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            SensorKind::Builtin => "builtin",
+            SensorKind::Script => "script",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum SensorState {
+    /// Compiled in (or script file present) and enabled in config.
+    Active,
+    /// Compiled in (or script file present) but disabled in config.
+    Off,
+    /// Built-in sensor whose feature flag was excluded at compile time.
+    /// Only constructible when a `sensor-*` feature is off, so default
+    /// builds correctly flag it as unused.
+    #[allow(dead_code)]
+    NotCompiled,
+    /// Script sensor whose `script:` path does not point at a file.
+    Missing,
+}
+
+impl SensorState {
+    pub fn label(self) -> &'static str {
+        match self {
+            SensorState::Active => "active",
+            SensorState::Off => "off",
+            SensorState::NotCompiled => "not compiled",
+            SensorState::Missing => "missing",
+        }
+    }
+}
+
+/// Enumerate every sensor known to this build — both compiled-in
+/// built-ins and config-defined script sensors. Pure metadata, no
+/// side effects; safe to call from any subcommand.
+pub fn enumerate_sensors(cfg: &Config, focus: &Focus) -> Vec<SensorEntry> {
+    let mut entries: Vec<SensorEntry> = Vec::new();
+
+    // Built-in sensors. Each block below either pushes the entry from
+    // a freshly instantiated sensor (when its feature is compiled) or
+    // a `not compiled` placeholder so the user can still see the slot.
+    push_builtin_context(&mut entries, cfg);
+    push_builtin_git(&mut entries, cfg);
+    push_builtin_peers(&mut entries, cfg);
+    push_builtin_processes(&mut entries, cfg);
+    push_builtin_disclosure(&mut entries, cfg);
+
+    // Script sensors — anything in config with `script:` set, regardless
+    // of whether the file currently resolves.
+    for (name, sc) in &cfg.sensors {
+        let Some(script_path) = sc.script.clone() else { continue };
+        let probe = ScriptSensor::new(
+            name.clone(),
+            script_path.clone(),
+            focus.working_dir.clone(),
+            sc.interval,
+            sc.min_interval,
+            sc.decay_threshold,
+            sc.threshold,
+        );
+        let resolved = std::path::Path::new(&script_path);
+        let resolved = if resolved.is_absolute() {
+            resolved.to_path_buf()
+        } else {
+            std::path::Path::new(&focus.working_dir).join(resolved)
+        };
+        let state = if !resolved.is_file() {
+            SensorState::Missing
+        } else if sc.enabled {
+            SensorState::Active
+        } else {
+            SensorState::Off
+        };
+        entries.push(SensorEntry {
+            name: probe.name().to_string(),
+            kind: SensorKind::Script,
+            state,
+            description: probe.description().to_string(),
+            source: probe.source(),
+            interval: sc.interval,
+            min_interval: sc.min_interval,
+        });
+    }
+
+    entries
+}
+
+fn builtin_state_for(
+    cfg: &Config,
+    name: &str,
+    default_base: Duration,
+    default_min: Duration,
+) -> (SensorState, Duration, Duration) {
+    let entry = cfg.sensors.get(name);
+    let enabled = entry.map(|s| s.enabled).unwrap_or(true);
+    let state = if enabled { SensorState::Active } else { SensorState::Off };
+    (
+        state,
+        entry.map(|s| s.interval).unwrap_or(default_base),
+        entry.map(|s| s.min_interval).unwrap_or(default_min),
+    )
+}
+
+#[cfg(feature = "sensor-context")]
+fn push_builtin_context(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let s = ContextSensor::new();
+    let (state, interval, min_interval) = builtin_state_for(cfg, "context", Duration::from_secs(60), Duration::from_secs(20));
+    entries.push(SensorEntry {
+        name: s.name().to_string(),
+        kind: SensorKind::Builtin,
+        state,
+        description: s.description().to_string(),
+        source: s.source(),
+        interval,
+        min_interval,
+    });
+}
+#[cfg(not(feature = "sensor-context"))]
+fn push_builtin_context(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let (_, interval, min_interval) = builtin_state_for(cfg, "context", Duration::from_secs(60), Duration::from_secs(20));
+    entries.push(SensorEntry {
+        name: "context".to_string(),
+        kind: SensorKind::Builtin,
+        state: SensorState::NotCompiled,
+        description: String::new(),
+        source: String::new(),
+        interval,
+        min_interval,
+    });
+}
+
+#[cfg(feature = "sensor-git")]
+fn push_builtin_git(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let s = GitSensor::new();
+    let (state, interval, min_interval) = builtin_state_for(cfg, "git", Duration::from_secs(30), Duration::from_secs(10));
+    entries.push(SensorEntry {
+        name: s.name().to_string(),
+        kind: SensorKind::Builtin,
+        state,
+        description: s.description().to_string(),
+        source: s.source(),
+        interval,
+        min_interval,
+    });
+}
+#[cfg(not(feature = "sensor-git"))]
+fn push_builtin_git(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let (_, interval, min_interval) = builtin_state_for(cfg, "git", Duration::from_secs(30), Duration::from_secs(10));
+    entries.push(SensorEntry {
+        name: "git".to_string(),
+        kind: SensorKind::Builtin,
+        state: SensorState::NotCompiled,
+        description: String::new(),
+        source: String::new(),
+        interval,
+        min_interval,
+    });
+}
+
+#[cfg(feature = "sensor-peers")]
+fn push_builtin_peers(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let s = PeerSensor::new();
+    let (state, interval, min_interval) = builtin_state_for(cfg, "peers", Duration::from_secs(30), Duration::from_secs(10));
+    entries.push(SensorEntry {
+        name: s.name().to_string(),
+        kind: SensorKind::Builtin,
+        state,
+        description: s.description().to_string(),
+        source: s.source(),
+        interval,
+        min_interval,
+    });
+}
+#[cfg(not(feature = "sensor-peers"))]
+fn push_builtin_peers(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let (_, interval, min_interval) = builtin_state_for(cfg, "peers", Duration::from_secs(30), Duration::from_secs(10));
+    entries.push(SensorEntry {
+        name: "peers".to_string(),
+        kind: SensorKind::Builtin,
+        state: SensorState::NotCompiled,
+        description: String::new(),
+        source: String::new(),
+        interval,
+        min_interval,
+    });
+}
+
+#[cfg(feature = "sensor-processes")]
+fn push_builtin_processes(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let s = match cfg.sensors.get("processes").and_then(|sc| sc.watch.clone()) {
+        Some(list) => ProcessSensor::with_watch(list),
+        None => ProcessSensor::new(),
+    };
+    let (state, interval, min_interval) = builtin_state_for(cfg, "processes", Duration::from_secs(30), Duration::from_secs(5));
+    entries.push(SensorEntry {
+        name: s.name().to_string(),
+        kind: SensorKind::Builtin,
+        state,
+        description: s.description().to_string(),
+        source: s.source(),
+        interval,
+        min_interval,
+    });
+}
+#[cfg(not(feature = "sensor-processes"))]
+fn push_builtin_processes(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let (_, interval, min_interval) = builtin_state_for(cfg, "processes", Duration::from_secs(30), Duration::from_secs(5));
+    entries.push(SensorEntry {
+        name: "processes".to_string(),
+        kind: SensorKind::Builtin,
+        state: SensorState::NotCompiled,
+        description: String::new(),
+        source: String::new(),
+        interval,
+        min_interval,
+    });
+}
+
+#[cfg(feature = "sensor-disclosure")]
+fn push_builtin_disclosure(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let s = DisclosureSensor::new();
+    let (state, interval, min_interval) = builtin_state_for(cfg, "disclosure", Duration::from_secs(60), Duration::from_secs(20));
+    entries.push(SensorEntry {
+        name: s.name().to_string(),
+        kind: SensorKind::Builtin,
+        state,
+        description: s.description().to_string(),
+        source: s.source(),
+        interval,
+        min_interval,
+    });
+}
+#[cfg(not(feature = "sensor-disclosure"))]
+fn push_builtin_disclosure(entries: &mut Vec<SensorEntry>, cfg: &Config) {
+    let (_, interval, min_interval) = builtin_state_for(cfg, "disclosure", Duration::from_secs(60), Duration::from_secs(20));
+    entries.push(SensorEntry {
+        name: "disclosure".to_string(),
+        kind: SensorKind::Builtin,
+        state: SensorState::NotCompiled,
+        description: String::new(),
+        source: String::new(),
+        interval,
+        min_interval,
+    });
+}

@@ -2,7 +2,7 @@
 name = "sensor-peers"
 version = "0.6.0"
 edition = "2021"
-description = "Peer sensor for attend — discovers Claude Code sessions, reads signals, manages inbox"
+description = "discovers Claude Code sessions and reads peer signals"
 license = "MIT"
 
 [dependencies]

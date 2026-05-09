@@ -2,7 +2,7 @@
 name = "sensor-git"
 version = "0.6.0"
 edition = "2021"
-description = "Git sensor for attend — tracks dirty files, branch changes, upstream divergence"
+description = "tracks dirty files, branch changes, and upstream divergence"
 license = "MIT"
 
 [dependencies]

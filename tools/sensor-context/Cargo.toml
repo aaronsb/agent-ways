@@ -2,7 +2,7 @@
 name = "sensor-context"
 version = "0.6.0"
 edition = "2021"
-description = "Context sensor for attend — tracks context window usage and velocity"
+description = "tracks context window usage and projects compaction"
 license = "MIT"
 
 [dependencies]

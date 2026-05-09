@@ -37,6 +37,20 @@ pub trait Sensor: Send {
     /// Unique name for this sensor (used in output format and state keys).
     fn name(&self) -> &str;
 
+    /// One-line description of what this sensor observes. Surfaced by
+    /// `attend sensors` for discovery. Default empty so the trait stays
+    /// backward compatible; concrete sensors should override.
+    fn description(&self) -> &str {
+        ""
+    }
+
+    /// Sensor source identifier — typically `crate@version` for built-in
+    /// crate sensors, or a script path for `ScriptSensor`. Surfaced by
+    /// `attend sensors`. Default empty; concrete sensors should override.
+    fn source(&self) -> String {
+        String::new()
+    }
+
     /// Poll the sensor's data source. Returns a list of observations.
     /// Each observation is a (delta_magnitude, description) pair.
     /// Empty vec = no change detected this tick.
@@ -340,6 +354,14 @@ impl SensorSlot {
 
     pub fn name(&self) -> &str {
         self.sensor.name()
+    }
+
+    pub fn description(&self) -> &str {
+        self.sensor.description()
+    }
+
+    pub fn source(&self) -> String {
+        self.sensor.source()
     }
 
     pub fn export_state(&self) -> Vec<(String, String)> {

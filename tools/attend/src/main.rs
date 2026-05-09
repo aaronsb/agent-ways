@@ -28,6 +28,7 @@ fn main() {
             }
         }
         Some("status") => cmd::status::cmd_status(),
+        Some("sensors") => cmd::sensors::cmd_sensors(&args[1..]),
         Some("send") => {
             cmd::send::cmd_send(&args[1..]);
         }
@@ -132,6 +133,7 @@ fn main() {
                     ("permissions", "Audit sensor permissions against settings.json"),
                     ("cleanup", "Remove stale signal files from the signals base (default: 5m)"),
                     ("status", "Show running instances, signals, and focus state"),
+                    ("sensors", "List all sensors — built-in and config-defined script sensors"),
                     ("help", "Show this help"),
                 ],
             );
