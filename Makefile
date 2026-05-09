@@ -32,6 +32,7 @@ help:
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
+	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
 	@echo "  make release      Build release binary for current platform"
 	@echo "  make uninstall    Remove ways from PATH"
 	@echo "  make clean        Remove build artifacts"
@@ -129,6 +130,15 @@ attend:
 		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
 		exit 1; \
 	fi
+
+# Generate the attend CLI markdown reference from the same clap-derive
+# `Cli` definition that drives runtime --help (ADR-111 extension). Output
+# lives in docs/cli/ alongside other end-user reference material.
+docs: attend
+	@mkdir -p docs/cli
+	@cargo build --release --manifest-path tools/Cargo.toml -p attend --bin gen-docs --quiet
+	@./tools/target/release/gen-docs > docs/cli/attend.md
+	@echo "Wrote docs/cli/attend.md ($$(wc -l < docs/cli/attend.md) lines)"
 
 # Force rebuild attend from source.
 attend-rebuild:

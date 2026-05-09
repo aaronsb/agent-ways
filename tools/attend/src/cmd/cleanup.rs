@@ -152,53 +152,21 @@ pub(crate) fn run_cleanup(
     stats
 }
 
-pub(crate) fn cmd_cleanup(args: &[String]) {
+pub(crate) fn cmd_cleanup(older_than_arg: Option<String>, dry_run: bool, nuke_all: bool) {
     // Default to the config's retention so the manual command's semantics
-    // match the auto-sweep by default. Overrides with --older-than.
+    // match the auto-sweep by default. `--older-than` overrides.
     let focus = Focus::default_focus();
     let cfg = config::Config::load(&focus.working_dir);
-    let mut older_than = cfg.cleanup.retention;
-    let mut dry_run = false;
-    let mut nuke_all = false;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--dry-run" | "-n" => dry_run = true,
-            "--all" => nuke_all = true,
-            "--older-than" => {
-                if let Some(v) = args.get(i + 1) {
-                    match parse_duration_arg(v) {
-                        Some(d) => older_than = d,
-                        None => {
-                            eprintln!("attend cleanup: invalid duration '{}' — try 5m, 1h, 30s", v);
-                            std::process::exit(2);
-                        }
-                    }
-                    i += 1;
-                } else {
-                    eprintln!("attend cleanup: --older-than requires a value");
-                    std::process::exit(2);
-                }
-            }
-            "--help" | "-h" => {
-                println!("attend cleanup — remove stale signal files from ~/.cache/attend/signals/\n");
-                println!("usage: attend cleanup [--older-than <dur>] [--dry-run] [--all]\n");
-                println!("  --older-than <dur>  age cutoff (default: cleanup.retention from config)");
-                println!("                       duration format: 30s, 5m, 1h, 2d");
-                println!("  --dry-run, -n       list what would be removed without deleting");
-                println!("  --all               remove every signal file regardless of age");
-                println!();
-                println!("Auto-cleanup also runs inside `attend run` every cleanup.interval seconds.");
-                return;
-            }
-            other => {
-                eprintln!("attend cleanup: unknown flag '{other}' — try --help");
+    let older_than = match older_than_arg {
+        Some(s) => match parse_duration_arg(&s) {
+            Some(d) => d,
+            None => {
+                eprintln!("attend cleanup: invalid duration '{s}' — try 5m, 1h, 30s");
                 std::process::exit(2);
             }
-        }
-        i += 1;
-    }
+        },
+        None => cfg.cleanup.retention,
+    };
 
     let base = signals_base();
     if !base.is_dir() {

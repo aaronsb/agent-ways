@@ -9,16 +9,7 @@ use crate::config::Config;
 use crate::sensors::{enumerate_sensors, Focus, SensorEntry, SensorState};
 use std::time::Duration;
 
-pub(crate) fn cmd_sensors(args: &[String]) {
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        print_help();
-        return;
-    }
-    if let Some(unknown) = args.iter().find(|a| a.starts_with('-')) {
-        eprintln!("attend sensors: unknown flag '{unknown}' — try --help");
-        std::process::exit(1);
-    }
-
+pub(crate) fn cmd_sensors() {
     let focus = Focus::default_focus();
     let cfg = Config::load(&focus.working_dir);
     let entries = enumerate_sensors(&cfg, &focus);
@@ -51,24 +42,6 @@ fn format_interval(e: &SensorEntry) -> String {
 
 fn fmt_secs(d: Duration) -> String {
     format!("{}s", d.as_secs())
-}
-
-fn print_help() {
-    println!("attend sensors — list every sensor known to this build");
-    println!();
-    println!("usage: attend sensors");
-    println!();
-    println!("Reports built-in (compiled-in crate) sensors and any script sensors");
-    println!("defined in config, with their state and source.");
-    println!();
-    println!("State values:");
-    println!("  active        compiled in (or script file present) and enabled in config");
-    println!("  off           compiled in (or script file present) but disabled in config");
-    println!("  not compiled  built-in whose feature flag was excluded at build time");
-    println!("  missing       script: path does not resolve to a file");
-    println!();
-    println!("To toggle a sensor's enabled state, edit the relevant `enabled:` field");
-    println!("in your attend.yaml — see `attend config path` for locations.");
 }
 
 /// Print short hints under the table for any non-Active states present.

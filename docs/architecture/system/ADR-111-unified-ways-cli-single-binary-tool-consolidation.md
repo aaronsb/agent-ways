@@ -169,3 +169,7 @@ Same FFI benefit as Rust + `cc`, but CGo cross-compilation is harder than Rust's
 | ADR-107 | Corpus generation becomes `ways corpus`. Locale support (Phase 3) becomes a flag |
 | ADR-108 | `way-embed` binary becomes `ways embed` subcommand. ONNX/GGUF loading unchanged |
 | ADR-110 | Graph export (`ways graph`) and sibling scoring (`ways siblings`) ship as subcommands rather than standalone scripts |
+
+## Extension: `attend` adopts the same pattern (2026-05-09)
+
+The `attend` binary (ADR-113) initially shipped a hand-rolled argv dispatcher with per-command help text written as free-form `println!` calls. As the surface grew to ~14 subcommands, the lack of a uniform help/argument-parsing layer started to bite — `--help` worked on some commands, errored as "unknown subcommand" on others, and silently ran the command on a third group. Rather than introduce a parallel CLI convention, `attend` adopts the clap-derive structure established here: a `Cli` struct, a `Commands` enum, doc comments as the source of truth for help text, and the same `agent_fmt::Banner` special-casing for bare invocation. External reference docs (`docs/cli/attend.md`) are generated from the same `Cli` definition via `clap-markdown`, wired into the project Makefile so the runtime help text and the published reference cannot drift. This decision retroactively confirms the ADR-111 pattern as the canonical CLI shape across the workspace.

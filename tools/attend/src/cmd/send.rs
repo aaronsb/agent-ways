@@ -4,49 +4,13 @@
 use crate::cmd::inbox::is_valid_signal_id;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 
-pub(crate) fn cmd_send(args: &[String]) {
-    // Parse flags: --broadcast, --to <project-path>, --focus <name>, --re <signal-id>
-    let mut broadcast = false;
-    let mut target_dir: Option<String> = None;
-    let mut target_focus: Option<String> = None;
-    let mut reply_to: Option<String> = None;
-    let mut message_parts: Vec<&str> = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--broadcast" => broadcast = true,
-            "--to" => {
-                i += 1;
-                if i < args.len() {
-                    target_dir = Some(args[i].clone());
-                } else {
-                    eprintln!("attend send: --to requires a project path");
-                    std::process::exit(1);
-                }
-            }
-            "--focus" => {
-                i += 1;
-                if i < args.len() {
-                    target_focus = Some(args[i].clone());
-                } else {
-                    eprintln!("attend send: --focus requires a focus group name");
-                    std::process::exit(1);
-                }
-            }
-            "--re" => {
-                i += 1;
-                if i < args.len() {
-                    reply_to = Some(args[i].clone());
-                } else {
-                    eprintln!("attend send: --re requires a signal id");
-                    std::process::exit(1);
-                }
-            }
-            _ => message_parts.push(&args[i]),
-        }
-        i += 1;
-    }
-
+pub(crate) fn cmd_send(
+    broadcast: bool,
+    target_dir: Option<String>,
+    target_focus: Option<String>,
+    reply_to: Option<String>,
+    message_parts: Vec<String>,
+) {
     // A signal id must match the same character class the parser uses to
     // disambiguate threaded records from legacy messages that happen to
     // start with "re:". Signal filename stems are `<sender-id>-<ts>`, so
@@ -271,7 +235,12 @@ pub(crate) fn cmd_send(args: &[String]) {
 /// `cmd_send` preserves every existing `send` flag (`--focus`,
 /// `--to`, `--broadcast`) without duplication.
 #[cfg(feature = "sensor-peers")]
-pub(crate) fn cmd_reply(args: &[String]) {
+pub(crate) fn cmd_reply(
+    broadcast: bool,
+    target_dir: Option<String>,
+    target_focus: Option<String>,
+    message: Vec<String>,
+) {
     let session_id =
         own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
     let last_id = match sensor_peers::last_inbound::read(&session_id) {
@@ -283,18 +252,19 @@ pub(crate) fn cmd_reply(args: &[String]) {
             std::process::exit(1);
         }
     };
-    // Prepend `--re <id>` to whatever flags the caller passed, then
-    // delegate to cmd_send. All other routing flags (--focus, --to,
-    // --broadcast) flow through untouched.
-    let mut forwarded: Vec<String> = Vec::with_capacity(args.len() + 2);
-    forwarded.push("--re".to_string());
-    forwarded.push(last_id);
-    forwarded.extend(args.iter().cloned());
-    cmd_send(&forwarded);
+    // Inject the resolved signal id as `reply_to` and delegate to cmd_send.
+    // All other routing flags (--focus, --to, --broadcast) flow through
+    // untouched.
+    cmd_send(broadcast, target_dir, target_focus, Some(last_id), message);
 }
 
 #[cfg(not(feature = "sensor-peers"))]
-pub(crate) fn cmd_reply(_args: &[String]) {
+pub(crate) fn cmd_reply(
+    _broadcast: bool,
+    _target_dir: Option<String>,
+    _target_focus: Option<String>,
+    _message: Vec<String>,
+) {
     eprintln!("attend reply: sensor-peers feature is not compiled in this build");
     std::process::exit(1);
 }

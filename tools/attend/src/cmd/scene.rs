@@ -3,16 +3,7 @@
 use crate::scenes;
 use crate::util::get_groups;
 
-pub(crate) fn cmd_scene(args: &[String]) {
-    let name = match args.first() {
-        Some(n) => n,
-        None => {
-            eprintln!("usage: attend scene <name>");
-            eprintln!("  try: attend scenes (to list available)");
-            std::process::exit(1);
-        }
-    };
-
+pub(crate) fn cmd_scene(name: &str) {
     let r = get_groups();
     match scenes::activate(name, &r) {
         Ok(result) => println!("[attend] scene '{name}': {result}"),
