@@ -24,6 +24,41 @@ pub type Tick = u64;
 /// unit is.
 pub type TickDelta = u64;
 
+// ── Metadata macro ──────────────────────────────────────────────
+
+/// Default `description()` and `source()` impls for built-in sensor crates.
+/// Invoke inside an `impl Sensor for ...` block to get:
+///   - `description()` returning `env!("CARGO_PKG_DESCRIPTION")` (so the
+///     user-facing text lives in `Cargo.toml`, single source of truth).
+///   - `source()` returning `format!("{name}@{version}")` from the crate's
+///     own `CARGO_PKG_NAME` / `CARGO_PKG_VERSION`.
+///
+/// `env!()` resolves at the macro-expansion site (i.e. the calling crate),
+/// so each sensor crate gets its own metadata without further wiring.
+///
+/// External (non-built-in) sensor implementors who don't want to publish
+/// their crate via Cargo can simply implement `description()` / `source()`
+/// directly instead.
+#[macro_export]
+macro_rules! sensor_metadata {
+    () => {
+        /// Sourced from this crate's `Cargo.toml` `description` field — edit
+        /// there to change what `attend sensors` prints.
+        fn description(&self) -> &str {
+            env!("CARGO_PKG_DESCRIPTION")
+        }
+
+        /// `{crate}@{version}` from this crate's package metadata.
+        fn source(&self) -> String {
+            format!(
+                "{}@{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+            )
+        }
+    };
+}
+
 // ── Sensor trait ────────────────────────────────────────────────
 
 /// A sensor observes some aspect of the environment or Claude's state.

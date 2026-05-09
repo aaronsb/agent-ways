@@ -199,6 +199,23 @@ impl Default for Config {
             requires: vec!["Bash(ps:*)".to_string()],
             watch: None,
         });
+        // Disclosure has no external tool requirements — it shells out to
+        // `ways context --json` (Bash) but the threshold dial isn't user-
+        // facing the way the per-sensor params for context/git/etc. are.
+        // Seeded here so `Config::default()` is the canonical source of
+        // truth for every built-in's defaults; without this, the
+        // `unwrap_or` fallback in register_sensors / enumerate_sensors
+        // becomes load-bearing.
+        sensors.insert("disclosure".to_string(), SensorConfig {
+            enabled: true,
+            interval: Duration::from_secs(60),
+            min_interval: Duration::from_secs(20),
+            threshold: 5.0,
+            decay_threshold: 3,
+            script: None,
+            requires: vec!["Bash(ways:*)".to_string()],
+            watch: None,
+        });
         Self {
             governor: GovernorConfig::default(),
             engagement: EngagementConfig::default(),

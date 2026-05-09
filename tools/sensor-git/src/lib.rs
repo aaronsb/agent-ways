@@ -95,15 +95,7 @@ impl Sensor for GitSensor {
         "git"
     }
 
-    /// Sourced from this crate's `Cargo.toml` `description` field — edit
-    /// there to change what `attend sensors` prints.
-    fn description(&self) -> &str {
-        env!("CARGO_PKG_DESCRIPTION")
-    }
-
-    fn source(&self) -> String {
-        format!("{}@{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-    }
+    sensor_trait::sensor_metadata!();
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let current = match self.snapshot(focus) {

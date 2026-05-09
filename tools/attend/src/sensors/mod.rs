@@ -223,20 +223,75 @@ impl SensorState {
     }
 }
 
+/// Push one builtin sensor's metadata into `entries`. Two `#[cfg]`-gated
+/// branches per invocation: the feature-on branch instantiates the sensor
+/// to read its trait-supplied `description()` / `source()` / `name()`; the
+/// feature-off branch emits a `NotCompiled` placeholder so the slot is
+/// still visible in the table.
+///
+/// `$sensor` is only parsed lexically as an expression — when its feature
+/// is off, the entire block (and the substituted expression with it) is
+/// stripped before name resolution, so it's fine if the type doesn't exist
+/// in that build.
+macro_rules! enumerate_builtin {
+    ($entries:ident, $cfg:expr, $feature:literal, $name:literal, $base:expr, $min:expr, $sensor:expr) => {{
+        #[cfg(feature = $feature)]
+        {
+            let s = $sensor;
+            let (state, interval, min_interval) = builtin_state_for($cfg, $name, $base, $min);
+            $entries.push(SensorEntry {
+                name: s.name().to_string(),
+                kind: SensorKind::Builtin,
+                state,
+                description: s.description().to_string(),
+                source: s.source(),
+                interval,
+                min_interval,
+            });
+        }
+        #[cfg(not(feature = $feature))]
+        {
+            let (_, interval, min_interval) = builtin_state_for($cfg, $name, $base, $min);
+            $entries.push(SensorEntry {
+                name: $name.to_string(),
+                kind: SensorKind::Builtin,
+                state: SensorState::NotCompiled,
+                description: String::new(),
+                source: String::new(),
+                interval,
+                min_interval,
+            });
+        }
+    }};
+}
+
 /// Enumerate every sensor known to this build — both compiled-in
 /// built-ins and config-defined script sensors. Pure metadata, no
 /// side effects; safe to call from any subcommand.
 pub fn enumerate_sensors(cfg: &Config, focus: &Focus) -> Vec<SensorEntry> {
     let mut entries: Vec<SensorEntry> = Vec::new();
 
-    // Built-in sensors. Each block below either pushes the entry from
-    // a freshly instantiated sensor (when its feature is compiled) or
-    // a `not compiled` placeholder so the user can still see the slot.
-    push_builtin_context(&mut entries, cfg);
-    push_builtin_git(&mut entries, cfg);
-    push_builtin_peers(&mut entries, cfg);
-    push_builtin_processes(&mut entries, cfg);
-    push_builtin_disclosure(&mut entries, cfg);
+    // Built-in sensors. Defaults here mirror the macro defaults in
+    // `register_sensors` and the seeds in `Config::default()` — keep them
+    // in sync if you change either source.
+    enumerate_builtin!(entries, cfg, "sensor-context", "context",
+        Duration::from_secs(60), Duration::from_secs(20),
+        ContextSensor::new());
+    enumerate_builtin!(entries, cfg, "sensor-git", "git",
+        Duration::from_secs(30), Duration::from_secs(10),
+        GitSensor::new());
+    enumerate_builtin!(entries, cfg, "sensor-peers", "peers",
+        Duration::from_secs(30), Duration::from_secs(10),
+        PeerSensor::new());
+    enumerate_builtin!(entries, cfg, "sensor-processes", "processes",
+        Duration::from_secs(30), Duration::from_secs(5),
+        match cfg.sensors.get("processes").and_then(|sc| sc.watch.clone()) {
+            Some(list) => ProcessSensor::with_watch(list),
+            None => ProcessSensor::new(),
+        });
+    enumerate_builtin!(entries, cfg, "sensor-disclosure", "disclosure",
+        Duration::from_secs(60), Duration::from_secs(20),
+        DisclosureSensor::new());
 
     // Script sensors — anything in config with `script:` set, regardless
     // of whether the file currently resolves.
@@ -294,145 +349,66 @@ fn builtin_state_for(
     )
 }
 
-#[cfg(feature = "sensor-context")]
-fn push_builtin_context(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let s = ContextSensor::new();
-    let (state, interval, min_interval) = builtin_state_for(cfg, "context", Duration::from_secs(60), Duration::from_secs(20));
-    entries.push(SensorEntry {
-        name: s.name().to_string(),
-        kind: SensorKind::Builtin,
-        state,
-        description: s.description().to_string(),
-        source: s.source(),
-        interval,
-        min_interval,
-    });
-}
-#[cfg(not(feature = "sensor-context"))]
-fn push_builtin_context(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let (_, interval, min_interval) = builtin_state_for(cfg, "context", Duration::from_secs(60), Duration::from_secs(20));
-    entries.push(SensorEntry {
-        name: "context".to_string(),
-        kind: SensorKind::Builtin,
-        state: SensorState::NotCompiled,
-        description: String::new(),
-        source: String::new(),
-        interval,
-        min_interval,
-    });
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[cfg(feature = "sensor-git")]
-fn push_builtin_git(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let s = GitSensor::new();
-    let (state, interval, min_interval) = builtin_state_for(cfg, "git", Duration::from_secs(30), Duration::from_secs(10));
-    entries.push(SensorEntry {
-        name: s.name().to_string(),
-        kind: SensorKind::Builtin,
-        state,
-        description: s.description().to_string(),
-        source: s.source(),
-        interval,
-        min_interval,
-    });
-}
-#[cfg(not(feature = "sensor-git"))]
-fn push_builtin_git(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let (_, interval, min_interval) = builtin_state_for(cfg, "git", Duration::from_secs(30), Duration::from_secs(10));
-    entries.push(SensorEntry {
-        name: "git".to_string(),
-        kind: SensorKind::Builtin,
-        state: SensorState::NotCompiled,
-        description: String::new(),
-        source: String::new(),
-        interval,
-        min_interval,
-    });
-}
+    /// Every compiled-in built-in sensor must expose a non-empty description
+    /// and a `crate@version`-shaped source string. Insurance for future
+    /// sensor authors who forget to invoke `sensor_trait::sensor_metadata!()`
+    /// in their `impl Sensor` block — without this test, a missing override
+    /// just renders as a blank cell in `attend sensors` rather than failing
+    /// the build.
+    #[test]
+    fn builtin_sensors_expose_metadata() {
+        let cfg = Config::default();
+        let focus = Focus::default_focus();
+        let entries = enumerate_sensors(&cfg, &focus);
 
-#[cfg(feature = "sensor-peers")]
-fn push_builtin_peers(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let s = PeerSensor::new();
-    let (state, interval, min_interval) = builtin_state_for(cfg, "peers", Duration::from_secs(30), Duration::from_secs(10));
-    entries.push(SensorEntry {
-        name: s.name().to_string(),
-        kind: SensorKind::Builtin,
-        state,
-        description: s.description().to_string(),
-        source: s.source(),
-        interval,
-        min_interval,
-    });
-}
-#[cfg(not(feature = "sensor-peers"))]
-fn push_builtin_peers(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let (_, interval, min_interval) = builtin_state_for(cfg, "peers", Duration::from_secs(30), Duration::from_secs(10));
-    entries.push(SensorEntry {
-        name: "peers".to_string(),
-        kind: SensorKind::Builtin,
-        state: SensorState::NotCompiled,
-        description: String::new(),
-        source: String::new(),
-        interval,
-        min_interval,
-    });
-}
+        let mut compiled_builtins = 0;
+        for e in &entries {
+            if !matches!(e.kind, SensorKind::Builtin) {
+                continue;
+            }
+            if matches!(e.state, SensorState::NotCompiled) {
+                continue;
+            }
+            compiled_builtins += 1;
 
-#[cfg(feature = "sensor-processes")]
-fn push_builtin_processes(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let s = match cfg.sensors.get("processes").and_then(|sc| sc.watch.clone()) {
-        Some(list) => ProcessSensor::with_watch(list),
-        None => ProcessSensor::new(),
-    };
-    let (state, interval, min_interval) = builtin_state_for(cfg, "processes", Duration::from_secs(30), Duration::from_secs(5));
-    entries.push(SensorEntry {
-        name: s.name().to_string(),
-        kind: SensorKind::Builtin,
-        state,
-        description: s.description().to_string(),
-        source: s.source(),
-        interval,
-        min_interval,
-    });
-}
-#[cfg(not(feature = "sensor-processes"))]
-fn push_builtin_processes(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let (_, interval, min_interval) = builtin_state_for(cfg, "processes", Duration::from_secs(30), Duration::from_secs(5));
-    entries.push(SensorEntry {
-        name: "processes".to_string(),
-        kind: SensorKind::Builtin,
-        state: SensorState::NotCompiled,
-        description: String::new(),
-        source: String::new(),
-        interval,
-        min_interval,
-    });
-}
+            assert!(
+                !e.description.is_empty(),
+                "{}: description is empty — invoke sensor_trait::sensor_metadata!() in its impl Sensor block",
+                e.name,
+            );
 
-#[cfg(feature = "sensor-disclosure")]
-fn push_builtin_disclosure(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let s = DisclosureSensor::new();
-    let (state, interval, min_interval) = builtin_state_for(cfg, "disclosure", Duration::from_secs(60), Duration::from_secs(20));
-    entries.push(SensorEntry {
-        name: s.name().to_string(),
-        kind: SensorKind::Builtin,
-        state,
-        description: s.description().to_string(),
-        source: s.source(),
-        interval,
-        min_interval,
-    });
-}
-#[cfg(not(feature = "sensor-disclosure"))]
-fn push_builtin_disclosure(entries: &mut Vec<SensorEntry>, cfg: &Config) {
-    let (_, interval, min_interval) = builtin_state_for(cfg, "disclosure", Duration::from_secs(60), Duration::from_secs(20));
-    entries.push(SensorEntry {
-        name: "disclosure".to_string(),
-        kind: SensorKind::Builtin,
-        state: SensorState::NotCompiled,
-        description: String::new(),
-        source: String::new(),
-        interval,
-        min_interval,
-    });
+            let src = &e.source;
+            let parts: Vec<&str> = src.split('@').collect();
+            assert_eq!(
+                parts.len(),
+                2,
+                "{}: source `{src}` is not crate@version shaped",
+                e.name,
+            );
+            assert!(
+                !parts[0].is_empty() && !parts[1].is_empty(),
+                "{}: source `{src}` has empty crate or version segment",
+                e.name,
+            );
+            // Cheap semver-shape check: at least two dots in the version.
+            assert!(
+                parts[1].matches('.').count() >= 2,
+                "{}: source `{src}` version `{}` is not in major.minor.patch shape",
+                e.name,
+                parts[1],
+            );
+        }
+
+        // The default feature set compiles all five built-ins; if a future
+        // refactor changes that, this assertion catches it before the
+        // metadata test silently passes with zero assertions.
+        assert!(
+            compiled_builtins > 0,
+            "no built-in sensors were compiled in — adjust this test if defaults changed",
+        );
+    }
 }
