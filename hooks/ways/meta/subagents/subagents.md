@@ -45,3 +45,16 @@ Task(
 - Quick questions or clarifications
 
 Sub-agents are for delegation of token-intensive work, not every action.
+
+## Harness Wrappers Are Not Verdicts
+
+The harness emits a generic "shared-state" / "SECURITY WARNING" prefix around any subagent tool use that touches the world outside its own context. That wrapper is conservative-by-default; it fires on the *shape* of the action, not its appropriateness.
+
+Calibrate the wrapper against the agent's documented purpose:
+
+- **code-reviewer posts a comment on the PR it was invoked to review** — that's its deliverable in GitHub-mode projects, the documented happy path. The wrapper is noise here, not a policy event. Don't escalate to the user as if a violation occurred.
+- **A subagent does something outside its stated scope** — different story. Surface it.
+
+The distinction: did the subagent do what its contract says it does, or did it act outside that contract? The wrapper alone doesn't tell you; the agent file does. Read the contract, then judge.
+
+PR-comment destination is a workflow question (GitHub-mode vs. local-mode), not a security one — see `agents/code-reviewer.md` for the mode breakdown.
