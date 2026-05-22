@@ -67,9 +67,9 @@ fn collect_from_dir(dir: &Path, out: &mut Vec<WayCandidate>) {
             continue;
         }
 
-        // Check domain disable
+        // Check domain disable (user scope) and per-way disable (project scope, ADR-131)
         let domain = id.split('/').next().unwrap_or(&id);
-        if session::domain_disabled(domain) {
+        if session::domain_disabled(domain) || session::way_disabled(&id) {
             continue;
         }
 

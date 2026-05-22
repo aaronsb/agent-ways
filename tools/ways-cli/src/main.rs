@@ -242,6 +242,19 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigCommand,
     },
+    /// Disable a way in this project (ADR-131 — writes .claude/ways.yaml)
+    Disable {
+        /// Way ID to disable (e.g., "itops/incident"). Omit when using --list.
+        name: Option<String>,
+        /// List currently disabled ways in this project
+        #[arg(long)]
+        list: bool,
+    },
+    /// Re-enable a way previously disabled in this project (ADR-131)
+    Enable {
+        /// Way ID to enable (e.g., "itops/incident")
+        name: String,
+    },
     /// Audit locale alias fidelity + discrimination (ADR-125 — flags stubs to re-author)
     Tune {
         /// Ways root directory (default: ~/.claude/hooks/ways)
@@ -586,6 +599,20 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
+        Commands::Disable { name, list } => {
+            if list {
+                cmd::disable::list()
+            } else {
+                match name {
+                    Some(n) => cmd::disable::disable(&n),
+                    None => {
+                        eprintln!("usage: ways disable <name>  |  ways disable --list");
+                        std::process::exit(2);
+                    }
+                }
+            }
+        }
+        Commands::Enable { name } => cmd::disable::enable(&name),
         Commands::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
         Commands::Tune { ways_dir, way, fidelity_threshold, discrimination_threshold, json } => {
             cmd::tune::run(ways_dir, way, fidelity_threshold, discrimination_threshold, json)

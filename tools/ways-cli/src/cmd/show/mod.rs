@@ -19,9 +19,9 @@ pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
 
-    // Domain disable check
+    // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
     let domain = id.split('/').next().unwrap_or(id);
-    if session::domain_disabled(domain) {
+    if session::domain_disabled(domain) || session::way_disabled(id) {
         return Ok(String::new());
     }
 
@@ -169,9 +169,9 @@ pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Res
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
 
-    // Domain disable
+    // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
     let domain = id.split('/').next().unwrap_or(id);
-    if session::domain_disabled(domain) {
+    if session::domain_disabled(domain) || session::way_disabled(id) {
         return Ok(String::new());
     }
 

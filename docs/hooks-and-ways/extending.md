@@ -107,9 +107,36 @@ Example: If a project has `.claude/ways/softwaredev/code/testing/testing.md`, it
 
 Project-local macros require explicit trust. Add the project path to `~/.claude/trusted-project-macros` (one path per line) to enable macro execution for that project.
 
-## Managing Domains
+## Managing Ways and Domains
 
-### Disabling a domain
+### Disabling a single way for one project (ADR-131)
+
+Use `ways disable` from inside the project:
+
+```
+ways disable itops/incident
+ways disable --list           # see what's disabled in this project
+ways enable itops/incident
+```
+
+That writes `{project}/.claude/ways.yaml`:
+
+```yaml
+ways:
+  itops/incident: false
+```
+
+Per-way toggles are **project-scope only** — there is no global per-way disable. The default state is enabled, so a project with no `ways.yaml` (or no `ways:` block in it) behaves exactly as today.
+
+Equivalent long-form, reserved for future per-way overrides:
+
+```yaml
+ways:
+  itops/incident:
+    enabled: false
+```
+
+### Disabling an entire domain (global)
 
 Add the domain name to `~/.claude/ways.json`:
 
@@ -119,7 +146,7 @@ Add the domain name to `~/.claude/ways.json`:
 }
 ```
 
-All ways in disabled domains are silently skipped. The domain still appears in the Available Ways table but its ways won't fire.
+All ways in disabled domains are silently skipped everywhere. The domain still appears in the Available Ways table but its ways won't fire. Domain-level disable is the right tool for "never anywhere"; project-scope per-way disable is the right tool for "not in this project."
 
 ### Creating a new domain
 

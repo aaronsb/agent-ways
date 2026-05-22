@@ -1,6 +1,7 @@
 pub mod banner;
 pub mod context;
 pub mod corpus;
+pub mod disable;
 pub mod embed;
 pub mod governance;
 pub mod graph;

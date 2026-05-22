@@ -57,6 +57,39 @@ fi
 
 [[ -z "$WAYS" ]] && exit 0
 
+# Collect project-scope disabled ways once per invocation (ADR-131).
+# Schema (stable, see ADR-131):
+#   ways:
+#     way/name: false          # shorthand
+#     way/name:                # long-form
+#       enabled: false
+# Any other key/value in the file is ignored here.
+DISABLED_WAYS=""
+PROJECT_WAYS_YAML="${PROJECT_DIR}/.claude/ways.yaml"
+if [[ -f "$PROJECT_WAYS_YAML" ]]; then
+  DISABLED_WAYS=$(awk '
+    /^ways:[[:space:]]*(#.*)?$/ { in_block=1; current=""; next }
+    in_block && /^[^[:space:]]/ { in_block=0 }
+    !in_block { next }
+    /^[[:space:]]*$/ { next }
+    /^[[:space:]]*#/ { next }
+    {
+      match($0, /^[[:space:]]*/); indent = RLENGTH
+      text = substr($0, indent + 1)
+      sub(/[[:space:]]*#.*$/, "", text)
+      if (indent == 2 && match(text, /^([^:]+):[[:space:]]*(.*)$/, m)) {
+        key = m[1]; val = m[2]
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+        if (val == "false") { print key; current = "" }
+        else if (val == "") { current = key }
+        else { current = "" }
+      } else if (indent == 4 && current != "" && text ~ /^enabled:[[:space:]]*false[[:space:]]*$/) {
+        print current; current = ""
+      }
+    }
+  ' "$PROJECT_WAYS_YAML")
+fi
+
 # Emit way content for each matched way (bypassing markers)
 CONTEXT=""
 WAY_IDX=0
@@ -82,13 +115,18 @@ while IFS= read -r waypath; do
   done
   [[ -z "$WAY_FILE" ]] && continue
 
-  # Check domain disabled
+  # Check domain disabled (user scope, legacy)
   DOMAIN="${waypath%%/*}"
   WAYS_CONFIG="${HOME}/.claude/ways.json"
   if [[ -f "$WAYS_CONFIG" ]]; then
     if jq -e --arg d "$DOMAIN" '.disabled | index($d) != null' "$WAYS_CONFIG" >/dev/null 2>&1; then
       continue
     fi
+  fi
+
+  # Check per-way disabled in project overlay (ADR-131)
+  if [[ -n "$DISABLED_WAYS" ]] && grep -qxF "$waypath" <<< "$DISABLED_WAYS"; then
+    continue
   fi
 
   # Extract macro position
