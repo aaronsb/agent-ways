@@ -58,36 +58,12 @@ fi
 [[ -z "$WAYS" ]] && exit 0
 
 # Collect project-scope disabled ways once per invocation (ADR-131).
-# Schema (stable, see ADR-131):
-#   ways:
-#     way/name: false          # shorthand
-#     way/name:                # long-form
-#       enabled: false
-# Any other key/value in the file is ignored here.
+# Delegate to the `ways` CLI so the bash gate sees exactly what the Rust
+# config parser sees — any divergence here is a subtle cross-path bug
+# where the same overlay disables a way in one path but not the other.
 DISABLED_WAYS=""
-PROJECT_WAYS_YAML="${PROJECT_DIR}/.claude/ways.yaml"
-if [[ -f "$PROJECT_WAYS_YAML" ]]; then
-  DISABLED_WAYS=$(awk '
-    /^ways:[[:space:]]*(#.*)?$/ { in_block=1; current=""; next }
-    in_block && /^[^[:space:]]/ { in_block=0 }
-    !in_block { next }
-    /^[[:space:]]*$/ { next }
-    /^[[:space:]]*#/ { next }
-    {
-      match($0, /^[[:space:]]*/); indent = RLENGTH
-      text = substr($0, indent + 1)
-      sub(/[[:space:]]*#.*$/, "", text)
-      if (indent == 2 && match(text, /^([^:]+):[[:space:]]*(.*)$/, m)) {
-        key = m[1]; val = m[2]
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-        if (val == "false") { print key; current = "" }
-        else if (val == "") { current = key }
-        else { current = "" }
-      } else if (indent == 4 && current != "" && text ~ /^enabled:[[:space:]]*false[[:space:]]*$/) {
-        print current; current = ""
-      }
-    }
-  ' "$PROJECT_WAYS_YAML")
+if command -v ways >/dev/null 2>&1; then
+  DISABLED_WAYS=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" ways disable --list --names-only 2>/dev/null)
 fi
 
 # Emit way content for each matched way (bypassing markers)

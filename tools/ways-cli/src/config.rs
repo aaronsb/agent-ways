@@ -35,7 +35,14 @@ pub struct Config {
     /// Disabled ways (e.g., ["itops/incident", "meta/introspection"]) — project scope only.
     /// Populated exclusively from `{project}/.claude/ways.yaml`. Default-enabled
     /// (absence means the way fires normally). See ADR-131.
-    pub disabled_ways: Vec<String>,
+    ///
+    /// Field is `pub(crate)` (not `pub`) to keep the only legitimate writer
+    /// — `apply_project_ways_overlay` — inside this module. Readers access
+    /// via `disabled_ways()`. This makes the "project scope only" invariant
+    /// structural rather than conventional: a future contributor who adds
+    /// per-way knobs to user-scope `apply_yaml` would have to also touch
+    /// this field, which sits right next to a load-bearing doc comment.
+    pub(crate) disabled_ways: Vec<String>,
     /// Parent-boost multiplier: a child way's effective embed_threshold is
     /// multiplied by this value when any ancestor way has fired in the
     /// session. Values <1.0 make children fire more easily once their parent
@@ -88,6 +95,11 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Public read accessor for the project-scope disable list (ADR-131).
+    pub fn disabled_ways(&self) -> &[String] {
+        &self.disabled_ways
+    }
+
     /// Load config with full resolution chain.
     pub fn load(project_dir: &str) -> Self {
         let mut cfg = Config::default();

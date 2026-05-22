@@ -76,7 +76,7 @@ pub fn run(json_output: bool) -> Result<()> {
     // config::global() — future migration: ctx.config.disabled_domains
     let disabled = crate::config::global().disabled_domains.clone();
     // ADR-131: project-scope per-way toggles
-    let disabled_ways = crate::config::global().disabled_ways.clone();
+    let disabled_ways: Vec<String> = crate::config::global().disabled_ways().to_vec();
 
     if json_output {
         let output = json!({

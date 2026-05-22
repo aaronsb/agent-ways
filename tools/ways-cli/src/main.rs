@@ -245,10 +245,14 @@ enum Commands {
     /// Disable a way in this project (ADR-131 — writes .claude/ways.yaml)
     Disable {
         /// Way ID to disable (e.g., "itops/incident"). Omit when using --list.
+        #[arg(required_unless_present = "list", conflicts_with = "list")]
         name: Option<String>,
         /// List currently disabled ways in this project
-        #[arg(long)]
+        #[arg(long, conflicts_with = "name")]
         list: bool,
+        /// With --list, emit bare names one-per-line (machine-readable, no decoration)
+        #[arg(long, requires = "list")]
+        names_only: bool,
     },
     /// Re-enable a way previously disabled in this project (ADR-131)
     Enable {
@@ -599,17 +603,12 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
-        Commands::Disable { name, list } => {
+        Commands::Disable { name, list, names_only } => {
             if list {
-                cmd::disable::list()
+                cmd::disable::list(names_only)
             } else {
-                match name {
-                    Some(n) => cmd::disable::disable(&n),
-                    None => {
-                        eprintln!("usage: ways disable <name>  |  ways disable --list");
-                        std::process::exit(2);
-                    }
-                }
+                // clap guarantees name is Some here via required_unless_present
+                cmd::disable::disable(&name.expect("clap enforces name when --list absent"))
             }
         }
         Commands::Enable { name } => cmd::disable::enable(&name),
