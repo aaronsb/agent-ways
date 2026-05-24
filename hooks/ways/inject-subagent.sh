@@ -57,6 +57,15 @@ fi
 
 [[ -z "$WAYS" ]] && exit 0
 
+# Collect project-scope disabled ways once per invocation (ADR-131).
+# Delegate to the `ways` CLI so the bash gate sees exactly what the Rust
+# config parser sees — any divergence here is a subtle cross-path bug
+# where the same overlay disables a way in one path but not the other.
+DISABLED_WAYS=""
+if command -v ways >/dev/null 2>&1; then
+  DISABLED_WAYS=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" ways disable --list --names-only 2>/dev/null)
+fi
+
 # Emit way content for each matched way (bypassing markers)
 CONTEXT=""
 WAY_IDX=0
@@ -82,13 +91,18 @@ while IFS= read -r waypath; do
   done
   [[ -z "$WAY_FILE" ]] && continue
 
-  # Check domain disabled
+  # Check domain disabled (user scope, legacy)
   DOMAIN="${waypath%%/*}"
   WAYS_CONFIG="${HOME}/.claude/ways.json"
   if [[ -f "$WAYS_CONFIG" ]]; then
     if jq -e --arg d "$DOMAIN" '.disabled | index($d) != null' "$WAYS_CONFIG" >/dev/null 2>&1; then
       continue
     fi
+  fi
+
+  # Check per-way disabled in project overlay (ADR-131)
+  if [[ -n "$DISABLED_WAYS" ]] && grep -qxF "$waypath" <<< "$DISABLED_WAYS"; then
+    continue
   fi
 
   # Extract macro position

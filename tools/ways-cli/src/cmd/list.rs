@@ -56,8 +56,12 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
 
     let current_epoch = session::get_epoch(&session_id);
 
-    // Use accurate context data from transcript when available
-    let (current_tokens_k, context_window_k, context_window) = match context::get_context(None) {
+    // Use accurate context data from transcript when available.
+    // Pinning to session_id keeps detection correct when cwd is outside
+    // the session's project (e.g. a session rooted in ~/.claude while the
+    // shell has cd'd elsewhere) — otherwise the cwd-walk can land on
+    // ~/.claude (global config) and miss the real transcript.
+    let (current_tokens_k, context_window_k, context_window) = match context::get_context_for_session(&session_id) {
         Ok(ctx) => (ctx.tokens_used / 1000, ctx.tokens_total / 1000, ctx.tokens_total),
         Err(_) => {
             // Fallback to session markers

@@ -75,6 +75,8 @@ pub fn run(json_output: bool) -> Result<()> {
 
     // config::global() — future migration: ctx.config.disabled_domains
     let disabled = crate::config::global().disabled_domains.clone();
+    // ADR-131: project-scope per-way toggles
+    let disabled_ways: Vec<String> = crate::config::global().disabled_ways().to_vec();
 
     if json_output {
         let output = json!({
@@ -105,6 +107,7 @@ pub fn run(json_output: bool) -> Result<()> {
             "projects": projects,
             "output_language": output_language,
             "disabled_domains": disabled,
+            "disabled_ways": disabled_ways,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -159,7 +162,10 @@ pub fn run(json_output: bool) -> Result<()> {
         println!("Global ways: {} total, {} semantic", global_total, global_semantic);
 
         if !disabled.is_empty() {
-            println!("Disabled:    {}", disabled.join(", "));
+            println!("Disabled domains: {}", disabled.join(", "));
+        }
+        if !disabled_ways.is_empty() {
+            println!("Disabled ways:    {} (project scope, ADR-131)", disabled_ways.join(", "));
         }
         println!();
 

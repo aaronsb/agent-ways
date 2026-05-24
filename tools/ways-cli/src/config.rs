@@ -30,8 +30,19 @@ pub struct Config {
     pub default_scope: String,
     /// Output language (e.g., "en", "ja", "auto")
     pub language: String,
-    /// Disabled domains (e.g., ["ea", "itops"])
+    /// Disabled domains (e.g., ["ea", "itops"]) — user scope (legacy ways.json).
     pub disabled_domains: Vec<String>,
+    /// Disabled ways (e.g., ["itops/incident", "meta/introspection"]) — project scope only.
+    /// Populated exclusively from `{project}/.claude/ways.yaml`. Default-enabled
+    /// (absence means the way fires normally). See ADR-131.
+    ///
+    /// Field is `pub(crate)` (not `pub`) to keep the only legitimate writer
+    /// — `apply_project_ways_overlay` — inside this module. Readers access
+    /// via `disabled_ways()`. This makes the "project scope only" invariant
+    /// structural rather than conventional: a future contributor who adds
+    /// per-way knobs to user-scope `apply_yaml` would have to also touch
+    /// this field, which sits right next to a load-bearing doc comment.
+    pub(crate) disabled_ways: Vec<String>,
     /// Parent-boost multiplier: a child way's effective embed_threshold is
     /// multiplied by this value when any ancestor way has fired in the
     /// session. Values <1.0 make children fire more easily once their parent
@@ -73,6 +84,7 @@ impl Default for Config {
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
+            disabled_ways: Vec::new(),
             parent_threshold_multiplier: 0.8,
             parent_boost_floor: 0.40,
             default_embed_threshold: 0.40,
@@ -83,6 +95,11 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Public read accessor for the project-scope disable list (ADR-131).
+    pub fn disabled_ways(&self) -> &[String] {
+        &self.disabled_ways
+    }
+
     /// Load config with full resolution chain.
     pub fn load(project_dir: &str) -> Self {
         let mut cfg = Config::default();
@@ -99,10 +116,12 @@ impl Config {
             cfg.apply_yaml(&content);
         }
 
-        // Layer 3: project overlay
+        // Layer 3: project overlay — only this layer may populate `disabled_ways`
+        // (ADR-131: per-way disable is project-scope only).
         let project_config = Path::new(project_dir).join(".claude/ways.yaml");
         if let Ok(content) = std::fs::read_to_string(&project_config) {
             cfg.apply_yaml(&content);
+            cfg.apply_project_ways_overlay(&content);
         }
 
         cfg
@@ -170,6 +189,49 @@ impl Config {
         }
     }
 
+    /// Parse the project-scope `ways:` mapping for per-way toggles (ADR-131).
+    ///
+    /// Schema accepts two equivalent forms:
+    ///   ways:
+    ///     itops/incident: false              # shorthand
+    ///     meta/introspection:                # long-form
+    ///       enabled: false
+    ///
+    /// Anything that evaluates to enabled=false is collected into `disabled_ways`.
+    /// Unknown sub-keys on the long-form (threshold overrides, etc.) are ignored
+    /// — reserved for future use per ADR-131.
+    /// Public alias used by `cmd::disable` to verify writer/reader round-trips
+    /// without exposing the parser as a stable API surface. Keeping the
+    /// internal name pinned makes future refactors trivial.
+    pub fn apply_project_ways_overlay_public(&mut self, content: &str) {
+        self.apply_project_ways_overlay(content);
+    }
+
+    fn apply_project_ways_overlay(&mut self, content: &str) {
+        let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
+            Ok(v) => v,
+            Err(_) => return, // already reported by apply_yaml
+        };
+        let Some(ways) = doc.get("ways").and_then(|v| v.as_mapping()) else {
+            return;
+        };
+        for (k, v) in ways {
+            let Some(name) = k.as_str() else { continue };
+            let disabled = match v {
+                serde_yaml::Value::Bool(b) => !*b, // shorthand: `way: false` means disabled
+                serde_yaml::Value::Mapping(m) => m
+                    .get(serde_yaml::Value::String("enabled".to_string()))
+                    .and_then(|v| v.as_bool())
+                    .map(|b| !b)
+                    .unwrap_or(false),
+                _ => false,
+            };
+            if disabled && !self.disabled_ways.iter().any(|w| w == name) {
+                self.disabled_ways.push(name.to_string());
+            }
+        }
+    }
+
     /// Initialize user config at XDG path.
     pub fn init_user_config() -> PathBuf {
         let path = xdg_config_dir().join("ways/config.yaml");
@@ -185,7 +247,15 @@ impl Config {
 
 # language: en          # Output language (en, ja, auto)
 # default_scope: agent  # Default scope for ways without explicit scope
-# disabled_domains: []  # Domains to disable (e.g., [ea, itops])
+# disabled_domains: []  # Domains to disable everywhere (e.g., [ea, itops])
+
+# Per-way enable/disable (ADR-131) is project scope only — set it in
+# {project}/.claude/ways.yaml using either form:
+#   ways:
+#     itops/incident: false          # shorthand
+#     meta/introspection:            # long-form
+#       enabled: false
+# Or run `ways disable <name>` / `ways enable <name>` from the project root.
 ";
         std::fs::write(&path, content).ok();
         path
@@ -280,5 +350,83 @@ mod tests {
         cfg.apply_ways_json(r#"{"output_language":"de"}"#);
         cfg.apply_yaml("language: ja");
         assert_eq!(cfg.language, "ja");
+    }
+
+    // ── ADR-131: project-scope per-way disable ─────────────────────
+
+    #[test]
+    fn project_overlay_shorthand_disable() {
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay(
+            "ways:\n  \
+             itops/incident: false\n  \
+             meta/introspection: false\n",
+        );
+        assert!(cfg.disabled_ways.iter().any(|w| w == "itops/incident"));
+        assert!(cfg.disabled_ways.iter().any(|w| w == "meta/introspection"));
+        assert_eq!(cfg.disabled_ways.len(), 2);
+    }
+
+    #[test]
+    fn project_overlay_longform_disable() {
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay(
+            "ways:\n  \
+             itops/incident:\n    \
+             enabled: false\n",
+        );
+        assert_eq!(cfg.disabled_ways, vec!["itops/incident".to_string()]);
+    }
+
+    #[test]
+    fn project_overlay_enabled_true_is_noop() {
+        // Explicit `enabled: true` (or shorthand `true`) must NOT add to disabled_ways.
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay(
+            "ways:\n  \
+             itops/incident: true\n  \
+             meta/introspection:\n    \
+             enabled: true\n",
+        );
+        assert!(cfg.disabled_ways.is_empty());
+    }
+
+    #[test]
+    fn project_overlay_missing_ways_key_is_noop() {
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay("language: en\nparent_boost_floor: 0.40\n");
+        assert!(cfg.disabled_ways.is_empty());
+    }
+
+    #[test]
+    fn project_overlay_dedupes_repeated_entries() {
+        let mut cfg = Config::default();
+        cfg.disabled_ways.push("itops/incident".to_string());
+        cfg.apply_project_ways_overlay("ways:\n  itops/incident: false\n");
+        assert_eq!(cfg.disabled_ways.len(), 1);
+    }
+
+    #[test]
+    fn project_overlay_ignores_unknown_subkeys() {
+        // Long-form with future-reserved keys should still parse and not panic.
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay(
+            "ways:\n  \
+             itops/incident:\n    \
+             enabled: false\n    \
+             embed_threshold: 0.50\n",
+        );
+        assert_eq!(cfg.disabled_ways, vec!["itops/incident".to_string()]);
+    }
+
+    #[test]
+    fn apply_yaml_does_not_populate_disabled_ways() {
+        // Only apply_project_ways_overlay should touch disabled_ways.
+        // apply_yaml is shared between user-scope and project-scope; if it ever
+        // started reading `ways:`, user-scope YAML would gain a per-way disable
+        // surface — explicitly forbidden by ADR-131.
+        let mut cfg = Config::default();
+        cfg.apply_yaml("ways:\n  itops/incident: false\n");
+        assert!(cfg.disabled_ways.is_empty());
     }
 }

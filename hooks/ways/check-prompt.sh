@@ -4,6 +4,15 @@
 # The ways binary handles: file walking, frontmatter extraction, pattern
 # + semantic matching, scope/precondition gating, parent threshold
 # lowering, session markers, macro dispatch, and content output.
+#
+# UserPromptSubmit doesn't just carry the user's typed message — the
+# harness also injects structured content here: <task-notification>
+# blobs from completed background agents, <persisted-output> pointers
+# for tool results that exceed inline budget, and other system-reminder
+# envelopes. Size bounding for the embed query is the ways binary's
+# responsibility (ADR-130 sentence-salience reducer in scan/reduce.rs).
+# This script passes the full combined prompt+topics through so the
+# reducer can score sentence salience across the whole input.
 
 source "$(dirname "$0")/require-ways.sh"
 
@@ -23,7 +32,7 @@ if [[ -f "$RESPONSE_STATE" ]]; then
   RESPONSE_TOPICS=$(jq -r '.topics // empty' "$RESPONSE_STATE" 2>/dev/null)
 fi
 
-# Combined context: user prompt + Claude's recent topics
+# Combined context: user prompt + Claude's recent topics.
 COMBINED="${PROMPT} ${RESPONSE_TOPICS}"
 
 export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"

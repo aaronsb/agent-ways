@@ -439,6 +439,13 @@ pub fn domain_disabled(domain: &str) -> bool {
     crate::config::global().disabled_domains.iter().any(|d| d == domain)
 }
 
+/// Check if a specific way is disabled in the current project (ADR-131).
+/// Project-scope only — sourced exclusively from `{project}/.claude/ways.yaml`.
+/// config::global() — future migration: ctx.config.disabled_ways
+pub fn way_disabled(way_id: &str) -> bool {
+    crate::config::global().disabled_ways().iter().any(|w| w == way_id)
+}
+
 
 // ── Way file resolution ─────────────────────────────────────────
 

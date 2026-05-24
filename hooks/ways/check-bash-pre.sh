@@ -3,6 +3,14 @@
 #
 # The ways binary handles: command pattern matching, semantic scoring,
 # check curve scoring, session state, and content output.
+#
+# Size bounding for the embed query is the ways binary's responsibility
+# (ADR-130 sentence-salience reducer in scan/reduce.rs). This script
+# passes the full command through so the reducer can score the prose
+# distribution itself — pre-truncating here would starve the reducer
+# of the back half of any long input. The regex `commands:` matcher
+# also gets the full command, which is what ways with patterns like
+# `^(npm|cargo|gh) ` expect.
 
 source "$(dirname "$0")/require-ways.sh"
 

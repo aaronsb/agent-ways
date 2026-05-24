@@ -14,7 +14,8 @@ Covers:
 - State triggers (context-threshold, file-exists, session-start)
 - The marker state machine
 - Project-local way creation and override semantics
-- Domain enable/disable via `ways.json`
+- Domain enable/disable via `ways.json` (global, user scope)
+- Per-way enable/disable via `.claude/ways.yaml` (project scope, ADR-131) — `ways disable <name>`
 
 The knowledge way also draws the line between **ways** and **skills**:
 

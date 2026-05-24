@@ -20,18 +20,41 @@ pub struct ContextInfo {
 }
 
 /// Get context info for the current session. Used by `ways context` and `ways list`.
+///
+/// When `session_id` is provided, the transcript is located by scanning
+/// `~/.claude/projects/*/<session_id>.jsonl` — this is robust against
+/// cwd/project mismatches (e.g. a session rooted in `~/.claude` while the
+/// shell cwd is elsewhere). Falls back to `project_dir` + newest-transcript
+/// lookup when no session id is given.
 pub fn get_context(project_dir: Option<&str>) -> Result<ContextInfo> {
-    let project = project_dir
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
-        .or_else(detect_project_dir)
-        .unwrap_or_else(|| ".".to_string());
+    get_context_inner(project_dir, None)
+}
 
-    let project_slug = project.replace(['/', '.'], "-");
-    let conv_dir = home_dir().join(format!(".claude/projects/{project_slug}"));
+/// Like `get_context`, but pinned to a known session id. Locates the
+/// transcript by session id across all project dirs rather than guessing
+/// the project from cwd.
+pub fn get_context_for_session(session_id: &str) -> Result<ContextInfo> {
+    get_context_inner(None, Some(session_id))
+}
 
-    let transcript = find_newest_transcript(&conv_dir)
-        .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))?;
+fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Result<ContextInfo> {
+    let transcript = if let Some(sid) = session_id {
+        find_transcript_by_session(sid).ok_or_else(|| {
+            anyhow::anyhow!("No transcript found for session: {sid}")
+        })?
+    } else {
+        let project = project_dir
+            .map(|s| s.to_string())
+            .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
+            .or_else(detect_project_dir)
+            .unwrap_or_else(|| ".".to_string());
+
+        let project_slug = project.replace(['/', '.'], "-");
+        let conv_dir = home_dir().join(format!(".claude/projects/{project_slug}"));
+
+        find_newest_transcript(&conv_dir)
+            .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))?
+    };
 
     let session = transcript
         .file_stem()
@@ -220,6 +243,22 @@ fn read_token_usage(content: &str) -> (u64, String) {
     // Conservative: ~6.3 transcript JSON bytes per token
     let estimated = active_bytes * 10 / 63;
     (estimated, "bytes".to_string())
+}
+
+/// Find a transcript by session id, searching every project dir under
+/// `~/.claude/projects/`. Session ids are globally unique, so we don't
+/// need to know which project the session is rooted in.
+fn find_transcript_by_session(session_id: &str) -> Option<PathBuf> {
+    let projects_root = home_dir().join(".claude/projects");
+    let filename = format!("{session_id}.jsonl");
+    for entry in std::fs::read_dir(&projects_root).ok()? {
+        let entry = entry.ok()?;
+        let candidate = entry.path().join(&filename);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn find_newest_transcript(dir: &Path) -> Option<PathBuf> {
