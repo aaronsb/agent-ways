@@ -19,52 +19,19 @@ pub struct Config {
     pub governor: GovernorConfig,
     pub engagement: EngagementConfig,
     pub cleanup: CleanupConfig,
-    pub signals: SignalsConfig,
     pub sensors: HashMap<String, SensorConfig>,
 }
 
-/// Presentation-layer aging for peer signals (ADR-121 outward gate, unified
-/// in ADR-123). sensor-peers consults a `Curve::Exponential` keyed by
-/// signal id before emitting an observation; stale backlog signals decay
-/// out of presentation without being deleted from disk, and thread-reply
-/// (`re:`) references reset a signal's salience to 1.0 so the parent
-/// resurfaces.
-#[derive(Debug, Clone)]
-pub struct SignalsConfig {
-    /// Exponential decay half-life in wall-clock seconds. Default 1800
-    /// (30 min) — picked as a conservative first value; subject to
-    /// `attend tune` once survey coverage exists. Signals with arrival
-    /// delta exceeding ~`half_life_seconds × log2(1/floor)` no longer
-    /// surface.
-    pub half_life_seconds: u64,
-    /// Presentation floor. Signals whose current salience drops below
-    /// this value are suppressed from the observation stream (still on
-    /// disk until the retention sweep). Default 0.3 matches the ADR-121
-    /// recommendation.
-    pub presentation_floor: f64,
-}
-
-impl Default for SignalsConfig {
-    fn default() -> Self {
-        Self {
-            half_life_seconds: 1800,
-            presentation_floor: 0.3,
-        }
-    }
-}
-
 /// Background signal-file cleanup. Runs inside `attend run` so the signals
-/// base doesn't accumulate indefinitely. Defaults keep peer discussion
-/// readable for ~30 days, which is long enough to pick up a conversation
-/// the next day or the next week and short enough that nothing lives forever.
+/// base doesn't accumulate indefinitely. Reaping is by project liveness
+/// (ADR-136) — a signal is removed when its owning project is gone — not by
+/// age, so there is no retention dial.
 #[derive(Debug, Clone)]
 pub struct CleanupConfig {
     /// Master switch. Disable to skip auto-cleanup entirely.
     pub enabled: bool,
     /// How often the sensor loop runs a cleanup sweep.
     pub interval: Duration,
-    /// Signal files older than this are removed by auto-cleanup.
-    pub retention: Duration,
 }
 
 impl Default for CleanupConfig {
@@ -73,9 +40,6 @@ impl Default for CleanupConfig {
             enabled: true,
             // Every 10 minutes — directory scan is O(files) and cheap.
             interval: Duration::from_secs(600),
-            // 30 days — conservative enough that peer discussion threads
-            // stay readable across multi-day gaps.
-            retention: Duration::from_secs(30 * 86400),
         }
     }
 }
@@ -220,7 +184,6 @@ impl Default for Config {
             governor: GovernorConfig::default(),
             engagement: EngagementConfig::default(),
             cleanup: CleanupConfig::default(),
-            signals: SignalsConfig::default(),
             sensors,
         }
     }
@@ -284,23 +247,13 @@ engagement:
   decay_per_minute: 0.1      # relative refractory decay rate
   peer_activity_window: 900  # per-peer engagement window
 
-# Presentation-layer aging for peer signals (ADR-121 outward gate, unified
-# in ADR-123). sensor-peers consults an exponential salience curve keyed
-# by signal id before emitting: old backlog signals decay out silently,
-# replies via the `re:` threading field reset the parent's salience and
-# resurface it. Disk retention (see `cleanup` below) is independent and
-# unaffected.
-signals:
-  half_life_seconds: 1800    # exponential decay half-life (30 min default)
-  presentation_floor: 0.3    # suppress below this salience
-
 # Background signal-file cleanup. Runs inside `attend run` so the signals
-# base doesn't accumulate indefinitely. `attend cleanup` is the manual
-# escape hatch with --older-than / --all / --dry-run.
+# base doesn't accumulate indefinitely. Reaping is by project liveness
+# (ADR-136), not by age. `attend cleanup` is the manual escape hatch with
+# --all / --dry-run.
 cleanup:
   enabled: true
   interval: 600              # seconds — how often the sweep runs (10 min)
-  retention: 2592000         # seconds — age cutoff (30 days)
 
 sensors:
   context:
@@ -523,27 +476,6 @@ fn apply_config(config: &mut Config, content: &str) {
                                 config.cleanup.interval = Duration::from_secs(v);
                             }
                         }
-                        "retention" => {
-                            if let Ok(v) = value.parse::<u64>() {
-                                config.cleanup.retention = Duration::from_secs(v);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            } else if current_section == "signals" {
-                if let Some((key, value)) = parse_kv(trimmed) {
-                    match key {
-                        "half_life_seconds" => {
-                            if let Ok(v) = value.parse::<u64>() {
-                                config.signals.half_life_seconds = v;
-                            }
-                        }
-                        "presentation_floor" => {
-                            if let Ok(v) = value.parse::<f64>() {
-                                config.signals.presentation_floor = v;
-                            }
-                        }
                         _ => {}
                     }
                 }
@@ -732,27 +664,25 @@ fn parse_kv(line: &str) -> Option<(&str, &str)> {
 mod tests {
     use super::*;
 
-    // ── watch: list (inline + block form) ──────────────────────────────
-
-    // ── signals: block ─────────────────────────────────────────────────
+    // ── back-compat: retired keys are ignored, not fatal ───────────────
 
     #[test]
-    fn signals_block_parses_half_life_and_floor() {
+    fn retired_signals_and_retention_are_silently_ignored() {
+        // The `signals:` section and `cleanup.retention` were removed
+        // (issue #141). An existing config carrying them from the old
+        // shipped template must still load — the loader ignores unknown
+        // keys, and the surviving cleanup keys still parse around them.
         let mut cfg = Config::default();
         apply_config(
             &mut cfg,
-            "signals:\n  half_life_seconds: 3600\n  presentation_floor: 0.5\n",
+            "signals:\n  half_life_seconds: 3600\n  presentation_floor: 0.5\n\
+             cleanup:\n  enabled: false\n  interval: 900\n  retention: 2592000\n",
         );
-        assert_eq!(cfg.signals.half_life_seconds, 3600);
-        assert!((cfg.signals.presentation_floor - 0.5).abs() < 1e-9);
+        assert!(!cfg.cleanup.enabled);
+        assert_eq!(cfg.cleanup.interval, Duration::from_secs(900));
     }
 
-    #[test]
-    fn signals_absent_retains_defaults() {
-        let cfg = Config::default();
-        assert_eq!(cfg.signals.half_life_seconds, 1800);
-        assert!((cfg.signals.presentation_floor - 0.3).abs() < 1e-9);
-    }
+    // ── watch: list (inline + block form) ──────────────────────────────
 
     #[test]
     fn watch_inline_array_replaces_defaults() {

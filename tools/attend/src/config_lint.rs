@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 /// Known top-level sections of attend config.
-const SECTIONS: &[&str] = &["governor", "engagement", "cleanup", "signals", "sensors"];
+const SECTIONS: &[&str] = &["governor", "engagement", "cleanup", "sensors"];
 
 /// Valid keys under `governor:`.
 const GOVERNOR_KEYS: &[&str] = &["base_cooldown", "max_per_window", "rate_window"];
@@ -41,12 +41,11 @@ const ENGAGEMENT_KEYS: &[&str] = &[
 /// soft deprecation is needed.
 const ENGAGEMENT_DEPRECATED: &[(&str, &str)] = &[];
 
-/// Valid keys under `cleanup:`.
-const CLEANUP_KEYS: &[&str] = &["enabled", "interval", "retention"];
-
-/// Valid keys under `signals:`. ADR-121 outward-gate parameters consumed
-/// by sensor-peers.
-const SIGNALS_KEYS: &[&str] = &["half_life_seconds", "presentation_floor"];
+/// Valid keys under `cleanup:`. `retention` was removed with the switch to
+/// project-liveness reaping (issue #141) — a leftover `retention:` is now
+/// flagged UNKNOWN and `--fix` removes it, same as any foreign key. The
+/// retired `signals:` section is likewise off the schema (see SECTIONS).
+const CLEANUP_KEYS: &[&str] = &["enabled", "interval"];
 
 /// Valid per-sensor properties (indent 4 under any sensor block).
 const SENSOR_KEYS: &[&str] = &[
@@ -157,13 +156,6 @@ fn classify_section_key(section: &str, key: &str) -> KeyClass {
         }
         "cleanup" => {
             if CLEANUP_KEYS.contains(&key) {
-                KeyClass::Known
-            } else {
-                KeyClass::Unknown
-            }
-        }
-        "signals" => {
-            if SIGNALS_KEYS.contains(&key) {
                 KeyClass::Known
             } else {
                 KeyClass::Unknown
@@ -514,23 +506,25 @@ mod tests {
     }
 
     #[test]
-    fn classify_signals_keys() {
+    fn classify_cleanup_keys() {
+        assert_eq!(classify_section_key("cleanup", "enabled"), KeyClass::Known);
+        assert_eq!(classify_section_key("cleanup", "interval"), KeyClass::Known);
+        // retention was retired with project-liveness reaping (issue #141)
+        // — now a generic unknown key the `--fix` pass removes.
         assert_eq!(
-            classify_section_key("signals", "half_life_seconds"),
-            KeyClass::Known
-        );
-        assert_eq!(
-            classify_section_key("signals", "presentation_floor"),
-            KeyClass::Known
-        );
-        assert_eq!(
-            classify_section_key("signals", "bogus"),
+            classify_section_key("cleanup", "retention"),
             KeyClass::Unknown
         );
-        assert_eq!(
-            classify_section_key("signals", "x-experimental"),
-            KeyClass::Known
-        );
+    }
+
+    #[test]
+    fn signals_section_is_retired() {
+        // The `signals:` section is off the schema (issue #141). It is no
+        // longer a recognized top-level section, so a leftover block draws
+        // an UNKNOWN-section warning. (`classify_section_key` itself returns
+        // Known via its catch-all arm because section-level recognition is
+        // handled in `lint_one_file` against SECTIONS, not here.)
+        assert!(!SECTIONS.contains(&"signals"));
     }
 
     #[test]
