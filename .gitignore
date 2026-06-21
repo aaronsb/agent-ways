@@ -121,6 +121,8 @@ hooks/ways/.obsidian/
 !scripts/hook-fire-detector.sh
 !scripts/signal-report.py
 !scripts/audit-permissions.sh
+!scripts/gh-monitor-ci-watch.sh
+!scripts/gh-monitor-inbox-watch.sh
 !docs/signal-analysis/
 !docs/signal-analysis/*.md
 !docs/signal-analysis/*.png
