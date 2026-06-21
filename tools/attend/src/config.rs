@@ -304,26 +304,17 @@ sensors:
     threshold: 2.0
     decay_threshold: 3
 
-  # Second shipped example: gh-pr-checks. Watches `gh pr checks` for
-  # the current branch's PR and emits on CI state transitions
-  # (pass / fail). Requires git, gh, and jq on PATH. Silent on
-  # main/master and on branches with no PR. Enable the same way as
-  # xdg-downloads above: copy the script, review, flip enabled.
-  #+gh-pr-checks:
-  #  script: $XDG_DATA_HOME/attend/sensors/gh-pr-checks.sh
-  #  enabled: false
-  #  interval: 30        # fast enough to catch a single CI run in progress
-  #  min_interval: 10    # ramps to 10 s during active transitions
-  #  threshold: 2.0
-
-  # Third shipped example: gh-notifications. Watches the authenticated
+  # Second shipped example: gh-notifications. Watches the authenticated
   # GitHub notification inbox and emits one line per new notification
   # since the last poll, with magnitude tiered by reason
   # (review_requested > mention > author > comment). Requires gh and
-  # jq on PATH, and an authenticated gh login. Different shape from
-  # gh-pr-checks — queries a global endpoint keyed on a rolling
-  # timestamp rather than a per-branch state machine — so it's worth
-  # reading both to see the range.
+  # jq on PATH, and an authenticated gh login. A remote-API-stream shape
+  # keyed on a rolling timestamp.
+  #
+  # Note: watching a PR's CI checks is deliberately NOT a shipped sensor.
+  # That kind of external, session-specific watching is a Monitor concern
+  # (a persistent `gh pr checks` poll loop the agent launches when it's
+  # working on a PR), not an ambient attend sensor — see ADR-137.
   #+gh-notifications:
   #  script: $XDG_DATA_HOME/attend/sensors/gh-notifications.sh
   #  enabled: false
@@ -742,9 +733,9 @@ mod tests {
         let mut cfg = Config::default();
         apply_config(
             &mut cfg,
-            "sensors:\n  +gh-pr-checks:\n    script: ./gh.sh\n    requires:\n      - Bash(git:*)\n      - Bash(gh:*)\n",
+            "sensors:\n  +gh-example:\n    script: ./gh.sh\n    requires:\n      - Bash(git:*)\n      - Bash(gh:*)\n",
         );
-        let r = &cfg.sensors.get("gh-pr-checks").unwrap().requires;
+        let r = &cfg.sensors.get("gh-example").unwrap().requires;
         assert_eq!(r, &vec!["Bash(git:*)".to_string(), "Bash(gh:*)".to_string()]);
     }
 

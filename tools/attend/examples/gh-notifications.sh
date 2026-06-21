@@ -7,19 +7,20 @@
 # other shipped sensors, which is the whole reason it exists as a
 # second reference:
 #
+#
 #   - `xdg-downloads.sh` demonstrates a **local filesystem scan with
 #     count-based tiers**: scan a directory, diff against a marker,
 #     emit once with magnitude tied to how many new files.
-#   - `gh-pr-checks.sh` demonstrates a **per-branch aggregate state
-#     machine**: three buckets, emit only on terminal transitions.
 #   - `gh-notifications.sh` (this file) demonstrates a **network API
 #     stream keyed on a rolling timestamp**: query a remote endpoint
 #     with `?since=<marker>`, emit one line per returned item, tier
 #     magnitude by the *type* of event rather than an aggregate.
 #
-# Taken together the three sensors cover the failure modes an author
-# will hit in the wild: local state, remote state that needs rollup,
-# and remote state that arrives as a stream.
+# Together the two shipped sensors cover local state and remote
+# stream state. Note: watching a single PR's CI checks is intentionally
+# NOT a sensor — that external, session-specific watching is a Monitor
+# concern (a `gh pr checks` poll loop the agent launches), not an
+# ambient attend sensor. See ADR-137.
 #
 # Design choices worth the ink:
 #
@@ -146,9 +147,10 @@ printf '%s\n' "$now_utc" > "$MARKER"
 #
 # Magnitudes above 2.0 surface individually once the emission threshold
 # is crossed; 1.5 items only fire after multiple land in the same
-# window. `ci_activity` is deliberately dropped — gh-pr-checks already
-# covers that surface and we don't want double notification. `subscribed`
-# is dropped because repo-watch notifications are too chatty.
+# window. `ci_activity` is deliberately dropped — CI watching is a
+# Monitor concern (a `gh pr checks` poll loop the agent launches when
+# working on a PR), not this ambient sensor's job; see ADR-137.
+# `subscribed` is dropped because repo-watch notifications are too chatty.
 #
 # The subshell + `|| true` keeps a jq parse failure from killing the
 # script with a non-zero exit — we'd rather lose one poll's output

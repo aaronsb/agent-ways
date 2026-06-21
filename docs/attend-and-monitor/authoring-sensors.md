@@ -107,13 +107,16 @@ The script is executed via `bash` with cwd set to the working directory attend w
 
 **Trust is the author's responsibility.** External sensors run arbitrary shell under your user — read every sensor before you enable it. Attend's design assumes sensors come from locations you already trust: your own data home, your own project dirs, your own tool repos. The parser will happily resolve any path, but if you point it at something you haven't audited, that's on you.
 
-**The shipped examples.** Attend ships three reference external sensors in the agent-ways repo under `tools/attend/examples/`. Each demonstrates a different shape of sensor so authors have a range to compare before writing their own:
+**The shipped examples.** Attend ships two reference external sensors in the agent-ways repo under `tools/attend/examples/`. Each demonstrates a different shape of sensor so authors have a range to compare before writing their own:
 
 - **`xdg-downloads.sh`** — **local filesystem scan with count-based tiers.** Scans the XDG Downloads directory, diffs against a marker, emits once with magnitude tied to how many new files appeared. ~80 lines, most of them comments walking through the contract. Good first read — you only need to understand the diff-against-marker pattern to follow the whole script.
-- **`gh-pr-checks.sh`** — **per-branch aggregate state machine.** Polls `gh pr checks` for the current branch's PR and emits only on terminal state transitions (pass / fail), keyed on repo-root + branch + PR number so closing and reopening a PR on the same branch doesn't carry stale state. Demonstrates aggregate-state modelling, marker-based state persistence, silent no-op when there's no PR, and magnitude tiers designed to break refractory on regressions without spamming on routine pushes.
 - **`gh-notifications.sh`** — **network API stream keyed on a rolling timestamp.** Queries `gh api notifications?since=<marker>` each poll and emits one line per returned item, tiered by GitHub's `reason` field (review_requested loudest, comment quietest). Demonstrates the stream shape (no aggregation — every distinct event becomes a distinct emission), wall-clock-marker pattern (no need to remember seen IDs; the server does the filtering), and graceful degradation on auth / network failure.
 
-Taken together the three cover the failure modes an author will hit in the wild: local state (xdg-downloads), remote state that needs rollup (gh-pr-checks), and remote state that arrives as a stream (gh-notifications). All three are disabled by default and all three have commented-out stub blocks in the user-scope default config. The intended workflow for any of them:
+Together they cover local state (xdg-downloads) and remote stream state (gh-notifications). Both are disabled by default and both have commented-out stub blocks in the user-scope default config.
+
+> **What's *not* a sensor: watching one PR's CI.** A sensor is for *ambient* observation — the local world or a remote stream that's always worth a glance. Watching a specific PR's checks until they land is **session-specific and bounded to a task you're doing right now**; that belongs in a **Monitor** (a `gh pr checks` poll loop the agent launches when it starts working on the PR, and that ends when CI resolves), not an attend sensor each session runs ambiently. An earlier `gh-pr-checks.sh` example was retired for exactly this reason — see ADR-137 (boundedness) for the principle.
+
+The intended workflow for either shipped sensor:
 
 1. Copy the script from the agent-ways repo into `$XDG_DATA_HOME/attend/sensors/` (or any trusted location — `~/bin`, `.claude/sensors/`, a tools repo, absolute paths all work)
 2. Read the script — it's all bash, most of it comments explaining the pattern

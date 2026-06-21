@@ -194,7 +194,7 @@ mtime=$(stat -c %Y "$TARGET" 2>/dev/null || true)
 
 The pattern across every shipped sensor is the same: **a quiet poll is a valid outcome.** Users don't want error lines in their notification stream — they want attend to notice things, and if it can't notice anything this tick, they want it to shut up until it can. A sensor that emits `ERROR: stat failed` on a broken symlink is a sensor that gets disabled within an hour.
 
-See `tools/attend/examples/xdg-downloads.sh` for a different take on the same pattern (`xdg-user-dirs` might not exist, fallback to `$HOME/Downloads`), or `gh-pr-checks.sh` for how to handle network failure and authentication issues without leaking them into the conversation.
+See `tools/attend/examples/xdg-downloads.sh` for a different take on the same pattern (`xdg-user-dirs` might not exist, fallback to `$HOME/Downloads`), or `gh-notifications.sh` for how to handle network failure and authentication issues without leaking them into the conversation.
 
 ## Step 6 — Tune intervals and decay
 
@@ -248,5 +248,5 @@ Everything else — the shipped examples under `tools/attend/examples/`, the Git
 - **[`authoring-sensors.md`](authoring-sensors.md)** — the reference doc. Everything this tutorial glossed over lives there, plus a walkthrough of a more involved network-API sensor (the GitHub Project example).
 - **[`sensors.md`](sensors.md)** — what each built-in sensor observes and how it chose its magnitude table. Good for calibrating your own numbers against a known surface.
 - **[`engagement.md`](engagement.md)** — the action potential model, which is what ultimately decides whether your event becomes a notification or gets eaten by refractory. Read this *after* you've shipped a sensor and started wondering why it stopped firing.
-- **`tools/attend/examples/xdg-downloads.sh`, `gh-pr-checks.sh`, `gh-notifications.sh`** — the three shipped reference sensors. Each demonstrates a different shape: local filesystem scan, per-branch aggregate state machine, and remote API stream keyed on a rolling timestamp. Reading all three will teach you the range.
+- **`tools/attend/examples/xdg-downloads.sh`, `gh-notifications.sh`** — the two shipped reference sensors. Each demonstrates a different shape: local filesystem scan, and remote API stream keyed on a rolling timestamp. (Watching one PR's CI is intentionally a Monitor concern, not a sensor — see ADR-137.)
 - **[`configuration.md`](configuration.md)** — when you want to declare your sensor at project scope, use the permissions audit, or understand the overlay semantics.
