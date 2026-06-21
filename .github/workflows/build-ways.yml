@@ -39,7 +39,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -76,7 +76,7 @@ jobs:
           file dist/ways-${{ matrix.platform }}
           ls -lh dist/ways-${{ matrix.platform }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ways-${{ matrix.platform }}
           path: dist/ways-${{ matrix.platform }}
@@ -84,7 +84,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Run unit tests
         run: cargo test --manifest-path tools/Cargo.toml -p ways
@@ -95,7 +95,7 @@ jobs:
     needs: [build, test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: binaries
           merge-multiple: true
@@ -107,7 +107,7 @@ jobs:
           cat checksums.txt
           ls -lh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ways-all-platforms
           path: binaries/
@@ -119,7 +119,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: ways-all-platforms
           path: binaries

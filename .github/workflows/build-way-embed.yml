@@ -29,7 +29,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -62,7 +62,7 @@ jobs:
           ls -lh bin/way-embed-${{ matrix.platform }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: way-embed-${{ matrix.platform }}
           path: bin/way-embed-${{ matrix.platform }}
@@ -72,7 +72,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: binaries
           merge-multiple: true
@@ -84,7 +84,7 @@ jobs:
           cat checksums.txt
           ls -lh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: way-embed-all-platforms
           path: binaries/

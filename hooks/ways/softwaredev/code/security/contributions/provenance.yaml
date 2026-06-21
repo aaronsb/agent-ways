@@ -1,0 +1,31 @@
+policy:
+  - uri: governance/policies/operations.md
+    type: governance-doc
+controls:
+  - id: NIST SP 800-53 SR-3 (Supply Chain Controls and Processes)
+    justifications:
+      - Treats external contributions as untrusted input requiring an adversarial review pass before acceptance
+      - Dependency/lockfile and install-script inspection applies supply-chain provenance checks at merge time
+  - id: NIST SP 800-53 SA-15 (Development Process, Standards, and Tools)
+    justifications:
+      - Defines a repeatable adversarial-review checklist applied to incoming changes
+      - Separates intent review from correctness review so both gates run before merge
+  - id: NIST SP 800-53 CM-3 (Configuration Change Control)
+    justifications:
+      - Scope-of-touch check flags changes to CI, build, and security-sensitive files that the change request does not justify
+  - id: CWE-506 (Embedded Malicious Code)
+    justifications:
+      - Hunts exfiltration primitives, obfuscation, and weakened guards introduced under cover of a benign-looking diff
+  - id: CWE-1007 (Insufficient Visual Distinction of Homoglyphs)
+    justifications:
+      - Hidden-character scan detects bidi-override (Trojan Source / CVE-2021-42574), zero-width, and homoglyph attacks in source
+  - id: OWASP Top 10 2021 A08 (Software and Data Integrity Failures)
+    justifications:
+      - Verifies incoming code and its dependencies for integrity before they enter the trusted build
+verified: 2026-06-09
+rationale: >
+  Operationalizes supply-chain and development-process controls at the
+  point of accepting external contributions. The checklist shifts
+  insider-threat and Trojan-Source detection left into code review, and the
+  scope/dependency checks enforce change-control and integrity verification
+  before untrusted code joins the trusted tree.

@@ -25,7 +25,7 @@ jobs:
     name: cargo clippy --workspace --all-targets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -37,7 +37,7 @@ jobs:
           cargo clippy --manifest-path tools/Cargo.toml --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
       - name: Upload log on failure
         if: failure() && github.event_name == 'schedule'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: clippy-drift-log
           path: clippy.log

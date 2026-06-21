@@ -39,7 +39,7 @@ jobs:
       run:
         shell: bash          # Git Bash on Windows runners — same script everywhere
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
 
