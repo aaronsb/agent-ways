@@ -57,7 +57,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-134](./system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) | Empirical auto-tuning from fire and near-miss telemetry | Accepted |
 | [ADR-135](./system/ADR-135-content-aware-write-time-over-build-gate-with-a-self-extending-pattern-corpus.md) | Content-aware write-time over-build gate with a self-extending pattern corpus | Accepted |
 | [ADR-136](./system/ADR-136-split-addressed-messaging-from-the-sensor-observation-bus.md) | Split addressed messaging from the sensor-observation bus | Accepted |
-| [ADR-137](./system/ADR-137-bounded-poll-contract-for-external-sensors-over-remote-collections.md) | Bounded-poll contract for external sensors over remote collections | Draft |
+| [ADR-137](./system/ADR-137-external-sensors-poll-conditional-feeds-not-collection-scans.md) | External sensors poll conditional feeds, not collection scans | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
