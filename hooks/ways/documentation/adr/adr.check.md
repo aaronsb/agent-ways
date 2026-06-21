@@ -16,3 +16,4 @@ Before writing or updating this ADR:
 - Do the consequences reflect **real trade-offs**, not just "this is good / this could be bad"?
 - Does an existing ADR already cover this decision? Check with `docs/scripts/adr list --group`.
 - Is the context section capturing the **actual motivation** (who needs this, what constraint drove it)?
+- Does this read as a **generalized decision** a future reader could apply to a different feature — or as a **trip report** of the exploration that birthed it? Lift the principle out; relegate the discovery to a one-line motivating example.

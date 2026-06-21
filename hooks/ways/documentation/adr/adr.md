@@ -87,6 +87,18 @@ What we're doing and how.
 
 Statuses: `Draft` | `Proposed` | `Accepted` | `Superseded` | `Deprecated`
 
+## Generalize the Decision
+
+An ADR records the **durable principle**, not the discovery path that led to it. After a long exploration the draft wants to accrete the session's specifics — the exact feature, the messy inversion, the trip-report of what you tried. Strip them. The ADR is the *reusable decision*; the exploration is not the artifact.
+
+The test: a future reader who never saw your session should be able to apply this decision to a *different* feature. If the ADR only makes sense if you know the story that birthed it, it's a trip report, not a decision.
+
+- **State the principle** at the altitude where it generalizes — "a unit of work must do bounded work per cycle," not "the poller-wrapped-in-attend-wrapped-in-Monitor stack needs a bound."
+- **Relegate the discovery** to at most a brief motivating example in Context — one or two sentences naming what surfaced the need, not a replay of the debugging.
+- **Decision and Consequences carry no session-specifics.** If a sentence only parses with this week's feature in mind, lift it to the general form or cut it.
+
+A generalized ADR is reusable across everything that hits the same force. A discovery-laden one is single-use.
+
 ## Fixing ADR Issues
 
 **Run `docs/scripts/adr lint` before editing ADR files.** The linter identifies exactly what's wrong (missing frontmatter, invalid status, missing fields). Use its output to guide targeted fixes rather than opening files and guessing.
