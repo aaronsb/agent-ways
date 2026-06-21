@@ -218,12 +218,15 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         ));
     }
 
-    // Self-reload: track own binary mtime
+    // Self-reload: track own binary mtime as the cheap trigger, plus a
+    // content hash so an identical rebuild (mtime bump, same bytes) is
+    // distinguished from a real binary change (issue #140).
     let self_exe = std::env::current_exe().ok();
-    let initial_mtime = self_exe
+    let mut initial_mtime = self_exe
         .as_ref()
         .and_then(|p| std::fs::metadata(p).ok())
         .and_then(|m| m.modified().ok());
+    let initial_hash = tick::initial_self_hash(self_exe.as_deref());
     let mut last_reload_check = Instant::now();
 
     // Heartbeat identifier (ADR-129). Real session id when resolvable,
@@ -243,7 +246,13 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         attend_heartbeat::touch(&heartbeat_id).ok();
 
         if last_reload_check.elapsed() >= RELOAD_CHECK_INTERVAL {
-            maybe_self_reload(self_exe.as_deref(), initial_mtime.as_ref(), &slots, &state_store);
+            maybe_self_reload(
+                self_exe.as_deref(),
+                &mut initial_mtime,
+                initial_hash,
+                &slots,
+                &state_store,
+            );
             last_reload_check = Instant::now();
         }
 

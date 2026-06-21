@@ -82,18 +82,49 @@ pub(super) fn build_engagement(cfg: &config::Config) -> sensor_trait::Curve {
     }
 }
 
+/// Hash a file's contents with the std default hasher. Returns `None`
+/// if the file can't be read. Used as the binary-identity check on the
+/// self-reload path — cheap, no external dep, and only invoked when the
+/// mtime has already moved (a rare event).
+fn hash_file(path: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+/// Capture the running binary's content hash at startup, paired with its
+/// mtime, so the reload check can tell a real binary change from an
+/// identical rebuild that only bumped the mtime. `None` if the exe path
+/// or its bytes can't be read.
+pub(super) fn initial_self_hash(self_exe: Option<&Path>) -> Option<u64> {
+    self_exe.and_then(hash_file)
+}
+
 /// Compare the running binary's mtime against the captured startup
 /// mtime. On change, checkpoint state and `exec()` self so the new
 /// binary takes over with state preserved. Never returns on success;
 /// `exec()` only returns on failure, which is logged and discarded so
 /// the loop continues against the now-stale binary.
+///
+/// An identical rebuild bumps the mtime without changing a byte (issue
+/// #140 — observed `reloaded fceb69e → fceb69e`). When the mtime has
+/// moved but the content hash still matches the startup hash, there's no
+/// point exec()ing into an identical binary — and the messaging reheat
+/// the reload triggers is pure noise — so we update the baseline mtime
+/// (to avoid rehashing every interval) and return without reloading.
 pub(super) fn maybe_self_reload(
     self_exe: Option<&Path>,
-    initial_mtime: Option<&SystemTime>,
+    baseline_mtime: &mut Option<SystemTime>,
+    baseline_hash: Option<u64>,
     slots: &[SensorSlot],
     state_store: &state::StateStore,
 ) {
-    let (Some(exe), Some(orig_mtime)) = (self_exe, initial_mtime) else {
+    let Some(exe) = self_exe else {
+        return;
+    };
+    let Some(orig_mtime) = *baseline_mtime else {
         return;
     };
     let Ok(meta) = std::fs::metadata(exe) else {
@@ -102,7 +133,17 @@ pub(super) fn maybe_self_reload(
     let Ok(current_mtime) = meta.modified() else {
         return;
     };
-    if current_mtime == *orig_mtime {
+    if current_mtime == orig_mtime {
+        return;
+    }
+    // mtime moved — confirm the bytes actually changed before reloading.
+    // A matching hash means an identical rebuild: skip the pointless
+    // exec() and the reheat noise, but advance the baseline mtime so we
+    // don't rehash on every subsequent interval. A failed hash falls
+    // through to reload (fail safe — behave as the pre-#140 mtime gate).
+    let current_hash = hash_file(exe);
+    if current_hash.is_some() && current_hash == baseline_hash {
+        *baseline_mtime = Some(current_mtime);
         return;
     }
     emit::log("binary changed — checkpointing and reloading");
@@ -378,5 +419,27 @@ mod tests {
             }
             _ => panic!("expected ActionPotential curve"),
         }
+    }
+
+    #[test]
+    fn hash_file_is_stable_and_content_sensitive() {
+        // The same-hash skip on the reload path (issue #140) depends on
+        // hash_file being deterministic for identical bytes and different
+        // for changed bytes.
+        let dir = std::env::temp_dir().join(format!("attend-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("bin-a");
+        let b = dir.join("bin-b");
+        std::fs::write(&a, b"identical rebuild bytes").unwrap();
+        std::fs::write(&b, b"identical rebuild bytes").unwrap();
+        // Byte-identical files hash equal even as distinct paths — this is
+        // the "mtime moved, content didn't" case we skip the reload on.
+        assert_eq!(hash_file(&a), hash_file(&b));
+
+        std::fs::write(&b, b"a genuinely changed binary").unwrap();
+        assert_ne!(hash_file(&a), hash_file(&b));
+
+        assert!(hash_file(&dir.join("does-not-exist")).is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
