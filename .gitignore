@@ -125,6 +125,8 @@ hooks/ways/.obsidian/
 !scripts/gh-monitor-inbox-watch.sh
 !scripts/update.sh
 !scripts/check-rust.sh
+!scripts/sync-to-home.sh
+!scripts/sync-to-home-test.sh
 !docs/signal-analysis/
 !docs/signal-analysis/*.md
 !docs/signal-analysis/*.png
