@@ -40,6 +40,14 @@ $(BIN): cmake-build
 	@echo "Built: $(PLATFORM_BIN) ($$(ls -lh $(PLATFORM_BIN) | awk '{print $$5}'))"
 
 cmake-build: CMakeLists.txt way-embed.cpp | llama.cpp/CMakeLists.txt
+	@command -v cmake >/dev/null 2>&1 || { \
+		echo "ERROR: cmake not found — required to build way-embed (the semantic matcher) from source."; \
+		echo "  Install cmake + a C++ compiler:"; \
+		echo "    Arch:    sudo pacman -S cmake gcc"; \
+		echo "    Debian:  sudo apt install cmake build-essential"; \
+		echo "    Fedora:  sudo dnf install cmake gcc-c++"; \
+		echo "    macOS:   brew install cmake"; \
+		exit 1; }
 	@mkdir -p $(BUILDDIR)
 	@cd $(BUILDDIR) && cmake $(CMAKE_FLAGS) .. 2>&1 | tail -5
 	cmake --build $(BUILDDIR) --target way-embed $(CMAKE_BUILD_FLAGS) -j$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)

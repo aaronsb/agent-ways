@@ -62,7 +62,14 @@ help:
 # Build ways CLI + set up embedding engine + generate initial corpus.
 setup: ways attend attend-chat
 	@echo "Setting up embedding engine..."
-	$(MAKE) -C tools/way-embed setup
+	@# Optional accelerator — if its build deps are missing, warn and continue so
+	@# the rest of install (incl. the PATH symlinks) still completes. Without it,
+	@# ways fall back to regex/keyword matching.
+	@$(MAKE) -C tools/way-embed setup || { \
+		echo ""; \
+		echo "  ⚠ Embedding engine not built — semantic (meaning-based) matching is unavailable."; \
+		echo "    Regex/keyword ways still work. Install the build deps shown above, then re-run 'make install'."; \
+	}
 	@echo ""
 	@echo "Setting up mmaid diagram renderer..."
 	@bash tools/mmaid/download-mmaid.sh || echo "  (mmaid optional — skipping)"
@@ -91,6 +98,13 @@ install: hooks-executable setup hooks-install
 	@echo "  attend binary:      $(XDG_BIN)/attend → $(CURDIR)/$(ATTEND_BIN)"
 	@echo "  attend-chat binary: $(XDG_BIN)/attend-chat → $(CURDIR)/$(ATTEND_CHAT_BIN)"
 	@echo "  way-embed binary:   $(CLAUDE_BIN)/way-embed → $(CURDIR)/$(WAY_EMBED_BIN)"
+	@case ":$$PATH:" in \
+		*":$(XDG_BIN):"*) ;; \
+		*) printf '\n  %s\n  %s\n  %s\n' \
+			"NOTE: $(XDG_BIN) is not on your PATH — ways/attend won't be found yet." \
+			"Add it to your shell rc (~/.bashrc or ~/.zshrc), then restart your shell:" \
+			"    export PATH=\"$(XDG_BIN):\$$PATH\"" ;; \
+	esac
 	@echo "  Restart Claude Code for ways to take effect."
 
 hooks-install:
