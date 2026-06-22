@@ -108,7 +108,7 @@ curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/insta
 
 The built-in ways cover software development, but the framework is domain-agnostic. Fork it, replace the ways, add your own domains.
 
-> **Already have `~/.claude/`?** The installer detects existing files and won't clobber them. See the **[install guide](docs/install-guide.md)** for how to back up, merge, or start fresh. If you're sure: `scripts/install.sh --dangerously-clobber`.
+> **Already have `~/.claude/`?** The installer detects existing files and won't clobber them. See the **[install guide](docs/install-guide.md)** for options — including a subdirectory install that keeps your existing config intact and syncs via `/sync-to-home`. If you're sure you want to replace: `scripts/install.sh --dangerously-clobber`.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.
 

@@ -132,6 +132,46 @@ make setup
 
 The built-in update checker (`hooks/check-config-updates.sh`) detects forks and nudges you when upstream has new commits.
 
+## Scenario 5: Keep your existing config, install alongside it
+
+**Signs:** `~/.claude/` has sessions, credentials, or settings you want to keep untouched, and you'd rather not make it a git repo at all.
+
+This topology keeps the agent-ways repo in a subdirectory (e.g. `~/.claude/directory`) and syncs its outputs into `~/.claude` without replacing it. Your sessions, credentials, and settings stay where they are.
+
+**Steps:**
+
+```bash
+# 1. Clone into a subdirectory of ~/.claude (or anywhere you prefer)
+git clone https://github.com/aaronsb/agent-ways ~/.claude/directory
+
+# 2. Build binaries and fetch the embedding model
+cd ~/.claude/directory && make setup
+
+# 3. Open Claude Code in the repo directory, then run:
+/sync-to-home
+```
+
+`/sync-to-home` copies skills, agents, commands, hooks, and binaries into `~/.claude` and merges only the hooks block and ways permissions into your existing `settings.json`, leaving your model, theme, plugins, and credentials untouched.
+
+**Keeping up to date:**
+
+```bash
+cd ~/.claude/directory
+git pull
+/sync-to-home
+```
+
+Run `/sync-to-home` after every pull. Hooks and binaries that are symlinked to the source are skipped automatically.
+
+**Trade-offs vs the canonical install:**
+
+| | Canonical (`~/.claude` is the repo) | Subdirectory |
+|---|---|---|
+| Updates | `git pull` | `git pull` + `/sync-to-home` |
+| Sessions/credentials isolation | Shared with repo | Fully separate |
+| Fork sync | GitHub fork-sync button works | Works, fork stays independent |
+| `make install` / `make update` | Direct | Not used — use `/sync-to-home` |
+
 ## The nuclear option
 
 If you just want it installed and don't care what's there:
