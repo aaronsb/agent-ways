@@ -1,109 +1,46 @@
 ---
-description: Sync this agent-ways clone into ~/.claude (subdirectory-clone topology)
+description: Sync a subdirectory agent-ways clone into ~/.claude (subdirectory topology, ADR-140)
+allowed-tools: Bash
 ---
 
 # /sync-to-home
 
-Sync this agent-ways repo clone into `~/.claude`. Run after pulling upstream changes or committing local edits.
+Project this agent-ways repo clone up into `~/.claude` for the **subdirectory
+topology** (ADR-140): the repo lives in a subdirectory of `~/.claude` while
+`~/.claude` stays your own config dir. Run after pulling upstream changes.
 
-## Steps
+The mechanism is deterministic and lives in `make sync-to-home` — your job is the
+judgment around it, not the bash.
 
-Run each step in order using the Bash tool. Print a short status line after each one.
+## What to do
 
-### 1. Detect topology
+1. **Confirm this is the subdirectory topology.** Run `git rev-parse --show-toplevel`
+   and compare to `$HOME/.claude`. If the repo root *is* `~/.claude`, this is the
+   in-place topology — stop and tell the user to use `make update` instead; there is
+   nothing to project.
 
-```bash
-SRC="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-DEST="$HOME/.claude"
-echo "Source: $SRC"
-echo "Target: $DEST"
-```
+2. **Get consent — this mutates `~/.claude`.** The sync replaces the hooks block in
+   `~/.claude/settings.json`, adds ways permissions, and copies skills/agents/
+   commands/hooks/binaries into `~/.claude` (backing up first to
+   `~/.claude/backups/`). Confirm the user wants this before proceeding.
 
-If `$SRC == $DEST`, report "Already the canonical install — nothing to sync" and stop.
+3. **Run the make target** from the repo root:
 
-Verify `$SRC` is an agent-ways repo by checking for `hooks/check-config-updates.sh`. If missing, stop with an error.
+   ```bash
+   make sync-to-home
+   ```
 
-### 2. Backup
+   For the advanced symlink variant (so a future `git pull` *is* the whole update,
+   with no re-sync), use `make sync-to-home-link` instead — but only if the user
+   asked for it; copy is the default.
 
-```bash
-STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP="$DEST/backups/sync-$STAMP"
-mkdir -p "$BACKUP"
-for item in settings.json commands hooks bin; do
-  [[ -e "$DEST/$item" ]] && cp -r "$DEST/$item" "$BACKUP/"
-done
-```
+4. **Report** what changed: the backup location, that settings.json was merged
+   (model/theme/plugins/credentials untouched), and that Claude Code must be
+   restarted to activate the changes. Surface any warning the script printed
+   (e.g. a binary rebuild that fell back to the existing `bin/`).
 
-### 3. Sync skills, agents, commands
+## Not for
 
-```bash
-mkdir -p "$DEST/skills" "$DEST/agents" "$DEST/commands"
-cp -r "$SRC/skills/." "$DEST/skills/"
-cp -r "$SRC/agents/." "$DEST/agents/"
-cp -r "$SRC/commands/." "$DEST/commands/"
-```
-
-### 4. Sync hooks
-
-Skip if the destination is already symlinked to the source:
-
-```bash
-_src_real="$(cd "$SRC/hooks" && pwd -P)"
-_dst_real="$(cd "$DEST/hooks" 2>/dev/null && pwd -P || true)"
-if [[ "$_dst_real" != "$_src_real" ]]; then
-  mkdir -p "$DEST/hooks/ways"
-  cp -r "$SRC/hooks/ways/." "$DEST/hooks/ways/"
-  for h in check-config-updates.sh refresh-claude-md.sh; do
-    [[ -f "$SRC/hooks/$h" ]] && cp -f "$SRC/hooks/$h" "$DEST/hooks/$h"
-  done
-fi
-find "$DEST/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
-```
-
-### 5. Rebuild and copy binaries
-
-Skip the copy for any binary already symlinked to the source:
-
-```bash
-if command -v cargo >/dev/null && command -v make >/dev/null; then
-  make -C "$SRC" update-binaries 2>&1 || echo "warn: binary rebuild had issues — copying existing bin/"
-fi
-mkdir -p "$DEST/bin"
-for b in ways attend attend-chat way-embed; do
-  if [[ -f "$SRC/bin/$b" ]]; then
-    if [[ -L "$DEST/bin/$b" ]] && [[ "$(readlink "$DEST/bin/$b")" == "$SRC/bin/$b" ]]; then
-      echo "ok $b already linked to source — skipping"
-      continue
-    fi
-    cp -f "$SRC/bin/$b" "$DEST/bin/$b" && chmod +x "$DEST/bin/$b"
-  fi
-done
-"$DEST/bin/ways" corpus --quiet 2>/dev/null || true
-```
-
-### 6. Merge settings.json
-
-Merge the hooks block and ways permissions into the existing settings, quoting hook command paths for `$HOME` values that contain spaces:
-
-```bash
-SETTINGS="$DEST/settings.json"
-[[ -f "$SETTINGS" ]] || echo '{}' > "$SETTINGS"
-ADD_PERMS='["Bash(ways:*)","Bash(attend:*)","Bash(attend-chat:*)","Bash(way-embed:*)","Edit(~/.claude/**)","Write(~/.claude/**)"]'
-TMP="$SETTINGS.tmp.$$"
-jq --slurpfile src "$SRC/settings.json" --argjson add "$ADD_PERMS" '
-  .hooks = $src[0].hooks
-  | .permissions = ((.permissions // {}) | .allow = ((.allow // []) + ($add - (.allow // []))))
-  | .hooks |= (
-      to_entries | map(.value |= map(.hooks |= map(.command |= (
-        if startswith("\"") then .
-        else ((index(" ")) as $i
-          | if $i == null then "\"\(.)\"" else "\"\(.[0:$i])\"\(.[$i:])" end)
-        end
-      )))) | from_entries
-    )
-' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
-```
-
-### 7. Done
-
-Print: "Sync complete. Restart Claude Code to activate changes."
+- The in-place topology (`~/.claude` *is* the repo) — that's `make update`.
+- Re-implementing the projection in bash — it lives in `scripts/sync-to-home.sh`
+  behind `make sync-to-home`. Drive the target; don't duplicate it.
