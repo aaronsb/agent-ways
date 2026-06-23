@@ -115,6 +115,17 @@ flowchart LR
     Age -->|re-engaged| Present
     Below --> Cleanup
     Cleanup --> Delete
+
+    classDef core fill:#7c3aed,stroke:#4a5568,color:#ffffff
+    classDef process fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef store fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef caution fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+
+    class Create core
+    class Write store
+    class Scan,Present,Cleanup process
+    class Age,Below caution
+    class Delete store
 ```
 
 **Phase 1 — creation.** The sender (an agent via `attend send`, a sensor via an internal emit path, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--broadcast` → `_broadcast/`, `--focus <name>` → `@<name>/`, `--to <path>` → the encoded path, no flags → the sender's own project scope. The threading flag composes with any routing flag.

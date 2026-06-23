@@ -20,19 +20,26 @@ under-serving, asks permission, and — only on consent — localizes itself.
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant Op as Operator (Spanish)
     participant CC as Claude Code · language = spanish
     participant W as agent-ways · output_language = en
     participant L as ways-localize skill
+    rect rgba(217,119,6,0.12)
     Op->>CC: set language = spanish
     Op->>W: install + start session
     W-->>Op: nudge "CC is Spanish, ways is en → not localized. Optimize?"
     Note over W,Op: emitted in Spanish — CC already responds in Spanish
     Op->>L: yes, localize for Spanish (consent)
+    end
+    rect rgba(45,125,154,0.12)
     L->>W: flip output_language → es
     L->>L: fetch multilingual model · translate every way vs English root
     L->>L: pack stubs · rebuild multi corpus (English anchor) · ways tune until clean
+    end
+    rect rgba(45,142,94,0.12)
     Note over Op,W: next session CC=es, output_language=es → match → nudge silent
+    end
 ```
 
 ## What each move is doing

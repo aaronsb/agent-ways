@@ -31,6 +31,16 @@ stateDiagram-v2
     Observed --> Gate
     Gate --> MessageLane : yes · @Name · #group · #open · a human on attend-chat
     Gate --> EventLane : no · git churn · a process · a peer appearing or going idle
+
+    classDef process fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef gate fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
+    classDef store fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+    classDef external fill:#f6821f,color:#1a1a1a,stroke:#4a5568
+
+    class Observed process
+    class Gate gate
+    class MessageLane store
+    class EventLane external
 ```
 
 - **Yes → message lane.** A person or agent *chose* to say this. It is a unit
@@ -78,6 +88,25 @@ stateDiagram-v2
             fresh one.
         end note
     }
+
+    classDef process fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef gate fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
+    classDef store fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+    classDef external fill:#f6821f,color:#1a1a1a,stroke:#4a5568
+
+    class Trayed process
+    class Deduped process
+    class Digested process
+    class Surfaced store
+    class Salience gate
+    class Refractory process
+    class Governor process
+    class Disclosed store
+    class Held external
+    class Decayed external
+
+    style MessageLane stroke:#2d8e5e,fill:#2d8e5e1a,color:#cbd5e1
+    style EventLane stroke:#d97706,fill:#f6821f1a,color:#cbd5e1
 ```
 
 ## Why handling the same moment two ways is the whole point

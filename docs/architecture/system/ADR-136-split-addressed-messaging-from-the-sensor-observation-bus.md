@@ -95,6 +95,7 @@ boundary.
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant H as Human / Agent
     participant C as Compose<br/>(attend-chat / attend send)
     participant FS as Shared signal dir<br/>(~/.cache/attend/signals/…)
@@ -102,9 +103,12 @@ sequenceDiagram
     participant G as Gate stack
     participant M as Monitor → session
 
+    rect rgba(124,58,237,0.12)
     H->>C: "@Cleo @Tam hi" / attend send
     Note over C: parse_addressed → ONE Addressed<br/>CLI → ONE --to / --focus
     C->>FS: write_signal (one file per dest dir)
+    end
+    rect rgba(217,119,6,0.12)
     loop each peer polls independently
         S->>FS: scan own-cwd + _broadcast + focus
         S->>G: 1. seen-dedup
@@ -115,6 +119,7 @@ sequenceDiagram
         S->>G: 6. disclosure governor: window cap + cooldown (per-session)
         S->>G: 7. priority filter: magnitude ≥ 3 → stdout
         G-->>M: survivors → stdout line
+    end
     end
     M->>H: <task-notification>
 ```
@@ -284,54 +289,82 @@ flowchart TD
     Q -->|"no — git, process, peer-presence"| E[EVENT lane<br/>salience + refractory + governor]
     M --> MT[recipient tray / room ledger<br/>never wiped until that recipient saw it]
     E --> ET[coalesced · aged by wall-clock · may drop]
+
+    classDef external fill:#f6821f,color:#1a1a1a,stroke:#4a5568
+    classDef decision fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
+    classDef core fill:#7c3aed,color:#ffffff,stroke:#4a5568
+    classDef process fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef store fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+
+    class X external
+    class Q decision
+    class M core
+    class E process
+    class MT store
+    class ET process
 ```
 
 **Authored message, live recipients** (also the Bug 1 multi-recipient fix):
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant A as Author
     participant L as Message lane
     participant T1 as Alice's tray
     participant T2 as Bob's tray / #open ledger
     participant Rx as Live recipient
+    rect rgba(124,58,237,0.12)
     A->>L: "@Alice @Bob ship it" (one compose)
     Note over L: parse the SET {Alice, Bob}<br/>stamp wall-clock ts, one dedup id
     L->>T1: durable write
     L->>T2: durable write
+    end
+    rect rgba(45,142,94,0.12)
     Rx->>T1: scan (live)
     T1-->>Rx: notify once
     Note over T1: read ≠ delete — marked seen in<br/>Rx's own set, survives restart
+    end
 ```
 
 **Re-entry after a down-gap** (the Bug 2 fix; wall-clock front and center):
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant Rx as Returning session
     participant T as Trays + #open ledger
     Note over Rx: was down 06:04–06:25
+    rect rgba(217,119,6,0.12)
     Rx->>T: on reconnect, scan UNSEEN (own seen-set)
     T-->>Rx: digest — "while away: 2 to you (newest 2m ago) ·<br/>6 on #open over 21m"
     Note over Rx: one coalesced turn, NOT a replay flood
+    end
+    rect rgba(45,142,94,0.12)
     Rx->>T: attend inbox (opt-in pull)
     T-->>Rx: full chronological ledger
     Note over Rx: silence still valid — glance if worth it
+    end
 ```
 
 **Environmental event** (unchanged — the lane the gate stack was built for):
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant Env as Environment
     participant S as Sensor poll
     participant G as Salience + Refractory + Governor
     participant Rx as Session
+    rect rgba(45,125,154,0.12)
     Env->>S: git dirty / process up / peer appeared
     S->>G: magnitude + wall-clock age
     Note over G: aged, coalesced, most suppressed to stderr
+    end
+    rect rgba(217,119,6,0.12)
     G-->>Rx: only if loud enough
     Note over Rx: lossy BY DESIGN — the phone may ring unanswered
+    end
 ```
 
 ## Validation

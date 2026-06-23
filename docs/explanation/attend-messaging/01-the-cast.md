@@ -50,6 +50,18 @@ flowchart LR
     H["aaron@kitty<br/>attend-chat (human)"] --- BUS
     A -.->|"spawns, invisible to peers"| S1["sub-agent: test-writer"]
     A -.-> S2["sub-agent: migration"]
+
+    classDef store fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+    classDef peer fill:#7c3aed,color:#ffffff,stroke:#4a5568
+    classDef human fill:#475569,color:#ffffff,stroke:#4a5568
+    classDef sub fill:#475569,color:#ffffff,stroke:#4a5568
+
+    class OPEN,G1 store
+    class A,B,C peer
+    class H human
+    class S1,S2 sub
+
+    style BUS stroke:#2d8e5e,fill:#2d8e5e1a,color:#cbd5e1
 ```
 
 attend discovers peers by reading `~/.claude/sessions/*.json` and confirming

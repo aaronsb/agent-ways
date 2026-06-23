@@ -26,6 +26,14 @@ flowchart TB
     SPLIT --> I["#infra<br/>Orin · Dex"]
     B -.->|"cross-cut decision"| OPEN
     I -.->|"'migration ready for all'"| OPEN
+
+    classDef commons fill:#7c3aed,color:#ffffff,stroke:#4a5568
+    classDef split fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef room fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+
+    class OPEN commons
+    class SPLIT split
+    class B,F,I room
 ```
 
 The pattern is **convene-then-split**:

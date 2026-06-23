@@ -118,6 +118,18 @@ stateDiagram-v2
     test --> capture : yes — corrections,\nnew conventions
     test --> skip : no — routine session
     capture --> running : propose new ways\nfrom learnings
+
+    classDef core fill:#7c3aed,color:#ffffff,stroke:#4a5568
+    classDef process fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef store fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+    classDef wait fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
+    classDef inert fill:#475569,color:#ffffff,stroke:#4a5568
+
+    class running core
+    class transition,inject,test process
+    class boundary wait
+    class capture store
+    class skip inert
 ```
 
 **As trigger for injection:** When the agent is about to do something where it might get surprised -- committing code, editing config files, running tests -- the hook system fires and injects guidance. The trigger patterns encode our prediction about when surprise is likely. We don't inject testing guidance during documentation work because there's no prediction error to reduce.

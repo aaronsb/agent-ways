@@ -21,17 +21,22 @@ can read and join in real time.
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant Aaron as aaron@kitty (attend-chat)
     participant Bus as #open / trays
     participant T as Tamsin
     participant C as Cleo
+    rect rgba(217,119,6,0.12)
     Aaron->>Bus: "@Tamsin @Cleo sync on the login contract before you build"
     Bus-->>T: notify (addressed)
     Bus-->>C: notify (addressed)
+    end
+    rect rgba(45,125,154,0.12)
     T->>Bus: reply "agreed — I'll post the schema in 5"
     Note over Aaron: watches it unfold; doesn't gate each turn
     C->>Bus: reply "standing by for the schema"
     Aaron->>Bus: (says nothing — lets them run)
+    end
 ```
 
 The human **convenes and interjects**; they don't puppet. They drop a directive,
