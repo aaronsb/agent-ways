@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install uninstall update update-binaries clean help ways ways-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
+.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help ways ways-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -37,7 +37,9 @@ help:
 	@echo ""
 	@echo "  make setup        Build ways CLI + attend + fetch embedding model + corpus"
 	@echo "  make install      Full first-time setup (hooks + tools + PATH)"
-	@echo "  make update       Pull latest changes and re-run install"
+	@echo "  make update       Pull latest changes and re-run install (in-place topology)"
+	@echo "  make sync-to-home Project a subdirectory clone into ~/.claude (copy; ADR-140)"
+	@echo "  make sync-to-home-link  Same, but symlink instead of copy (advanced)"
 	@echo "  make ways         Get ways binary (download or build from source)"
 	@echo "  make ways-rebuild Force rebuild ways from source"
 	@echo "  make attend       Build attend binary"
@@ -124,6 +126,19 @@ update:
 	@bash scripts/update.sh
 	$(MAKE) update-binaries
 	$(MAKE) install
+
+# Subdirectory topology (ADR-140): the repo lives in a subdir of ~/.claude and is
+# projected up into it. Copy is the default (robust everywhere); the -link variant
+# symlinks instead (git pull then becomes the whole update — no re-sync). Both
+# delegate to the same deterministic script and run a smoke test of the merge.
+sync-to-home:
+	@bash scripts/sync-to-home.sh
+
+sync-to-home-link:
+	@SYNC_MODE=symlink bash scripts/sync-to-home.sh
+
+sync-to-home-test:
+	@bash scripts/sync-to-home-test.sh
 
 # Rebuild every binary `update` is responsible for refreshing.
 # Indirected from `update:` so adding a new rebuild here takes effect
