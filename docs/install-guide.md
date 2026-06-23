@@ -138,6 +138,8 @@ The built-in update checker (`hooks/check-config-updates.sh`) detects forks and 
 
 This is the **subdirectory topology** (ADR-140): the agent-ways repo lives in a subdirectory (e.g. `~/.claude/agent-ways`) and is *projected* into `~/.claude` without replacing it. Your sessions, credentials, and settings stay where they are.
 
+> For the conceptual model and walked-through scenarios of both topologies, see [docs/explanation/install-topologies/](explanation/install-topologies/) — the model, the in-place install, and the subdirectory install, each with diagrams.
+
 **Steps:**
 
 ```bash
