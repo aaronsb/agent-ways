@@ -104,6 +104,19 @@ stateDiagram-v2
     AbsoluteRefractory --> RelativeRefractory: absolute_refractory<br/>seconds elapsed
     RelativeRefractory --> Rest: multiplier decayed to ~1.0<br/>via multiplier_half_life
     RelativeRefractory --> Disclosed: high-magnitude event<br/>breaks elevated threshold<br/>AND governor permits
+
+    classDef rest fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+    classDef process fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef waiting fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
+    classDef boundary fill:#f6821f,color:#1a1a1a,stroke:#4a5568
+    classDef core fill:#7c3aed,color:#ffffff,stroke:#4a5568
+
+    class Rest rest
+    class Accumulating process
+    class FireReady waiting
+    class Disclosed core
+    class AbsoluteRefractory boundary
+    class RelativeRefractory waiting
 ```
 
 **Absolute refractory** is a hard wall. For `absolute_refractory` seconds after any firing, the sensor cannot disclose at all — not even on a maximum-magnitude event. During this window the engine's `current_multiplier(tick)` returns `f64::INFINITY`, which `in_absolute_refractory(tick)` recognizes as "gate fully closed." Events still arrive and still accumulate, but none of them fire.

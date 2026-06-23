@@ -30,6 +30,14 @@ agent-ways runs in one of two **modes**, and a single flag decides which.
 flowchart TD
     Q{ways.json<br/>output_language} -->|"en / auto (default)"| EN[ENGLISH MODE<br/>embedding match · 384-dim English model only · corpus tuning always on · no locale tuning]
     Q -->|"a non-English code (es, zh, ...)"| LOC[LOCALIZED MODE<br/>adds a 2nd embedding lane · 768-dim multilingual model × English-root-anchored multi corpus · root-anchored locale tuning]
+
+    classDef config fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+    classDef steady fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef core fill:#7c3aed,stroke:#4a5568,color:#ffffff
+
+    class Q config
+    class EN steady
+    class LOC core
 ```
 
 - **English mode** is the default and the 99% case. The English corpus is still built

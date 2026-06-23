@@ -18,19 +18,26 @@ work and keep each other current over attend.
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant T as Tamsin (/api)
     participant Bus as #open ledger
     participant C as Cleo (/web)
+    rect rgba(45,125,154,0.12)
     T->>Bus: send "starting POST /login — will expose it by EOD"
     Bus-->>C: notify (Tamsin, #open)
     C->>Bus: reply "great, I'll stub the client against that contract"
     Note over T,C: reply auto-threads (ADR-120) — no id lookup
+    end
+    rect rgba(217,119,6,0.12)
     C->>Bus: send --to Tamsin "what's the 401 body shape?"
     Bus-->>T: notify (directed → you, magnitude high)
     Note over T: heads-down; the question waits in Tamsin's tray
+    end
+    rect rgba(45,142,94,0.12)
     T->>Bus: reply "{error, code} — code is a stable enum"
     Bus-->>C: notify (Tamsin replied)
     Note over C: silence is a valid reply — Cleo just builds
+    end
 ```
 
 ## What each move is doing

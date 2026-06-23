@@ -28,6 +28,20 @@ flowchart TD
     Q -->|"no — git, process, peer-presence"| E[EVENT lane<br/>salience + refractory + governor]
     M --> MT[lands in a recipient's tray / room ledger<br/>never wiped until that recipient saw it]
     E --> ET[coalesced · aged by wall-clock · may drop]
+
+    classDef source fill:#475569,stroke:#4a5568,color:#ffffff
+    classDef decision fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef message fill:#7c3aed,stroke:#4a5568,color:#ffffff
+    classDef event fill:#f6821f,stroke:#4a5568,color:#1a1a1a
+    classDef durable fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef ephemeral fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+
+    class X source
+    class Q decision
+    class M message
+    class MT durable
+    class E event
+    class ET ephemeral
 ```
 
 - **Authored communication** — `attend send`, `attend reply`, attend-chat's

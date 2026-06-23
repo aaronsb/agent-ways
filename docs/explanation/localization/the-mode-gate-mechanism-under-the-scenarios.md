@@ -32,6 +32,16 @@ flowchart TD
     F[output_language] --> M{en?}
     M -->|"yes — English mode"| EN[corpus: English only<br/>matcher: embedding, 384-dim English model only<br/>locale tuning: not in the flow]
     M -->|"no — localized mode"| LO[corpus: + multi, English-root anchored<br/>matcher: + 2nd embedding lane, 768-dim multilingual model<br/>locale tuning: root-anchored, --lang scoped]
+
+    classDef config fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
+    classDef process fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef done fill:#2d8e5e,color:#ffffff,stroke:#4a5568
+    classDef core fill:#7c3aed,color:#ffffff,stroke:#4a5568
+
+    class F config
+    class M process
+    class EN done
+    class LO core
 ```
 
 1. **Corpus build** (`corpus.rs`). Localized mode emits each way's English root into the

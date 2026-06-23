@@ -73,6 +73,18 @@ flowchart TD
     CleanupCheck -- yes --> Cleanup
     CleanupCheck -- no --> Continue
     Cleanup --> Continue
+
+    classDef terminal fill:#475569,stroke:#4a5568,color:#ffffff
+    classDef decision fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+    classDef process fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef boundary fill:#f6821f,stroke:#4a5568,color:#1a1a1a
+    classDef store fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+
+    class Start,Break,Continue terminal
+    class ReloadCheck,PeekQueue,ReadyCheck,GovernorCheck,CheckpointCheck,CleanupCheck decision
+    class Sleep,Drain,Poll,Batch,Hold,Cleanup process
+    class Exec boundary
+    class Checkpoint store
 ```
 
 The reload branch is a hard exit — `execve(2)` replaces the current process image with a fresh copy of the binary. State is checkpointed first, and the new process restores from that checkpoint during startup, so observed signals, engagement history, and disclosed context thresholds survive the reload.
@@ -117,6 +129,18 @@ stateDiagram-v2
     Accumulating --> Rescheduled: magnitude preserved<br/>for next poll
 
     Rescheduled --> [*]: schedule_next()<br/>pushed back into heap
+
+    classDef resting fill:#475569,stroke:#4a5568,color:#ffffff
+    classDef process fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef ok fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef waiting fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+    classDef held fill:#f6821f,stroke:#4a5568,color:#1a1a1a
+
+    class Resting resting
+    class Polling,GovernorRecord,ReadyCheck,Rescheduled process
+    class Quiet,Ready ok
+    class Changed,Accumulating waiting
+    class Held held
 ```
 
 **Quiet** is the happy path when nothing changed. The sensor's interval grows, its accumulator stays at zero, the loop logs nothing, and it sleeps until next fire.
@@ -151,6 +175,7 @@ If the governor rejects the batch, the magnitudes stay on the accumulators and t
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant World as External state<br/>(git, peers, processes)
     participant Sensor
     participant Slot as SensorSlot
@@ -160,6 +185,7 @@ sequenceDiagram
     participant Monitor as Claude Code Monitor
     participant Agent as Conversation
 
+    rect rgba(45,125,154,0.12)
     World->>Sensor: filesystem / process state changes
     Note right of Sensor: waits until next poll
 
@@ -169,15 +195,20 @@ sequenceDiagram
     Slot->>Governor: record_event() if changed
     Slot->>Engagement: ready_to_disclose()?
     Engagement-->>Slot: yes / held / absolute refractory
+    end
 
+    rect rgba(217,119,6,0.12)
     Slot->>Governor: can_disclose()?
     Governor-->>Slot: yes / rate-limited
+    end
 
+    rect rgba(45,142,94,0.12)
     Slot->>Emit: batch of (name, priority, events)
     Emit->>Monitor: println! — one line per event
     Monitor->>Agent: async notification
 
     Note over Governor,Engagement: Governor.record_disclosure()<br/>Engagement.record_fire(epoch_secs, 1.0) per sensor
+    end
 ```
 
 This is the one-way data flow. Signals enter via sensors (reading the environment) and leave via stdout (intercepted by Monitor). Nothing in attend's runtime is event-driven — every transition is a poll that happened to find something new.

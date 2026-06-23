@@ -26,6 +26,18 @@ flowchart LR
     C --> G{ways tune clean?}
     G -->|no| L
     G -->|yes| D[done — both layers current]
+
+    classDef authoring fill:#7c3aed,stroke:#4a5568,color:#ffffff
+    classDef root fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef process fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef gate fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+    classDef done fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+
+    class A authoring
+    class E root
+    class L,C process
+    class G gate
+    class D done
 ```
 
 ## What each move is doing

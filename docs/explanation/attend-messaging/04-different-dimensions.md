@@ -34,6 +34,17 @@ flowchart LR
     BUS -->|"'export job OOMs on big tenants'"| CODE
     CODE -->|"'blocked: need a decision on streaming vs batch'"| BUS
     BUS -->|"'opening an ADR; decision by noon'"| OFFICE
+
+    classDef office fill:#7c3aed,color:#ffffff,stroke:#4a5568
+    classDef code fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef seam fill:#f6821f,color:#1a1a1a,stroke:#4a5568
+
+    class O1,O2 office
+    class D1,D2 code
+    class BUS seam
+
+    style OFFICE stroke:#8b5cf6,fill:#7c3aed1a,color:#cbd5e1
+    style CODE stroke:#2d7d9a,fill:#2d7d9a1a,color:#cbd5e1
 ```
 
 A turn of the loop:

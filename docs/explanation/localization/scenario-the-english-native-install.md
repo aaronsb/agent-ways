@@ -19,17 +19,24 @@ the default and the overwhelming-majority case. The point of the scenario is tha
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant Op as Operator (English)
     participant CC as Claude Code
     participant W as agent-ways
+    rect rgba(45,125,154,0.12)
     Op->>CC: settings.json language unset → English
     Op->>W: make install
     Note over W: ways.json output_language = en (default)
+    end
+    rect rgba(124,58,237,0.12)
     W->>W: build English corpus only
     Note over W: multilingual model never downloaded or loaded
+    end
+    rect rgba(45,142,94,0.12)
     Op->>CC: start a session
     W-->>Op: session-start nudge reads CC lang vs output_language
     Note over W: en == en → match → silent
+    end
 ```
 
 ## What each move is doing
