@@ -136,41 +136,44 @@ The built-in update checker (`hooks/check-config-updates.sh`) detects forks and 
 
 **Signs:** `~/.claude/` has sessions, credentials, or settings you want to keep untouched, and you'd rather not make it a git repo at all.
 
-This topology keeps the agent-ways repo in a subdirectory (e.g. `~/.claude/directory`) and syncs its outputs into `~/.claude` without replacing it. Your sessions, credentials, and settings stay where they are.
+This is the **subdirectory topology** (ADR-140): the agent-ways repo lives in a subdirectory (e.g. `~/.claude/agent-ways`) and is *projected* into `~/.claude` without replacing it. Your sessions, credentials, and settings stay where they are.
 
 **Steps:**
 
 ```bash
-# 1. Clone into a subdirectory of ~/.claude (or anywhere you prefer)
-git clone https://github.com/aaronsb/agent-ways ~/.claude/directory
+# 1. Clone into a subdirectory of ~/.claude
+git clone https://github.com/aaronsb/agent-ways ~/.claude/agent-ways
 
 # 2. Build binaries and fetch the embedding model
-cd ~/.claude/directory && make setup
+cd ~/.claude/agent-ways && make setup
 
-# 3. Open Claude Code in the repo directory, then run:
-/sync-to-home
+# 3. Project the repo's outputs into ~/.claude
+make sync-to-home
 ```
 
-`/sync-to-home` copies skills, agents, commands, hooks, and binaries into `~/.claude` and merges only the hooks block and ways permissions into your existing `settings.json`, leaving your model, theme, plugins, and credentials untouched.
+`make sync-to-home` is the deterministic mechanism: it copies skills, agents, commands, hooks, and binaries into `~/.claude` and merges only the hooks block and ways permissions into your existing `settings.json`, leaving your model, theme, plugins, and credentials untouched. It backs up first (to `~/.claude/backups/`) and stamps a `.claude-source` marker so the update checker can find the repo. (The `/sync-to-home` slash command is a thin wrapper that runs this same target with consent + reporting.)
+
+**Copy vs symlink:** `make sync-to-home` *copies* (the default — robust everywhere, including Windows and low-privilege environments). `make sync-to-home-link` *symlinks* `~/.claude/{hooks,bin,skills,…}` at the repo instead, so a future `git pull` is the whole update with no re-sync — but symlinks are fragile where they need admin/developer-mode.
 
 **Keeping up to date:**
 
 ```bash
-cd ~/.claude/directory
+cd ~/.claude/agent-ways
 git pull
-/sync-to-home
+make sync-to-home        # copy mode only — symlink mode needs no re-sync
 ```
 
-Run `/sync-to-home` after every pull. Hooks and binaries that are symlinked to the source are skipped automatically.
+Run `make sync-to-home` after every pull. The update checker nudges you when the repo is behind upstream, and — because of the `.claude-source` synced-HEAD stamp — also when you've pulled but not yet re-synced.
 
 **Trade-offs vs the canonical install:**
 
-| | Canonical (`~/.claude` is the repo) | Subdirectory |
-|---|---|---|
-| Updates | `git pull` | `git pull` + `/sync-to-home` |
-| Sessions/credentials isolation | Shared with repo | Fully separate |
-| Fork sync | GitHub fork-sync button works | Works, fork stays independent |
-| `make install` / `make update` | Direct | Not used — use `/sync-to-home` |
+| | Canonical (`~/.claude` is the repo) | Subdirectory (copy) | Subdirectory (symlink) |
+|---|---|---|---|
+| Updates | `git pull` / `make update` | `git pull` + `make sync-to-home` | `git pull` (no re-sync) |
+| Drift risk | none | re-sync or you drift (stamp warns) | none |
+| Sessions/credentials isolation | shared with repo | fully separate | fully separate |
+| Windows / low-privilege | n/a | robust | fragile (symlinks need admin) |
+| Update command | `make update` | `make sync-to-home` | `git pull` |
 
 ## The nuclear option
 

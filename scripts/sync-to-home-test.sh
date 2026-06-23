@@ -99,4 +99,15 @@ out="$(CLAUDE_HOME="$SRC" SYNC_SRC="$SRC" bash "$SYNC")"
 echo "$out" | grep -q "canonical in-place install" || fail "topology guard did not fire for SRC==DEST"
 pass "topology guard: SRC==DEST is a no-op"
 
+# --- Symlink mode projects links, not copies, and stamps mode=symlink ---
+DEST2="$WORK/home-link"
+mkdir -p "$DEST2"; echo '{"model":"x"}' > "$DEST2/settings.json"
+CLAUDE_HOME="$DEST2" SYNC_SRC="$SRC" SYNC_MODE=symlink bash "$SYNC" >/dev/null
+[[ -L "$DEST2/skills" ]] || fail "symlink mode did not symlink skills"
+[[ -L "$DEST2/hooks/ways" ]] || fail "symlink mode did not symlink hooks/ways"
+[[ "$(readlink "$DEST2/skills")" == "$SRC/skills" ]] || fail "skills symlink points wrong"
+grep -q "^mode=symlink$" "$DEST2/.claude-source" || fail "marker mode not symlink"
+[[ "$(jq -r .model "$DEST2/settings.json")" == "x" ]] || fail "symlink mode clobbered user settings"
+pass "symlink mode links subtrees, preserves settings, stamps mode=symlink"
+
 echo "ALL PASS"
