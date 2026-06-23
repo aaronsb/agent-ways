@@ -78,14 +78,18 @@ ways stats --json
 
 **Run from:** Anywhere — launches an interactive session picker.
 
-**Tells you:** An animated frame-by-frame replay of way firings across the session timeline, showing epoch, way name, and trigger at each step. `--list` skips the animation and gives a plain session table.
+**Tells you:** An animated frame-by-frame replay of way firings across the session timeline, showing epoch, way name, and trigger at each step. `--list` skips the animation and gives a plain session table. `--json` skips the animation entirely and dumps the reconstructed timeline as a single JSON document — for agents, scripts, and CI where a TUI can't run.
 
 ```
 ways rethink                          # interactive picker
 ways rethink --session <id>           # jump to a specific session
 ways rethink --list                   # non-interactive session table
 ways rethink --speed 500              # faster animation (ms per frame)
+ways rethink --json                   # dump most recent session as JSON
+ways rethink --session <id> --json    # dump a specific session as JSON
 ```
+
+**`--json` output:** a single object with `session`, `project`, `context_window_k`, a `summary` (epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, trigger breakdown, top ways), the full `frames` timeline (each with epoch, timestamp, token position, active ways, and what newly fired that turn), and `near_misses` (ways that scored close to their threshold but didn't fire — each with its EN/multilingual scores, thresholds, and margin). Unlike the animation, the dump runs without the `tui` feature and surfaces near-misses, which the TUI omits. Slice large sessions with `jq` — a multi-day session can run to thousands of frames.
 
 ---
 

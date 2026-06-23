@@ -16,6 +16,7 @@ pub mod provenance;
 pub mod render;
 pub mod reset;
 pub mod rethink;
+pub mod rethink_dump;
 pub mod siblings;
 pub mod scan;
 pub mod show;
