@@ -185,11 +185,31 @@ pub fn parse(path: &Path) -> Result<Frontmatter> {
     let yaml_str = extract_frontmatter_str(&content)
         .with_context(|| format!("no frontmatter in {}", path.display()))?;
 
-    detect_legacy_redisclose(&yaml_str)
-        .with_context(|| format!("legacy frontmatter in {}", path.display()))?;
+    parse_str(&yaml_str)
+}
 
-    serde_yaml::from_str(&yaml_str)
-        .with_context(|| format!("parsing frontmatter in {}", path.display()))
+/// Parse an already-extracted frontmatter YAML block. This is the single
+/// strict-parse path the matching pipeline relies on; `ways lint` calls it too
+/// so the gate can't pass a way the corpus/scanner would silently reject (e.g.
+/// an unquoted value containing ": ", which is invalid YAML).
+pub fn parse_str(yaml_str: &str) -> Result<Frontmatter> {
+    detect_legacy_redisclose(yaml_str).context("legacy frontmatter")?;
+    serde_yaml::from_str(yaml_str).context("parsing frontmatter")
+}
+
+/// Like `parse`, but distinguishes "not a way" from "malformed way" so corpus
+/// generation warns only on genuine breakage:
+///
+/// - `Ok(None)` — no `---` frontmatter block (a template/catalog/prose file that isn't a way; skip silently).
+/// - `Ok(Some(_))` — frontmatter present and valid.
+/// - `Err(_)` — frontmatter present but unparseable (a real defect to surface, not a silent drop).
+pub fn parse_if_present(path: &Path) -> Result<Option<Frontmatter>> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    match extract_frontmatter_str(&content) {
+        None => Ok(None),
+        Some(yaml_str) => parse_str(&yaml_str).map(Some),
+    }
 }
 
 /// Extract the raw YAML string between `---` delimiters.
@@ -316,6 +336,46 @@ mod tests {
 
     fn parse_yaml(yaml: &str) -> Frontmatter {
         serde_yaml::from_str(yaml).expect("frontmatter parse failed")
+    }
+
+    #[test]
+    fn parse_str_accepts_valid_frontmatter() {
+        assert!(parse_str("description: a way\nvocabulary: a b c\n").is_ok());
+    }
+
+    #[test]
+    fn parse_str_rejects_unquoted_colon_space() {
+        // The exact shape that silently dropped a way from the corpus: a colon-space
+        // in an unquoted scalar is invalid YAML. lint runs this so it can't pass.
+        assert!(parse_str("description: a way about X: the thing\nvocabulary: a b\n").is_err());
+    }
+
+    #[test]
+    fn parse_str_accepts_colon_when_quoted() {
+        assert!(parse_str("description: \"a way about X: the thing\"\nvocabulary: a b\n").is_ok());
+    }
+
+    #[test]
+    fn parse_if_present_distinguishes_absent_from_malformed() {
+        let dir = std::env::temp_dir().join(format!("ways-fm-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No frontmatter delimiters → not a way → Ok(None) (silent skip).
+        let prose = dir.join("prose.md");
+        std::fs::write(&prose, "# Just prose\nno frontmatter here\n").unwrap();
+        assert!(matches!(parse_if_present(&prose), Ok(None)));
+
+        // Present but malformed → Err (a real defect to surface).
+        let bad = dir.join("bad.md");
+        std::fs::write(&bad, "---\ndescription: broken: yaml\n---\nbody\n").unwrap();
+        assert!(parse_if_present(&bad).is_err());
+
+        // Present and valid → Ok(Some).
+        let good = dir.join("good.md");
+        std::fs::write(&good, "---\ndescription: fine\nvocabulary: a b\n---\nbody\n").unwrap();
+        assert!(matches!(parse_if_present(&good), Ok(Some(_))));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
