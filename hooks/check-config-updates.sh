@@ -3,6 +3,8 @@
 # Handles four install scenarios: direct clone, fork, renamed clone, plugin
 #
 # Detection order:
+#   0. Is ~/.claude NOT a repo but a .claude-source marker points at one?
+#      → subdirectory projection (ADR-140): check the projecting repo, not ~/.claude
 #   1. Is ~/.claude a git repo? If not, exit.
 #   2. Is origin aaronsb/agent-ways? → direct clone
 #   3. Is origin a fork of aaronsb/agent-ways? → fork
@@ -16,6 +18,7 @@ CLAUDE_DIR="${HOME}/.claude"
 UPSTREAM_REPO="aaronsb/agent-ways"
 UPSTREAM_URL="https://github.com/${UPSTREAM_REPO}"
 UPSTREAM_MARKER="${CLAUDE_DIR}/.claude-upstream"
+SOURCE_MARKER="${CLAUDE_DIR}/.claude-source"
 # Cache file path MUST match metrics::update_status_text() in the ways binary
 # (the reader). Unix keys by uid under /tmp; Windows uses the per-user
 # LOCALAPPDATA base (no uid — LOCALAPPDATA is already per-user, and the parent
@@ -88,6 +91,31 @@ check_gh() {
   return 0
 }
 
+
+# --- Scenario 0: Subdirectory projection (ADR-140) ---
+# ~/.claude is the user's own dir (not a repo); the projecting repo lives in a
+# subdirectory and stamped a .claude-source marker. Check that repo for updates,
+# and compare its HEAD to the marker's recorded synced-HEAD to detect "pulled but
+# not synced" drift. Refresh is rate-limited like the clone path, so both the
+# behind-count and the drift flag can be up to an hour stale — they drive an
+# advisory nudge, not a gate.
+if ! git -C "$CLAUDE_DIR" rev-parse --git-dir >/dev/null 2>&1 && [[ -f "$SOURCE_MARKER" ]]; then
+  SRC_REPO=$(sed -n 's/^source=//p' "$SOURCE_MARKER" | head -1)
+  SYNCED_HEAD=$(sed -n 's/^head=//p' "$SOURCE_MARKER" | head -1)
+  if [[ -n "$SRC_REPO" ]] && git -C "$SRC_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+    SRC_REMOTE=$(git -C "$SRC_REPO" remote get-url origin 2>/dev/null)
+    if [[ "$SRC_REMOTE" == *github.com* ]] && needs_refresh; then
+      timeout 10 git -C "$SRC_REPO" fetch origin --quiet 2>/dev/null
+      BEHIND=$(git -C "$SRC_REPO" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)
+      CUR_HEAD=$(git -C "$SRC_REPO" rev-parse HEAD 2>/dev/null)
+      UNSYNCED=false
+      [[ -n "$SYNCED_HEAD" && -n "$CUR_HEAD" && "$CUR_HEAD" != "$SYNCED_HEAD" ]] && UNSYNCED=true
+      write_cache "subdirectory" "$BEHIND" "repo=${SRC_REPO}
+unsynced=${UNSYNCED}"
+    fi
+  fi
+  exit 0
+fi
 
 # --- Scenario 1 & 2: Git repo (clone or fork) ---
 

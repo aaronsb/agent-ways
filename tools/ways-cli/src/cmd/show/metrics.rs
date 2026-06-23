@@ -159,7 +159,12 @@ pub(crate) fn update_status_text() -> String {
         Ok(c) => c,
         Err(_) => return String::new(),
     };
+    render_update_status(&content)
+}
 
+/// Render the update-availability message from the cache file's content.
+/// Pure (no IO) so every install-type branch is unit-testable.
+pub(crate) fn render_update_status(content: &str) -> String {
     let get = |key: &str| -> Option<String> {
         content
             .lines()
@@ -171,6 +176,27 @@ pub(crate) fn update_status_text() -> String {
     let behind: u32 = get("behind").and_then(|s| s.parse().ok()).unwrap_or(0);
     let has_upstream = get("has_upstream").unwrap_or_default() == "true";
     let upstream_repo = "aaronsb/agent-ways";
+
+    // Subdirectory topology (ADR-140) has two independent nudge conditions: behind
+    // upstream, and "pulled but not synced" (repo HEAD moved past the last
+    // projection). It is the one type that can need a nudge while behind == 0.
+    if cached_type == "subdirectory" {
+        let unsynced = get("unsynced").unwrap_or_default() == "true";
+        if behind == 0 && !unsynced {
+            return String::new();
+        }
+        let repo = get("repo").unwrap_or_default();
+        let repo_disp = if repo.is_empty() { "<repo>" } else { &repo };
+        let mut out = String::from("\n");
+        if behind > 0 {
+            out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream (subdirectory install).** Pull, then project into ~/.claude:\n"));
+            out.push_str(&format!("`cd {repo_disp} && git pull && make sync-to-home`\n"));
+        } else {
+            out.push_str("**⚠ agent-ways was pulled but not synced into ~/.claude.** Re-project the latest commit:\n");
+            out.push_str(&format!("`cd {repo_disp} && make sync-to-home`\n"));
+        }
+        return out;
+    }
 
     if behind == 0 {
         return String::new();
@@ -261,4 +287,54 @@ pub(crate) unsafe fn libc_getuid() -> u32 {
     }
     #[cfg(not(unix))]
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_update_status;
+
+    #[test]
+    fn subdirectory_behind_nudges_pull_then_sync() {
+        let out = render_update_status(
+            "type=subdirectory\nbehind=3\nrepo=/home/u/.claude/directory\nunsynced=false\n",
+        );
+        assert!(out.contains("3 commit(s) behind"));
+        assert!(out.contains("cd /home/u/.claude/directory && git pull && make sync-to-home"));
+    }
+
+    #[test]
+    fn subdirectory_unsynced_nudges_sync_even_when_not_behind() {
+        let out = render_update_status(
+            "type=subdirectory\nbehind=0\nrepo=/home/u/.claude/directory\nunsynced=true\n",
+        );
+        assert!(out.contains("pulled but not synced"));
+        assert!(out.contains("cd /home/u/.claude/directory && make sync-to-home"));
+        // not the behind message
+        assert!(!out.contains("git pull"));
+    }
+
+    #[test]
+    fn subdirectory_clean_is_silent() {
+        let out = render_update_status("type=subdirectory\nbehind=0\nrepo=/x\nunsynced=false\n");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn subdirectory_missing_repo_falls_back_to_placeholder() {
+        let out = render_update_status("type=subdirectory\nbehind=1\nunsynced=false\n");
+        assert!(out.contains("cd <repo> && git pull && make sync-to-home"));
+    }
+
+    #[test]
+    fn clone_behind_still_advises_make_update() {
+        let out = render_update_status("type=clone\nbehind=2\n");
+        assert!(out.contains("2 commit(s) behind"));
+        assert!(out.contains("make update"));
+    }
+
+    #[test]
+    fn non_subdirectory_zero_behind_is_silent() {
+        assert!(render_update_status("type=clone\nbehind=0\n").is_empty());
+        assert!(render_update_status("").is_empty());
+    }
 }
