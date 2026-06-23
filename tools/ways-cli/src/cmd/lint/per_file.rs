@@ -77,6 +77,19 @@ pub(super) fn lint_file(
     // rules see the collapsed form.
     let fm_str = extract_frontmatter_raw(&content).unwrap_or_default();
 
+    // Strict YAML parse gate (ways only). The matching pipeline (corpus, scan)
+    // loads frontmatter via serde_yaml, so a value that isn't valid YAML drops the
+    // way from matching with no other symptom — and the field-by-field rules below
+    // never notice. Run the same parse the matcher uses so lint is a real gate.
+    // Checks aren't loaded this way, so they're exempt.
+    if !is_check {
+        if let Err(e) = crate::frontmatter::parse_str(&fm_str) {
+            let root = e.root_cause();
+            eprintln!("  ERROR: {rel} — frontmatter is not valid YAML, so the matcher would silently drop this way: {root}. Common cause: an unquoted value containing a colon-space (\": \") — wrap the value in double quotes.");
+            *errors += 1;
+        }
+    }
+
     // Unknown top-level fields. x-* prefixed fields are intentionally
     // skipped. With --fix, remove the field (and any indented block value
     // that follows) and emit FIXED; otherwise emit UNKNOWN as a warning.

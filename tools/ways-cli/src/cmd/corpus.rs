@@ -286,9 +286,20 @@ fn scan_ways_dir(dir: &Path, id_prefix: &str, excluded: &[String], w: &mut impl 
     // English roots captured here become the multilingual anchor in Pass 2 (localized mode).
     let mut en_roots: HashMap<String, (String, String)> = HashMap::new();
     for path in &md_files {
-        let fm = match frontmatter::parse(path) {
-            Ok(fm) => fm,
-            Err(_) => continue,
+        let fm = match frontmatter::parse_if_present(path) {
+            Ok(Some(fm)) => fm,
+            // No frontmatter at all — a template/catalog/prose file, not a way. Skip
+            // it silently, the way it always has been.
+            Ok(None) => continue,
+            // Frontmatter present but unparseable (e.g. an unquoted value containing
+            // ": ") would vanish from matching with no signal. `ways lint` is the hard
+            // gate (it now runs this same parse), but warn here too so a runtime
+            // rebuild still surfaces it. See ADR-125.
+            Err(e) => {
+                let rel = path.strip_prefix(dir).unwrap_or(path);
+                eprintln!("[ways corpus] WARN: {} — frontmatter present but did not parse, dropped from corpus ({})", rel.display(), e.root_cause());
+                continue;
+            }
         };
 
         // ADR-126: surface malformed refire specs at corpus time. Corpus is a
