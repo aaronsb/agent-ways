@@ -459,9 +459,8 @@ mod tests {
 
     #[test]
     fn localized_language_gates_on_mode() {
-        let mut cfg = Config::default();
         // English mode — en / auto / empty are all dormant (ADR-139).
-        cfg.language = "auto".to_string();
+        let mut cfg = Config { language: "auto".to_string(), ..Default::default() };
         assert_eq!(cfg.localized_language(), None);
         cfg.language = "en".to_string();
         assert_eq!(cfg.localized_language(), None);
