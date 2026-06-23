@@ -44,16 +44,21 @@ fi
 mkdir -p "$DEST"
 
 # --- 2. Backup (then prune to the last $KEEP_BACKUPS) --------------------------
-STAMP="$(date +%Y%m%d-%H%M%S)"
+# This backup is the only safety net before the overwrite below, so a failed copy
+# of an existing target must be loud — never reported as success. The $$ suffix
+# keeps two syncs in the same second from sharing a backup dir.
+STAMP="$(date +%Y%m%d-%H%M%S)-$$"
 BACKUP="$DEST/backups/sync-$STAMP"
 mkdir -p "$BACKUP"
 for item in settings.json commands hooks bin skills agents; do
-  [[ -e "$DEST/$item" ]] && cp -r "$DEST/$item" "$BACKUP/" 2>/dev/null || true
+  [[ -e "$DEST/$item" ]] || continue
+  cp -r "$DEST/$item" "$BACKUP/" || die "backup of $DEST/$item failed — aborting before overwrite"
 done
 log "Backed up to $BACKUP"
+# Keep at least the backup just made: a KEEP_BACKUPS < 1 must not delete it.
+keep=$(( KEEP_BACKUPS < 1 ? 1 : KEEP_BACKUPS ))
 if [[ -d "$DEST/backups" ]]; then
-  # Keep the newest $KEEP_BACKUPS sync-* dirs, remove the rest.
-  ls -1dt "$DEST"/backups/sync-* 2>/dev/null | tail -n +"$((KEEP_BACKUPS + 1))" | while read -r old; do
+  ls -1dt "$DEST"/backups/sync-* 2>/dev/null | tail -n +"$((keep + 1))" | while read -r old; do
     rm -rf "$old"
   done
 fi
@@ -109,6 +114,8 @@ fi
 find "$DEST/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
 # --- 5. Binaries ---------------------------------------------------------------
+# Rebuild the source binaries first (in symlink mode the links then point at the
+# freshly-built artifacts — the rebuild is still correct and worth doing).
 if command -v cargo >/dev/null && command -v make >/dev/null; then
   make -C "$SRC" update-binaries >/dev/null 2>&1 || log "warn: binary rebuild had issues — using existing bin/"
 fi
@@ -125,6 +132,37 @@ for b in ways attend attend-chat way-embed; do
   fi
 done
 [[ -x "$DEST/bin/ways" ]] && "$DEST/bin/ways" corpus --quiet 2>/dev/null || true
+
+# --- 5b. Prune orphans (copy mode) --------------------------------------------
+# A plain `cp` never deletes, so a way/skill/command removed or renamed upstream
+# would linger in ~/.claude and keep loading while the synced-HEAD stamp reads
+# green. Track exactly what the projection writes in a manifest, and on the next
+# sync remove only files this projection created before but that no longer exist
+# in source. User-owned files in the same shared dirs are never in the manifest,
+# so they are never touched. (Symlink mode reflects source live — no orphans.)
+MANIFEST="$DEST/.claude-source-manifest"
+build_manifest() {
+  local t
+  for t in skills agents commands hooks/ways; do
+    [[ -d "$SRC/$t" ]] && ( cd "$SRC" && find "$t" -type f )
+  done
+  for h in check-config-updates.sh refresh-claude-md.sh; do
+    [[ -f "$SRC/hooks/$h" ]] && echo "hooks/$h"
+  done
+  for b in ways attend attend-chat way-embed; do
+    [[ -f "$SRC/bin/$b" ]] && echo "bin/$b"
+  done
+  return 0  # don't let a final failed -f test abort the caller under set -e/pipefail
+}
+if [[ "$SYNC_MODE" == "copy" ]]; then
+  new_list="$(build_manifest | sort -u)"
+  if [[ -f "$MANIFEST" ]]; then
+    comm -23 <(sort -u "$MANIFEST") <(printf '%s\n' "$new_list") | while read -r orphan; do
+      [[ -n "$orphan" && -e "$DEST/$orphan" ]] && rm -f "$DEST/$orphan" && log "removed orphan $orphan"
+    done
+  fi
+  printf '%s\n' "$new_list" > "$MANIFEST"
+fi
 
 # --- 6. Merge settings.json ----------------------------------------------------
 # Replace the hooks block + add ways permissions; leave everything else (model,

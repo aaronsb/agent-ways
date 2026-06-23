@@ -190,10 +190,10 @@ pub(crate) fn render_update_status(content: &str) -> String {
         let mut out = String::from("\n");
         if behind > 0 {
             out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream (subdirectory install).** Pull, then project into ~/.claude:\n"));
-            out.push_str(&format!("`cd {repo_disp} && git pull && make sync-to-home`\n"));
+            out.push_str(&format!("`cd \"{repo_disp}\" && git pull && make sync-to-home`\n"));
         } else {
             out.push_str("**⚠ agent-ways was pulled but not synced into ~/.claude.** Re-project the latest commit:\n");
-            out.push_str(&format!("`cd {repo_disp} && make sync-to-home`\n"));
+            out.push_str(&format!("`cd \"{repo_disp}\" && make sync-to-home`\n"));
         }
         return out;
     }
@@ -299,7 +299,7 @@ mod tests {
             "type=subdirectory\nbehind=3\nrepo=/home/u/.claude/directory\nunsynced=false\n",
         );
         assert!(out.contains("3 commit(s) behind"));
-        assert!(out.contains("cd /home/u/.claude/directory && git pull && make sync-to-home"));
+        assert!(out.contains("cd \"/home/u/.claude/directory\" && git pull && make sync-to-home"));
     }
 
     #[test]
@@ -308,9 +308,29 @@ mod tests {
             "type=subdirectory\nbehind=0\nrepo=/home/u/.claude/directory\nunsynced=true\n",
         );
         assert!(out.contains("pulled but not synced"));
-        assert!(out.contains("cd /home/u/.claude/directory && make sync-to-home"));
+        assert!(out.contains("cd \"/home/u/.claude/directory\" && make sync-to-home"));
         // not the behind message
         assert!(!out.contains("git pull"));
+    }
+
+    #[test]
+    fn subdirectory_behind_and_unsynced_prefers_the_pull_then_sync_nudge() {
+        // Both flags live: `git pull && make sync-to-home` resolves both, so the
+        // behind message (which includes the pull) takes precedence.
+        let out = render_update_status(
+            "type=subdirectory\nbehind=2\nrepo=/home/u/.claude/directory\nunsynced=true\n",
+        );
+        assert!(out.contains("2 commit(s) behind"));
+        assert!(out.contains("git pull && make sync-to-home"));
+        assert!(!out.contains("pulled but not synced"));
+    }
+
+    #[test]
+    fn subdirectory_repo_path_with_spaces_is_quoted() {
+        let out = render_update_status(
+            "type=subdirectory\nbehind=1\nrepo=/home/My User/.claude/dir\nunsynced=false\n",
+        );
+        assert!(out.contains("cd \"/home/My User/.claude/dir\" && git pull && make sync-to-home"));
     }
 
     #[test]
@@ -322,7 +342,7 @@ mod tests {
     #[test]
     fn subdirectory_missing_repo_falls_back_to_placeholder() {
         let out = render_update_status("type=subdirectory\nbehind=1\nunsynced=false\n");
-        assert!(out.contains("cd <repo> && git pull && make sync-to-home"));
+        assert!(out.contains("cd \"<repo>\" && git pull && make sync-to-home"));
     }
 
     #[test]

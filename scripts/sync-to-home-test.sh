@@ -94,6 +94,17 @@ h2="$(sha256sum "$DEST/settings.json" | cut -d' ' -f1)"
 [[ "$h1" == "$h2" ]] || fail "settings.json not idempotent across re-run"
 pass "idempotent settings.json across re-run"
 
+# --- Orphan prune: a file removed upstream disappears from the projection ---
+# while a user-owned file in the same shared dir is preserved.
+printf 'user-skill\n' > "$DEST/skills/mine-SKILL.md"   # user-owned, never in source
+[[ -f "$DEST/skills/demo/SKILL.md" ]] || fail "precondition: demo skill missing"
+rm -rf "$SRC/skills/demo"                                # upstream removes a skill
+git -C "$SRC" add -A && git -C "$SRC" -c user.email=t@t -c user.name=t commit -qm "drop demo"
+run
+[[ ! -e "$DEST/skills/demo/SKILL.md" ]] || fail "orphan (upstream-removed) skill was not pruned"
+[[ -f "$DEST/skills/mine-SKILL.md" ]] || fail "user-owned file was wrongly pruned"
+pass "orphan pruned, user-owned file preserved"
+
 # --- Topology guard: SRC == DEST is a no-op ---
 out="$(CLAUDE_HOME="$SRC" SYNC_SRC="$SRC" bash "$SYNC")"
 echo "$out" | grep -q "canonical in-place install" || fail "topology guard did not fire for SRC==DEST"
