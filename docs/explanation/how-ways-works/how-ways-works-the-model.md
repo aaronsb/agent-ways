@@ -127,6 +127,48 @@ sub-premise about, say, performance or supply-chain, because that's what the
 moment called for. Checks are how progressive disclosure goes *deep* without the
 parent way having to carry every detail at all times.
 
+## One turn, in order
+
+The flowchart above shows *which* behaviours exist; it can't show the one thing
+that makes them matter — that the matcher runs to completion *before* Claude sees
+anything, and that a near-miss reaches the record but never reaches Claude. That
+asymmetry is temporal, so it wants a sequence:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant M as Matcher
+    participant R as events.jsonl
+    participant C as Claude
+
+    Note over M: cheap substrate — runs before Claude sees anything
+    User->>M: prompt + tool calls + prior topics
+    Note over M: scores every way against this frame
+
+    M->>R: way_fired — trigger crossed threshold
+    M->>C: inject premise into context
+
+    M->>R: check_fired — depth pulled under a fired way
+    M->>C: inject sub-premise on demand
+
+    M->>R: way_redisclosed — seen before, cooled down
+    M->>C: refresh the faded premise
+
+    M-->>R: way_nearmiss — close, but under threshold
+    Note right of M: recorded, never injected — the boundary of false silence
+
+    Note over C: expensive substrate — reasons with whatever surfaced
+    C->>User: work moves on
+```
+
+Read top to bottom, the ordering is the argument. The matcher does all its
+scoring and writes every decision to `events.jsonl` *first*; only the premises
+that cleared their bar are injected into Claude's context. The near-miss is the
+dashed line — it lands in the record and stops there. Claude never reasons over
+it, which is precisely why the conversation can't reveal it and the JSON dump
+([[01.019.E]]) can.
+
 ## Why the record is trustworthy
 
 The events are written by the same code path that does the matching, at the
