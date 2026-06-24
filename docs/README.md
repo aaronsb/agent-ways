@@ -13,6 +13,7 @@ Map of the documentation tree. For the project overview, see the [main README](.
 | [architecture.md](architecture.md) | System architecture diagrams (Mermaid) for the ways mechanics |
 | [architecture/](architecture/) | Architecture Decision Records (managed by `docs/scripts/adr`) |
 | [design-notes/](design-notes/) | Prose-first framing documents that justify multiple related decisions (complement to ADRs) |
+| [explanation/](explanation/) | Diátaxis explanation pages — conceptual walkthroughs grounded in real scenarios (install topologies, localization, attend messaging, and [how ways works](explanation/how-ways-works/how-ways-works-the-model.md) — the observable companion to cognitive-loop.md) |
 
 ## Guides vs Reference
 

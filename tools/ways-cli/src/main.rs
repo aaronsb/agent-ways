@@ -206,6 +206,10 @@ enum Commands {
         /// List sessions (non-interactive)
         #[arg(long)]
         list: bool,
+        /// Dump the reconstructed timeline as JSON instead of animating it
+        /// (non-interactive; includes a session summary and near-miss events)
+        #[arg(long)]
+        json: bool,
     },
     /// Engine health dashboard — binary, model, corpus, project status
     Status {
@@ -562,8 +566,12 @@ fn main() -> Result<()> {
             cmd::stats::run(days, project.as_deref(), json, global)
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
-        Commands::Rethink { session, project, speed, list } => {
-            cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list)
+        Commands::Rethink { session, project, speed, list, json } => {
+            if json {
+                cmd::rethink_dump::run_json(session.as_deref(), project.as_deref())
+            } else {
+                cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list)
+            }
         }
         Commands::Status { json } => cmd::status::run(json),
         Commands::Scan { mode } => match mode {

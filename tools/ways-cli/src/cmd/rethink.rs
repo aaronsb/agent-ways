@@ -24,7 +24,7 @@ use crate::util::{detect_project_dir, home_dir};
 // ── Data structures ───────────────────────────────────────────
 
 /// A way event from events.jsonl.
-struct WayEvent {
+pub(crate) struct WayEvent {
     ts: String,
     event: String,
     way: String,
@@ -34,15 +34,15 @@ struct WayEvent {
 
 /// An active way at a given frame.
 #[derive(Clone)]
-struct ActiveWay {
-    id: String,
-    trigger: String,
-    epoch_fired: u64,
-    token_pos: u64,
-    check_fires: u64,
-    is_new: bool,
-    is_redisclosed: bool,
-    refire_threshold_k: u64,
+pub(crate) struct ActiveWay {
+    pub(crate) id: String,
+    pub(crate) trigger: String,
+    pub(crate) epoch_fired: u64,
+    pub(crate) token_pos: u64,
+    pub(crate) check_fires: u64,
+    pub(crate) is_new: bool,
+    pub(crate) is_redisclosed: bool,
+    pub(crate) refire_threshold_k: u64,
 }
 
 impl WayRow for ActiveWay {
@@ -55,13 +55,13 @@ impl WayRow for ActiveWay {
 }
 
 /// A single frame in the replay.
-struct Frame {
-    epoch: u64,
-    timestamp: String,
-    elapsed_secs: u64,
-    token_position_k: u64,
-    ways: Vec<ActiveWay>,
-    new_events: Vec<String>,
+pub(crate) struct Frame {
+    pub(crate) epoch: u64,
+    pub(crate) timestamp: String,
+    pub(crate) elapsed_secs: u64,
+    pub(crate) token_position_k: u64,
+    pub(crate) ways: Vec<ActiveWay>,
+    pub(crate) new_events: Vec<String>,
 }
 
 /// Playback state.
@@ -157,22 +157,7 @@ pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, lis
 
     let context_window = session::detect_context_window_for(&project_name, &session_id);
     let context_window_k = context_window / 1000;
-    let token_timeline = build_token_timeline(&project_name, &session_id);
-    // Pre-resolve per-way refire thresholds once per session. Rethink is
-    // a replay, so if a way's curve has been edited since the recorded
-    // session we'll see the current value — that's the best we can do
-    // without also snapshotting frontmatter in events.jsonl.
-    let fallback_refire_k = context_window_k * 25 / 100;
-    let mut refire_cache: HashMap<String, u64> = HashMap::new();
-    for ev in &events {
-        if ev.way.is_empty() || refire_cache.contains_key(&ev.way) {
-            continue;
-        }
-        let threshold_k = session::way_refire_threshold_k(&ev.way, &project_name, context_window)
-            .unwrap_or(fallback_refire_k);
-        refire_cache.insert(ev.way.clone(), threshold_k);
-    }
-    let frames = build_frames(&events, &token_timeline, &refire_cache, fallback_refire_k);
+    let frames = reconstruct_frames(&events, &project_name, &session_id, context_window);
 
     if frames.is_empty() {
         println!("No frames to replay.");
@@ -408,6 +393,35 @@ fn render_status_bar(out: &mut String, player: &Player) {
 
 // ── Frame construction ────────────────────────────────────────
 
+/// Reconstruct the full replay frame timeline for a session. Loads the token
+/// timeline, pre-resolves per-way refire thresholds, and clusters events into
+/// epoch frames. Shared by the interactive replay (`run`) and the JSON dump
+/// (`rethink_dump::run_json`).
+///
+/// Refire thresholds reflect each way's *current* curve — rethink is a replay,
+/// so a curve edited since the recorded session shows today's value. That's the
+/// best we can do without snapshotting frontmatter into events.jsonl.
+pub(crate) fn reconstruct_frames(
+    events: &[WayEvent],
+    project_name: &str,
+    session_id: &str,
+    context_window: u64,
+) -> Vec<Frame> {
+    let context_window_k = context_window / 1000;
+    let token_timeline = build_token_timeline(project_name, session_id);
+    let fallback_refire_k = context_window_k * 25 / 100;
+    let mut refire_cache: HashMap<String, u64> = HashMap::new();
+    for ev in events {
+        if ev.way.is_empty() || refire_cache.contains_key(&ev.way) {
+            continue;
+        }
+        let threshold_k = session::way_refire_threshold_k(&ev.way, project_name, context_window)
+            .unwrap_or(fallback_refire_k);
+        refire_cache.insert(ev.way.clone(), threshold_k);
+    }
+    build_frames(events, &token_timeline, &refire_cache, fallback_refire_k)
+}
+
 fn build_frames(
     events: &[WayEvent],
     token_timeline: &[(String, u64)],
@@ -580,7 +594,7 @@ fn find_token_position(timeline: &[(String, u64)], ts: &str) -> u64 {
 
 // ── Event loading ─────────────────────────────────────────────
 
-fn load_session_events(content: &str, session_id: &str) -> Vec<WayEvent> {
+pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEvent> {
     content
         .lines()
         .filter(|l| l.contains(session_id))
@@ -600,7 +614,7 @@ fn load_session_events(content: &str, session_id: &str) -> Vec<WayEvent> {
         .collect()
 }
 
-fn find_session_project(content: &str, session_id: &str) -> Option<String> {
+pub(crate) fn find_session_project(content: &str, session_id: &str) -> Option<String> {
     for line in content.lines() {
         if !line.contains(session_id) || !line.contains("session_start") {
             continue;
