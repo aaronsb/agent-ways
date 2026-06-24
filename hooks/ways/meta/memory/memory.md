@@ -4,6 +4,7 @@ vocabulary: remember memory save note forget recall persist session learning got
 trigger: context-threshold
 threshold: 80
 pattern: remember|save.*(to|this|that).*memory|note.*(for|this).*(later|next)|don't forget|keep.*in.*mind
+files: projects/[^/]+/memory/.*\.md$
 macro: prepend
 scope: agent
 requires: ["Bash(jq:*)", "Bash(sed:*)", "Bash(ways:*)", "Bash(wc:*)"]
@@ -16,12 +17,15 @@ Memory is Claude Code's auto-memory — the `MEMORY.md` file and topic files in 
 
 ## When This Fires
 
-This way fires in two contexts:
+This way fires in three contexts:
 
 1. **User asks to remember something** — explicit request like "remember this" or "note this for later"
 2. **Context threshold** — context is filling up and it's time to checkpoint before compaction
+3. **About to write a memory file** — a Write/Edit targets the auto-memory directory, firing this way at the tool call *before the write commits*
 
-For explicit requests, just record what the user asked. For threshold checkpoints, apply the surprise test below.
+The third trigger exists because the first two can't catch the most common over-save: a *spontaneous, content-shaped self-save* mid-session — writing "X is the active income source" while the conversation is about income, not about memory. Semantic matching scores that against a memory way describing the *memory subsystem* and comes up cold; the user said no memory words; context isn't full. Nothing fires, and the harness's "save broadly" default goes unchallenged. The file trigger observes the **write event** the semantic layer structurally cannot see, and injects the routing check at the only moment it matters.
+
+For explicit requests, just record what the user asked. For threshold checkpoints and write-time interceptions, apply the surprise test and routing table below — the write hasn't committed yet, so a better home is still reachable.
 
 ## Surprise Test (threshold checkpoint only)
 
