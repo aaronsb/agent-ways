@@ -258,3 +258,60 @@ if [[ -z "$HAS_BADGES" ]] && [[ -n "$REPO_FULL_NAME" ]] && [[ "$CAN_PUSH" == "tr
   echo "![Latest Release](https://img.shields.io/github/v/release/${REPO_FULL_NAME}?include_prereleases&label=version)"
   echo '```'
 fi
+
+# ============================================================
+# SECTION 3: Attribution / session-link control surface
+# ============================================================
+# The `attribution` setting (settings.json) governs the text appended to
+# commits and PR bodies — including the `Claude-Session:` trailer and the
+# session URL. Empty string disables it; absent means default (trailer ON).
+# Reporting the effective value here gives that trailer a visible control
+# surface at commit/PR/ship time: you can see whether session links are on,
+# and which settings file decides it.
+#
+# Precedence is an approximation of Claude Code's resolution order
+# (project-local > project > user-global, highest wins). It does not account
+# for managed/enterprise policy or command-line overrides.
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+ATTR_SRC=""
+COMMIT_RAW="__UNSET__"
+PR_RAW="__UNSET__"
+for f in \
+  "$PROJECT_ROOT/.claude/settings.local.json" \
+  "$PROJECT_ROOT/.claude/settings.json" \
+  "$HOME/.claude/settings.json"; do
+  [[ -f "$f" ]] || continue
+  jq -e 'has("attribution")' "$f" >/dev/null 2>&1 || continue
+  COMMIT_RAW=$(jq -r 'if .attribution|has("commit") then .attribution.commit else "__UNSET__" end' "$f" 2>/dev/null)
+  PR_RAW=$(jq -r 'if .attribution|has("pr") then .attribution.pr else "__UNSET__" end' "$f" 2>/dev/null)
+  ATTR_SRC="$f"
+  break
+done
+
+describe_attr() {
+  case "$1" in
+    __UNSET__) echo "default (Claude attribution + session trailer ON)" ;;
+    "")        echo "OFF (empty — no attribution, no session trailer)" ;;
+    *)         echo "custom: \"$1\"" ;;
+  esac
+}
+
+echo ""
+if [[ -z "$ATTR_SRC" ]]; then
+  echo "**Session-link trailer**: default (ON) — set \`attribution.commit\` / \`.pr\` to \`\"\"\` in settings.json to disable"
+else
+  # Shorten $HOME to ~ for display. Don't use ${var/#$HOME/~}: bash
+  # tilde-expands the replacement, turning ~ back into $HOME (a no-op).
+  case "$ATTR_SRC" in
+    "$HOME"/*) SRC_LABEL="~${ATTR_SRC#"$HOME"}" ;;
+    *)         SRC_LABEL="$ATTR_SRC" ;;
+  esac
+  if [[ "$COMMIT_RAW" == "$PR_RAW" ]]; then
+    echo "**Session-link trailer**: $(describe_attr "$COMMIT_RAW") [$SRC_LABEL]"
+  else
+    echo "**Session-link trailer** [$SRC_LABEL]:"
+    echo "- commit: $(describe_attr "$COMMIT_RAW")"
+    echo "- pr: $(describe_attr "$PR_RAW")"
+  fi
+fi
