@@ -1,7 +1,7 @@
 ---
 description: creating and applying patch files, git diff generation, patch series management
 vocabulary: patch diff apply hunk unified series format-patch
-pattern: patch|\.diff|apply.*change
+pattern: \.patch\b|git.?(apply|am)|patch.?(set|series)
 files: \.(patch|diff)$
 commands: git\ apply|git\ diff.*\>
 scope: agent, subagent

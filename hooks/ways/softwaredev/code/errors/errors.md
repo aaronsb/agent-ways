@@ -1,7 +1,7 @@
 ---
 description: error handling patterns, exception management, try-catch boundaries, error wrapping and propagation
 vocabulary: exception handling catch throw boundary wrap rethrow fallback graceful recovery propagate unhandled
-pattern: error.?handl|exception|try.?catch|throw|catch
+pattern: error.?handl|exception|try.?catch|throw
 scope: agent, subagent
 refire: 0.2
 ---
