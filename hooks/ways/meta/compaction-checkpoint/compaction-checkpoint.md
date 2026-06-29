@@ -68,6 +68,7 @@ When a goal is active:
 
 ## See Also
 
+- wrap(meta) — the on-demand version: same wrap-up when *you* pick the seam, routing to the `/wrap` skill. This way is the automatic sibling that fires near the limit.
 - tracking(meta) — tracking files survive compaction
 - todos(meta) — task state should be captured before compaction
 - goals(meta) — an active /goal anchors continuation across the checkpoint

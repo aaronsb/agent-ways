@@ -32,3 +32,8 @@ For each task, capture:
 Mark the in-flight task as `in_progress`. This creates the tasks-active marker and stops this checkpoint from repeating.
 
 This repeats every prompt until you create a task list or the session ends.
+
+## See Also
+
+- wrap(meta) — wrapping a session deliberately runs this same TaskList-honesty pass, then writes a continuation prompt and hands off to a directed compaction. The `/wrap` skill is where the on-demand version lives.
+- compaction-checkpoint(meta) — the broader near-limit checkpoint this task discipline feeds.
