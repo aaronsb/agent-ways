@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SessionStart: Check if ways installation is complete.
 # Runs as the first startup hook. If setup is incomplete, emits a
-# one-time diagnostic and exits cleanly so other hooks don't error.
+# diagnostic and exits cleanly so other hooks don't error.
 #
-# Checks: ways binary → embedding model (optional) → corpus
+# Checks: ways binary → corpus → embedding engine (functional probe)
 
 WAYS_BIN="${HOME}/.claude/bin/ways"
 XDG_WAY="${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways/user"
@@ -43,25 +43,36 @@ MSG
   exit 0
 fi
 
-# Warn loudly if embedding model is missing — ADR-125 made it a hard dependency
-MODEL="${XDG_WAY}/minilm-l6-v2.gguf"
-EMBED_BIN="${XDG_WAY}/way-embed"
-if [[ ! -f "$MODEL" ]] || [[ ! -x "$EMBED_BIN" ]]; then
-  # Only mention this once per day (rate limit via marker file).
-  # Resolve a writable temp dir portably: TMPDIR/TEMP/TMP are set on Windows
-  # (Git Bash) and most CI; /tmp is the Unix fallback.
-  MARKER="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}/.claude-embed-notice-$(date +%Y%m%d)"
-  if [[ ! -f "$MARKER" ]]; then
-    cat <<'MSG'
+# Embedding engine — a hard dependency (ADR-125). Probe it *functionally* rather
+# than checking file paths. Two reasons:
+#   1. Path checks go stale. The old check looked for way-embed at $XDG_WAY/way-embed,
+#      but it actually lives at ~/.claude/bin/way-embed — so on a healthy install it
+#      false-positived "not installed" (masked by a once-a-day marker).
+#   2. ADR-140 symlink projection makes ~/.claude/{bin,hooks,...} symlinks into a
+#      subdir repo. Asking the binary to actually embed a query resolves identically
+#      across all topologies (in-place / copy-subdir / symlink-subdir) and also
+#      catches a corrupt model or a binary that loads-but-errors — which existence
+#      checks miss entirely.
+# Loud EVERY session while broken (no per-day suppression): a degraded engine means
+# only coarse pattern:/commands:/files: triggers fire, and that must not be skimmable.
+# Silent when it works.
+probe_embed() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 10 "$WAYS_BIN" match "$1" 2>/dev/null
+  else
+    "$WAYS_BIN" match "$1" 2>/dev/null
+  fi
+}
+if ! probe_embed "embedding engine health probe" | grep -qE '[0-9]\.[0-9]'; then
+  cat <<'MSG'
 
-⚠  Embedding engine not installed — semantic way matching is unavailable.
-   Only explicit pattern:/commands:/files: triggers will fire.
+⚠  Embedding engine is NOT functional — semantic way matching is OFF.
+   Only explicit pattern:/commands:/files: triggers will fire (coarse — expect ways
+   to over- and under-fire until this is fixed). It is a hard dependency (ADR-125).
 
-To install:
-
-    cd ~/.claude && make setup
+   Repair:
+     in-place install:      cd ~/.claude && make setup
+     subdirectory install:  cd <repo-subdir> && make setup && make sync-to-home
 
 MSG
-    touch "$MARKER" 2>/dev/null
-  fi
 fi
