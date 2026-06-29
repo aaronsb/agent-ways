@@ -314,6 +314,7 @@
       }
     }
   },
+  "tui": "default",
   "skipWorkflowUsageWarning": true,
   "autoCompactEnabled": false,
   "teammateMode": "auto",
