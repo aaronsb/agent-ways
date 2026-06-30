@@ -71,9 +71,9 @@ pub fn run(
     // Its ids become the skip set for core, so a user way shadows a same-named
     // shipped way (precedence project > user > core).
     let user_dir = crate::paths::user_ways_root();
-    let mut user_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut user_sink: std::collections::HashSet<String> = std::collections::HashSet::new();
     let user_count = if user_dir.is_dir() {
-        let c = scan_ways_dir(&user_dir, "", &excluded, &mut w, &empty_skip, &mut user_ids)?;
+        let c = scan_ways_dir(&user_dir, "", &excluded, &mut w, &empty_skip, &mut user_sink)?;
         if c > 0 {
             log(&format!("User ways: {c} ({})", user_dir.display()));
         }
@@ -83,9 +83,13 @@ pub fn run(
     };
     let user_hash = content_hash(&user_dir);
 
-    // Scan CORE (shipped) ways, dropping any id a user way already claimed.
-    let mut core_written = user_ids.clone();
-    let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w, &user_ids, &mut core_written)?;
+    // Scan CORE (shipped) ways, dropping any id a user way claimed. The shadow
+    // set is ALL user way ids by directory (crate::cmd::scan::candidates::way_ids)
+    // — incl. non-semantic ones — so it matches the predictive scanner's dedup
+    // and a pattern-only user override still suppresses the core way.
+    let user_shadow = crate::cmd::scan::candidates::way_ids(&user_dir);
+    let mut core_sink: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w, &user_shadow, &mut core_sink)?;
     let global_hash = content_hash(&global_dir);
     log(&format!(
         "Core ways: {global_count} (hash: {}...)",
