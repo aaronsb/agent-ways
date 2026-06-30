@@ -69,8 +69,8 @@ fn generate_corpus(name: &str) -> PathBuf {
         .status()
         .expect("Failed to run ways corpus");
 
-    // The corpus goes to XDG_CACHE_HOME/claude-ways/user/ways-corpus.jsonl
-    let actual = corpus_dir.join("claude-ways/user/ways-corpus.jsonl");
+    // The corpus goes to XDG_CACHE_HOME/agent-ways/user/ways-corpus.jsonl
+    let actual = corpus_dir.join("agent-ways/user/ways-corpus.jsonl");
     if actual.exists() {
         return actual;
     }
