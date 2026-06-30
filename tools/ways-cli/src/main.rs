@@ -232,7 +232,10 @@ enum Commands {
         /// Show the read-only migration plan (the default; accepted explicitly)
         #[arg(long)]
         plan: bool,
-        /// Perform the migration (default is a read-only plan)
+        /// Dry-run the executor: assert every phase's contract without mutating
+        #[arg(long)]
+        what_if: bool,
+        /// Perform the migration (gated; backs up first, resumable)
         #[arg(long)]
         execute: bool,
         /// Target install dir (default: ~/.claude)
@@ -614,7 +617,9 @@ fn main() -> Result<()> {
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
-        Commands::Migrate { plan: _, execute, dest } => cmd::migrate::run(execute, dest),
+        Commands::Migrate { plan: _, what_if, execute, dest } => {
+            cmd::migrate::run(execute, what_if, dest)
+        }
         Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet)
         }

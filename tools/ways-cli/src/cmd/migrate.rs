@@ -167,8 +167,9 @@ fn print_plan(p: &Plan) {
     }
 }
 
-/// `ways migrate` — plan (read-only, default) or execute (gated, not yet here).
-pub fn run(execute: bool, dest: Option<String>) -> Result<()> {
+/// `ways migrate` — plan (read-only classification, default), what-if (executor
+/// dry-run with contract checks), or execute (gated mutation).
+pub fn run(execute: bool, what_if: bool, dest: Option<String>) -> Result<()> {
     let dest: PathBuf = dest.map(PathBuf::from).unwrap_or_else(|| home_dir().join(".claude"));
 
     if !dest.exists() {
@@ -183,16 +184,16 @@ pub fn run(execute: bool, dest: Option<String>) -> Result<()> {
         );
     }
 
+    // --what-if and --execute share the executor's phases; --what-if just runs
+    // them in dry-run, asserting each contract without mutating.
+    if what_if || execute {
+        return crate::cmd::migrate_exec::run(&dest, !execute);
+    }
+
+    // Default: the read-only high-level classification plan.
     let plan = compute_plan(&dest)?;
     print_plan(&plan);
-
-    if execute {
-        bail!(
-            "the migration executor is not wired up here yet — this is the read-only \
-             plan. The phased, backed-up, resumable executor lands separately and is \
-             sandbox-tested before it ever touches a real ~/.claude."
-        );
-    }
+    println!("Run `ways migrate --what-if` to dry-run the executor and verify every phase's contract.");
     Ok(())
 }
 
@@ -259,12 +260,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    #[test]
-    fn execute_refuses_until_executor_lands() {
-        let base = sandbox("exec");
-        fake_clone(&base);
-        let err = run(true, Some(base.to_string_lossy().into())).unwrap_err();
-        assert!(err.to_string().contains("executor is not wired up"));
-        let _ = std::fs::remove_dir_all(&base);
-    }
+    // Executor behavior (what-if + execute) is covered by the sandboxed phase
+    // tests in migrate_exec, which inject XDG roots into a tmpdir. We do NOT
+    // call migrate::run(execute=true) from a test: it resolves the *real*
+    // $XDG_DATA/$XDG_CONFIG and would mutate the developer's environment.
 }
