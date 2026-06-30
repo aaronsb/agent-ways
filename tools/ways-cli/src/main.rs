@@ -225,6 +225,20 @@ enum Commands {
         #[arg(long)]
         quiet: bool,
     },
+    /// Preview (or perform) migration of a legacy in-place ~/.claude clone to
+    /// the XDG application layout (ADR-144 §5). Default is a read-only plan;
+    /// --execute is gated and backed up.
+    Migrate {
+        /// Show the read-only migration plan (the default; accepted explicitly)
+        #[arg(long)]
+        plan: bool,
+        /// Perform the migration (default is a read-only plan)
+        #[arg(long)]
+        execute: bool,
+        /// Target install dir (default: ~/.claude)
+        #[arg(long)]
+        dest: Option<String>,
+    },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
         /// Session ID to replay directly (skip picker)
@@ -600,6 +614,7 @@ fn main() -> Result<()> {
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
+        Commands::Migrate { plan: _, execute, dest } => cmd::migrate::run(execute, dest),
         Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet)
         }

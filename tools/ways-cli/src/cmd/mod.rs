@@ -12,6 +12,7 @@ pub mod list;
 pub mod manifest;
 pub mod match_cmd;
 pub mod memory_seed;
+pub mod migrate;
 pub mod permissions;
 pub mod provenance;
 pub mod reconcile;
