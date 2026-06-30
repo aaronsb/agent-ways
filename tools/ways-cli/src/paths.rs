@@ -106,6 +106,15 @@ pub fn cache_root() -> PathBuf {
     resolve_cache(&xdg_cache_base())
 }
 
+/// The canonical cache root (`$XDG_CACHE/agent-ways`), ignoring the legacy
+/// fallback. Use this where the target must be the NEW location regardless of
+/// what exists yet — specifically the migrator's rename *destination*. Runtime
+/// reads use [`cache_root`] (fallback-aware); the migrator must not, or its
+/// rename destination collapses onto the legacy source and the rename no-ops.
+pub fn cache_root_canonical() -> PathBuf {
+    normalize_path_sep(&xdg_cache_base().join(APP))
+}
+
 /// Pure fallback resolution, factored out so it's testable without mutating the
 /// process-global `$XDG_CACHE_HOME`.
 fn resolve_cache(base: &Path) -> PathBuf {
@@ -271,6 +280,14 @@ mod tests {
         assert!(resolve_events(&state, &projection).starts_with(&state));
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn cache_root_canonical_ignores_legacy_fallback() {
+        // Always the new name regardless of what exists — the migrator's rename
+        // destination must never collapse onto the legacy source (cache_root's
+        // fallback would, which is correct for reads but wrong as a rename target).
+        assert!(cache_root_canonical().ends_with("agent-ways"));
     }
 
     #[test]

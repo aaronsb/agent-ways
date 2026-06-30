@@ -49,7 +49,10 @@ impl Ctx {
             data: paths::data_root(),
             config: paths::config_root(),
             cache_old: crate::util::xdg_cache_dir().join("claude-ways"),
-            cache_new: paths::cache_root(),
+            // Canonical (NOT fallback-aware): the rename destination must be the
+            // new name even though it doesn't exist yet, or it collapses onto
+            // cache_old and the rename no-ops.
+            cache_new: paths::cache_root_canonical(),
             markers: state.join("migration"),
             state,
             dest,
