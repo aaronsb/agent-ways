@@ -5,6 +5,7 @@ pub mod agents;
 mod cmd;
 pub mod config;
 mod frontmatter;
+pub mod paths;
 mod scanner;
 pub mod session;
 pub mod util;
