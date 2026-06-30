@@ -7,6 +7,7 @@ deciders:
 related:
   - "[[ADR-142]]"
   - "[[ADR-140]]"
+  - "[[ADR-133]]"
   - "[[ADR-128]]"
 ---
 
@@ -218,6 +219,54 @@ date reaching the population.
 - **Auto-migrate silently at SessionStart** (no gate). Rejected outright by ADR-142's autonomy gradient:
   rewriting the user's home config without consent and without a loud backup announcement is exactly the
   blast radius the gradient exists to prevent.
+
+- **Bootstrap via a thin marketplace plugin.** *Viable alternative, not the chosen approach* — recorded
+  here so the reviewer can weigh it against §3's self-sufficient copied/stable-path entrypoint, which
+  stands. (Research-grounded: Claude Code plugins-reference plus adversarial cross-verification of the
+  named issues below.)
+
+  - **The crux is documented to work.** A plugin can ship a `SessionStart` hook that auto-fires the
+    moment the plugin is *enabled*, with **no `settings.json` edit by the user** (plugins-reference; the
+    shipped `explanatory-output-style` plugin is an existing example of an auto-firing plugin hook). The
+    hook file lives in Claude-Code's managed plugin cache
+    (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`), which is **independent of agent-ways'
+    own `~/.claude` projection** — a different tree, owned by a different system.
+
+  - **Effect on the bootstrap exemption: it *relocates* the exemption, it does not eliminate it.** Because
+    the hook is a real file in a Claude-Code-managed cache (loader-guaranteed to exist, *not* a symlink
+    into the projected tree agent-ways manages), it satisfies §3's exemption requirement by construction.
+    The burden of "guarantee a stable entry point" shifts **from agent-ways** (a copied file we keep in
+    sync) **to Claude Code's plugin loader**. That is a genuinely cleaner exemption — but it is a
+    **dependency on a third-party surface, not the removal of the dependency.**
+
+  - **Corrected risk-ranking — the exemption is *not* the headline risk here.** The headline risk is
+    **coupling a load-bearing bootstrap to Anthropic's plugin subsystem, which agent-ways does not control
+    and which is visibly churning**: an ephemeral, version-stamped `CLAUDE_PLUGIN_ROOT` (#15642); a
+    stale-marketplace-clone update bug (#35752); repeated Windows symlink regressions
+    (#23819 / #24140 / #53948 / #50052); and an uninstall path that deletes the plugin *and* its
+    `CLAUDE_PLUGIN_DATA` — which would make the projection persist while its **healer vanishes**. A
+    secondary facet is *fit with the official model*: plugins are meant to *contribute artifacts*, not
+    *mutate `~/.claude`*. A bootstrap hook that symlinks and merges `settings.json` into `~/.claude` is
+    **technically allowed** (hooks run unsandboxed at full user privilege) but is **off-label** use of the
+    plugin contract.
+
+  - **Three hard constraints if pursued:** (1) the bootstrap must resolve `$XDG_DATA` **independently** and
+    treat `CLAUDE_PLUGIN_ROOT` as ephemeral/throwaway (it rotates every plugin update); (2) any durable
+    bootstrap state goes to `$CLAUDE_PLUGIN_DATA` (survives updates) or `$XDG_STATE` — **never**
+    `CLAUDE_PLUGIN_ROOT`; (3) the plugin must be a genuinely self-contained **thin shim** (the hook plus a
+    small launcher only). Plugins deliberately skip outside-pointing symlinks for security, so the shim
+    **cannot symlink-bridge into `$XDG_DATA`**; and the binaries / model / corpus do not fit git-clone
+    plugin delivery — so **"ship the whole app as a plugin" is not viable** (wrong shape), full stop.
+
+  - **When it earns its keep — and when it doesn't.** The real payoff is **discoverability**:
+    `claude plugin install agent-ways@aaronsb` via a self-published single-plugin marketplace, riding
+    Anthropic's managed install channel, with the exemption-maintenance shift as a *bonus*. For the
+    exemption *alone* it is a **bad trade** — standing up a whole marketplace plus lifecycle coupling to
+    replace one copied file. It implies a **two-channel update model**: the thin plugin updates rarely via
+    the marketplace, while the bulk app updates independently via the reconciler / `git` in `$XDG_DATA`.
+    This is adjacent to **ADR-133**, which already shells `claude plugin list --json` at `SessionStart` to
+    discover plugin-contributed ways — so the framework already touches the plugin surface, just for
+    discovery rather than bootstrap.
 
 ## Open Questions
 
