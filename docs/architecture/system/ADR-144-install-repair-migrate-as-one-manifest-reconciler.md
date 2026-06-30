@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Accepted
 date: 2026-06-29
 deciders:
   - aaronsb
@@ -146,17 +146,31 @@ to it, on their own clock — so the engine never needs to know how many in-plac
 maintainer doesn't; ADR-142 Context). The migrator is invoked *by an update reaching the user*, not by a
 date reaching the population.
 
-- **1.0** — migrator ships and is active.
-- **1.0.x** — migration supported throughout; the in-place check + assisted migrator run for anyone
-  still in-place.
-- **1.1.0** — *final* migration release. When a user's update lands on 1.1.0, the migrator runs (or
-  confirms already-migrated), then announces that the *next* release stops checking/migrating.
-- **post-1.1.0** — remove the migrator and the in-place check. This is **safe by construction**: releases
-  are sequential, so no one reaches a post-1.1.0 release without having passed *through* 1.1.0's migrating
-  gate. **"Remove assistance" is not "break the un-migrated":** a user still in-place keeps a working
-  in-place install; agent-ways simply stops *helping* them move and stops *checking*. A user who never
-  updates past 1.1.0 stays **frozen at 1.1.0, working but unsupported** — an acceptable, self-selected
-  outcome, not a stranding. The design must not actively break them.
+The lifecycle is an **escalating-pressure curve across the 1.0.x line**, dormant at first so adopters
+meet the migrator before they're pushed by it:
+
+- **1.0.0** — the migrator ships **functional but dormant**: `ways migrate` (plan / what-if / execute)
+  is available on demand, with **no SessionStart pressure**. The release exists to make the path real
+  and prove it end-to-end; updating to it is idempotent-in-use to 0.9.x (the runtime behaves identically
+  until the operator chooses to migrate). This is the verify-before-you-push release.
+- **1.0.1 … 1.0.5** — the migrator stays available while a SessionStart nudge **escalates each release**,
+  keyed to version and **silent for already-migrated installs**: a gentle offer at 1.0.1 ("agent-ways can
+  migrate — want to?") → progressively more insistent → at **1.0.5**, the last-chance warning that the
+  *next* release drops the migrator and that migrating after this point means checking out the 1.0.5 tag.
+- **1.1.0** — migrator and in-place check **removed**. Safe by construction: releases are sequential, so
+  reaching 1.1.0 means having passed through the escalation. Two properties make the removal humane:
+  - **The escape hatch is the immutable tag.** A user still in-place migrates with
+    `git clone --branch ways-v1.0.5 … && ways migrate` — the migrator lives *forever* at that tag, so
+    "we removed it" never means "you can't." This is the concrete form of the never-strand clause.
+  - **The cliff is a ramp.** "Remove assistance" is not "break the un-migrated." A 1.1.0 binary on an
+    un-migrated `~/.claude` still **reads correctly** through the transition fallbacks — core ways from
+    the clone's own `hooks/ways`, cache from the legacy `claude-ways`, events from `~/.claude/stats`. It
+    loses assisted migration and in-place *checking*, not *function*. A user frozen pre-1.1.0 stays
+    working and unsupported by their own choice; a user who updates *to* 1.1.0 while in-place keeps
+    running via the fallbacks. The design never actively breaks them.
+
+(The specific patch numbers above are the *cadence*, not a contract — the mechanism is "pressure level
+keyed to release, escalating to a final 1.0.x before 1.1.0," and any 1.0.x spacing satisfies it.)
 
 ## Consequences
 

@@ -4,6 +4,15 @@ The recommended setup is to **fork this repo** and customize it for your own wor
 
 When you build something that would benefit everyone — a new domain, a better trigger pattern, a macro that detects something clever — we'd love a PR back to upstream. The framework improves when people bring different workflows to it.
 
+## Development setup
+
+As of 1.0, **your dev checkout is not your install.** `~/.claude` is a projection of an XDG
+application; the app source lives in `$XDG_DATA_HOME/agent-ways`. So you develop from a
+**separate clone** (e.g. `~/src/agent-ways`) and choose when your changes reach your install —
+editing `~/.claude` directly no longer "just works." See **[docs/development.md](docs/development.md)**
+for the full setup, the sandbox/reconcile/worktree testing patterns, and why the worktree must
+hang off your standalone clone rather than `$XDG_DATA`.
+
 ## Adding a Way
 
 1. Create `hooks/ways/{domain}/{wayname}/{wayname}.md` with YAML frontmatter
@@ -44,7 +53,7 @@ Fix drift in small batches. If a lint is genuinely wrong for a specific case, `#
 
 The `.gitignore` uses an **exclusive pattern**: `*` (ignore everything) with explicit `!` exceptions for tracked files. This is intentional, not lazy.
 
-This repo *is* `~/.claude/` — the directory that controls how Claude Code thinks and acts. Every file here can influence agent behavior: hooks execute shell commands, ways inject guidance, CLAUDE.md steers reasoning, settings.json controls permissions. An accidental commit of a malicious or poorly-written file could steer Claude to do undesirable things for anyone who pulls it.
+This repo **controls `~/.claude/`** — directly when installed in-place, or via the projection after 1.0 — the directory that governs how Claude Code thinks and acts. Every file here can influence agent behavior: hooks execute shell commands, ways inject guidance, CLAUDE.md steers reasoning, settings.json controls permissions. An accidental commit of a malicious or poorly-written file could steer Claude to do undesirable things for anyone who pulls it.
 
 The exclusive gitignore ensures:
 - **No accidental file inclusion.** New files must be explicitly opted in via `.gitignore`. You can't push a file you didn't mean to track.
