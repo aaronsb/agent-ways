@@ -193,6 +193,17 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Print the projection manifest — the desired state of ~/.claude derived
+    /// from `git ls-files` over the projection allowlist (ADR-144). The
+    /// reconciler converges ~/.claude toward this.
+    Manifest {
+        /// Source checkout to derive from (default: $XDG_DATA/agent-ways)
+        #[arg(long)]
+        source: Option<String>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
         /// Session ID to replay directly (skip picker)
@@ -567,6 +578,7 @@ fn main() -> Result<()> {
             cmd::stats::run(days, project.as_deref(), json, global)
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
+        Commands::Manifest { source, json } => cmd::manifest::run(json, source),
         Commands::Rethink { session, project, speed, list, json } => {
             if json {
                 cmd::rethink_dump::run_json(session.as_deref(), project.as_deref())
