@@ -256,7 +256,22 @@ pub fn apply_to_files(
     let desired_hooks = desired.get("hooks").cloned().unwrap_or(Value::Object(Map::new()));
 
     let live: Value = read_json_or_empty(dest_settings)?;
-    let base = read_json_or_empty(base_path).map(|v| Owned::from_value(&v)).unwrap_or_default();
+    // The merge base. With a last-applied record, use it (per-entry user-hook
+    // preservation on subsequent applies). WITHOUT one — the first apply, e.g.
+    // migrating an existing in-place install whose settings.json already holds
+    // agent-ways hooks + perms from the pre-1.0 wholesale-replace sync — seed the
+    // base from the live content so those pre-existing entries are treated as
+    // OURS: replaced wholesale (matching pre-1.0 behavior) rather than mistaken
+    // for user content. Without this seed the merge both duplicated our old hooks
+    // in the result and the self-audit false-positived on us removing them.
+    let base = if base_path.exists() {
+        read_json_or_empty(base_path).map(|v| Owned::from_value(&v)).unwrap_or_default()
+    } else {
+        Owned {
+            hooks: live.get("hooks").and_then(|h| h.as_object()).cloned().unwrap_or_default(),
+            perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
+        }
+    };
 
     let merged = merge(&live, &desired_hooks, &base)?;
 
@@ -419,5 +434,51 @@ mod tests {
         );
         // Already quoted → untouched (idempotent).
         assert_eq!(quote_first_token("\"already\" quoted"), "\"already\" quoted");
+    }
+
+    #[test]
+    fn migrating_existing_install_seeds_base_and_passes_self_audit() {
+        // Reproduces the north bug: an existing in-place install whose settings.json
+        // already holds agent-ways hooks + the ways perms (from the pre-1.0
+        // wholesale-replace sync) PLUS user content, with NO last-applied base
+        // record (first migration). Without base-seeding the merge duplicated the
+        // old hooks and the self-audit aborted the migration.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir()
+            .join(format!("ways-setmerge-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::SeqCst)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("settings.json");
+        let source = dir.join("source.json");
+        let base = dir.join("base.json"); // deliberately does NOT exist
+
+        std::fs::write(&dest, serde_json::to_string(&json!({
+            "model": "opus",
+            "theme": "dark",
+            "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [
+                { "type": "command", "command": "${HOME}/.claude/hooks/ways/OLD-check.sh" } ] } ] },
+            "permissions": { "allow": ["Bash(ways:*)", "Bash(git:*)"], "deny": ["Bash(rm:*)"] }
+        })).unwrap()).unwrap();
+        std::fs::write(&source, serde_json::to_string(&json!({
+            "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [
+                { "type": "command", "command": "${HOME}/.claude/hooks/ways/check-setup.sh" } ] } ] }
+        })).unwrap()).unwrap();
+
+        // Must NOT abort — the self-audit must pass.
+        apply_to_files(&source, &dest, &base).expect("migration settings merge must not abort");
+
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        // User content preserved.
+        assert_eq!(after["model"], "opus");
+        assert_eq!(after["theme"], "dark");
+        assert_eq!(after["permissions"]["deny"][0], "Bash(rm:*)");
+        assert!(after["permissions"]["allow"].as_array().unwrap().iter().any(|v| v == "Bash(git:*)"));
+        // Our old hook REPLACED by the new one — not duplicated, not lingering.
+        let ss = after["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(ss.len(), 1, "old agent-ways hook must be replaced, not duplicated: {ss:?}");
+        let cmd = ss[0]["hooks"][0]["command"].as_str().unwrap();
+        assert!(cmd.contains("check-setup.sh") && !cmd.contains("OLD-check.sh"), "got: {cmd}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
