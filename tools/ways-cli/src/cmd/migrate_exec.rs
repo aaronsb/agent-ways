@@ -283,6 +283,7 @@ fn phase_projection(ctx: &Ctx) -> Result<Vec<String>> {
         None,
         false,
         true,
+        true, // allow_in_place: migrator is the legitimate mid-migration reconcile
     )?;
     // Postcondition gate before the destructive removal: a projection root must
     // now resolve as a symlink. If it doesn't, abort BEFORE deleting anything.
@@ -480,7 +481,11 @@ mod tests {
         };
         g(&["init", "-q"]);
         g(&["remote", "add", "origin", "https://github.com/aaronsb/agent-ways"]);
-        for f in ["hooks/ways/meta/a.md", "skills/wrap/SKILL.md", "docs/x.md", "settings.json"] {
+        // Include tools/ AND docs/ so the clone fully matches is_legacy_in_place
+        // (.git + tools + docs) — the real ~/.claude shape. Without tools/, the
+        // reconcile guard never fired in the sandbox and masked the mid-migration
+        // abort bug.
+        for f in ["hooks/ways/meta/a.md", "skills/wrap/SKILL.md", "docs/x.md", "tools/x.rs", "settings.json"] {
             let p = root.join(f);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, if f == "settings.json" { "{\"hooks\":{}}" } else { "---\nx\n" }).unwrap();
