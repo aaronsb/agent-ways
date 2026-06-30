@@ -16,7 +16,7 @@ use crate::util::{home_dir, xdg_cache_dir};
 
 pub fn run(filter_lang: Option<&str>, audit: bool, json_output: bool) -> Result<()> {
     let ways_dir = home_dir().join(".claude/hooks/ways");
-    let xdg_way = xdg_cache_dir().join("claude-ways/user");
+    let xdg_way = xdg_cache_dir().join("agent-ways/user");
     let excluded = crate::util::load_excluded_segments();
 
     // Resolved language

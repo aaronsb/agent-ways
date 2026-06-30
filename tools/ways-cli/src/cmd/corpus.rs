@@ -19,7 +19,7 @@ pub fn run(
         .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
 
     // The engine dir holds the way-embed binary + GGUF models — always canonical.
-    let engine_dir = crate::util::normalize_path_sep(&xdg_cache_dir().join("claude-ways/user"));
+    let engine_dir = crate::util::normalize_path_sep(&xdg_cache_dir().join("agent-ways/user"));
     // Corpus artifacts (jsonl, splits, manifest) go to --output if given, else
     // the canonical engine dir.
     let out_dir = match &output_dir {

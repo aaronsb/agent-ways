@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub fn run(json_output: bool) -> Result<()> {
-    let xdg_cache = xdg_cache_dir().join("claude-ways/user");
+    let xdg_cache = xdg_cache_dir().join("agent-ways/user");
     let ways_dir = home_dir().join(".claude/hooks/ways");
     // Engine detection
     let way_embed = find_way_embed(&xdg_cache);

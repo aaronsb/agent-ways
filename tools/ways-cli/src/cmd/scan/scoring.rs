@@ -58,7 +58,7 @@ pub(crate) fn batch_embed_score(query: &str) -> EmbedScores {
     let Some(embed_bin) = find_way_embed() else {
         return EmbedScores { en: None, multi: None };
     };
-    let xdg = crate::util::normalize_path_sep(&xdg_cache_dir().join("claude-ways/user"));
+    let xdg = crate::util::normalize_path_sep(&xdg_cache_dir().join("agent-ways/user"));
 
     let en_corpus = xdg.join("ways-corpus-en.jsonl");
     let en_model = xdg.join("minilm-l6-v2.gguf");
@@ -161,7 +161,7 @@ fn line_count(path: &std::path::Path) -> usize {
 }
 
 fn find_way_embed() -> Option<std::path::PathBuf> {
-    let xdg = crate::util::normalize_path_sep(&xdg_cache_dir().join("claude-ways/user/way-embed"));
+    let xdg = crate::util::normalize_path_sep(&xdg_cache_dir().join("agent-ways/user/way-embed"));
     if xdg.is_file() { return Some(xdg); }
     let bin = crate::util::normalize_path_sep(&home_dir().join(".claude/bin/way-embed"));
     if bin.is_file() { return Some(bin); }

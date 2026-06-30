@@ -173,5 +173,5 @@ fn default_corpus() -> PathBuf {
                 .map(|h| PathBuf::from(h).join(".cache"))
                 .unwrap_or_else(|_| PathBuf::from("/tmp"))
         });
-    xdg.join("claude-ways/user/ways-corpus.jsonl")
+    xdg.join("agent-ways/user/ways-corpus.jsonl")
 }

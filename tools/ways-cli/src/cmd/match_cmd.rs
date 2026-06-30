@@ -57,7 +57,7 @@ pub fn run(query: String, _corpus: Option<String>) -> Result<()> {
         key(&b.1).partial_cmp(&key(&a.1)).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let en_corpus = xdg_cache_dir().join("claude-ways/user/ways-corpus-en.jsonl");
+    let en_corpus = xdg_cache_dir().join("agent-ways/user/ways-corpus-en.jsonl");
     let descriptions = load_descriptions(en_corpus.to_str().unwrap_or(""));
 
     let mut t = Table::new(&["Way", "EN", "Multi", "Description"]);
