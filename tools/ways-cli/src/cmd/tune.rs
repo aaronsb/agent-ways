@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 
 use crate::frontmatter;
-use crate::util::{home_dir, xdg_cache_dir};
+use crate::util::home_dir;
 
 #[derive(Clone)]
 struct FidelityResult {
@@ -76,7 +76,7 @@ pub fn run(
     let global_dir = ways_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
-    let xdg_way = xdg_cache_dir().join("agent-ways/user");
+    let xdg_way = crate::paths::corpus_dir();
 
     let multi_corpus = xdg_way.join("ways-corpus-multi.jsonl");
     let multi_model = xdg_way.join("multilingual-minilm-l12-v2-q8.gguf");
@@ -416,7 +416,7 @@ fn nan_to_null(x: f64) -> serde_json::Value {
 }
 
 fn find_way_embed() -> Option<PathBuf> {
-    let xdg = xdg_cache_dir().join("agent-ways/user/way-embed");
+    let xdg = crate::paths::corpus_dir().join("way-embed");
     if xdg.is_file() {
         return Some(xdg);
     }

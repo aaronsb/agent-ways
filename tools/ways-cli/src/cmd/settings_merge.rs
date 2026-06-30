@@ -19,8 +19,12 @@
 //!
 //! The merge is **self-auditing**: after writing, [`stripped_user_view`] of the
 //! new file must equal that of the backup — i.e. the user's portion is provably
-//! byte-identical. If it isn't, the write is reverted from the backup. That
-//! turns a botched merge into a loud failure instead of silent corruption.
+//! unchanged under JSON `Value` (semantic) equality. The whole file is
+//! re-serialized via `to_string_pretty`, so the bytes aren't necessarily
+//! identical, but `preserve_order` keeps key order stable and the *meaning* of
+//! every unmanaged field is held invariant. If it isn't, the write is reverted
+//! from the backup — turning a botched merge into a loud failure, not silent
+//! corruption.
 
 use anyhow::{bail, Context, Result};
 use serde_json::{Map, Value};

@@ -23,15 +23,14 @@
 //! tmpdir gives every consumer a sandbox `HOME` — this module is the test seam
 //! the reconciler and migrator are validated against, never the live install.
 
-// Not every accessor has a call site yet — call-site migration is a separate,
-// reviewed step. The allow comes off as each site adopts these.
-#![allow(dead_code)]
-
 use crate::util::{home_dir, normalize_path_sep};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The XDG application-directory name, shared by all four tiers.
 const APP: &str = "agent-ways";
+
+/// The pre-1.0 cache directory name, kept as a read-fallback during migration.
+const LEGACY_CACHE: &str = "claude-ways";
 
 // ---------------------------------------------------------------------------
 // XDG base directories (spec defaults; Windows home handling via `home_dir`).
@@ -40,25 +39,36 @@ const APP: &str = "agent-ways";
 // into this module.
 // ---------------------------------------------------------------------------
 
+/// Resolve an `$XDG_*` base, treating an empty or relative value as unset.
+///
+/// The spec says relative `$XDG_*` values must be ignored. This matters here
+/// because these roots now drive a destructive relocate — a stray empty env var
+/// must never resolve a root to the current directory.
+fn xdg_base(var: &str, fallback: impl Fn() -> PathBuf) -> PathBuf {
+    match std::env::var(var) {
+        Ok(v) if !v.is_empty() && Path::new(&v).is_absolute() => PathBuf::from(v),
+        _ => fallback(),
+    }
+}
+
 /// XDG data base ($XDG_DATA_HOME or ~/.local/share).
 fn xdg_data_base() -> PathBuf {
-    std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".local").join("share"))
+    xdg_base("XDG_DATA_HOME", || home_dir().join(".local").join("share"))
 }
 
 /// XDG config base ($XDG_CONFIG_HOME or ~/.config).
 fn xdg_config_base() -> PathBuf {
-    std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".config"))
+    xdg_base("XDG_CONFIG_HOME", || home_dir().join(".config"))
 }
 
 /// XDG state base ($XDG_STATE_HOME or ~/.local/state).
 fn xdg_state_base() -> PathBuf {
-    std::env::var("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".local").join("state"))
+    xdg_base("XDG_STATE_HOME", || home_dir().join(".local").join("state"))
+}
+
+/// XDG cache base ($XDG_CACHE_HOME or ~/.cache), with the same empty/relative guard.
+fn xdg_cache_base() -> PathBuf {
+    xdg_base("XDG_CACHE_HOME", || home_dir().join(".cache"))
 }
 
 // ---------------------------------------------------------------------------
@@ -84,9 +94,30 @@ pub fn state_root() -> PathBuf {
 }
 
 /// Derived state — corpus, embeddings, model. Regenerable; safe to delete.
-/// (Replaces the legacy `$XDG_CACHE_HOME/claude-ways`; the reconciler renames it.)
+///
+/// During the 1.0 transition this is **read-fallback aware**: it prefers
+/// `$XDG_CACHE/agent-ways`, but if that doesn't exist yet while the legacy
+/// `$XDG_CACHE/claude-ways` does, it returns the legacy dir. So an un-migrated
+/// install keeps using its already-downloaded model + corpus (no re-fetch, no
+/// split-brain with the tooling that populated it); the migrator renames the
+/// dir, after which the preferred path simply wins. A fresh install gets the
+/// new name. Reads and writes both route through here, so they never diverge.
 pub fn cache_root() -> PathBuf {
-    normalize_path_sep(&crate::util::xdg_cache_dir().join(APP))
+    resolve_cache(&xdg_cache_base())
+}
+
+/// Pure fallback resolution, factored out so it's testable without mutating the
+/// process-global `$XDG_CACHE_HOME`.
+fn resolve_cache(base: &Path) -> PathBuf {
+    let preferred = base.join(APP);
+    if preferred.exists() {
+        return normalize_path_sep(&preferred);
+    }
+    let legacy = base.join(LEGACY_CACHE);
+    if legacy.exists() {
+        return normalize_path_sep(&legacy);
+    }
+    normalize_path_sep(&preferred)
 }
 
 /// The Claude-Code-owned projection floor (`~/.claude`). What *stays*:
@@ -172,10 +203,32 @@ mod tests {
 
     #[test]
     fn roots_carry_the_app_name() {
+        // data/config/state are unconditional. cache is fallback-aware (it may
+        // resolve to the legacy dir on an un-migrated machine), so it is NOT
+        // asserted here — see cache_root_prefers_new_falls_back_to_legacy.
         assert!(data_root().ends_with("agent-ways"));
         assert!(config_root().ends_with("agent-ways"));
         assert!(state_root().ends_with("agent-ways"));
-        assert!(cache_root().ends_with("agent-ways"));
+    }
+
+    #[test]
+    fn cache_root_prefers_new_falls_back_to_legacy() {
+        // Deterministic: drive the pure resolver with a controlled base dir
+        // instead of mutating $XDG_CACHE_HOME (process-global, races tests).
+        let base = std::env::temp_dir().join(format!("ways-cache-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        // Neither exists → preferred (agent-ways).
+        assert!(resolve_cache(&base).ends_with("agent-ways"));
+        // Only legacy exists → legacy (so an un-migrated install keeps its cache).
+        std::fs::create_dir_all(base.join(LEGACY_CACHE)).unwrap();
+        assert!(resolve_cache(&base).ends_with(LEGACY_CACHE));
+        // New exists → new wins even with legacy present (post-migration).
+        std::fs::create_dir_all(base.join(APP)).unwrap();
+        assert!(resolve_cache(&base).ends_with(APP));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -196,7 +249,10 @@ mod tests {
     #[test]
     fn accessors_land_in_the_right_tier() {
         assert!(corpus_dir().ends_with("user"));
-        assert!(corpus_dir().parent().unwrap().ends_with("agent-ways"));
+        // corpus_dir's parent is the fallback-aware cache root (agent-ways or the
+        // legacy claude-ways), so only assert it's one of those — not a fixed name.
+        let cache_name = corpus_dir().parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+        assert!(cache_name == APP || cache_name == LEGACY_CACHE, "unexpected cache dir: {cache_name}");
         assert!(events_log().ends_with("events.jsonl"));
         assert!(bin_root().ends_with("bin"));
     }

@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 use agent_fmt::{Align, Table};
-use crate::util::xdg_cache_dir;
 
 /// (max EN score, max multi score) for a single way.
 type ScorePair = (Option<f64>, Option<f64>);
@@ -57,7 +56,7 @@ pub fn run(query: String, _corpus: Option<String>) -> Result<()> {
         key(&b.1).partial_cmp(&key(&a.1)).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let en_corpus = xdg_cache_dir().join("agent-ways/user/ways-corpus-en.jsonl");
+    let en_corpus = crate::paths::corpus_dir().join("ways-corpus-en.jsonl");
     let descriptions = load_descriptions(en_corpus.to_str().unwrap_or(""));
 
     let mut t = Table::new(&["Way", "EN", "Multi", "Description"]);

@@ -66,8 +66,10 @@ verify: cmake-build
 		exit 1; \
 	fi
 
-# Model download (XDG cache location)
-MODEL_DIR  = $(shell echo $${XDG_CACHE_HOME:-$$HOME/.cache})/claude-ways/user
+# Model download (XDG cache location). Prefer the 1.0 cache name; reuse the
+# legacy claude-ways dir if it already holds a model (un-migrated install) so we
+# don't re-download. Matches paths::cache_root() in the binary.
+MODEL_DIR  = $(shell C="$${XDG_CACHE_HOME:-$$HOME/.cache}"; if [ -d "$$C/agent-ways/user" ]; then echo "$$C/agent-ways/user"; elif [ -d "$$C/claude-ways/user" ]; then echo "$$C/claude-ways/user"; else echo "$$C/agent-ways/user"; fi)
 MODEL_EN   = $(MODEL_DIR)/minilm-l6-v2.gguf
 MODEL_MULTI = $(MODEL_DIR)/multilingual-minilm-l12-v2-q8.gguf
 SRCDIR     = $(CURDIR)/

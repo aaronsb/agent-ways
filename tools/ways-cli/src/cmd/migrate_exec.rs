@@ -7,16 +7,20 @@
 //! the executor's logic, not a parallel description of it.
 //!
 //! Each phase is **design-by-contract**: a precondition gate, an action, and a
-//! postcondition that is *predicted* in what-if and *verified* in execute. A
-//! failed postcondition in execute restores from the backup and aborts — a
-//! half-migrated `~/.claude` is never left behind.
+//! postcondition that is *predicted* in what-if and *verified* in execute.
 //!
-//! Crash-safety: phases write `migration/<phase>.done` markers under
-//! `$XDG_STATE`; a re-run skips completed phases and resumes from the first
-//! incomplete one. The whole-tree backup taken in phase 1 is the escape hatch.
+//! **Recovery model.** There is no automatic rollback; recovery is *resume* plus
+//! a *manual* escape hatch. Phases write `migration/<phase>.done` markers under
+//! `$XDG_STATE`; a failed run aborts, and re-running resumes from the first
+//! incomplete phase (phases are idempotent). The whole-tree backup taken in
+//! phase 1 is the manual escape hatch — on failure the executor prints the exact
+//! restore command. The phase order is chosen so that **no failure leaves a
+//! non-functional `~/.claude`**: in particular the projection rebuild reconciles
+//! the symlinks *before* removing any app-internal directory, so a reconcile
+//! error never guts the live tree.
 
 use crate::paths;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -96,7 +100,20 @@ pub fn run(dest: &Path, dry_run: bool) -> Result<()> {
         }
         let tag = if dry_run { "would" } else { "do" };
         println!("  [{tag}] {label}");
-        let actions = f(&ctx).with_context(|| format!("phase {id} ({label})"))?;
+        let actions = match f(&ctx) {
+            Ok(a) => a,
+            Err(e) => {
+                if !dry_run {
+                    eprintln!("\nMIGRATION ABORTED at phase {id} ({label}):\n  {e:#}");
+                    eprintln!("\nYour ~/.claude is still functional (no phase guts the live tree).");
+                    eprintln!("Original backed up at: {}", ctx.backup.display());
+                    eprintln!("Fix the cause and re-run `ways migrate --execute` to resume from this phase,");
+                    eprintln!("or restore the original:");
+                    eprintln!("  rm -rf {0} && cp -a {1} {0}", ctx.dest.display(), ctx.backup.display());
+                }
+                return Err(e.context(format!("phase {id} ({label})")));
+            }
+        };
         for a in &actions {
             println!("         - {a}");
         }
@@ -138,14 +155,30 @@ fn phase_backup(ctx: &Ctx) -> Result<Vec<String>> {
 
 fn phase_relocate(ctx: &Ctx) -> Result<Vec<String>> {
     let tracked = git_tracked_count(&ctx.dest);
+    // Uncommitted edits to *tracked* app files would be replaced by their
+    // committed versions in the clean checkout. They are preserved in the backup,
+    // but the user must know — surface them rather than silently discarding.
+    let dirty = git_files(&ctx.dest, &["--modified"]);
+    let dirty_note = |actions: &mut Vec<String>| {
+        if !dirty.is_empty() {
+            actions.push(format!(
+                "WARNING: {} tracked app file(s) have uncommitted edits — they will be replaced \
+                 by their committed versions (your edits remain in the backup): {}",
+                dirty.len(),
+                dirty.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    };
     if ctx.dry_run {
         if !ctx.dest.join(".git").exists() {
             bail!("source is not a git checkout — cannot relocate cleanly");
         }
-        return Ok(vec![format!(
+        let mut out = vec![format!(
             "materialize a clean checkout of {tracked} tracked files (+ .git, + bin/) → {}",
             ctx.data.display()
-        )]);
+        )];
+        dirty_note(&mut out);
+        return Ok(out);
     }
     // A pristine app checkout: copy .git, then materialize tracked files from it
     // (so no user/CC files leak into $XDG_DATA), then copy the built bin/.
@@ -163,7 +196,9 @@ fn phase_relocate(ctx: &Ctx) -> Result<Vec<String>> {
     if got != tracked {
         bail!("relocated checkout has {got} tracked files, expected {tracked}");
     }
-    Ok(vec![format!("relocated {got} tracked files → {}", ctx.data.display())])
+    let mut out = vec![format!("relocated {got} tracked files → {}", ctx.data.display())];
+    dirty_note(&mut out);
+    Ok(out)
 }
 
 fn phase_lift_state(ctx: &Ctx) -> Result<Vec<String>> {
@@ -205,37 +240,40 @@ fn phase_lift_user(ctx: &Ctx) -> Result<Vec<String>> {
 }
 
 fn phase_projection(ctx: &Ctx) -> Result<Vec<String>> {
-    // Top-level app entries to remove from dest (now living in $XDG_DATA) — every
-    // git-tracked top-level component, plus .git and bin. settings.json is the
-    // one tracked path we KEEP: it's the Claude-Code-owned projection floor, to
-    // be three-way merged, never removed.
+    // What to remove from dest: the git-tracked top-level entries that are NOT
+    // projection roots (docs, tools, governance, scripts, Makefile, top-level
+    // *.md …), plus .git. We do NOT touch the projection-root tops (skills,
+    // agents, commands, hooks, bin) — reconcile turns those into symlinks — nor
+    // settings.json (the Claude-Code-owned floor, three-way merged), nor
+    // projects/ and other untracked CC-owned entries.
     //
-    // Enumerate from `dest` (the clone), not `data`: dest still has .git at this
-    // point in both modes, so what-if is accurate even though $XDG_DATA may not
-    // exist yet in a pure dry-run.
-    let tops = git_top_level(&ctx.dest);
-    let mut to_remove: Vec<String> =
-        tops.into_iter().filter(|t| t != "settings.json").collect();
+    // Enumerate from `dest` (the clone): it still has .git here in both modes, so
+    // what-if is accurate even when $XDG_DATA doesn't exist yet.
+    let proj_root_tops: Vec<String> = crate::cmd::manifest::projection_roots(&ctx.dest)
+        .into_iter()
+        .map(|r| r.rel.split('/').next().unwrap_or("").to_string())
+        .collect();
+    let mut to_remove: Vec<String> = git_top_level(&ctx.dest)
+        .into_iter()
+        .filter(|t| t != "settings.json" && !proj_root_tops.contains(t))
+        .collect();
     to_remove.push(".git".into());
-    to_remove.push("bin".into());
 
     if ctx.dry_run {
-        let mut out = vec![format!(
-            "remove {} app entries from {} (kept: settings.json, projects/, CC-owned)",
-            to_remove.len(),
-            ctx.dest.display()
-        )];
-        out.push(format!("then reconcile symlinks + settings merge from {}", ctx.data.display()));
-        return Ok(out);
+        return Ok(vec![
+            format!("reconcile symlinks + settings merge from {}", ctx.data.display()),
+            format!(
+                "then remove {} app-internal entr{} from {} (kept: projection roots, settings.json, projects/, CC-owned)",
+                to_remove.len(),
+                if to_remove.len() == 1 { "y" } else { "ies" },
+                ctx.dest.display()
+            ),
+        ]);
     }
 
-    for t in &to_remove {
-        let p = ctx.dest.join(t);
-        if p.exists() || std::fs::symlink_metadata(&p).is_ok() {
-            remove_any(&p)?;
-        }
-    }
-    // Reconcile the projection (symlinks + the settings three-way merge).
+    // 1. Reconcile FIRST — symlinks + settings merge. reconcile replaces each
+    // projection root atomically and is idempotent, so even if this errors the
+    // live tree is never gutted (nothing has been removed yet).
     crate::cmd::reconcile::run(
         Some(ctx.data.to_string_lossy().into()),
         Some(ctx.dest.to_string_lossy().into()),
@@ -243,13 +281,20 @@ fn phase_projection(ctx: &Ctx) -> Result<Vec<String>> {
         false,
         true,
     )?;
-    // Postcondition: a projection root resolves into $XDG_DATA, and an
-    // app-internal dir is gone from dest.
+    // Postcondition gate before the destructive removal: a projection root must
+    // now resolve as a symlink. If it doesn't, abort BEFORE deleting anything.
     let skills = ctx.dest.join("skills");
     if std::fs::symlink_metadata(&skills).map(|m| !m.file_type().is_symlink()).unwrap_or(true) {
-        bail!("projection check failed: {} is not a symlink", skills.display());
+        bail!("projection check failed: {} is not a symlink — aborting before any removal", skills.display());
     }
-    Ok(vec![format!("rebuilt {} as projection ({} app entries removed)", ctx.dest.display(), to_remove.len())])
+    // 2. Only now remove the app-internal leftovers.
+    for t in &to_remove {
+        let p = ctx.dest.join(t);
+        if p.exists() || std::fs::symlink_metadata(&p).is_ok() {
+            remove_any(&p)?;
+        }
+    }
+    Ok(vec![format!("rebuilt {} as projection ({} app-internal entries removed)", ctx.dest.display(), to_remove.len())])
 }
 
 fn phase_cache(ctx: &Ctx) -> Result<Vec<String>> {
