@@ -61,7 +61,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-138](./system/ADR-138-skills-own-the-how-ways-own-the-5w.md) | Skills own the how, ways own the 5W | Draft |
 | [ADR-139](./system/ADR-139-shelve-maintainer-i18n-adopter-run-localization-via-ways-localize.md) | Shelve maintainer i18n; adopter-run localization via ways-localize | Accepted |
 | [ADR-140](./system/ADR-140-two-install-topologies-in-place-repo-and-subdirectory-projection.md) | Two install topologies: in-place repo and subdirectory projection | Accepted |
-| [ADR-141](./system/ADR-141-knowledge-graph-as-evidential-memory-backend.md) | Knowledge Graph as Evidential Memory Backend | Draft |
+| [ADR-141](./system/ADR-141-knowledge-graph-as-evidential-memory-backend.md) | Knowledge Graph as Evidential Memory Backend | Accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
