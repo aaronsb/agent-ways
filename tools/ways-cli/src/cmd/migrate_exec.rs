@@ -147,7 +147,7 @@ fn phase_backup(ctx: &Ctx) -> Result<Vec<String>> {
         }
         return Ok(vec![format!("copy {} files → {}", n, ctx.backup.display())]);
     }
-    copy_tree(&ctx.dest, &ctx.backup)?;
+    copy_tree(&ctx.dest, &ctx.backup, false)?;
     // Postcondition: backup exists and holds ~the same number of files.
     let got = count_files(&ctx.backup);
     if got < n {
@@ -189,10 +189,10 @@ fn phase_relocate(ctx: &Ctx) -> Result<Vec<String>> {
         std::fs::remove_dir_all(&ctx.data).ok();
     }
     std::fs::create_dir_all(&ctx.data)?;
-    copy_tree(&ctx.dest.join(".git"), &ctx.data.join(".git"))?;
+    copy_tree(&ctx.dest.join(".git"), &ctx.data.join(".git"), false)?;
     git_run(&ctx.data, &["reset", "--hard", "HEAD"])?;
     if ctx.dest.join("bin").is_dir() {
-        copy_tree(&ctx.dest.join("bin"), &ctx.data.join("bin"))?;
+        copy_tree(&ctx.dest.join("bin"), &ctx.data.join("bin"), true)?;
     }
     // Postcondition: it's a checkout with the same tracked count.
     let got = git_tracked_count(&ctx.data);
@@ -385,7 +385,12 @@ fn git_top_level(dir: &Path) -> Vec<String> {
     seen
 }
 
-fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
+/// Recursively copy `src` to `dst`. With `deref`, symlinks are followed and their
+/// targets copied as standalone files (used for `bin/`, whose entries are
+/// symlinks into `tools/target/` that the migration later removes — the migrated
+/// app must hold real binaries, not links into a deleted build dir). Without
+/// `deref`, symlinks are recreated verbatim (faithful backup / .git copy).
+fn copy_tree(src: &Path, dst: &Path, deref: bool) -> Result<()> {
     if src.is_dir() {
         std::fs::create_dir_all(dst)?;
         for entry in std::fs::read_dir(src)? {
@@ -393,10 +398,19 @@ fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
             let to = dst.join(entry.file_name());
             let ft = entry.file_type()?;
             if ft.is_symlink() {
-                let target = std::fs::read_link(entry.path())?;
-                symlink_raw(&target, &to)?;
+                if deref {
+                    // std::fs::copy follows symlinks and preserves the file mode
+                    // (so the executable bit survives). Skip a dangling link
+                    // rather than abort the whole relocate.
+                    if entry.path().exists() {
+                        std::fs::copy(entry.path(), &to)?;
+                    }
+                } else {
+                    let target = std::fs::read_link(entry.path())?;
+                    symlink_raw(&target, &to)?;
+                }
             } else if ft.is_dir() {
-                copy_tree(&entry.path(), &to)?;
+                copy_tree(&entry.path(), &to, deref)?;
             } else {
                 std::fs::copy(entry.path(), &to)?;
             }
@@ -418,7 +432,7 @@ fn move_path(src: &Path, dst: &Path) -> Result<()> {
     if std::fs::rename(src, dst).is_ok() {
         return Ok(());
     }
-    copy_tree(src, dst)?;
+    copy_tree(src, dst, false)?;
     remove_any(src)
 }
 
@@ -492,8 +506,16 @@ mod tests {
         }
         g(&["add", "-A"]);
         g(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
-        // Built binary (gitignored in reality; here just untracked).
+        // Built binary: in a real in-place install bin/ways is a SYMLINK into
+        // tools/target/ (the build output, gitignored). Reproduce that exactly —
+        // the migration removes tools/, so a preserved symlink would dangle. This
+        // is the shape that broke on cube and that the deref copy must handle.
         std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(root.join("tools/target/release")).unwrap();
+        std::fs::write(root.join("tools/target/release/ways"), "#!/bin/sh\necho ways\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("tools/target/release/ways"), root.join("bin/ways")).unwrap();
+        #[cfg(not(unix))]
         std::fs::write(root.join("bin/ways"), "#!/bin/sh\n").unwrap();
         // Untracked user way + a user settings.json overlay + CC transcripts + stats.
         std::fs::write(root.join("hooks/ways/meta/mine.md"), "---\nuser\n").unwrap();
@@ -572,6 +594,23 @@ mod tests {
         assert!(dest.join("projects/p1/sess.jsonl").exists(), "CC transcripts preserved");
         let settings = std::fs::read_to_string(dest.join("settings.json")).unwrap();
         assert!(settings.contains("opus"), "user settings.json preserved (model:opus)");
+
+        // The relocated binary must be a REAL file, not a dangling symlink into
+        // the removed tools/target — and the projection must reach it (the cube bug).
+        #[cfg(unix)]
+        {
+            let app_bin = ctx.data.join("bin/ways");
+            assert!(app_bin.is_file(), "migrated bin/ways must exist");
+            assert!(
+                !std::fs::symlink_metadata(&app_bin).unwrap().file_type().is_symlink(),
+                "migrated bin/ways must be a real file (deref-copied), not a symlink into the removed tools/"
+            );
+            // ~/.claude/bin/ways → $XDG_DATA/agent-ways/bin/ways → real content.
+            assert!(
+                std::fs::read_to_string(dest.join("bin/ways")).unwrap().contains("echo ways"),
+                "projected bin/ways must resolve to the real binary content"
+            );
+        }
 
         // Cache renamed; bootstrap shim is a real file (not a symlink).
         assert!(ctx.cache_new.join("user/corpus.jsonl").exists(), "cache renamed");
