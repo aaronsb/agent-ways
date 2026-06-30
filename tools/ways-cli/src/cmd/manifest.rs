@@ -32,6 +32,54 @@ const PROJECTED_FILES: &[&str] = &["hooks/check-config-updates.sh", "hooks/refre
 /// Built binaries (NOT git-tracked) projected from `bin/`.
 const PROJECTED_BINS: &[&str] = &["ways", "attend", "attend-chat", "way-embed"];
 
+/// The granularity at which the reconciler *materializes* the projection.
+///
+/// Symlink mode links these roots (a `git pull` then appears live underneath an
+/// already-linked tree — ADR-142 §2's zero-step update); copy mode copies them
+/// and prunes per-file using the manifest. This is intentionally coarser than
+/// the per-file [`ManifestEntry`] list: the manifest is the *membership* truth
+/// (for the app-vs-user split and copy-mode pruning), these are the *link units*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootKind {
+    /// A whole subtree linked/copied as one unit (`skills`, `hooks/ways`, …).
+    Tree,
+    /// A single git-tracked file (`hooks/check-config-updates.sh`).
+    File,
+    /// A built binary under `bin/`.
+    Binary,
+}
+
+/// One materialization unit (see [`RootKind`]).
+#[derive(Debug, Clone)]
+pub struct ProjectionRoot {
+    /// Path relative to both source and projection roots.
+    pub rel: String,
+    pub kind: RootKind,
+}
+
+/// The projection roots that exist at `source_root` — the symlink/copy units the
+/// reconciler operates on. Filters the allowlist to what's actually present.
+pub fn projection_roots(source_root: &Path) -> Vec<ProjectionRoot> {
+    let mut roots = Vec::new();
+    for t in PROJECTED_TREES {
+        if source_root.join(t).is_dir() {
+            roots.push(ProjectionRoot { rel: (*t).to_string(), kind: RootKind::Tree });
+        }
+    }
+    for f in PROJECTED_FILES {
+        if source_root.join(f).is_file() {
+            roots.push(ProjectionRoot { rel: (*f).to_string(), kind: RootKind::File });
+        }
+    }
+    for b in PROJECTED_BINS {
+        let rel = format!("bin/{b}");
+        if source_root.join(&rel).exists() {
+            roots.push(ProjectionRoot { rel, kind: RootKind::Binary });
+        }
+    }
+    roots
+}
+
 /// How an entry is sourced — which decides how it's kept current.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryClass {

@@ -204,6 +204,27 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Converge ~/.claude toward the projection manifest (ADR-144). Symlink
+    /// mode (default) links each projection root into the source checkout, so a
+    /// `git pull` in $XDG_DATA is live with no further step. Idempotent;
+    /// silent when already up to date.
+    Reconcile {
+        /// Source checkout (default: $XDG_DATA/agent-ways)
+        #[arg(long)]
+        source: Option<String>,
+        /// Projection target (default: ~/.claude)
+        #[arg(long)]
+        dest: Option<String>,
+        /// Materialization: symlink (default) or copy
+        #[arg(long)]
+        mode: Option<String>,
+        /// Show what would change without touching the filesystem
+        #[arg(long)]
+        dry_run: bool,
+        /// Suppress the summary line (still prints any changes)
+        #[arg(long)]
+        quiet: bool,
+    },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
         /// Session ID to replay directly (skip picker)
@@ -579,6 +600,9 @@ fn main() -> Result<()> {
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
+        Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
+            cmd::reconcile::run(source, dest, mode, dry_run, quiet)
+        }
         Commands::Rethink { session, project, speed, list, json } => {
             if json {
                 cmd::rethink_dump::run_json(session.as_deref(), project.as_deref())
