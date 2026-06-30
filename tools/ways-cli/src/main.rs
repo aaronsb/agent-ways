@@ -621,7 +621,7 @@ fn main() -> Result<()> {
             cmd::migrate::run(execute, what_if, dest)
         }
         Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
-            cmd::reconcile::run(source, dest, mode, dry_run, quiet)
+            cmd::reconcile::run(source, dest, mode, dry_run, quiet, false)
         }
         Commands::Rethink { session, project, speed, list, json } => {
             if json {
