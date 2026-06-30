@@ -167,6 +167,12 @@ the messaging branch are the remaining follow-on work this ADR authorizes.
   do not eliminate it the way symlink or in-place would.
 - A new marker file and a new detection branch add moving parts to the update checker,
   which is security-sensitive (it runs at session start).
+- Session-start health checks must resolve through the binary, not hardcoded
+  `~/.claude/...` paths. Under symlink projection those paths are links into the subdir
+  repo, so a path-based check is topology-fragile — the embedding-engine notice in
+  `check-setup.sh` checked the wrong `way-embed` location and went stale once already.
+  The durable contract: probe the engine *functionally* (`ways match`), which resolves
+  identically across in-place, copy-subdir, and symlink-subdir installs.
 
 ### Neutral
 

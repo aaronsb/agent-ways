@@ -5,7 +5,7 @@
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "99",
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
-  "includeCoAuthoredBy": false,
+  "attribution": { "commit": "", "pr": "" },
   "permissions": {
     "allow": [
       "Edit(~/.claude/**)",
@@ -314,6 +314,7 @@
       }
     }
   },
+  "tui": "default",
   "skipWorkflowUsageWarning": true,
   "autoCompactEnabled": false,
   "teammateMode": "auto",

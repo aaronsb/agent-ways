@@ -2,7 +2,7 @@
 description: software releases, changelog generation, version bumping, semantic versioning, tagging
 vocabulary: release changelog version bump semver tag publish ship major minor breaking
 refire: 0.15
-pattern: release|changelog|tag|version.?bump|bump.?version|npm.?publish|cargo.?publish
+pattern: release|changelog|semver|git.?tag|release.?(notes|candidate)|npm.?publish|cargo.?publish
 scope: agent, subagent
 ---
 <!-- epistemic: heuristic -->

@@ -62,6 +62,9 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-139](./system/ADR-139-shelve-maintainer-i18n-adopter-run-localization-via-ways-localize.md) | Shelve maintainer i18n; adopter-run localization via ways-localize | Accepted |
 | [ADR-140](./system/ADR-140-two-install-topologies-in-place-repo-and-subdirectory-projection.md) | Two install topologies: in-place repo and subdirectory projection | Accepted |
 | [ADR-141](./system/ADR-141-knowledge-graph-as-evidential-memory-backend.md) | Knowledge Graph as Evidential Memory Backend | Accepted |
+| [ADR-142](./system/ADR-142-agent-ways-1-0-xdg-application-distribution.md) | agent-ways 1.0 — XDG application distribution | Draft |
+| [ADR-143](./system/ADR-143-three-root-way-runtime-core-user-project.md) | Three-root way runtime — core, user, project | Draft |
+| [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
