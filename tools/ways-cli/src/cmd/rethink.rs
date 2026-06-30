@@ -112,7 +112,7 @@ impl Drop for TermGuard {
 
 #[cfg(feature = "tui")]
 pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, list: bool) -> Result<()> {
-    let events_file = home_dir().join(".claude/stats/events.jsonl");
+    let events_file = crate::paths::events_log();
     if !events_file.is_file() {
         println!("No events recorded yet.");
         return Ok(());
@@ -188,7 +188,7 @@ pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, lis
 #[cfg(not(feature = "tui"))]
 pub fn run(_session: Option<&str>, _project: Option<&str>, _speed: Option<u64>, list: bool) -> Result<()> {
     if list {
-        let events_file = home_dir().join(".claude/stats/events.jsonl");
+        let events_file = crate::paths::events_log();
         if !events_file.is_file() {
             println!("No events recorded yet.");
             return Ok(());

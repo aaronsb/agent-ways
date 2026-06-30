@@ -64,8 +64,7 @@ pub fn find_incomplete(manifest: &Value) -> Vec<String> {
 }
 
 pub fn load_events() -> Vec<Value> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = format!("{home}/.claude/stats/events.jsonl");
+    let path = crate::paths::events_log();
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),

@@ -22,7 +22,6 @@ use agent_fmt::{Align, Table};
 
 use crate::frontmatter;
 use crate::session::resolve_way_file;
-use crate::util::home_dir;
 
 /// Rule-of-thumb: suggest a half_life equal to the median observed token
 /// delta between fires, rounded to the nearest 500 tokens for readability.
@@ -38,7 +37,7 @@ pub fn run(
     project_filter: Option<String>,
     way_filter: Option<String>,
 ) -> Result<()> {
-    let events_path = home_dir().join(".claude/stats/events.jsonl");
+    let events_path = crate::paths::events_log();
     if !events_path.is_file() {
         println!("no events log found at {}", events_path.display());
         println!("ways tune-curves needs real firing data — run ways for a few sessions first.");

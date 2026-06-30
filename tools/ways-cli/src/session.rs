@@ -423,11 +423,13 @@ const MAX_EVENTS_BYTES: u64 = 32 * 1024 * 1024;
 /// compactions, so the rewrite is rare, not per-append.
 const KEEP_EVENTS_BYTES: u64 = 24 * 1024 * 1024;
 
-/// Log an event to ~/.claude/stats/events.jsonl.
+/// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl, with a
+/// legacy ~/.claude/stats fallback for un-migrated installs — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
-    let stats_dir = home_dir().join(".claude/stats");
-    let _ = std::fs::create_dir_all(&stats_dir);
-    let events_file = stats_dir.join("events.jsonl");
+    let events_file = crate::paths::events_log();
+    if let Some(stats_dir) = events_file.parent() {
+        let _ = std::fs::create_dir_all(stats_dir);
+    }
 
     let ts = chrono_utc_now();
     let mut obj = serde_json::Map::new();

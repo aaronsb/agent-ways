@@ -165,10 +165,30 @@ pub fn user_config() -> PathBuf {
 
 // --- state ($XDG_STATE) ---
 
-/// Telemetry/event log: `$XDG_STATE/agent-ways/events.jsonl` (migrated from the
-/// Claude-Code-adjacent `~/.claude/stats/events.jsonl`; it is *our* telemetry).
+/// Telemetry/event log: `$XDG_STATE/agent-ways/events.jsonl` (our telemetry).
+///
+/// Fallback-aware during the transition, mirroring [`cache_root`]: prefers the
+/// `$XDG_STATE` location, but if that doesn't exist yet while the legacy
+/// `~/.claude/stats/events.jsonl` does, returns the legacy file so an
+/// un-migrated install keeps appending to its existing history. The migrator
+/// lifts the file to `$XDG_STATE`, after which the preferred path wins. Reads
+/// and the writer both route through here, so they never diverge.
 pub fn events_log() -> PathBuf {
-    state_root().join("events.jsonl")
+    resolve_events(&state_root(), &projection_root())
+}
+
+/// Pure fallback resolution for the event log, factored out for testing without
+/// touching `$XDG_STATE`/`$HOME`.
+fn resolve_events(state: &Path, projection: &Path) -> PathBuf {
+    let preferred = state.join("events.jsonl");
+    if preferred.exists() {
+        return preferred;
+    }
+    let legacy = projection.join("stats").join("events.jsonl");
+    if legacy.exists() {
+        return legacy;
+    }
+    preferred
 }
 
 // --- cache ($XDG_CACHE) ---
@@ -227,6 +247,28 @@ mod tests {
         // New exists → new wins even with legacy present (post-migration).
         std::fs::create_dir_all(base.join(APP)).unwrap();
         assert!(resolve_cache(&base).ends_with(APP));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn events_log_prefers_state_falls_back_to_legacy_stats() {
+        let base = std::env::temp_dir().join(format!("ways-events-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        let projection = base.join(".claude");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(&projection).unwrap();
+
+        // Neither exists → preferred (state).
+        assert!(resolve_events(&state, &projection).starts_with(&state));
+        // Only legacy ~/.claude/stats/events.jsonl exists → legacy (continuity).
+        std::fs::create_dir_all(projection.join("stats")).unwrap();
+        std::fs::write(projection.join("stats/events.jsonl"), "{}\n").unwrap();
+        assert!(resolve_events(&state, &projection).starts_with(&projection));
+        // State events present → state wins (post-migration).
+        std::fs::write(state.join("events.jsonl"), "{}\n").unwrap();
+        assert!(resolve_events(&state, &projection).starts_with(&state));
 
         let _ = std::fs::remove_dir_all(&base);
     }

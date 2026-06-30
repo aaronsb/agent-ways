@@ -15,7 +15,7 @@ pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, g
         None
     };
     let project_filter = project_filter.or(detected_project.as_deref());
-    let stats_file = home_dir().join(".claude/stats/events.jsonl");
+    let stats_file = crate::paths::events_log();
 
     if !stats_file.is_file() {
         if !json_output {
@@ -277,4 +277,4 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     (y, m, d)
 }
 
-use crate::util::{detect_project_dir, home_dir};
+use crate::util::detect_project_dir;
