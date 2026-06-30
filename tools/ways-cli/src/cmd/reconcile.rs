@@ -95,6 +95,22 @@ pub fn run(
     }
 
     report(&outcomes, &source_root, &dest_root, dry_run, quiet);
+
+    // The settings.json three-way merge — the one shared-write seam (ADR-142).
+    // Skipped in dry-run; backed up + self-audited inside apply_to_files.
+    if !dry_run {
+        let src_settings = source_root.join("settings.json");
+        if src_settings.exists() {
+            let dest_settings = dest_root.join("settings.json");
+            let base_path = paths::state_root().join("settings-applied.json");
+            let summary =
+                crate::cmd::settings_merge::apply_to_files(&src_settings, &dest_settings, &base_path)?;
+            if !quiet {
+                eprintln!("{summary}");
+            }
+        }
+    }
+
     Ok(())
 }
 
