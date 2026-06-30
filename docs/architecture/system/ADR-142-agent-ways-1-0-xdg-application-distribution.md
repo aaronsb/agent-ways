@@ -63,7 +63,7 @@ they separate code from config from state from cache, install into well-known lo
 and replace their own code wholesale on update without touching the user's data. The XDG
 Base Directory specification is exactly that contract. The cache half of it is already
 here — derived corpus, embeddings, and the model live in `$XDG_CACHE_HOME`
-(`~/.cache/claude-ways/`) and are regenerated, not version-controlled. 1.0 finishes the
+(`~/.cache/claude-ways/` today, renamed to `agent-ways/` for one consistent name) and are regenerated, not version-controlled. 1.0 finishes the
 job: it makes agent-ways a real XDG application and reduces `~/.claude` to the thin
 **projection surface that Claude Code owns**.
 
@@ -101,7 +101,7 @@ contract matches:
 | `$XDG_DATA_HOME/agent-ways/` | **The application** — exactly what is on GitHub: ways, skills, hooks, `bin/`, docs. | Read-only to the user; **replaced wholesale on update**. Losing it is a re-install, not data loss. |
 | `$XDG_CONFIG_HOME/agent-ways/` | **The operator's own** ways and macros, plus `ways.json`. | Durable; **never touched by update**. Out of every mutation's blast radius. |
 | `$XDG_STATE_HOME/agent-ways/` | **Session substrate** — ledger, memory, focus — that should survive a `~/.claude` wipe. | Durable; survives reinstall/repair. (Boundary vs. Claude-Code-owned state is an open question, below.) |
-| `$XDG_CACHE_HOME/claude-ways/` | **Derived** — corpus, embeddings, model. Already here today. | Regenerable; safe to delete; rebuilt on demand. |
+| `$XDG_CACHE_HOME/agent-ways/` | **Derived** — corpus, embeddings, model. (Exists today as `claude-ways/`; the reconciler renames it.) | Regenerable; safe to delete; rebuilt on demand. |
 | `~/.claude/` | **The projection** — a merged `settings.json` (hooks + ways permissions only) and the projected tree. | The irreducible **Claude-Code-owned floor**; regenerable from the manifest. |
 
 The payoff is that **durability and ownership are now structural, not conventional.** "Can we
@@ -282,10 +282,11 @@ Two properties fall out of the per-user gate, and they are the whole point:
 
 ### Neutral
 
-- `$XDG_CACHE_HOME/claude-ways/` already exists and already behaves as derived/regenerable state; 1.0
-  ratifies the convention rather than inventing it. (Note the cache dir is `claude-ways`, while the
-  app/config/state dirs are proposed as `agent-ways` — a naming inconsistency to reconcile, see Open
-  Questions.)
+- `$XDG_CACHE_HOME/agent-ways/` already exists today as `claude-ways/` and already behaves as
+  derived/regenerable state; 1.0 ratifies the convention rather than inventing it, and **harmonizes the
+  name to `agent-ways`** so all four XDG tiers share one application name. The rename
+  (`claude-ways` → `agent-ways`) is a one-time move the reconciler performs; because the tier is
+  regenerable, a missed rename costs only a rebuild.
 - The session ledger (ADR-112) and the KG evidential backend (ADR-141) become tenants of `$XDG_STATE`;
   their "survive a `~/.claude` wipe" expectation is exactly what the state tier provides. Memory routing
   (ADR-128) is unaffected in intent but its files' XDG-vs-Claude-Code ownership is an open question.
@@ -319,8 +320,6 @@ Accepted:
 - **`$XDG_STATE` vs. Claude-Code-owned boundary.** Which of sessions / memory are Claude-Code-owned (and
   stay in `~/.claude`) vs. agent-ways-owned (and move to `$XDG_STATE`)? The ledger and focus are clearly
   ours; auto-memory (ADR-128) sits in Claude Code's `projects/<slug>/memory/` and may not be ours to move.
-- **App / config / state dir naming.** Cache is `claude-ways`; this ADR proposes `agent-ways` for the
-  others. Reconcile to one name, or accept the split and document why.
 - **Exact length of the 1.0.x migration window** before 1.1.0 retires assisted migration.
 - **Whether to add a lightweight, privacy-respecting adoption signal** so future lifecycle decisions
   aren't blind. Note this is **explicitly not a prerequisite**: passive GitHub signals (forks, release
