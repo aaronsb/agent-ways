@@ -65,12 +65,30 @@ pub fn run(
     };
 
     let excluded = crate::util::load_excluded_segments();
+    let empty_skip: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Scan global ways
-    let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w)?;
+    // Scan USER ways first (ADR-143): the operator's own root in $XDG_CONFIG.
+    // Its ids become the skip set for core, so a user way shadows a same-named
+    // shipped way (precedence project > user > core).
+    let user_dir = crate::paths::user_ways_root();
+    let mut user_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let user_count = if user_dir.is_dir() {
+        let c = scan_ways_dir(&user_dir, "", &excluded, &mut w, &empty_skip, &mut user_ids)?;
+        if c > 0 {
+            log(&format!("User ways: {c} ({})", user_dir.display()));
+        }
+        c
+    } else {
+        0
+    };
+    let user_hash = content_hash(&user_dir);
+
+    // Scan CORE (shipped) ways, dropping any id a user way already claimed.
+    let mut core_written = user_ids.clone();
+    let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w, &user_ids, &mut core_written)?;
     let global_hash = content_hash(&global_dir);
     log(&format!(
-        "Global ways: {global_count} (hash: {}...)",
+        "Core ways: {global_count} (hash: {}...)",
         &global_hash[..16.min(global_hash.len())]
     ));
 
@@ -156,9 +174,9 @@ pub fn run(
     // Atomic move
     std::fs::rename(&tmpfile, &corpus_path)?;
 
-    let total = global_count + project_total;
+    let total = global_count + user_count + project_total;
     log(&format!(
-        "Generated {}: {total} ways ({global_count} global, {project_total} project)",
+        "Generated {}: {total} ways ({global_count} core, {user_count} user, {project_total} project)",
         corpus_path.display()
     ));
 
@@ -169,6 +187,8 @@ pub fn run(
     let manifest = json!({
         "global_hash": global_hash,
         "global_count": global_count,
+        "user_hash": user_hash,
+        "user_count": user_count,
         "total_count": total,
         "projects": manifest_projects,
     });
@@ -208,7 +228,11 @@ fn embed_one_project(
     }
 
     let prefix = format!("{key}/");
-    let local_count = scan_ways_dir(ways_path, &prefix, excluded, w)?;
+    // Project ids are namespaced ({key}/…), so they can't collide with core/user;
+    // pass fresh dedup sets.
+    let skip = std::collections::HashSet::new();
+    let mut written = std::collections::HashSet::new();
+    let local_count = scan_ways_dir(ways_path, &prefix, excluded, w, &skip, &mut written)?;
 
     if local_count > 0 {
         let local_hash = content_hash(ways_path);
@@ -231,7 +255,19 @@ fn embed_one_project(
 
 /// Scan a ways directory for semantic ways (having description + vocabulary).
 /// Writes JSONL to the writer. Returns the number of ways found.
-fn scan_ways_dir(dir: &Path, id_prefix: &str, excluded: &[String], w: &mut impl Write) -> Result<usize> {
+///
+/// `skip` holds ids already claimed by a higher-precedence root — a matching way
+/// here is shadowed and dropped (ADR-143 dedup-by-name). Every id actually
+/// written is recorded in `written` so the caller can build the next root's skip
+/// set (precedence: project > user > core).
+fn scan_ways_dir(
+    dir: &Path,
+    id_prefix: &str,
+    excluded: &[String],
+    w: &mut impl Write,
+    skip: &std::collections::HashSet<String>,
+    written: &mut std::collections::HashSet<String>,
+) -> Result<usize> {
     let mut count = 0;
 
     let mut md_files: Vec<PathBuf> = Vec::new();
@@ -322,6 +358,14 @@ fn scan_ways_dir(dir: &Path, id_prefix: &str, excluded: &[String], w: &mut impl 
         let id_body = crate::util::path_to_id(relpath.parent().unwrap_or(Path::new("")));
         let id = format!("{id_prefix}{id_body}");
 
+        // Dedup-by-name (ADR-143): a higher-precedence root already claimed this
+        // id, so this shadowed way is dropped from the corpus. Otherwise record it
+        // so lower-precedence roots skip it.
+        if skip.contains(&id) {
+            continue;
+        }
+        written.insert(id.clone());
+
         // Capture the English root for the multilingual anchor (Pass 2, localized mode).
         en_roots.insert(
             id.clone(),
@@ -352,6 +396,10 @@ fn scan_ways_dir(dir: &Path, id_prefix: &str, excluded: &[String], w: &mut impl 
             let parent = path.parent().unwrap_or(Path::new(""));
             let relparent = parent.strip_prefix(dir).unwrap_or(parent);
             let id = format!("{}{}", id_prefix, crate::util::path_to_id(relparent));
+            // Same dedup as Pass 1: don't emit locale aliases for a shadowed id.
+            if skip.contains(&id) {
+                continue;
+            }
 
             let entries = match frontmatter::parse_locales_jsonl(path) {
                 Ok(e) => e,
@@ -640,17 +688,22 @@ use crate::util::home_dir;
 
 /// Check if any way file is newer than the manifest.
 fn is_stale(manifest: &Path, global_dir: &Path, project_dir: &str) -> bool {
-    // Check global ways
-    for entry in WalkDir::new(global_dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if path.is_file() {
-            let ext = path.extension().and_then(|e| e.to_str());
-            if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
-                return true;
+    // Check core + user ways (both unnamespaced roots feed the corpus).
+    for root in [global_dir.to_path_buf(), crate::paths::user_ways_root()] {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(&root)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() {
+                let ext = path.extension().and_then(|e| e.to_str());
+                if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
+                    return true;
+                }
             }
         }
     }

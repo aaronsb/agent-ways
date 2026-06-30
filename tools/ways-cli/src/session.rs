@@ -562,12 +562,18 @@ pub fn way_disabled(way_id: &str) -> bool {
 
 // ── Way file resolution ─────────────────────────────────────────
 
-/// Resolve a way ID to its file path. Project-local takes precedence.
-/// Returns (path, is_project_local).
+/// Resolve a way ID to its file path. Precedence: project > user > core (ADR-143).
+/// Returns (path, is_project_local). User and core both report `false` (non-project),
+/// but the user root is checked first so a user way shadows a same-named core way.
 pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, bool)> {
     let local_dir = PathBuf::from(project_dir).join(format!(".claude/ways/{way_id}"));
     if let Some(f) = find_way_in_dir(&local_dir) {
         return Some((f, true));
+    }
+
+    let user_dir = crate::paths::user_ways_root().join(way_id);
+    if let Some(f) = find_way_in_dir(&user_dir) {
+        return Some((f, false));
     }
 
     let global_dir = home_dir().join(format!(".claude/hooks/ways/{way_id}"));
@@ -578,11 +584,16 @@ pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, boo
     None
 }
 
-/// Resolve a way ID to its check file path.
+/// Resolve a way ID to its check file path. Precedence: project > user > core.
 pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, bool)> {
     let local_dir = PathBuf::from(project_dir).join(format!(".claude/ways/{way_id}"));
     if let Some(f) = find_check_in_dir(&local_dir) {
         return Some((f, true));
+    }
+
+    let user_dir = crate::paths::user_ways_root().join(way_id);
+    if let Some(f) = find_check_in_dir(&user_dir) {
+        return Some((f, false));
     }
 
     let global_dir = home_dir().join(format!(".claude/hooks/ways/{way_id}"));

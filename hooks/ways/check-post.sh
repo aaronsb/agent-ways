@@ -29,9 +29,15 @@ export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 # Project-local is kept symmetric with predictive hooks; trust is
 # enforced at the `ways show way` gate (which honors
 # trusted-project-macros for project-local macros) rather than here.
+# Precedence project > user > core (ADR-143). User root is the operator's own
+# ways in $XDG_CONFIG; core is the shipped tree (projected at ~/.claude/hooks/ways).
 WAYS_ROOTS=()
 if [[ -d "${PROJECT_DIR}/.claude/ways" ]]; then
   WAYS_ROOTS+=("${PROJECT_DIR}/.claude/ways")
+fi
+_USER_WAYS="${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/ways"
+if [[ -d "${_USER_WAYS}" ]]; then
+  WAYS_ROOTS+=("${_USER_WAYS}")
 fi
 WAYS_ROOTS+=("${HOME}/.claude/hooks/ways")
 
