@@ -56,6 +56,7 @@ struct Env {
     base: PathBuf,
     home: PathBuf,
     xdg_cache: PathBuf,
+    xdg_config: PathBuf,
     xdg_runtime: PathBuf,
 }
 
@@ -65,11 +66,24 @@ impl Env {
         let _ = std::fs::remove_dir_all(&base);
         let home = base.join("home");
         let xdg_cache = base.join("cache");
+        let xdg_config = base.join("config");
         let xdg_runtime = base.join("runtime");
-        for d in [&home, &xdg_cache, &xdg_runtime] {
+        for d in [&home, &xdg_cache, &xdg_config, &xdg_runtime] {
             std::fs::create_dir_all(d).unwrap();
         }
-        Env { base, home, xdg_cache, xdg_runtime }
+        Env { base, home, xdg_cache, xdg_config, xdg_runtime }
+    }
+
+    /// Write a semantic way file at `<root>/<id>/<leaf>.md`.
+    fn write_way(root: &Path, id: &str, desc: &str, vocab: &str) {
+        let leaf = id.rsplit('/').next().unwrap_or(id);
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{leaf}.md")),
+            format!("---\ndescription: {desc}\nvocabulary: {vocab}\n---\n# {leaf}\n"),
+        )
+        .unwrap();
     }
 
     /// Apply the isolated environment so neither the real `~/.claude/projects`
@@ -78,6 +92,7 @@ impl Env {
         cmd.env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
             .env("XDG_CACHE_HOME", &self.xdg_cache)
+            .env("XDG_CONFIG_HOME", &self.xdg_config)
             .env("XDG_RUNTIME_DIR", &self.xdg_runtime)
             .env_remove("CLAUDE_PROJECT_DIR")
             .env_remove("PWD");
@@ -315,4 +330,36 @@ fn ways_dir_without_output_warns_about_canonical() {
         stderr.contains("WARNING") && stderr.contains("--output"),
         "Bug C: expected a footgun warning steering to --output.\nstderr: {stderr}"
     );
+}
+
+/// ADR-143: a user way in $XDG_CONFIG shadows a same-named core way (dedup-by-name),
+/// and a unique user way is embedded alongside core ways.
+#[test]
+fn user_way_shadows_core_way() {
+    let env = Env::new("shadow");
+    // core ways at ~/.claude/hooks/ways (the default core root).
+    let core = env.home.join(".claude/hooks/ways");
+    Env::write_way(&core, "meta/foo", "CORE foo about deployment", "deploy ci release");
+    Env::write_way(&core, "meta/bar", "core bar about migrations", "migrate schema sql");
+    // user ways at $XDG_CONFIG/agent-ways/ways — foo shadows core foo, baz is unique.
+    let user = env.xdg_config.join("agent-ways/ways");
+    Env::write_way(&user, "meta/foo", "USER foo override about kubernetes", "k8s pod cluster");
+    Env::write_way(&user, "meta/baz", "user baz personal notes", "note journal todo");
+
+    let mut cmd = Command::new(ways_bin());
+    env.apply(&mut cmd);
+    assert!(cmd.args(["corpus", "--quiet"]).status().expect("run ways corpus").success());
+
+    let ids = corpus_ids(&env.corpus_jsonl());
+    assert_eq!(
+        ids.iter().filter(|i| *i == "meta/foo").count(),
+        1,
+        "meta/foo must appear exactly once (user shadows core, not double-embedded): {ids:?}"
+    );
+    assert!(ids.iter().any(|i| i == "meta/bar"), "core-only bar present: {ids:?}");
+    assert!(ids.iter().any(|i| i == "meta/baz"), "user-only baz present: {ids:?}");
+
+    let content = std::fs::read_to_string(env.corpus_jsonl()).unwrap();
+    assert!(content.contains("USER foo override"), "the surviving foo must be the user's");
+    assert!(!content.contains("CORE foo about"), "core foo must be shadowed out of the corpus");
 }

@@ -43,7 +43,6 @@ use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
-use crate::util::home_dir;
 
 /// A family's share of a session's fires must clear this to count as part of
 /// the session's activity class. 0.15 keeps incidental single fires out of the
@@ -122,7 +121,7 @@ pub fn run(
     way_filter: Option<String>,
     json_output: bool,
 ) -> Result<()> {
-    let events_path = home_dir().join(".claude/stats/events.jsonl");
+    let events_path = crate::paths::events_log();
     if !events_path.is_file() {
         println!("no events log found at {}", events_path.display());
         println!("ways tune-precision needs real firing data — run ways for a few sessions first.");

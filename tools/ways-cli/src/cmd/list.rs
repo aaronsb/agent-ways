@@ -258,8 +258,7 @@ fn detect_session() -> Option<String> {
 }
 
 fn latest_session_for_project(project: &str) -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
-    let path = format!("{home}/.claude/stats/events.jsonl");
+    let path = crate::paths::events_log();
     let content = std::fs::read_to_string(&path).ok()?;
 
     let mut latest: Option<String> = None;

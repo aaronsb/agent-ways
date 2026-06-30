@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use super::rethink;
 use crate::session;
-use crate::util::{detect_project_dir, home_dir};
+use crate::util::detect_project_dir;
 
 // ── Output shape ──────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ struct NearMiss {
 /// Emit a session's reconstructed timeline as a single pretty-printed JSON
 /// document. With no `session`, dumps the most recent session in scope.
 pub fn run_json(session: Option<&str>, project: Option<&str>) -> Result<()> {
-    let events_file = home_dir().join(".claude/stats/events.jsonl");
+    let events_file = crate::paths::events_log();
     if !events_file.is_file() {
         println!("{{\"error\":\"no events recorded yet\"}}");
         return Ok(());

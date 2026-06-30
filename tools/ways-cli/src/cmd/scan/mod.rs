@@ -3,7 +3,7 @@
 //! Combines file walking, frontmatter extraction, matching (pattern + semantic),
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
-mod candidates;
+pub(crate) mod candidates;
 mod reduce;
 mod scoring;
 mod state;

@@ -25,8 +25,10 @@ pub fn run(json_output: bool) -> Result<()> {
         "none"
     };
 
-    // Global way counts
+    // Way counts: core (shipped) + user (operator's own, $XDG_CONFIG) — ADR-143.
     let (global_total, global_semantic) = count_ways(&ways_dir);
+    let user_ways_dir = crate::paths::user_ways_root();
+    let (user_total, user_semantic) = count_ways(&user_ways_dir);
 
     // Corpus stats
     let corpus_count = if corpus_exists {
@@ -103,6 +105,8 @@ pub fn run(json_output: bool) -> Result<()> {
             "ways": {
                 "global_total": global_total,
                 "global_semantic": global_semantic,
+                "user_total": user_total,
+                "user_semantic": user_semantic,
             },
             "projects": projects,
             "output_language": output_language,
@@ -159,7 +163,10 @@ pub fn run(json_output: bool) -> Result<()> {
         println!();
 
         // Ways
-        println!("Global ways: {} total, {} semantic", global_total, global_semantic);
+        println!("Core ways: {} total, {} semantic", global_total, global_semantic);
+        if user_total > 0 {
+            println!("User ways: {} total, {} semantic", user_total, user_semantic);
+        }
 
         if !disabled.is_empty() {
             println!("Disabled domains: {}", disabled.join(", "));
