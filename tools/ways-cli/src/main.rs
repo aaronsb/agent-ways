@@ -5,6 +5,7 @@ pub mod agents;
 mod cmd;
 pub mod config;
 mod frontmatter;
+pub mod paths;
 mod scanner;
 pub mod session;
 pub mod util;
@@ -191,6 +192,55 @@ enum Commands {
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
+    },
+    /// Print the projection manifest — the desired state of ~/.claude derived
+    /// from `git ls-files` over the projection allowlist (ADR-144). The
+    /// reconciler converges ~/.claude toward this.
+    Manifest {
+        /// Source checkout to derive from (default: $XDG_DATA/agent-ways)
+        #[arg(long)]
+        source: Option<String>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Converge ~/.claude toward the projection manifest (ADR-144). Symlink
+    /// mode (default) links each projection root into the source checkout, so a
+    /// `git pull` in $XDG_DATA is live with no further step. Idempotent;
+    /// silent when already up to date.
+    Reconcile {
+        /// Source checkout (default: $XDG_DATA/agent-ways)
+        #[arg(long)]
+        source: Option<String>,
+        /// Projection target (default: ~/.claude)
+        #[arg(long)]
+        dest: Option<String>,
+        /// Materialization: symlink (default) or copy
+        #[arg(long)]
+        mode: Option<String>,
+        /// Show what would change without touching the filesystem
+        #[arg(long)]
+        dry_run: bool,
+        /// Suppress the summary line (still prints any changes)
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Preview (or perform) migration of a legacy in-place ~/.claude clone to
+    /// the XDG application layout (ADR-144 §5). Default is a read-only plan;
+    /// --execute is gated and backed up.
+    Migrate {
+        /// Show the read-only migration plan (the default; accepted explicitly)
+        #[arg(long)]
+        plan: bool,
+        /// Dry-run the executor: assert every phase's contract without mutating
+        #[arg(long)]
+        what_if: bool,
+        /// Perform the migration (gated; backs up first, resumable)
+        #[arg(long)]
+        execute: bool,
+        /// Target install dir (default: ~/.claude)
+        #[arg(long)]
+        dest: Option<String>,
     },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
@@ -566,6 +616,13 @@ fn main() -> Result<()> {
             cmd::stats::run(days, project.as_deref(), json, global)
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
+        Commands::Manifest { source, json } => cmd::manifest::run(json, source),
+        Commands::Migrate { plan: _, what_if, execute, dest } => {
+            cmd::migrate::run(execute, what_if, dest)
+        }
+        Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
+            cmd::reconcile::run(source, dest, mode, dry_run, quiet)
+        }
         Commands::Rethink { session, project, speed, list, json } => {
             if json {
                 cmd::rethink_dump::run_json(session.as_deref(), project.as_deref())

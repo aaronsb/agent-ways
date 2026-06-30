@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub fn run(json_output: bool) -> Result<()> {
-    let xdg_cache = xdg_cache_dir().join("claude-ways/user");
+    let xdg_cache = crate::paths::corpus_dir();
     let ways_dir = home_dir().join(".claude/hooks/ways");
     // Engine detection
     let way_embed = find_way_embed(&xdg_cache);
@@ -244,4 +244,4 @@ fn count_lines(path: &Path) -> usize {
         .unwrap_or(0)
 }
 
-use crate::util::{home_dir, xdg_cache_dir};
+use crate::util::home_dir;

@@ -84,7 +84,7 @@ impl Env {
     }
 
     fn corpus_jsonl(&self) -> PathBuf {
-        self.xdg_cache.join("claude-ways/user/ways-corpus.jsonl")
+        self.xdg_cache.join("agent-ways/user/ways-corpus.jsonl")
     }
 }
 
@@ -179,7 +179,7 @@ fn project_way_fires_via_semantic_when_model_present() {
 
     // Stage the engine (binary + model) into the isolated cache so auto-embed
     // can generate vectors without touching the real corpus.
-    let engine_dir = env.xdg_cache.join("claude-ways/user");
+    let engine_dir = env.xdg_cache.join("agent-ways/user");
     std::fs::create_dir_all(&engine_dir).unwrap();
     for entry in std::fs::read_dir(&model_dir).expect("read WAYS_TEST_MODEL_DIR") {
         let entry = entry.unwrap();

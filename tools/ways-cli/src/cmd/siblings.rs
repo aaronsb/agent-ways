@@ -166,12 +166,12 @@ fn load_embeddings(path: &str) -> Result<Vec<CorpusEntry>> {
 }
 
 fn default_corpus() -> PathBuf {
-    let xdg = std::env::var("XDG_CACHE_HOME")
+    let _xdg = std::env::var("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             std::env::var("HOME")
                 .map(|h| PathBuf::from(h).join(".cache"))
                 .unwrap_or_else(|_| PathBuf::from("/tmp"))
         });
-    xdg.join("claude-ways/user/ways-corpus.jsonl")
+    crate::paths::corpus_dir().join("ways-corpus.jsonl")
 }

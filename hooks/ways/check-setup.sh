@@ -6,7 +6,13 @@
 # Checks: ways binary → corpus → embedding engine (functional probe)
 
 WAYS_BIN="${HOME}/.claude/bin/ways"
-XDG_WAY="${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways/user"
+# Prefer the 1.0 cache name; fall back to the legacy one for un-migrated installs
+# (must match paths::cache_root() in the binary so the probe checks where the
+# binary actually reads).
+_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
+if [[ -d "${_CACHE}/agent-ways/user" ]]; then XDG_WAY="${_CACHE}/agent-ways/user"
+elif [[ -d "${_CACHE}/claude-ways/user" ]]; then XDG_WAY="${_CACHE}/claude-ways/user"
+else XDG_WAY="${_CACHE}/agent-ways/user"; fi
 
 # Nothing to check if this isn't a ways-enabled install
 [[ ! -d "${HOME}/.claude/hooks/ways" ]] && exit 0

@@ -66,8 +66,21 @@ class Score:
     score: float
 
 
+def _engine_dir() -> Path:
+    # Prefer the 1.0 cache name; fall back to legacy for un-migrated installs.
+    # Matches paths::cache_root() in the binary.
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache"))
+    new = cache / "agent-ways/user"
+    if new.is_dir():
+        return new
+    legacy = cache / "claude-ways/user"
+    if legacy.is_dir():
+        return legacy
+    return new
+
+
 def way_embed_path() -> Path:
-    xdg = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "claude-ways/user/way-embed"
+    xdg = _engine_dir() / "way-embed"
     if xdg.is_file():
         return xdg
     fallback = Path.home() / ".claude/bin/way-embed"
@@ -102,7 +115,7 @@ def run_match(bin_path: Path, corpus: Path, model: Path, query: str) -> list[tup
 
 def gather(battery: list[tuple[str, str | None, str]]) -> list[Score]:
     bin_path = way_embed_path()
-    xdg = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "claude-ways/user"
+    xdg = _engine_dir()
     en_corpus = xdg / "ways-corpus-en.jsonl"
     en_model = xdg / "minilm-l6-v2.gguf"
     mu_corpus = xdg / "ways-corpus-multi.jsonl"
