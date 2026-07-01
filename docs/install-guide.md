@@ -1,205 +1,85 @@
 # Installation Guide
 
-This guide covers installing agent-ways when the path isn't a straight line — existing files, custom config, previous installs, or forks you want to keep in sync.
-
-If you're starting fresh with no `~/.claude/` directory, you don't need this guide:
+Most installs are a straight line — the one-liner in the [README](../README.md#quick-start) stages the app, builds it, and projects it into `~/.claude`:
 
 ```bash
-git clone https://github.com/aaronsb/agent-ways ~/.claude
-cd ~/.claude && make setup
+curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/install.sh | bash -s -- --bootstrap
 ```
 
-Restart Claude Code. Done.
+This guide is for the paths that aren't straight: an existing `~/.claude` you care about, a previous install, or a fork you want to keep in sync.
 
-## The problem
+## The 1.0 model (why there's no "clobber" anymore)
 
-Claude Code stores its configuration in `~/.claude/`. This repo *is* `~/.claude/`. That means installing it replaces the directory that Claude Code already uses — and you might have files there you care about.
+Before 1.0, this repo *was* `~/.claude/` — installing meant cloning over the directory Claude Code already used, so the installer had to detect existing files and stop rather than destroy them. **1.0 dissolves that.** `~/.claude` is now a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways` (see [ADR-142](architecture/system/ADR-142-agent-ways-1-0-xdg-application-distribution.md)). Installing only:
 
-The installer detects this and stops rather than silently clobbering your work. This guide helps you understand what you're dealing with and pick the right path forward.
+- symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, and
+- three-way-merges the hooks block into your `settings.json`.
 
-## Scenario 1: You have settings but no git tracking
+Everything else you have in `~/.claude` — `settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md` — is **preserved by construction**. There is nothing to back up first and no clobber prompt, because the install never replaces your directory. (`scripts/` and `tools/` and the rest of the app stay in `$XDG_DATA` and are deliberately *not* projected.)
 
-**Signs:** `~/.claude/` exists with files like `settings.json`, `CLAUDE.md`, or `projects/`, but no `.git/` directory.
+## Scenario: you already have a `~/.claude` you value
 
-This is common — Claude Code creates `~/.claude/` on first run with your settings.
+**Signs:** `~/.claude/` has `settings.json`, `projects/`, credentials, or sessions — with or without its own `.git/`.
 
-**What to save:**
-- `settings.json` — your permissions and preferences
-- `CLAUDE.md` — your global instructions (if you wrote any)
-- `projects/` — per-project memory and settings
-- `memory/` — auto-memory files (if using memory)
+Just run the one-liner. The projection coexists with your directory; your files are untouched and your `settings.json` keeps its model, theme, plugins, and permissions (only the hooks block is merged in, and it backs up first). No move-aside, no restore dance.
 
-**Steps:**
+If `~/.claude/` is your **own** git repo (you version-control your config), that still works — the projection adds symlinks alongside your tracked files. Add the projected roots to your `.gitignore` if you don't want them tracked.
+
+## Scenario: a previous agent-ways install
+
+**A 1.0 projection install** (the app is in `$XDG_DATA_HOME/agent-ways`, `~/.claude` is not a repo) — update in place:
 
 ```bash
-# 1. Back up what matters
-mkdir -p ~/claude-config-backup
-cp -a ~/.claude/settings.json ~/claude-config-backup/ 2>/dev/null
-cp -a ~/.claude/settings.local.json ~/claude-config-backup/ 2>/dev/null
-cp -a ~/.claude/CLAUDE.md ~/claude-config-backup/ 2>/dev/null
-cp -a ~/.claude/projects ~/claude-config-backup/ 2>/dev/null
-cp -a ~/.claude/memory ~/claude-config-backup/ 2>/dev/null
-
-# 2. Move the old directory aside
-mv ~/.claude ~/.claude-pre-install
-
-# 3. Install
-git clone https://github.com/aaronsb/agent-ways ~/.claude
-cd ~/.claude && make setup
-
-# 4. Restore your files
-cp ~/claude-config-backup/settings.json ~/.claude/ 2>/dev/null
-cp ~/claude-config-backup/settings.local.json ~/.claude/ 2>/dev/null
-cp ~/claude-config-backup/CLAUDE.md ~/.claude/ 2>/dev/null
-cp -a ~/claude-config-backup/projects ~/.claude/ 2>/dev/null
-cp -a ~/claude-config-backup/memory ~/.claude/ 2>/dev/null
+cd "$XDG_DATA_HOME/agent-ways" && git pull && make setup && ways reconcile
 ```
 
-Your settings are `.gitignore`d in this repo, so they won't conflict with updates.
-
-## Scenario 2: You have your own git tracking
-
-**Signs:** `~/.claude/.git/` exists, but it's your own repo — not a clone or fork of agent-ways.
-
-This means you're already version-controlling your Claude config. Good instinct. The question is whether you want to adopt this framework or keep your own.
-
-**Option A: Adopt this framework (replace your tracking)**
+**A legacy pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo — it has its own `.git/` and ships `~/.claude/tools/`, `~/.claude/docs/`) — do **not** `git pull` it. Migrate it to the 1.0 model with the gated, backup-first migrator:
 
 ```bash
-# Back up everything
-cp -a ~/.claude ~/.claude-my-version
-
-# Remove your .git and install ours
-rm -rf ~/.claude/.git
-rm -rf ~/.claude    # or mv to backup
-git clone https://github.com/aaronsb/agent-ways ~/.claude
-cd ~/.claude && make setup
-
-# Cherry-pick your customizations back in
-# (compare ~/.claude-my-version/ with ~/.claude/ and copy what you want)
+ways migrate --what-if     # preview (read-only)
+ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
 ```
 
-**Option B: Keep your tracking, adopt selectively**
+See the [Migration Guide](migration-1.0.md) for the full walkthrough and the deprecation window (the migrator ships through 1.0.x and is removed at 1.1).
 
-Read through this repo and copy the parts you want into your own config. The key pieces:
-- `hooks/` — the event-driven way system
-- `hooks/ways/` — the actual guidance content
-- `tools/ways-cli/` — unified CLI (matching, scanning, linting, governance)
-- `tools/way-embed/` — embedding engine (separate binary, wraps llama.cpp)
-- `settings.json` — hook registration (merge with yours)
+## Scenario: you want a fork
 
-This is more work but gives you full control.
-
-## Scenario 3: Previous agent-ways install
-
-**Signs:** `~/.claude/.git/` exists and origin points to `aaronsb/agent-ways` or your fork of it.
-
-You're already installed. Just update:
+**Recommended for anyone who plans to customize ways.** Fork on GitHub, then install *from your fork* by making it the app source:
 
 ```bash
-cd ~/.claude && git pull
-make setup
-```
+# 1. Fork on GitHub (web UI), then clone your fork as the app source
+git clone https://github.com/YOUR-USERNAME/agent-ways "$XDG_DATA_HOME/agent-ways"
+cd "$XDG_DATA_HOME/agent-ways"
 
-The installer detects this automatically and runs the update path.
-
-## Scenario 4: You want a fork
-
-**Recommended for anyone who plans to customize ways.**
-
-```bash
-# 1. Fork on GitHub first (use the web UI)
-# 2. Clone your fork
-git clone https://github.com/YOUR-USERNAME/agent-ways ~/.claude
-
-# 3. Set up upstream tracking
-cd ~/.claude
+# 2. Track upstream for later
 git remote add upstream https://github.com/aaronsb/agent-ways
 
-# 4. Set up semantic matching
-make setup
+# 3. Install from the fork — builds, links `ways` onto PATH, and projects into ~/.claude
+./scripts/install.sh
 ```
 
-To pull upstream improvements later:
+Running the installer from inside the app dir is what links the `ways`/`attend`
+binaries onto your `PATH`; `make setup` alone builds them but does not. Pull
+upstream improvements later:
 
 ```bash
-cd ~/.claude
-git fetch upstream
-git merge upstream/main
-# Resolve any conflicts in your custom ways
-make setup
+cd "$XDG_DATA_HOME/agent-ways"
+git fetch upstream && git merge upstream/main   # resolve conflicts in your custom ways
+make setup && ways reconcile                    # ways is on PATH from the install above
 ```
 
-The built-in update checker (`hooks/check-config-updates.sh`) detects forks and nudges you when upstream has new commits.
+If you're actively *developing* agent-ways (not just carrying a few custom ways), use a standalone dev checkout instead and dogfood via reconcile — see [development.md](development.md).
 
-## Scenario 5: Keep your existing config, install alongside it
+## Legacy: the subdirectory topology
 
-**Signs:** `~/.claude/` has sessions, credentials, or settings you want to keep untouched, and you'd rather not make it a git repo at all.
-
-This is the **subdirectory topology** (ADR-140): the agent-ways repo lives in a subdirectory (e.g. `~/.claude/agent-ways`) and is *projected* into `~/.claude` without replacing it. Your sessions, credentials, and settings stay where they are.
-
-> For the conceptual model and walked-through scenarios of both topologies, see [docs/explanation/install-topologies/](explanation/install-topologies/) — the model, the in-place install, and the subdirectory install, each with diagrams.
-
-**Steps:**
-
-```bash
-# 1. Clone into a subdirectory of ~/.claude
-git clone https://github.com/aaronsb/agent-ways ~/.claude/agent-ways
-
-# 2. Build binaries and fetch the embedding model
-cd ~/.claude/agent-ways && make setup
-
-# 3. Project the repo's outputs into ~/.claude
-make sync-to-home
-```
-
-`make sync-to-home` is the deterministic mechanism: it copies skills, agents, commands, hooks, and binaries into `~/.claude` and merges only the hooks block and ways permissions into your existing `settings.json`, leaving your model, theme, plugins, and credentials untouched. It backs up first (to `~/.claude/backups/`) and stamps a `.claude-source` marker so the update checker can find the repo. (The `/sync-to-home` slash command is a thin wrapper that runs this same target with consent + reporting.)
-
-**Copy vs symlink:** `make sync-to-home` *copies* (the default — robust everywhere, including Windows and low-privilege environments). `make sync-to-home-link` *symlinks* `~/.claude/{hooks,bin,skills,…}` at the repo instead, so a future `git pull` is the whole update with no re-sync — but symlinks are fragile where they need admin/developer-mode.
-
-**Keeping up to date:**
-
-```bash
-cd ~/.claude/agent-ways
-git pull
-make sync-to-home        # copy mode only — symlink mode needs no re-sync
-```
-
-Run `make sync-to-home` after every pull. The update checker nudges you when the repo is behind upstream, and — because of the `.claude-source` synced-HEAD stamp — also when you've pulled but not yet re-synced.
-
-**Trade-offs vs the canonical install:**
-
-| | Canonical (`~/.claude` is the repo) | Subdirectory (copy) | Subdirectory (symlink) |
-|---|---|---|---|
-| Updates | `git pull` / `make update` | `git pull` + `make sync-to-home` | `git pull` (no re-sync) |
-| Drift risk | none | re-sync or you drift (stamp warns) | none |
-| Sessions/credentials isolation | shared with repo | fully separate | fully separate |
-| Windows / low-privilege | n/a | robust | fragile (symlinks need admin) |
-| Update command | `make update` | `make sync-to-home` | `git pull` |
-
-## The nuclear option
-
-If you just want it installed and don't care what's there:
-
-```bash
-scripts/install.sh --dangerously-clobber
-```
-
-This backs up `~/.claude/` to `~/.claude-backup-YYYYMMDD-HHMMSS/` and replaces it entirely. You'll be asked to type `clobber` to confirm (unless piped/non-interactive).
-
-Your backup is a complete copy — you can always restore:
-
-```bash
-rm -rf ~/.claude
-mv ~/.claude-backup-20260323-141500 ~/.claude
-```
+Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project with `make sync-to-home`. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, `ways migrate` moves you to the native projection. (The conceptual history lives in [docs/explanation/install-topologies/](explanation/install-topologies/), kept as a record of how the model evolved.)
 
 ## After installing
 
-1. **Restart Claude Code** — ways activate on session start
-2. **Check engine status** — `ways status` shows binary, model, corpus, and project detection
-3. **Review ways.json** — `~/.claude/ways.json` controls which domains are active
-4. **Read the ways** — browse `~/.claude/hooks/ways/` to understand what guidance is loaded
+1. **Restart Claude Code** — ways activate on session start.
+2. **Check engine status** — `ways status` shows binary, model, corpus, and project detection.
+3. **Read the ways** — browse `~/.claude/hooks/ways/` (a projected symlink into the app) to see the loaded guidance.
+4. **Config** — user config lives in `$XDG_CONFIG_HOME/ways/config.yaml` (a legacy `~/.claude/ways.json` is still honored). It controls which domains are active.
 
 ## What gets downloaded
 
@@ -207,10 +87,8 @@ mv ~/.claude-backup-20260323-141500 ~/.claude
 
 | Artifact | Size | Location | Source | Verification |
 |----------|------|----------|--------|--------------|
-| `ways` binary | ~3.6MB | `bin/ways` | GitHub Releases (or built from source) | SHA-256 checksum |
-| `way-embed` binary | ~3MB | `~/.cache/claude-ways/user/` | GitHub Releases | SHA-256 checksum |
-| `minilm-l6-v2.gguf` model | ~21MB | `~/.cache/claude-ways/user/` | GitHub Releases (or HuggingFace) | SHA-256 checksum |
-
-The `ways` binary lands in `bin/` (gitignored) and is symlinked into `~/.local/bin/` by `make install`. The repo itself stays clean and diffable.
+| `ways` binary | ~3.6MB | `$XDG_DATA_HOME/agent-ways/bin/` (symlinked onto `PATH`) | GitHub Releases (or built from source) | SHA-256 checksum |
+| `way-embed` binary | ~3MB | XDG cache (`…/user/`) | GitHub Releases | SHA-256 checksum |
+| `minilm-l6-v2.gguf` model | ~21MB | XDG cache (`…/user/`) | GitHub Releases (or HuggingFace) | SHA-256 checksum |
 
 The embedding model is a hard dependency — `ways` will not match without it. If the download fails, rerun `make setup` or fetch the model manually from GitHub Releases.

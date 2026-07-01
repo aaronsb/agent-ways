@@ -93,24 +93,14 @@ See [Semantic Matching](docs/hooks-and-ways.md#semantic-matching) for the full s
 ## Quick Start
 
 ```bash
-# Clone (fork first if you plan to customize)
-git clone https://github.com/aaronsb/agent-ways ~/.claude
-
-# Set up semantic matching engine (downloads ~21MB model)
-cd ~/.claude && make setup
-
-# Restart Claude Code — ways are now active
-```
-
-Or as a one-liner (clones to temp, verifies, then installs):
-
-```bash
 curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/install.sh | bash -s -- --bootstrap
 ```
 
-The built-in ways cover software development, but the framework is domain-agnostic. Fork it, replace the ways, add your own domains.
+This stages the app into `$XDG_DATA_HOME/agent-ways`, builds the binaries and fetches the embedding model (~21MB), links the CLIs onto your `PATH`, and runs `ways reconcile` to project the framework into `~/.claude`. In 1.0, `~/.claude` is a thin **projection** — so your existing config (sessions, credentials, `settings.json`, `projects/`) is **preserved**, not replaced: the install only adds symlinks for the projected roots and merges the hooks block into your settings. Restart Claude Code and the ways are active.
 
-> **Already have `~/.claude/`?** The installer detects existing files and won't clobber them. See the **[install guide](docs/install-guide.md)** for options — including a subdirectory install that keeps your existing config intact and projects ways in via `make sync-to-home`. If you're sure you want to replace: `scripts/install.sh --dangerously-clobber`.
+The built-in ways cover software development, but the framework is domain-agnostic. To customize, fork it and pass your fork to the installer, or set up a **[development checkout](docs/development.md)** — then replace the ways and add your own domains. For non-straightforward installs (existing forks, offline, custom prefixes), see the **[install guide](docs/install-guide.md)**.
+
+> **Upgrading a pre-1.0 in-place clone** (where `~/.claude` *is* the git repo)? Don't `git pull` it — run the gated, backup-first migrator after upgrading: `ways migrate --execute`. Your `projects/` and `settings.json` are preserved. See the **[Migration Guide](docs/migration-1.0.md)**.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.
 
@@ -293,13 +283,21 @@ For the attention mechanics: [context-decay.md](docs/hooks-and-ways/context-deca
 
 ## Updating
 
-At session start, `check-config-updates.sh` compares your local copy against upstream (`aaronsb/agent-ways`). It runs silently unless you're behind — then it prints a notice with the exact commands to sync. Network calls are rate-limited to once per hour. After pulling, run `make setup` to update the semantic matching corpus.
+In 1.0 the app source lives in `$XDG_DATA_HOME/agent-ways` (not `~/.claude`). Update by refreshing that checkout, then rebuilding and reprojecting — or just re-run the installer one-liner, which is idempotent:
+
+```bash
+cd "$XDG_DATA_HOME/agent-ways" && git pull && make setup && ways reconcile
+```
+
+`make setup` rebuilds the binaries and semantic-matching corpus; `ways reconcile` refreshes the `~/.claude` projection. A fork fetches and merges upstream in the app dir first (`git fetch upstream && git merge upstream/main`), then the same `make setup && ways reconcile`.
+
+At session start, `check-config-updates.sh` flags when you're behind upstream (`aaronsb/agent-ways`), rate-limited to once per hour. It currently recognizes **legacy** git-based layouts — an in-place clone at `~/.claude`, and the ADR-140 subdirectory (`.claude-source` marker). Native-projection update detection is being wired (it reads the app source in `$XDG_DATA`); until then, use the manual command above.
 
 | Scenario | How detected | Sync command |
 |----------|-------------|--------------|
-| **Direct clone** | `origin` points to `aaronsb/agent-ways` | `cd ~/.claude && git pull` |
-| **Fork** | GitHub API reports `parent` is `aaronsb/agent-ways` | `cd ~/.claude && git fetch upstream && git merge upstream/main` |
-| **Renamed clone** | `.claude-upstream` marker file exists | `cd ~/.claude && git fetch upstream && git merge upstream/main` |
+| **Native projection (1.0)** | app source at `$XDG_DATA_HOME/agent-ways` | `cd "$XDG_DATA_HOME/agent-ways" && git pull && make setup && ways reconcile` |
+| **Fork** | GitHub API reports `parent` is `aaronsb/agent-ways` | fetch/merge upstream in the app dir, then `make setup && ways reconcile` |
+| **Legacy in-place clone** | `~/.claude` is itself the git repo | `ways migrate --execute` first (moves it to the projection model) |
 | **Plugin** | `CLAUDE_PLUGIN_ROOT` set with `plugin.json` | `/plugin update disciplined-methodology` |
 
 ### Renamed clones (org-internal copies)
