@@ -14,12 +14,12 @@ refire: 0.15
 Resolution order — use the first one found:
 
 1. **System PATH**: `mmaid` (installed via AUR, brew, `go install`)
-2. **XDG cache**: `~/.cache/claude-ways/user/mmaid` (downloaded by our tooling)
+2. **XDG cache**: `~/.cache/agent-ways/user/mmaid` (downloaded by our tooling)
 3. **Not found**: suggest installation
 
 ```bash
 # Check if available
-command -v mmaid || ~/.cache/claude-ways/user/mmaid --version
+command -v mmaid || ~/.cache/agent-ways/user/mmaid --version
 ```
 
 If not installed:
@@ -35,7 +35,7 @@ Pipe Mermaid syntax via stdin:
 echo 'flowchart LR
     A[Start] --> B{Decision}
     B -->|yes| C[Done]
-    B -->|no| D[Retry]' | ~/.cache/claude-ways/user/mmaid -t blueprint
+    B -->|no| D[Retry]' | ~/.cache/agent-ways/user/mmaid -t blueprint
 ```
 
 Or render a file: `mmaid diagram.mmd -t slate`

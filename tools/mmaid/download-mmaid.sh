@@ -2,7 +2,7 @@
 # Download the pre-built mmaid binary for the current platform
 #
 # Detects OS/arch, downloads from GitHub Releases, verifies it runs.
-# Binary is placed at: ${XDG_CACHE_HOME:-~/.cache}/claude-ways/user/mmaid
+# Binary is placed at: ${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/mmaid
 #
 # Usage:
 #   download-mmaid.sh [--release TAG]
@@ -27,7 +27,7 @@ BIN_NAME="mmaid-${PLATFORM}"
 [[ "$OS" == "windows" ]] && BIN_NAME="${BIN_NAME}.exe"
 
 XDG_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
-OUTPUT_DIR="${XDG_CACHE}/claude-ways/user"
+OUTPUT_DIR="${XDG_CACHE}/agent-ways/user"
 OUTPUT_FILE="${OUTPUT_DIR}/mmaid"
 
 # Parse args
