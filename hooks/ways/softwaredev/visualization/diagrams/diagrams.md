@@ -25,7 +25,7 @@ command -v mmaid || ~/.cache/claude-ways/user/mmaid --version
 If not installed:
 - **Arch Linux**: `yay -S mmaid` (AUR, when published)
 - **Go**: `go install github.com/aaronsb/mmaid-go/cmd/mmaid@latest`
-- **Download**: `bash ~/.claude/tools/mmaid/download-mmaid.sh`
+- **Download**: `bash "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/mmaid/download-mmaid.sh"` (the `tools/` tree is app-internal, not projected into `~/.claude` — ADR-142)
 
 ## Usage
 
