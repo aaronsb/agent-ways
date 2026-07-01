@@ -31,11 +31,12 @@ These three overlap, and reaching for the wrong one is the most common mistake.
 
 Rule of thumb: **a way teaches Claude how to behave; a skill gives Claude something to run.** If the answer is "inject advice when X happens," it's a way — and most of *this repo's* value is ways, so default there and only reach for a skill when there's a concrete procedure to execute. (`ways-update`, `ways-tests`, `ship`, `attend` are skills because each *runs a procedure*; `meta/knowledge`, `softwaredev/code/quality` are ways because they *shape behavior*.)
 
-## The scope caveat — this repo IS `~/.claude`
+## The scope caveat — `skills/` here projects into personal scope
 
-`skills/` here is the **live personal scope** (`~/.claude/skills/`). A skill added
-to this repo is available in **every** project on this machine the moment it lands.
-Two consequences:
+`skills/` in this repo is **projected into `~/.claude/skills/`** (ADR-142) — the
+live personal scope. Once a skill here reaches your install (via `ways reconcile` /
+update, or immediately if you're editing the symlinked projection), it is available
+in **every** project on this machine. Two consequences:
 
 - **Triggers must be tight.** A loose `description` on a global skill hijacks
   unrelated requests everywhere. Name the specific task and the words a user would
