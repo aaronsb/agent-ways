@@ -38,6 +38,38 @@ hooks/ways/.obsidian/
 !/.claude/ways/
 !/.claude/skills/
 
+# --- Secrets / local env ---
+# The conventional (track-by-default) posture has no implicit safety net, so guard
+# the common secret/credential shapes explicitly — a stray one is otherwise a single
+# `git add -A` from being committed.
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+id_rsa
+id_ed25519
+secrets.json
+secrets.yaml
+secrets.yml
+credentials.json
+
+# --- Logs, coverage, language caches ---
+*.log
+node_modules/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Patch / merge cruft ---
+*.orig
+*.rej
+
 # --- OS / editor cruft ---
 .DS_Store
 *.swp
