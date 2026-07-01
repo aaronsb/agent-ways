@@ -39,9 +39,10 @@ to leave running afterward.
 
 Launch with the **Monitor tool** (not Bash):
 
-- **command**: `bash ~/.claude/scripts/gh-monitor-ci-watch.sh` — append a PR
-  number/branch/URL only if watching something other than the current branch,
-  e.g. `bash ~/.claude/scripts/gh-monitor-ci-watch.sh 142`
+- **command**: `bash "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/scripts/gh-monitor-ci-watch.sh"` —
+  append a PR number/branch/URL only if watching something other than the current
+  branch, e.g. `bash "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/scripts/gh-monitor-ci-watch.sh" 142`
+  (the `scripts/` helpers live in the app dir, not the `~/.claude` projection — ADR-142)
 - **description**: `gh-monitor ci: <repo>#<pr>` (fill in the PR you're watching)
 - **persistent**: `false`
 - **timeout_ms**: `1800000` (30 min — a generous cap so a wedged/never-running
@@ -59,7 +60,7 @@ work it was supporting is done.
 
 Launch with the **Monitor tool**:
 
-- **command**: `bash ~/.claude/scripts/gh-monitor-inbox-watch.sh`
+- **command**: `bash "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/scripts/gh-monitor-inbox-watch.sh"`
 - **description**: `gh-monitor: GitHub notifications`
 - **persistent**: `true`
 - **timeout_ms**: `3600000` (ignored when persistent, but pass it anyway)

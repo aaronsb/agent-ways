@@ -22,10 +22,11 @@ Compare this project against Claude Code upstream releases, or reconcile ADR sta
 
 ## How to Run
 
-Execute the script and capture its output:
+Execute the script and capture its output. The helper lives in the app dir
+(`scripts/` is not projected into `~/.claude` — ADR-142), so resolve it via XDG:
 
 ```bash
-bash ~/.claude/scripts/project-pulse [flags]
+bash "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/scripts/project-pulse" [flags]
 ```
 
 The script outputs structured markdown. Your job is to interpret it.
