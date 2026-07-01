@@ -11,8 +11,19 @@ mod scanner;
 pub mod session;
 pub mod util;
 
+/// Full version string for `--version`: the semver plus the baked `git describe`
+/// build provenance (ADR-150), e.g. `1.0.0 (ways-v1.0.0-78-gc595437)`. This makes
+/// a dev build visibly and machine-readably distinct from a release build — the
+/// signal `ways update`'s downgrade guard and `download-ways.sh` rely on.
+const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("WAYS_BUILD"), ")");
+
 #[derive(Parser)]
-#[command(name = "ways", version, about = "Unified CLI for ways knowledge guidance")]
+#[command(
+    name = "ways",
+    version,
+    long_version = LONG_VERSION,
+    about = "Unified CLI for ways knowledge guidance"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

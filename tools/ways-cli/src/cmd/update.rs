@@ -58,7 +58,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     if dry_run {
         println!("ways update would, in {}:", app.display());
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
-        println!("  2. refresh ways               — download pre-built, else build (rename→revert on fail)");
+        println!("  2. refresh ways               — download pre-built (guarded: never older than source), else build");
         println!("  3. refresh way-embed          — download pre-built, else build (optional)");
         if has_toolchain {
             println!("  4. refresh attend/attend-chat — build (toolchain present)");
@@ -74,11 +74,13 @@ pub fn run(dry_run: bool) -> Result<()> {
     eprintln!("==> pull ({})", app.display());
     run_step(Command::new("bash").arg("scripts/update.sh").current_dir(&app), "git pull")?;
 
-    // 2. Core — ways. Download-first, rename-revert safe. A failed refresh reverts
-    //    to the previous binary and CONTINUES (we still reproject the pulled source)
-    //    rather than aborting mid-update.
-    eprintln!("==> refresh ways (pre-built first)");
-    let ways_refreshed = match refresh_component(&app, "ways", &["ways"], &app) {
+    // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
+    //    downgrade guard: a pre-built that is behind the pulled source is refused
+    //    (built from source instead, or the previous binary kept) so the updater
+    //    can never move backward. A failed refresh reverts and CONTINUES (we still
+    //    reproject the pulled source) rather than aborting mid-update.
+    eprintln!("==> refresh ways (pre-built first, downgrade-guarded)");
+    let ways_refreshed = match refresh_ways(&app, has_toolchain) {
         Ok(()) => true,
         Err(e) => {
             eprintln!("  ⚠ ways binary NOT refreshed ({e}); keeping the previous binary.");
@@ -180,6 +182,230 @@ fn refresh_component(app: &Path, name: &str, make_args: &[&str], make_dir: &Path
     }
 }
 
+/// How a candidate binary's build compares to the pulled source (ADR-150).
+#[derive(Debug, PartialEq, Eq)]
+enum Freshness {
+    /// Same commit, or the source is an ancestor of the candidate — safe to install.
+    AtLeastAsNew,
+    /// The candidate is strictly behind the source — installing it would downgrade.
+    Older,
+    /// Lineage can't be established (unparseable/absent provenance, sha not in
+    /// local history). Caller decides — prefer building when a toolchain exists.
+    Unknown,
+}
+
+/// Refresh the `ways` binary safely, with the downgrade guard. Download-first
+/// (`make ways`), then compare the freshly-installed binary's baked `git describe`
+/// against the pulled source. Only keep the download when it is at least as new;
+/// otherwise build from source (toolchain present) or restore the previous binary
+/// (none) — never leave an older binary in place, never leave the slot empty.
+fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
+    let bin = app.join("bin").join(exe("ways"));
+    let backup = app.join("bin").join(format!("{}.pre-update", exe("ways")));
+
+    // Recover an orphaned backup from an interrupted prior run.
+    if !bin.exists() && backup.exists() {
+        std::fs::rename(&backup, &bin)
+            .with_context(|| format!("restoring an orphaned backup {}", backup.display()))?;
+    }
+
+    let source = source_describe(app);
+    let had = bin.exists();
+    if had {
+        std::fs::rename(&bin, &backup)
+            .with_context(|| format!("renaming {} aside", bin.display()))?;
+    }
+
+    // Download-first (build fallback lives inside the Makefile `ways` target).
+    let installed = run_make(app, &["ways"]) && bin.exists();
+    if !installed {
+        if had {
+            std::fs::rename(&backup, &bin)?;
+        }
+        bail!("`make ways` did not produce a ways binary — reverted");
+    }
+
+    // Guard: is the just-installed binary at least as new as the pulled source?
+    let candidate = read_build_describe(&bin);
+    let verdict = match (candidate.as_deref(), source.as_deref()) {
+        (Some(c), Some(s)) => compare_freshness(c, s, |a, b| is_ancestor(app, a, b)),
+        _ => Freshness::Unknown,
+    };
+
+    match verdict {
+        Freshness::AtLeastAsNew => {
+            if had {
+                let _ = std::fs::remove_file(&backup);
+            }
+            Ok(())
+        }
+        Freshness::Older => {
+            eprintln!(
+                "  ⚠ downloaded pre-built ({}) is behind the pulled source ({}) — not a valid update.",
+                candidate.as_deref().unwrap_or("?"),
+                source.as_deref().unwrap_or("?"),
+            );
+            build_from_source_or_revert(app, &bin, &backup, had, has_toolchain,
+                "no pre-built matching the pulled source is published yet")
+        }
+        Freshness::Unknown => {
+            // Can't prove lineage (e.g. a legacy release binary without baked
+            // provenance). Prefer building — the checkout is authoritative — else
+            // accept the download as best effort.
+            if has_toolchain {
+                eprintln!(
+                    "  ⚠ could not verify the downloaded binary's lineage (candidate={}, source={}); \
+                     building from source to be safe.",
+                    candidate.as_deref().unwrap_or("?"),
+                    source.as_deref().unwrap_or("?"),
+                );
+                build_from_source_or_revert(app, &bin, &backup, had, true, "unverifiable pre-built")
+            } else {
+                eprintln!(
+                    "  ⚠ could not verify the downloaded binary's lineage and no toolchain is present \
+                     — keeping the downloaded binary."
+                );
+                if had {
+                    let _ = std::fs::remove_file(&backup);
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Build ways from source (`make ways-rebuild`) when a toolchain is present,
+/// keeping the build result; otherwise restore the previous binary. Either way
+/// the slot ends non-empty — never a downgrade, never a hole. `reason` explains
+/// why we're not keeping the just-downloaded binary.
+fn build_from_source_or_revert(
+    app: &Path,
+    bin: &Path,
+    backup: &Path,
+    had: bool,
+    has_toolchain: bool,
+    reason: &str,
+) -> Result<()> {
+    if has_toolchain {
+        eprintln!("     building ways from source ({reason})…");
+        if run_make(app, &["ways-rebuild"]) && bin.exists() {
+            if had {
+                let _ = std::fs::remove_file(backup);
+            }
+            return Ok(());
+        }
+        if had {
+            std::fs::rename(backup, bin)?;
+        }
+        bail!("source build failed after {reason} — reverted to the previous binary");
+    }
+    // No toolchain: restore the previous binary rather than downgrade.
+    if had {
+        std::fs::rename(backup, bin)?;
+    }
+    bail!("{reason} and no build toolchain is present — kept the previous binary (install a toolchain, then `ways update`)");
+}
+
+/// Run a `make` target in `dir`, returning whether it succeeded.
+fn run_make(dir: &Path, args: &[&str]) -> bool {
+    Command::new("make")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// The pulled source's `git describe` (same flags build.rs bakes), or None.
+fn source_describe(app: &Path) -> Option<String> {
+    Command::new("git")
+        .args(["describe", "--tags", "--always", "--long", "--dirty", "--match", "ways-v*"])
+        .current_dir(app)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// The `git describe` a binary bakes, read from its `--version` output —
+/// the parenthesized provenance in `ways X.Y.Z (ways-v...-g<sha>)`. None when the
+/// binary predates baked provenance (no parenthetical) or can't be run.
+fn read_build_describe(bin: &Path) -> Option<String> {
+    let out = Command::new(bin).arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let start = s.find('(')?;
+    let end = s[start..].find(')')? + start;
+    let inner = s[start + 1..end].trim();
+    (!inner.is_empty()).then(|| inner.to_string())
+}
+
+/// Whether commit `a` is an ancestor of commit `b` (Some(true)/Some(false)), or
+/// None if git can't answer (unknown sha, not a repo). Mirrors
+/// `git merge-base --is-ancestor` exit semantics (0 = ancestor, 1 = not).
+fn is_ancestor(app: &Path, a: &str, b: &str) -> Option<bool> {
+    let status = Command::new("git")
+        .args(["merge-base", "--is-ancestor", a, b])
+        .current_dir(app)
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
+/// Extract the commit sha from a `git describe --long` string:
+/// `ways-v1.0.0-78-gc595437` → `c595437`; a bare `--always` sha → itself; a
+/// trailing `-dirty` and the `unknown` sentinel are handled. None when no sha is
+/// present (e.g. a legacy tag-only describe with no `-g` suffix).
+fn describe_sha(desc: &str) -> Option<String> {
+    let d = desc.trim();
+    let d = d.strip_suffix("-dirty").unwrap_or(d);
+    if d.is_empty() || d == "unknown" {
+        return None;
+    }
+    // The `--long` format always ends `-g<sha>`; take the sha after the last `-g`.
+    if let Some(idx) = d.rfind("-g") {
+        let sha = &d[idx + 2..];
+        if !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(sha.to_string());
+        }
+    }
+    // `--always` with no reachable tag emits a bare sha.
+    if d.len() >= 4 && d.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Some(d.to_string());
+    }
+    None
+}
+
+/// Compare a candidate binary's build against the source. `is_ancestor(a, b)`
+/// answers whether commit `a` precedes `b`. The candidate is `Older` only when
+/// its commit is a strict ancestor of the source; equal shas or a
+/// non-ancestor (source behind/diverged) are `AtLeastAsNew`; anything we can't
+/// resolve is `Unknown`.
+fn compare_freshness(
+    candidate: &str,
+    source: &str,
+    is_ancestor: impl Fn(&str, &str) -> Option<bool>,
+) -> Freshness {
+    let (Some(cand), Some(src)) = (describe_sha(candidate), describe_sha(source)) else {
+        return Freshness::Unknown;
+    };
+    if cand == src {
+        return Freshness::AtLeastAsNew;
+    }
+    match is_ancestor(&cand, &src) {
+        Some(true) => Freshness::Older,
+        Some(false) => Freshness::AtLeastAsNew,
+        None => Freshness::Unknown,
+    }
+}
+
 fn exe(name: &str) -> String {
     if cfg!(windows) {
         format!("{name}.exe")
@@ -272,5 +498,50 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD-BINARY", "and be the same file");
         assert!(!app.join("bin").join("ways.pre-update").exists(), "backup consumed by the revert");
         let _ = std::fs::remove_dir_all(&app);
+    }
+
+    #[test]
+    fn describe_sha_extracts_the_commit() {
+        assert_eq!(describe_sha("ways-v1.0.0-78-gc595437").as_deref(), Some("c595437"));
+        assert_eq!(describe_sha("ways-v1.0.0-78-gc595437-dirty").as_deref(), Some("c595437"));
+        // Bare `--always` sha (no reachable tag).
+        assert_eq!(describe_sha("69a8475").as_deref(), Some("69a8475"));
+        assert_eq!(describe_sha("69a8475-dirty").as_deref(), Some("69a8475"));
+        // No sha to key on.
+        assert_eq!(describe_sha("unknown"), None);
+        assert_eq!(describe_sha(""), None);
+        assert_eq!(describe_sha("ways-v1.0.0"), None); // legacy tag-only, no -g suffix
+    }
+
+    #[test]
+    fn compare_freshness_orders_by_commit_ancestry() {
+        // Equal shas → at least as new, without consulting git.
+        assert_eq!(
+            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called")),
+            Freshness::AtLeastAsNew
+        );
+        // Candidate is an ancestor of source → strictly older → refuse (downgrade).
+        assert_eq!(
+            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-78-gbeef00", |a, b| {
+                assert_eq!((a, b), ("c0ffee", "beef00"));
+                Some(true)
+            }),
+            Freshness::Older
+        );
+        // Candidate not an ancestor (source behind / diverged) → not a downgrade.
+        assert_eq!(
+            compare_freshness("ways-v1.1.0-0-gaaaa11", "ways-v1.0.0-0-gbbbb22", |_, _| Some(false)),
+            Freshness::AtLeastAsNew
+        );
+        // Git can't resolve the ancestry (sha not local) → Unknown.
+        assert_eq!(
+            compare_freshness("ways-v1.0.0-0-gabc123", "ways-v1.0.0-1-gdef456", |_, _| None),
+            Freshness::Unknown
+        );
+        // Unparseable candidate provenance (legacy binary → describe_sha None) → Unknown.
+        assert_eq!(
+            compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called")),
+            Freshness::Unknown
+        );
     }
 }
