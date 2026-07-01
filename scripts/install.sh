@@ -190,12 +190,17 @@ is_agent_ways_repo() {
 }
 
 # Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.
+# Uses `if` (not `&&`) and an explicit `return 0` so a missing binary in the last
+# loop iteration can't make the function return non-zero and trip `set -e`.
 link_path_binaries() {
   mkdir -p "$XDG_BIN"
   local b
   for b in ways attend attend-chat; do
-    [[ -e "$APP_DIR/bin/$b" ]] && ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
+    if [[ -e "$APP_DIR/bin/$b" ]]; then
+      ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
+    fi
   done
+  return 0
 }
 
 # --- Clobber: remove the app dir AND ~/.claude (backs ~/.claude up first) ---
@@ -220,6 +225,17 @@ fi
 # --- Already installed (native XDG)? Update in place. ---
 
 if is_agent_ways_repo "$APP_DIR"; then
+  # If ~/.claude is itself a pre-1.0 in-place clone, reconciling over it would
+  # symlink projection roots on top of a live repo — that's a migration, not an
+  # update. Route to the gated migrator instead.
+  if is_agent_ways_repo "$DEST"; then
+    echo -e "${YELLOW}App is installed at ${APP_DIR}, but ~/.claude is still a pre-1.0 in-place clone.${RESET}"
+    echo "  Migrate it rather than reconcile over it (gated, backs up first):"
+    echo -e "    ${CYAN}ways migrate --what-if && ways migrate --execute${RESET}"
+    echo -e "  Guide: ${CYAN}${UPSTREAM_URL}/blob/main/docs/migration-1.0.md${RESET}"
+    exit 1
+  fi
+
   echo -e "${GREEN}Already installed${RESET} (app at ${CYAN}${APP_DIR}${RESET}). Updating..."
   echo ""
   git -C "$APP_DIR" pull --ff-only 2>&1 || {
@@ -233,10 +249,15 @@ if is_agent_ways_repo "$APP_DIR"; then
   make -C "$APP_DIR" setup || true
   link_path_binaries
   echo ""
-  echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-  [[ -x "$APP_DIR/bin/ways" ]] && "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" || true
-  echo ""
-  echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
+  if [[ -x "$APP_DIR/bin/ways" ]]; then
+    echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
+    "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" || true
+    echo ""
+    echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
+  else
+    echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
+    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways reconcile"
+  fi
   exit 0
 fi
 
@@ -258,8 +279,11 @@ if is_agent_ways_repo "$DEST"; then
 fi
 
 # --- App dir occupied by something that isn't our repo? Stop rather than clobber. ---
+# Exception: if we're running FROM the app dir (SRC == APP_DIR), it IS an
+# agent-ways checkout (just an unrecognized origin — local clone / fork with gh
+# unauthed); fall through to the fresh path, which skips staging in that case.
 
-if [[ -e "$APP_DIR" ]]; then
+if [[ -e "$APP_DIR" && "$SRC" != "$APP_DIR" ]]; then
   echo -e "${YELLOW}${APP_DIR} exists but is not an agent-ways clone.${RESET}"
   echo "  Move it aside, or re-run with --dangerously-clobber."
   exit 1
@@ -268,15 +292,15 @@ fi
 # --- Fresh native install: stage app → build → reconcile projection ---
 
 echo -e "Staging application → ${CYAN}${APP_DIR}${RESET}..."
-mkdir -p "$(dirname "$APP_DIR")"
 if [[ "$SRC" == "$APP_DIR" ]]; then
   echo -e "${GREEN}Source is already the app dir.${RESET}"
 else
+  mkdir -p "$(dirname "$APP_DIR")"
   git clone "$SRC" "$APP_DIR" 2>&1
+  # Only rewrite origin when we cloned from a temp/bootstrap source — never
+  # clobber the remote of a checkout we were run from.
+  git -C "$APP_DIR" remote set-url origin "$UPSTREAM_URL" 2>/dev/null || true
 fi
-
-# Point the app dir at upstream (SRC may be a temp bootstrap clone) and arm hooks.
-git -C "$APP_DIR" remote set-url origin "$UPSTREAM_URL" 2>/dev/null || true
 find "$APP_DIR/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
 echo ""
@@ -294,20 +318,24 @@ make -C "$APP_DIR" setup || {
 link_path_binaries
 
 echo ""
-echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-echo -e "${DIM}(symlinks the projected trees; merges settings.json; your Claude Code files stay)${RESET}"
-echo ""
-mkdir -p "$DEST"
 if [[ -x "$APP_DIR/bin/ways" ]]; then
+  echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
+  echo -e "${DIM}(symlinks the projected trees; merges settings.json; your Claude Code files stay)${RESET}"
+  echo ""
+  mkdir -p "$DEST"
   "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"
+  echo ""
+  echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
+  echo ""
+  echo "  Restart Claude Code for ways to take effect."
+  echo -e "  If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
+  echo ""
 else
-  echo -e "${YELLOW}ways binary not built — skipping reconcile.${RESET}"
-  echo "  After building, run: ways reconcile"
+  # No binary → don't create an empty ~/.claude. The app is staged; finish by hand.
+  echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"
+  echo "  The application is staged at $APP_DIR. To finish:"
+  echo -e "    ${CYAN}cd $APP_DIR && make setup${RESET}      # build the binary"
+  echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}   # materialize the projection"
+  echo ""
+  exit 1
 fi
-
-echo ""
-echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
-echo ""
-echo "  Restart Claude Code for ways to take effect."
-echo -e "  If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
-echo ""
