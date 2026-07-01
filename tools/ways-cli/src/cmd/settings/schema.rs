@@ -30,6 +30,23 @@ pub enum ScopeClass {
     ManagedOverridable,
 }
 
+/// Valid Claude Code settings keys that the vendored schema *lags* (SchemaStore
+/// hasn't added them yet) and that carry no scope restriction. Without this, the
+/// linter would false-warn "unrecognized" on current, valid settings. Managed-
+/// scoped laggards need no entry here — [`scope_class`] already covers them.
+const KNOWN_LAGGED: &[&str] = &[
+    // Present in the CLI as a boolean; SchemaStore exposes `autoUpdatesChannel`
+    // but not the older `autoUpdates` toggle.
+    "autoUpdates",
+];
+
+/// Whether the overlay recognizes `key` — either it has a scope class or it is a
+/// known key the vendored schema lags. Lets the linter avoid false "unrecognized"
+/// warnings on keys the schema doesn't (yet) list.
+pub fn overlay_knows(key: &str) -> bool {
+    scope_class(key).is_some() || KNOWN_LAGGED.contains(&key)
+}
+
 /// The scope-class of a key, or `None` if it has no scope restriction.
 pub fn scope_class(key: &str) -> Option<ScopeClass> {
     use ScopeClass::*;

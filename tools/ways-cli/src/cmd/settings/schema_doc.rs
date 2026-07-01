@@ -78,8 +78,15 @@ impl PropType {
 
 /// What the schema knows about one top-level key.
 pub struct PropInfo {
+    /// The type to *validate* against. Concrete only when the schema gives a
+    /// single unambiguous `type`; unions (`oneOf`/`anyOf`), multi-type arrays,
+    /// nullable types, and unresolved `$ref`s are [`PropType::Other`] so the
+    /// linter accepts any branch instead of false-erroring on a valid one.
     pub ty: PropType,
     pub description: String,
+    /// A concrete, type-correct placeholder for scaffolding — prefers a real
+    /// branch even for unions (where `ty` is `Other`), so templates stay useful.
+    pub placeholder: Value,
 }
 
 /// The parsed settings schema: top-level key → info.
@@ -113,59 +120,86 @@ fn parse(json: &str) -> anyhow::Result<SettingsSchema> {
         .ok_or_else(|| anyhow::anyhow!("settings schema has no top-level `properties`"))?;
     let mut props = BTreeMap::new();
     for (key, spec) in props_obj {
-        let ty = derive_type(&root, spec);
+        let (ty, placeholder) = analyze(&root, spec);
         let description = spec
             .get("description")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        props.insert(key.clone(), PropInfo { ty, description });
+        props.insert(
+            key.clone(),
+            PropInfo {
+                ty,
+                description,
+                placeholder,
+            },
+        );
     }
     Ok(SettingsSchema { props })
 }
 
-/// Best-effort concrete type: reads `type`, else resolves one level of `$ref`
-/// into `$defs`, else picks a usable type out of `oneOf`/`anyOf`/`allOf`.
-fn derive_type(root: &Value, spec: &Value) -> PropType {
+/// Determine `(validation type, template placeholder)` for a property.
+///
+/// The validation type is concrete **only** for a single unambiguous `type`.
+/// Unions (`oneOf`/`anyOf`/`allOf`), multi-type arrays, nullable types, and
+/// unresolved refs return [`PropType::Other`], which matches any value — so the
+/// linter never false-errors on a legitimately-typed branch. The placeholder,
+/// by contrast, always prefers a real concrete branch so scaffolds stay useful.
+fn analyze(root: &Value, spec: &Value) -> (PropType, Value) {
     if let Some(t) = spec.get("type") {
-        return type_from_type_field(t);
+        return match t {
+            Value::String(s) => {
+                let ty = from_type_str(s);
+                (ty, ty.placeholder())
+            }
+            Value::Array(arr) => {
+                let concretes: Vec<PropType> = arr
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|s| *s != "null")
+                    .map(from_type_str)
+                    .collect();
+                let has_null = arr.iter().any(|x| x.as_str() == Some("null"));
+                let placeholder = concretes
+                    .first()
+                    .copied()
+                    .unwrap_or(PropType::Other)
+                    .placeholder();
+                // Enforce a type only when it is a single concrete type, no null.
+                let ty = if concretes.len() == 1 && !has_null {
+                    concretes[0]
+                } else {
+                    PropType::Other
+                };
+                (ty, placeholder)
+            }
+            _ => (PropType::Other, Value::Null),
+        };
     }
     if let Some(r) = spec.get("$ref").and_then(Value::as_str) {
         if let Some(def) = resolve_ref(root, r) {
-            return derive_type(root, def);
+            return analyze(root, def);
         }
     }
     for combiner in ["oneOf", "anyOf", "allOf"] {
         if let Some(arr) = spec.get(combiner).and_then(Value::as_array) {
-            let mut fallback = PropType::Other;
+            // A union accepts any branch — validate permissively (Other) but pick
+            // a structured branch for the placeholder when one exists.
+            let mut ph = PropType::Other;
             for branch in arr {
-                let t = derive_type(root, branch);
-                // Prefer a structured type; it makes the best template skeleton.
+                let (t, _) = analyze(root, branch);
                 if matches!(t, PropType::Object | PropType::Array) {
-                    return t;
+                    ph = t;
+                    break;
                 }
-                if fallback == PropType::Other && t != PropType::Other {
-                    fallback = t;
+                if ph == PropType::Other && t != PropType::Other {
+                    ph = t;
                 }
             }
-            return fallback;
+            return (PropType::Other, ph.placeholder());
         }
     }
-    PropType::Other
-}
-
-fn type_from_type_field(t: &Value) -> PropType {
-    match t {
-        Value::String(s) => from_type_str(s),
-        // A union like ["string","null"] — take the first non-null concrete type.
-        Value::Array(arr) => arr
-            .iter()
-            .filter_map(Value::as_str)
-            .find(|s| *s != "null")
-            .map(from_type_str)
-            .unwrap_or(PropType::Other),
-        _ => PropType::Other,
-    }
+    (PropType::Other, Value::Null)
 }
 
 fn from_type_str(s: &str) -> PropType {
@@ -236,5 +270,17 @@ mod tests {
     #[test]
     fn unknown_key_absent() {
         assert!(bundled().get("totallyMadeUpKey").is_none());
+    }
+
+    #[test]
+    fn union_typed_key_validates_permissively_with_a_concrete_placeholder() {
+        // `strictPluginOnlyCustomization` is anyOf[boolean, array] in the schema.
+        // It must validate as Other (accept either branch) so a valid `true`
+        // doesn't false-error, yet still offer a concrete placeholder.
+        let info = bundled().get("strictPluginOnlyCustomization").unwrap();
+        assert_eq!(info.ty, PropType::Other, "a union must validate permissively");
+        assert!(info.ty.matches(&serde_json::json!(true)));
+        assert!(info.ty.matches(&serde_json::json!([])));
+        assert!(!info.placeholder.is_null(), "placeholder should be a real branch");
     }
 }

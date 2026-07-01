@@ -51,7 +51,7 @@ pub fn run(key: &str, scope: Option<Scope>, dir: &Path) -> Result<()> {
 /// block with a type-correct placeholder) then a body carrying the description.
 fn render(key: &str, scope: Scope, info: &schema_doc::PropInfo) -> String {
     let mut settings = Map::new();
-    settings.insert(key.to_string(), info.ty.placeholder());
+    settings.insert(key.to_string(), info.placeholder.clone());
     let mut fm = Map::new();
     fm.insert("scope".to_string(), Value::String(scope.as_str().to_string()));
     fm.insert("settings".to_string(), Value::Object(settings));
@@ -87,7 +87,7 @@ fn next_prefix(dir: &Path) -> Result<u32> {
             }
         }
     }
-    Ok(if max == 0 { 10 } else { max + 10 })
+    Ok(if max == 0 { 10 } else { max.saturating_add(10) })
 }
 
 /// An existing `*-<key>.md` (or bare `<key>.md`) fragment, if any.
