@@ -62,8 +62,13 @@ fi
 # config parser sees — any divergence here is a subtle cross-path bug
 # where the same overlay disables a way in one path but not the other.
 DISABLED_WAYS=""
+DISABLED_DOMAINS=""
 if command -v ways >/dev/null 2>&1; then
   DISABLED_WAYS=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" ways disable --list --names-only 2>/dev/null)
+  # Disabled DOMAINS from the same CLI, so this gate honors the FULL config chain
+  # ($XDG_CONFIG/agent-ways/config.yaml `disabled_domains` + legacy ways.json), not
+  # just the legacy JSON — same cross-path-consistency reasoning as the ways above.
+  DISABLED_DOMAINS=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" ways status --json 2>/dev/null | jq -r '.disabled_domains[]?' 2>/dev/null)
 fi
 
 # Emit way content for each matched way (bypassing markers)
@@ -91,13 +96,10 @@ while IFS= read -r waypath; do
   done
   [[ -z "$WAY_FILE" ]] && continue
 
-  # Check domain disabled (user scope, legacy)
+  # Check domain disabled (user scope) — full config chain, resolved by the CLI above.
   DOMAIN="${waypath%%/*}"
-  WAYS_CONFIG="${HOME}/.claude/ways.json"
-  if [[ -f "$WAYS_CONFIG" ]]; then
-    if jq -e --arg d "$DOMAIN" '.disabled | index($d) != null' "$WAYS_CONFIG" >/dev/null 2>&1; then
-      continue
-    fi
+  if [[ -n "$DISABLED_DOMAINS" ]] && grep -qxF "$DOMAIN" <<< "$DISABLED_DOMAINS"; then
+    continue
   fi
 
   # Check per-way disabled in project overlay (ADR-131)
