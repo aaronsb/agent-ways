@@ -66,7 +66,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-143](./system/ADR-143-three-root-way-runtime-core-user-project.md) | Three-root way runtime — core, user, project | Accepted |
 | [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Accepted |
 | [ADR-145](./system/ADR-145-explicit-three-source-convergence-manifest.md) | Explicit three-source convergence manifest | Draft |
-| [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Draft |
+| [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
