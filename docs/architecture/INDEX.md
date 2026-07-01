@@ -68,6 +68,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-145](./system/ADR-145-explicit-three-source-convergence-manifest.md) | Explicit three-source convergence manifest | Draft |
 | [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
 | [ADR-147](./system/ADR-147-projectable-user-config-layer.md) | projectable user config layer | Draft |
+| [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_

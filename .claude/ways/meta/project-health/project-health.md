@@ -2,8 +2,6 @@
 description: Managing agent-ways as a project — upstream tracking against Claude Code releases, ADR reconciliation, release discipline, maintaining relevance
 vocabulary: upstream changelog release version claude-code update adr status reconcile drift stale dormant shipped implemented current behind project pulse health review audit recently changed since last relevance feature gap opportunity
 scope: agent
-when:
-  project: ~/.claude
 refire: 0.15
 ---
 <!-- epistemic: convention -->
