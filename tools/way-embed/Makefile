@@ -95,7 +95,6 @@ setup: setup-binary
 	@echo "Setup complete. Running verification..."
 	bash "$(SRCDIR)test-embedding.sh"
 	@echo ""
-	@echo "To compare against BM25: bash $(SRCDIR)compare-engines.sh"
 	@echo "To localize ways into another language: invoke the ways-localize skill"
 
 # Try download, fall back to build

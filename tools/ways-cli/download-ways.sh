@@ -60,7 +60,7 @@ fi
 # Need gh CLI
 if ! command -v gh >/dev/null 2>&1; then
   echo "error: gh CLI not found — build from source instead:" >&2
-  echo "  cd ~/.claude && make ways" >&2
+  echo "  cd "$REPO_ROOT" && make ways" >&2
   exit 1
 fi
 
@@ -73,7 +73,7 @@ if [[ "$RELEASE_TAG" == "latest" ]]; then
     | grep '^ways-v' | head -1)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No ways release found. Build from source:" >&2
-    echo "  cd ~/.claude && make ways" >&2
+    echo "  cd "$REPO_ROOT" && make ways" >&2
     exit 1
   fi
 fi
@@ -88,7 +88,7 @@ if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.asset
   gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep "ways-" | sed 's/^/  /' >&2
   echo "" >&2
   echo "Build from source instead:" >&2
-  echo "  cd ~/.claude && make ways" >&2
+  echo "  cd "$REPO_ROOT" && make ways" >&2
   exit 1
 fi
 
@@ -137,7 +137,7 @@ if "$OUTPUT_FILE" --version >/dev/null 2>&1; then
 else
   echo "WARNING: binary downloaded but won't execute on this platform" >&2
   echo "Build from source instead:" >&2
-  echo "  cd ~/.claude && make ways" >&2
+  echo "  cd "$REPO_ROOT" && make ways" >&2
   rm -f "$OUTPUT_FILE" "$PLATFORM_FILE"
   exit 1
 fi

@@ -143,7 +143,7 @@ ways governance report            # full coverage report
 | Changed hook scripts (check-*.sh, inject-*.sh) | Activation test |
 | Added a new way | `/ways-tests score` + `/ways-tests lint` + activation test |
 | Restructured way directories | All three test layers |
-| Changed embedding engine or model | `tools/way-embed/compare-engines.sh` |
+| Changed embedding engine or model | `tools/way-embed/test-embedding.sh` |
 | Renamed or moved documentation files | Doc-graph |
 | Changed provenance metadata | Governance verification |
 | Sanity check after merge | All of the above |
