@@ -67,6 +67,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Accepted |
 | [ADR-145](./system/ADR-145-explicit-three-source-convergence-manifest.md) | Explicit three-source convergence manifest | Draft |
 | [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
+| [ADR-147](./system/ADR-147-projectable-user-config-layer.md) | projectable user config layer | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
