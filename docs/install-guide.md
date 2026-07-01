@@ -49,21 +49,23 @@ See the [Migration Guide](migration-1.0.md) for the full walkthrough and the dep
 ```bash
 # 1. Fork on GitHub (web UI), then clone your fork as the app source
 git clone https://github.com/YOUR-USERNAME/agent-ways "$XDG_DATA_HOME/agent-ways"
+cd "$XDG_DATA_HOME/agent-ways"
 
 # 2. Track upstream for later
-cd "$XDG_DATA_HOME/agent-ways"
 git remote add upstream https://github.com/aaronsb/agent-ways
 
-# 3. Build and project into ~/.claude
-make setup && ways reconcile
+# 3. Install from the fork — builds, links `ways` onto PATH, and projects into ~/.claude
+./scripts/install.sh
 ```
 
-Pull upstream improvements later:
+Running the installer from inside the app dir is what links the `ways`/`attend`
+binaries onto your `PATH`; `make setup` alone builds them but does not. Pull
+upstream improvements later:
 
 ```bash
 cd "$XDG_DATA_HOME/agent-ways"
 git fetch upstream && git merge upstream/main   # resolve conflicts in your custom ways
-make setup && ways reconcile
+make setup && ways reconcile                    # ways is on PATH from the install above
 ```
 
 If you're actively *developing* agent-ways (not just carrying a few custom ways), use a standalone dev checkout instead and dogfood via reconcile — see [development.md](development.md).
