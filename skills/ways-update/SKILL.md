@@ -108,8 +108,8 @@ fails (`make -C "$APP" ways-rebuild`, `attend-rebuild`, …).
 
 The embedding corpus regenerates lazily on the next session (`ways corpus --if-stale`
 in the `SessionStart` hook). To refresh it now — e.g. ways changed — run
-`make -C "$APP" setup` (binaries are already fresh, so it only rebuilds way-embed and
-regenerates the corpus) or `"$APP/bin/ways" corpus`.
+`make -C "$APP" setup` (binaries already fresh; this regenerates the corpus) or
+`"$APP/bin/ways" corpus`.
 
 ### 4. Refresh the projection
 
