@@ -108,10 +108,16 @@ pub fn merge(live: &Value, desired_hooks: &Value, base: &Owned) -> Result<Merged
         // lost) we'd then duplicate every hook on re-apply and trip the self-audit.
         // NB: this byte-match assumes `quote_entry_commands` stays in lockstep with
         // the jq quoting the hook-install path applies (both quote the first token).
+        // `entry_is_ours` is the base-independent backstop: it also drops a prior
+        // entry of OURS whose command CHANGED (so it matches neither base nor the
+        // new `ours`), which byte-matching alone would leave lingering.
         let mut merged: Vec<Value> = theirs
             .into_iter()
             .filter(|e| {
-                !base_entries.contains(e) && !ours.contains(e) && !ours_quoted.contains(e)
+                !base_entries.contains(e)
+                    && !ours.contains(e)
+                    && !ours_quoted.contains(e)
+                    && !entry_is_ours(e)
             })
             .collect();
         merged.extend(ours_quoted);
@@ -179,12 +185,16 @@ pub fn stripped_user_view(settings: &Value, base: &Owned) -> Value {
         let mut user_hooks: Map<String, Value> = Map::new();
         for (event, entries) in &hooks {
             let ours = base.hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            // Strip our entries by the recorded base AND by structural signature, so
+            // a stale/under-recording base can't leave an old-form entry of ours in
+            // the user view — which would make before/after asymmetric and trip a
+            // spurious revert. See `entry_is_ours`.
             let kept: Vec<Value> = entries
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|e| !ours.contains(e))
+                .filter(|e| !ours.contains(e) && !entry_is_ours(e))
                 .collect();
             if !kept.is_empty() {
                 user_hooks.insert(event.clone(), Value::Array(kept));
@@ -271,6 +281,68 @@ fn quote_first_token(cmd: &str) -> String {
     match cmd.find(' ') {
         None => format!("\"{cmd}\""),
         Some(i) => format!("\"{}\"{}", &cmd[..i], &cmd[i..]),
+    }
+}
+
+/// True if a hook *command*'s executable is an agent-ways projection artifact —
+/// a `.claude/hooks/…` script or a `.claude/bin/…` CLI (`ways`, `way-embed`,
+/// `attend`). Only the **first (exe) token** is examined (quote-aware), so a
+/// user hook that merely passes a projection path as an *argument* — e.g.
+/// `tail -f ${HOME}/.claude/hooks/ways/x.log` — is NOT mistaken for ours. That
+/// distinction is load-bearing: misclassifying a user hook would silently drop
+/// it (the self-audit strips it symmetrically, so no revert catches it).
+///
+/// Path separators are normalized so a Windows `\`-form path matches. Matches
+/// the literal `${HOME}`-prefixed form we ship and the expanded/quoted forms a
+/// prior merge wrote.
+///
+/// Assumes the ADR-142 projection root (`~/.claude`) — the hooks we ship are
+/// written with a literal `${HOME}/.claude/...` prefix, so a relocated config
+/// dir (`CLAUDE_CONFIG_DIR`) is out of scope; if that ever changes, the
+/// shipped-hooks guard test (`shipped_hooks_are_all_recognized_as_ours`) fails
+/// loudly rather than the reconciler silently regressing.
+fn command_is_ours(cmd: &str) -> bool {
+    let exe = exe_token(cmd).replace('\\', "/");
+    exe.contains(".claude/hooks/") || exe.contains(".claude/bin/")
+}
+
+/// The executable token of a hook command: the leading `"`-quoted span when the
+/// command is quoted (the form our installer writes, e.g.
+/// `"${HOME}/.claude/bin/ways" corpus`), else the run up to the first
+/// whitespace. Mirrors the tokenization `quote_first_token` assumes.
+fn exe_token(cmd: &str) -> &str {
+    if let Some(rest) = cmd.strip_prefix('"') {
+        match rest.find('"') {
+            Some(i) => &rest[..i],
+            None => rest,
+        }
+    } else {
+        cmd.split_whitespace().next().unwrap_or(cmd)
+    }
+}
+
+/// True if a hook *entry* is one agent-ways ships: it runs at least one command
+/// and **every** command targets the projection ([`command_is_ours`]).
+///
+/// This makes hook ownership *self-identifying* — the merge and self-audit can
+/// recognize our entries structurally, independent of the persisted base. That
+/// matters because the base is only rewritten after a non-no-op apply (the
+/// idempotent early-return skips it), so a long run of converged reconciles
+/// leaves it stale (e.g. `hooks: {}`). The first update that *changes* a hook
+/// then can't attribute the prior (old-command) entry to us via the base, and
+/// the self-audit would false-positive "unmanaged field changed" and revert —
+/// blocking exactly the updates that ship new hooks. Byte-matching against the
+/// base still runs first; this is the base-independent backstop.
+///
+/// Trade-off: a user hook placed under `.claude/hooks/` (contrary to the ways
+/// model, which extends via `ways/` fragments — not hand-edited settings.json)
+/// would be treated as ours. Accepted and documented.
+fn entry_is_ours(entry: &Value) -> bool {
+    match entry.get("hooks").and_then(|h| h.as_array()) {
+        Some(cmds) if !cmds.is_empty() => cmds.iter().all(|h| {
+            h.get("command").and_then(|c| c.as_str()).map(command_is_ours).unwrap_or(false)
+        }),
+        _ => false,
     }
 }
 
@@ -576,5 +648,142 @@ mod tests {
         assert!(after["permissions"]["allow"].as_array().unwrap().iter().any(|v| v == "Bash(git:*)"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_that_changes_our_hooks_with_a_lost_base_converges() {
+        // The `north` reconcile failure: an `ways update` pulled CHANGED hook
+        // definitions while the persisted base was stale (`hooks: {}`, from a long
+        // run of no-op reconciles that never rewrote it). Live still held the OLD
+        // ways-hook; source shipped a NEW one with a different command. Byte-matching
+        // couldn't attribute the old entry to us (not in base, not equal to the new
+        // `ours`), so the self-audit saw it as "user content that vanished" and
+        // reverted with "settings merge changed unmanaged fields" — blocking exactly
+        // the updates that ship new hooks. `entry_is_ours` (structural ownership)
+        // fixes it: the old ways-hook is recognized as ours and replaced, not lingered.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ways-setmerge-changed-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("settings.json");
+        let source = dir.join("source.json");
+        let base = dir.join("base.json");
+
+        // Source ships the NEW hook command.
+        std::fs::write(&source, serde_json::to_string(&json!({
+            "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [
+                { "type": "command", "command": "${HOME}/.claude/hooks/ways/check-state.sh" } ] } ] }
+        })).unwrap()).unwrap();
+
+        // Live holds the OLD ways-hook (quoted, DIFFERENT command) + a genuine user
+        // hook. This is the crux: old command != new command, so quoted/raw dedup
+        // against `ours` cannot catch it.
+        std::fs::write(&dest, serde_json::to_string(&json!({
+            "model": "opus",
+            "hooks": { "SessionStart": [
+                { "matcher": "startup", "hooks": [ { "type": "command",
+                    "command": "\"${HOME}/.claude/hooks/ways/check-setup.sh\"" } ] },
+                { "matcher": "stop", "hooks": [ { "type": "command", "command": "/u/mine" } ] }
+            ] },
+            "permissions": { "allow": ["Bash(git:*)", "Bash(ways:*)", "Bash(attend:*)",
+                "Bash(attend-chat:*)", "Bash(way-embed:*)", "Edit(~/.claude/**)", "Write(~/.claude/**)"] }
+        })).unwrap()).unwrap();
+
+        // Base is stale: hooks lost, perms recorded.
+        std::fs::write(&base, serde_json::to_string(&json!({
+            "hooks": {},
+            "perms": WAYS_PERMS
+        })).unwrap()).unwrap();
+
+        apply_to_files(&source, &dest, &base)
+            .expect("update that changes our hooks must not abort on a stale base");
+
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        let ss = after["hooks"]["SessionStart"].as_array().unwrap();
+        // Old ways-hook GONE, new one present, user hook preserved — no duplication.
+        assert_eq!(ss.len(), 2, "old ours replaced (not lingered/duplicated): {ss:?}");
+        let cmds: Vec<&str> = ss.iter().filter_map(|e| e["hooks"][0]["command"].as_str()).collect();
+        assert!(cmds.iter().any(|c| c.contains("check-state.sh")), "new hook present: {cmds:?}");
+        assert!(!cmds.iter().any(|c| c.contains("check-setup.sh")), "old hook removed: {cmds:?}");
+        assert!(cmds.iter().any(|c| *c == "/u/mine"), "user hook preserved: {cmds:?}");
+        assert_eq!(after["model"], "opus", "user content preserved");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn command_is_ours_examines_the_exe_token_only() {
+        // Ours: script + CLI, unquoted and quoted-with-args.
+        assert!(command_is_ours("${HOME}/.claude/hooks/ways/check-setup.sh"));
+        assert!(command_is_ours("\"${HOME}/.claude/hooks/ways/check-setup.sh\""));
+        assert!(command_is_ours("\"${HOME}/.claude/bin/ways\" corpus --quiet"));
+        // Sibling CLIs under .claude/bin/ (broadened past just `ways`).
+        assert!(command_is_ours("${HOME}/.claude/bin/way-embed match"));
+        assert!(command_is_ours("${HOME}/.claude/bin/attend"));
+        // Windows backslash form of our path.
+        assert!(command_is_ours("\"C:\\Users\\j\\.claude\\hooks\\ways\\c.sh\""));
+        // NOT ours: a user command that merely references a projection path as an
+        // ARGUMENT — the exe is `tail`, not ours. Must not be swept up (else it is
+        // silently deleted with no revert).
+        assert!(!command_is_ours("tail -f ${HOME}/.claude/hooks/ways/x.log"));
+        assert!(!command_is_ours("cat ${HOME}/.claude/bin/ways"));
+        assert!(!command_is_ours("/usr/local/bin/mine"));
+    }
+
+    #[test]
+    fn entry_is_ours_requires_every_command_ours() {
+        let ours = json!({ "hooks": [ { "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/a.sh" } ] });
+        assert!(entry_is_ours(&ours));
+        // A mixed entry (one ours + one user command) is NOT ours — .all() fails,
+        // so the whole entry is preserved rather than dropped.
+        let mixed = json!({ "hooks": [
+            { "type": "command", "command": "${HOME}/.claude/hooks/ways/a.sh" },
+            { "type": "command", "command": "/usr/local/bin/mine" } ] });
+        assert!(!entry_is_ours(&mixed));
+        // An empty/absent hooks array is not ours.
+        assert!(!entry_is_ours(&json!({ "matcher": "x", "hooks": [] })));
+        assert!(!entry_is_ours(&json!({ "matcher": "x" })));
+    }
+
+    #[test]
+    fn merge_preserves_user_hook_referencing_our_path_as_argument() {
+        // Regression for the review finding: a genuine user hook whose command
+        // takes a projection path as an ARGUMENT must survive the merge untouched.
+        let user_hook = json!({ "matcher": "startup", "hooks": [ { "type": "command",
+            "command": "tail -f ${HOME}/.claude/hooks/ways/debug.log" } ] });
+        let live = json!({ "hooks": { "SessionStart": [ user_hook.clone() ] } });
+        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let ss = m.settings["hooks"]["SessionStart"].as_array().unwrap();
+        assert!(ss.contains(&user_hook), "user hook (path-as-arg) must survive: {ss:?}");
+        // And the self-audit view agrees it's user content on both sides.
+        let before = stripped_user_view(&live, &Owned::default());
+        let after = stripped_user_view(&m.settings, &m.base);
+        assert_eq!(before, after, "user view preserved");
+    }
+
+    #[test]
+    fn shipped_hooks_are_all_recognized_as_ours() {
+        // Guard: every hook agent-ways ships in the repo settings.json must be
+        // recognized by `entry_is_ours`. Otherwise structural ownership silently
+        // regresses and a stale-base update false-reverts again. Catches a future
+        // hook that shells something outside `.claude/hooks/` or `.claude/bin/`.
+        let repo_settings =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings.json");
+        let raw = match std::fs::read_to_string(&repo_settings) {
+            Ok(s) => s,
+            Err(_) => return, // not a source checkout — skip
+        };
+        let v: Value = serde_json::from_str(&raw).expect("repo settings.json parses");
+        let Some(hooks) = v.get("hooks").and_then(|h| h.as_object()) else { return };
+        for (event, entries) in hooks {
+            for e in entries.as_array().into_iter().flatten() {
+                assert!(entry_is_ours(e), "shipped hook in {event} not recognized as ours: {e}");
+            }
+        }
     }
 }
