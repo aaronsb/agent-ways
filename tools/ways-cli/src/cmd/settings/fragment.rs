@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 /// Configuration scope a fragment targets. Mirrors Claude Code's settings
 /// precedence tiers (ADR-147, "Managed-scope interop").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     User,
@@ -178,15 +178,16 @@ fn order_prefix(path: &Path) -> Option<u32> {
     }
 }
 
-/// Human name for a JSON value's kind, for error messages.
-fn json_kind(v: &serde_json::Value) -> &'static str {
+/// Human name for a JSON value's kind, for error messages. Shared with the
+/// linter so both surfaces speak the same JSON vocabulary.
+pub(crate) fn json_kind(v: &serde_json::Value) -> &'static str {
     match v {
         serde_json::Value::Null => "null",
         serde_json::Value::Bool(_) => "a boolean",
         serde_json::Value::Number(_) => "a number",
         serde_json::Value::String(_) => "a string",
-        serde_json::Value::Array(_) => "a list",
-        serde_json::Value::Object(_) => "a mapping",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
     }
 }
 

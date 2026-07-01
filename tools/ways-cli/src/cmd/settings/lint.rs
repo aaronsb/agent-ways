@@ -78,41 +78,47 @@ pub fn check(frags: &[Fragment]) -> Vec<Finding> {
                             message: format!(
                                 "`{key}` expects {}, got {}",
                                 spec.ty.name(),
-                                json_kind(value)
+                                super::fragment::json_kind(value)
                             ),
                         });
                     }
                     // scope-legal.
-                    scope_finding(spec.class, frag.scope, key, &file)
-                        .map(|f| findings.push(f));
+                    if let Some(f) = scope_finding(spec.class, frag.scope, key, &file) {
+                        findings.push(f);
+                    }
                 }
             }
         }
     }
 
-    // Cross-fragment check: duplicate top-level scalar.
-    let mut seen: HashMap<&str, &Path> = HashMap::new();
+    // Cross-fragment check: duplicate top-level scalar, partitioned by scope.
+    // Scopes compile to different destination files (user/project/managed), so a
+    // scalar set once per scope is not a conflict — only a repeat *within* a
+    // scope silently drops a value. `seen` tracks the most recent occurrence so a
+    // 3+ chain points each warning at its immediate predecessor.
+    let mut seen: HashMap<(Scope, &str), &Path> = HashMap::new();
     for frag in frags {
         let Some(obj) = frag.settings.as_object() else { continue };
         for (key, value) in obj {
             if !is_scalar(value) {
                 continue;
             }
-            if let Some(prev) = seen.get(key.as_str()) {
+            let slot = (frag.scope, key.as_str());
+            if let Some(prev) = seen.get(&slot) {
+                let prev = prev.display().to_string();
                 findings.push(Finding {
                     severity: Severity::Warning,
                     check: "duplicate",
                     file: frag.path.display().to_string(),
                     key: key.clone(),
                     message: format!(
-                        "scalar `{key}` is also set in {} — last wins by filename \
-                         order, the earlier value is dropped",
-                        prev.display()
+                        "scalar `{key}` is also set in {prev} at {} scope — last \
+                         wins by filename order, the earlier value is dropped",
+                        frag.scope.as_str()
                     ),
                 });
-            } else {
-                seen.insert(key.as_str(), frag.path.as_path());
             }
+            seen.insert(slot, frag.path.as_path());
         }
     }
 
@@ -149,17 +155,6 @@ fn scope_finding(class: ScopeClass, scope: Scope, key: &str, file: &str) -> Opti
 
 fn is_scalar(v: &serde_json::Value) -> bool {
     v.is_string() || v.is_number() || v.is_boolean()
-}
-
-fn json_kind(v: &serde_json::Value) -> &'static str {
-    match v {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "a boolean",
-        serde_json::Value::Number(_) => "a number",
-        serde_json::Value::String(_) => "a string",
-        serde_json::Value::Array(_) => "an array",
-        serde_json::Value::Object(_) => "an object",
-    }
 }
 
 /// Print findings. Human-readable by default; a JSON array with `--json`.
@@ -282,6 +277,23 @@ mod tests {
         assert_eq!(dup[0].severity, Severity::Warning);
         assert!(dup[0].file.contains("20-b.md"), "warning lands on the later file");
         assert!(dup[0].message.contains("10-a.md"), "and names the earlier one");
+    }
+
+    #[test]
+    fn duplicate_scalar_is_partitioned_by_scope() {
+        // The same scalar at user vs project scope compiles to different files —
+        // both apply, nothing is dropped, so no duplicate finding.
+        let u = frag("10.md", Scope::User, json!({ "cleanupPeriodDays": 30 }));
+        let p = frag("20.md", Scope::Project, json!({ "cleanupPeriodDays": 90 }));
+        assert!(of(&check(&[u, p]), "duplicate").is_empty());
+    }
+
+    #[test]
+    fn denied_mcp_servers_at_user_scope_is_clean() {
+        // Regression: deniedMcpServers concatenates from user scope (ADR-147
+        // interop); it must not raise a scope-legal error.
+        let f = frag("10.md", Scope::User, json!({ "deniedMcpServers": ["evil-server"] }));
+        assert!(of(&check(&[f]), "scope").is_empty());
     }
 
     #[test]

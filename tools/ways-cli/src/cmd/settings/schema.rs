@@ -100,8 +100,9 @@ pub fn lookup(key: &str) -> Option<KeySpec> {
         | "wslInheritsWindowsSettings"
         | "forceRemoteSettingsRefresh" => (ManagedOnly, Bool),
         // Uncertain value shapes — scope-class is what matters, type stays Any.
-        "disableSideloadFlags" | "blockedMarketplaces" | "allowedChannelPlugins"
-        | "allowedMcpServers" | "deniedMcpServers" => (ManagedOnly, Any),
+        "disableSideloadFlags" | "blockedMarketplaces" | "allowedChannelPlugins" => {
+            (ManagedOnly, Any)
+        }
         "pluginTrustMessage" | "forceLoginOrgUUID" | "requiredMinimumVersion"
         | "requiredMaximumVersion" => (ManagedOnly, String),
 
@@ -111,6 +112,13 @@ pub fn lookup(key: &str) -> Option<KeySpec> {
         "cleanupPeriodDays" => (Normal, Number),
         "includeCoAuthoredBy" | "enableAllProjectMcpServers" | "autoUpdates" => (Normal, Bool),
         "enabledMcpjsonServers" | "disabledMcpjsonServers" => (Normal, Array),
+        // User/project-settable MCP allow/deny lists. ADR-147 (Managed-scope
+        // interop) names deniedMcpServers as a *concatenating* key that takes
+        // effect from user scope — NOT managed-only; classing it ManagedOnly
+        // would false-error valid config. allowedMcpServers is treated the same
+        // (conservative on class to avoid a false error); type stays Any pending
+        // doc reconfirmation, which project-pulse tracks.
+        "allowedMcpServers" | "deniedMcpServers" => (Normal, Any),
         // Opaque objects — contents intentionally not schema-checked in v1.
         // `sandbox` includes managed sub-locks (sandbox.*.allowManaged*Only) that
         // a future slice may scope-check; for now the whole object is Normal.
@@ -130,8 +138,16 @@ mod tests {
     fn managed_only_keys_classify() {
         assert_eq!(lookup("allowManagedHooksOnly").unwrap().class, ScopeClass::ManagedOnly);
         assert_eq!(lookup("strictPluginOnlyCustomization").unwrap().class, ScopeClass::ManagedOnly);
-        assert_eq!(lookup("allowedMcpServers").unwrap().class, ScopeClass::ManagedOnly);
+        assert_eq!(lookup("disableSideloadFlags").unwrap().class, ScopeClass::ManagedOnly);
         assert_eq!(lookup("forceLoginOrgUUID").unwrap().class, ScopeClass::ManagedOnly);
+    }
+
+    #[test]
+    fn mcp_allow_deny_lists_are_user_settable_not_managed_only() {
+        // ADR-147 interop: deniedMcpServers concatenates from user scope, so it
+        // must not be classed ManagedOnly (which would false-error valid config).
+        assert_eq!(lookup("deniedMcpServers").unwrap().class, ScopeClass::Normal);
+        assert_eq!(lookup("allowedMcpServers").unwrap().class, ScopeClass::Normal);
     }
 
     #[test]
