@@ -199,8 +199,8 @@ make test-sim   # 8 integration scenarios
 ways status
 ```
 
-Model location: `${XDG_CACHE_HOME:-~/.cache}/claude-ways/user/minilm-l6-v2.gguf`
-Corpus: `${XDG_CACHE_HOME:-~/.cache}/claude-ways/user/ways-corpus.jsonl`
+Model location: `${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/minilm-l6-v2.gguf`
+Corpus: `${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/ways-corpus.jsonl`
 
 Both user-scope (`~/.claude/hooks/ways/`) and project-scope (`.claude/ways/`) corpora are scanned. They share the same model file.
 

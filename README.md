@@ -179,8 +179,8 @@ ways lint --global
 ways suggest --file ~/.claude/hooks/ways/softwaredev/code/security/security.md
 
 # Embedding similarity scores
-way-embed match --corpus ~/.cache/claude-ways/user/ways-corpus.jsonl \
-  --model ~/.cache/claude-ways/user/minilm-l6-v2.gguf \
+way-embed match --corpus ~/.cache/agent-ways/user/ways-corpus.jsonl \
+  --model ~/.cache/agent-ways/user/minilm-l6-v2.gguf \
   --query "pin lockfile versions"
 
 # Sibling vocabulary overlap (Jaccard)
