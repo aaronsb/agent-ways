@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
-# Install agent-ways into ~/.claude
+# Install agent-ways as an XDG application projected into ~/.claude (1.0, ADR-142/144).
 #
-# This is a gateway, not a butler. It checks readiness, detects complexity,
-# and either proceeds with a clean install or tells you what to sort out first.
+# The application lives in $XDG_DATA_HOME/agent-ways; ~/.claude becomes a thin
+# projection (symlinks + Claude-Code-owned files). This is a gateway, not a butler:
+# it stages the app, builds it, and reconciles the projection.
 #
 # Usage:
 #   scripts/install.sh                           # install from repo root
 #   scripts/install.sh --bootstrap               # clone latest + install
 #   curl ... | bash -s -- --bootstrap            # self-bootstrap from internet
-#   scripts/install.sh --dangerously-clobber     # overwrite existing ~/.claude/
+#   scripts/install.sh --dangerously-clobber     # nuke ~/.claude + app dir, reinstall
 #
-# The happy path: clone → make setup. Everything else is guardrails.
+# The happy path: stage app → make setup → ways reconcile. Everything else is guardrails.
 
 set -euo pipefail
 
 UPSTREAM_REPO="aaronsb/agent-ways"
 UPSTREAM_URL="https://github.com/${UPSTREAM_REPO}"
 DEST="${HOME}/.claude"
+
+# The application root (1.0 XDG layout). The repo is staged here; ~/.claude is a
+# projection of it. Honours XDG_DATA_HOME so sandbox installs stay contained.
+XDG_DATA="${XDG_DATA_HOME:-${HOME}/.local/share}"
+APP_DIR="${XDG_DATA}/agent-ways"
+XDG_BIN="${HOME}/.local/bin"
 
 # --- Colors ---
 
@@ -45,18 +52,19 @@ ${CYAN}Usage:${RESET}
 
 ${CYAN}Options:${RESET}
   --bootstrap               Clone latest release to temp, then install
-  --dangerously-clobber     Overwrite existing ~/.claude/ (backs up first)
+  --dangerously-clobber     Remove ~/.claude AND the app dir, then reinstall (backs up first)
   --help                    Show this help
 
-${CYAN}What it does:${RESET}
+${CYAN}What it does (1.0 XDG layout):${RESET}
   1. Checks prerequisites (git, jq, make)
-  2. Detects existing ~/.claude/ state
-  3. Clones into ~/.claude/ (or tells you what to sort out first)
-  4. Runs 'make setup' for semantic matching engine
+  2. Stages the app into \$XDG_DATA_HOME/agent-ways
+  3. Builds binaries + embedding model ('make setup')
+  4. Reconciles the projection into ~/.claude ('ways reconcile')
+     — your Claude Code files (projects/, credentials, settings) are preserved
 
-${CYAN}If you already have ~/.claude/ files:${RESET}
-  See ${UPSTREAM_URL}/blob/main/docs/install-guide.md
-  for how to prepare, back up, or merge your existing config.
+${CYAN}Already have a pre-1.0 in-place clone at ~/.claude?${RESET}
+  Migrate it to the 1.0 layout — see
+  ${UPSTREAM_URL}/blob/main/docs/migration-1.0.md
 
 HELP
 }
@@ -158,184 +166,148 @@ fi
 check_prereqs
 
 echo ""
-echo -e "${BOLD}agent-ways installer${RESET}"
-echo -e "Source: ${CYAN}${SRC}${RESET}"
-echo -e "Target: ${CYAN}${DEST}${RESET}"
+echo -e "${BOLD}agent-ways installer${RESET} ${DIM}(1.0 XDG projection)${RESET}"
+echo -e "Source:      ${CYAN}${SRC}${RESET}"
+echo -e "Application: ${CYAN}${APP_DIR}${RESET}"
+echo -e "Projection:  ${CYAN}${DEST}${RESET}"
 echo ""
 
-# --- Detect existing ~/.claude/ state ---
+# --- Helpers ---
 
-if [[ -d "$DEST" ]]; then
-  HAS_GIT=false
-  HAS_FILES=false
-  IS_US=false
-
-  [[ -d "$DEST/.git" ]] && HAS_GIT=true
-  [[ -n "$(ls -A "$DEST" 2>/dev/null)" ]] && HAS_FILES=true
-
-  # Check if it's already our repo
-  if [[ "$HAS_GIT" == "true" ]]; then
-    REMOTE_URL=$(git -C "$DEST" remote get-url origin 2>/dev/null || true)
-    OWNER_REPO=$(echo "$REMOTE_URL" | sed -E 's#.*github\.com[:/]##; s/\.git$//')
-    if [[ "$OWNER_REPO" == "$UPSTREAM_REPO" ]]; then
-      IS_US=true
-    fi
-    # Also check if it's a fork
-    if [[ "$IS_US" == "false" ]] && command -v gh &>/dev/null; then
-      PARENT=$(gh api "repos/${OWNER_REPO}" --jq '.parent.full_name' 2>/dev/null || true)
-      [[ "$PARENT" == "$UPSTREAM_REPO" ]] && IS_US=true
-    fi
+# Is a directory an agent-ways git clone (ours or a fork of ours)?
+is_agent_ways_repo() {
+  local dir="$1"
+  [[ -d "$dir/.git" ]] || return 1
+  local remote owner_repo parent
+  remote=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
+  owner_repo=$(echo "$remote" | sed -E 's#.*github\.com[:/]##; s/\.git$//')
+  [[ "$owner_repo" == "$UPSTREAM_REPO" ]] && return 0
+  if command -v gh &>/dev/null; then
+    parent=$(gh api "repos/${owner_repo}" --jq '.parent.full_name' 2>/dev/null || true)
+    [[ "$parent" == "$UPSTREAM_REPO" ]] && return 0
   fi
+  return 1
+}
 
-  # --- Already installed: update path ---
-  if [[ "$IS_US" == "true" ]]; then
-    echo -e "${GREEN}Already installed.${RESET} Updating..."
-    echo ""
-    echo -e "  ${DIM}cd ~/.claude && git pull${RESET}"
-    cd "$DEST"
-    git pull --ff-only 2>&1 || {
-      echo ""
-      echo -e "${YELLOW}git pull failed.${RESET} You may have local changes."
-      echo "  cd ~/.claude && git status"
-      echo "  Resolve conflicts, then: make setup"
-      exit 1
-    }
+# Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.
+link_path_binaries() {
+  mkdir -p "$XDG_BIN"
+  local b
+  for b in ways attend attend-chat; do
+    [[ -e "$APP_DIR/bin/$b" ]] && ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
+  done
+}
 
-    echo ""
-    echo -e "Running ${CYAN}make setup${RESET} for semantic matching..."
-    if [[ -f "$DEST/Makefile" ]]; then
-      make -C "$DEST" setup || true
-    fi
+# --- Clobber: remove the app dir AND ~/.claude (backs ~/.claude up first) ---
 
-    echo ""
-    echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
-    exit 0
-  fi
-
-  # --- Existing files: complexity detected ---
-  if [[ "$CLOBBER" == "false" ]]; then
-    echo -e "${YELLOW}~/.claude/ already exists and isn't an agent-ways install.${RESET}"
-    echo ""
-
-    if [[ "$HAS_GIT" == "true" ]]; then
-      echo -e "  Found: ${BOLD}.git/${RESET} directory (existing git tracking)"
-      echo -e "  Remote: ${DIM}$(git -C "$DEST" remote get-url origin 2>/dev/null || echo 'none')${RESET}"
-    fi
-
-    if [[ "$HAS_FILES" == "true" ]]; then
-      local_files=$(find "$DEST" -maxdepth 1 -type f | head -5)
-      echo -e "  Found: existing files"
-      echo "$local_files" | while read -r f; do
-        echo -e "    ${DIM}$(basename "$f")${RESET}"
-      done
-      more_count=$(find "$DEST" -maxdepth 1 -type f | wc -l)
-      if (( more_count > 5 )); then
-        echo -e "    ${DIM}... and $((more_count - 5)) more${RESET}"
-      fi
-    fi
-
-    # Re-runnable invocation. Under --bootstrap, $0 is an ephemeral temp clone
-    # that the EXIT trap deletes — so the options must reference the curl
-    # one-liner that re-fetches, not a path that won't exist when pasted.
-    if [[ "${AGENT_WAYS_BOOTSTRAPPED:-}" == "1" ]]; then
-      RERUN="curl -sL https://raw.githubusercontent.com/${UPSTREAM_REPO}/main/scripts/install.sh | bash -s -- --bootstrap"
-    else
-      RERUN="$0"
-    fi
-
-    echo ""
-    echo -e "${BOLD}You need to decide what to do with these files before installing.${RESET}"
-    echo ""
-    echo "  Options:"
-    echo -e "    1. Install alongside (keeps your config — ${BOLD}recommended${RESET}):"
-    echo -e "       ${CYAN}git clone ${UPSTREAM_URL} ~/.claude/agent-ways${RESET}"
-    echo -e "       ${CYAN}cd ~/.claude/agent-ways && make setup && make sync-to-home${RESET}"
-    echo "       Keeps your sessions, credentials, and settings; projects ways in"
-    echo "       (subdirectory topology — update with: git pull && make sync-to-home)."
-    echo ""
-    echo "    2. Back up and clobber:"
-    echo -e "       ${CYAN}${RERUN} --dangerously-clobber${RESET}"
-    echo "       (backs up to ~/.claude-backup-YYYYMMDD/ first)"
-    echo ""
-    echo "    3. Merge manually (if you have custom config):"
-    echo -e "       See ${CYAN}${UPSTREAM_URL}/blob/main/docs/install-guide.md${RESET}"
-    echo ""
-    echo "    4. Start fresh:"
-    echo -e "       ${CYAN}mv ~/.claude ~/.claude-old && ${RERUN}${RESET}"
-    echo ""
-    exit 1
-  fi
-
-  # --- Clobber path (--dangerously-clobber) ---
+if [[ "$CLOBBER" == "true" ]]; then
   BACKUP="${DEST}-backup-$(date +%Y%m%d-%H%M%S)"
-  echo -e "${YELLOW}Clobber mode.${RESET} Backing up to ${CYAN}${BACKUP}${RESET}"
-  echo ""
-
-  # Confirmation gate — interactive requires typing "clobber", non-interactive warns loudly
+  echo -e "${YELLOW}Clobber mode.${RESET} This removes the app dir and ~/.claude."
   if [[ -t 0 ]]; then
-    echo -e "  This will ${RED}replace${RESET} everything in ~/.claude/ with a fresh install."
-    echo -e "  Your backup will be at: ${BACKUP}"
+    echo -e "  ~/.claude will be backed up to: ${CYAN}${BACKUP}${RESET}"
     echo ""
     read -rp "  Type 'clobber' to confirm: " confirm < /dev/tty
-    if [[ "$confirm" != "clobber" ]]; then
-      echo -e "  ${GREEN}Aborted.${RESET} Nothing changed."
-      exit 1
-    fi
+    [[ "$confirm" == "clobber" ]] || { echo -e "  ${GREEN}Aborted.${RESET} Nothing changed."; exit 1; }
     echo ""
   else
-    echo -e "  ${YELLOW}WARNING: Non-interactive clobber.${RESET} Backing up and replacing ~/.claude/"
-    echo -e "  Backup: ${BACKUP}"
-    echo ""
+    echo -e "  ${YELLOW}Non-interactive clobber.${RESET} Backup: ${BACKUP}"
   fi
-
-  mv "$DEST" "$BACKUP"
-  echo -e "  Backed up to ${CYAN}${BACKUP}${RESET}"
+  [[ -e "$DEST" ]] && mv "$DEST" "$BACKUP" && echo -e "  Backed up ~/.claude → ${CYAN}${BACKUP}${RESET}"
+  [[ -e "$APP_DIR" ]] && rm -rf "$APP_DIR" && echo -e "  Removed app dir ${CYAN}${APP_DIR}${RESET}"
+  echo ""
 fi
 
-# --- Fresh install ---
+# --- Already installed (native XDG)? Update in place. ---
 
-echo -e "Cloning into ${CYAN}~/.claude/${RESET}..."
-echo ""
+if is_agent_ways_repo "$APP_DIR"; then
+  echo -e "${GREEN}Already installed${RESET} (app at ${CYAN}${APP_DIR}${RESET}). Updating..."
+  echo ""
+  git -C "$APP_DIR" pull --ff-only 2>&1 || {
+    echo ""
+    echo -e "${YELLOW}git pull failed.${RESET} You may have local changes in the app dir."
+    echo "  cd $APP_DIR && git status"
+    exit 1
+  }
+  echo ""
+  echo -e "Rebuilding (${CYAN}make setup${RESET})..."
+  make -C "$APP_DIR" setup || true
+  link_path_binaries
+  echo ""
+  echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
+  [[ -x "$APP_DIR/bin/ways" ]] && "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" || true
+  echo ""
+  echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
+  exit 0
+fi
 
-if [[ "$SRC" == "$DEST" ]]; then
-  # We're already in place (shouldn't happen, but be safe)
-  echo -e "${GREEN}Source is already ~/.claude/.${RESET}"
+# --- Legacy pre-1.0 in-place clone at ~/.claude? Point to the gated migrator. ---
+
+if is_agent_ways_repo "$DEST"; then
+  echo -e "${YELLOW}You have a pre-1.0 in-place agent-ways clone at ~/.claude.${RESET}"
+  echo ""
+  echo "  1.0 moved agent-ways to an XDG application projected into ~/.claude."
+  echo "  Migrate your install to the new layout (gated, backs up first):"
+  echo ""
+  echo -e "    ${CYAN}cd ~/.claude && git pull && make update${RESET}   # get the 1.0 ways binary"
+  echo -e "    ${CYAN}ways migrate --what-if${RESET}                    # preview (read-only)"
+  echo -e "    ${CYAN}ways migrate --execute${RESET}                    # convert (backs up first)"
+  echo ""
+  echo -e "  Guide: ${CYAN}${UPSTREAM_URL}/blob/main/docs/migration-1.0.md${RESET}"
+  echo ""
+  exit 0
+fi
+
+# --- App dir occupied by something that isn't our repo? Stop rather than clobber. ---
+
+if [[ -e "$APP_DIR" ]]; then
+  echo -e "${YELLOW}${APP_DIR} exists but is not an agent-ways clone.${RESET}"
+  echo "  Move it aside, or re-run with --dangerously-clobber."
+  exit 1
+fi
+
+# --- Fresh native install: stage app → build → reconcile projection ---
+
+echo -e "Staging application → ${CYAN}${APP_DIR}${RESET}..."
+mkdir -p "$(dirname "$APP_DIR")"
+if [[ "$SRC" == "$APP_DIR" ]]; then
+  echo -e "${GREEN}Source is already the app dir.${RESET}"
 else
-  git clone "$SRC" "$DEST" 2>&1
+  git clone "$SRC" "$APP_DIR" 2>&1
 fi
 
-# Set remote to upstream (source might be a temp dir from bootstrap)
-git -C "$DEST" remote set-url origin "$UPSTREAM_URL" 2>/dev/null || true
-
-# Make hooks executable
-find "$DEST/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
+# Point the app dir at upstream (SRC may be a temp bootstrap clone) and arm hooks.
+git -C "$APP_DIR" remote set-url origin "$UPSTREAM_URL" 2>/dev/null || true
+find "$APP_DIR/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
 echo ""
-echo -e "${GREEN}Installed.${RESET}"
-echo ""
-
-# --- Post-install: semantic matching setup ---
-
-echo -e "Setting up semantic matching engine..."
+echo -e "Building binaries + embedding model (${CYAN}make setup${RESET})..."
 echo -e "${DIM}(downloads ~21MB model + pre-built binary on first run)${RESET}"
 echo ""
+make -C "$APP_DIR" setup || {
+  echo ""
+  echo -e "${YELLOW}Build had issues.${RESET} Ways will fall back to pattern/keyword matching."
+  echo "  Retry with: cd $APP_DIR && make setup"
+  echo ""
+}
 
-if [[ -f "$DEST/Makefile" ]]; then
-  make -C "$DEST" install || {
-    echo ""
-    echo -e "${YELLOW}Semantic matching setup had issues.${RESET}"
-    echo "Ways will only fire on explicit pattern/commands triggers until the"
-    echo "embedding engine is installed. Retry later with:"
-    echo "  cd ~/.claude && make setup"
-    echo ""
-  }
+# Bootstrap the binaries onto PATH so 'ways' is callable.
+link_path_binaries
+
+echo ""
+echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
+echo -e "${DIM}(symlinks the projected trees; merges settings.json; your Claude Code files stay)${RESET}"
+echo ""
+mkdir -p "$DEST"
+if [[ -x "$APP_DIR/bin/ways" ]]; then
+  "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"
+else
+  echo -e "${YELLOW}ways binary not built — skipping reconcile.${RESET}"
+  echo "  After building, run: ways reconcile"
 fi
 
 echo ""
-echo -e "${BOLD}Done.${RESET}"
+echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
 echo ""
 echo "  Restart Claude Code for ways to take effect."
-echo "  Review hooks at: ~/.claude/hooks/"
-echo ""
-echo -e "  ${DIM}Tip: cd ~/.claude && make test${RESET}"
+echo -e "  If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
 echo ""
