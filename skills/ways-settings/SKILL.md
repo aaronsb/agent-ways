@@ -1,7 +1,7 @@
 ---
 name: ways-settings
-description: Interview-driven authoring of Claude Code's settings.json as composable, lintable fragments — scaffold from the settings schema, lint, compile, and project into ~/.claude. Synthesizes Claude Code's own config knowledge and its /insights usage report with the operator's history. Use when the operator wants to set up, review, or change their Claude Code settings or configuration. Not for editing individual ways (that is the ways skill), CLAUDE.md memory, or updating the agent-ways install (ways-update).
-allowed-tools: Bash, Read, Edit, Write
+description: Manage Claude Code's settings.json as a composable, versioned store of interviewed config fragments — scaffold from the schema, lint, compile, and project into ~/.claude, with rationale and provenance. Synthesizes Claude Code's own config knowledge and its /insights usage report with the operator's history. Use when the operator wants to build up, review, or reason about their configuration as a documented fragment store. Not for a one-off settings.json change (Claude Code's built-in update-config handles those), editing individual ways (the ways skill), CLAUDE.md memory, or updating the agent-ways install (ways-update).
+allowed-tools: Bash, Read, Edit
 ---
 
 # ways-settings: interview the operator to author Claude Code config
@@ -11,6 +11,10 @@ is deterministic mechanism — `lint`, `new`, `schema`, `compile`, `project`. Th
 skill is the intelligence on top: it *interviews* the operator, authors config
 **fragments** (markdown files with a `settings:` YAML block + a rationale body),
 then lints, compiles, and projects them into `~/.claude/settings.json`.
+
+For a single ad-hoc setting change, Claude Code's built-in `update-config` is
+lighter — reach for *this* skill when the operator wants their config **managed**:
+authored with rationale, linted, versioned as a store, and re-projectable.
 
 ## The one rule: synthesize with Claude Code, don't rebuild it
 
@@ -87,6 +91,8 @@ ways settings project "$STORE"                     # apply (keeps a .ways-projec
 - `project` coexists with the reconciler: it owns the fragment keys and preserves
   `hooks`/`permissions` (the reconciler's) — it skips those with a warning.
 - Managed scope is never auto-written; it prints a blob to paste into the console.
+- Project scope writes `$CLAUDE_PROJECT_DIR/.claude/settings.json` (or cwd) — the one
+  cwd-dependent path. Confirm the operator is in the intended project before applying.
 
 ### pull-schema
 ```bash
@@ -94,10 +100,11 @@ ways settings schema --refresh       # fetch the latest schema (no rebuild neede
 ```
 Do this when a key the operator wants isn't recognized, or the schema looks stale.
 
-### suggest — mine what Claude Code already knows (the high-value move)
+### suggest — mine what Claude Code already knows (v2; the high-value move)
 
-Read the newest `/insights` report and turn its **settings-relevant** findings into
-fragment proposals:
+The MVP loop is author → check → rebuild → project; `suggest` is the v2 layer
+(ADR-149). Read the newest `/insights` report and turn its **settings-relevant**
+findings into fragment proposals:
 
 ```bash
 ls -t "$HOME/.claude/usage-data/report-"*.html 2>/dev/null | head -1
