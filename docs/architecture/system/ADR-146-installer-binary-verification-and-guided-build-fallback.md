@@ -83,6 +83,11 @@ backstop:
   app dir (`$XDG_DATA_HOME/agent-ways`) and ask it to finish setup. A shipped
   agent-context file (see 4) primes the agent with the exact, safe steps. This
   turns "go compile a C++ project" into "ask the assistant that's already here."
+  For the user who doesn't even know *what* to ask, the card supplies a
+  **ready-to-paste prompt** — "if you're not sure what to do, start Claude Code as
+  usual and paste this:" — with the real values already substituted (the resolved
+  app-dir path, the platform triple, and which binary failed to launch). Recovery
+  drops to a single copy-paste; the agent, primed by the context doc, does the rest.
 - **Do it yourself.** The precise commands against the *already-staged* source,
   shaped by the dep check: deps present → `cd "$XDG_DATA_HOME/agent-ways" && make
   setup`; deps missing but a recognized package manager (pacman/apt/dnf/brew) is
