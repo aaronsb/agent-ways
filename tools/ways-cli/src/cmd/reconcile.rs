@@ -209,7 +209,7 @@ fn make_symlink(src: &Path, dst: &Path, is_dir: bool) -> Result<()> {
 
 /// True if `dest` is a legacy in-place agent-ways clone (its own git repo that
 /// also ships the app source) rather than a thin projection.
-fn is_legacy_in_place(dest: &Path) -> bool {
+pub(crate) fn is_legacy_in_place(dest: &Path) -> bool {
     // A projection has symlinked/looked-up subtrees but no app source of its
     // own; a clone has .git AND the app's source dirs (tools/, docs/).
     dest.join(".git").exists() && dest.join("tools").is_dir() && dest.join("docs").is_dir()

@@ -387,6 +387,12 @@ enum Commands {
         #[arg(long, global = true)]
         global: bool,
     },
+    /// Update the agent-ways install — pull, refresh binaries (pre-built first), regenerate corpus, reproject
+    Update {
+        /// Show what would run without executing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Governance provenance queries — report, trace, control, policy, gaps, stale, active, matrix, lint
     Governance {
         #[command(subcommand)]
@@ -819,6 +825,7 @@ fn main() -> Result<()> {
             };
             cmd::governance::run(gov_mode, json, global)
         }
+        Commands::Update { dry_run } => cmd::update::run(dry_run),
         Commands::Settings { command } => match command {
             SettingsCommand::Lint { path, json } => {
                 let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
