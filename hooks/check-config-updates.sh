@@ -154,6 +154,11 @@ if ! git -C "$CLAUDE_DIR" rev-parse --git-dir >/dev/null 2>&1 \
     fi
     BEHIND=$(git -C "$APP_DIR" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)
     write_cache "native" "$BEHIND" "repo=${APP_DIR}" "$FETCH_TS"
+  else
+    # Native fork / non-GitHub origin: behind-upstream isn't computed yet (documented
+    # follow-up), but still stamp a native-type cache (behind=0, no nudge) so a stale
+    # `fork`/`clone` entry from a prior topology can't render a wrong ~/.claude command.
+    write_cache "native" "0" "repo=${APP_DIR}"
   fi
   exit 0
 fi
