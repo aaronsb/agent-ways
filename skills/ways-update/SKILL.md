@@ -18,7 +18,7 @@ doesn't do.
 cd "$XDG_DATA_HOME/agent-ways"
 git pull --ff-only        # (or fetch/merge upstream for a fork — see step 2)
 make setup                # rebuild ways/attend/way-embed + regenerate the corpus
-ways reconcile            # refresh the ~/.claude projection + re-merge settings.json
+./bin/ways reconcile      # refresh the ~/.claude projection + re-merge settings.json
 ```
 
 Because the projected roots are symlinks into the app dir, a pull is *live* for
@@ -40,8 +40,8 @@ APP="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
 
 ```bash
 # Legacy pre-1.0 in-place clone? ~/.claude is itself the agent-ways repo.
-if git -C "$HOME/.claude" rev-parse --git-dir >/dev/null 2>&1 \
-   && [ -d "$HOME/.claude/tools" ] && [ -d "$HOME/.claude/docs" ]; then
+# (Same triad as reconcile.rs is_legacy_in_place: own .git + ships tools/ + docs/.)
+if [ -d "$HOME/.claude/.git" ] && [ -d "$HOME/.claude/tools" ] && [ -d "$HOME/.claude/docs" ]; then
   echo "~/.claude looks like a pre-1.0 in-place clone. Don't update it in place —"
   echo "migrate to the 1.0 projection first:  ways migrate --what-if  then  --execute"
   exit 1
@@ -82,6 +82,8 @@ git -C "$APP" pull --ff-only
 **Fork** (origin is your fork, `upstream` tracks agent-ways):
 
 ```bash
+git -C "$APP" remote get-url upstream >/dev/null 2>&1 \
+  || { echo "No 'upstream' remote. Add it: git -C \"$APP\" remote add upstream https://github.com/aaronsb/agent-ways"; exit 1; }
 git -C "$APP" fetch upstream && git -C "$APP" merge upstream/main   # resolve conflicts in custom ways
 ```
 
@@ -98,11 +100,12 @@ fails partway, the sub-targets are re-runnable (`make -C "$APP" update-binaries`
 ### 4. Refresh the projection
 
 ```bash
-ways reconcile --source "$APP" --dest "$HOME/.claude"
+"$APP/bin/ways" reconcile --source "$APP" --dest "$HOME/.claude"
 ```
 
 Idempotent and silent when nothing structural changed; relinks any new projected
-root and re-runs the `settings.json` merge.
+root and re-runs the `settings.json` merge. (Called by absolute path — like
+`install.sh` does — so it works even if `~/.local/bin` isn't on `PATH`.)
 
 ### 5. Tell the user to restart
 
