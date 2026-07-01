@@ -1,11 +1,16 @@
-//! The vendored Claude Code settings JSON Schema (SchemaStore), parsed into a
-//! lookup of top-level key → `{ type, description }`.
+//! The Claude Code settings JSON Schema (SchemaStore), read at runtime and parsed
+//! into a lookup of top-level key → `{ type, description, placeholder }`.
 //!
 //! This is the **shape source**: the set of valid `settings.json` keys, their
-//! JSON types, and human descriptions — acquired deterministically and bundled
-//! via `include_str!` (offline, ships with the binary; the lockfile pattern).
-//! It powers template scaffolding (`ways settings new`) and the linter's
-//! key-set/type checks.
+//! JSON types, and human descriptions. It powers template scaffolding
+//! (`ways settings new`) and the linter's key-set/type checks.
+//!
+//! **Externalized, not compiled in** (ADR-147): the schema is a data file read
+//! from [`crate::paths::settings_schema_file`] the first time a `ways settings`
+//! command needs it — never on the every-turn hook path. Claude Code's settings
+//! surface changes often, so this can be refreshed without rebuilding the binary.
+//! If the file is absent or unparseable, [`active`] returns `None` and callers
+//! degrade (the linter skips schema checks; scaffolding errors).
 //!
 //! It deliberately does **not** encode scope-class (managed-only /
 //! managed-overridable) — a generic JSON Schema has no such axis. That stays the
@@ -13,15 +18,13 @@
 //!
 //! Provenance: community-maintained SchemaStore, not an official Anthropic
 //! artifact (anthropics/claude-code#11795); it may lag the latest CLI release.
-//! Refresh with `refresh-settings-schema.sh` and re-commit; project-pulse tracks
-//! the drift.
+//! Refresh with `refresh-settings-schema.sh`; project-pulse tracks the drift.
 
+use anyhow::Context;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::LazyLock;
-
-/// The vendored schema, embedded at build time.
-const SCHEMA_JSON: &str = include_str!("claude-code-settings.schema.json");
 
 /// A coarse JSON type — enough for template placeholders and type checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,13 +106,40 @@ impl SettingsSchema {
     }
 }
 
-/// The bundled schema, parsed once. Panics only if the *vendored* file is
-/// malformed — a build-time invariant, not a runtime input.
-pub fn bundled() -> &'static SettingsSchema {
-    static SCHEMA: LazyLock<SettingsSchema> = LazyLock::new(|| {
-        parse(SCHEMA_JSON).expect("vendored settings schema must parse")
+/// Parse a settings schema from a file on disk.
+pub fn load(path: &Path) -> anyhow::Result<SettingsSchema> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading settings schema {}", path.display()))?;
+    parse(&text)
+}
+
+/// The active settings schema, read once from the resolved runtime path
+/// ([`crate::paths::settings_schema_file`]). `None` if the file is absent (a
+/// normal, recoverable state) or unparseable (logged) — callers degrade rather
+/// than fail: the linter skips schema-valid, scaffolding errors with guidance.
+pub fn active() -> Option<&'static SettingsSchema> {
+    static SCHEMA: LazyLock<Option<SettingsSchema>> = LazyLock::new(|| {
+        let path = crate::paths::settings_schema_file();
+        if !path.exists() {
+            return None; // absent — a recoverable state, callers handle it
+        }
+        match load(&path) {
+            Ok(schema) => Some(schema),
+            Err(e) => {
+                eprintln!("[ways] settings schema at {} is unusable: {e:#}", path.display());
+                None
+            }
+        }
     });
-    &SCHEMA
+    SCHEMA.as_ref()
+}
+
+/// Load the repo's shipped schema copy for tests, bypassing runtime resolution.
+#[cfg(test)]
+pub(crate) fn test_schema() -> SettingsSchema {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../share/claude-code-settings.schema.json");
+    load(&path).expect("repo settings schema must load in tests")
 }
 
 fn parse(json: &str) -> anyhow::Result<SettingsSchema> {
@@ -224,15 +254,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_schema_parses_and_is_broad() {
-        let s = bundled();
-        // The vendored SchemaStore schema carried 84 top-level keys when pinned.
+    fn shipped_schema_parses_and_is_broad() {
+        let s = test_schema();
+        // The SchemaStore schema carried 84 top-level keys when pinned.
         assert!(s.len() >= 80, "expected a broad schema, got {}", s.len());
     }
 
     #[test]
     fn known_keys_have_expected_types_and_descriptions() {
-        let s = bundled();
+        let s = test_schema();
         assert_eq!(s.get("cleanupPeriodDays").unwrap().ty, PropType::Number);
         assert_eq!(s.get("model").unwrap().ty, PropType::String);
         assert_eq!(s.get("permissions").unwrap().ty, PropType::Object);
@@ -252,7 +282,7 @@ mod tests {
     fn schema_is_broader_than_the_curated_overlay() {
         // A key present in the vendored schema but NOT in our hand-curated
         // scope-class overlay — the whole point of acquiring the schema.
-        let s = bundled();
+        let s = test_schema();
         assert!(s.get("autoMemoryEnabled").is_some());
         assert!(super::super::schema::scope_class("autoMemoryEnabled").is_none());
     }
@@ -269,7 +299,7 @@ mod tests {
 
     #[test]
     fn unknown_key_absent() {
-        assert!(bundled().get("totallyMadeUpKey").is_none());
+        assert!(test_schema().get("totallyMadeUpKey").is_none());
     }
 
     #[test]
@@ -277,7 +307,8 @@ mod tests {
         // `strictPluginOnlyCustomization` is anyOf[boolean, array] in the schema.
         // It must validate as Other (accept either branch) so a valid `true`
         // doesn't false-error, yet still offer a concrete placeholder.
-        let info = bundled().get("strictPluginOnlyCustomization").unwrap();
+        let schema = test_schema();
+        let info = schema.get("strictPluginOnlyCustomization").unwrap();
         assert_eq!(info.ty, PropType::Other, "a union must validate permissively");
         assert!(info.ty.matches(&serde_json::json!(true)));
         assert!(info.ty.matches(&serde_json::json!([])));

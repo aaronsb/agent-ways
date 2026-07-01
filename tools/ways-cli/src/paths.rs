@@ -158,6 +158,32 @@ pub fn frontmatter_schema() -> PathBuf {
     core_ways_root().join("frontmatter-schema.yaml")
 }
 
+/// The Claude Code settings schema, read at runtime by `ways settings` (ADR-147).
+///
+/// Externalized rather than compiled into the binary: Claude Code's settings
+/// surface changes often, so this must update without a rebuild, and the
+/// every-turn binary shouldn't carry data only `ways settings` reads. Resolution
+/// precedence (first existing wins; if none exist the shipped path is returned so
+/// the caller can name it in an error):
+///   1. `$WAYS_SETTINGS_SCHEMA_FILE` — explicit override
+///   2. `$XDG_CONFIG/agent-ways/claude-code-settings.schema.json` — durable user
+///      copy, the `--refresh` target; survives `make update`
+///   3. `$XDG_DATA/agent-ways/share/claude-code-settings.schema.json` — shipped
+///      with the app, refreshed by `make update`
+pub fn settings_schema_file() -> PathBuf {
+    const FILE: &str = "claude-code-settings.schema.json";
+    if let Ok(p) = std::env::var("WAYS_SETTINGS_SCHEMA_FILE") {
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    let user = normalize_path_sep(&config_root().join(FILE));
+    if user.exists() {
+        return user;
+    }
+    normalize_path_sep(&data_root().join("share").join(FILE))
+}
+
 // --- user ($XDG_CONFIG) ---
 
 /// The operator's own ways root: `$XDG_CONFIG/agent-ways/ways` (the new "user"

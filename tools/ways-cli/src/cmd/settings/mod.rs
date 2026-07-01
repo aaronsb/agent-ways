@@ -28,14 +28,21 @@ pub fn schema_command(source_only: bool) {
         println!("{url}");
         return;
     }
-    let schema = schema_doc::bundled();
-    println!("Claude Code settings schema (vendored)");
-    println!("  keys:     {}", schema.len());
+    let file = crate::paths::settings_schema_file();
+    println!("Claude Code settings schema");
+    match schema_doc::active() {
+        Some(s) => println!("  file:     {} ({} keys)", file.display(), s.len()),
+        None => println!(
+            "  file:     {} (NOT FOUND — run refresh-settings-schema.sh)",
+            file.display()
+        ),
+    }
     println!("  source:   {url}");
     println!("  resolved: {}", origin.as_str());
     println!(
-        "  refresh:  WAYS_SETTINGS_SCHEMA_URL=<url> or set `settings_schema_url` \
-         in config, then run refresh-settings-schema.sh and rebuild"
+        "  refresh:  refresh-settings-schema.sh writes the file from <source> \
+         (no rebuild needed); WAYS_SETTINGS_SCHEMA_URL / config `settings_schema_url` \
+         override the source"
     );
     println!(
         "  note:     community SchemaStore, not an official Anthropic artifact; \
