@@ -132,7 +132,13 @@ pub fn check(frags: &[Fragment], schema: Option<&schema_doc::SettingsSchema>) ->
     for frag in frags {
         let Some(obj) = frag.settings.as_object() else { continue };
         for (key, value) in obj {
-            if !is_scalar(value) {
+            // A repeat is lossy exactly when compile would *override* it: scalars,
+            // and arrays that aren't concat paths. Objects deep-merge and concat
+            // lists union — those are not lossy, so they aren't flagged. The
+            // concat law is shared with compile so the two can't disagree.
+            let lossy = is_scalar(value)
+                || (value.is_array() && !super::compile::is_concat_path(key));
+            if !lossy {
                 continue;
             }
             let slot = (frag.scope, key.as_str());
@@ -144,8 +150,8 @@ pub fn check(frags: &[Fragment], schema: Option<&schema_doc::SettingsSchema>) ->
                     file: frag.path.display().to_string(),
                     key: key.clone(),
                     message: format!(
-                        "scalar `{key}` is also set in {prev} at {} scope — last \
-                         wins by filename order, the earlier value is dropped",
+                        "`{key}` is also set in {prev} at {} scope — last wins by \
+                         filename order, the earlier value is dropped",
                         frag.scope.as_str()
                     ),
                 });
@@ -220,7 +226,13 @@ pub fn run(dir: &Path, json: bool) -> Result<bool> {
     let frags = super::fragment::load_dir(dir)?;
     let findings = check(&frags, schema_doc::active());
     report(&findings, json);
-    Ok(findings.iter().any(|f| f.severity == Severity::Error))
+    Ok(has_errors(&findings))
+}
+
+/// Whether any finding is an error — the shared "should this gate fail?" predicate
+/// (used by lint's own exit code and by `compile`'s lint gate).
+pub fn has_errors(findings: &[Finding]) -> bool {
+    findings.iter().any(|f| f.severity == Severity::Error)
 }
 
 #[cfg(test)]
@@ -370,12 +382,22 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_ignores_objects_and_arrays() {
-        // permissions (object) and an array key set twice — deep-merge/concat,
-        // not lossy, so no duplicate finding.
-        let a = frag("10.md", Scope::User, json!({ "permissions": { "allow": ["a"] }, "enabledMcpjsonServers": ["x"] }));
-        let b = frag("20.md", Scope::User, json!({ "permissions": { "allow": ["b"] }, "enabledMcpjsonServers": ["y"] }));
+    fn duplicate_ignores_objects_and_concat_arrays() {
+        // permissions (object, deep-merges) and deniedMcpServers (a concat path,
+        // unions) set twice are not lossy, so no duplicate finding.
+        let a = frag("10.md", Scope::User, json!({ "permissions": { "allow": ["a"] }, "deniedMcpServers": ["x"] }));
+        let b = frag("20.md", Scope::User, json!({ "permissions": { "allow": ["b"] }, "deniedMcpServers": ["y"] }));
         assert!(of(&checked(&[a, b]), "duplicate").is_empty());
+    }
+
+    #[test]
+    fn duplicate_warns_on_overriding_array() {
+        // A non-concat array (enabledMcpjsonServers) set twice IS lossy — compile
+        // overrides it (last wins), so lint must warn. Closes the lint/compile
+        // divergence (PR #242 review H2).
+        let a = frag("10.md", Scope::User, json!({ "enabledMcpjsonServers": ["x"] }));
+        let b = frag("20.md", Scope::User, json!({ "enabledMcpjsonServers": ["y"] }));
+        assert_eq!(of(&checked(&[a, b]), "duplicate").len(), 1);
     }
 
     #[test]

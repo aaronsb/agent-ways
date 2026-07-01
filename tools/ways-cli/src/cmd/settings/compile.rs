@@ -34,11 +34,11 @@ pub fn run(store: &Path, scope_filter: Option<Scope>, out: Option<&Path>) -> Res
 
     // Lint gate — refuse to bake a store with errors (warnings are fine).
     let findings = lint::check(&frags, schema_doc::active());
-    let errors: Vec<_> = findings
-        .iter()
-        .filter(|f| f.severity == lint::Severity::Error)
-        .collect();
-    if !errors.is_empty() {
+    if lint::has_errors(&findings) {
+        let errors: Vec<_> = findings
+            .iter()
+            .filter(|f| f.severity == lint::Severity::Error)
+            .collect();
         eprintln!(
             "compile refused: {} lint error(s) — fix first (`ways settings lint {}`):",
             errors.len(),
@@ -109,12 +109,28 @@ pub fn run(store: &Path, scope_filter: Option<Scope>, out: Option<&Path>) -> Res
 
 /// The documented concat-and-dedupe paths. Everything else overrides (objects
 /// deep-merge). Kept explicit and minimal; extend as Claude Code's edge cases
-/// surface (see ADR-147 Q3 — the merge law is a spec to mirror, not invent).
-fn is_concat(path: &str) -> bool {
+/// surface (ADR-147 Q3 — the merge law is a spec to mirror, not invent).
+///
+/// This is the **single source of the concat law**: the linter's duplicate-scalar
+/// check consults it too (a repeat of a non-concat list is lossy under override
+/// and must be warned), so the two components cannot diverge.
+pub fn is_concat_path(path: &str) -> bool {
     matches!(
         path,
-        "permissions.allow" | "permissions.deny" | "permissions.ask" | "deniedMcpServers"
+        "permissions.allow"
+            | "permissions.deny"
+            | "permissions.ask"
+            | "permissions.additionalDirectories"
+            | "allowedMcpServers"
+            | "deniedMcpServers"
     )
+}
+
+/// Drop provenance for `path` and everything nested under it — used when a value
+/// is replaced by a differently-shaped one, so stale leaf entries don't linger.
+fn prune_provenance(prov: &mut Provenance, path: &str) {
+    let prefix = format!("{path}.");
+    prov.retain(|k, _| k != path && !k.starts_with(&prefix));
 }
 
 /// Deep-merge a scope's fragments (already filename-ordered) into one baked
@@ -152,21 +168,30 @@ fn merge_object(
             format!("{prefix}.{key}")
         };
 
-        if is_concat(&path) && val.is_array() {
-            // Concat + dedupe (order-preserving) into the accumulated array.
+        if is_concat_path(&path) && val.is_array() {
             let entry = acc_obj
                 .entry(key.clone())
                 .or_insert_with(|| Value::Array(Vec::new()));
             if let Some(arr) = entry.as_array_mut() {
+                // Concat + dedupe (order-preserving). Credit this fragment only if
+                // it actually contributed a new entry (net-zero adds don't count).
+                let mut added = false;
                 for item in val.as_array().expect("checked is_array") {
                     if !arr.contains(item) {
                         arr.push(item.clone());
+                        added = true;
                     }
                 }
+                if added {
+                    prov.entry(path).or_default().push(frag.to_string());
+                }
             } else {
-                *entry = val.clone(); // prior value wasn't an array — replace
+                // Prior value wasn't an array (shape change) — replace, and reset
+                // provenance (the discarded value's source no longer applies).
+                *entry = val.clone();
+                prune_provenance(prov, &path);
+                prov.insert(path, vec![frag.to_string()]);
             }
-            prov.entry(path).or_default().push(frag.to_string());
         } else if val.is_object() {
             // Deep-merge: ensure the slot is an object, then recurse.
             let entry = acc_obj
@@ -174,10 +199,13 @@ fn merge_object(
                 .or_insert_with(|| Value::Object(Map::new()));
             if !entry.is_object() {
                 *entry = Value::Object(Map::new());
+                prune_provenance(prov, &path); // was a leaf, now an object
             }
             merge_object(entry, val.as_object().expect("checked is_object"), &path, frag, prov);
         } else {
             // Override — last fragment wins; provenance is the effective source.
+            // Prune any stale nested entries if we're replacing an object.
+            prune_provenance(prov, &path);
             acc_obj.insert(key.clone(), val.clone());
             prov.insert(path, vec![frag.to_string()]);
         }
@@ -252,6 +280,30 @@ mod tests {
         assert_eq!(baked["permissions"]["defaultMode"], json!("plan"));
         assert_eq!(prov["permissions.defaultMode"], vec!["20-b.md"]);
         assert_eq!(prov["permissions.allow"], vec!["10-a.md", "20-b.md"]);
+    }
+
+    #[test]
+    fn additional_directories_concatenate() {
+        // Regression (PR #242 review H1): permissions.additionalDirectories merges
+        // in CC, so it must concat — not silently drop an entry.
+        let (baked, _) = merge(&[
+            frag("10-a.md", json!({ "permissions": { "additionalDirectories": ["/a"] } })),
+            frag("20-b.md", json!({ "permissions": { "additionalDirectories": ["/b"] } })),
+        ]);
+        assert_eq!(baked["permissions"]["additionalDirectories"], json!(["/a", "/b"]));
+    }
+
+    #[test]
+    fn provenance_is_pruned_on_shape_change() {
+        // Regression (review M1): a later fragment replacing an object with a
+        // scalar must drop the stale nested-leaf provenance.
+        let (baked, prov) = merge(&[
+            frag("10-a.md", json!({ "env": { "A": "1" } })),
+            frag("20-b.md", json!({ "env": "off" })),
+        ]);
+        assert_eq!(baked["env"], json!("off"));
+        assert!(prov.get("env.A").is_none(), "stale nested provenance must be pruned");
+        assert_eq!(prov["env"], vec!["20-b.md"]);
     }
 
     #[test]
