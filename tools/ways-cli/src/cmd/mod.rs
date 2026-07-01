@@ -1,4 +1,5 @@
 pub mod banner;
+pub mod config;
 pub mod context;
 pub mod corpus;
 pub mod disable;
