@@ -70,7 +70,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Accepted |
 | [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
 | [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Accepted |
-| [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Draft |
+| [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
