@@ -116,7 +116,7 @@ sequenceDiagram
 
 2. **Parent-boost.** Before comparing a candidate way's score to its threshold, the matcher checks the way's ancestor chain for any fired marker. If found, the effective threshold is `base_threshold * parent_threshold_multiplier` (default 0.8). Children within an active parent domain fire on weaker signal; children in cold domains need to clear the full bar.
 
-Configure via `~/.config/ways/config.yaml`:
+Configure via `~/.config/agent-ways/config.yaml`:
 ```yaml
 parent_threshold_multiplier: 0.8   # 1.0 disables the boost
 default_embed_threshold: 0.35      # English base for nodes without explicit override

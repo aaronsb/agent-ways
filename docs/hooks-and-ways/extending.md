@@ -138,7 +138,7 @@ ways:
 
 ### Disabling an entire domain (global)
 
-Add the domain to `disabled_domains` in `$XDG_CONFIG_HOME/ways/config.yaml`:
+Add the domain to `disabled_domains` in `$XDG_CONFIG_HOME/agent-ways/config.yaml`:
 
 ```yaml
 disabled_domains:

@@ -449,7 +449,7 @@ flowchart TD
 
 ## Domain Enable/Disable
 
-`$XDG_CONFIG_HOME/ways/config.yaml` controls which domains are active (a legacy `~/.claude/ways.json` with `{"disabled": [...]}` is still honored):
+`$XDG_CONFIG_HOME/agent-ways/config.yaml` controls which domains are active (a legacy `$XDG_CONFIG_HOME/ways/config.yaml`, and `~/.claude/ways.json` with `{"disabled": [...]}`, are still honored):
 
 ```yaml
 disabled_domains:
