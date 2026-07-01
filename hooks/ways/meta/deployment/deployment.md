@@ -43,7 +43,7 @@ a **pre-1.0 in-place clone** (it has its own `.git` *and* ships the app source â
 reconcile it â€” point the user at migration:
 
 ```
-ways migrate --what-if     # preview: what moves where
+ways migrate --what-if     # preview (read-only dry-run)
 ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
 ```
 

@@ -26,9 +26,10 @@ if [[ ! -x "$WAYS_BIN" ]]; then
 ⚠️  Ways setup incomplete — the \`ways\` binary is not installed.
 
 Hooks will be inactive until setup completes. Build the app source and
-reproject (the Makefile lives in the app dir, not in ~/.claude):
+reproject (the Makefile lives in the app dir, not in ~/.claude; call the
+binary by full path since it isn't on PATH yet):
 
-    cd "$APP_DIR" && make setup && ways reconcile
+    cd "$APP_DIR" && make setup && "$APP_DIR/bin/ways" reconcile
 
 If the app dir doesn't exist, re-run the installer one-liner. Setup
 downloads the ways binary, embedding model, and generates the matching
@@ -82,7 +83,7 @@ if ! probe_embed "embedding engine health probe" | grep -qE '[0-9]\.[0-9]'; then
    to over- and under-fire until this is fixed). It is a hard dependency (ADR-125).
 
    Repair (rebuild the binary, model, and corpus from the app source, then reproject):
-     cd "$APP_DIR" && make setup && ways reconcile
+     cd "$APP_DIR" && make setup && "$APP_DIR/bin/ways" reconcile
 
 MSG
 fi
