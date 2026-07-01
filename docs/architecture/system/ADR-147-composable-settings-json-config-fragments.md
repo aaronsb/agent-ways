@@ -105,16 +105,30 @@ binary embeds keys only as minified string literals — not cleanly extractable.
 The community **SchemaStore** schema
 (`json.schemastore.org/claude-code-settings.json` — 84 keys, every one carrying a
 `description`) is the de-facto definition editors already use for autocomplete, so
-we adopt it as the shape source: **vendored** — pinned and bundled into the binary
-(`include_str!`), offline, the lockfile pattern — not fetched at runtime. It
-supplies the key set, types, and descriptions (enough to generate fill-in-the-blank
-fragment templates); it deliberately does *not* encode scope-class (managed-only /
-managed-overridable), which stays the small hand-curated overlay.
+we adopt it as the shape source. It supplies the key set, types, and descriptions
+(enough to generate fill-in-the-blank fragment templates); it deliberately does
+*not* encode scope-class (managed-only / managed-overridable), which stays the
+small hand-curated overlay.
 
-Because it is community-maintained and can lag the CLI, the *source* is a
-**configuration surface** (`settings_schema_url`, also env-overridable), not a
-constant — an org can point at an internal mirror or a version-pinned URL, or an
-official Anthropic schema if one is ever published. project-pulse tracks the drift.
+The schema is **externalized, not compiled in**: a data file shipped alongside the
+binary (`share/claude-code-settings.schema.json`, riding the app's data-dir clone),
+read lazily at runtime only when a `ways settings` command needs it — never on the
+every-turn hook path. Claude Code's settings surface changes frequently, so this is
+deliberate: the schema updates **without a rebuild** (`make update`'s `git pull`
+refreshes the shipped copy; `refresh-settings-schema.sh` writes a durable user copy
+that takes effect immediately), and the binary that runs on every turn does not
+carry data it rarely reads. The trade — the file can be absent — is handled by
+**graceful degradation**: the linter skips schema-valid (scope-legal and duplicate
+still run off the overlay) and scaffolding errors with guidance, rather than the
+tool breaking. An earlier draft bundled it via `include_str!` for offline
+determinism; the update cadence and every-turn binary size won out.
+
+Two configuration surfaces follow, both env-overridable and both defaulting
+sanely: the **source** (`settings_schema_url`) — where a refresh *fetches* from, so
+an org can point at an internal mirror, a version-pinned URL, or an official
+Anthropic schema if one is ever published; and the **file location**
+(`$WAYS_SETTINGS_SCHEMA_FILE` › `$XDG_CONFIG` durable copy › shipped copy) — which
+file is *read*. project-pulse tracks the drift.
 
 ### Independence and the shape contract
 
@@ -242,11 +256,27 @@ fragment pattern extends to them later if wanted.
   surface: no lint, no lifecycle, no rationale, no composition. It is a deploy target
   the factory *feeds*, not a place to author.
 
-## Open Questions
+## Resolved Questions
 
-- **Store location** — `$XDG_CONFIG_HOME/agent-ways/config/` (mirroring the user-ways
-  root, ADR-143) vs. a dedicated repo an org can share.
-- **Test depth** — static only (schema/scope/duplicate) for v1 vs. a dynamic gate that
-  boots a sandbox Claude Code against the compiled output.
-- **Manager/ways boundary** — how much of the lint/compile is its own tool vs. a
-  subcommand of `ways`, given the stated independence.
+Settled during implementation (slices 1–2):
+
+- **Store location** — *resolved.* The store path is a **parameter** with an XDG
+  default (`$XDG_CONFIG_HOME/agent-ways/settings/`). A personal user gets the
+  default; an org points the tool at a shared git repo (`ways settings lint
+  ./our-config/`). A shared repo is a *different argument*, not a separate mode, so
+  the original dichotomy dissolves. (Default is `settings/`, aligned with the
+  `ways settings` command, not the ADR's earlier `config/`.)
+- **Test depth** — *decided: static only; decline the live-boot gate.* Claude Code
+  parses settings **tolerantly** (invalid entries are stripped with a warning,
+  remaining policy enforced), so booting a sandbox CC against compiled output would
+  not fail on bad config — a low-signal gate. The static checks flag exactly what CC
+  would silently drop, so they are the *stronger* signal, not a compromise. When the
+  compile stage lands, the high-value test is **merge-law conformance** (deterministic,
+  unit-testable), not a live boot.
+- **Manager/ways boundary** — *decided: a `ways settings` subcommand; defer a
+  standalone binary.* Independence is real as a **code boundary** — `cmd/settings`
+  pulls in no matching-engine code (only `paths` + `serde`). Shipping inside the
+  `ways` binary is a distribution convenience, and extracting a standalone binary
+  later is cheap precisely because the module is decoupled (a `[[bin]]` target or
+  workspace member, no API churn). Extract only when a config-only consumer that
+  won't install `ways` actually appears.
