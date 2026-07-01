@@ -107,6 +107,20 @@ project as symlinks, editing the live file already writes the store (same inode)
 no capture is needed; capture bites only where symlinks can't reach — the *merged*
 `settings.json` and fresh artifacts CC creates that the store has never seen.
 
+The last-synced base is what keeps this legible. Everything that changed on only one
+side since base auto-resolves silently; only a *genuine* conflict — the same key or
+file changed on **both** sides since base — needs a human/agent call. No single
+hardcoded rule ("latest wins", "richest wins", "store wins") resolves those reliably:
+a deploy pass rewrites `~/.claude` mtimes so "latest" mis-reads, "richest" resurrects
+keys a user deliberately pruned, and "store wins" discards CC's self-configuration —
+the very thing capture exists to keep. So conflicts **surface** through the
+framework's own disclosure machinery rather than being auto-resolved: a **macro**
+computes the divergence signals at trigger time (which side is newer, which is richer,
+what actually differs), a **way** guides the operator and Claude through the choice,
+and a **skill** lets Claude drive the capture/deploy/merge. The heuristics become a
+*suggested default* for the rare true conflict, never a silent verdict — straightforward
+for both the operator and Claude to decide.
+
 **6. Non-prescriptive and opt-in.** Absent a user layer, nothing changes — the
 reconciler projects only the framework, exactly as today. The layer is an
 affordance for the user who wants their config carried; it never imposes a structure
@@ -131,9 +145,15 @@ Deliberately left open for the debate this ADR anchors (not yet decided):
   content the store never had, and capture must decide it is user-scoped.
 - **Capture mechanics** — capture is ongoing, not a one-time seed (principle 5); the
   first capture *is* the seed. Open: the merge base for detecting real conflicts (a
-  stored last-synced snapshot vs. content hashing), how a capture presents conflicts
-  to the user, and whether capture is a distinct verb (`ways config capture`) or a
-  `--capture` mode of reconcile.
+  stored last-synced snapshot vs. content hashing), and whether capture is a distinct
+  verb (`ways config capture`) or a `--capture` mode of reconcile.
+- **Conflict surfacing (macro + way + skill).** True conflicts surface rather than
+  auto-resolve (principle 5). Open: which signals the macro should compute and how it
+  presents them; whether the guiding **way** is new or an extension of the existing
+  deploy/migration ways (review those so this *composes* rather than duplicates); and
+  the shape of the **skill** that lets Claude execute the chosen resolution. The
+  heuristics (latest / richest / store-wins) are inputs the macro *reports*, not a
+  rule the code silently applies.
 
 ## Consequences
 
