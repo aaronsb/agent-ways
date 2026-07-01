@@ -41,5 +41,8 @@ Same pattern: guide, reference, implementation.
 
 | Path | What's there |
 |------|-------------|
+| [install-guide.md](install-guide.md) | Installation when the path isn't a straight line — existing files, forks, previous installs |
+| [migration-1.0.md](migration-1.0.md) | **Migrating a pre-1.0 in-place clone to the 1.0 XDG layout** — the `ways migrate` walkthrough and deprecation window |
+| [development.md](development.md) | Developing agent-ways after the 1.0 shift (install vs dev checkout vs sandbox) |
 | [prerequisites-*.md](.) | Platform install guides (macOS, Arch, Debian, Fedora) |
 | [images/](images/) | Theme imagery |
