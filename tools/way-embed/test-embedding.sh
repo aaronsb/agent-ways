@@ -4,7 +4,10 @@
 
 set -euo pipefail
 
-XDG_WAY="${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways/user"
+_C="${XDG_CACHE_HOME:-$HOME/.cache}"
+if [[ -d "$_C/agent-ways/user" ]]; then XDG_WAY="$_C/agent-ways/user"
+elif [[ -d "$_C/claude-ways/user" ]]; then XDG_WAY="$_C/claude-ways/user"
+else XDG_WAY="$_C/agent-ways/user"; fi
 if [[ -x "${XDG_WAY}/way-embed" ]]; then
   WAY_EMBED="${XDG_WAY}/way-embed"
 elif [[ -x "${HOME}/.claude/bin/way-embed" ]]; then
