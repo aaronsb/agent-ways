@@ -106,6 +106,54 @@ and its consumers is the compiled output: a baked `settings.json` (or, for org s
 manifest. Consumers are swappable: the reconciler projects it into `~/.claude`; an
 enterprise console receives it as a *deploy target*; a plain viewer browses the tree.
 
+## Managed-scope interop
+
+Managed settings are how an organization *enforces* configuration, and they behave
+unlike any other scope. The reconciler must **coexist** with the managed layer, never
+merge it — and the factory must know which shape to emit for it.
+
+**Delivery is IT-owned, through three channels; Claude Code only reads.** Server-managed
+settings are fetched from the claude.ai admin console, cached to
+`~/.claude/remote-settings.json`, and **re-polled hourly**. MDM/OS policy is deployed to
+a plist (macOS) or the HKLM registry (Windows) and read once at startup. File-based
+settings live at `/etc/claude-code/managed-settings.json` (plus a `managed-settings.d/`
+drop-in dir) and are read once at startup. Within the managed tier these channels do
+**not** merge — if server-managed delivers any keys, endpoint sources are ignored — so
+an org commits to one channel, and the factory cannot split its output across two.
+
+**As a consumer, agent-ways coexists — it does not reconcile the managed layer.** Managed
+is the highest precedence and lands in files the reconciler never touches
+(`managed-settings.json`, `remote-settings.json`); our three-way merge is scoped to
+`~/.claude/settings.json` alone. Three behaviors follow, and they are *not* uniform:
+
+- **List keys concatenate.** `permissions.allow/deny` and `deniedMcpServers` from our
+  user-scope fragments still take effect — a user may *broaden* a managed allowlist, only
+  not *narrow* it. Our permission fragments are not dead under management.
+- **Override keys are dead on arrival.** `fallbackModel`, `availableModels`, and scalar
+  hard-overrides (e.g. `model`) set at managed scope replace ours entirely. A user-scope
+  fragment for such a key is silently ignored on a managed endpoint — the linter should
+  say so (a *managed-overridable* warning, alongside the scope-legal check).
+- **Policy locks can suppress the whole projection.** An org that sets
+  `allowManagedHooksOnly`, `allowManagedPermissionRulesOnly`, or
+  `strictPluginOnlyCustomization` turns agent-ways into a no-op *by policy* — our hooks,
+  skills, and agents do not load. This is the sharpest managed fact for the project: the
+  honest behavior is to *detect* the lock and report "policy-suppressed," not to project
+  silently and imply it took effect. Runtime detection is a `ways`-side concern, tracked
+  separately from this factory.
+
+**As a producer, the compile target follows the deploy channel** (this settles the
+managed-compile-target question): for file/MDM deployment, emit `managed-settings.d/*.json`
+and let Claude Code merge them natively — its drop-in law (alphabetical, later-file-wins,
+systemd-style) *is* this ADR's `NN-` filename-prefix convention, so the fragment tree maps
+1:1 with no merge code of our own; for the console, pre-merge to a single `settings.json`
+blob to paste in.
+
+**No readback.** There is no documented mechanism for the console to read effective config
+back from an endpoint, or for Claude Code to report config state upstream — the console
+only audit-logs changes made *in* it. The fragment tree is therefore the sole source of
+truth and the console is strictly the last mile. This is why the earlier draft's two-way
+sync is *dropped*, not deferred: there is no upstream to sync from.
+
 ## Non-goals (the discipline)
 
 Complexity is bounded to what `settings.json` needs. Explicitly **not** built:
@@ -179,9 +227,6 @@ fragment pattern extends to them later if wanted.
 
 - **Store location** — `$XDG_CONFIG_HOME/agent-ways/config/` (mirroring the user-ways
   root, ADR-143) vs. a dedicated repo an org can share.
-- **Compile target for managed scope** — pre-merge to one file vs. emit
-  `managed-settings.d/*.json` and delegate the merge to Claude Code (leaning: delegate,
-  it is less code and uses CC's own semantics).
 - **Test depth** — static only (schema/scope/duplicate) for v1 vs. a dynamic gate that
   boots a sandbox Claude Code against the compiled output.
 - **Manager/ways boundary** — how much of the lint/compile is its own tool vs. a
