@@ -19,7 +19,7 @@ use super::compile::{self, Outcome};
 use super::fragment::Scope;
 use anyhow::{bail, Context, Result};
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Keys the reconciler co-owns — `project` must not touch them (MVP).
@@ -28,26 +28,55 @@ fn reconciler_owned(key: &str) -> bool {
 }
 
 pub fn run(store: &Path, scope_filter: Option<Scope>, dry_run: bool) -> Result<bool> {
-    let scopes = match compile::compile_store(store, scope_filter)? {
+    let baked = match compile::compile_store(store, scope_filter)? {
         Outcome::Refused(errors) => {
             compile::report_refusal(store, &errors);
             return Ok(true);
         }
         Outcome::Baked(scopes) => scopes,
     };
-    if scopes.is_empty() {
-        bail!("nothing to project in {}", store.display());
+    let mut baked_map: HashMap<Scope, Value> = HashMap::new();
+    for (scope, obj, _prov) in baked {
+        baked_map.insert(scope, obj);
     }
 
-    for (scope, baked, _prov) in scopes {
-        match scope {
-            Scope::User => project_into(scope, &crate::paths::settings_json(), &baked, dry_run)?,
-            Scope::Project => project_into(scope, &project_settings_path(), &baked, dry_run)?,
-            Scope::Managed => {
-                println!("# managed scope — paste into the enterprise console (not auto-written):");
-                println!("{}", serde_json::to_string_pretty(&baked)?);
-            }
+    // Process a scope if it has fragments now OR a base file to clean up — the
+    // latter is how deleting all of a scope's fragments GCs its keys from the
+    // live settings. Managed is never auto-written, so it only appears when it
+    // currently has fragments.
+    let mut did = false;
+    for scope in [Scope::User, Scope::Project, Scope::Managed] {
+        if scope_filter.is_some_and(|f| f != scope) {
+            continue;
         }
+        if scope == Scope::Managed {
+            if let Some(obj) = baked_map.get(&scope) {
+                println!("# managed scope — paste into the enterprise console (not auto-written):");
+                println!("{}", serde_json::to_string_pretty(obj)?);
+                did = true;
+            }
+            continue;
+        }
+        let has_base = base_path(scope).exists();
+        if !baked_map.contains_key(&scope) && !has_base {
+            continue;
+        }
+        // An emptied scope (base exists, no fragments) projects an empty object,
+        // which removes everything it previously owned.
+        let ours = baked_map
+            .get(&scope)
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let target = if scope == Scope::User {
+            crate::paths::settings_json()
+        } else {
+            project_settings_path()
+        };
+        project_into(scope, &target, &ours, dry_run)?;
+        did = true;
+    }
+    if !did {
+        bail!("nothing to project in {}", store.display());
     }
     Ok(false)
 }
@@ -69,9 +98,13 @@ fn base_path(scope: Scope) -> PathBuf {
 
 fn read_json(path: &Path) -> Result<Value> {
     match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text)
-            .with_context(|| format!("parsing {}", path.display())),
-        Err(_) => Ok(Value::Object(Map::new())), // absent = empty
+        Ok(text) if text.trim().is_empty() => Ok(Value::Object(Map::new())),
+        Ok(text) => serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display())),
+        // Only a genuinely-absent file is treated as empty; a real I/O error
+        // (permissions, transient) must propagate — never rewrite a file we
+        // couldn't read as if it held nothing.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Object(Map::new())),
+        Err(e) => Err(anyhow::Error::new(e)).with_context(|| format!("reading {}", path.display())),
     }
 }
 
@@ -149,32 +182,45 @@ fn project_write(
             skipped.join(", ")
         );
     }
+    // Self-audit (analogous to the reconciler's stripped_user_view check): every
+    // key we change must be one we own. By construction we only touch owned keys,
+    // so this never fires — it's the net that turns any future bug into a refusal
+    // instead of silent corruption of the user's live config.
+    let owned: BTreeSet<&String> = ours
+        .keys()
+        .chain(base.as_object().map(|o| o.keys()).into_iter().flatten())
+        .filter(|k| !reconciler_owned(k))
+        .collect();
+    let live_obj = live.as_object().cloned().unwrap_or_default();
+    let all: BTreeSet<&String> = live_obj.keys().chain(result.keys()).collect();
+    for key in all {
+        if live_obj.get(key) != result.get(key) && !owned.contains(key) {
+            bail!(
+                "project self-audit: refusing to change unmanaged key `{key}` in {}",
+                target.display()
+            );
+        }
+    }
+
     if dry_run {
         println!("  (dry-run — nothing written)");
         return Ok(());
     }
 
-    // Write the merged settings (with a backup) and persist the new base.
+    // Back up (distinct slot from the reconciler's) and write atomically.
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
     if target.exists() {
-        let backup = target.with_extension("json.bak");
+        let backup = target.with_extension("json.ways-project.bak");
         std::fs::copy(target, &backup).ok();
     }
-    std::fs::write(
-        target,
-        format!("{}\n", serde_json::to_string_pretty(&Value::Object(result))?),
-    )
-    .with_context(|| format!("writing {}", target.display()))?;
+    crate::cmd::settings_merge::write_json_atomic(target, &Value::Object(result))?;
 
     if let Some(parent) = base_file.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(
-        base_file,
-        format!("{}\n", serde_json::to_string_pretty(&Value::Object(applied))?),
-    )?;
+    crate::cmd::settings_merge::write_json_atomic(base_file, &Value::Object(applied))?;
     Ok(())
 }
 
@@ -248,6 +294,34 @@ mod tests {
         assert_eq!(after["model"], json!("opus"), "non-owned key applied");
         assert!(after.get("permissions").is_none(), "permissions skipped (reconciler-owned)");
         assert!(after["hooks"].is_object(), "reconciler's hooks preserved");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn coexists_with_reconciler_and_user_keys() {
+        // One write that exercises all three ownership classes at once: our new
+        // key applied, our dropped key removed, reconciler's hooks/perms and the
+        // user's theme all preserved.
+        let dir = tmpdir();
+        let target = dir.join("settings.json");
+        let base = dir.join("base.json");
+        write(&base, &json!({ "oldKey": "x" }));
+        write(
+            &target,
+            &json!({
+                "hooks": { "SessionStart": [] },
+                "permissions": { "allow": ["Bash(ways:*)"] },
+                "theme": "dark",
+                "oldKey": "x"
+            }),
+        );
+        project_write(&target, &json!({ "model": "opus" }), false, &base, "user").unwrap();
+        let after = read(&target);
+        assert_eq!(after["model"], json!("opus"), "our key applied");
+        assert!(after.get("oldKey").is_none(), "our dropped key removed");
+        assert!(after["hooks"].is_object(), "reconciler hooks preserved");
+        assert_eq!(after["permissions"]["allow"][0], json!("Bash(ways:*)"), "reconciler perms preserved");
+        assert_eq!(after["theme"], json!("dark"), "user key preserved");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

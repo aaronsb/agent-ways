@@ -293,6 +293,40 @@ fn project_applies_to_project_scope_and_dry_run_does_not() {
 }
 
 #[test]
+fn project_gcs_keys_when_all_fragments_removed() {
+    // Delete a scope's only fragment, re-project -> the key it set is GC'd from
+    // the live settings (drives the cleanup path through compile_store + run).
+    let store = tmp_store();
+    let frag = store.join("10-a.md");
+    std::fs::write(&frag, "---\nscope: project\nsettings:\n  cleanupPeriodDays: 30\n---\nr\n").unwrap();
+    let proj = tmp_store();
+    let state = tmp_store();
+    let target = proj.join(".claude").join("settings.json");
+    let run = |extra: &[&str]| {
+        let mut c = Command::new(ways_bin());
+        c.env("WAYS_SETTINGS_SCHEMA_FILE", repo_schema())
+            .env("CLAUDE_PROJECT_DIR", &proj)
+            .env("XDG_STATE_HOME", &state)
+            .args(["settings", "project", "--scope", "project"])
+            .args(extra)
+            .arg(&store);
+        c.output().unwrap()
+    };
+    assert!(run(&[]).status.success());
+    assert!(std::fs::read_to_string(&target).unwrap().contains("cleanupPeriodDays"));
+
+    std::fs::remove_file(&frag).unwrap(); // scope now has no fragments
+    let out = run(&[]);
+    assert!(out.status.success(), "GC re-project stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&target).unwrap();
+    assert!(!after.contains("cleanupPeriodDays"), "dropped key must be GC'd; got:\n{after}");
+
+    for d in [&store, &proj, &state] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+#[test]
 fn scaffold_fails_when_schema_absent() {
     let dir = tmp_store();
     let out = Command::new(ways_bin())
