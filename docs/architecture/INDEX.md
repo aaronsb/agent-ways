@@ -65,6 +65,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-142](./system/ADR-142-agent-ways-1-0-xdg-application-distribution.md) | agent-ways 1.0 — XDG application distribution | Accepted |
 | [ADR-143](./system/ADR-143-three-root-way-runtime-core-user-project.md) | Three-root way runtime — core, user, project | Accepted |
 | [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Accepted |
+| [ADR-145](./system/ADR-145-explicit-three-source-convergence-manifest.md) | Explicit three-source convergence manifest | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
