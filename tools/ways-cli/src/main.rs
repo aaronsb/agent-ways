@@ -589,6 +589,12 @@ enum SettingsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Show the vendored Claude Code settings schema and its (configurable) source
+    Schema {
+        /// Print only the resolved source URL (for scripts)
+        #[arg(long)]
+        source: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -772,6 +778,10 @@ fn main() -> Result<()> {
                 if has_errors {
                     std::process::exit(1);
                 }
+                Ok(())
+            }
+            SettingsCommand::Schema { source } => {
+                cmd::settings::schema_command(source);
                 Ok(())
             }
         },
