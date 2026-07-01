@@ -4,12 +4,18 @@ domain: system
 mode: explanation
 related:
   - "[[ADR-140]]"
+  - "[[ADR-142]]"
   - "[[01.014.E]]"
   - "[[01.016.E]]"
 aliases: []
 ---
 
 # Scenario — the in-place install
+
+> ⚠️ **Historical (pre-1.0).** The in-place topology — `~/.claude` *is* the git clone — is
+> **superseded** by the 1.0 native projection ([[ADR-142]]). A pre-1.0 in-place clone
+> migrates to the projection with `ways migrate`; see the
+> [Migration Guide](../../migration-1.0.md). Kept as a record of how the model evolved.
 
 **A greenfield machine: no existing `~/.claude` worth keeping.** The simplest, default
 shape — the repo *is* your config dir, and `git pull` is the entire update story.

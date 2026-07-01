@@ -4,12 +4,19 @@ domain: system
 mode: explanation
 related:
   - "[[ADR-140]]"
+  - "[[ADR-142]]"
   - "[[01.014.E]]"
   - "[[01.015.E]]"
 aliases: []
 ---
 
 # Scenario — the subdirectory install
+
+> ⚠️ **Historical (pre-1.0).** The subdirectory topology (`make sync-to-home`) existed to
+> keep an existing `~/.claude` intact. The 1.0 native projection ([[ADR-142]]) does that by
+> default, so this topology is **superseded** — `ways migrate` moves an existing subdirectory
+> install to the projection. See the [Migration Guide](../../migration-1.0.md). Kept as a
+> record of how the model evolved.
 
 **An operator who already has a `~/.claude` they value installs agent-ways without
 giving it up.** The repo lives in a subdirectory; `make sync-to-home` *projects* its
