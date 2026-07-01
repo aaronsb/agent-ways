@@ -20,7 +20,7 @@ provenance), `project` (install into the live config). These are **mechanism**:
 dumb, testable, no cleverness. They are also, per ADR-147, a *shape contract* — a
 surface a separate consumer can drive.
 
-Three assets now sit unused by any conversational layer:
+Four assets now sit unused by any conversational layer:
 
 1. **Claude Code already understands its own configuration.** It ships with
    context and skills that know what `statusLine`, `permissions`, `hooks`, and the
@@ -31,6 +31,12 @@ Three assets now sit unused by any conversational layer:
 3. **Ways carries operator telemetry** — firing stats, near-miss logging
    (ADR-134), a `permissions audit`, governance/provenance. This is a record of
    *learned behavior*: what the operator actually does, repeatedly, by hand.
+4. **Claude Code already analyzes the operator's usage.** The `/insights` command
+   writes a report (`~/.claude/usage-data/report-<timestamp>.html`) from the last
+   30 days of local sessions, and its sections are *already configuration
+   recommendations*: **"Where Things Go Wrong"** (friction), **"Suggested CLAUDE.md
+   Additions"**, **"Existing CC Features to Try"**, **"How You Use Claude Code"**.
+   It is Claude Code pre-computing the very suggestions this skill wants to make.
 
 Nothing composes these into an authoring experience. A user still hand-writes
 fragments. The mechanism exists; the **conductor** does not.
@@ -42,17 +48,31 @@ drives the `ways settings` primitives to lint, compile, and project it. The skil
 is the intelligence; the CLI keeps the guarantees.
 
 **Core thesis — synthesize, don't rebuild.** The skill does *not* re-implement
-Claude Code's knowledge of its own settings. It **composes three sources**:
+Claude Code's knowledge of its own settings or its usage analysis. It **composes
+four sources**:
 
 - Claude Code's own config self-knowledge (what a key is *for*, sensible values);
 - our schema (the authoritative key set, types, and descriptions — the interview's
   spine, and what keeps suggestions valid by construction);
 - ways telemetry (what the operator repeatedly grants/does — the raw material for
-  *suggestions*).
+  *suggestions*);
+- the **`/insights` report** — Claude Code's own analysis of the operator's last 30
+  days (friction, pre-suggested CLAUDE.md rules, features to try).
 
-The result is a management system more capable than any of the three alone: CC's
-understanding, made **composable, inspectable, lintable, and projectable** by the
-ADR-147 substrate, and **informed by the operator's own history**.
+The result is a management system more capable than any one alone: CC's
+understanding *and its usage analysis*, made **composable, inspectable, lintable,
+and projectable** by the ADR-147 substrate, and **informed by the operator's own
+history**.
+
+**On `/insights`: read it, don't parse it.** The report is HTML, not JSON — and a
+brittle HTML *parser* would be the wrong dependency. Our consumer is a language
+model: the skill **reads the latest report in-context** and lets Claude interpret
+it the way a human would, focusing on the config-bearing sections. This sidesteps
+the fragility of screen-scraping a format that may change, and it *is* the
+synthesize-with-CC thesis at its purest — Claude Code generates the analysis, Claude
+reads it, our schema turns what matters into valid fragments. Constraint: a skill
+cannot invoke a slash command, so it consumes the existing report (noting its age)
+and asks the operator to run `/insights` when the report is stale or absent.
 
 **Shape.** A skill (not a way, not a slash command — per the Skills Way, it *runs
 a procedure*) whose sub-functions map onto the primitives:
@@ -64,7 +84,7 @@ a procedure*) whose sub-functions map onto the primitives:
 | rebuild | `ways settings compile` |
 | project | `ways settings project` |
 | pull-schema | `ways settings schema --refresh` |
-| suggest *(v2)* | mine telemetry (`permissions audit`, firing stats) → propose fragments |
+| suggest *(v2)* | read the latest `/insights` report + mine ways telemetry (`permissions audit`, firing stats) → propose fragments |
 
 **The interview's byproduct is documentation.** The operator's answer to "why do
 you want this?" becomes the fragment's markdown body — so `git blame` on the config
@@ -124,6 +144,15 @@ the `ways settings` CLI and `ways` telemetry — it does not reimplement them.
 - **Fold the orchestration into the `ways` binary** (a `ways settings interview`
   subcommand). Rejected: the intelligence is conversational and model-driven, which
   is exactly what a skill is for; the binary stays the deterministic mechanism.
+- **Ship an HTML parser for `/insights`** (cheerio-style, as community tools do).
+  Rejected: brittle screen-scraping of an unsupported, changeable format. Our
+  consumer is a language model that reads HTML natively, so the skill reads the
+  report in-context instead — more robust *and* less code.
+- **Use `/usage` or an OpenTelemetry exporter** for usage data instead of
+  `/insights`. Noted as complements, not replacements: `/usage` is tokens/cost (not
+  config-shaped), and OTel is structured but high-friction to stand up. `/insights`
+  already emits *config-shaped* recommendations, which is why it's the primary v2
+  usage source.
 
 ## Open Questions
 
@@ -131,5 +160,10 @@ the `ways settings` CLI and `ways` telemetry — it does not reimplement them.
   fires on "help me configure Claude Code" without hijacking adjacent requests.
 - **Telemetry read contract (v2)** — which sources (`permissions audit`, firing
   stats, governance) and in what shape the `suggest` function consumes them.
+- **`/insights` freshness (v2)** — the skill reads the newest
+  `~/.claude/usage-data/report-*.html`; how stale is too stale before it should ask
+  the operator to re-run `/insights`, and how it maps the report's sections
+  ("Suggested CLAUDE.md Additions", "Where Things Go Wrong") onto *settings*
+  fragments vs. CLAUDE.md memory (which is a different surface).
 - **Store bootstrapping** — does the skill scaffold an empty store on first run,
   and where (the ADR-147 default `$XDG_CONFIG/agent-ways/settings/`)?
