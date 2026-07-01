@@ -3,6 +3,7 @@ name: Build way-embed
 on:
   push:
     branches: [main]
+    tags: ['way-embed-v*']
     paths:
       - 'tools/way-embed/**'
       - '.github/workflows/build-way-embed.yml'
@@ -88,3 +89,30 @@ jobs:
         with:
           name: way-embed-all-platforms
           path: binaries/
+
+  release:
+    needs: collect
+    if: startsWith(github.ref, 'refs/tags/way-embed-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: way-embed-all-platforms
+          path: binaries
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "way-embed ${TAG#way-embed-}" \
+            --notes "Pre-built way-embed (semantic matcher) binaries for 4 platforms.
+
+          Downloaded automatically by \`make setup\` / the installer, so semantic
+          matching works with no C++ toolchain. To build from source instead,
+          install a C++ toolchain (cmake + compiler), then \`make setup\`." \
+            binaries/*
