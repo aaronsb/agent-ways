@@ -14,7 +14,8 @@
 //!    Code's merge law, so those are not lossy and are not flagged.
 
 use super::fragment::{Fragment, Scope};
-use super::schema::{lookup, ScopeClass};
+use super::schema::{scope_class, ScopeClass};
+use super::schema_doc;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -56,8 +57,30 @@ pub fn check(frags: &[Fragment]) -> Vec<Finding> {
             None => continue, // loader guarantees an object; defensive.
         };
         for (key, value) in obj {
-            match lookup(key) {
-                None => findings.push(Finding {
+            let schema_info = schema_doc::bundled().get(key);
+            let sclass = scope_class(key);
+
+            // schema-valid. A key is "known" if the vendored schema has it OR the
+            // scope overlay does (the overlay carries a few keys SchemaStore
+            // still lags). Unknown -> warning, never error. Known + typed ->
+            // type-check against the vendored schema.
+            match schema_info {
+                Some(info) => {
+                    if !info.ty.matches(value) {
+                        findings.push(Finding {
+                            severity: Severity::Error,
+                            check: "schema",
+                            file: file.clone(),
+                            key: key.clone(),
+                            message: format!(
+                                "`{key}` expects {}, got {}",
+                                info.ty.name(),
+                                super::fragment::json_kind(value)
+                            ),
+                        });
+                    }
+                }
+                None if sclass.is_none() => findings.push(Finding {
                     severity: Severity::Warning,
                     check: "schema",
                     file: file.clone(),
@@ -67,25 +90,13 @@ pub fn check(frags: &[Fragment]) -> Vec<Finding> {
                          (may be newer or version-gated)"
                     ),
                 }),
-                Some(spec) => {
-                    // schema-valid: type check (Any never mismatches).
-                    if !spec.ty.matches(value) {
-                        findings.push(Finding {
-                            severity: Severity::Error,
-                            check: "schema",
-                            file: file.clone(),
-                            key: key.clone(),
-                            message: format!(
-                                "`{key}` expects {}, got {}",
-                                spec.ty.name(),
-                                super::fragment::json_kind(value)
-                            ),
-                        });
-                    }
-                    // scope-legal.
-                    if let Some(f) = scope_finding(spec.class, frag.scope, key, &file) {
-                        findings.push(f);
-                    }
+                None => {} // known to the overlay but not the schema: no type check.
+            }
+
+            // scope-legal (overlay).
+            if let Some(class) = sclass {
+                if let Some(f) = scope_finding(class, frag.scope, key, &file) {
+                    findings.push(f);
                 }
             }
         }
@@ -226,9 +237,10 @@ mod tests {
 
     #[test]
     fn yaml_yes_becomes_schema_error_on_bool_key() {
-        // The fidelity boundary, end-to-end: `autoUpdates: yes` loads as the
-        // string "yes" (see fragment tests), which the Bool schema rejects.
-        let f = frag("10.md", Scope::User, json!({ "autoUpdates": "yes" }));
+        // The fidelity boundary, end-to-end: `autoMemoryEnabled: yes` loads as
+        // the string "yes" (see fragment tests), which the vendored schema's
+        // boolean type rejects.
+        let f = frag("10.md", Scope::User, json!({ "autoMemoryEnabled": "yes" }));
         let schema = of(&check(&[f]), "schema");
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].severity, Severity::Error);

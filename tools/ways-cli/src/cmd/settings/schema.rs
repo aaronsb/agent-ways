@@ -1,28 +1,26 @@
-//! Curated settings.json schema for the linter (ADR-147).
+//! The scope-class overlay for settings keys (ADR-147).
 //!
-//! This is a **deliberately partial** table of Claude Code `settings.json` keys.
-//! Its job is to power three checks — schema-valid, scope-legal, duplicate-scalar
-//! — not to be an exhaustive schema. Claude Code version-gates ~90 keys and adds
-//! more over time, so an **unknown key is not an error**: [`lookup`] returns
-//! `None` and the linter emits a *warning*, never a hard failure. Rejecting
-//! valid-but-new config is the worse failure mode.
+//! The vendored JSON Schema ([`super::schema_doc`]) owns the *shape* — the valid
+//! key set, types, and descriptions. What a generic JSON Schema cannot express is
+//! **scope-class**: which keys only work at managed scope, and which are settable
+//! at user scope but hard-replaced by a managed endpoint. That semantic — drawn
+//! from ADR-147's "Managed-scope interop" research — is this small hand-curated
+//! overlay.
 //!
-//! Keys are matched at the **top level** of a fragment's `settings:` object.
-//! Every high-value managed-only key is top-level; the two nested `sandbox.*`
-//! managed sub-locks are intentionally out of scope for v1 (see the `sandbox`
-//! entry). Object-valued keys (`env`, `permissions`, `hooks`, `statusLine`,
-//! `sandbox`) are opaque — their contents are not schema-checked here.
+//! It lists *only* the keys with a non-normal scope relationship. A key absent
+//! here has no scope restriction (the common case), so [`scope_class`] returns
+//! `None`. The overlay also carries a few keys the community schema still lags
+//! (e.g. `fallbackModel`, `disableSideloadFlags`), so it doubles as a
+//! known-key supplement for the linter.
 //!
-//! Source of truth: <https://code.claude.com/docs/en/settings>,
-//! <https://code.claude.com/docs/en/permissions#managed-only-settings>, and
-//! <https://code.claude.com/docs/en/server-managed-settings>. project-pulse
-//! tracks drift in those docs so this table gets a refill signal.
+//! Source: <https://code.claude.com/docs/en/permissions#managed-only-settings>
+//! and <https://code.claude.com/docs/en/server-managed-settings>. project-pulse
+//! tracks drift.
 
-/// How a key relates to scope — the axis the scope-legal check turns on.
+/// How a key relates to scope. Absence from the overlay means "normal" — no
+/// scope restriction — so there is no `Normal` variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScopeClass {
-    /// Settable at any scope.
-    Normal,
     /// Only valid at managed scope. Authored at user/project scope it has no
     /// effect — Claude Code ignores it. Scope-legal treats this as an ERROR.
     ManagedOnly,
@@ -32,64 +30,14 @@ pub enum ScopeClass {
     ManagedOverridable,
 }
 
-/// The JSON type a key's value is expected to take. `Any` is used where the
-/// documented type is uncertain, so the schema-valid check never false-positives
-/// on a type the table isn't sure about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueType {
-    Bool,
-    Number,
-    String,
-    Array,
-    Object,
-    Any,
-}
-
-impl ValueType {
-    /// Whether `v` satisfies this expected type.
-    pub fn matches(&self, v: &serde_json::Value) -> bool {
-        match self {
-            ValueType::Any => true,
-            ValueType::Bool => v.is_boolean(),
-            ValueType::Number => v.is_number(),
-            ValueType::String => v.is_string(),
-            ValueType::Array => v.is_array(),
-            ValueType::Object => v.is_object(),
-        }
-    }
-
-    /// Human name, for diagnostics.
-    pub fn name(&self) -> &'static str {
-        match self {
-            ValueType::Any => "any",
-            ValueType::Bool => "boolean",
-            ValueType::Number => "number",
-            ValueType::String => "string",
-            ValueType::Array => "array",
-            ValueType::Object => "object",
-        }
-    }
-}
-
-/// The schema entry for one key.
-#[derive(Debug, Clone, Copy)]
-pub struct KeySpec {
-    pub class: ScopeClass,
-    pub ty: ValueType,
-}
-
-/// Look up a top-level `settings.json` key. `None` means "not in the curated
-/// table" — an unrecognized (possibly newer or version-gated) key, which the
-/// linter surfaces as a warning rather than an error.
-pub fn lookup(key: &str) -> Option<KeySpec> {
+/// The scope-class of a key, or `None` if it has no scope restriction.
+pub fn scope_class(key: &str) -> Option<ScopeClass> {
     use ScopeClass::*;
-    use ValueType::*;
-    let (class, ty) = match key {
-        // ── Managed-overridable (dead on arrival if an org sets them) ──
-        "model" | "fallbackModel" => (ManagedOverridable, String),
-        "availableModels" => (ManagedOverridable, Array),
+    let class = match key {
+        // Managed-overridable (dead on arrival if an org sets them).
+        "model" | "fallbackModel" | "availableModels" => ManagedOverridable,
 
-        // ── Managed-only: policy locks & enforcement (permissions.md) ──
+        // Managed-only: policy locks & enforcement.
         "allowManagedHooksOnly"
         | "allowManagedPermissionRulesOnly"
         | "allowManagedMcpServersOnly"
@@ -98,89 +46,55 @@ pub fn lookup(key: &str) -> Option<KeySpec> {
         | "channelsEnabled"
         | "allowAllClaudeAiMcps"
         | "wslInheritsWindowsSettings"
-        | "forceRemoteSettingsRefresh" => (ManagedOnly, Bool),
-        // Uncertain value shapes — scope-class is what matters, type stays Any.
-        "disableSideloadFlags" | "blockedMarketplaces" | "allowedChannelPlugins" => {
-            (ManagedOnly, Any)
-        }
-        "pluginTrustMessage" | "forceLoginOrgUUID" | "requiredMinimumVersion"
-        | "requiredMaximumVersion" => (ManagedOnly, String),
+        | "forceRemoteSettingsRefresh"
+        | "disableSideloadFlags"
+        | "blockedMarketplaces"
+        | "allowedChannelPlugins"
+        | "pluginTrustMessage"
+        | "forceLoginOrgUUID"
+        | "requiredMinimumVersion"
+        | "requiredMaximumVersion" => ManagedOnly,
 
-        // ── Normal: common user/project-settable keys ──
-        "apiKeyHelper" | "awsAuthRefresh" | "awsCredentialExport"
-        | "otelHeadersHelper" | "outputStyle" | "forceLoginMethod" => (Normal, String),
-        "cleanupPeriodDays" => (Normal, Number),
-        "includeCoAuthoredBy" | "enableAllProjectMcpServers" | "autoUpdates" => (Normal, Bool),
-        "enabledMcpjsonServers" | "disabledMcpjsonServers" => (Normal, Array),
-        // User/project-settable MCP allow/deny lists. ADR-147 (Managed-scope
-        // interop) names deniedMcpServers as a *concatenating* key that takes
-        // effect from user scope — NOT managed-only; classing it ManagedOnly
-        // would false-error valid config. allowedMcpServers is treated the same
-        // (conservative on class to avoid a false error); type stays Any pending
-        // doc reconfirmation, which project-pulse tracks.
-        "allowedMcpServers" | "deniedMcpServers" => (Normal, Any),
-        // Opaque objects — contents intentionally not schema-checked in v1.
-        // `sandbox` includes managed sub-locks (sandbox.*.allowManaged*Only) that
-        // a future slice may scope-check; for now the whole object is Normal.
-        "env" | "permissions" | "hooks" | "statusLine" | "sandbox" => (Normal, Object),
-
+        // Everything else — including the user-settable MCP allow/deny lists,
+        // which ADR-147 interop names as concatenating keys valid at user scope
+        // — has no scope restriction.
         _ => return None,
     };
-    Some(KeySpec { class, ty })
+    Some(class)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn managed_only_keys_classify() {
-        assert_eq!(lookup("allowManagedHooksOnly").unwrap().class, ScopeClass::ManagedOnly);
-        assert_eq!(lookup("strictPluginOnlyCustomization").unwrap().class, ScopeClass::ManagedOnly);
-        assert_eq!(lookup("disableSideloadFlags").unwrap().class, ScopeClass::ManagedOnly);
-        assert_eq!(lookup("forceLoginOrgUUID").unwrap().class, ScopeClass::ManagedOnly);
-    }
-
-    #[test]
-    fn mcp_allow_deny_lists_are_user_settable_not_managed_only() {
-        // ADR-147 interop: deniedMcpServers concatenates from user scope, so it
-        // must not be classed ManagedOnly (which would false-error valid config).
-        assert_eq!(lookup("deniedMcpServers").unwrap().class, ScopeClass::Normal);
-        assert_eq!(lookup("allowedMcpServers").unwrap().class, ScopeClass::Normal);
+        assert_eq!(scope_class("allowManagedHooksOnly"), Some(ScopeClass::ManagedOnly));
+        assert_eq!(scope_class("strictPluginOnlyCustomization"), Some(ScopeClass::ManagedOnly));
+        assert_eq!(scope_class("disableSideloadFlags"), Some(ScopeClass::ManagedOnly));
+        assert_eq!(scope_class("forceLoginOrgUUID"), Some(ScopeClass::ManagedOnly));
     }
 
     #[test]
     fn managed_overridable_keys_classify() {
-        assert_eq!(lookup("model").unwrap().class, ScopeClass::ManagedOverridable);
-        assert_eq!(lookup("fallbackModel").unwrap().class, ScopeClass::ManagedOverridable);
-        assert_eq!(lookup("availableModels").unwrap().class, ScopeClass::ManagedOverridable);
+        assert_eq!(scope_class("model"), Some(ScopeClass::ManagedOverridable));
+        assert_eq!(scope_class("fallbackModel"), Some(ScopeClass::ManagedOverridable));
+        assert_eq!(scope_class("availableModels"), Some(ScopeClass::ManagedOverridable));
     }
 
     #[test]
-    fn normal_keys_classify_with_types() {
-        let p = lookup("permissions").unwrap();
-        assert_eq!(p.class, ScopeClass::Normal);
-        assert_eq!(p.ty, ValueType::Object);
-        assert_eq!(lookup("cleanupPeriodDays").unwrap().ty, ValueType::Number);
-        assert_eq!(lookup("includeCoAuthoredBy").unwrap().ty, ValueType::Bool);
+    fn mcp_allow_deny_lists_have_no_scope_restriction() {
+        // ADR-147 interop: deniedMcpServers concatenates from user scope, so it
+        // must not be flagged — no scope class.
+        assert_eq!(scope_class("deniedMcpServers"), None);
+        assert_eq!(scope_class("allowedMcpServers"), None);
     }
 
     #[test]
-    fn unknown_key_is_none() {
-        assert!(lookup("totallyMadeUpKey").is_none());
-        assert!(lookup("").is_none());
-    }
-
-    #[test]
-    fn value_type_matches() {
-        assert!(ValueType::Bool.matches(&json!(true)));
-        assert!(!ValueType::Bool.matches(&json!("yes")));
-        assert!(ValueType::String.matches(&json!("opus")));
-        assert!(ValueType::Number.matches(&json!(30)));
-        assert!(ValueType::Object.matches(&json!({"a": 1})));
-        assert!(ValueType::Array.matches(&json!([1, 2])));
-        assert!(ValueType::Any.matches(&json!(null)));
-        assert!(ValueType::Any.matches(&json!("whatever")));
+    fn normal_and_unknown_keys_have_no_scope_class() {
+        assert_eq!(scope_class("permissions"), None);
+        assert_eq!(scope_class("cleanupPeriodDays"), None);
+        assert_eq!(scope_class("totallyMadeUpKey"), None);
+        assert_eq!(scope_class(""), None);
     }
 }

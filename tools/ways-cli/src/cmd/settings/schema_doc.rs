@@ -50,6 +50,19 @@ impl PropType {
         }
     }
 
+    /// Whether `v` satisfies this type. `Other` matches anything (we couldn't
+    /// pin a single type, so we don't second-guess the value).
+    pub fn matches(&self, v: &Value) -> bool {
+        match self {
+            PropType::String => v.is_string(),
+            PropType::Number => v.is_number(),
+            PropType::Boolean => v.is_boolean(),
+            PropType::Array => v.is_array(),
+            PropType::Object => v.is_object(),
+            PropType::Other => true,
+        }
+    }
+
     /// Human name, for diagnostics.
     pub fn name(&self) -> &'static str {
         match self {
@@ -216,7 +229,7 @@ mod tests {
         // scope-class overlay — the whole point of acquiring the schema.
         let s = bundled();
         assert!(s.contains("autoMemoryEnabled"));
-        assert!(super::super::schema::lookup("autoMemoryEnabled").is_none());
+        assert!(super::super::schema::scope_class("autoMemoryEnabled").is_none());
     }
 
     #[test]
