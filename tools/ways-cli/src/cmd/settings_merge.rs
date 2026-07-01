@@ -98,17 +98,21 @@ pub fn merge(live: &Value, desired_hooks: &Value, base: &Owned) -> Result<Merged
         let base_entries =
             base.hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         let ours = ours_hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        // The form we actually write (command paths quoted, Windows-space safety).
+        let ours_quoted: Vec<Value> = ours.iter().map(quote_entry_commands).collect();
 
         // User entries = theirs minus what we wrote last (base) minus what we're
-        // about to write (ours) — so a re-apply doesn't duplicate.
+        // about to write — matched in BOTH raw and quoted form. A settled install
+        // stores our hooks quoted, so comparing only against raw `ours` fails to
+        // recognize them: with an under-recording base (e.g. one whose hooks were
+        // lost) we'd then duplicate every hook on re-apply and trip the self-audit.
         let mut merged: Vec<Value> = theirs
             .into_iter()
-            .filter(|e| !base_entries.contains(e) && !ours.contains(e))
+            .filter(|e| {
+                !base_entries.contains(e) && !ours.contains(e) && !ours_quoted.contains(e)
+            })
             .collect();
-        // Append ours, with hook command paths quoted (Windows-space safety).
-        for e in &ours {
-            merged.push(quote_entry_commands(e));
-        }
+        merged.extend(ours_quoted.iter().cloned());
 
         if !merged.is_empty() {
             new_hooks.insert(event.clone(), Value::Array(merged));
@@ -214,6 +218,33 @@ pub fn stripped_user_view(settings: &Value, base: &Owned) -> Value {
     Value::Object(obj)
 }
 
+/// Union of two owned records. The self-audit strips our contribution from the
+/// pre-write `live`; using `prior ∪ new` ensures an under-recording base still
+/// strips everything we own (old deprecated entries *and* current ones), so a
+/// base whose hooks were lost can't trigger a spurious revert.
+fn union_owned(a: &Owned, b: &Owned) -> Owned {
+    let mut hooks = a.hooks.clone();
+    for (event, entries) in &b.hooks {
+        let mut combined =
+            hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        if let Some(src) = entries.as_array() {
+            for e in src {
+                if !combined.contains(e) {
+                    combined.push(e.clone());
+                }
+            }
+        }
+        hooks.insert(event.clone(), Value::Array(combined));
+    }
+    let mut perms = a.perms.clone();
+    for p in &b.perms {
+        if !perms.contains(p) {
+            perms.push(p.clone());
+        }
+    }
+    Owned { hooks, perms }
+}
+
 /// Quote the first whitespace-bearing command-path token so a `${HOME}` that
 /// expands to a spaced Windows path stays one token. Mirrors the jq transform.
 fn quote_entry_commands(entry: &Value) -> Value {
@@ -290,9 +321,13 @@ pub fn apply_to_files(
     // Atomic write (temp + rename) so a crash never leaves a half-written file.
     write_json_atomic(dest_settings, &merged.settings)?;
 
-    // Self-audit: the user's view must be byte-identical before and after.
+    // Self-audit: the user's view must be identical before and after. Strip OUR
+    // contribution from both sides — but from `live` use the union of the prior
+    // base and the new base. A base that under-records what we own (e.g. one whose
+    // hooks were lost) would otherwise leave our entries in the pre-write view,
+    // which `after` correctly drops — a false "unmanaged field changed" revert.
     let after: Value = read_json_or_empty(dest_settings)?;
-    let user_before = stripped_user_view(&live, &base);
+    let user_before = stripped_user_view(&live, &union_owned(&base, &merged.base));
     let user_after = stripped_user_view(&after, &merged.base);
     if user_before != user_after {
         // Revert and fail loud — we must never corrupt the user's settings.
@@ -478,6 +513,65 @@ mod tests {
         assert_eq!(ss.len(), 1, "old agent-ways hook must be replaced, not duplicated: {ss:?}");
         let cmd = ss[0]["hooks"][0]["command"].as_str().unwrap();
         assert!(cmd.contains("check-setup.sh") && !cmd.contains("OLD-check.sh"), "got: {cmd}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reapply_is_idempotent_when_base_hooks_were_lost() {
+        // A settled 1.0 install whose persisted base LOST its hooks record
+        // (`hooks: {}`, perms still recorded) while the live settings.json already
+        // holds our hooks in the QUOTED form a prior merge wrote. Re-applying must
+        // not duplicate our hooks and must not trip the self-audit. Before the fix
+        // the merge dedup'd `theirs` (quoted) only against raw (unquoted) `ours`, so
+        // it duplicated every hook, and the empty base made the strip asymmetric —
+        // reverting on every reconcile, forever (base never got corrected).
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ways-setmerge-lostbase-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("settings.json");
+        let source = dir.join("source.json");
+        let base = dir.join("base.json");
+
+        // Source ships one unquoted hook.
+        std::fs::write(&source, serde_json::to_string(&json!({
+            "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [
+                { "type": "command", "command": "${HOME}/.claude/hooks/ways/check-setup.sh" } ] } ] }
+        })).unwrap()).unwrap();
+
+        // Live already holds our hook QUOTED (a prior successful merge wrote it),
+        // plus a genuine user hook and a user perm.
+        std::fs::write(&dest, serde_json::to_string(&json!({
+            "model": "opus",
+            "hooks": { "SessionStart": [
+                { "matcher": "startup", "hooks": [ { "type": "command",
+                    "command": "\"${HOME}/.claude/hooks/ways/check-setup.sh\"" } ] },
+                { "matcher": "startup", "hooks": [ { "type": "command", "command": "/u/mine" } ] }
+            ] },
+            "permissions": { "allow": ["Bash(git:*)", "Bash(ways:*)", "Bash(attend:*)",
+                "Bash(attend-chat:*)", "Bash(way-embed:*)", "Edit(~/.claude/**)", "Write(~/.claude/**)"] }
+        })).unwrap()).unwrap();
+
+        // Persisted base EXISTS but its hooks were lost; perms recorded.
+        std::fs::write(&base, serde_json::to_string(&json!({
+            "hooks": {},
+            "perms": WAYS_PERMS
+        })).unwrap()).unwrap();
+
+        apply_to_files(&source, &dest, &base)
+            .expect("re-apply with lost base hooks must not abort");
+
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        let ss = after["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(ss.len(), 2, "our hook must not be duplicated: {ss:?}");
+        assert!(ss.iter().any(|e| e["hooks"][0]["command"] == "/u/mine"), "user hook preserved");
+        assert_eq!(after["model"], "opus");
+        assert!(after["permissions"]["allow"].as_array().unwrap().iter().any(|v| v == "Bash(git:*)"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
