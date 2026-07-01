@@ -69,7 +69,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
 | [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Accepted |
 | [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
-| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Draft |
+| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
