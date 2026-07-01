@@ -97,6 +97,25 @@ Let Claude run git/gh unprompted — constant use, prompts are pure friction.
   into `~/.claude` and three-way-merges `settings.json`, using the provenance manifest
   as its base (the same base hardened in the ADR-145 settings-merge work).
 
+### Schema source
+
+The lint and compile stages need Claude Code's settings schema. Anthropic does
+not publish a machine-readable one (anthropics/claude-code#11795), and the native
+binary embeds keys only as minified string literals — not cleanly extractable.
+The community **SchemaStore** schema
+(`json.schemastore.org/claude-code-settings.json` — 84 keys, every one carrying a
+`description`) is the de-facto definition editors already use for autocomplete, so
+we adopt it as the shape source: **vendored** — pinned and bundled into the binary
+(`include_str!`), offline, the lockfile pattern — not fetched at runtime. It
+supplies the key set, types, and descriptions (enough to generate fill-in-the-blank
+fragment templates); it deliberately does *not* encode scope-class (managed-only /
+managed-overridable), which stays the small hand-curated overlay.
+
+Because it is community-maintained and can lag the CLI, the *source* is a
+**configuration surface** (`settings_schema_url`, also env-overridable), not a
+constant — an org can point at an internal mirror or a version-pinned URL, or an
+official Anthropic schema if one is ever published. project-pulse tracks the drift.
+
 ### Independence and the shape contract
 
 *Managing* the configuration is independent of the ways matching engine — someone can
