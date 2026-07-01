@@ -201,6 +201,59 @@ fn schema_refresh_writes_the_user_copy() {
 }
 
 #[test]
+fn compile_merges_to_out_dir_with_provenance() {
+    let out = tmp_store();
+    let run = ways()
+        .args(["settings", "compile"])
+        .arg(store("mergeable"))
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "compile failed: {}", String::from_utf8_lossy(&run.stderr));
+
+    let baked = out.join("user.settings.json");
+    let prov = out.join("provenance.json");
+    assert!(baked.exists() && prov.exists(), "compile must write baked + provenance");
+
+    let s = std::fs::read_to_string(&baked).unwrap();
+    // concat: both allow entries present; override: opus wins; deep-merge: env present.
+    assert!(s.contains("Bash(git:*)") && s.contains("Bash(gh:*)"), "allow concatenated; got:\n{s}");
+    assert!(s.contains("\"opus\""), "model overridden to opus; got:\n{s}");
+    assert!(s.contains("FOO"), "env deep-merged; got:\n{s}");
+
+    let p = std::fs::read_to_string(&prov).unwrap();
+    assert!(p.contains("permissions.allow") && p.contains("20-more.md"), "provenance records sources; got:\n{p}");
+    let _ = std::fs::remove_dir_all(&out);
+}
+
+#[test]
+fn compile_prints_single_scope_to_stdout() {
+    let out = ways()
+        .args(["settings", "compile"])
+        .arg(store("mergeable"))
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.trim_start().starts_with('{'), "expected a JSON object; got:\n{s}");
+    assert!(s.contains("Bash(gh:*)"), "merged content on stdout; got:\n{s}");
+}
+
+#[test]
+fn compile_refuses_a_store_with_lint_errors() {
+    // The dirty fixture has schema/scope errors -> compile must refuse.
+    let out = ways()
+        .args(["settings", "compile"])
+        .arg(store("dirty"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "compile must refuse an erroring store");
+    let s = String::from_utf8_lossy(&out.stderr);
+    assert!(s.contains("refused"), "expected a refusal message; got:\n{s}");
+}
+
+#[test]
 fn scaffold_fails_when_schema_absent() {
     let dir = tmp_store();
     let out = Command::new(ways_bin())

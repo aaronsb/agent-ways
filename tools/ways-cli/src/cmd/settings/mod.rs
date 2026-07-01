@@ -12,6 +12,7 @@
 //! This module is the *authoring* side that produces it. Distinct, too, from
 //! `crate::config`, the ways runtime config behind `ways config`.
 
+pub mod compile;
 pub mod fragment;
 pub mod lint;
 pub mod scaffold;
