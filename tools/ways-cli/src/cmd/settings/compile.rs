@@ -15,12 +15,97 @@
 //! contributor for a concatenated list. That is both `git blame`-for-config and
 //! the future reconciler's merge base.
 
-use super::fragment::Fragment;
+use super::fragment::{load_dir, Fragment, Scope};
+use super::{lint, schema_doc};
+use anyhow::{bail, Context, Result};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// `dotted path → fragment file name(s)` that produced the effective value.
 pub type Provenance = BTreeMap<String, Vec<String>>;
+
+/// Compile a store: lint-gate, then merge each scope into a baked settings
+/// object + provenance. Returns `true` if the lint gate failed (caller exits
+/// non-zero). With `out`, writes `<scope>.settings.json` + `provenance.json`;
+/// otherwise prints a single scope's baked blob to stdout.
+pub fn run(store: &Path, scope_filter: Option<Scope>, out: Option<&Path>) -> Result<bool> {
+    let frags = load_dir(store)?;
+
+    // Lint gate — refuse to bake a store with errors (warnings are fine).
+    let findings = lint::check(&frags, schema_doc::active());
+    let errors: Vec<_> = findings
+        .iter()
+        .filter(|f| f.severity == lint::Severity::Error)
+        .collect();
+    if !errors.is_empty() {
+        eprintln!(
+            "compile refused: {} lint error(s) — fix first (`ways settings lint {}`):",
+            errors.len(),
+            store.display()
+        );
+        for e in &errors {
+            eprintln!("  {}: {}", e.file, e.message);
+        }
+        return Ok(true);
+    }
+
+    // Merge each scope present (or the requested one), in filename order.
+    let mut baked: BTreeMap<&str, Value> = BTreeMap::new();
+    let mut provenance: BTreeMap<&str, Provenance> = BTreeMap::new();
+    for scope in [Scope::User, Scope::Project, Scope::Managed] {
+        if scope_filter.is_some_and(|f| f != scope) {
+            continue;
+        }
+        let scoped: Vec<&Fragment> = frags.iter().filter(|fr| fr.scope == scope).collect();
+        if scoped.is_empty() {
+            continue;
+        }
+        let (obj, prov) = merge_scope(&scoped);
+        baked.insert(scope.as_str(), obj);
+        provenance.insert(scope.as_str(), prov);
+    }
+
+    if baked.is_empty() {
+        bail!(
+            "no fragments to compile in {}{}",
+            store.display(),
+            scope_filter
+                .map(|s| format!(" at {} scope", s.as_str()))
+                .unwrap_or_default()
+        );
+    }
+
+    match out {
+        Some(dir) => {
+            std::fs::create_dir_all(dir)
+                .with_context(|| format!("creating {}", dir.display()))?;
+            for (scope, obj) in &baked {
+                let path = dir.join(format!("{scope}.settings.json"));
+                std::fs::write(&path, format!("{}\n", serde_json::to_string_pretty(obj)?))
+                    .with_context(|| format!("writing {}", path.display()))?;
+                println!("Wrote {}", path.display());
+            }
+            let prov_path = dir.join("provenance.json");
+            std::fs::write(
+                &prov_path,
+                format!("{}\n", serde_json::to_string_pretty(&provenance)?),
+            )?;
+            println!("Wrote {}", prov_path.display());
+        }
+        None => {
+            if baked.len() > 1 {
+                bail!(
+                    "store has multiple scopes ({}); pass --scope or --out",
+                    baked.keys().copied().collect::<Vec<_>>().join(", ")
+                );
+            }
+            let obj = baked.values().next().expect("non-empty");
+            println!("{}", serde_json::to_string_pretty(obj)?);
+        }
+    }
+    Ok(false)
+}
 
 /// The documented concat-and-dedupe paths. Everything else overrides (objects
 /// deep-merge). Kept explicit and minimal; extend as Claude Code's edge cases

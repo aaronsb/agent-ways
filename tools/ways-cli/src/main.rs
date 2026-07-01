@@ -609,6 +609,29 @@ enum SettingsCommand {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// Compile a fragment store into baked settings.json (+ provenance)
+    Compile {
+        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
+        path: Option<PathBuf>,
+        /// Only compile this scope
+        #[arg(long)]
+        scope: Option<String>,
+        /// Write <scope>.settings.json + provenance.json here (else print one scope to stdout)
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+/// Parse an optional `--scope` string into a settings scope.
+fn parse_settings_scope(scope: Option<String>) -> Result<Option<cmd::settings::fragment::Scope>> {
+    use cmd::settings::fragment::Scope;
+    match scope.as_deref() {
+        None => Ok(None),
+        Some("user") => Ok(Some(Scope::User)),
+        Some("project") => Ok(Some(Scope::Project)),
+        Some("managed") => Ok(Some(Scope::Managed)),
+        Some(other) => anyhow::bail!("invalid --scope `{other}` (want user|project|managed)"),
+    }
 }
 
 fn main() -> Result<()> {
@@ -803,17 +826,18 @@ fn main() -> Result<()> {
                 }
             }
             SettingsCommand::New { key, scope, dir } => {
-                let scope = match scope.as_deref() {
-                    None => None,
-                    Some("user") => Some(cmd::settings::fragment::Scope::User),
-                    Some("project") => Some(cmd::settings::fragment::Scope::Project),
-                    Some("managed") => Some(cmd::settings::fragment::Scope::Managed),
-                    Some(other) => {
-                        anyhow::bail!("invalid --scope `{other}` (want user|project|managed)")
-                    }
-                };
+                let scope = parse_settings_scope(scope)?;
                 let dir = dir.unwrap_or_else(|| paths::config_root().join("settings"));
                 cmd::settings::scaffold::run(&key, scope, &dir)
+            }
+            SettingsCommand::Compile { path, scope, out } => {
+                let scope = parse_settings_scope(scope)?;
+                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
+                let had_error = cmd::settings::compile::run(&dir, scope, out.as_deref())?;
+                if had_error {
+                    std::process::exit(1);
+                }
+                Ok(())
             }
         },
     }

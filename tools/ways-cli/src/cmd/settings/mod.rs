@@ -12,9 +12,6 @@
 //! This module is the *authoring* side that produces it. Distinct, too, from
 //! `crate::config`, the ways runtime config behind `ways config`.
 
-// Wired into the CLI in the `ways settings compile` slice; the merge engine
-// lands ahead of its orchestration/command callers.
-#[allow(dead_code)]
 pub mod compile;
 pub mod fragment;
 pub mod lint;
