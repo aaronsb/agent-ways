@@ -21,7 +21,10 @@ pub fn run(query: String, _corpus: Option<String>) -> Result<()> {
 
     if !scores.any_ran() {
         eprintln!("ERROR: embedding engine unavailable.");
-        eprintln!("       Run: cd ~/.claude && make setup");
+        eprintln!(
+            "       Run: cd {} && make setup",
+            crate::paths::data_root().display()
+        );
         std::process::exit(1);
     }
 
