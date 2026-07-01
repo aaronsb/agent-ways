@@ -106,13 +106,15 @@ pub fn merge(live: &Value, desired_hooks: &Value, base: &Owned) -> Result<Merged
         // stores our hooks quoted, so comparing only against raw `ours` fails to
         // recognize them: with an under-recording base (e.g. one whose hooks were
         // lost) we'd then duplicate every hook on re-apply and trip the self-audit.
+        // NB: this byte-match assumes `quote_entry_commands` stays in lockstep with
+        // the jq quoting the hook-install path applies (both quote the first token).
         let mut merged: Vec<Value> = theirs
             .into_iter()
             .filter(|e| {
                 !base_entries.contains(e) && !ours.contains(e) && !ours_quoted.contains(e)
             })
             .collect();
-        merged.extend(ours_quoted.iter().cloned());
+        merged.extend(ours_quoted);
 
         if !merged.is_empty() {
             new_hooks.insert(event.clone(), Value::Array(merged));
