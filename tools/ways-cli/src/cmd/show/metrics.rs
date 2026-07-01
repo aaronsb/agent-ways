@@ -218,6 +218,14 @@ pub(crate) fn render_update_status(content: &str) -> String {
                 out.push_str("`cd ~/.claude && git fetch upstream && git merge upstream/main && make update-binaries && make install`\n");
             }
         }
+        "native" => {
+            // 1.0 XDG projection: the app source lives in $XDG_DATA/agent-ways and
+            // ~/.claude is a projection of it. Update the source, then reproject.
+            let repo = get("repo").unwrap_or_default();
+            let repo_disp = if repo.is_empty() { "$XDG_DATA_HOME/agent-ways" } else { &repo };
+            out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
+            out.push_str(&format!("`cd \"{repo_disp}\" && git pull && make setup && ways reconcile`\n"));
+        }
         "plugin" => {
             let installed = get("installed").unwrap_or_default();
             let latest = get("latest").unwrap_or_default();

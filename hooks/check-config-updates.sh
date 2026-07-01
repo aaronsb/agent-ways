@@ -5,6 +5,8 @@
 # Detection order:
 #   0. Is ~/.claude NOT a repo but a .claude-source marker points at one?
 #      → subdirectory projection (ADR-140): check the projecting repo, not ~/.claude
+#   0b. Is ~/.claude NOT a repo, no marker, but $XDG_DATA/agent-ways is a repo?
+#      → native XDG projection (1.0, ADR-142): check the app source, not ~/.claude
 #   1. Is ~/.claude a git repo? If not, exit.
 #   2. Is origin aaronsb/agent-ways? → direct clone
 #   3. Is origin a fork of aaronsb/agent-ways? → fork
@@ -126,6 +128,37 @@ if ! git -C "$CLAUDE_DIR" rev-parse --git-dir >/dev/null 2>&1 && [[ -f "$SOURCE_
     fi
     write_cache "subdirectory" "$BEHIND" "repo=${SRC_REPO}
 unsynced=${UNSYNCED}" "$FETCH_TS"
+  fi
+  exit 0
+fi
+
+# --- Scenario 0b: Native XDG projection (1.0, ADR-142) ---
+# ~/.claude is not a repo and there's no ADR-140 marker — the app source lives in
+# $XDG_DATA_HOME/agent-ways and ~/.claude is a thin symlink projection of it. Check
+# the app source for behind-upstream. Only the direct-install case is nudged here
+# (origin is upstream); a native fork updates the same way but "behind upstream"
+# needs its upstream remote, left to a follow-up (falls through to no nudge — no
+# regression, just no reminder for that case).
+APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
+if ! git -C "$CLAUDE_DIR" rev-parse --git-dir >/dev/null 2>&1 \
+   && [[ ! -f "$SOURCE_MARKER" ]] \
+   && git -C "$APP_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  APP_REMOTE=$(git -C "$APP_DIR" remote get-url origin 2>/dev/null)
+  APP_OWNER_REPO=$(echo "$APP_REMOTE" | sed -E 's#.*github\.com[:/]##; s/\.git$//')
+  if [[ "$APP_REMOTE" == *github.com* && "$APP_OWNER_REPO" == "$UPSTREAM_REPO" ]]; then
+    PREV_FETCH=$(sed -n 's/^fetched=//p' "$CACHE_FILE" 2>/dev/null | head -1)
+    FETCH_TS="${PREV_FETCH:-0}"
+    if needs_refresh; then
+      timeout 10 git -C "$APP_DIR" fetch origin --quiet 2>/dev/null
+      FETCH_TS="$CURRENT_TIME"
+    fi
+    BEHIND=$(git -C "$APP_DIR" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)
+    write_cache "native" "$BEHIND" "repo=${APP_DIR}" "$FETCH_TS"
+  else
+    # Native fork / non-GitHub origin: behind-upstream isn't computed yet (documented
+    # follow-up), but still stamp a native-type cache (behind=0, no nudge) so a stale
+    # `fork`/`clone` entry from a prior topology can't render a wrong ~/.claude command.
+    write_cache "native" "0" "repo=${APP_DIR}"
   fi
   exit 0
 fi
