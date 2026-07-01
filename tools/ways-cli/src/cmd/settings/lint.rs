@@ -1,9 +1,10 @@
 //! The config-store linter (ADR-147): three deterministic checks over a loaded
 //! fragment tree, plus a reporter.
 //!
-//! 1. **schema-valid** — every top-level `settings:` key exists in the curated
-//!    schema (unknown → *warning*, never error) and its value matches the
-//!    expected type (mismatch → *error*).
+//! 1. **schema-valid** — every top-level `settings:` key is known to the vendored
+//!    schema or the scope overlay (unknown → *warning*, never error) and its
+//!    value matches the vendored schema's type (mismatch → *error*; unions
+//!    validate permissively).
 //! 2. **scope-legal** — a managed-only key authored at user/project scope is an
 //!    *error* (Claude Code ignores it there); a managed-overridable key
 //!    (`model`/`fallbackModel`/`availableModels`) authored outside managed scope
@@ -14,7 +15,8 @@
 //!    Code's merge law, so those are not lossy and are not flagged.
 
 use super::fragment::{Fragment, Scope};
-use super::schema::{lookup, ScopeClass};
+use super::schema::{overlay_knows, scope_class, ScopeClass};
+use super::schema_doc;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -56,8 +58,30 @@ pub fn check(frags: &[Fragment]) -> Vec<Finding> {
             None => continue, // loader guarantees an object; defensive.
         };
         for (key, value) in obj {
-            match lookup(key) {
-                None => findings.push(Finding {
+            let schema_info = schema_doc::bundled().get(key);
+            let sclass = scope_class(key);
+
+            // schema-valid. A key is "known" if the vendored schema has it OR the
+            // overlay does (the overlay carries keys SchemaStore still lags).
+            // Unknown -> warning, never error. Known + typed -> type-check against
+            // the vendored schema (unions validate permissively; see schema_doc).
+            match schema_info {
+                Some(info) => {
+                    if !info.ty.matches(value) {
+                        findings.push(Finding {
+                            severity: Severity::Error,
+                            check: "schema",
+                            file: file.clone(),
+                            key: key.clone(),
+                            message: format!(
+                                "`{key}` expects {}, got {}",
+                                info.ty.name(),
+                                super::fragment::json_kind(value)
+                            ),
+                        });
+                    }
+                }
+                None if !overlay_knows(key) => findings.push(Finding {
                     severity: Severity::Warning,
                     check: "schema",
                     file: file.clone(),
@@ -67,25 +91,13 @@ pub fn check(frags: &[Fragment]) -> Vec<Finding> {
                          (may be newer or version-gated)"
                     ),
                 }),
-                Some(spec) => {
-                    // schema-valid: type check (Any never mismatches).
-                    if !spec.ty.matches(value) {
-                        findings.push(Finding {
-                            severity: Severity::Error,
-                            check: "schema",
-                            file: file.clone(),
-                            key: key.clone(),
-                            message: format!(
-                                "`{key}` expects {}, got {}",
-                                spec.ty.name(),
-                                super::fragment::json_kind(value)
-                            ),
-                        });
-                    }
-                    // scope-legal.
-                    if let Some(f) = scope_finding(spec.class, frag.scope, key, &file) {
-                        findings.push(f);
-                    }
+                None => {} // known to the overlay but not the schema: no type check.
+            }
+
+            // scope-legal (overlay).
+            if let Some(class) = sclass {
+                if let Some(f) = scope_finding(class, frag.scope, key, &file) {
+                    findings.push(f);
                 }
             }
         }
@@ -226,13 +238,33 @@ mod tests {
 
     #[test]
     fn yaml_yes_becomes_schema_error_on_bool_key() {
-        // The fidelity boundary, end-to-end: `autoUpdates: yes` loads as the
-        // string "yes" (see fragment tests), which the Bool schema rejects.
-        let f = frag("10.md", Scope::User, json!({ "autoUpdates": "yes" }));
+        // The fidelity boundary, end-to-end: `autoMemoryEnabled: yes` loads as
+        // the string "yes" (see fragment tests), which the vendored schema's
+        // boolean type rejects.
+        let f = frag("10.md", Scope::User, json!({ "autoMemoryEnabled": "yes" }));
         let schema = of(&check(&[f]), "schema");
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].severity, Severity::Error);
         assert!(schema[0].message.contains("expects boolean"));
+    }
+
+    #[test]
+    fn union_typed_key_does_not_false_error() {
+        // Regression: strictPluginOnlyCustomization is anyOf[boolean,array]; a
+        // boolean `true` must not raise a schema (type) error. Managed scope
+        // keeps it scope-legal so we isolate the schema check.
+        let f = frag("10.md", Scope::Managed, json!({ "strictPluginOnlyCustomization": true }));
+        assert!(of(&check(&[f]), "schema").is_empty());
+        let f2 = frag("10.md", Scope::Managed, json!({ "strictPluginOnlyCustomization": [] }));
+        assert!(of(&check(&[f2]), "schema").is_empty());
+    }
+
+    #[test]
+    fn schema_lagged_known_key_is_not_flagged() {
+        // Regression: `autoUpdates` is valid but absent from SchemaStore; the
+        // overlay marks it known, so no "unrecognized" warning.
+        let f = frag("10.md", Scope::User, json!({ "autoUpdates": false }));
+        assert!(of(&check(&[f]), "schema").is_empty());
     }
 
     #[test]

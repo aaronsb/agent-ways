@@ -7,6 +7,19 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static SEQ: AtomicU32 = AtomicU32::new(0);
+
+fn tmp_store() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "ways-it-settings-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
 
 fn ways_bin() -> PathBuf {
     let mut path = std::env::current_exe().unwrap();
@@ -86,4 +99,54 @@ fn missing_store_dir_is_an_error() {
         .output()
         .unwrap();
     assert!(!out.status.success(), "a missing store dir must fail");
+}
+
+#[test]
+fn scaffold_then_lint_round_trips_clean() {
+    let dir = tmp_store();
+    // Scaffold a normal key from the schema.
+    let new = Command::new(ways_bin())
+        .args(["settings", "new", "cleanupPeriodDays", "--dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(new.status.success(), "scaffold failed: {}", String::from_utf8_lossy(&new.stderr));
+    assert!(dir.join("10-cleanupPeriodDays.md").exists());
+
+    // The generated fragment must lint clean end-to-end.
+    let lint = Command::new(ways_bin())
+        .args(["settings", "lint"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        lint.status.success(),
+        "scaffolded store must lint clean; stdout: {}",
+        String::from_utf8_lossy(&lint.stdout)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn scaffold_unknown_key_fails() {
+    let dir = tmp_store();
+    let out = Command::new(ways_bin())
+        .args(["settings", "new", "totallyMadeUpKey", "--dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "scaffolding an unknown key must fail");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn schema_source_prints_a_url() {
+    let out = Command::new(ways_bin())
+        .args(["settings", "schema", "--source"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.trim_start().starts_with("http"), "expected a URL; got: {s}");
+    assert!(s.contains("schemastore"), "expected the default source; got: {s}");
 }

@@ -14,4 +14,31 @@
 
 pub mod fragment;
 pub mod lint;
+pub mod scaffold;
 pub mod schema;
+pub mod schema_doc;
+pub mod source;
+
+/// `ways settings schema` — report the vendored schema and its (configurable)
+/// refresh source. With `source_only`, print just the resolved URL, so the
+/// refresh script can consume it.
+pub fn schema_command(source_only: bool) {
+    let (url, origin) = source::resolve();
+    if source_only {
+        println!("{url}");
+        return;
+    }
+    let schema = schema_doc::bundled();
+    println!("Claude Code settings schema (vendored)");
+    println!("  keys:     {}", schema.len());
+    println!("  source:   {url}");
+    println!("  resolved: {}", origin.as_str());
+    println!(
+        "  refresh:  WAYS_SETTINGS_SCHEMA_URL=<url> or set `settings_schema_url` \
+         in config, then run refresh-settings-schema.sh and rebuild"
+    );
+    println!(
+        "  note:     community SchemaStore, not an official Anthropic artifact; \
+         may lag the latest CLI"
+    );
+}
