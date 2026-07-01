@@ -203,6 +203,47 @@ link_path_binaries() {
   return 0
 }
 
+# Platform triple for messages (linux-x86_64, darwin-arm64, …).
+PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+
+# Did setup produce a functional semantic-matching engine? (ADR-146 verify step.)
+# A binary that downloaded/built but won't actually embed is treated as "not
+# acquired" — `ways status` reports Engine: embedding only when it truly works.
+embedding_engine_ok() {
+  [[ -x "$APP_DIR/bin/ways" ]] || return 1
+  "$APP_DIR/bin/ways" status 2>/dev/null | grep -qiE '^Engine:[[:space:]]*embedding'
+}
+
+# ADR-146 recovery card: shown when the projection is up but semantic matching is
+# off (no prebuilt way-embed for this platform / it won't launch / toolchain
+# missing). Leads with an agent handoff — Claude Code is, by definition, installed,
+# since this is being set up *for* it — including a paste-ready prompt; the exact
+# commands are the backstop. This function never builds or installs anything.
+print_recovery_card() {
+  cat <<CARD
+
+${YELLOW}⚠ Semantic (meaning-based) way-matching is OFF${RESET} — keyword/pattern ways still fire,
+  but the embedding engine (way-embed) isn't working on this platform (${PLATFORM}).
+
+  ${BOLD}Easiest fix — let the agent you're installing this for finish it.${RESET}
+  Open Claude Code in ${CYAN}${APP_DIR}${RESET} and paste this:
+  ${DIM}────────────────────────────────────────────────────────────────${RESET}
+  agent-ways installed but semantic way-matching is off — way-embed isn't
+  working on this machine (${PLATFORM}). The app source is at ${APP_DIR}.
+  Please finish setup per docs/finish-install.md: check for a C++ toolchain
+  (cmake + compiler); if it's missing run \`make deps\` (it uses sudo — ask me
+  first); then \`make setup\`; then verify \`ways status\` shows Engine: embedding.
+  ${DIM}────────────────────────────────────────────────────────────────${RESET}
+
+  ${BOLD}Or finish it yourself:${RESET}
+    cd ${APP_DIR}
+    make deps      # only if cmake/compiler is missing — installs the toolchain (sudo)
+    make setup     # build way-embed + fetch model + regenerate corpus
+  Details: ${CYAN}${APP_DIR}/docs/finish-install.md${RESET}
+
+CARD
+}
+
 # --- Clobber: remove the app dir AND ~/.claude (backs ~/.claude up first) ---
 
 if [[ "$CLOBBER" == "true" ]]; then
@@ -254,6 +295,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" || true
     echo ""
     echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
+    embedding_engine_ok || print_recovery_card
   else
     echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
     echo "  Fix the build (cd $APP_DIR && make setup), then run: ways reconcile"
@@ -330,6 +372,9 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo "  Restart Claude Code for ways to take effect."
   echo -e "  If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
   echo ""
+  # ADR-146 verify: the projection is up, but if semantic matching didn't come
+  # up (no prebuilt way-embed for this platform / toolchain missing), guide recovery.
+  embedding_engine_ok || print_recovery_card
 else
   # No binary → don't create an empty ~/.claude. The app is staged; finish by hand.
   echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"
