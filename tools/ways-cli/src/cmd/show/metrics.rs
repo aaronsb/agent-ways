@@ -224,7 +224,8 @@ pub(crate) fn render_update_status(content: &str) -> String {
             let repo = get("repo").unwrap_or_default();
             let repo_disp = if repo.is_empty() { "$XDG_DATA_HOME/agent-ways" } else { &repo };
             out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
-            out.push_str(&format!("`cd \"{repo_disp}\" && git pull && make setup && ways reconcile`\n"));
+            out.push_str(&format!("`cd \"{repo_disp}\" && make update && ways reconcile`\n"));
+            out.push_str("`make update` pulls, force-rebuilds the binaries, and relinks; `ways reconcile` reprojects. Don't use `git pull && make setup`: `setup` skips existing binaries (leaving them stale) and a bare `git pull` aborts on machine-local settings.json edits.\n");
         }
         "plugin" => {
             let installed = get("installed").unwrap_or_default();
