@@ -284,13 +284,41 @@ fn quote_first_token(cmd: &str) -> String {
     }
 }
 
-/// True if a hook *command* invokes the agent-ways projection — a `.claude/hooks/`
-/// script or the `.claude/bin/ways` CLI. Matches the literal `${HOME}`-prefixed
-/// form we ship and the expanded/quoted forms a prior merge may have written
-/// (substring match, so quoting and `${HOME}` vs `/home/...` both pass). Assumes
-/// the ADR-142 projection root (`~/.claude`).
+/// True if a hook *command*'s executable is an agent-ways projection artifact —
+/// a `.claude/hooks/…` script or a `.claude/bin/…` CLI (`ways`, `way-embed`,
+/// `attend`). Only the **first (exe) token** is examined (quote-aware), so a
+/// user hook that merely passes a projection path as an *argument* — e.g.
+/// `tail -f ${HOME}/.claude/hooks/ways/x.log` — is NOT mistaken for ours. That
+/// distinction is load-bearing: misclassifying a user hook would silently drop
+/// it (the self-audit strips it symmetrically, so no revert catches it).
+///
+/// Path separators are normalized so a Windows `\`-form path matches. Matches
+/// the literal `${HOME}`-prefixed form we ship and the expanded/quoted forms a
+/// prior merge wrote.
+///
+/// Assumes the ADR-142 projection root (`~/.claude`) — the hooks we ship are
+/// written with a literal `${HOME}/.claude/...` prefix, so a relocated config
+/// dir (`CLAUDE_CONFIG_DIR`) is out of scope; if that ever changes, the
+/// shipped-hooks guard test (`shipped_hooks_are_all_recognized_as_ours`) fails
+/// loudly rather than the reconciler silently regressing.
 fn command_is_ours(cmd: &str) -> bool {
-    cmd.contains(".claude/hooks/") || cmd.contains(".claude/bin/ways")
+    let exe = exe_token(cmd).replace('\\', "/");
+    exe.contains(".claude/hooks/") || exe.contains(".claude/bin/")
+}
+
+/// The executable token of a hook command: the leading `"`-quoted span when the
+/// command is quoted (the form our installer writes, e.g.
+/// `"${HOME}/.claude/bin/ways" corpus`), else the run up to the first
+/// whitespace. Mirrors the tokenization `quote_first_token` assumes.
+fn exe_token(cmd: &str) -> &str {
+    if let Some(rest) = cmd.strip_prefix('"') {
+        match rest.find('"') {
+            Some(i) => &rest[..i],
+            None => rest,
+        }
+    } else {
+        cmd.split_whitespace().next().unwrap_or(cmd)
+    }
 }
 
 /// True if a hook *entry* is one agent-ways ships: it runs at least one command
@@ -685,5 +713,77 @@ mod tests {
         assert_eq!(after["model"], "opus", "user content preserved");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn command_is_ours_examines_the_exe_token_only() {
+        // Ours: script + CLI, unquoted and quoted-with-args.
+        assert!(command_is_ours("${HOME}/.claude/hooks/ways/check-setup.sh"));
+        assert!(command_is_ours("\"${HOME}/.claude/hooks/ways/check-setup.sh\""));
+        assert!(command_is_ours("\"${HOME}/.claude/bin/ways\" corpus --quiet"));
+        // Sibling CLIs under .claude/bin/ (broadened past just `ways`).
+        assert!(command_is_ours("${HOME}/.claude/bin/way-embed match"));
+        assert!(command_is_ours("${HOME}/.claude/bin/attend"));
+        // Windows backslash form of our path.
+        assert!(command_is_ours("\"C:\\Users\\j\\.claude\\hooks\\ways\\c.sh\""));
+        // NOT ours: a user command that merely references a projection path as an
+        // ARGUMENT — the exe is `tail`, not ours. Must not be swept up (else it is
+        // silently deleted with no revert).
+        assert!(!command_is_ours("tail -f ${HOME}/.claude/hooks/ways/x.log"));
+        assert!(!command_is_ours("cat ${HOME}/.claude/bin/ways"));
+        assert!(!command_is_ours("/usr/local/bin/mine"));
+    }
+
+    #[test]
+    fn entry_is_ours_requires_every_command_ours() {
+        let ours = json!({ "hooks": [ { "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/a.sh" } ] });
+        assert!(entry_is_ours(&ours));
+        // A mixed entry (one ours + one user command) is NOT ours — .all() fails,
+        // so the whole entry is preserved rather than dropped.
+        let mixed = json!({ "hooks": [
+            { "type": "command", "command": "${HOME}/.claude/hooks/ways/a.sh" },
+            { "type": "command", "command": "/usr/local/bin/mine" } ] });
+        assert!(!entry_is_ours(&mixed));
+        // An empty/absent hooks array is not ours.
+        assert!(!entry_is_ours(&json!({ "matcher": "x", "hooks": [] })));
+        assert!(!entry_is_ours(&json!({ "matcher": "x" })));
+    }
+
+    #[test]
+    fn merge_preserves_user_hook_referencing_our_path_as_argument() {
+        // Regression for the review finding: a genuine user hook whose command
+        // takes a projection path as an ARGUMENT must survive the merge untouched.
+        let user_hook = json!({ "matcher": "startup", "hooks": [ { "type": "command",
+            "command": "tail -f ${HOME}/.claude/hooks/ways/debug.log" } ] });
+        let live = json!({ "hooks": { "SessionStart": [ user_hook.clone() ] } });
+        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let ss = m.settings["hooks"]["SessionStart"].as_array().unwrap();
+        assert!(ss.contains(&user_hook), "user hook (path-as-arg) must survive: {ss:?}");
+        // And the self-audit view agrees it's user content on both sides.
+        let before = stripped_user_view(&live, &Owned::default());
+        let after = stripped_user_view(&m.settings, &m.base);
+        assert_eq!(before, after, "user view preserved");
+    }
+
+    #[test]
+    fn shipped_hooks_are_all_recognized_as_ours() {
+        // Guard: every hook agent-ways ships in the repo settings.json must be
+        // recognized by `entry_is_ours`. Otherwise structural ownership silently
+        // regresses and a stale-base update false-reverts again. Catches a future
+        // hook that shells something outside `.claude/hooks/` or `.claude/bin/`.
+        let repo_settings =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings.json");
+        let raw = match std::fs::read_to_string(&repo_settings) {
+            Ok(s) => s,
+            Err(_) => return, // not a source checkout — skip
+        };
+        let v: Value = serde_json::from_str(&raw).expect("repo settings.json parses");
+        let Some(hooks) = v.get("hooks").and_then(|h| h.as_object()) else { return };
+        for (event, entries) in hooks {
+            for e in entries.as_array().into_iter().flatten() {
+                assert!(entry_is_ours(e), "shipped hook in {event} not recognized as ours: {e}");
+            }
+        }
     }
 }
