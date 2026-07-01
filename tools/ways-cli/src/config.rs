@@ -2,9 +2,10 @@
 //!
 //! Resolution order (later overrides earlier):
 //!   1. Built-in defaults
-//!   2. ~/.claude/ways.json (legacy, backward compat)
-//!   3. $XDG_CONFIG_HOME/ways/config.yaml (user scope)
-//!   4. $PROJECT/.claude/ways.yaml (project scope)
+//!   2. ~/.claude/ways.json (legacy JSON, pre-1.0 backward compat)
+//!   3. $XDG_CONFIG_HOME/ways/config.yaml (legacy XDG path)
+//!   4. $XDG_CONFIG_HOME/agent-ways/config.yaml (canonical user scope)
+//!   5. $PROJECT/.claude/ways.yaml (project scope)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -134,13 +135,25 @@ impl Config {
             cfg.apply_ways_json(&content);
         }
 
-        // Layer 2: XDG user config
-        let xdg_config = xdg_config_dir().join("ways/config.yaml");
-        if let Ok(content) = std::fs::read_to_string(&xdg_config) {
+        // Layer 2: legacy XDG user config ($XDG_CONFIG_HOME/ways/config.yaml).
+        // Kept as a fallback for installs written before the app-namespaced path.
+        let legacy_xdg = xdg_config_dir().join("ways/config.yaml");
+        if let Ok(content) = std::fs::read_to_string(&legacy_xdg) {
             cfg.apply_yaml(&content);
         }
 
-        // Layer 3: project overlay — only this layer may populate `disabled_ways`
+        // Layer 3: canonical user config ($XDG_CONFIG_HOME/agent-ways/config.yaml) —
+        // the app-namespaced location, matching user_ways_root's parent. This is the
+        // single source of truth for the path (paths::user_config); it overrides
+        // the legacy `ways/config.yaml` above when both exist.
+        let user_config = crate::paths::user_config();
+        if user_config != legacy_xdg {
+            if let Ok(content) = std::fs::read_to_string(&user_config) {
+                cfg.apply_yaml(&content);
+            }
+        }
+
+        // Layer 4: project overlay — only this layer may populate `disabled_ways`
         // (ADR-131: per-way disable is project-scope only).
         let project_config = Path::new(project_dir).join(".claude/ways.yaml");
         if let Ok(content) = std::fs::read_to_string(&project_config) {

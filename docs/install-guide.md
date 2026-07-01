@@ -79,7 +79,7 @@ Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirector
 1. **Restart Claude Code** — ways activate on session start.
 2. **Check engine status** — `ways status` shows binary, model, corpus, and project detection.
 3. **Read the ways** — browse `~/.claude/hooks/ways/` (a projected symlink into the app) to see the loaded guidance.
-4. **Config** — user config lives in `$XDG_CONFIG_HOME/ways/config.yaml` (a legacy `~/.claude/ways.json` is still honored). It controls which domains are active.
+4. **Config** — user config lives in `$XDG_CONFIG_HOME/agent-ways/config.yaml` (a legacy `$XDG_CONFIG_HOME/ways/config.yaml` and `~/.claude/ways.json` are still honored). It controls which domains are active.
 
 ## What gets downloaded
 

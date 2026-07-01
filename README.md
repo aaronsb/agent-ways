@@ -123,7 +123,7 @@ For the complete system guide — trigger flow, state machines, the pipeline fro
 
 ## Configuration
 
-User config lives in `$XDG_CONFIG_HOME/ways/config.yaml` (YAML). For example, to disable whole domains:
+User config lives in `$XDG_CONFIG_HOME/agent-ways/config.yaml` (YAML). For example, to disable whole domains:
 
 ```yaml
 disabled_domains:

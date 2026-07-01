@@ -49,7 +49,7 @@ Three way roots (ADR-143) — don't confuse *reading* one with *authoring* in it
   lost. Change these in a dev checkout and reproject (see `docs/development.md`).
 - **Your own ways (user scope, survives updates):** `$XDG_CONFIG_HOME/agent-ways/ways/{domain}/{wayname}/{wayname}.md`
 - **Project ways:** `$PROJECT/.claude/ways/{domain}/{wayname}/{wayname}.md` — override global ways at the same path
-- Disable domains: `$XDG_CONFIG_HOME/ways/config.yaml` → `disabled_domains: [domain]` (legacy `~/.claude/ways.json` → `{"disabled": [...]}` still honored)
+- Disable domains: `$XDG_CONFIG_HOME/agent-ways/config.yaml` → `disabled_domains: [domain]` (legacy `$XDG_CONFIG_HOME/ways/config.yaml` and `~/.claude/ways.json` → `{"disabled": [...]}` still honored)
 - Ways can nest: `{domain}/{parent}/{child}/{child}.md` for progressive disclosure
 - When a parent way fires, child thresholds are lowered 20% (domain context is established)
 - Tree disclosure metrics are tracked per-session (parent, depth, epoch distance, sibling coverage)
