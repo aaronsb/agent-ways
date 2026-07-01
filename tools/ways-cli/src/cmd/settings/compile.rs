@@ -25,34 +25,30 @@ use std::path::Path;
 /// `dotted path → fragment file name(s)` that produced the effective value.
 pub type Provenance = BTreeMap<String, Vec<String>>;
 
-/// Compile a store: lint-gate, then merge each scope into a baked settings
-/// object + provenance. Returns `true` if the lint gate failed (caller exits
-/// non-zero). With `out`, writes `<scope>.settings.json` + `provenance.json`;
-/// otherwise prints a single scope's baked blob to stdout.
-pub fn run(store: &Path, scope_filter: Option<Scope>, out: Option<&Path>) -> Result<bool> {
+/// The result of compiling a store: either the lint gate refused, or a baked
+/// object + provenance per scope present.
+pub enum Outcome {
+    /// Lint errors blocked the bake (the error findings, for reporting).
+    Refused(Vec<lint::Finding>),
+    /// One `(scope, baked settings, provenance)` per scope that had fragments.
+    Baked(Vec<(Scope, Value, Provenance)>),
+}
+
+/// Lint-gate a store, then merge each scope into a baked object + provenance.
+/// Pure (no output) — shared by `compile` and `project`.
+pub fn compile_store(store: &Path, scope_filter: Option<Scope>) -> Result<Outcome> {
     let frags = load_dir(store)?;
 
-    // Lint gate — refuse to bake a store with errors (warnings are fine).
     let findings = lint::check(&frags, schema_doc::active());
     if lint::has_errors(&findings) {
-        let errors: Vec<_> = findings
-            .iter()
+        let errors = findings
+            .into_iter()
             .filter(|f| f.severity == lint::Severity::Error)
             .collect();
-        eprintln!(
-            "compile refused: {} lint error(s) — fix first (`ways settings lint {}`):",
-            errors.len(),
-            store.display()
-        );
-        for e in &errors {
-            eprintln!("  {}: {}", e.file, e.message);
-        }
-        return Ok(true);
+        return Ok(Outcome::Refused(errors));
     }
 
-    // Merge each scope present (or the requested one), in filename order.
-    let mut baked: BTreeMap<&str, Value> = BTreeMap::new();
-    let mut provenance: BTreeMap<&str, Provenance> = BTreeMap::new();
+    let mut scopes = Vec::new();
     for scope in [Scope::User, Scope::Project, Scope::Managed] {
         if scope_filter.is_some_and(|f| f != scope) {
             continue;
@@ -62,8 +58,41 @@ pub fn run(store: &Path, scope_filter: Option<Scope>, out: Option<&Path>) -> Res
             continue;
         }
         let (obj, prov) = merge_scope(&scoped);
-        baked.insert(scope.as_str(), obj);
-        provenance.insert(scope.as_str(), prov);
+        scopes.push((scope, obj, prov));
+    }
+    Ok(Outcome::Baked(scopes))
+}
+
+/// Print lint-gate errors to stderr. Shared by `compile`/`project`.
+pub fn report_refusal(store: &Path, errors: &[lint::Finding]) {
+    eprintln!(
+        "refused: {} lint error(s) — fix first (`ways settings lint {}`):",
+        errors.len(),
+        store.display()
+    );
+    for e in errors {
+        eprintln!("  {}: {}", e.file, e.message);
+    }
+}
+
+/// Compile a store: lint-gate, then merge each scope into a baked settings
+/// object + provenance. Returns `true` if the lint gate failed (caller exits
+/// non-zero). With `out`, writes `<scope>.settings.json` + `provenance.json`;
+/// otherwise prints a single scope's baked blob to stdout.
+pub fn run(store: &Path, scope_filter: Option<Scope>, out: Option<&Path>) -> Result<bool> {
+    let scopes = match compile_store(store, scope_filter)? {
+        Outcome::Refused(errors) => {
+            report_refusal(store, &errors);
+            return Ok(true);
+        }
+        Outcome::Baked(scopes) => scopes,
+    };
+
+    let mut baked: BTreeMap<&str, Value> = BTreeMap::new();
+    let mut provenance: BTreeMap<&str, Provenance> = BTreeMap::new();
+    for (scope, obj, prov) in &scopes {
+        baked.insert(scope.as_str(), obj.clone());
+        provenance.insert(scope.as_str(), prov.clone());
     }
 
     if baked.is_empty() {

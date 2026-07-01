@@ -620,6 +620,17 @@ enum SettingsCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Project a compiled store into the live settings.json (user/project); emits managed as a blob
+    Project {
+        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
+        path: Option<PathBuf>,
+        /// Only project this scope
+        #[arg(long)]
+        scope: Option<String>,
+        /// Preview changes without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Parse an optional `--scope` string into a settings scope.
@@ -834,6 +845,15 @@ fn main() -> Result<()> {
                 let scope = parse_settings_scope(scope)?;
                 let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
                 let had_error = cmd::settings::compile::run(&dir, scope, out.as_deref())?;
+                if had_error {
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
+            SettingsCommand::Project { path, scope, dry_run } => {
+                let scope = parse_settings_scope(scope)?;
+                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
+                let had_error = cmd::settings::project::run(&dir, scope, dry_run)?;
                 if had_error {
                     std::process::exit(1);
                 }

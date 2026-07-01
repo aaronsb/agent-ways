@@ -15,6 +15,7 @@
 pub mod compile;
 pub mod fragment;
 pub mod lint;
+pub mod project;
 pub mod scaffold;
 pub mod schema;
 pub mod schema_doc;

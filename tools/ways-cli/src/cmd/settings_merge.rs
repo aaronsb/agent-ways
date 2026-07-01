@@ -364,7 +364,7 @@ fn read_json_or_empty(p: &Path) -> Result<Value> {
     }
 }
 
-fn write_json_atomic(p: &Path, v: &Value) -> Result<()> {
+pub(crate) fn write_json_atomic(p: &Path, v: &Value) -> Result<()> {
     let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
     let body = serde_json::to_string_pretty(v)?;
     std::fs::write(&tmp, body).with_context(|| format!("writing {}", tmp.display()))?;
