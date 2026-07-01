@@ -16,4 +16,6 @@
 #[allow(dead_code)]
 pub mod fragment;
 #[allow(dead_code)]
+pub mod lint;
+#[allow(dead_code)]
 pub mod schema;
