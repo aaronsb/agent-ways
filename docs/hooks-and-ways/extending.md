@@ -138,13 +138,15 @@ ways:
 
 ### Disabling an entire domain (global)
 
-Add the domain name to `~/.claude/ways.json`:
+Add the domain to `disabled_domains` in `$XDG_CONFIG_HOME/ways/config.yaml`:
 
-```json
-{
-  "disabled": ["itops", "experimental"]
-}
+```yaml
+disabled_domains:
+  - itops
+  - experimental
 ```
+
+(A legacy `~/.claude/ways.json` with `{"disabled": [...]}` is still honored for un-migrated installs.)
 
 All ways in disabled domains are silently skipped everywhere. The domain still appears in the Available Ways table but its ways won't fire. Domain-level disable is the right tool for "never anywhere"; project-scope per-way disable is the right tool for "not in this project."
 
