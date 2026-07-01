@@ -38,21 +38,30 @@ impl Scope {
 }
 
 /// One config fragment: a parsed `NN-*.md` file.
+///
+/// The loader captures the whole fragment faithfully. The linter reads only
+/// `scope` and `settings`; `order_prefix`, `mandatory`, and `body` are consumed
+/// by the compile/project slices (org-lock emission, provenance manifest,
+/// rendered rationale) — hence the forward-looking `allow(dead_code)` on them,
+/// removed as each gains a reader.
 #[derive(Debug, Clone)]
 pub struct Fragment {
     /// Source file path.
     pub path: PathBuf,
     /// Numeric filename ordering prefix (the `NN` in `NN-name.md`), if present.
     /// Informational only — actual load order is the alphabetical filename sort.
+    #[allow(dead_code)]
     pub order_prefix: Option<u32>,
     /// Target scope.
     pub scope: Scope,
     /// Org-lock flag. Only meaningful at managed scope; carried verbatim.
+    #[allow(dead_code)]
     pub mandatory: bool,
     /// The `settings:` block as a `settings.json` fragment. Always a JSON
     /// object (an absent or null `settings:` normalizes to `{}`).
     pub settings: serde_json::Value,
     /// Markdown body after the frontmatter — the rationale, trimmed.
+    #[allow(dead_code)]
     pub body: String,
 }
 

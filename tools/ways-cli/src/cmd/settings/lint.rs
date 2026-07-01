@@ -172,7 +172,7 @@ pub fn report(findings: &[Finding], json: bool) {
         return;
     }
     if findings.is_empty() {
-        println!("config lint: clean — no issues");
+        println!("settings lint: clean — no issues");
         return;
     }
     for f in findings {
@@ -184,7 +184,7 @@ pub fn report(findings: &[Finding], json: bool) {
     }
     let errors = findings.iter().filter(|f| f.severity == Severity::Error).count();
     let warns = findings.len() - errors;
-    println!("config lint: {errors} error(s), {warns} warning(s)");
+    println!("settings lint: {errors} error(s), {warns} warning(s)");
 }
 
 /// Load, check, and report a config store. Returns `true` if any errors were
@@ -199,7 +199,7 @@ pub fn run(dir: &Path, json: bool) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::config::fragment::Fragment;
+    use crate::cmd::settings::fragment::Fragment;
     use serde_json::json;
     use std::path::PathBuf;
 

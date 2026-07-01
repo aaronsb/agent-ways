@@ -1,5 +1,4 @@
 pub mod banner;
-pub mod config;
 pub mod context;
 pub mod corpus;
 pub mod disable;
@@ -24,6 +23,7 @@ pub mod rethink;
 pub mod rethink_dump;
 pub mod siblings;
 pub mod scan;
+pub mod settings;
 pub mod settings_merge;
 pub mod show;
 pub mod stats;

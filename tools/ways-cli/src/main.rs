@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 pub mod agents;
 mod cmd;
@@ -397,6 +398,11 @@ enum Commands {
         #[arg(long, global = true)]
         global: bool,
     },
+    /// settings.json fragment store — author settings as composable YAML fragments (ADR-147)
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -573,6 +579,18 @@ enum GovernanceCommand {
     Lint,
 }
 
+#[derive(Subcommand)]
+enum SettingsCommand {
+    /// Lint a settings.json fragment store: schema-valid, scope-legal, duplicate-scalar
+    Lint {
+        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
+        path: Option<PathBuf>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 fn main() -> Result<()> {
     // Show banner + help when invoked with no args or "help"
     let args: Vec<String> = std::env::args().collect();
@@ -747,5 +765,15 @@ fn main() -> Result<()> {
             };
             cmd::governance::run(gov_mode, json, global)
         }
+        Commands::Settings { command } => match command {
+            SettingsCommand::Lint { path, json } => {
+                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
+                let has_errors = cmd::settings::lint::run(&dir, json)?;
+                if has_errors {
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
+        },
     }
 }
