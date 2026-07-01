@@ -589,11 +589,14 @@ enum SettingsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show the vendored Claude Code settings schema and its (configurable) source
+    /// Show or refresh the Claude Code settings schema and its (configurable) source
     Schema {
         /// Print only the resolved source URL (for scripts)
         #[arg(long)]
         source: bool,
+        /// Fetch the latest schema from the configured source into the durable user copy
+        #[arg(long)]
+        refresh: bool,
     },
     /// Scaffold a fragment for a settings key (fill-in-the-blank template from the schema)
     New {
@@ -791,9 +794,13 @@ fn main() -> Result<()> {
                 }
                 Ok(())
             }
-            SettingsCommand::Schema { source } => {
-                cmd::settings::schema_command(source);
-                Ok(())
+            SettingsCommand::Schema { source, refresh } => {
+                if refresh {
+                    cmd::settings::schema_refresh()
+                } else {
+                    cmd::settings::schema_command(source);
+                    Ok(())
+                }
             }
             SettingsCommand::New { key, scope, dir } => {
                 let scope = match scope.as_deref() {

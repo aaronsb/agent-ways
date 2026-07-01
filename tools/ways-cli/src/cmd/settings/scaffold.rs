@@ -1,5 +1,5 @@
 //! `ways settings new <key>` — scaffold a syntactically-correct fragment from
-//! the vendored schema (ADR-147).
+//! the settings schema (ADR-147).
 //!
 //! The MVP authoring aid: the user names a key, and we instantiate a valid
 //! `NN-<key>.md` with a type-correct placeholder in the `settings:` block and the
@@ -9,14 +9,32 @@
 
 use super::fragment::Scope;
 use super::{schema, schema_doc};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
 /// Scaffold a fragment for `key` into `dir`. `scope` defaults to `managed` for
-/// managed-only keys, else `user`.
+/// managed-only keys, else `user`. Requires the settings schema — errors with
+/// guidance if it isn't available.
 pub fn run(key: &str, scope: Option<Scope>, dir: &Path) -> Result<()> {
-    let info = match schema_doc::bundled().get(key) {
+    let schema = schema_doc::active().ok_or_else(|| {
+        anyhow!(
+            "the settings schema is not available at {}. \
+             Run `ways settings schema --refresh` or reinstall.",
+            crate::paths::settings_schema_file().display()
+        )
+    })?;
+    run_with(key, scope, dir, schema)
+}
+
+/// Schema-injected core, so tests can supply the shipped schema directly.
+fn run_with(
+    key: &str,
+    scope: Option<Scope>,
+    dir: &Path,
+    schema: &schema_doc::SettingsSchema,
+) -> Result<()> {
+    let info = match schema.get(key) {
         Some(i) => i,
         None => bail!(
             "`{key}` is not a known Claude Code settings key. \
@@ -127,7 +145,7 @@ mod tests {
     #[test]
     fn scaffolds_a_normal_key_that_loads_and_lints_clean() {
         let dir = tmpdir();
-        run("cleanupPeriodDays", None, &dir).unwrap();
+        run_with("cleanupPeriodDays", None, &dir, &schema_doc::test_schema()).unwrap();
         let path = dir.join("10-cleanupPeriodDays.md");
         assert!(path.exists());
         // The round-trip guarantee: generated file loads and lints clean.
@@ -135,7 +153,7 @@ mod tests {
         assert_eq!(frag.scope, Scope::User);
         assert!(frag.settings.get("cleanupPeriodDays").unwrap().is_number());
         assert!(!frag.body.is_empty(), "description should land in the body");
-        let findings = check(&[frag]);
+        let findings = check(&[frag], Some(&schema_doc::test_schema()));
         assert!(
             findings.iter().all(|f| f.severity != Severity::Error),
             "scaffold must lint without errors: {findings:?}"
@@ -146,18 +164,18 @@ mod tests {
     #[test]
     fn managed_only_key_defaults_to_managed_scope() {
         let dir = tmpdir();
-        run("allowManagedHooksOnly", None, &dir).unwrap();
+        run_with("allowManagedHooksOnly", None, &dir, &schema_doc::test_schema()).unwrap();
         let frag = load_file(&dir.join("10-allowManagedHooksOnly.md")).unwrap();
         assert_eq!(frag.scope, Scope::Managed);
         // At managed scope it is scope-legal — no findings.
-        assert!(check(&[frag]).is_empty());
+        assert!(check(&[frag], Some(&schema_doc::test_schema())).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn unknown_key_is_refused() {
         let dir = tmpdir();
-        let err = run("totallyMadeUpKey", None, &dir).unwrap_err();
+        let err = run_with("totallyMadeUpKey", None, &dir, &schema_doc::test_schema()).unwrap_err();
         assert!(err.to_string().contains("not a known"), "got: {err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -165,8 +183,8 @@ mod tests {
     #[test]
     fn refuses_to_clobber_existing_fragment() {
         let dir = tmpdir();
-        run("model", None, &dir).unwrap();
-        let err = run("model", None, &dir).unwrap_err();
+        run_with("model", None, &dir, &schema_doc::test_schema()).unwrap();
+        let err = run_with("model", None, &dir, &schema_doc::test_schema()).unwrap_err();
         assert!(err.to_string().contains("already exists"), "got: {err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -174,8 +192,8 @@ mod tests {
     #[test]
     fn prefix_increments_with_store_contents() {
         let dir = tmpdir();
-        run("model", None, &dir).unwrap();
-        run("cleanupPeriodDays", None, &dir).unwrap();
+        run_with("model", None, &dir, &schema_doc::test_schema()).unwrap();
+        run_with("cleanupPeriodDays", None, &dir, &schema_doc::test_schema()).unwrap();
         assert!(dir.join("10-model.md").exists());
         assert!(dir.join("20-cleanupPeriodDays.md").exists());
         let _ = std::fs::remove_dir_all(&dir);

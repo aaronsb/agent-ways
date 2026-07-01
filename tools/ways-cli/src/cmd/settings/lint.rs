@@ -1,9 +1,9 @@
 //! The config-store linter (ADR-147): three deterministic checks over a loaded
 //! fragment tree, plus a reporter.
 //!
-//! 1. **schema-valid** — every top-level `settings:` key is known to the vendored
+//! 1. **schema-valid** — every top-level `settings:` key is known to the settings
 //!    schema or the scope overlay (unknown → *warning*, never error) and its
-//!    value matches the vendored schema's type (mismatch → *error*; unions
+//!    value matches the settings schema's type (mismatch → *error*; unions
 //!    validate permissively).
 //! 2. **scope-legal** — a managed-only key authored at user/project scope is an
 //!    *error* (Claude Code ignores it there); a managed-overridable key
@@ -46,9 +46,28 @@ pub struct Finding {
 }
 
 /// Run all three checks over an already-loaded, filename-ordered fragment list.
-/// Pure and deterministic — the CLI and the tests share this entry point.
-pub fn check(frags: &[Fragment]) -> Vec<Finding> {
+/// Pure and deterministic — the CLI and the tests share this entry point. The
+/// settings schema is injected (`None` = unavailable) rather than resolved
+/// inside, so it degrades explicitly and stays testable.
+pub fn check(frags: &[Fragment], schema: Option<&schema_doc::SettingsSchema>) -> Vec<Finding> {
     let mut findings = Vec::new();
+
+    // No schema available: note it once and skip schema-valid entirely — do not
+    // flood one "unrecognized" per key. Scope-legal + duplicate still run off the
+    // overlay, so the linter stays useful.
+    if schema.is_none() {
+        findings.push(Finding {
+            severity: Severity::Warning,
+            check: "schema",
+            // Synthetic notice (not a fragment finding): `file` names the schema
+            // path we looked for, and `key` is empty.
+            file: crate::paths::settings_schema_file().display().to_string(),
+            key: String::new(),
+            message: "settings schema not found — schema-valid checks skipped; \
+                      run `ways settings schema --refresh`"
+                .to_string(),
+        });
+    }
 
     // Per-fragment checks: schema-valid + scope-legal, in fragment then key order.
     for frag in frags {
@@ -58,43 +77,44 @@ pub fn check(frags: &[Fragment]) -> Vec<Finding> {
             None => continue, // loader guarantees an object; defensive.
         };
         for (key, value) in obj {
-            let schema_info = schema_doc::bundled().get(key);
             let sclass = scope_class(key);
 
-            // schema-valid. A key is "known" if the vendored schema has it OR the
-            // overlay does (the overlay carries keys SchemaStore still lags).
-            // Unknown -> warning, never error. Known + typed -> type-check against
-            // the vendored schema (unions validate permissively; see schema_doc).
-            match schema_info {
-                Some(info) => {
-                    if !info.ty.matches(value) {
-                        findings.push(Finding {
-                            severity: Severity::Error,
-                            check: "schema",
-                            file: file.clone(),
-                            key: key.clone(),
-                            message: format!(
-                                "`{key}` expects {}, got {}",
-                                info.ty.name(),
-                                super::fragment::json_kind(value)
-                            ),
-                        });
+            // schema-valid — only when a schema is available. A key is "known" if
+            // the schema has it OR the overlay does (the overlay carries keys
+            // SchemaStore still lags). Unknown -> warning, never error. Known +
+            // typed -> type-check (unions validate permissively; see schema_doc).
+            if let Some(sc) = schema {
+                match sc.get(key) {
+                    Some(info) => {
+                        if !info.ty.matches(value) {
+                            findings.push(Finding {
+                                severity: Severity::Error,
+                                check: "schema",
+                                file: file.clone(),
+                                key: key.clone(),
+                                message: format!(
+                                    "`{key}` expects {}, got {}",
+                                    info.ty.name(),
+                                    super::fragment::json_kind(value)
+                                ),
+                            });
+                        }
                     }
+                    None if !overlay_knows(key) => findings.push(Finding {
+                        severity: Severity::Warning,
+                        check: "schema",
+                        file: file.clone(),
+                        key: key.clone(),
+                        message: format!(
+                            "unrecognized settings key `{key}` — not validated \
+                             (may be newer or version-gated)"
+                        ),
+                    }),
+                    None => {} // known to the overlay but not the schema.
                 }
-                None if !overlay_knows(key) => findings.push(Finding {
-                    severity: Severity::Warning,
-                    check: "schema",
-                    file: file.clone(),
-                    key: key.clone(),
-                    message: format!(
-                        "unrecognized settings key `{key}` — not validated \
-                         (may be newer or version-gated)"
-                    ),
-                }),
-                None => {} // known to the overlay but not the schema: no type check.
             }
 
-            // scope-legal (overlay).
+            // scope-legal (overlay) — runs regardless of schema availability.
             if let Some(class) = sclass {
                 if let Some(f) = scope_finding(class, frag.scope, key, &file) {
                     findings.push(f);
@@ -198,7 +218,7 @@ pub fn report(findings: &[Finding], json: bool) {
 /// found (the caller maps that to a non-zero exit).
 pub fn run(dir: &Path, json: bool) -> Result<bool> {
     let frags = super::fragment::load_dir(dir)?;
-    let findings = check(&frags);
+    let findings = check(&frags, schema_doc::active());
     report(&findings, json);
     Ok(findings.iter().any(|f| f.severity == Severity::Error))
 }
@@ -226,10 +246,31 @@ mod tests {
         findings.iter().filter(|f| f.check == check).cloned().collect()
     }
 
+    /// Run check() with the shipped schema injected — the normal case.
+    fn checked(frags: &[Fragment]) -> Vec<Finding> {
+        check(frags, Some(&schema_doc::test_schema()))
+    }
+
+    #[test]
+    fn absent_schema_degrades_gracefully() {
+        // No schema: one notice, schema-valid skipped (no per-key "unrecognized"
+        // flood), but scope-legal still fires. The linter stays useful.
+        let f = frag(
+            "10.md",
+            Scope::User,
+            json!({ "totallyMadeUpKey": 1, "model": "opus" }),
+        );
+        let findings = check(&[f], None);
+        let schema = of(&findings, "schema");
+        assert_eq!(schema.len(), 1, "exactly one 'schema skipped' notice");
+        assert!(schema[0].message.contains("skipped"));
+        assert_eq!(of(&findings, "scope").len(), 1, "scope-legal still runs");
+    }
+
     #[test]
     fn schema_type_mismatch_is_error() {
         let f = frag("10.md", Scope::User, json!({ "cleanupPeriodDays": "soon" }));
-        let findings = check(&[f]);
+        let findings = checked(&[f]);
         let schema = of(&findings, "schema");
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].severity, Severity::Error);
@@ -239,10 +280,10 @@ mod tests {
     #[test]
     fn yaml_yes_becomes_schema_error_on_bool_key() {
         // The fidelity boundary, end-to-end: `autoMemoryEnabled: yes` loads as
-        // the string "yes" (see fragment tests), which the vendored schema's
+        // the string "yes" (see fragment tests), which the settings schema's
         // boolean type rejects.
         let f = frag("10.md", Scope::User, json!({ "autoMemoryEnabled": "yes" }));
-        let schema = of(&check(&[f]), "schema");
+        let schema = of(&checked(&[f]), "schema");
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].severity, Severity::Error);
         assert!(schema[0].message.contains("expects boolean"));
@@ -254,9 +295,9 @@ mod tests {
         // boolean `true` must not raise a schema (type) error. Managed scope
         // keeps it scope-legal so we isolate the schema check.
         let f = frag("10.md", Scope::Managed, json!({ "strictPluginOnlyCustomization": true }));
-        assert!(of(&check(&[f]), "schema").is_empty());
+        assert!(of(&checked(&[f]), "schema").is_empty());
         let f2 = frag("10.md", Scope::Managed, json!({ "strictPluginOnlyCustomization": [] }));
-        assert!(of(&check(&[f2]), "schema").is_empty());
+        assert!(of(&checked(&[f2]), "schema").is_empty());
     }
 
     #[test]
@@ -264,13 +305,13 @@ mod tests {
         // Regression: `autoUpdates` is valid but absent from SchemaStore; the
         // overlay marks it known, so no "unrecognized" warning.
         let f = frag("10.md", Scope::User, json!({ "autoUpdates": false }));
-        assert!(of(&check(&[f]), "schema").is_empty());
+        assert!(of(&checked(&[f]), "schema").is_empty());
     }
 
     #[test]
     fn unknown_key_is_schema_warning_not_error() {
         let f = frag("10.md", Scope::User, json!({ "frobnicate": true }));
-        let schema = of(&check(&[f]), "schema");
+        let schema = of(&checked(&[f]), "schema");
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].severity, Severity::Warning);
         assert!(schema[0].message.contains("unrecognized"));
@@ -279,7 +320,7 @@ mod tests {
     #[test]
     fn managed_only_at_user_scope_is_error() {
         let f = frag("10.md", Scope::User, json!({ "allowManagedHooksOnly": true }));
-        let scope = of(&check(&[f]), "scope");
+        let scope = of(&checked(&[f]), "scope");
         assert_eq!(scope.len(), 1);
         assert_eq!(scope[0].severity, Severity::Error);
         assert!(scope[0].message.contains("managed-only"));
@@ -288,13 +329,13 @@ mod tests {
     #[test]
     fn managed_only_at_managed_scope_is_clean() {
         let f = frag("10.md", Scope::Managed, json!({ "allowManagedHooksOnly": true }));
-        assert!(of(&check(&[f]), "scope").is_empty());
+        assert!(of(&checked(&[f]), "scope").is_empty());
     }
 
     #[test]
     fn managed_overridable_at_user_scope_is_warning() {
         let f = frag("10.md", Scope::User, json!({ "model": "opus" }));
-        let scope = of(&check(&[f]), "scope");
+        let scope = of(&checked(&[f]), "scope");
         assert_eq!(scope.len(), 1);
         assert_eq!(scope[0].severity, Severity::Warning);
         assert!(scope[0].message.contains("managed scope"));
@@ -304,7 +345,7 @@ mod tests {
     fn duplicate_scalar_across_fragments_warns_on_later() {
         let a = frag("10-a.md", Scope::User, json!({ "cleanupPeriodDays": 30 }));
         let b = frag("20-b.md", Scope::User, json!({ "cleanupPeriodDays": 90 }));
-        let dup = of(&check(&[a, b]), "duplicate");
+        let dup = of(&checked(&[a, b]), "duplicate");
         assert_eq!(dup.len(), 1);
         assert_eq!(dup[0].severity, Severity::Warning);
         assert!(dup[0].file.contains("20-b.md"), "warning lands on the later file");
@@ -317,7 +358,7 @@ mod tests {
         // both apply, nothing is dropped, so no duplicate finding.
         let u = frag("10.md", Scope::User, json!({ "cleanupPeriodDays": 30 }));
         let p = frag("20.md", Scope::Project, json!({ "cleanupPeriodDays": 90 }));
-        assert!(of(&check(&[u, p]), "duplicate").is_empty());
+        assert!(of(&checked(&[u, p]), "duplicate").is_empty());
     }
 
     #[test]
@@ -325,7 +366,7 @@ mod tests {
         // Regression: deniedMcpServers concatenates from user scope (ADR-147
         // interop); it must not raise a scope-legal error.
         let f = frag("10.md", Scope::User, json!({ "deniedMcpServers": ["evil-server"] }));
-        assert!(of(&check(&[f]), "scope").is_empty());
+        assert!(of(&checked(&[f]), "scope").is_empty());
     }
 
     #[test]
@@ -334,7 +375,7 @@ mod tests {
         // not lossy, so no duplicate finding.
         let a = frag("10.md", Scope::User, json!({ "permissions": { "allow": ["a"] }, "enabledMcpjsonServers": ["x"] }));
         let b = frag("20.md", Scope::User, json!({ "permissions": { "allow": ["b"] }, "enabledMcpjsonServers": ["y"] }));
-        assert!(of(&check(&[a, b]), "duplicate").is_empty());
+        assert!(of(&checked(&[a, b]), "duplicate").is_empty());
     }
 
     #[test]
@@ -344,6 +385,6 @@ mod tests {
             Scope::User,
             json!({ "permissions": { "allow": ["Bash(git:*)"] }, "includeCoAuthoredBy": false }),
         );
-        assert!(check(&[f]).is_empty());
+        assert!(checked(&[f]).is_empty());
     }
 }
