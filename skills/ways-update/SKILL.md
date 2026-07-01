@@ -17,9 +17,16 @@ doesn't do.
 ```
 cd "$XDG_DATA_HOME/agent-ways"
 git pull --ff-only        # (or fetch/merge upstream for a fork — see step 2)
-make setup                # rebuild ways/attend/way-embed + regenerate the corpus
+make update-binaries      # FORCE-rebuild ways/attend/way-embed (make setup skips existing binaries)
 ./bin/ways reconcile      # refresh the ~/.claude projection + re-merge settings.json
 ```
+
+The pull is done here (step 1/2), so this uses `make update-binaries` — a force
+rebuild — rather than `make setup`, which short-circuits any binary that already
+exists and would silently leave you on the old build. (The all-in-one `make update`
+bundles pull + rebuild + relink, but this skill does its own guarded pull first.)
+The embedding corpus self-heals on the next session via the `ways corpus --if-stale`
+`SessionStart` hook; regenerate it eagerly with `make -C "$APP" setup` if you want.
 
 Because the projected roots are symlinks into the app dir, a pull is *live* for
 existing files the moment it lands; `ways reconcile` is what catches **structural**
@@ -87,15 +94,22 @@ git -C "$APP" remote get-url upstream >/dev/null 2>&1 \
 git -C "$APP" fetch upstream && git -C "$APP" merge upstream/main   # resolve conflicts in custom ways
 ```
 
-### 3. Rebuild binaries + corpus
+### 3. Force-rebuild the binaries
 
 ```bash
-make -C "$APP" setup
+make -C "$APP" update-binaries
 ```
 
-`make setup` rebuilds the binaries and regenerates the embedding corpus. If it
-fails partway, the sub-targets are re-runnable (`make -C "$APP" update-binaries`,
-`make -C "$APP" ways-rebuild`).
+`make update-binaries` **force-rebuilds** ways/attend/attend-chat/way-embed. Do
+**not** use `make setup` here: `setup` skips any binary that already exists and runs
+(`ways already installed`), so after a pull it would leave the compiled binary
+**stale** — the whole point of the update. Individual targets are re-runnable if one
+fails (`make -C "$APP" ways-rebuild`, `attend-rebuild`, …).
+
+The embedding corpus regenerates lazily on the next session (`ways corpus --if-stale`
+in the `SessionStart` hook). To refresh it now — e.g. ways changed — run
+`make -C "$APP" setup` (binaries already fresh; this regenerates the corpus) or
+`"$APP/bin/ways" corpus`.
 
 ### 4. Refresh the projection
 

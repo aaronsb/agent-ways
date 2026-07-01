@@ -287,17 +287,17 @@ For the attention mechanics: [context-decay.md](docs/hooks-and-ways/context-deca
 In 1.0 the app source lives in `$XDG_DATA_HOME/agent-ways` (not `~/.claude`). Update by refreshing that checkout, then rebuilding and reprojecting — or just re-run the installer one-liner, which is idempotent:
 
 ```bash
-cd "$XDG_DATA_HOME/agent-ways" && git pull && make setup && ways reconcile
+cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile
 ```
 
-`make setup` rebuilds the binaries and semantic-matching corpus; `ways reconcile` refreshes the `~/.claude` projection. A fork fetches and merges upstream in the app dir first (`git fetch upstream && git merge upstream/main`), then the same `make setup && ways reconcile`.
+`make update` pulls (robustly — it autostashes around machine-local settings drift), **force-rebuilds** the binaries, regenerates the corpus, and relinks; `ways reconcile` then refreshes the `~/.claude` projection. Use `make update`, not `make setup` — `setup` skips binaries that already exist, so on an update it would leave you on the *old* binary. A fork fetches and merges upstream in the app dir first (`git fetch upstream && git merge upstream/main`), then `make update-binaries && ways reconcile` (force-rebuild without re-pulling origin; the corpus self-heals via the `SessionStart` hook).
 
 At session start, `check-config-updates.sh` flags when you're behind upstream (`aaronsb/agent-ways`), rate-limited to once per hour. It currently recognizes **legacy** git-based layouts — an in-place clone at `~/.claude`, and the ADR-140 subdirectory (`.claude-source` marker). Native-projection update detection is being wired (it reads the app source in `$XDG_DATA`); until then, use the manual command above.
 
 | Scenario | How detected | Sync command |
 |----------|-------------|--------------|
-| **Native projection (1.0)** | app source at `$XDG_DATA_HOME/agent-ways` | `cd "$XDG_DATA_HOME/agent-ways" && git pull && make setup && ways reconcile` |
-| **Fork** | GitHub API reports `parent` is `aaronsb/agent-ways` | fetch/merge upstream in the app dir, then `make setup && ways reconcile` |
+| **Native projection (1.0)** | app source at `$XDG_DATA_HOME/agent-ways` | `cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile` |
+| **Fork** | GitHub API reports `parent` is `aaronsb/agent-ways` | fetch/merge upstream in the app dir, then `make update-binaries && ways reconcile` |
 | **Legacy in-place clone** | `~/.claude` is itself the git repo | `ways migrate --execute` first (moves it to the projection model) |
 | **Plugin** | `CLAUDE_PLUGIN_ROOT` set with `plugin.json` | `/plugin update disciplined-methodology` |
 

@@ -30,8 +30,10 @@ If `~/.claude/` is your **own** git repo (you version-control your config), that
 **A 1.0 projection install** (the app is in `$XDG_DATA_HOME/agent-ways`, `~/.claude` is not a repo) — update in place:
 
 ```bash
-cd "$XDG_DATA_HOME/agent-ways" && git pull && make setup && ways reconcile
+cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile
 ```
+
+`make update` pulls, **force-rebuilds** the binaries, regenerates the corpus, and relinks — use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
 
 **A legacy pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo — it has its own `.git/` and ships `~/.claude/tools/`, `~/.claude/docs/`) — do **not** `git pull` it. Migrate it to the 1.0 model with the gated, backup-first migrator:
 
@@ -65,7 +67,7 @@ upstream improvements later:
 ```bash
 cd "$XDG_DATA_HOME/agent-ways"
 git fetch upstream && git merge upstream/main   # resolve conflicts in your custom ways
-make setup && ways reconcile                    # ways is on PATH from the install above
+make update-binaries && ways reconcile          # force-rebuild (make setup would skip existing binaries)
 ```
 
 If you're actively *developing* agent-ways (not just carrying a few custom ways), use a standalone dev checkout instead and dogfood via reconcile — see [development.md](development.md).
