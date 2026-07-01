@@ -595,6 +595,17 @@ enum SettingsCommand {
         #[arg(long)]
         source: bool,
     },
+    /// Scaffold a fragment for a settings key (fill-in-the-blank template from the schema)
+    New {
+        /// The settings.json key to scaffold (must exist in the schema)
+        key: String,
+        /// Scope [default: managed for managed-only keys, else user]
+        #[arg(long)]
+        scope: Option<String>,
+        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -783,6 +794,19 @@ fn main() -> Result<()> {
             SettingsCommand::Schema { source } => {
                 cmd::settings::schema_command(source);
                 Ok(())
+            }
+            SettingsCommand::New { key, scope, dir } => {
+                let scope = match scope.as_deref() {
+                    None => None,
+                    Some("user") => Some(cmd::settings::fragment::Scope::User),
+                    Some("project") => Some(cmd::settings::fragment::Scope::Project),
+                    Some("managed") => Some(cmd::settings::fragment::Scope::Managed),
+                    Some(other) => {
+                        anyhow::bail!("invalid --scope `{other}` (want user|project|managed)")
+                    }
+                };
+                let dir = dir.unwrap_or_else(|| paths::config_root().join("settings"));
+                cmd::settings::scaffold::run(&key, scope, &dir)
             }
         },
     }

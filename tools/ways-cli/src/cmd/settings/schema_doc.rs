@@ -91,17 +91,8 @@ impl SettingsSchema {
     pub fn get(&self, key: &str) -> Option<&PropInfo> {
         self.props.get(key)
     }
-    pub fn contains(&self, key: &str) -> bool {
-        self.props.contains_key(key)
-    }
-    pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.props.keys().map(String::as_str)
-    }
     pub fn len(&self) -> usize {
         self.props.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.props.is_empty()
     }
 }
 
@@ -228,7 +219,7 @@ mod tests {
         // A key present in the vendored schema but NOT in our hand-curated
         // scope-class overlay — the whole point of acquiring the schema.
         let s = bundled();
-        assert!(s.contains("autoMemoryEnabled"));
+        assert!(s.get("autoMemoryEnabled").is_some());
         assert!(super::super::schema::scope_class("autoMemoryEnabled").is_none());
     }
 

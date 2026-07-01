@@ -14,10 +14,8 @@
 
 pub mod fragment;
 pub mod lint;
+pub mod scaffold;
 pub mod schema;
-// Consumed by the scaffold (`ways settings new`) and lint slices; a few
-// accessors land ahead of their first caller.
-#[allow(dead_code)]
 pub mod schema_doc;
 pub mod source;
 
