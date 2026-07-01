@@ -9,7 +9,7 @@
 #   download-model.sh [--upstream] [--f16] [--multilingual] [output-dir]
 #
 # Models are placed in the XDG cache directory by default:
-#   ${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways/user/
+#   ${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user/
 
 set -euo pipefail
 
@@ -23,13 +23,13 @@ MODEL_SIZE="21MB"
 # Source URLs
 HF_BASE="https://huggingface.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF/resolve/main"
 MULTI_HF_BASE="https://huggingface.co/mykor/paraphrase-multilingual-MiniLM-L12-v2.gguf/resolve/main"
-GH_REPO="aaronsb/claude"
+GH_REPO="aaronsb/agent-ways"
 GH_RELEASE_TAG="v0.1.0-model"
 
 # Defaults
 SOURCE="github"
 XDG_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
-OUTPUT_DIR="${XDG_CACHE}/claude-ways/user"
+OUTPUT_DIR="${XDG_CACHE}/agent-ways/user"
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --upstream      Download directly from HuggingFace (verify provenance)"
       echo "  --f16           Download full-precision F16 (44MB) instead of Q5_K_M (21MB)"
       echo "  --multilingual  Download multilingual model (127MB, 52 languages)"
-      echo "  output-dir      Override output directory (default: \$XDG_CACHE_HOME/claude-ways/user/)"
+      echo "  output-dir      Override output directory (default: \$XDG_CACHE_HOME/agent-ways/user/)"
       echo ""
       echo "Models:"
       echo "  English:      all-MiniLM-L6-v2 Q5_K_M (21MB)"

@@ -7,7 +7,7 @@
 # Usage:
 #   download-binary.sh [--release TAG] [output-dir]
 #
-# The binary is placed at: ${XDG_CACHE_HOME:-~/.cache}/claude-ways/user/way-embed
+# The binary is placed at: ${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/way-embed
 
 set -euo pipefail
 
@@ -20,7 +20,9 @@ GH_REPO="aaronsb/agent-ways"
 RELEASE_TAG="${WAY_EMBED_RELEASE:-latest}"
 BIN_NAME="way-embed-${PLATFORM}"
 XDG_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
-OUTPUT_DIR="${XDG_CACHE}/claude-ways/user"
+OUTPUT_DIR="${XDG_CACHE}/agent-ways/user"
+# App source dir (has the Makefile + way-embed source) — for build-from-source hints.
+APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -32,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [--release TAG] [output-dir]"
       echo ""
       echo "  --release TAG  GitHub Release tag (default: latest way-embed-* release)"
-      echo "  output-dir     Override output directory (default: \$XDG_CACHE_HOME/claude-ways/user/)"
+      echo "  output-dir     Override output directory (default: \$XDG_CACHE_HOME/agent-ways/user/)"
       echo ""
       echo "Platform: ${PLATFORM}"
       echo "Available: linux-x86_64, linux-aarch64, darwin-x86_64, darwin-arm64"
@@ -57,7 +59,7 @@ fi
 # Need gh CLI
 if ! command -v gh >/dev/null 2>&1; then
   echo "error: gh CLI not found — install it or build from source:" >&2
-  echo "  cd ~/.claude/tools/way-embed && make" >&2
+  echo "  cd $APP_DIR/tools/way-embed && make" >&2
   exit 1
 fi
 
@@ -70,7 +72,7 @@ if [[ "$RELEASE_TAG" == "latest" ]]; then
     | grep '^way-embed-v' | head -1)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No way-embed release found. Build from source:" >&2
-    echo "  cd ~/.claude && make setup" >&2
+    echo "  cd $APP_DIR && make setup" >&2
     exit 1
   fi
 fi
@@ -85,7 +87,7 @@ if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.asset
   gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep "way-embed-" | sed 's/^/  /' >&2
   echo "" >&2
   echo "Build from source instead:" >&2
-  echo "  cd ~/.claude && make setup" >&2
+  echo "  cd $APP_DIR && make setup" >&2
   exit 1
 fi
 
@@ -132,7 +134,7 @@ if "$OUTPUT_FILE" --version >/dev/null 2>&1; then
 else
   echo "WARNING: binary downloaded but won't execute on this platform" >&2
   echo "Build from source instead:" >&2
-  echo "  cd ~/.claude/tools/way-embed && make" >&2
+  echo "  cd $APP_DIR/tools/way-embed && make" >&2
   rm -f "$OUTPUT_FILE" "$PLATFORM_FILE"
   exit 1
 fi

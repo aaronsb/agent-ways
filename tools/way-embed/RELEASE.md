@@ -5,7 +5,7 @@ Pre-built binaries and model for ADR-108 embedding-based way matching.
 One command — downloads the right binary for your platform + model, generates corpus:
 
 ```bash
-cd ~/.claude && make setup
+cd "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways" && make setup
 ```
 
 This will:
@@ -20,14 +20,14 @@ If no pre-built binary exists for your platform, it builds from source automatic
 
 ```bash
 # Download binary + model separately
-bash ~/.claude/tools/way-embed/download-binary.sh
-bash ~/.claude/tools/way-embed/download-model.sh
+bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/way-embed/download-binary.sh
+bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/way-embed/download-model.sh
 
 # Regenerate corpus
 ways corpus
 
 # Verify
-bash ~/.claude/tools/way-embed/test-embedding.sh
+bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/way-embed/test-embedding.sh
 ```
 
 ## Available platforms
@@ -44,7 +44,7 @@ bash ~/.claude/tools/way-embed/test-embedding.sh
 If your platform isn't listed:
 
 ```bash
-cd ~/.claude && make setup
+cd "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways" && make setup
 ```
 
 Requires: cmake, C++ compiler, git (for submodule).
@@ -54,7 +54,7 @@ Requires: cmake, C++ compiler, git (for submodule).
 Download the model directly from HuggingFace instead of the release:
 
 ```bash
-bash ~/.claude/tools/way-embed/download-model.sh --upstream
+bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/way-embed/download-model.sh --upstream
 ```
 
 Both paths verify against the same SHA-256 checksum.
