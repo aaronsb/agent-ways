@@ -254,6 +254,45 @@ fn compile_refuses_a_store_with_lint_errors() {
 }
 
 #[test]
+fn project_applies_to_project_scope_and_dry_run_does_not() {
+    // A project-scope fragment projects into $CLAUDE_PROJECT_DIR/.claude/settings.json.
+    let store = tmp_store();
+    std::fs::write(
+        store.join("10-a.md"),
+        "---\nscope: project\nsettings:\n  cleanupPeriodDays: 30\n---\nrationale\n",
+    )
+    .unwrap();
+    let proj = tmp_store();
+    let state = tmp_store();
+    let target = proj.join(".claude").join("settings.json");
+
+    let base_args = |args: &[&str]| {
+        let mut c = Command::new(ways_bin());
+        c.env("WAYS_SETTINGS_SCHEMA_FILE", repo_schema())
+            .env("CLAUDE_PROJECT_DIR", &proj)
+            .env("XDG_STATE_HOME", &state)
+            .args(args)
+            .arg(&store);
+        c.output().unwrap()
+    };
+
+    // dry-run writes nothing.
+    let dry = base_args(&["settings", "project", "--scope", "project", "--dry-run"]);
+    assert!(dry.status.success(), "dry-run stderr: {}", String::from_utf8_lossy(&dry.stderr));
+    assert!(!target.exists(), "dry-run must not write the file");
+
+    // real apply writes the projected key.
+    let run = base_args(&["settings", "project", "--scope", "project"]);
+    assert!(run.status.success(), "apply stderr: {}", String::from_utf8_lossy(&run.stderr));
+    let written = std::fs::read_to_string(&target).unwrap();
+    assert!(written.contains("cleanupPeriodDays"), "projected key present; got:\n{written}");
+
+    for d in [&store, &proj, &state] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+#[test]
 fn scaffold_fails_when_schema_absent() {
     let dir = tmp_store();
     let out = Command::new(ways_bin())
