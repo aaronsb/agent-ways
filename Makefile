@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help ways ways-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
+.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -37,6 +37,8 @@ help:
 	@echo ""
 	@echo "  make setup        Build ways CLI + attend + fetch embedding model + corpus"
 	@echo "  make install      Full first-time setup (hooks + tools + PATH)"
+	@echo "  make deps         Install the C++ build toolchain (only if a prebuilt binary"
+	@echo "                    won't run on your platform and you must build from source)"
 	@echo "  make update       Pull + rebuild + relink in the app dir; then 'ways reconcile' to reproject"
 	@echo "  make sync-to-home [legacy] ADR-140 subdirectory projection — superseded by 'ways reconcile'"
 	@echo "  make sync-to-home-link  [legacy] symlink variant of sync-to-home"
@@ -61,6 +63,33 @@ help:
 	@echo "                           invoked by setup/install/update."
 	@echo ""
 
+# Install the C++ build toolchain (cmake + compiler + git) needed to build
+# way-embed from source, for platforms with no pre-built binary (or where the
+# prebuilt won't launch). This is the ONLY target that installs system packages;
+# it uses sudo where the platform requires it and lets the package manager prompt
+# for confirmation. `make setup` never calls this — the user runs it explicitly.
+deps:
+	@echo "Installing build toolchain (cmake, C++ compiler, git)."
+	@echo "This installs system packages — you'll be prompted to confirm."
+	@echo ""
+	@if command -v pacman >/dev/null 2>&1; then \
+		sudo pacman -S --needed cmake gcc git; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		sudo apt-get update && sudo apt-get install cmake g++ git; \
+	elif command -v dnf >/dev/null 2>&1; then \
+		sudo dnf install cmake gcc-c++ git; \
+	elif command -v zypper >/dev/null 2>&1; then \
+		sudo zypper install cmake gcc-c++ git; \
+	elif command -v brew >/dev/null 2>&1; then \
+		brew install cmake git; \
+	else \
+		echo "No supported package manager found (pacman/apt/dnf/zypper/brew)."; \
+		echo "Install manually: cmake, a C++ compiler (g++ or clang++), and git."; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "Toolchain ready. Now run: make setup"
+
 # Build ways CLI + set up embedding engine + generate initial corpus.
 setup: ways attend attend-chat
 	@echo "Setting up embedding engine..."
@@ -70,7 +99,8 @@ setup: ways attend attend-chat
 	@$(MAKE) -C tools/way-embed setup || { \
 		echo ""; \
 		echo "  ⚠ Embedding engine not built — semantic (meaning-based) matching is unavailable."; \
-		echo "    Regex/keyword ways still work. Install the build deps shown above, then re-run 'make install'."; \
+		echo "    Regex/keyword ways still work. To enable it, install the build toolchain"; \
+		echo "    with 'make deps', then re-run 'make setup' (or use a platform with a prebuilt binary)."; \
 	}
 	@echo ""
 	@echo "Setting up mmaid diagram renderer..."

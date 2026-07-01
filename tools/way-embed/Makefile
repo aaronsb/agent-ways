@@ -42,11 +42,10 @@ $(BIN): cmake-build
 cmake-build: CMakeLists.txt way-embed.cpp | llama.cpp/CMakeLists.txt
 	@command -v cmake >/dev/null 2>&1 || { \
 		echo "ERROR: cmake not found — required to build way-embed (the semantic matcher) from source."; \
-		echo "  Install cmake + a C++ compiler:"; \
-		echo "    Arch:    sudo pacman -S cmake gcc"; \
-		echo "    Debian:  sudo apt install cmake build-essential"; \
-		echo "    Fedora:  sudo dnf install cmake gcc-c++"; \
-		echo "    macOS:   brew install cmake"; \
+		echo "  Install the build toolchain from the agent-ways app dir, then retry:"; \
+		echo "    make deps    # auto-detects your package manager (pacman/apt/dnf/zypper/brew)"; \
+		echo "  Or install manually: cmake + a C++ compiler"; \
+		echo "    Arch: pacman -S cmake gcc   Debian: apt install cmake g++   Fedora: dnf install cmake gcc-c++   macOS: brew install cmake"; \
 		exit 1; }
 	@mkdir -p $(BUILDDIR)
 	@cd $(BUILDDIR) && cmake $(CMAKE_FLAGS) .. 2>&1 | tail -5
