@@ -123,17 +123,18 @@ For the complete system guide — trigger flow, state machines, the pipeline fro
 
 ## Configuration
 
-Ways config lives in `~/.claude/ways.json`:
+User config lives in `$XDG_CONFIG_HOME/ways/config.yaml` (YAML). For example, to disable whole domains:
 
-```json
-{
-  "disabled": []
-}
+```yaml
+disabled_domains:
+  - itops
 ```
 
-| Field | Purpose |
+A legacy `~/.claude/ways.json` (`{"disabled": [...]}`) is still honored as a lower-precedence layer for un-migrated installs.
+
+| Key | Purpose |
 |-------|---------|
-| `disabled` | Array of domain names to skip (e.g., `["itops", "softwaredev"]`) |
+| `disabled_domains` | List of domain names to skip (e.g., `[itops, softwaredev]`) — in legacy `ways.json` this key is `disabled` |
 
 Disabled domains are completely ignored — no pattern matching, no output.
 

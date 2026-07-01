@@ -449,12 +449,11 @@ flowchart TD
 
 ## Domain Enable/Disable
 
-`~/.claude/ways.json` controls which domains are active:
+`$XDG_CONFIG_HOME/ways/config.yaml` controls which domains are active (a legacy `~/.claude/ways.json` with `{"disabled": [...]}` is still honored):
 
-```json
-{
-  "disabled": ["itops"]
-}
+```yaml
+disabled_domains:
+  - itops
 ```
 
 Checked by `ways scan` before outputting any way.
