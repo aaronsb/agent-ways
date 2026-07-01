@@ -40,6 +40,17 @@ the statusline broke. Two lessons: (1) the framework should not force-claim a
 **user-scoped** key like `statusLine`, and (2) a user's own config artifacts want to
 be *managed and projectable*, not orphaned in one machine's `~/.claude`.
 
+There is a second asymmetry the "left untouched" framing misses: `~/.claude` is not a
+passive projection *sink*. Claude Code **configures itself** — the user subscribes to a
+skill, a capability writes a statusline or an output-style, a slash command is added,
+a `settings.json` key is flipped — and that lands *live* in `~/.claude`, authored
+through CC rather than by hand in any store. One-way projection (store → `~/.claude`)
+would either clobber that live config or let the durable store rot: config the user
+genuinely acquired through CC would never make it back to the place that survives a
+reinstall or travels to a second machine. So the store and `~/.claude` are two
+authoring surfaces for the same user-scoped config, and the relationship between them
+is **two-way**, not a one-directional deploy.
+
 ## Decision
 
 Add an optional **user config layer**: a user-owned, version-controllable set of
@@ -82,7 +93,21 @@ projected by the same reconcile pass, so `install` / `update` / `repair` deploy 
 for free and it survives a clobber-reinstall (it lives in `$XDG_CONFIG`, not
 `~/.claude`).
 
-**5. Non-prescriptive and opt-in.** Absent a user layer, nothing changes — the
+**5. Two-way, on the git model — deploy and capture, both explicit.** Because CC
+authors user-scoped config live in `~/.claude`, the user layer syncs in both
+directions: *deploy* (store → `~/.claude`, the reconcile pass above) and *capture*
+(`~/.claude` → store, sweeping live user-scoped artifacts back into the durable
+store). Both are **explicit, user-invoked** operations — like `git push`/`pull`, not
+a background daemon reconciling continuously; continuous bidirectional sync is where
+dotfiles managers drown in conflict resolution and "which machine is authoritative."
+Capture is not new machinery: it is the ADR-145 `settings.json` three-way merge run
+with `~/.claude` treated as an authoring *source* — track a last-synced base, diff
+live against store, three-way merge, surface genuine conflicts. Where whole files
+project as symlinks, editing the live file already writes the store (same inode) and
+no capture is needed; capture bites only where symlinks can't reach — the *merged*
+`settings.json` and fresh artifacts CC creates that the store has never seen.
+
+**6. Non-prescriptive and opt-in.** Absent a user layer, nothing changes — the
 reconciler projects only the framework, exactly as today. The layer is an
 affordance for the user who wants their config carried; it never imposes a structure
 or content.
@@ -98,11 +123,17 @@ Deliberately left open for the debate this ADR anchors (not yet decided):
 - **Precedence** when the same path exists in more than one source (framework vs
   user layer vs CC baseline) — likely user-over-framework for user-scoped artifacts,
   but the settings merge needs an explicit rule.
-- **The audit** of which keys agent-ways currently injects that are actually
-  user-scoped and should be de-scoped (statusLine is the first; enumerate the rest).
-- **Bootstrapping / capture** — is there a command to *seed* the user layer from an
-  existing `~/.claude` (so an adopter's current config becomes carried), mirroring
-  how migration seeds other state?
+- **The audit runs both ways.** *De-scoping:* which keys agent-ways currently injects
+  are actually user-scoped and should be un-claimed (statusLine is the first;
+  enumerate the rest). *Classifying for capture:* the inverse — of the artifacts
+  living in a real `~/.claude`, which are the user's to carry vs framework-owned vs
+  ephemeral? The `skills/` case is the sharp one: a CC-subscribed skill is brand-new
+  content the store never had, and capture must decide it is user-scoped.
+- **Capture mechanics** — capture is ongoing, not a one-time seed (principle 5); the
+  first capture *is* the seed. Open: the merge base for detecting real conflicts (a
+  stored last-synced snapshot vs. content hashing), how a capture presents conflicts
+  to the user, and whether capture is a distinct verb (`ways config capture`) or a
+  `--capture` mode of reconcile.
 
 ## Consequences
 
@@ -111,6 +142,10 @@ Deliberately left open for the debate this ADR anchors (not yet decided):
 - A user's own Claude Code config becomes version-controllable, survives a reinstall,
   and deploys to a new machine or a fresh Claude Code install — the pre-1.0 repo's
   best property, restored without re-coupling config to the framework.
+- Config CC *authors itself* (a subscribed skill, a capability-written statusline) is
+  captured back to the durable store rather than being clobbered on the next deploy or
+  lost on reinstall — the two-way sync closes the loop between CC's self-configuration
+  and the store.
 - Fixes the `statusLine` class of bug at the root: the framework stops force-claiming
   user-scoped keys; the convenience script becomes opt-in user config that the
   reconciler actually projects.
@@ -124,8 +159,14 @@ Deliberately left open for the debate this ADR anchors (not yet decided):
   to reconcile, and user-key merging distinct from framework-key merging).
 - A precedence model is now genuinely three-way; conflicts (same path in framework
   and user layer) need a defined, documented rule rather than "framework only".
-- Risk of scope creep toward a general dotfiles manager. The guardrail: this carries
-  *Claude Code* config projected into `~/.claude`, nothing broader.
+- Two-way sync adds a capture direction with its own conflict case (store and
+  `~/.claude` both changed since the last sync). The explicit-pull / git model bounds
+  this — conflicts surface at an invoked `capture`, never silently in the background —
+  but a merge-base and conflict-presentation model still has to be designed.
+- Risk of scope creep toward a general dotfiles manager, sharpened by the two-way
+  sync (that is precisely what dotfiles managers do). The guardrail holds: this
+  carries *Claude Code* config projected into `~/.claude`, nothing broader, and sync
+  stays explicit rather than becoming a continuous reconciling daemon.
 
 ### Neutral
 
