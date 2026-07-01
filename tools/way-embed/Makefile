@@ -75,21 +75,21 @@ MODEL_MULTI = $(MODEL_DIR)/multilingual-minilm-l12-v2-q8.gguf
 SRCDIR     = $(CURDIR)/
 
 model:
-	@[ -f "$(MODEL_EN)" ] || bash "$(SRCDIR)download-model.sh"
+	@[ -f "$(MODEL_EN)" ] || bash "$(SRCDIR)download-model.sh" "$(MODEL_DIR)"
 
 model-multilingual:
-	@[ -f "$(MODEL_MULTI)" ] || bash "$(SRCDIR)download-model.sh" --multilingual
+	@[ -f "$(MODEL_MULTI)" ] || bash "$(SRCDIR)download-model.sh" --multilingual "$(MODEL_DIR)"
 
 # Download directly from HuggingFace (for provenance verification)
 model-upstream:
-	bash $(SRCDIR)download-model.sh --upstream
+	bash $(SRCDIR)download-model.sh --upstream "$(MODEL_DIR)"
 
 # Full setup: download (or build) binary + English model, regenerate corpus.
 # Tries pre-built binary from GitHub Releases first, builds from source if unavailable.
 # The multilingual model (127MB) is on-demand per ADR-139 — fetched via
 # `make model-multilingual` by the ways-localize skill, not at default setup.
 setup: setup-binary
-	@[ -f "$(MODEL_EN)" ] || bash "$(SRCDIR)download-model.sh"
+	@[ -f "$(MODEL_EN)" ] || bash "$(SRCDIR)download-model.sh" "$(MODEL_DIR)"
 	@echo "Regenerating corpus with embeddings..."
 	../../bin/ways corpus --quiet
 	@echo ""
@@ -101,7 +101,7 @@ setup: setup-binary
 
 # Try download, fall back to build
 setup-binary:
-	@if bash "$(SRCDIR)download-binary.sh"; then \
+	@if bash "$(SRCDIR)download-binary.sh" "$(MODEL_DIR)"; then \
 		echo "Pre-built binary installed."; \
 	else \
 		echo "No pre-built binary available, building from source..."; \
