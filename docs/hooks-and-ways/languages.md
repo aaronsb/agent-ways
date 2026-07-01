@@ -24,7 +24,7 @@ There are **two** different language settings; conflating them is the common mis
 
 | Config | Controls | Set by |
 |--------|----------|--------|
-| `language` in `~/.config/ways/config.yaml` (overrides `output_language` in `~/.claude/ways.json`) | the **ways** intl mode + the output-language directive | `ways-localize` |
+| `language` in `~/.config/agent-ways/config.yaml` (overrides `output_language` in `~/.claude/ways.json`) | the **ways** intl mode + the output-language directive | `ways-localize` |
 | `language` in Claude Code `settings.json` (a NAME, e.g. `"spanish"`) | Claude Code's **response** language | the operator (or `ways-localize`) |
 
 `ways.json output_language` (Layer 1) is **overridden** by `config.yaml language`

@@ -272,9 +272,9 @@ impl Config {
         }
     }
 
-    /// Initialize user config at XDG path.
+    /// Initialize user config at the canonical XDG path.
     pub fn init_user_config() -> PathBuf {
-        let path = xdg_config_dir().join("ways/config.yaml");
+        let path = crate::paths::user_config();
         if path.exists() {
             return path;
         }
@@ -282,7 +282,7 @@ impl Config {
             std::fs::create_dir_all(parent).ok();
         }
         let content = "# ways configuration
-# User scope: $XDG_CONFIG_HOME/ways/config.yaml
+# User scope: $XDG_CONFIG_HOME/agent-ways/config.yaml
 # Project scope: {project}/.claude/ways.yaml (layered on top)
 
 # language: en          # Output language (en, ja, auto)
@@ -301,12 +301,14 @@ impl Config {
         path
     }
 
-    /// Show the config file path.
+    /// Show the config file paths (canonical first, then honored legacy fallbacks).
     pub fn config_path() -> String {
-        let xdg = xdg_config_dir().join("ways/config.yaml");
-        format!("user:    {}\nlegacy:  {}\nproject: $PROJECT/.claude/ways.yaml",
-            xdg.display(),
-            home_dir().join(".claude/ways.json").display())
+        format!(
+            "user:    {}\nlegacy:  {}\nlegacy:  {}\nproject: $PROJECT/.claude/ways.yaml",
+            crate::paths::user_config().display(),
+            xdg_config_dir().join("ways/config.yaml").display(),
+            home_dir().join(".claude/ways.json").display()
+        )
     }
 }
 
