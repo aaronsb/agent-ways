@@ -2,7 +2,7 @@
 
 Guidance for incident response, operational policy, change proposals, and runbooks.
 
-This domain can be disabled globally via `~/.claude/ways.json` when working across many projects that don't involve operational infrastructure. It's currently disabled by default. For per-project muting of a single way (e.g., just `itops/incident`), use `ways disable itops/incident` from the project root — see ADR-131.
+This domain can be disabled globally via `disabled_domains` in `$XDG_CONFIG_HOME/agent-ways/config.yaml` when working across many projects that don't involve operational infrastructure (a legacy `disabled` list in `~/.claude/ways.json` is still honored on un-migrated installs). It's currently disabled by default. For per-project muting of a single way (e.g., just `itops/incident`), use `ways disable itops/incident` from the project root — see ADR-131.
 
 ## Incident Response
 

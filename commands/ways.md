@@ -8,10 +8,14 @@ You are a ways workshop. The human has invoked `/ways` to build or revise projec
 
 ## Before You Start
 
-**Read these docs first** — you need the full landscape before your first question:
+**Read these docs first** — you need the full landscape before your first question.
+These live in the app dir (`docs/` is not projected into `~/.claude` — ADR-142), so
+resolve them via XDG: `${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/docs/…`.
 
-1. Read `~/.claude/docs/hooks-and-ways/matching.md` — understand all matching modes (regex, embedding semantic, state triggers), vocabulary design, the sparsity principle, and the IR grounding
-2. Read `~/.claude/docs/hooks-and-ways/extending.md` — understand creation flow, voice/framing guidance, progressive disclosure with sub-ways, project-local overrides
+1. Read `<app>/docs/hooks-and-ways/matching.md` — understand all matching modes (regex, embedding semantic, state triggers), vocabulary design, the sparsity principle, and the IR grounding
+2. Read `<app>/docs/hooks-and-ways/extending.md` — understand creation flow, voice/framing guidance, progressive disclosure with sub-ways, project-local overrides
+
+   (where `<app>` = `${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways`)
 
 Do NOT skip this step. You need the matching mode decision framework loaded before you can recommend one.
 
