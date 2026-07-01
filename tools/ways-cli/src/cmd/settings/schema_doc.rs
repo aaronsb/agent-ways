@@ -18,7 +18,7 @@
 //!
 //! Provenance: community-maintained SchemaStore, not an official Anthropic
 //! artifact (anthropics/claude-code#11795); it may lag the latest CLI release.
-//! Refresh with `refresh-settings-schema.sh`; project-pulse tracks the drift.
+//! Refresh with `ways settings schema --refresh`; project-pulse tracks the drift.
 
 use anyhow::Context;
 use serde_json::Value;
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn schema_is_broader_than_the_curated_overlay() {
-        // A key present in the vendored schema but NOT in our hand-curated
+        // A key present in the settings schema but NOT in our hand-curated
         // scope-class overlay — the whole point of acquiring the schema.
         let s = test_schema();
         assert!(s.get("autoMemoryEnabled").is_some());

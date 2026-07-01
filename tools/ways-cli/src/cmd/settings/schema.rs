@@ -1,6 +1,6 @@
 //! The scope-class overlay for settings keys (ADR-147).
 //!
-//! The vendored JSON Schema ([`super::schema_doc`]) owns the *shape* — the valid
+//! The shipped JSON Schema ([`super::schema_doc`]) owns the *shape* — the valid
 //! key set, types, and descriptions. What a generic JSON Schema cannot express is
 //! **scope-class**: which keys only work at managed scope, and which are settable
 //! at user scope but hard-replaced by a managed endpoint. That semantic — drawn
@@ -30,7 +30,7 @@ pub enum ScopeClass {
     ManagedOverridable,
 }
 
-/// Valid Claude Code settings keys that the vendored schema *lags* (SchemaStore
+/// Valid Claude Code settings keys that the settings schema *lags* (SchemaStore
 /// hasn't added them yet) and that carry no scope restriction. Without this, the
 /// linter would false-warn "unrecognized" on current, valid settings. Managed-
 /// scoped laggards need no entry here — [`scope_class`] already covers them.
@@ -41,7 +41,7 @@ const KNOWN_LAGGED: &[&str] = &[
 ];
 
 /// Whether the overlay recognizes `key` — either it has a scope class or it is a
-/// known key the vendored schema lags. Lets the linter avoid false "unrecognized"
+/// known key the settings schema lags. Lets the linter avoid false "unrecognized"
 /// warnings on keys the schema doesn't (yet) list.
 pub fn overlay_knows(key: &str) -> bool {
     scope_class(key).is_some() || KNOWN_LAGGED.contains(&key)

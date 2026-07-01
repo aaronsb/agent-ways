@@ -1,9 +1,9 @@
 //! The config-store linter (ADR-147): three deterministic checks over a loaded
 //! fragment tree, plus a reporter.
 //!
-//! 1. **schema-valid** — every top-level `settings:` key is known to the vendored
+//! 1. **schema-valid** — every top-level `settings:` key is known to the settings
 //!    schema or the scope overlay (unknown → *warning*, never error) and its
-//!    value matches the vendored schema's type (mismatch → *error*; unions
+//!    value matches the settings schema's type (mismatch → *error*; unions
 //!    validate permissively).
 //! 2. **scope-legal** — a managed-only key authored at user/project scope is an
 //!    *error* (Claude Code ignores it there); a managed-overridable key
@@ -59,6 +59,8 @@ pub fn check(frags: &[Fragment], schema: Option<&schema_doc::SettingsSchema>) ->
         findings.push(Finding {
             severity: Severity::Warning,
             check: "schema",
+            // Synthetic notice (not a fragment finding): `file` names the schema
+            // path we looked for, and `key` is empty.
             file: crate::paths::settings_schema_file().display().to_string(),
             key: String::new(),
             message: "settings schema not found — schema-valid checks skipped; \
@@ -278,7 +280,7 @@ mod tests {
     #[test]
     fn yaml_yes_becomes_schema_error_on_bool_key() {
         // The fidelity boundary, end-to-end: `autoMemoryEnabled: yes` loads as
-        // the string "yes" (see fragment tests), which the vendored schema's
+        // the string "yes" (see fragment tests), which the settings schema's
         // boolean type rejects.
         let f = frag("10.md", Scope::User, json!({ "autoMemoryEnabled": "yes" }));
         let schema = of(&checked(&[f]), "schema");

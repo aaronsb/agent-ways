@@ -180,6 +180,27 @@ fn lint_degrades_when_schema_absent() {
 }
 
 #[test]
+fn schema_refresh_writes_the_user_copy() {
+    // Hermetic: source is a file:// URL (no network), config home is a temp dir.
+    let cfg = tmp_store();
+    let src = repo_schema().canonicalize().unwrap();
+    let out = Command::new(ways_bin())
+        .env("XDG_CONFIG_HOME", &cfg)
+        .env("WAYS_SETTINGS_SCHEMA_URL", format!("file://{}", src.display()))
+        .args(["settings", "schema", "--refresh"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "refresh failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let written = cfg.join("agent-ways/claude-code-settings.schema.json");
+    assert!(written.exists(), "refresh must write the durable user copy");
+    let _ = std::fs::remove_dir_all(&cfg);
+}
+
+#[test]
 fn scaffold_fails_when_schema_absent() {
     let dir = tmp_store();
     let out = Command::new(ways_bin())

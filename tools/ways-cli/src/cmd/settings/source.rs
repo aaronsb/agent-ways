@@ -1,10 +1,10 @@
 //! Where the settings schema comes from — a small configuration surface.
 //!
-//! The schema itself is *vendored* (see [`super::schema_doc`], which bundles it
-//! via `include_str!`), so normal operation needs no network. But *refreshing*
-//! that vendored copy pulls from a source URL that is **configurable, not
-//! hardcoded** — an org can point at an internal mirror or a version-pinned URL,
-//! or swap in an official Anthropic schema if one is ever published.
+//! The schema is a shipped file read at runtime (see [`super::schema_doc`]), so
+//! normal operation needs no network. But *refreshing* that file pulls from a
+//! source URL that is **configurable, not hardcoded** — an org can point at an
+//! internal mirror or a version-pinned URL, or swap in an official Anthropic
+//! schema if one is ever published.
 //!
 //! Resolution precedence (first wins):
 //!   1. `$WAYS_SETTINGS_SCHEMA_URL` — one-shot env override
