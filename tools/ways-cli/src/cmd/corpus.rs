@@ -472,7 +472,10 @@ fn auto_embed(out_dir: &Path, engine_dir: &Path, corpus: &Path, log: &dyn Fn(&st
     let bin = match embed_bin {
         Some(b) => b,
         None => {
-            log("ERROR: embedding engine required (ADR-125). Run: cd ~/.claude && make setup");
+            log(&format!(
+                "ERROR: embedding engine required (ADR-125). Run: cd {} && make setup",
+                crate::paths::data_root().display()
+            ));
             return Ok(());
         }
     };
