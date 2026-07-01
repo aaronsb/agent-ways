@@ -15,3 +15,5 @@
 // binary-crate dead-code lint rather than leaving a warning on `main`.
 #[allow(dead_code)]
 pub mod fragment;
+#[allow(dead_code)]
+pub mod schema;
