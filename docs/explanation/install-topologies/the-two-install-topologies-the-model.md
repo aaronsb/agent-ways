@@ -4,12 +4,20 @@ domain: system
 mode: explanation
 related:
   - "[[ADR-140]]"
+  - "[[ADR-142]]"
   - "[[01.015.E]]"
   - "[[01.016.E]]"
 aliases: []
 ---
 
 # The two install topologies — the model
+
+> ⚠️ **Historical (pre-1.0).** agent-ways 1.0 supersedes *both* topologies below with a
+> single **native projection**: `~/.claude` becomes a thin projection of an XDG app whose
+> source lives in `$XDG_DATA_HOME/agent-ways` ([[ADR-142]]). There is no longer a topology
+> *choice* to make. This page is kept as a record of how the model evolved — for installing
+> or migrating today, see the [Migration Guide](../../migration-1.0.md) and
+> [install-guide](../../install-guide.md).
 
 agent-ways can live in your `~/.claude` in one of two shapes. They are not two
 products — they are two *topologies* of the same install, and which one you're on
