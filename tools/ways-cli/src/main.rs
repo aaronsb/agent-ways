@@ -626,6 +626,14 @@ enum SettingsCommand {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// Show the fragment store: inventory (no key) or a manpage-style detail for one key
+    Show {
+        /// A settings key to detail; omit for the full inventory
+        key: Option<String>,
+        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
     /// Compile a fragment store into baked settings.json (+ provenance)
     Compile {
         /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
@@ -858,6 +866,10 @@ fn main() -> Result<()> {
                 let scope = parse_settings_scope(scope)?;
                 let dir = dir.unwrap_or_else(|| paths::config_root().join("settings"));
                 cmd::settings::scaffold::run(&key, scope, &dir)
+            }
+            SettingsCommand::Show { key, path } => {
+                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
+                cmd::settings::show::run(&dir, key)
             }
             SettingsCommand::Compile { path, scope, out } => {
                 let scope = parse_settings_scope(scope)?;

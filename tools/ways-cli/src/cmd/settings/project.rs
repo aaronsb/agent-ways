@@ -22,8 +22,10 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
-/// Keys the reconciler co-owns — `project` must not touch them (MVP).
-fn reconciler_owned(key: &str) -> bool {
+/// Keys the reconciler co-owns — `project` must not touch them (MVP). Single
+/// source of this ownership fact: `show` consults it too (for a key's live
+/// status), so the two components cannot diverge.
+pub(crate) fn reconciler_owned(key: &str) -> bool {
     matches!(key, "hooks" | "permissions")
 }
 

@@ -19,6 +19,7 @@ pub mod project;
 pub mod scaffold;
 pub mod schema;
 pub mod schema_doc;
+pub mod show;
 pub mod source;
 
 /// `ways settings schema` — report the settings schema and its (configurable)
