@@ -60,6 +60,12 @@ Project env files deny the secret ones (`.env`, `.env.local`) but **not**
 starting floor, expected to grow through the same review as any owned-permission
 change — not a claim of completeness.
 
+Two deliberate narrownesses in that floor: the `.env` rules are **root-anchored**
+(`Read(./.env)` matches the project-root file, not a nested `subdir/.env`) and
+deny **read only** — the home-directory credential stores, not project env files,
+are the higher-severity targets, and over-broad project globs are where workflow
+breakage lives. Both can widen later if warranted.
+
 ### 2. Secure by default, with an explicit opt-out
 
 The baseline applies by default. Because a Claude Code deny cannot be overridden

@@ -443,7 +443,16 @@ pub fn apply_to_files(
         Owned {
             hooks: live.get("hooks").and_then(|h| h.as_object()).cloned().unwrap_or_default(),
             perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
-            deny: WAYS_DENY.iter().map(|s| s.to_string()).collect(),
+            // Seed deny EMPTY, not with WAYS_DENY. Unlike allow (which agent-ways
+            // has long written, so a legacy install's entries must be claimed to
+            // avoid duplication), agent-ways has NEVER written permissions.deny
+            // before this baseline. Seeding WAYS_DENY would falsely claim ownership
+            // of any textually-matching entry the user authored themselves — and on
+            // the opt-out + first-reconcile path that entry would be silently
+            // stripped while the self-audit still passed. Empty is correct: enabled,
+            // the deny is added fresh and the user's own entries are provably
+            // preserved; opted out, nothing is touched.
+            deny: Vec::new(),
         }
     };
 
@@ -598,6 +607,27 @@ mod tests {
         let deny = deny_list(&opted.settings);
         assert_eq!(deny, vec!["Bash(rm:*)"], "only the user's own deny remains");
         assert!(opted.base.deny.is_empty());
+    }
+
+    #[test]
+    fn opt_out_first_reconcile_keeps_user_deny_matching_baseline() {
+        // Regression (PR #264 review, HIGH): on first reconcile (no base → the
+        // seed's deny is EMPTY) with the baseline opted out, a user's own deny that
+        // textually matches a WAYS_DENY pattern must NOT be stripped. Seeding the
+        // base with WAYS_DENY instead of empty deleted it silently AND passed the
+        // self-audit. Owned::default() here stands in for the empty-deny seed.
+        let live = json!({ "permissions": { "deny": ["Read(~/.ssh/**)"] } });
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        assert_eq!(
+            deny_list(&m.settings),
+            vec!["Read(~/.ssh/**)"],
+            "a user's own deny matching the baseline survives when opted out"
+        );
+        // And the self-audit must agree the user's view is unchanged.
+        assert_eq!(
+            stripped_user_view(&live, &union_owned(&Owned::default(), &m.base)),
+            stripped_user_view(&m.settings, &m.base),
+        );
     }
 
     #[test]
