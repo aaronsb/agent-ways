@@ -99,6 +99,12 @@ Policy source docs moved to `governance/policies/` — they're governance chain 
 
 ### 4. Address governance pipeline gap
 
+> *Reconciled (2026-07): the tools named below (`governance.sh`, `provenance-scan.py`,
+> `provenance-verify.sh`) were consolidated into `ways governance` (ADR-111) and now move
+> to the `ways-audit` binary (ADR-151); provenance moved from way frontmatter to a
+> `provenance.yaml` sidecar (ADR-110); and the subsystem is reframed as compliance
+> claims/findings (ADR-200). The "pipeline gap" below is addressed there.*
+
 The governance system has code (governance.sh, provenance-scan.py, provenance-verify.sh) and provenance metadata in way frontmatter, but output artifacts are not generated, tracked, or consumed. The docs explain what governance *is* but not how to *use* it.
 
 Documentation fixes (scoped to this ADR):

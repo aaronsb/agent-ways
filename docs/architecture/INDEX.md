@@ -30,7 +30,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-107](./system/ADR-107-way-match-corpus-batch-mode-and-locale-support.md) | Corpus, Matching Pipeline, and Locale Support | Accepted |
 | [ADR-108](./system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) | Embedding-Based Way Matching with all-MiniLM-L6-v2 | Accepted |
 | [ADR-109](./system/ADR-109-project-scope-way-embedding-with-manifest-based-staleness-detection.md) | Project-Scope Way Embedding with Manifest-Based Staleness Detection | Accepted |
-| [ADR-110](./system/ADR-110-way-file-separation-and-graph-compatible-structure.md) | Way File Separation and Graph-Compatible Structure | Draft |
+| [ADR-110](./system/ADR-110-way-file-separation-and-graph-compatible-structure.md) | Way File Separation and Graph-Compatible Structure | Accepted |
 | [ADR-111](./system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) | Unified `ways` CLI — Single Binary Tool Consolidation | Accepted |
 | [ADR-112](./system/ADR-112-session-ledger-and-knowledge-graph-integration.md) | Session Ledger with Optional Knowledge Graph Enhancement | Draft |
 | [ADR-113](./system/ADR-113-attend-active-awareness-module.md) | `attend` — Active Awareness Module | Accepted |
@@ -71,6 +71,14 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
 | [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Accepted |
 | [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
+| [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Draft |
+
+## Governance
+_Provenance, traceability, controls, compliance mapping_
+
+| ADR | Title | Status |
+|-----|-------|--------|
+| [ADR-200](./governance/ADR-200-compliance-claims-and-session-derived-findings.md) | Compliance claims and session-derived findings | Draft |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
@@ -86,6 +94,6 @@ _Documentation structure, tooling, coherence_
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-004](./legacy/ADR-004-way-macros.md) | Way Macros for Dynamic Context Injection | Accepted |
-| [ADR-005](./legacy/ADR-005-governance-traceability.md) | Governance Traceability for Ways | Accepted |
+| [ADR-005](./legacy/ADR-005-governance-traceability.md) | Governance Traceability for Ways | Superseded |
 | [ADR-013](./legacy/ADR-013-ways-skills-governance-architecture.md) | Ways, Skills, and Governance Architecture | Accepted |
 | [ADR-014](./legacy/ADR-014-tfidf-semantic-matcher.md) | TF-IDF/BM25 Binary for Semantic Way Matching | Accepted |

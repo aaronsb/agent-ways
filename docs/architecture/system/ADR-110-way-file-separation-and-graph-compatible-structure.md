@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Accepted
 date: 2026-03-29
 deciders:
   - aaronsb
@@ -8,9 +8,19 @@ related:
   - ADR-107
   - ADR-108
   - ADR-005
+  - ADR-111
+  - ADR-151
+  - ADR-200
 ---
 
 # ADR-110: Way File Separation and Graph-Compatible Structure
+
+> **Accepted as implemented; reconciled with later ADRs.** The `provenance.yaml` sidecar
+> defined here is the storage for what **ADR-200** reframes as a compliance **claim** (a
+> control-*design* assertion, not evidence). Its consumers named below — `governance.sh`
+> and `provenance-scan.py` — predate the single-binary consolidation (**ADR-111**); the
+> sidecar is now read by `ways governance`, moving to the `ways-audit` binary
+> (**ADR-151**). Read those tool names accordingly.
 
 ## Context
 
@@ -31,7 +41,7 @@ Meanwhile, the ways system is approaching a point where humans other than the or
 
 Three observations converged:
 
-1. **Anthropic's harness design research** (March 2028) found that "every component in a harness encodes an assumption about what the model can't do on its own." Ways are exactly this — each one encodes an assumption. As models improve, some assumptions become stale. There's no mechanism to signal which assumptions a way is making or how firm they are.
+1. **Anthropic's harness design research** (2025) found that "every component in a harness encodes an assumption about what the model can't do on its own." Ways are exactly this — each one encodes an assumption. As models improve, some assumptions become stale. There's no mechanism to signal which assumptions a way is making or how firm they are.
 
 2. **Man page architecture** has solved the "many structured documents, navigable by humans and machines" problem for 40 years with a clear separation: minimal metadata (one line), conventional body sections (`NAME`, `SEE ALSO`), derived indexes (`mandb`/`whatis`), and locale as a directory concern. Ways could follow the same pattern.
 
@@ -63,7 +73,7 @@ controls:
       - Nesting depth limit maintains modifiability by controlling complexity
 ```
 
-`governance.sh` reads `provenance.yaml` files instead of parsing way frontmatter. The governance pipeline never needs to parse markdown again.
+The governance CLI (`ways governance`, later the `ways-audit` binary — ADR-111/151) reads `provenance.yaml` files instead of parsing way frontmatter. The pipeline never needs to parse markdown again.
 
 Way files that have no governance mapping simply don't have a `provenance.yaml`. Absence is the default, not an empty block.
 
@@ -256,7 +266,7 @@ This simplifies ADR-107's scope: locale support only touches way files, not the 
 - ADR-107: Way-Match Corpus, Batch Mode, and Locale Support
 - ADR-108: Embedding-Based Way Matching with all-MiniLM-L6-v2
 - ADR-005: Governance Traceability for Ways
-- Anthropic Engineering: "Harness Design for Long-Running Application Development" (2028)
+- Anthropic Engineering: "Harness Design for Long-Running Application Development" (2025)
 - `hooks/ways/frontmatter-schema.yaml`: Current field definitions
-- `governance/governance.sh`: Current provenance consumer
+- Provenance consumer: `ways governance` (consolidated from the former `governance/governance.sh` per ADR-111; moving to the `ways-audit` binary per ADR-151)
 - Unix man pages: `man(7)`, `mandb(8)` — prior art for structured document corpora
