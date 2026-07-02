@@ -28,7 +28,7 @@ Same pattern: guide, reference, implementation.
 
 - **[../governance/README.md](../governance/README.md)** — guide. Getting started, operator commands.
 - **[governance.md](governance.md)** — reference. Compilation chain, data flow, tool mechanics.
-- **[../governance/](../governance/)** — implementation. Scripts, policies, manifests.
+- **[../governance/](../governance/)** — implementation. Policy source documents and reporting tooling (the `ways governance` CLI).
 
 | Path | What's there |
 |------|-------------|

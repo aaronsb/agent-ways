@@ -244,29 +244,29 @@ This matters because of how attention works in transformers. Rules loaded at fil
 | **Dynamic content** | No | No | Yes (shell macros) |
 | **Survives refactoring** | No (`src/` → `lib/` breaks paths) | Yes | Yes |
 | **Non-file triggers** | No | No | Yes (`git commit`, context threshold, subagent spawn) |
-| **Governance provenance** | No | No | Yes (NIST, OWASP, ISO, SOC 2 traceability) |
+| **Compliance claims** | No | No | Yes (design claims → NIST, OWASP, ISO, SOC 2) |
 | **Org-level scope** | Yes (`/etc/claude-code/`) | No | No |
 | **Zero-config simplicity** | Yes (drop a `.md` file) | Yes | No (requires hook infrastructure) |
 
 **Rules** are best for static, always-on preferences ("use TypeScript strict mode", "tabs not spaces"). **Skills** are best for specific capabilities invoked by intent ("ship this PR", "rotate AWS keys"). **Ways** are best for context-sensitive guidance that fires on events, cuts across the file tree, and needs to stay fresh in long sessions.
 
-They compose well: rules set baseline preferences, ways inject governance at tool boundaries, skills provide specific workflows. The [full comparison](docs/hooks-and-ways/README.md#ways-rules-and-skills) covers the architectural details.
+They compose well: rules set baseline preferences, ways inject guidance at tool boundaries, skills provide specific workflows. The [full comparison](docs/hooks-and-ways/README.md#ways-rules-and-skills) covers the architectural details.
 
 > **Is this just RAG?** Ways and RAG solve the same fundamental problem — getting the right context into the window at the right time — but through different architectures. RAG retrieves by semantic similarity; Ways retrieve by event. RAG is stateless; Ways track session state. The [full comparison](docs/hooks-and-ways/ways-vs-rag.md) explores what's shared, what's different, and when each approach wins.
 
 ## Governance
 
-Ways are compiled from policy. Every way can carry `provenance:` metadata linking it to policy documents and regulatory controls — the runtime strips it (zero tokens), but the [governance operator](governance/README.md) walks the chain:
+A way can carry a compliance **claim**: a `provenance.yaml` sidecar linking it to policy documents and the regulatory controls its guidance is *designed* to address. The runtime never reads it (zero tokens), but the [governance operator](governance/README.md) walks the chain:
 
 ```
-Regulatory Framework → Policy Document → Way File → Agent Context
+Control Framework → Policy Document → Way + claim → Agent Context
 ```
 
-The [`governance/`](governance/) directory contains reporting tools and [policy source documents](governance/policies/) — coverage queries, control traces, traceability matrices. Designed to be separable. The built-in ways carry justifications across controls from NIST, OWASP, ISO, SOC 2, CIS, and IEEE.
+The [`governance/`](governance/) directory contains reporting tools and [policy source documents](governance/policies/) — claim-coverage queries, control traces, matrices. Designed to be separable. The built-in ways carry justification *claims* across controls from NIST, OWASP, ISO, SOC 2, CIS, and IEEE — assertions about how the guidance is *designed*, not evidence that any control operates.
 
-Most users don't need governance. It's an additive layer that emerges when compliance asks *"can you prove your agents follow policy?"* See [docs/governance.md](docs/governance.md) for the full reference.
+Most users don't need it. It's an additive layer that helps work take a control-aligned shape at the point of work: a first-line aid, not an assessment or attestation. Read any coverage number as *claims made*, not *conformance achieved*. See [docs/governance.md](docs/governance.md) for the full reference.
 
-For adding provenance: [provenance.md](docs/hooks-and-ways/provenance.md) | Design rationale: [ADR-005](docs/architecture/legacy/ADR-005-governance-traceability.md)
+For adding a claim: [provenance.md](docs/hooks-and-ways/provenance.md) | Design rationale: [ADR-200](docs/architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md)
 
 ## Philosophy
 

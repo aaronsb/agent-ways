@@ -1,6 +1,6 @@
 # Stats and Observability
 
-You can't manage what you can't see. The ways system logs every firing event and provides tools to understand how governance is actually being applied across sessions, projects, and teams.
+You can't manage what you can't see. The ways system logs every firing event and provides tools to understand how guidance is actually being applied across sessions, projects, and teams.
 
 ## What Gets Logged
 
@@ -75,11 +75,11 @@ Last 24h: 11 sessions, 458 way fires
 
 ### How to Interpret It
 
-**Top ways** tells you which governance is actually active. If `meta/todos` and `meta/memory` dominate, your sessions are long enough to hit context thresholds regularly — the system is doing its job keeping state persistent. If a domain-specific way never appears, either the trigger patterns don't match your workflow or the domain is disabled.
+**Top ways** tells you which guidance is actually active. If `meta/todos` and `meta/memory` dominate, your sessions are long enough to hit context thresholds regularly — the system is doing its job keeping state persistent. If a domain-specific way never appears, either the trigger patterns don't match your workflow or the domain is disabled.
 
-**By scope** shows who's receiving governance. `agent` is your main sessions. `teammate` means team members got their coordination norms. `subagent` means delegated tasks received relevant ways. `unknown` is from older events logged before scope tracking existed — it ages out naturally.
+**By scope** shows who's receiving guidance. `agent` is your main sessions. `teammate` means team members got their coordination norms. `subagent` means delegated tasks received relevant ways. `unknown` is from older events logged before scope tracking existed — it ages out naturally.
 
-**By team** appears only when teams have been used. It shows which teams triggered the most governance. A team with many fires was doing complex, varied work. A team with few fires was focused on something narrow that only matched a couple of ways.
+**By team** appears only when teams have been used. It shows which teams triggered the most ways. A team with many fires was doing complex, varied work. A team with few fires was focused on something narrow that only matched a couple of ways.
 
 **By trigger** reveals *how* ways are being activated:
 - `state` — context-threshold and session-start triggers (the system managing itself)
@@ -88,7 +88,7 @@ Last 24h: 11 sessions, 458 way fires
 - `file` — file path matching (editing .env, README.md, etc.)
 - `teammate`/`subagent` — injected into spawned agents
 
-**By project** shows governance distribution across your work. A project with many fires is one where the ways are highly relevant. A project with few fires either doesn't trigger many patterns or has a focused workflow.
+**By project** shows guidance distribution across your work. A project with many fires is one where the ways are highly relevant. A project with few fires either doesn't trigger many patterns or has a focused workflow.
 
 ### Filtering
 
