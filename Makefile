@@ -55,6 +55,7 @@ help:
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
 	@echo "  make release      Build release binary for current platform"
+	@echo "  make cut-release  Bump+tag a component release (COMPONENT=ways LEVEL=patch [PUSH=1])"
 	@echo "  make uninstall    Remove ways from PATH"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make purge-attend-state  Wipe all attend runtime cache (peers, signals,"
@@ -348,6 +349,13 @@ release: ways-rebuild
 		cd dist && sha256sum ways-$$PLATFORM > ways-$$PLATFORM.sha256; \
 		echo "dist/ways-$$PLATFORM ($$(ls -lh ways-$$PLATFORM | awk '{print $$5}'))"; \
 		cat ways-$$PLATFORM.sha256
+
+# Cut a release for a Cargo-versioned component (ADR-150): bump version + tag
+# locally. Publishing is a separate, explicit push (or PUSH=1). Examples:
+#   make cut-release COMPONENT=ways LEVEL=patch          # local: bump 1.0.0 -> 1.0.1, tag
+#   make cut-release COMPONENT=ways LEVEL=patch PUSH=1   # also push main + tag (publishes)
+cut-release:
+	@bash scripts/release.sh "$(COMPONENT)" "$(LEVEL)" $(if $(PUSH),--push,)
 
 # --- Supporting ---
 
