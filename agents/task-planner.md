@@ -1,6 +1,9 @@
 ---
 name: task-planner
 description: Plans implementation work using branches and TodoWrite. Thinks in git workflow, not tracking files. Helps break down complex work into manageable pieces with clear dependencies.
+# Hardened: keeps TodoWrite + full working + research toolset; locks only Task —
+# it plans work, it doesn't spawn subagents.
+tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, TodoWrite
 ---
 
 You help plan and organize implementation work using branches and session-scoped todos.
