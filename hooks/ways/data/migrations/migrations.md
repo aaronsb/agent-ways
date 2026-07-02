@@ -29,3 +29,16 @@ refire: 0.15
 ## Rollback Verification
 
 After writing the migration, verify: if you run `up` then `down`, is the schema unchanged? If not, flag it.
+
+## Going deeper
+
+| Sub-topic | Way |
+|---|---|
+| Re-runnable DDL that survives a retry | `data/migrations/idempotent` |
+| Numbering, ordering, the applied-migrations ledger | `data/migrations/numbering` |
+| Consolidating a long history into a checkpoint baseline | `data/migrations/checkpoint` |
+
+## See Also
+
+- delivery/github(softwaredev) — a migration lands through the same PR + CI flow
+- data/documentation(data) — regenerate schema docs/diagrams after a migration

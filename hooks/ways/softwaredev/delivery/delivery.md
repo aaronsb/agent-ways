@@ -17,12 +17,16 @@ Children of this way cover the journey from local changes to production:
 | Commits, messages | `delivery/commits` |
 | PRs, review, merge | `delivery/github` |
 | Releases, tagging, publishing | `delivery/release` |
-| Schema migrations | `delivery/migrations` |
 | Patch creation | `delivery/patches` |
 | Implementation planning | `delivery/implement` |
+
+Deploying a schema migration is a delivery step, but the migration *discipline*
+— design, numbering, idempotency, consolidation — lives in its own domain now:
+see `data/migrations`.
 
 ## See Also
 
 - delivery/commits(softwaredev) — commit structure and messages
 - delivery/github(softwaredev) — PR workflow
 - delivery/implement(softwaredev) — implementation planning
+- data/migrations(data) — schema migration discipline (moved out of delivery)
