@@ -49,7 +49,7 @@ cd "$ROOT"
 MODE="${1:-}"; COMPONENT="${2:-}"
 [[ -n "$MODE" && -n "$COMPONENT" ]] || die "usage: release.sh <bump|tag> <ways|ways-audit|attend|attend-chat> ..."
 MANIFEST="$(manifest_for "$COMPONENT")"
-PKG="$COMPONENT"   # package name == component name for all three
+PKG="$COMPONENT"   # package name == component name for every component
 TAG_PREFIX="${COMPONENT}-v"
 
 case "$MODE" in
