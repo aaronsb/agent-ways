@@ -14,6 +14,7 @@
 
 pub mod agents;
 pub mod config;
+pub mod finding;
 pub mod firing;
 pub mod frontmatter;
 pub mod paths;

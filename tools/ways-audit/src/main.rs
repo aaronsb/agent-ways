@@ -10,6 +10,7 @@
 //! the same `ways-core` engine this binary already depends on.
 
 mod audit;
+mod findings;
 mod helpers;
 mod lint;
 mod matrix;
@@ -74,6 +75,17 @@ enum Command {
     Matrix,
     /// Validate claim integrity
     Lint,
+    /// Assemble the classifier-ready finding dataset from claims + firing (ADR-201)
+    Assemble {
+        /// Restrict to a single way ID
+        #[arg(long)]
+        way: Option<String>,
+        /// Append the assembled findings to the ledger
+        #[arg(long)]
+        write: bool,
+    },
+    /// Show the assembled finding ledger
+    Findings,
 }
 
 fn main() -> Result<()> {
@@ -99,5 +111,9 @@ fn main() -> Result<()> {
         Command::Active => audit::active(&manifest, json),
         Command::Matrix => matrix::run(&manifest, json),
         Command::Lint => lint::run(&manifest, json),
+        Command::Assemble { way, write } => {
+            findings::assemble(&manifest, way.as_deref(), write, json)
+        }
+        Command::Findings => findings::list(json),
     }
 }

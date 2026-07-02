@@ -473,13 +473,19 @@ ways permissions audit --global
 | `trace <id>` | End-to-end provenance trace for a single way |
 | `control <id>` | Which ways *claim* a given control |
 | `policy <id>` | Which ways derive from a given policy |
+| `assemble [--way <id>] [--write]` | Build the classifier-ready **finding dataset** (ADR-201) — one row per `(way, control)` with firing evidence and an *empty* determination. `--write` appends to the finding ledger |
+| `findings` | Show the assembled finding ledger |
 
 ```
 ways-audit report
 ways-audit gaps
 ways-audit trace meta/knowledge
 ways-audit matrix --json > coverage.jsonl
+ways-audit assemble --json > findings.json   # dataset for an external classifier
 ```
+
+`assemble` never writes a determination — it leaves the label empty for a separate,
+out-of-scope classifier (ADR-201). Assembly is not assessment.
 
 ---
 

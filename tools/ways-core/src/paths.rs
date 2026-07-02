@@ -221,6 +221,14 @@ pub fn events_log() -> PathBuf {
     resolve_events(&state_root(), &projection_root())
 }
 
+/// Append-only ledger of assembled compliance findings (ADR-201):
+/// `$XDG_STATE/agent-ways/findings.jsonl`. agent-ways owns this — findings are
+/// session-derived records, not Claude-Code state — so it sits beside the event
+/// log in `$XDG_STATE`, never in the `~/.claude` projection.
+pub fn findings_ledger() -> PathBuf {
+    state_root().join("findings.jsonl")
+}
+
 /// Pure fallback resolution for the event log, factored out for testing without
 /// touching `$XDG_STATE`/`$HOME`.
 fn resolve_events(state: &Path, projection: &Path) -> PathBuf {
