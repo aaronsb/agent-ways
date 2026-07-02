@@ -72,6 +72,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Accepted |
 | [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
 | [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Accepted |
+| [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
