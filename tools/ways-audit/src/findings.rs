@@ -13,6 +13,11 @@ use ways_core::{firing, paths, util};
 
 /// Assemble finding rows from the claim manifest + firing events, print them, and
 /// optionally append them to the ledger. `way` filters to a single way id.
+///
+/// `--write` **appends** a fresh snapshot; the ledger is append-only (like the
+/// firing-event log), so repeated writes accumulate timestamped snapshots rather
+/// than replacing prior rows. A consumer that wants current state reduces by
+/// `(way, control)` to the latest `assembled_at` (ADR-201).
 pub fn assemble(manifest: &Value, way: Option<&str>, write: bool, json_out: bool) -> Result<()> {
     let events = firing::load_events();
     let mut findings = assemble_findings(manifest, &events, &util::now_utc());

@@ -57,12 +57,13 @@ Frame the finding record as one row of a supervised-classification dataset — *
 
 | Role | Field | Source |
 |------|-------|--------|
-| feature | `criterion` (the claim's `satisfied_when`) | claim sidecar (ADR-110) |
-| feature | `evidence.firing` — counts, sessions, timestamps | firing-event log |
-| feature | `evidence.transcript_refs` — session + pointer | session transcripts |
-| feature | `tier` — `process` or `outcome` (ADR-200 §3) | the criterion's kind |
-| **label** | `determination` — `satisfied` / `other-than-satisfied` / *unset* | a classifier |
-| provenance | `assessed_by`, `assessed_at`, `basis` | the classifier, when it labels |
+| `way`, `control` | the claimed `(way, control)` this row assesses | claim sidecar (ADR-110) |
+| feature | `criterion` — the claim's `satisfied_when` (`null` if none) | claim sidecar |
+| feature | `evidence` — `total` fire count, `sessions` (each id is a transcript pointer), `first_seen` / `last_seen` | firing-event log |
+| feature | `tier` — `process` when there is no criterion, `outcome` when there is (ADR-200 §3) | criterion presence |
+| **label** | `determination` — `satisfied` / `other-than-satisfied`, `null` until labeled | a classifier |
+| provenance | `assessed_by`, `assessed_at`, `basis` — `null` until labeled | the classifier, when it labels |
+| provenance | `assembled_at`, `assembled_by` — who built the row, when | the assembler |
 
 *Informally:* the ledger is a dataset with an empty label column. The framing is not
 decorative — it is why the record stores the criterion and the raw evidence *beside* the
@@ -112,6 +113,13 @@ and unambiguous to label.
   boundary.
 - `satisfied_when` moves from ADR-200 §1's "proposed, not yet in schema" note into the
   actual claim schema (ADR-151 §3) as part of realizing this ADR.
+- The ledger is **append-only**, like the firing-event log it is built from: each
+  `assemble --write` appends a fresh *snapshot* of the rows (their `assembled_at` and
+  evolving firing evidence distinguish them), rather than mutating prior rows in place. It
+  is therefore a time series of assemblies, not a unique-keyed table; a consumer that wants
+  current state reduces by `(way, control)` to the latest `assembled_at`. This keeps the
+  writer a trivial, honest append and defers any compaction policy to the — out of scope —
+  consumer.
 
 ## Alternatives Considered
 

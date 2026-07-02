@@ -88,6 +88,8 @@ fn index_firing(events: &[Value]) -> BTreeMap<String, WayFiring> {
             }
         }
         if let Some(ts) = ev["ts"].as_str() {
+            // Lexicographic compare is chronological here: every event timestamp is
+            // written by the same RFC3339 `…Z` writer, so string order == time order.
             if entry.first_seen.as_deref().map(|f| ts < f).unwrap_or(true) {
                 entry.first_seen = Some(ts.to_string());
             }
