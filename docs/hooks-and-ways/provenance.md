@@ -59,25 +59,25 @@ shouldn't carry one; forcing a claim where none is honest is the anti-pattern.
 
 ## Check it
 
-`ways governance` reads the sidecars directly and builds its view **in memory** — there
+`ways-audit` reads the sidecars directly and builds its view **in memory** — there
 is no persisted manifest and no separate scripts (the former `governance.sh` /
-`provenance-scan.py` were consolidated into the `ways` binary, ADR-111):
+`provenance-scan.py` were consolidated into the binary, ADR-111):
 
 ```bash
-ways governance trace softwaredev/delivery/commits   # the chain for one way
-ways governance report                               # which ways carry a claim
-ways governance lint                                 # validate: URIs resolve, fields present
-ways governance report --json                        # machine-readable
+ways-audit trace softwaredev/delivery/commits   # the chain for one way
+ways-audit report                               # which ways carry a claim
+ways-audit lint                                 # validate: URIs resolve, fields present
+ways-audit report --json                        # machine-readable
 ```
 
 ## Keep it honest
 
 - A `justification` is an **assertion** about how the guidance is *designed* to address
   the control — not proof it did. Substantiating a claim needs a session-derived
-  **finding** (SOC 2 Type II), which is the `ways-audit` direction
-  ([ADR-151](../architecture/system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md)),
+  **finding** (SOC 2 Type II), which is the direction set in
+  [ADR-151](../architecture/system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md),
   not yet built.
-- Read `ways governance report` coverage as *claims made*, not *conformance achieved*.
+- Read `ways-audit report` coverage as *claims made*, not *conformance achieved*.
 - Point a claim at a control you can defend by ID — and verify the control means what you
   think, because an unchecked citation is itself a claim.
 
@@ -93,7 +93,7 @@ compliance-repo/              your-claude-config/
 └── controls-catalog.md
 ```
 
-A claim references its policy by `uri`; `ways governance` resolves those URIs and builds
+A claim references its policy by `uri`; `ways-audit` resolves those URIs and builds
 the cross-repo view at query time. Nothing is persisted between the repos, so the two
 sides stay decoupled.
 

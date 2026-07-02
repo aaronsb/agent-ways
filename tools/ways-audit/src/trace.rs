@@ -1,9 +1,9 @@
-//! `ways governance trace <way>` — full provenance trace for a single way.
+//! `ways-audit trace <way>` — full claim trace for a single way.
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
-use super::helpers::load_events;
+use ways_core::firing::load_events;
 
 pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
     let way_data = &manifest["ways"][way_id];
@@ -30,7 +30,7 @@ pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
 
     println!();
     println!(
-        "\x1b[1mProvenance Trace: \x1b[0;36m{way_id}\x1b[0m"
+        "\x1b[1mClaim Trace: \x1b[0;36m{way_id}\x1b[0m"
     );
     println!();
     if let Some(path) = way_data["path"].as_str() {
@@ -40,7 +40,7 @@ pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
 
     let prov = &way_data["provenance"];
     if prov.is_null() {
-        println!("  \x1b[1;33m(no provenance metadata)\x1b[0m");
+        println!("  \x1b[1;33m(no claim)\x1b[0m");
         return Ok(());
     }
 

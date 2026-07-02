@@ -1,4 +1,4 @@
-//! `ways governance matrix` — control-to-way traceability matrix.
+//! `ways-audit matrix` — control-to-way traceability matrix.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -68,7 +68,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     }
 
     println!();
-    println!("\x1b[1mGovernance Traceability Matrix\x1b[0m");
+    println!("\x1b[1mClaim Traceability Matrix\x1b[0m");
     println!();
     println!(
         "  \x1b[1m{:<28} {:<50} JUSTIFICATION\x1b[0m",

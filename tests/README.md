@@ -126,9 +126,9 @@ bash scripts/doc-graph.sh --all       # all outputs
 Validates that provenance metadata is structurally sound: policy URIs point to real files, verified dates aren't stale, controls have justifications.
 
 ```bash
-ways governance lint              # human-readable report
-ways governance lint --json       # machine-readable
-ways governance report            # full coverage report
+ways-audit lint              # human-readable report
+ways-audit lint --json       # machine-readable
+ways-audit report            # full coverage report
 ```
 
 **What it covers**: Provenance chain integrity — every `policy.uri` in provenance sidecars resolves, every control has justifications, verified dates are within staleness window.

@@ -6,14 +6,17 @@
 //! makes this previously-untested engine unit-testable.
 //!
 //! Scope (ADR-151 §1): way discovery/scanning, frontmatter parsing, path and
-//! projection resolution, and configuration. The compliance claim model and
-//! firing-log reader migrate here alongside `ways-audit` (ADR-151 §2–3).
+//! projection resolution, configuration, the firing-event log reader, and the
+//! compliance-claim sidecar model and manifest builder.
 //!
-//! Session lifecycle, command dispatch, and hooks stay in the `ways` binary.
+//! Session lifecycle, command dispatch, and hooks stay in the `ways` binary;
+//! the compliance operator surface lives in the `ways-audit` binary.
 
 pub mod agents;
 pub mod config;
+pub mod firing;
 pub mod frontmatter;
 pub mod paths;
+pub mod provenance;
 pub mod scanner;
 pub mod util;

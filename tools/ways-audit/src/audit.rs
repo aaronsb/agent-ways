@@ -1,9 +1,10 @@
-//! `ways governance gaps/stale/active` — audit-focused queries.
+//! `ways-audit gaps/stale/active` — audit-focused queries.
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::helpers::{count_fires, cutoff_date, find_stale_ways, load_events};
+use crate::helpers::{cutoff_date, find_stale_ways};
+use ways_core::firing::{count_fires, load_events};
 
 pub fn gaps(manifest: &Value, json_out: bool) -> Result<()> {
     let without = &manifest["coverage"]["without_provenance"];
@@ -18,7 +19,7 @@ pub fn gaps(manifest: &Value, json_out: bool) -> Result<()> {
 
     println!();
     println!(
-        "\x1b[1mWays Without Provenance\x1b[0m \x1b[1;33m({count} of {total})\x1b[0m"
+        "\x1b[1mWays Without a Claim\x1b[0m \x1b[1;33m({count} of {total})\x1b[0m"
     );
     println!();
     if let Some(arr) = without.as_array() {
@@ -52,12 +53,12 @@ pub fn stale(manifest: &Value, days: u32, json_out: bool) -> Result<()> {
     let cutoff = cutoff_date(days);
     println!();
     println!(
-        "\x1b[1mStale Provenance\x1b[0m \x1b[2m(verified > {days} days ago, cutoff: {cutoff})\x1b[0m"
+        "\x1b[1mStale Claims\x1b[0m \x1b[2m(verified > {days} days ago, cutoff: {cutoff})\x1b[0m"
     );
     println!();
 
     if stale_ways.is_empty() {
-        println!("  \x1b[0;32mAll provenance dates are current.\x1b[0m");
+        println!("  \x1b[0;32mAll claim dates are current.\x1b[0m");
     } else {
         for way in &stale_ways {
             let verified = manifest["ways"][way.as_str()]["provenance"]["verified"]
@@ -77,7 +78,7 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     let with_prov = match manifest["coverage"]["with_provenance"].as_array() {
         Some(a) => a,
         None => {
-            println!("No provenance data.");
+            println!("No claim data.");
             return Ok(());
         }
     };
@@ -99,10 +100,10 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     let total_ways = manifest["ways_scanned"].as_u64().unwrap_or(0);
 
     println!();
-    println!("\x1b[1mActive Governance Report\x1b[0m");
+    println!("\x1b[1mActive Claims Report\x1b[0m");
     println!();
     println!(
-        "  Governed ways: \x1b[0;32m{total_governed}\x1b[0m of {total_ways}"
+        "  Ways with claims: \x1b[0;32m{total_governed}\x1b[0m of {total_ways}"
     );
     println!();
     println!(
@@ -128,10 +129,10 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         println!("  {:<28} {:>5}  {}", way, fires, status);
     }
 
-    // Ungoverned with high fire counts
+    // Ways without a claim, ranked by fire count.
     println!();
     println!(
-        "\x1b[1mUngoverned ways\x1b[0m \x1b[2m(top by fire count):\x1b[0m"
+        "\x1b[1mWays without a claim\x1b[0m \x1b[2m(top by fire count):\x1b[0m"
     );
     if let Some(without) = manifest["coverage"]["without_provenance"].as_array() {
         let mut ungov_fires: Vec<(&str, u64)> = without
@@ -149,11 +150,11 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         ungov_fires.sort_by(|a, b| b.1.cmp(&a.1));
 
         if ungov_fires.is_empty() {
-            println!("  (no firing data for ungoverned ways)");
+            println!("  (no firing data for ways without a claim)");
         } else {
             for (way, fires) in ungov_fires.iter().take(5) {
                 println!(
-                    "  {:<28} {:>5} fires \x1b[1;33m(no provenance)\x1b[0m",
+                    "  {:<28} {:>5} fires \x1b[1;33m(no claim)\x1b[0m",
                     way, fires
                 );
             }

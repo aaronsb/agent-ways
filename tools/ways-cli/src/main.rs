@@ -123,12 +123,6 @@ enum Commands {
         #[arg(long)]
         jaccard: bool,
     },
-    /// Scan provenance sidecars
-    Provenance {
-        /// Ways root directory (default: ~/.claude/hooks/ways)
-        #[arg(long)]
-        ways_dir: Option<String>,
-    },
     /// Display a way, check, or core guidance (session-aware)
     Show {
         #[command(subcommand)]
@@ -403,17 +397,6 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Governance provenance queries — report, trace, control, policy, gaps, stale, active, matrix, lint
-    Governance {
-        #[command(subcommand)]
-        mode: GovernanceCommand,
-        /// Machine-readable JSON output
-        #[arg(long, global = true)]
-        json: bool,
-        /// Scan global ways (ignore project-local)
-        #[arg(long, global = true)]
-        global: bool,
-    },
     /// settings.json fragment store — author settings as composable YAML fragments (ADR-147)
     Settings {
         #[command(subcommand)]
@@ -561,41 +544,6 @@ enum PermissionsCommand {
 }
 
 #[derive(Subcommand)]
-enum GovernanceCommand {
-    /// Coverage report (default)
-    Report,
-    /// End-to-end provenance trace for a single way
-    Trace {
-        /// Way ID (e.g., "softwaredev/code/quality")
-        way: String,
-    },
-    /// Which ways implement a control
-    Control {
-        /// Search pattern for control IDs
-        pattern: String,
-    },
-    /// Which ways derive from a policy
-    Policy {
-        /// Search pattern for policy URIs
-        pattern: String,
-    },
-    /// Ways without provenance
-    Gaps,
-    /// Ways with stale verified dates
-    Stale {
-        /// Days before considered stale (default: 90)
-        #[arg(default_value = "90")]
-        days: u32,
-    },
-    /// Cross-reference provenance with firing stats
-    Active,
-    /// Flat spreadsheet: way | control | justification
-    Matrix,
-    /// Validate provenance integrity
-    Lint,
-}
-
-#[derive(Subcommand)]
 enum SettingsCommand {
     /// Lint a settings.json fragment store: schema-valid, scope-legal, duplicate-scalar
     Lint {
@@ -702,7 +650,6 @@ fn main() -> Result<()> {
         }
         Commands::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),
         Commands::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
-        Commands::Provenance { ways_dir } => cmd::provenance::run(ways_dir),
         Commands::Init { project } => cmd::init::run(project.as_deref()),
         Commands::Template { path, description, vocabulary, scope, global } => {
             cmd::template::run(path, description, vocabulary, scope, global)
@@ -828,20 +775,6 @@ fn main() -> Result<()> {
             match action {
                 PermissionsCommand::Audit => cmd::permissions::audit(global),
             }
-        }
-        Commands::Governance { mode, json, global } => {
-            let gov_mode = match mode {
-                GovernanceCommand::Report => cmd::governance::Mode::Report,
-                GovernanceCommand::Trace { way } => cmd::governance::Mode::Trace(way),
-                GovernanceCommand::Control { pattern } => cmd::governance::Mode::Control(pattern),
-                GovernanceCommand::Policy { pattern } => cmd::governance::Mode::Policy(pattern),
-                GovernanceCommand::Gaps => cmd::governance::Mode::Gaps,
-                GovernanceCommand::Stale { days } => cmd::governance::Mode::Stale(days),
-                GovernanceCommand::Active => cmd::governance::Mode::Active,
-                GovernanceCommand::Matrix => cmd::governance::Mode::Matrix,
-                GovernanceCommand::Lint => cmd::governance::Mode::Lint,
-            };
-            cmd::governance::run(gov_mode, json, global)
         }
         Commands::Update { dry_run } => cmd::update::run(dry_run),
         Commands::Settings { command } => match command {

@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
+.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -24,6 +24,7 @@ else
 endif
 
 WAYS_BIN = bin/ways
+WAYS_AUDIT_BIN = bin/ways-audit
 ATTEND_BIN = bin/attend
 ATTEND_CHAT_BIN = bin/attend-chat
 WAY_EMBED_BIN = bin/way-embed
@@ -44,6 +45,7 @@ help:
 	@echo "  make sync-to-home-link  [legacy] symlink variant of sync-to-home"
 	@echo "  make ways         Get ways binary (download or build from source)"
 	@echo "  make ways-rebuild Force rebuild ways from source"
+	@echo "  make ways-audit   Build + link the optional compliance binary (ADR-151)"
 	@echo "  make attend       Build attend binary"
 	@echo "  make attend-rebuild Force rebuild attend from source"
 	@echo "  make lint         Run clippy on Rust workspace (warnings = errors)"
@@ -147,8 +149,8 @@ hooks-install:
 
 # Remove symlink from PATH.
 uninstall:
-	@rm -f "$(XDG_BIN)/ways" "$(XDG_BIN)/attend" "$(XDG_BIN)/attend-chat"
-	@echo "Removed $(XDG_BIN)/ways $(XDG_BIN)/attend $(XDG_BIN)/attend-chat"
+	@rm -f "$(XDG_BIN)/ways" "$(XDG_BIN)/ways-audit" "$(XDG_BIN)/attend" "$(XDG_BIN)/attend-chat"
+	@echo "Removed $(XDG_BIN)/ways $(XDG_BIN)/ways-audit $(XDG_BIN)/attend $(XDG_BIN)/attend-chat"
 
 # Pull upstream and re-setup. scripts/update.sh wraps the pull so machine-local
 # changes (settings.json, stale build artifacts) and merged branches don't abort
@@ -211,6 +213,21 @@ ways-rebuild:
 	@mkdir -p bin
 	@$(LINK) "$(CURDIR)/tools/target/release/ways$(EXE)" $(WAYS_BIN)
 	@echo "Built: $(WAYS_BIN) ($$(ls -lh $(WAYS_BIN) | awk '{print $$5}'))"
+
+# Build the ways-audit compliance binary from source and link it onto PATH.
+# Deliberately NOT part of `make setup`/`install` — it is optional, operator-
+# invoked tooling (ADR-151), so the default install stays lean. Run on demand.
+ways-audit:
+	@if ! command -v cargo >/dev/null 2>&1; then \
+		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
+		exit 1; \
+	fi
+	@bash scripts/check-rust.sh
+	cargo build --release --manifest-path tools/Cargo.toml -p ways-audit
+	@mkdir -p bin "$(XDG_BIN)"
+	@$(LINK) "$(CURDIR)/tools/target/release/ways-audit$(EXE)" $(WAYS_AUDIT_BIN)
+	@$(LINK) "$(CURDIR)/$(WAYS_AUDIT_BIN)" "$(XDG_BIN)/ways-audit"
+	@echo "Built + linked: $(XDG_BIN)/ways-audit → $(CURDIR)/$(WAYS_AUDIT_BIN)"
 
 # Build attend binary from workspace.
 attend:

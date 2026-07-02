@@ -4,6 +4,7 @@ members = [
     "agent-identity",
     "sensor-trait",
     "ways-core",
+    "ways-audit",
     "sensor-git",
     "sensor-context",
     "sensor-peers",

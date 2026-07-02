@@ -1,7 +1,10 @@
-//! Shared helpers for governance subcommands.
+//! Shared helpers for the ways-audit report modules.
+//!
+//! Query-side helpers that operate on the claim manifest. The firing-log reader
+//! (`load_events` / `count_fires`) lives in `ways_core::firing`; the calendar
+//! conversion lives in `ways_core::util` — both shared engine, not audit-only.
 
 use serde_json::Value;
-use std::collections::HashMap;
 
 pub fn obj_len(v: &Value) -> usize {
     v.as_object().map(|m| m.len()).unwrap_or(0)
@@ -14,7 +17,7 @@ pub fn cutoff_date(days: u32) -> String {
         .as_secs();
     let cutoff_secs = secs.saturating_sub(days as u64 * 86400);
     let days_since = cutoff_secs / 86400;
-    let (y, m, d) = crate::session::days_to_ymd_pub(days_since);
+    let (y, m, d) = ways_core::util::days_to_ymd(days_since);
     format!("{y:04}-{m:02}-{d:02}")
 }
 
@@ -63,30 +66,6 @@ pub fn find_incomplete(manifest: &Value) -> Vec<String> {
     incomplete
 }
 
-pub fn load_events() -> Vec<Value> {
-    let path = crate::paths::events_log();
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    content
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect()
-}
-
-pub fn count_fires(events: &[Value]) -> HashMap<String, u64> {
-    let mut counts: HashMap<String, u64> = HashMap::new();
-    for event in events {
-        if event["event"].as_str() == Some("way_fired") {
-            if let Some(way) = event["way"].as_str() {
-                *counts.entry(way.to_string()).or_default() += 1;
-            }
-        }
-    }
-    counts
-}
-
 /// Detect project-local ways directory from CLAUDE_PROJECT_DIR or cwd.
 pub fn detect_project_ways() -> Option<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
@@ -112,5 +91,51 @@ pub fn detect_project_ways() -> Option<String> {
         Some(project_ways.to_string_lossy().to_string())
     } else {
         None // No project-local ways, fall through to global
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn cutoff_date_is_iso_formatted() {
+        let d = cutoff_date(0);
+        assert_eq!(d.len(), 10);
+        assert_eq!(d.as_bytes()[4], b'-');
+        assert_eq!(d.as_bytes()[7], b'-');
+    }
+
+    #[test]
+    fn find_incomplete_flags_missing_fields() {
+        let manifest = json!({
+            "ways": {
+                "a/complete": {"provenance": {
+                    "policy": [{"uri": "p.md"}],
+                    "controls": [{"id": "X"}],
+                    "rationale": "why"
+                }},
+                "a/no-rationale": {"provenance": {
+                    "policy": [{"uri": "p.md"}],
+                    "controls": [{"id": "X"}]
+                }},
+                "a/no-claim": {"provenance": null}
+            }
+        });
+        let incomplete = find_incomplete(&manifest);
+        assert_eq!(incomplete, vec!["a/no-rationale"]);
+    }
+
+    #[test]
+    fn find_stale_ways_respects_cutoff() {
+        let manifest = json!({
+            "ways": {
+                "a/old": {"provenance": {"verified": "2000-01-01"}},
+                "a/future": {"provenance": {"verified": "2999-01-01"}}
+            }
+        });
+        let stale = find_stale_ways(&manifest, 90);
+        assert_eq!(stale, vec!["a/old"]);
     }
 }

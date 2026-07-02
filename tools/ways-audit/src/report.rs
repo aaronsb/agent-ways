@@ -1,9 +1,9 @@
-//! `ways governance report` — provenance coverage overview.
+//! `ways-audit report` — claim coverage overview.
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::helpers::{find_incomplete, find_stale_ways, obj_len};
+use crate::helpers::{find_incomplete, find_stale_ways, obj_len};
 
 pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     let total = manifest["ways_scanned"].as_u64().unwrap_or(0);
@@ -31,7 +31,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     }
 
     println!();
-    println!("\x1b[1mProvenance Coverage Report\x1b[0m");
+    println!("\x1b[1mClaim Coverage Report\x1b[0m");
     println!();
 
     if total > 0 {
@@ -45,10 +45,10 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
         };
         println!("  Ways scanned:        {:3}", total);
         println!(
-            "  With provenance:     {}{:3} ({}%)\x1b[0m",
+            "  With claims:         {}{:3} ({}%)\x1b[0m",
             color, with, pct
         );
-        println!("  Without provenance:  {:3}", without);
+        println!("  Without claims:      {:3}", without);
     } else {
         println!("  Ways scanned:        {:3}", total);
     }
@@ -86,7 +86,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
 
     if !stale_ways.is_empty() {
         println!(
-            "\x1b[1mStale Provenance\x1b[0m \x1b[1;33m(verified > 90 days ago):\x1b[0m"
+            "\x1b[1mStale Claims\x1b[0m \x1b[1;33m(verified > 90 days ago):\x1b[0m"
         );
         for way in &stale_ways {
             if let Some(verified) = manifest["ways"][way]["provenance"]["verified"].as_str() {
@@ -98,7 +98,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
 
     if !incomplete.is_empty() {
         println!(
-            "\x1b[1mIncomplete Provenance\x1b[0m \x1b[1;33m(missing policy, controls, or rationale):\x1b[0m"
+            "\x1b[1mIncomplete Claims\x1b[0m \x1b[1;33m(missing policy, controls, or rationale):\x1b[0m"
         );
         for way in &incomplete {
             println!("  \x1b[1;33m{way}\x1b[0m");
@@ -106,8 +106,8 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
         println!();
     }
 
-    // Ways without provenance
-    println!("\x1b[1mWays without provenance:\x1b[0m");
+    // Ways without a claim
+    println!("\x1b[1mWays without a claim:\x1b[0m");
     if let Some(arr) = manifest["coverage"]["without_provenance"].as_array() {
         for way in arr {
             if let Some(s) = way.as_str() {
