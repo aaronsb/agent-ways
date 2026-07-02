@@ -55,7 +55,8 @@ help:
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
 	@echo "  make release      Build release binary for current platform"
-	@echo "  make cut-release  Bump+tag a component release (COMPONENT=ways LEVEL=patch [PUSH=1])"
+	@echo "  make cut-release  Open a version-bump PR for a component (COMPONENT=ways LEVEL=patch)"
+	@echo "  make publish-release  After the bump PR merges: tag + publish (COMPONENT=ways [PUSH=1])"
 	@echo "  make uninstall    Remove ways from PATH"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make purge-attend-state  Wipe all attend runtime cache (peers, signals,"
@@ -350,12 +351,18 @@ release: ways-rebuild
 		echo "dist/ways-$$PLATFORM ($$(ls -lh ways-$$PLATFORM | awk '{print $$5}'))"; \
 		cat ways-$$PLATFORM.sha256
 
-# Cut a release for a Cargo-versioned component (ADR-150): bump version + tag
-# locally. Publishing is a separate, explicit push (or PUSH=1). Examples:
-#   make cut-release COMPONENT=ways LEVEL=patch          # local: bump 1.0.0 -> 1.0.1, tag
-#   make cut-release COMPONENT=ways LEVEL=patch PUSH=1   # also push main + tag (publishes)
+# Release a Cargo-versioned component (ADR-150). Two steps, because main is
+# branch-protected and PR-first:
+#   make cut-release COMPONENT=ways LEVEL=patch      # 1) open a version-bump PR
+#   (merge that PR, then: git checkout main && git pull)
+#   make publish-release COMPONENT=ways [PUSH=1]     # 2) tag the merged bump + publish
+# publish-release without PUSH=1 creates the tag locally and prints the push
+# command; PUSH=1 pushes it (CI then builds all platforms + creates the Release).
 cut-release:
-	@bash scripts/release.sh "$(COMPONENT)" "$(LEVEL)" $(if $(PUSH),--push,)
+	@bash scripts/release.sh bump "$(COMPONENT)" "$(LEVEL)"
+
+publish-release:
+	@bash scripts/release.sh tag "$(COMPONENT)" $(if $(PUSH),--push,)
 
 # --- Supporting ---
 

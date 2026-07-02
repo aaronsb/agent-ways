@@ -1,93 +1,150 @@
 #!/usr/bin/env bash
-# Cut a release for one Cargo-versioned component (ADR-150): bump its version,
-# refresh the lockfile, commit, and tag — all LOCAL. Publishing (pushing the
-# commit + tag, which triggers CI to build every platform and create the GitHub
-# Release) is left as an explicit, printed step so the outward action stays a
-# deliberate choice, never a side effect.
+# ADR-150 release helper for a Cargo-versioned component. Two steps, because
+# `main` is branch-protected and the repo is PR-first:
+#
+#   bump  — create a `release/<comp>-vX.Y.Z` branch with the version bump + a
+#           verified Cargo.lock, push it, and open a PR. No tag yet; the bump is
+#           reviewed and merged like any other change.
+#   tag   — AFTER that PR merges to main: tag `<comp>-vX.Y.Z` on main and push the
+#           tag. Pushing the tag is the one outward step — CI (build-<comp>.yml)
+#           then builds every platform and creates the GitHub Release.
 #
 # Usage:
-#   scripts/release.sh <component> <patch|minor|major> [--push]
-#     component : ways | attend | attend-chat
-#     --push    : also push main + the tag (publishes). Omit to stop local and
-#                 print the push commands.
+#   scripts/release.sh bump <ways|attend|attend-chat> <patch|minor|major>
+#   scripts/release.sh tag  <ways|attend|attend-chat> [--push]
 #
-# way-embed is NOT handled here — it versions through its own
-# tools/way-embed/Makefile (`make release VERSION=...`).
+# `tag` without --push creates the annotated tag locally and prints the push
+# command (keeps the publish deliberate); `--push` pushes it. way-embed is out of
+# scope — it versions via tools/way-embed/Makefile.
 set -euo pipefail
 
 die() { echo "release: $*" >&2; exit 1; }
 
-[[ $# -ge 2 ]] || die "usage: release.sh <ways|attend|attend-chat> <patch|minor|major> [--push]"
-COMPONENT="$1"; LEVEL="$2"; PUSH="${3:-}"
+manifest_for() {
+  case "$1" in
+    ways)        echo "tools/ways-cli/Cargo.toml" ;;
+    attend)      echo "tools/attend/Cargo.toml" ;;
+    attend-chat) echo "tools/attend-chat/Cargo.toml" ;;
+    *) die "unknown component '$1' (ways|attend|attend-chat)" ;;
+  esac
+}
 
-case "$COMPONENT" in
-  ways)        MANIFEST="tools/ways-cli/Cargo.toml"; PKG="ways" ;;
-  attend)      MANIFEST="tools/attend/Cargo.toml"; PKG="attend" ;;
-  attend-chat) MANIFEST="tools/attend-chat/Cargo.toml"; PKG="attend-chat" ;;
-  *) die "unknown component '$COMPONENT' (ways|attend|attend-chat)" ;;
-esac
-TAG_PREFIX="${COMPONENT}-v"
+current_version() {
+  grep -m1 -E '^version *= *"' "$1" | sed -E 's/.*"([^"]+)".*/\1/'
+}
 
-# Resolve repo root so the script works from anywhere.
+# Read the recorded version of a package from Cargo.lock (empty if absent).
+lock_version() {
+  awk -v p="\"$1\"" '
+    /^\[\[package\]\]/ { name="" }
+    $1=="name" { name=$3 }
+    $1=="version" && name==p { gsub(/"/,"",$3); print $3; exit }
+  ' tools/Cargo.lock 2>/dev/null
+}
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# --- Guards: releases are cut from a clean, up-to-date main. ---
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[[ "$BRANCH" == "main" ]] || die "must be on main to cut a release (on '$BRANCH')"
-[[ -z "$(git status --porcelain)" ]] || die "working tree not clean — commit or stash first"
-git fetch --quiet origin main
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
-  || die "local main is not in sync with origin/main — pull/push first"
+MODE="${1:-}"; COMPONENT="${2:-}"
+[[ -n "$MODE" && -n "$COMPONENT" ]] || die "usage: release.sh <bump|tag> <ways|attend|attend-chat> ..."
+MANIFEST="$(manifest_for "$COMPONENT")"
+PKG="$COMPONENT"   # package name == component name for all three
+TAG_PREFIX="${COMPONENT}-v"
 
-# --- Compute the next version from the current one. ---
-CURRENT="$(grep -m1 -E '^version *= *"' "$MANIFEST" | sed -E 's/.*"([^"]+)".*/\1/')"
-[[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || die "unparseable version '$CURRENT' in $MANIFEST"
-MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
-case "$LEVEL" in
-  patch) PATCH=$((PATCH + 1)) ;;
-  minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-  major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-  *) die "level must be patch|minor|major (got '$LEVEL')" ;;
-esac
-NEXT="${MAJOR}.${MINOR}.${PATCH}"
-TAG="${TAG_PREFIX}${NEXT}"
+case "$MODE" in
+  bump)
+    LEVEL="${3:-}"
+    [[ -n "$LEVEL" ]] || die "usage: release.sh bump $COMPONENT <patch|minor|major>"
 
-git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && die "tag ${TAG} already exists"
+    # Guards: bump is cut from a clean, in-sync main.
+    [[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || die "run bump from main"
+    [[ -z "$(git status --porcelain)" ]] || die "working tree not clean"
+    git fetch --quiet origin main
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
+      || die "local main is not in sync with origin/main — pull/push first"
 
-echo "release: $COMPONENT $CURRENT -> $NEXT  (tag ${TAG})"
+    CURRENT="$(current_version "$MANIFEST")"
+    [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || die "unparseable version '$CURRENT' in $MANIFEST"
+    MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+    case "$LEVEL" in
+      patch) PATCH=$((PATCH + 1)) ;;
+      minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+      major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+      *) die "level must be patch|minor|major (got '$LEVEL')" ;;
+    esac
+    NEXT="${MAJOR}.${MINOR}.${PATCH}"
+    TAG="${TAG_PREFIX}${NEXT}"
+    BRANCH="release/${TAG}"
 
-# --- Bump the manifest version (only the first `version = "..."` — the package
-#     stanza), then refresh the lockfile entry for this package. ---
-#     BSD/GNU sed differ on -i; write via a temp file to stay portable.
-awk -v ver="$NEXT" '
-  !done && /^version *= *"/ { sub(/"[^"]+"/, "\"" ver "\""); done=1 }
-  { print }
-' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+    git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && die "tag ${TAG} already exists"
+    git rev-parse -q --verify "refs/heads/${BRANCH}" >/dev/null && die "branch ${BRANCH} already exists"
 
-# Sync Cargo.lock (best effort; a build would otherwise do it). --offline keeps
-# it from touching the network; ignore failure so a lock-less checkout still cuts.
-cargo update -p "$PKG" --precise "$NEXT" --manifest-path tools/Cargo.toml --offline >/dev/null 2>&1 \
-  || cargo update -p "$PKG" --manifest-path tools/Cargo.toml --offline >/dev/null 2>&1 || true
+    echo "release: bump $COMPONENT $CURRENT -> $NEXT  (branch $BRANCH, tag-to-be $TAG)"
+    git checkout -q -b "$BRANCH"
 
-git add "$MANIFEST" tools/Cargo.lock
-git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
-git tag -a "$TAG" -m "${COMPONENT} v${NEXT}"
-echo "release: committed and tagged ${TAG} locally."
+    # Bump ONLY the package's own version line (column-0 `version = "..."`), never a
+    # dependency's `version` field. `!done` makes it a one-shot on the first match.
+    awk -v ver="$NEXT" '
+      !done && /^version *= *"/ { sub(/"[^"]+"/, "\"" ver "\""); done=1 }
+      { print }
+    ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
 
-if [[ "$PUSH" == "--push" ]]; then
-  echo "release: publishing (push main + tag)…"
-  git push origin main
-  git push origin "$TAG"
-  echo "release: pushed. CI (build-${COMPONENT}.yml) will build all platforms and create the GitHub Release."
-else
-  cat <<EOF
+    # Sync Cargo.lock, then VERIFY it actually records the new version — a stale
+    # lock in the release commit is the exact drift this helper exists to prevent.
+    cargo update -p "$PKG" --manifest-path tools/Cargo.toml --offline >/dev/null 2>&1 \
+      || cargo update -p "$PKG" --manifest-path tools/Cargo.toml >/dev/null 2>&1 || true
+    GOT="$(lock_version "$PKG")"
+    [[ "$GOT" == "$NEXT" ]] \
+      || die "Cargo.lock still records $PKG=${GOT:-none}, not $NEXT — refusing to commit a stale lockfile. Run 'cargo update -p $PKG --manifest-path tools/Cargo.toml' and retry."
 
-Not pushed. To PUBLISH (triggers CI build of every platform + a GitHub Release):
-  git push origin main
-  git push origin ${TAG}
+    git add "$MANIFEST" tools/Cargo.lock
+    git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
+    git push -q -u origin "$BRANCH"
+    gh pr create --title "release(${COMPONENT}): v${NEXT}" \
+      --body "Version bump for the ${COMPONENT} ${NEXT} release (ADR-150). After merge, tag it: \`make publish-release COMPONENT=${COMPONENT}\` — that pushes \`${TAG}\` and CI builds all platforms + creates the GitHub Release."
+    cat <<EOF
 
-To ABORT this local cut:
-  git tag -d ${TAG} && git reset --hard HEAD~1
+Bump PR opened on branch ${BRANCH}. Next:
+  1. review + merge the PR
+  2. git checkout main && git pull
+  3. make publish-release COMPONENT=${COMPONENT}   (tags ${TAG} on main + publishes)
 EOF
-fi
+    ;;
+
+  tag)
+    PUSH="${3:-}"
+    # Guards: tag the MERGED bump on a clean, in-sync main.
+    [[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || die "run tag from main (after the bump PR merged)"
+    [[ -z "$(git status --porcelain)" ]] || die "working tree not clean"
+    git fetch --quiet origin main
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
+      || die "local main is not in sync with origin/main — pull first"
+
+    VERSION="$(current_version "$MANIFEST")"
+    [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "unparseable version '$VERSION' in $MANIFEST"
+    # The lock must agree — otherwise the bump PR wasn't merged (or is inconsistent).
+    GOT="$(lock_version "$PKG")"
+    [[ "$GOT" == "$VERSION" ]] || die "Cargo.lock records $PKG=${GOT:-none} but manifest is $VERSION — is the bump PR merged?"
+    TAG="${TAG_PREFIX}${VERSION}"
+
+    git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && die "tag ${TAG} already exists locally"
+    git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1 && die "tag ${TAG} already exists on origin"
+
+    git tag -a "$TAG" -m "${COMPONENT} v${VERSION}"
+    echo "release: tagged ${TAG} on $(git rev-parse --short HEAD)."
+    if [[ "$PUSH" == "--push" ]]; then
+      git push origin "$TAG"
+      echo "release: pushed ${TAG}. CI (build-${COMPONENT}.yml) is building platforms + creating the GitHub Release."
+    else
+      cat <<EOF
+
+Tag created locally, NOT pushed. To PUBLISH (CI builds platforms + GitHub Release):
+  git push origin ${TAG}
+To abort:
+  git tag -d ${TAG}
+EOF
+    fi
+    ;;
+
+  *) die "unknown mode '$MODE' (bump|tag)" ;;
+esac
