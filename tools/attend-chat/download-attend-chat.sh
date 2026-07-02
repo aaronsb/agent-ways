@@ -5,7 +5,7 @@
 # Falls back to build-from-source instructions if no pre-built binary exists.
 #
 # Usage:
-#   download-ways.sh [--release TAG] [output-dir]
+#   download-attend-chat.sh [--release TAG] [output-dir]
 #
 # The binary is placed at: bin/attend-chat (relative to repo root)
 
@@ -67,7 +67,7 @@ fi
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Find the latest ways release
+# Find the latest attend-chat release
 if [[ "$RELEASE_TAG" == "latest" ]]; then
   RELEASE_TAG=$(gh release list --repo "$GH_REPO" --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null \
     | grep '^attend-chat-v' | head -1)
@@ -85,7 +85,7 @@ echo "Release:  ${RELEASE_TAG}" >&2
 if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -q "^${BIN_NAME}$"; then
   echo "No pre-built binary for ${PLATFORM} in release ${RELEASE_TAG}." >&2
   echo "Available binaries:" >&2
-  gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep "attend-chat-" | sed 's/^/  /' >&2
+  gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null |  grep "^attend-chat-" | sed 's/^/  /' >&2
   echo "" >&2
   echo "Build from source instead:" >&2
   echo "  cd \"$REPO_ROOT\" && make attend-chat" >&2

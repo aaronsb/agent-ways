@@ -12,10 +12,11 @@
 //! - **Prefer pre-built binaries.** `make update` force-*builds* via cargo/cmake,
 //!   which fails for anyone without a toolchain. This mirrors the *install* flow
 //!   instead: download-first, build-fallback (the Makefile's `ways` / way-embed
-//!   `setup-binary` targets). `attend`/`attend-chat` are download-first too now
-//!   (ADR-152 sibling work): their `make` targets fetch the pre-built binary
-//!   before building, so they refresh without a toolchain; only the build
-//!   fallback needs cargo.
+//!   `setup-binary` targets). `attend`/`attend-chat` are download-first too now:
+//!   their `make` targets fetch the pre-built binary before building, so they
+//!   refresh without a toolchain — `attend` already publishes binaries, while
+//!   `attend-chat` falls back to a build until its first release is cut. Only the
+//!   build fallback needs cargo.
 //! - **Rename-then-revert, never leave a broken install.** Each component's
 //!   binary is *renamed* aside (not removed) to defeat the "already installed"
 //!   early-return; if re-acquiring it fails, the old binary is moved back. A
