@@ -231,17 +231,20 @@ ways-audit:
 
 # Build attend binary from workspace.
 attend:
-	@if [ -x $(ATTEND_BIN) ] && $(ATTEND_BIN) --help >/dev/null 2>&1; then \
+	@if [ -x $(ATTEND_BIN) ] && $(ATTEND_BIN) --version >/dev/null 2>&1; then \
 		echo "attend already built."; \
+	elif bash tools/attend/download-attend.sh 2>/dev/null; then \
+		echo "Pre-built attend binary installed."; \
+		$(MAKE) -s --no-print-directory _attend_state_hint; \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Building attend..."; \
+		echo "No pre-built binary, building attend from source..."; \
 		cargo build --release --manifest-path tools/Cargo.toml -p attend; \
 		mkdir -p bin; \
 		$(LINK) "$(CURDIR)/tools/target/release/attend$(EXE)" $(ATTEND_BIN); \
 		echo "Built: $(ATTEND_BIN) ($$(ls -lh $(ATTEND_BIN) | awk '{print $$5}'))"; \
 		$(MAKE) -s --no-print-directory _attend_state_hint; \
 	else \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
+		echo "error: No pre-built binary and cargo not found. Install Rust: https://rustup.rs/"; \
 		exit 1; \
 	fi
 
@@ -268,17 +271,20 @@ attend-rebuild:
 
 # Build attend-chat binary from workspace.
 attend-chat:
-	@if [ -x $(ATTEND_CHAT_BIN) ] && $(ATTEND_CHAT_BIN) --help >/dev/null 2>&1; then \
+	@if [ -x $(ATTEND_CHAT_BIN) ] && $(ATTEND_CHAT_BIN) --version >/dev/null 2>&1; then \
 		echo "attend-chat already built."; \
+	elif bash tools/attend-chat/download-attend-chat.sh 2>/dev/null; then \
+		echo "Pre-built attend-chat binary installed."; \
+		$(MAKE) -s --no-print-directory _attend_state_hint; \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Building attend-chat..."; \
+		echo "No pre-built binary, building attend-chat from source..."; \
 		cargo build --release --manifest-path tools/Cargo.toml -p attend-chat; \
 		mkdir -p bin; \
 		$(LINK) "$(CURDIR)/tools/target/release/attend-chat$(EXE)" $(ATTEND_CHAT_BIN); \
 		echo "Built: $(ATTEND_CHAT_BIN) ($$(ls -lh $(ATTEND_CHAT_BIN) | awk '{print $$5}'))"; \
 		$(MAKE) -s --no-print-directory _attend_state_hint; \
 	else \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
+		echo "error: No pre-built binary and cargo not found. Install Rust: https://rustup.rs/"; \
 		exit 1; \
 	fi
 
