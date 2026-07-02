@@ -33,6 +33,9 @@ controls:
     justifications:
       - Conventional commit types classify changes by nature
       - Atomic commits make each change independently reviewable
+    satisfied_when: >
+      Commits in the session follow the conventional-commit format with a type
+      prefix and are scoped to a single logical change.
   - id: SOC 2 CC8.1 (Change Management)
     justifications:
       - Type prefix and scope create structured change records
@@ -50,6 +53,7 @@ rationale: >
 | `policy[].type` | Classification: `adr`, `governance-doc`, `regulatory-framework`, `control-spec` |
 | `controls[].id` | The control this way *claims* to be designed for |
 | `controls[].justifications[]` | How the guidance is meant to address the control — assertions, not evidence |
+| `controls[].satisfied_when` | *(optional)* the **determination criterion** — what observable session behavior would let a classifier mark this control *satisfied* / *other-than-satisfied* (ADR-200 §1, ADR-201). A control with one can carry an outcome-tier finding; without one, only a process-tier finding (that the way fired) |
 | `verified` | Date the claim's authoring was last reviewed (not an assessment date) |
 | `rationale` | Summary of how the way's guidance compiles the cited controls into practice |
 
@@ -68,15 +72,18 @@ ways-audit trace softwaredev/delivery/commits   # the chain for one way
 ways-audit report                               # which ways carry a claim
 ways-audit lint                                 # validate: URIs resolve, fields present
 ways-audit report --json                        # machine-readable
+ways-audit assemble --json                      # the finding dataset for these claims
 ```
 
 ## Keep it honest
 
 - A `justification` is an **assertion** about how the guidance is *designed* to address
   the control — not proof it did. Substantiating a claim needs a session-derived
-  **finding** (SOC 2 Type II), which is the direction set in
-  [ADR-151](../architecture/system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md),
-  not yet built.
+  **finding** (SOC 2 Type II). `ways-audit assemble` builds the finding *record* — the
+  claim's `satisfied_when` criterion beside the firing evidence — but leaves the
+  determination **empty**: whether the control is *satisfied* is a classifier's call
+  ([ADR-201](../architecture/governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md)),
+  and that classifier is a separate, out-of-scope system. Assembly is not assessment.
 - Read `ways-audit report` coverage as *claims made*, not *conformance achieved*.
 - Point a claim at a control you can defend by ID — and verify the control means what you
   think, because an unchecked citation is itself a claim.

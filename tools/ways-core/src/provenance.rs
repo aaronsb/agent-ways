@@ -11,12 +11,109 @@
 //! ADR-200 §1 direction, layered on in a later change.
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::util::{has_frontmatter, home_dir};
+
+/// The typed compliance-claim schema stored in a `provenance.yaml` sidecar
+/// (ADR-110, ADR-151 §3). The manifest builder above stays `Value`-based for the
+/// query layer; this type is the single-sourced, documented schema and the lens
+/// the finding assembler reads through (ADR-201).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Claim {
+    #[serde(default)]
+    pub policy: Vec<Policy>,
+    #[serde(default)]
+    pub controls: Vec<Control>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+}
+
+/// A source policy document a claim derives from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Policy {
+    pub uri: String,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// A control the way *claims* to be designed for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Control {
+    pub id: String,
+    #[serde(default)]
+    pub justifications: Vec<String>,
+    /// The determination criterion (ADR-200 §1, ADR-201): the observable session
+    /// behavior that would let a classifier decide this control *satisfied* or
+    /// *other than satisfied*. Absent → the control is not yet assessable; it can
+    /// carry only a process-tier finding (that the way fired), never an outcome one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub satisfied_when: Option<String>,
+}
+
+impl Claim {
+    /// Build a typed claim from a manifest way-entry's `provenance` object,
+    /// tolerating the legacy bare-string control form (`- OWASP A01`) alongside
+    /// the structured form. Returns `None` when the entry carries no claim.
+    pub fn from_provenance_value(prov: &Value) -> Option<Claim> {
+        let obj = prov.as_object()?;
+        let policy = obj
+            .get("policy")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|p| {
+                        let uri = p.get("uri")?.as_str()?.to_string();
+                        let kind = p.get("type").and_then(|v| v.as_str()).map(str::to_string);
+                        Some(Policy { uri, kind })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let controls = obj
+            .get("controls")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        if let Some(s) = c.as_str() {
+                            return Some(Control {
+                                id: s.to_string(),
+                                justifications: Vec::new(),
+                                satisfied_when: None,
+                            });
+                        }
+                        let o = c.as_object()?;
+                        Some(Control {
+                            id: o.get("id")?.as_str()?.to_string(),
+                            justifications: o
+                                .get("justifications")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.iter().filter_map(|j| j.as_str().map(str::to_string)).collect())
+                                .unwrap_or_default(),
+                            satisfied_when: o
+                                .get("satisfied_when")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(Claim {
+            policy,
+            controls,
+            verified: obj.get("verified").and_then(|v| v.as_str()).map(str::to_string),
+            rationale: obj.get("rationale").and_then(|v| v.as_str()).map(str::to_string),
+        })
+    }
+}
 
 /// Build the full compliance-claim manifest as a JSON value.
 ///

@@ -181,6 +181,18 @@ pub fn is_excluded_path(path: &Path, excluded_segments: &[String]) -> bool {
     false
 }
 
+/// Current UTC timestamp as `YYYY-MM-DDThh:mm:ssZ`, chrono-free.
+pub fn now_utc() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let time_of_day = secs % 86400;
+    let (y, m, d) = days_to_ymd(secs / 86400);
+    let (hh, mm, ss) = (time_of_day / 3600, (time_of_day % 3600) / 60, time_of_day % 60);
+    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
 /// Convert days-since-Unix-epoch to a `(year, month, day)` civil date (UTC).
 ///
 /// A dependency-free calendar conversion (Howard Hinnant's `civil_from_days`).

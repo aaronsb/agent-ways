@@ -71,14 +71,15 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
 | [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Accepted |
 | [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
-| [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Draft |
+| [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-200](./governance/ADR-200-compliance-claims-and-session-derived-findings.md) | Compliance claims and session-derived findings | Draft |
+| [ADR-200](./governance/ADR-200-compliance-claims-and-session-derived-findings.md) | Compliance claims and session-derived findings | Accepted |
+| [ADR-201](./governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md) | Findings assembled as classifier-ready assessment records | Accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
