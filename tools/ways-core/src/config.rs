@@ -86,6 +86,13 @@ pub struct Config {
     /// an org can point at an internal mirror or a pinned version instead of the
     /// public schema.
     pub settings_schema_url: Option<String>,
+    /// Whether `ways reconcile` projects the framework's secret-path
+    /// `permissions.deny` baseline into `settings.json` (ADR-152). Default
+    /// `true` — secure by default. Set `secret_path_deny: false` to suppress the
+    /// baseline entirely (the one explicit opt-out; a Claude Code deny cannot be
+    /// re-opened by a user `allow`, so the escape hatch lives here, not in
+    /// settings).
+    pub secret_path_deny: bool,
 }
 
 impl Config {
@@ -123,6 +130,7 @@ impl Default for Config {
             near_miss_margin: 0.05,
             refire_presets,
             settings_schema_url: None,
+            secret_path_deny: true,
         }
     }
 }
@@ -241,6 +249,9 @@ impl Config {
                 self.settings_schema_url = Some(v.to_string());
             }
         }
+        if let Some(v) = doc.get("secret_path_deny").and_then(|v| v.as_bool()) {
+            self.secret_path_deny = v;
+        }
     }
 
     /// Parse the project-scope `ways:` mapping for per-way toggles (ADR-131).
@@ -302,6 +313,9 @@ impl Config {
 # language: en          # Output language (en, ja, auto)
 # default_scope: agent  # Default scope for ways without explicit scope
 # disabled_domains: []  # Domains to disable everywhere (e.g., [ea, itops])
+# secret_path_deny: true # Project the secret-path permissions.deny baseline
+#                        # (~/.ssh, ~/.aws, .env, …) into settings.json — ADR-152.
+#                        # Set false to opt out entirely (secure by default).
 
 # Per-way enable/disable (ADR-131) is project scope only — set it in
 # {project}/.claude/ways.yaml using either form:
@@ -394,6 +408,16 @@ mod tests {
             cfg.settings_schema_url.as_deref(),
             Some("https://mirror.example/cc.json")
         );
+    }
+
+    #[test]
+    fn secret_path_deny_defaults_true_and_opts_out() {
+        let mut cfg = Config::default();
+        assert!(cfg.secret_path_deny, "secure by default (ADR-152)");
+        cfg.apply_yaml("secret_path_deny: false");
+        assert!(!cfg.secret_path_deny, "explicit opt-out honored");
+        cfg.apply_yaml("secret_path_deny: true");
+        assert!(cfg.secret_path_deny);
     }
 
     #[test]
