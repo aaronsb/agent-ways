@@ -377,16 +377,16 @@ ways language --audit              # full per-way detail
 
 ---
 
-### `ways provenance`
+### `ways-audit report --json`
 
-**When:** Auditing which ways have governance metadata (ADR links, control references, policy derivations).
+**When:** Auditing which ways have governance metadata (ADR links, control references, policy derivations). This lives in the sibling `ways-audit` binary (ADR-151), not `ways`; the raw manifest is `ways-audit report --json`.
 
 **Run from:** Anywhere.
 
-**Tells you:** List of ways with provenance sidecar files and their metadata — ADR references, control IDs, and verified dates.
+**Tells you:** The claim manifest — ways with provenance sidecar files and their metadata (ADR references, control IDs, and verified dates), as JSON.
 
 ```
-ways provenance
+ways-audit report --json
 ```
 
 ---
@@ -454,11 +454,11 @@ ways permissions audit --global
 
 ---
 
-### `ways governance`
+### `ways-audit`
 
 **When:** Compliance reporting; finding ways that lack ADR traceability; identifying ways with stale verified-dates; cross-referencing governance controls with firing activity.
 
-**Run from:** Anywhere. Add `--global` to restrict to global ways.
+**Run from:** Anywhere. Add `--global` to restrict to global ways. This is the sibling `ways-audit` binary (ADR-151), not a `ways` subcommand.
 
 **Tells you:** Depends on subcommand — see below. Add `--json` to any subcommand for machine-readable output.
 
@@ -475,10 +475,10 @@ ways permissions audit --global
 | `policy <id>` | Which ways derive from a given policy |
 
 ```
-ways governance report
-ways governance gaps
-ways governance trace meta/knowledge
-ways governance matrix --json > coverage.jsonl
+ways-audit report
+ways-audit gaps
+ways-audit trace meta/knowledge
+ways-audit matrix --json > coverage.jsonl
 ```
 
 ---

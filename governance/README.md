@@ -10,18 +10,18 @@
 
 ```bash
 # See what's covered
-ways governance report
+ways-audit report
 
 # Trace a single way end-to-end
-ways governance trace softwaredev/security
+ways-audit trace softwaredev/security
 
 # Query by control framework
-ways governance control OWASP
+ways-audit control OWASP
 ```
 
 For adding provenance to your own ways, see [provenance.md](../docs/hooks-and-ways/provenance.md).
 
-> **Current state:** Governance output is ephemeral — reports go to stdout. The provenance metadata lives in way frontmatter and the `ways` CLI queries it on demand.
+> **Current state:** Governance output is ephemeral — reports go to stdout. The provenance metadata lives in way frontmatter and the `ways-audit` CLI queries it on demand.
 
 ---
 
@@ -86,33 +86,33 @@ Each layer compresses the one above it. The regulatory framework is hundreds of 
 | File | Purpose |
 |------|---------|
 | `policies/` | Policy source documents — the human-readable interpretation layer |
-| `provenance-scan.py` | Legacy scanner (superseded by `ways provenance`) |
+| `provenance-scan.py` | Legacy scanner (superseded by `ways-audit report`) |
 
 ### The governance operator
 
-All governance queries are handled by the `ways` CLI:
+All governance queries are handled by the `ways-audit` binary:
 
 ```bash
 # Coverage report
-ways governance report
+ways-audit report
 
 # Trace a single way end-to-end (controls + justifications + firing stats)
-ways governance trace softwaredev/security
+ways-audit trace softwaredev/security
 
 # Query by control
-ways governance control OWASP
+ways-audit control OWASP
 
 # Flat traceability matrix (the spreadsheet auditors want)
-ways governance matrix
+ways-audit matrix
 
 # Validate provenance integrity (the audit of the audit)
-ways governance lint
+ways-audit lint
 
 # Cross-reference provenance with way firing stats
-ways governance active
+ways-audit active
 
 # Any mode outputs JSON with --json
-ways governance matrix --json
+ways-audit matrix --json
 ```
 
 ### Justifications
@@ -132,8 +132,7 @@ The `matrix` mode flattens these into rows for spreadsheet export. The `lint` mo
 ### Generate the manifest
 
 ```bash
-ways provenance
-ways provenance --json
+ways-audit report --json
 ```
 
 Produces a JSON manifest with per-way provenance data and inverted indices — policy → implementing ways, control → addressing ways. An auditor can query it with `jq`.
@@ -158,9 +157,9 @@ This directory is designed to be separable — a perforated pop-out. To use it s
 1. Copy `governance/` to a new repo
 2. Set `WAYS_DIR` to wherever your ways live
 3. Add `provenance:` blocks to your ways referencing your own policy documents
-4. Run `ways governance report` to verify the chain
+4. Run `ways-audit report` to verify the chain
 
-The `ways` binary is the only dependency.
+The `ways-audit` binary is the only dependency.
 
 Your compliance repo owns the policies. Your ways repo owns the guidance. This directory bridges them — and the bridge is verifiable.
 

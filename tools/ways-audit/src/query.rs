@@ -1,4 +1,4 @@
-//! `ways governance control` and `ways governance policy` — pattern queries.
+//! `ways-audit control` and `ways-audit policy` — pattern queries.
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};

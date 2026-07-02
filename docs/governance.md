@@ -9,9 +9,10 @@ see **[ADR-200](architecture/governance/ADR-200-compliance-claims-and-session-de
 > steer work toward a specific control (NIST 800-53, OWASP, ISO 27001, SOC 2, CIS,
 > IEEE). A claim is a control-*design* assertion — in audit terms the **SOC 2 Type I**
 > posture (suitably designed at a point in time) — **not** evidence that the control
-> operates. Evidence is a **finding**, produced later from real sessions (SOC 2 Type II;
-> the `ways-audit` direction in ADR-151). Today the tooling reports on **claims**, so
-> read any coverage number as *claims made*, not *conformance achieved*.
+> operates. Evidence is a **finding**, produced later from real sessions (SOC 2 Type II) —
+> the finding pipeline is the direction set in ADR-151, not yet built. Today `ways-audit`
+> reports on **claims**, so read any coverage number as *claims made*, not *conformance
+> achieved*.
 
 ## The chain
 
@@ -78,24 +79,24 @@ rationale: >
 
 ## What the tooling does today
 
-Compliance queries run through the `ways` CLI (`ways governance <mode>`). The command
-keeps the `governance` name for now; the claim/finding model and a dedicated `ways-audit`
-binary are the direction set in ADR-151, not yet shipped. The CLI scans the
+Compliance queries run through the `ways-audit` binary (`ways-audit <mode>`), a sibling of
+the `ways` binary (ADR-151). Session-derived findings — the claim/finding model's second
+half — remain the direction set in ADR-151, not yet built. The tool scans the
 `provenance.yaml` sidecars directly and builds the manifest **in memory** — there is no
 persisted `provenance-manifest.json`, and no separate shell scripts (the former
 `governance.sh` / `provenance-scan.py` were consolidated into the binary, ADR-111).
 
 | Mode | Command | Output |
 |------|---------|--------|
-| **Coverage** | `ways governance report` | Which ways carry a claim, which don't |
-| **Trace** | `ways governance trace softwaredev/commits` | The full chain for one way |
-| **Control query** | `ways governance control OWASP` | Which ways *claim* a control |
-| **Policy query** | `ways governance policy code-lifecycle` | Which ways derive from a policy |
-| **Gaps** | `ways governance gaps` | Ways without a claim |
-| **Stale** | `ways governance stale 90` | Claims with old `verified` dates |
-| **Active** | `ways governance active` | Cross-reference claims with way firing stats |
-| **Matrix** | `ways governance matrix` | Flat sheet: way / control / justification |
-| **Lint** | `ways governance lint` | Validate claim integrity (URIs resolve, fields present) |
+| **Coverage** | `ways-audit report` | Which ways carry a claim, which don't |
+| **Trace** | `ways-audit trace softwaredev/commits` | The full chain for one way |
+| **Control query** | `ways-audit control OWASP` | Which ways *claim* a control |
+| **Policy query** | `ways-audit policy code-lifecycle` | Which ways derive from a policy |
+| **Gaps** | `ways-audit gaps` | Ways without a claim |
+| **Stale** | `ways-audit stale 90` | Claims with old `verified` dates |
+| **Active** | `ways-audit active` | Cross-reference claims with way firing stats |
+| **Matrix** | `ways-audit matrix` | Flat sheet: way / control / justification |
+| **Lint** | `ways-audit lint` | Validate claim integrity (URIs resolve, fields present) |
 
 All modes support `--json`.
 
@@ -107,7 +108,7 @@ flowchart LR
 
     W["way + provenance.yaml<br/>(claims)"]:::data
     P["governance/policies/<br/>(policy source docs)"]:::data
-    CLI["ways governance"]:::tool
+    CLI["ways-audit"]:::tool
     R["Reports<br/>(claim coverage, traces,<br/>matrix, lint)"]:::output
 
     W --> CLI
@@ -133,7 +134,7 @@ See ADR-200 for the full model and its non-goals.
 
 Policy documents live in `governance/policies/`. They are the human-readable
 interpretation layer — why a way exists, what principle it implements, where the
-boundaries are. `ways governance lint` validates that every `policy.uri` in a claim
+boundaries are. `ways-audit lint` validates that every `policy.uri` in a claim
 resolves to a real file; the chain breaks silently if policies move without the claims
 following.
 
@@ -144,8 +145,8 @@ Compliance claiming is optional and additive. Most users never touch it.
 1. **Ways** — encode how you work. Everyone starts here.
 2. **Policies** — write down *why* (`governance/policies/`).
 3. **Claims** — link a way to the controls it's *designed* to address (`provenance.yaml`).
-4. **Reporting** — `ways governance` surfaces claim coverage and gaps.
-5. **Findings** — *(direction, ADR-151 / `ways-audit`)* session-derived evidence that the
+4. **Reporting** — `ways-audit` surfaces claim coverage and gaps.
+5. **Findings** — *(direction, ADR-151)* session-derived evidence that the
    claimed guidance actually shaped the work. Not yet built.
 
 Each step builds on the previous without requiring it. A way without a claim runs
@@ -165,7 +166,7 @@ compliance-repo/              your-claude-config/
 └── …                         └── governance/policies/
 ```
 
-A claim references its policy by URI. `ways governance` resolves those URIs and builds
+A claim references its policy by URI. `ways-audit` resolves those URIs and builds
 the cross-repo view in memory at query time — nothing is persisted between repos, so the
 two sides stay decoupled.
 

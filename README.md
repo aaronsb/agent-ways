@@ -195,7 +195,7 @@ make test-sim
 
 The embedding engine achieves 98.4% accuracy (63/64) with 0 false negatives on the fixture set.
 
-Other test tools: `scripts/doc-graph.sh --stats` checks documentation link integrity; `ways governance lint` validates provenance metadata. Full test guide: [tests/README.md](tests/README.md).
+Other test tools: `scripts/doc-graph.sh --stats` checks documentation link integrity; `ways-audit lint` validates provenance metadata. Full test guide: [tests/README.md](tests/README.md).
 
 ## What's Included
 

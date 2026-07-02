@@ -197,7 +197,7 @@ lint:
 
 # Provenance sidecar schema (ADR-110)
 # Lives in provenance.yaml alongside the way file, not in frontmatter.
-# Consumed by `ways governance` and `ways provenance`.
+# Consumed by the `ways-audit` binary (report, trace, matrix, lint, …).
 provenance_sidecar:
   policy:
     type: array

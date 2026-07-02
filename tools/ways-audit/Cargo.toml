@@ -1,0 +1,17 @@
+[package]
+name = "ways-audit"
+version = "1.0.0"
+edition = "2021"
+description = "Compliance claim/finding operator surface for the ways toolchain (ADR-151, ADR-200)"
+license = "MIT"
+
+[[bin]]
+name = "ways-audit"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+ways-core = { path = "../ways-core" }

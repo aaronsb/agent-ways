@@ -1,24 +1,22 @@
-name: Build ways CLI
+name: Build ways-audit
 
 on:
   push:
     branches: [main]
-    tags: ['ways-v*']
+    tags: ['ways-audit-v*']
     paths:
-      - 'tools/ways-cli/**'
+      - 'tools/ways-audit/**'
       - 'tools/ways-core/**'
-      - 'tools/agent-fmt/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
-      - '.github/workflows/build-ways.yml'
+      - '.github/workflows/build-ways-audit.yml'
   pull_request:
     paths:
-      - 'tools/ways-cli/**'
+      - 'tools/ways-audit/**'
       - 'tools/ways-core/**'
-      - 'tools/agent-fmt/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
-      - '.github/workflows/build-ways.yml'
+      - '.github/workflows/build-ways-audit.yml'
   workflow_dispatch:
 
 jobs:
@@ -56,42 +54,40 @@ jobs:
 
       - name: Build (native)
         if: "!(runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu')"
-        run: cargo build --release --manifest-path tools/Cargo.toml -p ways --target ${{ matrix.target }}
+        run: cargo build --release --manifest-path tools/Cargo.toml -p ways-audit --target ${{ matrix.target }}
 
       - name: Build (zigbuild cross-compile)
         if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p ways --target ${{ matrix.target }}
+        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p ways-audit --target ${{ matrix.target }}
 
       - name: Package binary
         run: |
           mkdir -p dist
-          cp tools/target/${{ matrix.target }}/release/ways dist/ways-${{ matrix.platform }}
+          cp tools/target/${{ matrix.target }}/release/ways-audit dist/ways-audit-${{ matrix.platform }}
 
       # Native builds can run directly; cross-compiled binaries can only be verified with `file`
       - name: Smoke test
         if: "!(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') && !(matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
-        run: dist/ways-${{ matrix.platform }} --version
+        run: dist/ways-audit-${{ matrix.platform }} --version
 
       - name: Verify binary (cross-compiled — can't execute on this runner)
         if: "(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') || (matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
         run: |
-          file dist/ways-${{ matrix.platform }}
-          ls -lh dist/ways-${{ matrix.platform }}
+          file dist/ways-audit-${{ matrix.platform }}
+          ls -lh dist/ways-audit-${{ matrix.platform }}
 
       - uses: actions/upload-artifact@v5
         with:
-          name: ways-${{ matrix.platform }}
-          path: dist/ways-${{ matrix.platform }}
+          name: ways-audit-${{ matrix.platform }}
+          path: dist/ways-audit-${{ matrix.platform }}
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run unit tests
-        run: cargo test --manifest-path tools/Cargo.toml -p ways
-      - name: Run simulation tests
-        run: cargo test --manifest-path tools/Cargo.toml -p ways --test session_sim -- --test-threads=1
+      - name: Run unit tests (ways-audit + ways-core)
+        run: cargo test --manifest-path tools/Cargo.toml -p ways-audit -p ways-core
 
   collect:
     needs: [build, test]
@@ -105,25 +101,25 @@ jobs:
       - name: Generate checksums
         run: |
           cd binaries
-          sha256sum ways-* > checksums.txt
+          sha256sum ways-audit-* > checksums.txt
           cat checksums.txt
           ls -lh
 
       - uses: actions/upload-artifact@v5
         with:
-          name: ways-all-platforms
+          name: ways-audit-all-platforms
           path: binaries/
 
   release:
     needs: collect
-    if: startsWith(github.ref, 'refs/tags/ways-v')
+    if: startsWith(github.ref, 'refs/tags/ways-audit-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v5
         with:
-          name: ways-all-platforms
+          name: ways-audit-all-platforms
           path: binaries
 
       - name: Create GitHub Release
@@ -133,9 +129,8 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "ways ${TAG#ways-}" \
-            --notes "Pre-built ways CLI binaries for 4 platforms.
+            --title "ways-audit ${TAG#ways-audit-}" \
+            --notes "Pre-built ways-audit binaries for 4 platforms.
 
-          Install: \`bash tools/ways-cli/download-ways.sh\`
-          Or build from source: \`make ways\`" \
+          Build from source: \`make ways-audit\`" \
             binaries/*

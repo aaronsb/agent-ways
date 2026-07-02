@@ -18,28 +18,28 @@ to cite and *how* to phrase it, see the **governance citation** way.
 ### By topic
 
 ```bash
-ways governance control PATTERN          # e.g. NIST, OWASP, ISO, SOC, CIS, change
+ways-audit control PATTERN          # e.g. NIST, OWASP, ISO, SOC, CIS, change
 ```
 
 ### By way (full trace)
 
 ```bash
-ways governance trace softwaredev/commits
-ways governance trace softwaredev/security
+ways-audit trace softwaredev/commits
+ways-audit trace softwaredev/security
 ```
 
 ### Machine-readable
 
 ```bash
-ways governance control PATTERN --json
-ways governance trace WAY --json
-ways governance matrix --json            # the complete traceability matrix
+ways-audit control PATTERN --json
+ways-audit trace WAY --json
+ways-audit matrix --json            # the complete traceability matrix
 ```
 
-Read the governed ways and controls **from the data** — run `ways governance
+Read the governed ways and controls **from the data** — run `ways-audit
 matrix` for the current set. Never cite from memory; provenance changes.
 
 ## Not for
 
 - Deciding *whether* to cite, or *how* to phrase a citation — that's the **governance citation** way.
-- The full coverage/provenance report — that's the **governance** skill (`ways governance report`).
+- The full coverage/provenance report — that's the **governance** skill (`ways-audit report`).

@@ -1,4 +1,4 @@
-//! `ways governance lint` — provenance quality checks.
+//! `ways-audit lint` — claim quality checks.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -30,7 +30,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
         if ctrl_count == 0 {
             errors.push((
                 way_id.clone(),
-                "provenance declared but no controls listed".to_string(),
+                "claim declared but no controls listed".to_string(),
             ));
         }
 
@@ -124,7 +124,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     }
 
     println!();
-    println!("\x1b[1mGovernance Lint Report\x1b[0m");
+    println!("\x1b[1mClaim Lint Report\x1b[0m");
     println!();
 
     for (way, msg) in &errors {
@@ -141,7 +141,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     }
 
     if error_count == 0 && warning_count == 0 {
-        println!("  \x1b[0;32mAll provenance checks passed.\x1b[0m");
+        println!("  \x1b[0;32mAll claim checks passed.\x1b[0m");
     } else {
         println!();
         println!(

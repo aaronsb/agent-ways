@@ -44,5 +44,5 @@ that maps a specific directive to a specific control requirement.
 
 ## See also
 
-- the **governance-cite** skill — the lookup commands (`ways governance control` / `trace`)
+- the **governance-cite** skill — the lookup commands (`ways-audit control` / `trace`)
 - policy(itops) — operation classification and approval gating

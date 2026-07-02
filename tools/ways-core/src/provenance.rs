@@ -1,31 +1,27 @@
+//! Compliance claim sidecar model and manifest builder (ADR-151 §1, ADR-110).
+//!
+//! A claim lives in a `provenance.yaml` sidecar beside a way (ADR-110). This
+//! module scans the ways tree for those sidecars and builds an in-memory
+//! manifest — the cross-referenced view (by policy, by control) that the
+//! `ways-audit` compliance surface queries. Nothing is persisted; the manifest
+//! is rebuilt at query time.
+//!
+//! The manifest is currently a loosely-typed `serde_json::Value`. A typed claim
+//! schema with an assessability (`satisfied_when`) field is the ADR-151 §3 /
+//! ADR-200 §1 direction, layered on in a later change.
+
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-pub fn run(ways_dir: Option<String>) -> Result<()> {
-    let manifest = generate_manifest(ways_dir)?;
+use crate::util::{has_frontmatter, home_dir};
 
-    println!("{}", serde_json::to_string_pretty(&manifest)?);
-
-    let ways_len = manifest["ways_scanned"].as_u64().unwrap_or(0);
-    let with_len = manifest["ways_with_provenance"].as_u64().unwrap_or(0);
-    let without_len = manifest["ways_without_provenance"].as_u64().unwrap_or(0);
-    let policy_len = manifest["coverage"]["by_policy"].as_object().map(|m: &serde_json::Map<_, _>| m.len()).unwrap_or(0);
-    let control_len = manifest["coverage"]["by_control"].as_object().map(|m: &serde_json::Map<_, _>| m.len()).unwrap_or(0);
-
-    eprintln!("Ways scanned: {}", ways_len);
-    eprintln!("  With provenance: {} ({:.0}%)", with_len, if ways_len == 0 { 0.0 } else { with_len as f64 / ways_len as f64 * 100.0 });
-    eprintln!("  Without provenance: {}", without_len);
-    eprintln!("  Policy sources: {}", policy_len);
-    eprintln!("  Control references: {}", control_len);
-
-    Ok(())
-}
-
-/// Generate the full provenance manifest as a JSON Value.
-/// Used by both `ways provenance` and `ways governance`.
+/// Build the full compliance-claim manifest as a JSON value.
+///
+/// Scans `ways_dir` (or the default core ways root) for ways and their
+/// `provenance.yaml` sidecars, then indexes coverage by policy and by control.
 pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
     let root = ways_dir
         .map(PathBuf::from)
@@ -57,10 +53,7 @@ pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
                         .unwrap_or("")
                         .to_string();
                     if !cid.is_empty() {
-                        by_control
-                            .entry(cid)
-                            .or_default()
-                            .push(way_key.clone());
+                        by_control.entry(cid).or_default().push(way_key.clone());
                     }
                 }
             }
@@ -69,7 +62,7 @@ pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
 
     Ok(json!({
         "manifest_version": "1.0.0",
-        "generator": "ways provenance",
+        "generator": "ways-audit",
         "ways_scanned": ways.len(),
         "ways_with_provenance": with_prov.len(),
         "ways_without_provenance": without_prov.len(),
@@ -84,8 +77,10 @@ pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
 }
 
 #[allow(clippy::type_complexity)]
-fn scan_provenance(root: &Path) -> Result<(HashMap<String, serde_json::Value>, Vec<String>, Vec<String>)> {
-    let mut ways: HashMap<String, serde_json::Value> = HashMap::new();
+fn scan_provenance(
+    root: &Path,
+) -> Result<(HashMap<String, Value>, Vec<String>, Vec<String>)> {
+    let mut ways: HashMap<String, Value> = HashMap::new();
     let mut with_prov = Vec::new();
     let mut without_prov = Vec::new();
 
@@ -111,16 +106,12 @@ fn scan_provenance(root: &Path) -> Result<(HashMap<String, serde_json::Value>, V
             Ok(c) => c,
             Err(_) => continue,
         };
-        if !crate::util::has_frontmatter(&content) {
+        if !has_frontmatter(&content) {
             continue;
         }
 
         let rel = path.strip_prefix(root).unwrap_or(path);
-        let way_key = rel
-            .parent()
-            .unwrap_or(Path::new(""))
-            .display()
-            .to_string();
+        let way_key = rel.parent().unwrap_or(Path::new("")).display().to_string();
 
         if way_key.is_empty() || !way_key.contains('/') {
             continue; // need at least domain/way
@@ -136,10 +127,16 @@ fn scan_provenance(root: &Path) -> Result<(HashMap<String, serde_json::Value>, V
 
         if let Some(ref p) = prov {
             with_prov.push(way_key.clone());
-            ways.insert(way_key, json!({ "path": rel.display().to_string(), "provenance": p }));
+            ways.insert(
+                way_key,
+                json!({ "path": rel.display().to_string(), "provenance": p }),
+            );
         } else {
             without_prov.push(way_key.clone());
-            ways.insert(way_key, json!({ "path": rel.display().to_string(), "provenance": null }));
+            ways.insert(
+                way_key,
+                json!({ "path": rel.display().to_string(), "provenance": null }),
+            );
         }
     }
 
@@ -148,15 +145,15 @@ fn scan_provenance(root: &Path) -> Result<(HashMap<String, serde_json::Value>, V
     Ok((ways, with_prov, without_prov))
 }
 
-fn parse_sidecar(path: &Path) -> Result<serde_json::Value> {
+fn parse_sidecar(path: &Path) -> Result<Value> {
     let content = std::fs::read_to_string(path)?;
     let parsed: serde_yaml::Value = serde_yaml::from_str(&content)?;
     Ok(yaml_to_json(&parsed))
 }
 
-fn yaml_to_json(v: &serde_yaml::Value) -> serde_json::Value {
+fn yaml_to_json(v: &serde_yaml::Value) -> Value {
     match v {
-        serde_yaml::Value::Null => serde_json::Value::Null,
+        serde_yaml::Value::Null => Value::Null,
         serde_yaml::Value::Bool(b) => json!(b),
         serde_yaml::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
@@ -164,7 +161,7 @@ fn yaml_to_json(v: &serde_yaml::Value) -> serde_json::Value {
             } else if let Some(f) = n.as_f64() {
                 json!(f)
             } else {
-                serde_json::Value::Null
+                Value::Null
             }
         }
         serde_yaml::Value::String(s) => json!(s),
@@ -178,10 +175,73 @@ fn yaml_to_json(v: &serde_yaml::Value) -> serde_json::Value {
                     obj.insert(key.to_string(), yaml_to_json(val));
                 }
             }
-            serde_json::Value::Object(obj)
+            Value::Object(obj)
         }
-        _ => serde_json::Value::Null,
+        _ => Value::Null,
     }
 }
 
-use crate::util::home_dir;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("ways-prov-test-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(root: &Path, rel: &str, body: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, body).unwrap();
+    }
+
+    const WAY: &str = "---\ndescription: a way\n---\nguidance\n";
+
+    #[test]
+    fn indexes_claims_by_policy_and_control() {
+        let root = scratch("index");
+        write(&root, "sd/commits/commits.md", WAY);
+        write(
+            &root,
+            "sd/commits/provenance.yaml",
+            "policy:\n  - uri: governance/policies/code.md\n    type: governance-doc\ncontrols:\n  - id: NIST CM-3\n    justifications:\n      - structured change records\nverified: 2026-02-05\nrationale: because\n",
+        );
+        // A way with no sidecar → counted as without-provenance.
+        write(&root, "meta/todos/todos.md", WAY);
+
+        let m = generate_manifest(Some(root.display().to_string())).unwrap();
+        assert_eq!(m["ways_scanned"], 2);
+        assert_eq!(m["ways_with_provenance"], 1);
+        assert_eq!(m["ways_without_provenance"], 1);
+        assert!(m["coverage"]["by_control"]["NIST CM-3"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("sd/commits")));
+        assert!(m["coverage"]["by_policy"]["governance/policies/code.md"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("sd/commits")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn legacy_string_controls_are_indexed() {
+        let root = scratch("legacy");
+        write(&root, "sd/w/w.md", WAY);
+        write(
+            &root,
+            "sd/w/provenance.yaml",
+            "controls:\n  - OWASP A01\nverified: 2026-01-01\n",
+        );
+        let m = generate_manifest(Some(root.display().to_string())).unwrap();
+        assert!(m["coverage"]["by_control"]["OWASP A01"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("sd/w")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
