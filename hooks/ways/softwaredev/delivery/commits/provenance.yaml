@@ -7,14 +7,27 @@ controls:
       - Conventional commit types (feat/fix/refactor) classify changes by nature
       - Atomic single-concern commits make each change independently reviewable
       - Commit message body captures rationale, satisfying change documentation requirements
+    satisfied_when: >
+      Commits created in the session carry a conventional-commit type prefix
+      (feat/fix/refactor/docs/test/chore), each covers a single logical change
+      rather than bundling unrelated edits, and the message body states the
+      rationale for the change.
   - id: SOC 2 CC8.1 (Change Management)
     justifications:
       - Type prefix and scope field create structured change records for audit trail
       - Branch naming convention (adr-NNN, feature/, fix/) categorizes change intent
+    satisfied_when: >
+      Session commits carry a type(scope) prefix and the work was done on a branch
+      named per convention (adr-NNN, feature/, fix/, refactor/) rather than
+      committed directly to main with unstructured messages.
   - id: ISO/IEC 27001:2022 A.8.32 (Change Management)
     justifications:
       - Git commit history provides immutable timestamped change log
       - Conventional format enables automated changelog generation
+    satisfied_when: >
+      Changes were landed as git commits (recorded in timestamped history) rather
+      than left as uncommitted edits, and their subjects follow the conventional
+      format such that a changelog generator could classify them by type.
 verified: 2026-02-05
 rationale: >
   Conventional commits create structured change records with type classification

@@ -6,6 +6,11 @@ controls:
     justifications:
       - Migration workflow preserves decision history during tooling adoption
       - Legacy range in adr.yaml maintains traceability for pre-domain ADRs
+    satisfied_when: >
+      Pre-existing ADRs were moved into the tooling with git mv (preserving file
+      history) rather than recreated, and adr.yaml carries a legacy range covering
+      their original numbers, verifiable by docs/scripts/adr list --group showing
+      them grouped under the legacy band.
 verified: 2026-02-17
 rationale: >
   Migration guidance ensures existing architectural decisions survive tooling adoption

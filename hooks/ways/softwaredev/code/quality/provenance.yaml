@@ -7,14 +7,30 @@ controls:
       - File length thresholds (500/800 lines) enforce analyzability through size limits
       - Nesting depth limit (3 levels) maintains modifiability by controlling complexity
       - Method count limit (7 public methods) enforces single responsibility
+    satisfied_when: >
+      When the file-length scan reports a file over the 500/800-line threshold, the
+      session calls it out explicitly before proceeding; and code added in the session
+      stays within the nesting-depth (3), public-method (7), and function-size (30-50
+      line) limits, or a concrete split/extraction is proposed where it would cross
+      them. Adding to a flagged file without acknowledging it is the failure case.
   - id: NIST SP 800-53 SA-15 (Development Process, Standards, and Tools)
     justifications:
       - Ecosystem convention enforcement reduces security-relevant coding errors
       - Anti-pattern detection (foreign patterns, unnecessary abstractions) prevents tool misuse
+    satisfied_when: >
+      Code introduced in the session follows the language/ecosystem's idioms — no
+      foreign patterns (e.g. Result/Option monads in TypeScript) and no reimplementation
+      of what a standard library already provides — and any such pattern encountered in
+      reviewed code is flagged rather than left or copied.
   - id: IEEE 730-2014 (Software Quality Assurance Processes)
     justifications:
       - Measurable quality signals with specific action thresholds
       - Function size limits (30-50 lines) enforce decomposition practices
+    satisfied_when: >
+      Where a quality signal is exceeded, the session names the specific measurable
+      threshold crossed (line count, nesting depth, method count, function length) and
+      pairs it with a concrete remediation such as a named split boundary or extracted
+      helper, rather than proceeding silently or citing quality in the abstract.
 verified: 2026-02-05
 rationale: >
   Measurable thresholds (file length, nesting depth, method count) operationalize

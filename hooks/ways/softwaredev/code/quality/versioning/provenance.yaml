@@ -6,10 +6,21 @@ controls:
     justifications:
       - Version-numbered identifiers create parallel implementations that degrade modifiability — callers split across revisions nobody consolidates
       - Names describing what a symbol is (not which revision) preserve analyzability; VCS carries the timeline
+    satisfied_when: >
+      Identifiers introduced or renamed in the session carry no authoring-revision
+      version suffix (process_v2, _FOO_V0, "v0 seed"); a contract that changed is
+      expressed by editing the existing name or by a behavioral name (parse_strict), and
+      any genuine overlap window marks the old name deprecated with a removal condition
+      rather than leaving a versioned twin. A committed _vN twin is the failure case.
   - id: NIST SP 800-53 SA-15 (Development Process, Standards, and Tools)
     justifications:
       - Anti-pattern detection on the authored diff catches versioned twins at the moment they would become permanent
       - Distinguishes code-owned identifiers from legitimate external version references to avoid false enforcement
+    satisfied_when: >
+      When a version-bearing identifier appears in the diff, the session distinguishes
+      code-owned names (flagged and reworked) from legitimate external version references
+      (/v1/ paths, __version__, schema_version, migration filenames, apiVersion), acting
+      only on the former; flagging a legitimate external reference is the failure case.
 verified: 2026-05-18
 rationale: >
   Versioned identifiers (process_v2, _FOO_V0, "v0 seed") freeze authoring-time

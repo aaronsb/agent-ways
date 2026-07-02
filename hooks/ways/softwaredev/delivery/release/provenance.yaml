@@ -7,14 +7,28 @@ controls:
       - Keep a Changelog format (Added/Changed/Fixed/Removed) classifies changes by nature for review
       - Git log since last tag captures complete change history between releases
       - Semantic version inference from commit types creates deterministic version progression
+    satisfied_when: >
+      The release session enumerated changes via git log since the last tag and
+      produced changelog entries organized into Keep a Changelog sections
+      (Added/Changed/Fixed/Removed), rather than cutting a release without
+      documenting its changes.
   - id: SOC 2 CC8.1 (Change Management)
     justifications:
       - Changelog generation from commit history produces auditable release documentation
       - Version file detection and update creates traceable release artifacts
+    satisfied_when: >
+      The session both produced changelog documentation and updated the detected
+      version file as part of the release, leaving matching traceable artifacts
+      rather than bumping one without the other.
   - id: NIST SP 800-53 SA-10 (Developer Configuration Management)
     justifications:
       - Semantic versioning (major/minor/patch) from commit message analysis standardizes version identification
       - Version file management across ecosystems (package.json, Cargo.toml, pyproject.toml) ensures consistent version tracking
+    satisfied_when: >
+      The new version number was derived by classifying commits since the last tag
+      (breaking → major, feat → minor, fix/chore → patch) and applied to the
+      ecosystem-appropriate version file (package.json, Cargo.toml, pyproject.toml,
+      version.txt), not chosen arbitrarily.
 verified: 2026-02-09
 rationale: >
   Keep a Changelog format and git-based change enumeration implement CM-3 change documentation.

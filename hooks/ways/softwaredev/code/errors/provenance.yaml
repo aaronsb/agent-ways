@@ -7,14 +7,31 @@ controls:
       - Boundary-only catch pattern ensures errors are logged once at system edges, not swallowed internally
       - Prohibition on silent catch blocks prevents monitoring blind spots
       - Log-once-at-boundary rule prevents log noise that obscures real failures
+    satisfied_when: >
+      Catch blocks added or modified in the session sit at system boundaries (API
+      endpoint, CLI entry, message handler) rather than inside business logic, contain
+      no silent/empty handlers, and log each error at most once; a session that
+      introduces an empty catch or logs the same error at multiple levels is
+      distinguishable in the diff.
   - id: NIST SP 800-53 SI-11 (Error Handling)
     justifications:
       - Generic error responses to clients (code + safe message) prevent information disclosure
       - Programmer vs operational error distinction prevents exposing internal state through bug-triggered messages
+    satisfied_when: >
+      Client- or user-facing error responses produced in the session return a generic
+      code plus a safe message rather than raw exception text or stack traces, and
+      programmer errors (bugs) are allowed to fail fast instead of being caught and
+      surfaced; a response that leaks internal state or an exception message is the
+      failure case.
   - id: NIST SP 800-53 AU-3 (Content of Audit Records)
     justifications:
       - Error wrapping with context (module boundary, identifiers) creates traceable audit records
       - Cause chaining preserves full error provenance for forensic analysis
+    satisfied_when: >
+      Errors re-thrown across module boundaries in the session are wrapped with
+      contextual identifiers and preserve the originating error via cause chaining,
+      visible in the diff; a bare re-throw that drops context or the cause is the
+      failure case.
 verified: 2026-02-09
 rationale: >
   Boundary-only catching with log-once semantics implements OWASP A09 monitoring requirements.

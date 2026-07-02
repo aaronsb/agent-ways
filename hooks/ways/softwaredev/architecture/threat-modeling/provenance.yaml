@@ -6,10 +6,18 @@ controls:
     justifications:
       - STRIDE framework applied at design phase before code review
       - Trust boundaries identified between components and external systems
+    satisfied_when: >
+      Before implementation, the session performed a STRIDE pass over the design
+      and enumerated the trust boundaries where data crosses trust levels — the
+      threat analysis preceded writing the code rather than following it.
   - id: NIST SP 800-30 (Risk Assessment)
     justifications:
       - Risk register documents accepted risks with expiration dates
       - Likelihood and impact assessed for each identified threat
+    satisfied_when: >
+      Identified threats were recorded in a risk register with likelihood and
+      impact assessed for each, and any risk marked accepted carries an expiration
+      date rather than being accepted indefinitely.
 verified: 2026-02-17
 rationale: >
   Security Way covers code-level detection (SQL injection, XSS, secrets).

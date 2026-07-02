@@ -7,6 +7,12 @@ controls:
       - Way file format specification ensures documented information is appropriate and suitable
       - Frontmatter schema (match, pattern, files, commands) standardizes trigger documentation
       - Writing voice guidance ensures guidance is readable by context-free readers
+    satisfied_when: >
+      A way authored or edited in the session followed the documented format — a
+      {domain}/{wayname}/{wayname}.md file with valid single-line frontmatter
+      fields (description/vocabulary or pattern/files/commands, plus refire on a
+      fire-bearing way) — and was validated with ways lint (corpus rebuilt) rather
+      than hand-shaped ad hoc.
 verified: 2026-02-05
 rationale: >
   Format spec and authoring guidance for writing effective ways.

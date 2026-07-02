@@ -7,15 +7,27 @@ controls:
       - PR-always stance ensures all changes pass through a reviewable change management gate
       - Solo PRs still serve as decision records and CI gates even without reviewers
       - Tiered PR depth (lightweight for solo, thorough for teams) scales change management to context
+    satisfied_when: >
+      Changes in the session were routed through a pull request (a PR was opened
+      via gh pr create) rather than pushed or merged directly to main, including
+      for solo work.
   - id: NIST SP 800-53 CM-3 (Configuration Change Control)
     justifications:
       - PR as change record creates immutable audit trail of what changed and why
       - CI checks on PRs implement automated configuration change verification
       - Repo health macro detects missing configuration controls (branch protection, templates)
+    satisfied_when: >
+      A PR was opened describing what changed and why, and its CI check status was
+      consulted (e.g. gh pr checks) before merge rather than merging without
+      confirming checks passed.
   - id: ISO/IEC 27001:2022 A.8.32 (Change Management)
     justifications:
       - PR workflow (create → review → merge) implements formal change management process
       - Issue tracking provides requirements traceability for changes
+    satisfied_when: >
+      The change followed the create → review → merge sequence — a review pass
+      (code-reviewer offered or run) occurred between opening the PR and merging —
+      rather than the PR being merged immediately with no review step.
 verified: 2026-02-09
 rationale: >
   PR-always stance implements CC8.1 change management even for solo projects. PR-as-record

@@ -7,14 +7,28 @@ controls:
       - ADR format captures Context/Decision/Consequences for each architectural change
       - Alternatives Considered section documents rejected options and rejection rationale
       - Status lifecycle (Proposed → Accepted → Deprecated → Superseded) tracks decision currency
+    satisfied_when: >
+      An ADR file was created via docs/scripts/adr carrying populated Context,
+      Decision, and Consequences sections and an Alternatives Considered section
+      naming rejected options, with a status drawn from the lifecycle, before the
+      architectural change it records was implemented.
   - id: ISO/IEC 27001:2022 A.5.1 (Policies for Information Security)
     justifications:
       - Structured decision records create traceable architectural policy documentation
       - Deciders field establishes accountability for each architectural decision
+    satisfied_when: >
+      The ADR created for the decision carries a populated deciders frontmatter
+      field naming who owns it, and the record is stored under docs/architecture/
+      where docs/scripts/adr list surfaces it as standing architectural policy.
   - id: NIST SP 800-53 PL-2 (System Security and Privacy Plans)
     justifications:
       - ADR workflow (debate → draft → PR → review → merge) implements documented planning process
       - Consequences section (positive/negative/neutral) documents risk acceptance for each decision
+    satisfied_when: >
+      The decision moved through the documented workflow — drafted with
+      docs/scripts/adr new, opened as a PR for review, then merged — and its
+      Consequences section records positive, negative, and neutral outcomes rather
+      than being left as an unfilled template stub.
 verified: 2026-02-09
 rationale: >
   ADR format with Context/Decision/Consequences implements CM-3 change documentation for

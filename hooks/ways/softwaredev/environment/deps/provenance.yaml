@@ -6,15 +6,28 @@ controls:
     justifications:
       - Pre-addition checklist evaluates maintenance status, size, and license before adopting third-party components
       - Trivial dependency rejection (is-odd, left-pad) reduces unnecessary supply chain attack surface
+    satisfied_when: >
+      Before adding a third-party dependency, the session checked its maintenance
+      status, size, and license (e.g. npm info, npm pack --dry-run, repository
+      activity) and declined trivial packages that could be written inline, rather
+      than installing on first impulse.
   - id: OWASP Top 10 2021 A06 (Vulnerable and Outdated Components)
     justifications:
       - npm audit / pip-audit / cargo audit required after adding or updating dependencies
       - Dependencies more than 2 major versions behind flagged for remediation
       - Changelog review before updates catches breaking changes and known vulnerabilities
+    satisfied_when: >
+      After adding or updating a dependency the session ran the ecosystem audit
+      command (npm audit / pip-audit / cargo audit), and before an update consulted
+      the changelog and flagged packages more than two major versions behind.
   - id: NIST SP 800-53 RA-5 (Vulnerability Monitoring and Scanning)
     justifications:
       - Post-install audit scanning implements continuous vulnerability monitoring for third-party code
       - Vulnerability warnings must be fixed or explicitly documented as accepted risk
+    satisfied_when: >
+      A vulnerability scan was run after installation, and each reported finding was
+      either remediated or explicitly documented as accepted risk in the session,
+      not left unaddressed without comment.
 verified: 2026-02-09
 rationale: >
   Pre-addition evaluation implements supply chain risk assessment per SA-12. Post-install

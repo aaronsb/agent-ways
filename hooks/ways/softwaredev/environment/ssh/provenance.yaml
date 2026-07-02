@@ -7,16 +7,28 @@ controls:
       - BatchMode=yes enforces non-interactive authentication, preventing credential prompt hanging
       - ConnectTimeout prevents indefinite connection attempts to unreachable hosts
       - Tiered scenarios (dev/homelab/enterprise) acknowledge different remote access security postures
+    satisfied_when: >
+      SSH and scp/rsync commands issued in the session carried -o BatchMode=yes and
+      -o ConnectTimeout=..., so an auth or unreachable-host failure returned
+      immediately instead of hanging on a prompt.
   - id: NIST SP 800-53 IA-2 (Identification and Authentication)
     justifications:
       - Key-based authentication preferred over password authentication
       - ssh-agent key verification before connection attempts validates identity infrastructure
       - StrictHostKeyChecking=accept-new prevents MITM while allowing legitimate new hosts
+    satisfied_when: >
+      The session validated key availability before relying on SSH (e.g. ssh-add -l
+      or a BatchMode=yes test connection) and used StrictHostKeyChecking=accept-new
+      rather than blanket-disabling host-key verification.
   - id: NIST SP 800-53 IA-5 (Authenticator Management)
     justifications:
       - Never-hardcode-passwords rule prevents credential exposure in source and process lists
       - sshpass -e (environment variable) preferred over -p (command line) to reduce credential visibility
       - SSH config file patterns centralize credential management per host class
+    satisfied_when: >
+      No password literal appeared in any command or in the transcript; where
+      password auth was unavoidable the session used sshpass -e with the secret
+      sourced from an environment variable (SSHPASS), never -p on the command line.
 verified: 2026-02-09
 rationale: >
   Non-interactive flags implement AC-17 remote access controls for automated sessions.

@@ -7,19 +7,40 @@ controls:
       - Detection table maps SQL concatenation, innerHTML, and shell interpolation to remediation actions
       - Parameterized queries required as default for all database access
       - Input validation enforced at system boundaries
+    satisfied_when: >
+      Database access written in the session uses parameterized queries rather than
+      string-concatenated SQL, output is escaped for its rendering context, input is
+      validated at boundaries, and any SQL concatenation or unsanitized user input in
+      reviewed code is flagged. Introducing or leaving a concatenated query unremarked
+      is the failure case.
   - id: NIST SP 800-53 IA-5 (Authenticator Management)
     justifications:
       - Never-commit list explicitly prohibits API keys, tokens, passwords, and private keys
       - Hardcoded secrets flagged for extraction to environment variables
       - .env hygiene enforced with .env.example and .gitignore verification
+    satisfied_when: >
+      No API keys, tokens, passwords, or private keys are committed in the session; any
+      hardcoded secret encountered is flagged for extraction to an environment variable;
+      and changes touching a .env file verify it is gitignored and mirrored by a
+      secret-free .env.example. A committed credential is the failure case.
   - id: CIS Controls v8 16.12 (Implementation of Application-Level Access)
     justifications:
       - Missing auth check on endpoints flagged as security issue
       - Principle of least privilege stated as default for permissions
+    satisfied_when: >
+      Permissions or access grants added or changed in the session are scoped to the
+      minimum needed rather than broad defaults, and any endpoint reachable without an
+      authentication/authorization check is flagged. Granting broader access than the
+      task requires is the failure case.
   - id: SOC 2 CC6.1 (Logical and Physical Access Controls)
     justifications:
       - Authentication/authorization gap detection in code review checklist
       - Endpoint access control enforcement via middleware/guard guidance
+    satisfied_when: >
+      A review pass in the session inspects endpoints for authentication/authorization
+      coverage and reports any access-control gap before merge, rather than the gap
+      passing through unexamined. Reviewing changed endpoints without checking their
+      access control is the failure case.
 verified: 2026-02-05
 rationale: >
   Detection table operationalizes OWASP injection prevention and NIST credential
