@@ -1,13 +1,23 @@
 ---
-status: Accepted
+status: Superseded
 date: 2026-02-05
 deciders:
   - aaronsb
   - claude
-related: []
+related:
+  - ADR-013
+  - ADR-200
 ---
 
 # ADR-005: Governance Traceability for Ways
+
+> **Superseded by [ADR-200](../governance/ADR-200-compliance-claims-and-session-derived-findings.md).**
+> This ADR established provenance traceability but framed the hand-authored mappings as
+> "auditability" and "proof." ADR-200 corrects the epistemics: the mappings are compliance
+> **claims** (control-*design* assertions — SOC 2 Type I), not **findings** (assessed
+> evidence). The sidecar mechanism described here is retained and renamed; its framing as
+> proof is replaced. Storage later moved from way frontmatter to a `provenance.yaml`
+> sidecar (ADR-110). Kept unedited below as the historical record.
 
 ## Context
 

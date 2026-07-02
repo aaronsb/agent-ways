@@ -7,9 +7,23 @@ deciders:
 related:
   - ADR-004
   - ADR-005
+  - ADR-200
 ---
 
 # ADR-013: Ways, Skills, and Governance Architecture
+
+> **Refined by [ADR-200](../governance/ADR-200-compliance-claims-and-session-derived-findings.md).**
+> This ADR's core insights stand — ways as *activation cues* for latent knowledge, the
+> Type 1–4 way classification, the author-as-compiler model, and the formation intuition
+> in its "Shift Lead Wisdom" type. But its **epistemics are corrected**: wherever it calls
+> provenance "evidence," "auditability," "proof," or what "turns Claude from a hack into a
+> professional," read **claim**. A hand-authored mapping is a control-*design* assertion
+> (SOC 2 Type I), not an assessed **finding** (SOC 2 Type II); a citation on demand is an
+> assertion awaiting a finding, not proof. Its analogies (kitchen poster, shift lead, FAA
+> tool) are illustration; the grounded vocabulary — *first line*, *tacit knowledge*,
+> *claim/finding* — lives in ADR-200. Mechanism has also moved on: `governance.sh` is now
+> `ways governance`/`ways-audit` (ADR-111), and provenance lives in a `provenance.yaml`
+> sidecar, not way frontmatter (ADR-110).
 
 ## Context
 
@@ -75,10 +89,10 @@ Provenance is the evidence chain from repeated failure → institutional learnin
 - Maps specific way directives to specific control requirements with justifications
 - Creates a self-supporting network: multiple controls cross-referencing the same practice
 
-**What provenance provides**:
-- The difference between "Claude follows good practices because it was trained on good code" (hack) and "Claude follows good practices because specific regulations require them, and here's the evidence chain" (professional)
-- Auditability: when someone asks "prove it," the governance-cite skill can pull real control citations
-- Authority: a way without provenance is a rule without authority; with provenance, it's a traceable policy implementation
+**What a claim provides** *(epistemics corrected by ADR-200 — this section originally read "What provenance provides")*:
+- A statement that a way is *designed* to address specific controls — a control-design **claim** (SOC 2 Type I), not proof that it does.
+- Traceability of intent: the lookup can surface which controls a way *claims* to address. This is an asserted mapping, not evidence — a citation on demand is a claim awaiting a **finding**, not a satisfied "prove it."
+- Explicitness: a way with a claim states its intended control alignment, which makes that alignment *assessable*; substantiating it requires a session-derived finding (ADR-200).
 
 #### The Authorship Model: Provenance as Design-Time Artifact
 
@@ -215,14 +229,14 @@ The overlap zone is "inject contextual guidance." But the ways that justify the 
 - Scope-filtered team coordination
 - Macro-based dynamic context (repo health checks, file scanning)
 
-### The professional distinction
+### First-line formation, not proof
 
-The difference between a professional and a hack isn't skill — it's awareness of the policy network. Both might write the same code. The professional knows WHY (the regulation, the safety standard, the certification requirement) and can PROVE IT (traceability, test evidence, documentation). The hack just knows "don't break it."
+*(Reframed per ADR-200.)* A way carrying a claim knows *which control shape* it steers toward — but citing that claim is an assertion, not proof. In audit terms this is **first-line** work (the Three Lines Model): shaping how risk is managed *in the doing of the work*, distinct from the third-line assurance that independently proves conformance.
 
-- A hack agent: follows good practices because the LLM was trained on good code
-- A professional agent: follows good practices because specific policies require them, and can cite those policies on demand
+- Without claims: guidance is followed because the model was trained on good practice.
+- With claims: guidance also *states* the control shape it intends — so a later **finding** can test whether the work actually took that shape.
 
-The governance provenance layer is what turns Claude from a very capable hack into a professional.
+The claim layer makes intended alignment explicit and assessable. It does not, by itself, turn assertion into evidence — that is precisely the correction ADR-200 exists to make.
 
 ## The Governance Control Surface
 
@@ -300,42 +314,16 @@ Rejected: skills cannot fire on tool use, cannot session-gate, cannot carry prov
 ### Replace ways with raw hooks
 Possible but rejected: ways provide an abstraction (session-gating, multi-mode matching, macros, governance provenance, scope filtering, domain organization) that would need to be rebuilt in every hook script. The abstraction layer is the value.
 
-## Traceability Gap: Current State
+## Traceability: a live query, not a frozen table
 
-*Updated 2026-02-09 after provenance gap-fill (37 controls, 93 justifications across 12 ways)*
-
-| Way | Has Provenance | Type | Status |
-|-----|---------------|------|--------|
-| softwaredev/commits | YES | Kitchen Poster | Complete |
-| softwaredev/security | YES | Kitchen Poster | Complete |
-| softwaredev/quality | YES | Kitchen Poster | Complete |
-| meta/knowledge | YES | HQ Policy Manual | Complete |
-| softwaredev/deps | YES | Kitchen Poster | **Added** — SA-12, OWASP A06, RA-5 |
-| softwaredev/testing | YES | Kitchen Poster | **Added** — SA-11, IEEE 829, ISO 25010 |
-| softwaredev/config | YES | Kitchen Poster | **Added** — CM-6, CIS 4.1, IA-5 |
-| softwaredev/errors | YES | Kitchen Poster | **Added** — OWASP A09, SI-11, AU-3 |
-| softwaredev/ssh | YES | Kitchen Poster | **Added** — AC-17, IA-2, IA-5 |
-| softwaredev/release | YES | Kitchen Poster | **Added** — CM-3, CC8.1, SA-10 |
-| softwaredev/adr | YES | Kitchen Poster | **Added** — CM-3, A.5.1, PL-2 |
-| softwaredev/github | YES | Kitchen Poster | **Added** — CC8.1, CM-3, A.8.32 |
-| softwaredev/debugging | NO | Shift Lead Wisdom | None needed |
-| softwaredev/patches | NO | Shift Lead Wisdom | None needed |
-| softwaredev/performance | NO | Shift Lead Wisdom | None needed |
-| softwaredev/api | NO | Shift Lead Wisdom | None needed |
-| softwaredev/design | NO | Shift Lead Wisdom | None needed |
-| softwaredev/migrations | NO | Shift Lead Wisdom | None needed |
-| softwaredev/docs | NO | Shift Lead Wisdom | None needed |
-| meta/memory | NO | Plumbing | None needed |
-| meta/subagents | NO | Plumbing | None needed |
-| meta/teams | NO | Plumbing | None needed |
-| meta/todos | NO | Plumbing | None needed |
-| meta/tracking | NO | Plumbing | None needed |
-| meta/introspection | NO | HQ Policy Manual | None needed |
-| meta/skills | NO | HQ Policy Manual | None needed |
-| itops/incident | NO | Kitchen Poster (disabled) | Future work |
-| itops/policy | NO | HQ Policy Manual (disabled) | Future work |
-| itops/proposals | NO | Kitchen Poster (disabled) | Future work |
-| itops/runbooks | NO | Kitchen Poster (disabled) | Future work |
+*(Reframed per ADR-200.)* This ADR originally carried a point-in-time table marking each
+way's provenance as "Complete." That is retired on two counts. Coverage is a **live
+query** now (`ways governance`, moving to the `ways-audit` binary) — not a snapshot
+frozen into a decision record. And under ADR-200 a way with a hand-authored mapping
+carries a **claim**, not a completed control; "Complete" was the
+coverage-equals-compliance overclaim. A claim is complete only once a session-derived
+**finding** substantiates it. Run the tool for current coverage, and read any count it
+reports as *claims made*, not *conformance achieved*.
 
 ## References
 
