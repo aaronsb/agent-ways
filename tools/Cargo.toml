@@ -3,6 +3,7 @@ members = [
     "agent-fmt",
     "agent-identity",
     "sensor-trait",
+    "ways-core",
     "sensor-git",
     "sensor-context",
     "sensor-peers",
