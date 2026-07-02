@@ -12,9 +12,10 @@
 //! - **Prefer pre-built binaries.** `make update` force-*builds* via cargo/cmake,
 //!   which fails for anyone without a toolchain. This mirrors the *install* flow
 //!   instead: download-first, build-fallback (the Makefile's `ways` / way-embed
-//!   `setup-binary` targets). `attend`/`attend-chat` have no pre-built binaries
-//!   yet, so they are refreshed **only if a toolchain is present**, else left
-//!   running their current version.
+//!   `setup-binary` targets). `attend`/`attend-chat` are download-first too now
+//!   (ADR-152 sibling work): their `make` targets fetch the pre-built binary
+//!   before building, so they refresh without a toolchain; only the build
+//!   fallback needs cargo.
 //! - **Rename-then-revert, never leave a broken install.** Each component's
 //!   binary is *renamed* aside (not removed) to defeat the "already installed"
 //!   early-return; if re-acquiring it fails, the old binary is moved back. A
@@ -60,11 +61,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
         println!("  2. refresh ways               — download pre-built (guarded: never older than source), else build");
         println!("  3. refresh way-embed          — download pre-built, else build (optional)");
-        if has_toolchain {
-            println!("  4. refresh attend/attend-chat — build (toolchain present)");
-        } else {
-            println!("  4. skip attend/attend-chat    — no pre-built + no toolchain; keep current version");
-        }
+        println!("  4. refresh attend/attend-chat — download pre-built, else build (optional)");
         println!("  5. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
         return Ok(());
@@ -100,19 +97,15 @@ pub fn run(dry_run: bool) -> Result<()> {
         eprintln!("  ⚠ way-embed not refreshed ({e}); semantic matching degrades to regex until next update.");
     }
 
-    // 4. Awareness — attend/attend-chat. Build-only today, so gate on a toolchain.
-    if has_toolchain {
-        eprintln!("==> refresh attend/attend-chat (build)");
-        for comp in ["attend", "attend-chat"] {
-            if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
-                eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
-            }
+    // 4. Awareness — attend/attend-chat. Now download-first (their `make` targets
+    //    try the pre-built binary before building), so they refresh even without a
+    //    toolchain; the build fallback still needs cargo but the download path does
+    //    not. A failed refresh reverts and keeps the current version.
+    eprintln!("==> refresh attend/attend-chat (pre-built first)");
+    for comp in ["attend", "attend-chat"] {
+        if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
+            eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
         }
-    } else {
-        eprintln!(
-            "==> attend/attend-chat: skipped — no pre-built binary and no build toolchain. \
-             They keep running the current version; run `make deps` then `ways update` to refresh them."
-        );
     }
 
     // 5. Regenerate the corpus (best-effort — it self-heals on next session) and
