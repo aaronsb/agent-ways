@@ -13,7 +13,7 @@ This guide is for the paths that aren't straight: an existing `~/.claude` you ca
 Before 1.0, this repo *was* `~/.claude/` — installing meant cloning over the directory Claude Code already used, so the installer had to detect existing files and stop rather than destroy them. **1.0 dissolves that.** `~/.claude` is now a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways` (see [ADR-142](architecture/system/ADR-142-agent-ways-1-0-xdg-application-distribution.md)). Installing only:
 
 - symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, and
-- three-way-merges the hooks block into your `settings.json`.
+- three-way-merges its owned slices into your `settings.json`: the hooks block, its `permissions.allow` entries (its own binaries), and a `permissions.deny` secret-path baseline (`~/.ssh`, `~/.aws`, `.env`, … — [ADR-152](architecture/system/ADR-152-framework-default-secret-path-deny-baseline.md); opt out with `secret_path_deny: false`).
 
 Everything else you have in `~/.claude` — `settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md` — is **preserved by construction**. There is nothing to back up first and no clobber prompt, because the install never replaces your directory. (`scripts/` and `tools/` and the rest of the app stay in `$XDG_DATA` and are deliberately *not* projected.)
 
@@ -21,7 +21,7 @@ Everything else you have in `~/.claude` — `settings.json` values you set, `.cr
 
 **Signs:** `~/.claude/` has `settings.json`, `projects/`, credentials, or sessions — with or without its own `.git/`.
 
-Just run the one-liner. The projection coexists with your directory; your files are untouched and your `settings.json` keeps its model, theme, plugins, and permissions (only the hooks block is merged in, and it backs up first). No move-aside, no restore dance.
+Just run the one-liner. The projection coexists with your directory; your files are untouched and your `settings.json` keeps its model, theme, plugins, and your own permissions (agent-ways merges only its owned slices — the hooks block, its `permissions.allow` entries, and the secret-path `permissions.deny` baseline — and backs up first). No move-aside, no restore dance.
 
 If `~/.claude/` is your **own** git repo (you version-control your config), that still works — the projection adds symlinks alongside your tracked files. Add the projected roots to your `.gitignore` if you don't want them tracked.
 

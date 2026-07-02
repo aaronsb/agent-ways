@@ -40,30 +40,53 @@ pub const WAYS_PERMS: &[&str] = &[
     "Write(~/.claude/**)",
 ];
 
+/// The framework-default secret-path `permissions.deny` baseline (ADR-152).
+/// Set-unioned into `permissions.deny` unless `config.secret_path_deny` is false.
+/// A hard block on the agent's file tools reaching credential material — narrow
+/// and high-confidence (paths with essentially no legitimate agent read target).
+/// `.env.example` / `.env.sample` are intentionally NOT denied. Bash-path access
+/// is out of scope (see the ADR).
+pub const WAYS_DENY: &[&str] = &[
+    "Read(~/.ssh/**)",
+    "Edit(~/.ssh/**)",
+    "Write(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.config/gcloud/**)",
+    "Read(~/.kube/config)",
+    "Read(~/.netrc)",
+    "Read(./.env)",
+    "Read(./.env.local)",
+];
+
 /// The slices agent-ways last applied — the merge base.
 #[derive(Debug, Clone, Default)]
 pub struct Owned {
     /// Hook entries we wrote, per event (`SessionStart`, `PreToolUse`, …).
     pub hooks: Map<String, Value>,
-    /// Permission strings we added.
+    /// `permissions.allow` strings we added.
     pub perms: Vec<String>,
+    /// `permissions.deny` strings we added (ADR-152).
+    pub deny: Vec<String>,
 }
 
 impl Owned {
     fn from_value(v: &Value) -> Owned {
         let hooks = v.get("hooks").and_then(|h| h.as_object()).cloned().unwrap_or_default();
-        let perms = v
-            .get("perms")
-            .and_then(|p| p.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-            .unwrap_or_default();
-        Owned { hooks, perms }
+        let str_vec = |key: &str| {
+            v.get(key)
+                .and_then(|p| p.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default()
+        };
+        Owned { hooks, perms: str_vec("perms"), deny: str_vec("deny") }
     }
 
     fn to_value(&self) -> Value {
         serde_json::json!({
             "hooks": Value::Object(self.hooks.clone()),
             "perms": self.perms,
+            "deny": self.deny,
         })
     }
 }
@@ -76,7 +99,12 @@ pub struct Merged {
 
 /// Three-way merge of our owned slices into `live`, given the desired hooks and
 /// the prior base. Pure: no I/O, fully testable.
-pub fn merge(live: &Value, desired_hooks: &Value, base: &Owned) -> Result<Merged> {
+pub fn merge(
+    live: &Value,
+    desired_hooks: &Value,
+    base: &Owned,
+    deny_secrets: bool,
+) -> Result<Merged> {
     let mut out = live.as_object().cloned().unwrap_or_default();
 
     // --- hooks: per-event three-way ---
@@ -166,11 +194,41 @@ pub fn merge(live: &Value, desired_hooks: &Value, base: &Owned) -> Result<Merged
         new_allow.push(Value::String(p.clone()));
     }
     perms_obj.insert("allow".into(), Value::Array(new_allow));
+
+    // --- permissions.deny: same set-union + deprecated-ours cleanup (ADR-152) ---
+    // `ours_deny` is empty when the operator opts out (`secret_path_deny: false`),
+    // so the opt-out flows through the ordinary deprecated-cleanup: entries we
+    // added on a prior reconcile are dropped here, restoring the user's own deny.
+    let theirs_deny = perms_obj.get("deny").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let ours_deny: Vec<String> = if deny_secrets {
+        WAYS_DENY.iter().map(|s| s.to_string()).collect()
+    } else {
+        Vec::new()
+    };
+    let deprecated_deny: Vec<String> =
+        base.deny.iter().filter(|p| !ours_deny.contains(p)).cloned().collect();
+    let mut new_deny: Vec<Value> = theirs_deny
+        .into_iter()
+        .filter(|v| {
+            v.as_str()
+                .map(|s| !deprecated_deny.iter().any(|d| d == s) && !ours_deny.iter().any(|o| o == s))
+                .unwrap_or(true)
+        })
+        .collect();
+    for d in &ours_deny {
+        new_deny.push(Value::String(d.clone()));
+    }
+    if new_deny.is_empty() {
+        perms_obj.remove("deny");
+    } else {
+        perms_obj.insert("deny".into(), Value::Array(new_deny));
+    }
+
     out.insert("permissions".into(), Value::Object(perms_obj));
 
     Ok(Merged {
         settings: Value::Object(out),
-        base: Owned { hooks: base_hooks, perms: ours_perms },
+        base: Owned { hooks: base_hooks, perms: ours_perms, deny: ours_deny },
     })
 }
 
@@ -207,17 +265,20 @@ pub fn stripped_user_view(settings: &Value, base: &Owned) -> Value {
         }
     }
 
-    // Strip our perms from permissions.allow.
+    // Strip our perms from permissions.allow and our deny baseline from
+    // permissions.deny — both are owned slices held invariant by the self-audit.
     if let Some(mut perms) = obj.get("permissions").and_then(|p| p.as_object()).cloned() {
-        if let Some(allow) = perms.get("allow").and_then(|a| a.as_array()).cloned() {
-            let kept: Vec<Value> = allow
-                .into_iter()
-                .filter(|v| v.as_str().map(|s| !base.perms.iter().any(|p| p == s)).unwrap_or(true))
-                .collect();
-            if kept.is_empty() {
-                perms.remove("allow");
-            } else {
-                perms.insert("allow".into(), Value::Array(kept));
+        for (key, owned) in [("allow", &base.perms), ("deny", &base.deny)] {
+            if let Some(entries) = perms.get(key).and_then(|a| a.as_array()).cloned() {
+                let kept: Vec<Value> = entries
+                    .into_iter()
+                    .filter(|v| v.as_str().map(|s| !owned.iter().any(|p| p == s)).unwrap_or(true))
+                    .collect();
+                if kept.is_empty() {
+                    perms.remove(key);
+                } else {
+                    perms.insert(key.into(), Value::Array(kept));
+                }
             }
         }
         if perms.is_empty() {
@@ -248,13 +309,20 @@ fn union_owned(a: &Owned, b: &Owned) -> Owned {
         }
         hooks.insert(event.clone(), Value::Array(combined));
     }
-    let mut perms = a.perms.clone();
-    for p in &b.perms {
-        if !perms.contains(p) {
-            perms.push(p.clone());
+    let union_vec = |a: &[String], b: &[String]| {
+        let mut out = a.to_vec();
+        for x in b {
+            if !out.contains(x) {
+                out.push(x.clone());
+            }
         }
+        out
+    };
+    Owned {
+        hooks,
+        perms: union_vec(&a.perms, &b.perms),
+        deny: union_vec(&a.deny, &b.deny),
     }
-    Owned { hooks, perms }
 }
 
 /// Quote the first whitespace-bearing command-path token so a `${HOME}` that
@@ -375,10 +443,20 @@ pub fn apply_to_files(
         Owned {
             hooks: live.get("hooks").and_then(|h| h.as_object()).cloned().unwrap_or_default(),
             perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
+            // Seed deny EMPTY, not with WAYS_DENY. Unlike allow (which agent-ways
+            // has long written, so a legacy install's entries must be claimed to
+            // avoid duplication), agent-ways has NEVER written permissions.deny
+            // before this baseline. Seeding WAYS_DENY would falsely claim ownership
+            // of any textually-matching entry the user authored themselves — and on
+            // the opt-out + first-reconcile path that entry would be silently
+            // stripped while the self-audit still passed. Empty is correct: enabled,
+            // the deny is added fresh and the user's own entries are provably
+            // preserved; opted out, nothing is touched.
+            deny: Vec::new(),
         }
     };
 
-    let merged = merge(&live, &desired_hooks, &base)?;
+    let merged = merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
 
     // Idempotent: if nothing changed, don't churn the file or a backup.
     if merged.settings == live {
@@ -460,7 +538,7 @@ mod tests {
     #[test]
     fn fresh_merge_adds_hooks_and_perms() {
         let live = json!({});
-        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
         assert!(m.settings["hooks"]["SessionStart"].is_array());
         let allow = m.settings["permissions"]["allow"].as_array().unwrap();
         assert_eq!(allow.len(), WAYS_PERMS.len());
@@ -470,20 +548,105 @@ mod tests {
     #[test]
     fn merge_is_idempotent() {
         let live = json!({});
-        let m1 = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let m1 = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
         // Second apply, with the first run's base and its output as the live file.
-        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base).unwrap();
+        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base, false).unwrap();
         assert_eq!(m1.settings, m2.settings, "merge must be idempotent");
     }
 
     #[test]
     fn preserves_unrelated_user_keys() {
         let live = json!({ "model": "opus", "theme": "dark", "permissions": { "deny": ["Bash(rm:*)"] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
         assert_eq!(m.settings["model"], "opus");
         assert_eq!(m.settings["theme"], "dark");
         // permissions.deny (user's) survives alongside our allow additions.
         assert_eq!(m.settings["permissions"]["deny"][0], "Bash(rm:*)");
+    }
+
+    fn deny_list(settings: &Value) -> Vec<String> {
+        settings["permissions"]["deny"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn deny_baseline_added_when_enabled() {
+        let m = merge(&json!({}), &ours_hooks(), &Owned::default(), true).unwrap();
+        let deny = deny_list(&m.settings);
+        for want in WAYS_DENY {
+            assert!(deny.iter().any(|d| d == want), "missing deny entry {want}");
+        }
+        assert_eq!(m.base.deny.len(), WAYS_DENY.len(), "base records owned deny");
+    }
+
+    #[test]
+    fn deny_baseline_absent_when_opted_out() {
+        // Opted out + no user deny → no `deny` key written at all.
+        let m = merge(&json!({}), &ours_hooks(), &Owned::default(), false).unwrap();
+        assert!(m.settings["permissions"].get("deny").is_none());
+        assert!(m.base.deny.is_empty());
+    }
+
+    #[test]
+    fn deny_preserves_user_deny_entries() {
+        let live = json!({ "permissions": { "deny": ["Bash(rm:*)"] } });
+        let m = merge(&live, &ours_hooks(), &Owned::default(), true).unwrap();
+        let deny = deny_list(&m.settings);
+        assert!(deny.iter().any(|d| d == "Bash(rm:*)"), "user deny must survive");
+        assert!(deny.iter().any(|d| d == "Read(~/.ssh/**)"), "ours added alongside");
+    }
+
+    #[test]
+    fn opt_out_removes_previously_owned_deny_keeps_user() {
+        // A settled install: our baseline is present and recorded in the base.
+        let enabled = merge(&json!({ "permissions": { "deny": ["Bash(rm:*)"] } }), &ours_hooks(), &Owned::default(), true).unwrap();
+        // Now the operator opts out — our owned deny must vanish, the user's stays.
+        let opted = merge(&enabled.settings, &ours_hooks(), &enabled.base, false).unwrap();
+        let deny = deny_list(&opted.settings);
+        assert_eq!(deny, vec!["Bash(rm:*)"], "only the user's own deny remains");
+        assert!(opted.base.deny.is_empty());
+    }
+
+    #[test]
+    fn opt_out_first_reconcile_keeps_user_deny_matching_baseline() {
+        // Regression (PR #264 review, HIGH): on first reconcile (no base → the
+        // seed's deny is EMPTY) with the baseline opted out, a user's own deny that
+        // textually matches a WAYS_DENY pattern must NOT be stripped. Seeding the
+        // base with WAYS_DENY instead of empty deleted it silently AND passed the
+        // self-audit. Owned::default() here stands in for the empty-deny seed.
+        let live = json!({ "permissions": { "deny": ["Read(~/.ssh/**)"] } });
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        assert_eq!(
+            deny_list(&m.settings),
+            vec!["Read(~/.ssh/**)"],
+            "a user's own deny matching the baseline survives when opted out"
+        );
+        // And the self-audit must agree the user's view is unchanged.
+        assert_eq!(
+            stripped_user_view(&live, &union_owned(&Owned::default(), &m.base)),
+            stripped_user_view(&m.settings, &m.base),
+        );
+    }
+
+    #[test]
+    fn deny_is_idempotent() {
+        let m1 = merge(&json!({}), &ours_hooks(), &Owned::default(), true).unwrap();
+        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base, true).unwrap();
+        assert_eq!(m1.settings, m2.settings, "re-applying the deny baseline is stable");
+    }
+
+    #[test]
+    fn user_view_invariant_holds_with_deny() {
+        // The self-audit: stripping our owned slices from before/after must match.
+        let live = json!({ "model": "opus", "permissions": { "deny": ["Bash(rm:*)"] } });
+        let m = merge(&live, &ours_hooks(), &Owned::default(), true).unwrap();
+        assert_eq!(
+            stripped_user_view(&live, &Owned::default()),
+            stripped_user_view(&m.settings, &m.base),
+            "the user's portion is provably unchanged under the deny baseline"
+        );
     }
 
     #[test]
@@ -491,7 +654,7 @@ mod tests {
         // The key three-way property: a user's own hook entry is NOT clobbered.
         let user_hook = json!({ "matcher": "startup", "hooks": [ { "type": "command", "command": "/usr/local/bin/my-thing" } ] });
         let live = json!({ "hooks": { "SessionStart": [ user_hook.clone() ] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
         let entries = m.settings["hooks"]["SessionStart"].as_array().unwrap();
         assert!(entries.contains(&user_hook), "user hook must survive the merge");
         assert!(entries.len() >= 2, "both user and our hook present");
@@ -506,7 +669,7 @@ mod tests {
         let mut base = Owned::default();
         base.hooks.insert("SessionStart".into(), json!([ old.clone() ]));
 
-        let m = merge(&live, &ours_hooks(), &base).unwrap();
+        let m = merge(&live, &ours_hooks(), &base, false).unwrap();
         let ss = m.settings["hooks"]["SessionStart"].as_array().unwrap();
         assert!(!ss.contains(&old), "our deprecated hook must be removed");
         // User's unrelated hook on another event is untouched.
@@ -520,7 +683,7 @@ mod tests {
             "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [ { "type": "command", "command": "/u/mine" } ] } ] },
             "permissions": { "allow": ["Bash(git:*)"], "deny": ["Bash(rm:*)"] }
         });
-        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
         // Stripping our slices from before and after must yield identical user views.
         let before = stripped_user_view(&live, &Owned::default());
         let after = stripped_user_view(&m.settings, &m.base);
@@ -709,7 +872,7 @@ mod tests {
         let cmds: Vec<&str> = ss.iter().filter_map(|e| e["hooks"][0]["command"].as_str()).collect();
         assert!(cmds.iter().any(|c| c.contains("check-state.sh")), "new hook present: {cmds:?}");
         assert!(!cmds.iter().any(|c| c.contains("check-setup.sh")), "old hook removed: {cmds:?}");
-        assert!(cmds.iter().any(|c| *c == "/u/mine"), "user hook preserved: {cmds:?}");
+        assert!(cmds.contains(&"/u/mine"), "user hook preserved: {cmds:?}");
         assert_eq!(after["model"], "opus", "user content preserved");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -757,7 +920,7 @@ mod tests {
         let user_hook = json!({ "matcher": "startup", "hooks": [ { "type": "command",
             "command": "tail -f ${HOME}/.claude/hooks/ways/debug.log" } ] });
         let live = json!({ "hooks": { "SessionStart": [ user_hook.clone() ] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default()).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
         let ss = m.settings["hooks"]["SessionStart"].as_array().unwrap();
         assert!(ss.contains(&user_hook), "user hook (path-as-arg) must survive: {ss:?}");
         // And the self-audit view agrees it's user content on both sides.
