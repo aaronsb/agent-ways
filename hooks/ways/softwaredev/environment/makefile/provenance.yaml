@@ -3,10 +3,19 @@ controls:
     justifications:
       - Makefile codifies build, test, and release procedures as reproducible targets
       - make help provides discoverable project interface documentation
+    satisfied_when: >
+      When build, test, or release steps were involved, the session routed them
+      through Makefile targets (creating or extending the Makefile) rather than
+      issuing ad-hoc one-off commands, and a self-documenting help target lists the
+      available targets.
   - id: NIST SP 800-53 SA-11 (Developer Testing and Evaluation)
     justifications:
       - Standardized make test / make lint targets ensure consistent test execution
       - CI and local environments run identical commands via Make
+    satisfied_when: >
+      The session invoked tests and linting through standardized make targets
+      (make test / make lint / make check) — the same commands CI would run — and
+      read the existing Makefile or make help before adding new targets.
 verified: 2026-03-13
 rationale: >
   A Makefile provides a language-agnostic, zero-dependency task interface that

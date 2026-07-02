@@ -7,14 +7,27 @@ controls:
       - Configuration hierarchy (env vars > config files > defaults) establishes deterministic configuration precedence
       - Fail-fast on missing required config prevents runtime configuration drift
       - Sensible defaults for non-sensitive values reduce misconfiguration risk
+    satisfied_when: >
+      When creating or modifying configuration, the session resolved values in the
+      order env vars over config files over defaults, and added a startup check that
+      fails (throws or exits) on a missing required value rather than reading it
+      lazily at first use.
   - id: CIS Controls v8 4.1 (Establish and Maintain a Secure Configuration Process)
     justifications:
       - Startup validation pattern checks all required configuration before accepting traffic
       - .env.example with placeholder values documents expected configuration shape
+    satisfied_when: >
+      When a .env file was introduced, the session also produced a matching
+      .env.example populated with placeholder (non-real) values, and wired a startup
+      validation enumerating the required configuration keys.
   - id: NIST SP 800-53 IA-5 (Authenticator Management)
     justifications:
       - .env files excluded from version control via .gitignore verification
       - Secrets handling deferred to Security Way for credential separation
+    satisfied_when: >
+      The session confirmed, by reading or editing .gitignore, that .env is ignored
+      when or before creating it, and left real secret values out of any
+      version-controlled file.
 verified: 2026-02-09
 rationale: >
   Configuration hierarchy and startup validation implement CM-6 configuration management.

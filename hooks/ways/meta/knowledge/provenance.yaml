@@ -8,10 +8,20 @@ controls:
     justifications:
       - Domain organization (global vs project-local) establishes policy hierarchy
       - Enable/disable mechanism via ways.json provides controlled policy application
+    satisfied_when: >
+      In a session that acted on way placement or activation, the agent respected
+      the global-vs-project-local hierarchy — authoring or overriding a way at the
+      correct root, or disabling a domain via the config mechanism — rather than
+      editing the read-only framework projection under ~/.claude.
   - id: NIST SP 800-53 PL-2 (System Security and Privacy Plans)
     justifications:
       - Ways index at session start documents active security and privacy guidance
       - State machine ensures each policy is delivered exactly once per session
+    satisfied_when: >
+      The session's firing log records this way's guidance being disclosed on
+      trigger and held below its refire threshold rather than re-injected verbatim,
+      and the agent relied on that contextual delivery instead of asking the
+      operator to restate the ways-system guidance.
 verified: 2026-02-05
 rationale: >
   Overview of the ways system for orientation when ways are mentioned

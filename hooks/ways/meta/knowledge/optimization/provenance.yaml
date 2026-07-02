@@ -6,6 +6,12 @@ controls:
     justifications:
       - Systematic vocabulary analysis ensures ways fire accurately
       - Gap/coverage metrics provide evidence-based improvement decisions
+    satisfied_when: >
+      Vocabulary or threshold changes in the session were driven by the built-in
+      tooling — /ways-tests suggest output read against gap/coverage/unused
+      metrics, applied, then re-tested with score-all and make test-sim holding
+      zero false positives — rather than by ad-hoc edits or hand-written scoring
+      scripts.
 verified: 2026-02-16
 rationale: >
   Optimization workflow for tuning way vocabulary and matching quality.

@@ -7,15 +7,32 @@ controls:
       - Four coverage categories (happy path, empty/null, boundary, error) implement structured developer test evaluation
       - Framework auto-detection ensures tests follow project conventions rather than ad-hoc patterns
       - One logical assertion per test enforces precise, evaluable test cases
+    satisfied_when: >
+      Tests written in the session cover the four categories for the function under test
+      (happy path, empty/null input, boundary values, error conditions) with one logical
+      assertion each, and the test framework is detected from project files
+      (package.json, requirements.txt, Cargo.toml, go.mod) rather than assumed. Tests
+      covering only the happy path, or written against the wrong framework, is the
+      failure case.
   - id: IEEE 829-2008 (Test Documentation Standard)
     justifications:
       - Arrange-Act-Assert structure standardizes test documentation format
       - Naming convention (should [behavior] when [condition]) creates self-documenting test specifications
       - Test independence requirement (no shared mutable state) ensures repeatable test execution
+    satisfied_when: >
+      Tests written in the session follow Arrange-Act-Assert structure and the
+      "should [behavior] when [condition]" naming, and share no mutable state across
+      tests, all visible in the test files. Tests with vague names, tangled setup, or
+      order-dependent shared state are the failure case.
   - id: ISO/IEC 25010:2011 (Reliability - Maturity, Fault Tolerance)
     justifications:
       - Boundary value testing (min, max, off-by-one, empty collections) verifies fault tolerance
       - Error condition coverage (invalid input, dependency failures) validates graceful degradation
+    satisfied_when: >
+      Tests written in the session include boundary-value cases (min, max, off-by-one,
+      empty collections) and error-condition cases (invalid input, dependency failure),
+      asserting on observable outputs and side effects rather than internal state. A
+      suite that exercises only nominal inputs is the failure case.
 verified: 2026-02-09
 rationale: >
   Structured coverage categories implement SA-11 developer testing evaluation. AAA format

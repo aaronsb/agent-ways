@@ -6,22 +6,54 @@ controls:
     justifications:
       - Treats external contributions as untrusted input requiring an adversarial review pass before acceptance
       - Dependency/lockfile and install-script inspection applies supply-chain provenance checks at merge time
+    satisfied_when: >
+      Before an external contribution is accepted, the session runs an adversarial pass
+      that is distinct from the correctness review and includes inspection of any
+      manifest/lockfile changes and install/postinstall scripts. A contribution accepted
+      on the strength of a correctness review and green CI alone is the failure case.
   - id: NIST SP 800-53 SA-15 (Development Process, Standards, and Tools)
     justifications:
       - Defines a repeatable adversarial-review checklist applied to incoming changes
       - Separates intent review from correctness review so both gates run before merge
+    satisfied_when: >
+      The session works through the adversarial checklist against the incoming diff and
+      records a security verdict kept separate from the correctness review, so both
+      gates are visible as distinct passes. Folding the security judgment into style
+      notes or omitting the checklist is the failure case.
   - id: NIST SP 800-53 CM-3 (Configuration Change Control)
     justifications:
       - Scope-of-touch check flags changes to CI, build, and security-sensitive files that the change request does not justify
+    satisfied_when: >
+      The session enumerates the touched files (e.g. `git diff --stat`) and flags any
+      CI/workflow, manifest/lockfile, build-script, install-hook, or security-sensitive
+      file that the PR description does not justify. Reviewing the diff without noting an
+      unjustified change to one of these files is the failure case.
   - id: CWE-506 (Embedded Malicious Code)
     justifications:
       - Hunts exfiltration primitives, obfuscation, and weakened guards introduced under cover of a benign-looking diff
+    satisfied_when: >
+      Added lines are scanned for exfiltration primitives (fetch/http/net, fs writes,
+      child_process/exec, eval/new Function, dynamic require/import) and for obfuscation
+      (base64/hex blobs, string-built identifiers, indirected calls) and for removed or
+      loosened existing assertions, with any hit reported. Passing a diff that adds such
+      a primitive without remark is the failure case.
   - id: CWE-1007 (Insufficient Visual Distinction of Homoglyphs)
     justifications:
       - Hidden-character scan detects bidi-override (Trojan Source / CVE-2021-42574), zero-width, and homoglyph attacks in source
+    satisfied_when: >
+      Added lines are scanned for bidi-override, zero-width, and other hidden control
+      characters and for non-ASCII characters in identifiers, and any match is reported
+      as a Trojan-Source finding. Accepting a diff containing such characters without
+      detecting them is the failure case.
   - id: OWASP Top 10 2021 A08 (Software and Data Integrity Failures)
     justifications:
       - Verifies incoming code and its dependencies for integrity before they enter the trusted build
+    satisfied_when: >
+      The session states an explicit go/no-go verdict as its own line ("no malicious
+      patterns found" or "flagging X") before the contribution merges, and raises
+      anything suspect for the contributor to explain rather than silently fixing and
+      absorbing it. Merging without a stated verdict, or quietly patching a finding, is
+      the failure case.
 verified: 2026-06-09
 rationale: >
   Operationalizes supply-chain and development-process controls at the
