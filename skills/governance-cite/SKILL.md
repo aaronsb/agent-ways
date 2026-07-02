@@ -6,9 +6,11 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Governance Citation Lookup
 
-A governance traceability system maps agent guidance (ways) to real regulatory
-controls with specific justification evidence. This skill is the **lookup** — run
-it to fetch the control IDs and justification text behind a practice. For *when*
+A governance traceability system maps agent guidance (ways) to the regulatory
+controls their guidance *claims* to address, each with asserted justifications —
+control-*design* claims, not evidence the control operates. This skill is the
+**lookup** — run it to fetch the control IDs and justification text behind a
+practice. For *when*
 to cite and *how* to phrase it, see the **governance citation** way.
 
 ## Look up controls

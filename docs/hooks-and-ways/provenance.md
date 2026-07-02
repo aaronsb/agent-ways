@@ -1,87 +1,46 @@
-# Provenance and Governance Traceability
+# Adding a compliance claim to a way
 
-Ways are compiled policy. A human reads a policy document, interprets it for the agent context, and writes a way file — compressed, directive, stripped of rationale. The guidance that reaches the agent is the object code. The policy document is the source.
+A way can carry a **claim** that its guidance is *designed* to address a specific control
+(NIST 800-53, OWASP, ISO 27001, SOC 2, CIS, IEEE). A claim is a control-*design*
+assertion — not evidence the control operates. For the model and its honest scope, see
+[governance.md](../governance.md) and
+[ADR-200](../architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md).
+This page is the how-to: author a claim and check it.
 
-This page documents how to make that compilation traceable. For running governance reports, see [governance/README.md](../../governance/README.md).
+## Where a claim lives
 
-## Quick Start: Add Provenance to a Way
+A claim is a **`provenance.yaml` sidecar** in the way's own directory, beside `{name}.md`
+(ADR-110). The runtime never reads it — way frontmatter is stripped before injection, so
+a claim reaches the agent's context **never**: zero tokens, zero latency. It exists for
+the compliance tooling and for humans.
 
-Add a `provenance:` block to your way's YAML frontmatter. The runtime strips it before injection — zero tokens, zero latency:
+```
+hooks/ways/softwaredev/delivery/commits/
+├── commits.md            # the way (guidance + matching frontmatter)
+├── commits.check.md      # optional re-fire check
+└── provenance.yaml       # the compliance claim  ← add this
+```
+
+## Write the sidecar
 
 ```yaml
----
-match: regex
-pattern: commit|push
-provenance:
-  policy:
-    - uri: governance/policies/code-lifecycle.md
-      type: governance-doc
-  controls:
-    - id: NIST SP 800-53 CM-3
-      justifications:
-        - Conventional commits create structured change records
-  verified: 2026-02-17
----
+# hooks/ways/softwaredev/delivery/commits/provenance.yaml
+policy:
+  - uri: governance/policies/code-lifecycle.md
+    type: governance-doc
+controls:
+  - id: NIST SP 800-53 CM-3 (Configuration Change Control)
+    justifications:
+      - Conventional commit types classify changes by nature
+      - Atomic commits make each change independently reviewable
+  - id: SOC 2 CC8.1 (Change Management)
+    justifications:
+      - Type prefix and scope create structured change records
+verified: 2026-02-05
+rationale: >
+  Conventional commits create structured change records with type classification,
+  implementing auditable change control.
 ```
-
-Then verify it's picked up: `ways governance trace softwaredev/commits`
-
-## The Full Chain
-
-```
-Regulatory Framework    (NIST, ISO, OWASP, SOC 2, CIS...)
-       ↓
-Control Requirement     (NIST SP 800-53 CM-3, OWASP A03:Injection...)
-       ↓
-Policy Document         (ADR, governance doc, internal standard)
-       ↓
-Way File                ({name}.md — compiled guidance, context-optimized)
-       ↓
-Agent Context           (injected at runtime when triggers match)
-```
-
-Each layer compresses the one above it. The regulatory framework is hundreds of pages. The control requirement is a paragraph. The policy document is a few pages of interpretation. The way is 30 lines of directives. The agent sees only the directives — but the full chain is walkable.
-
-## The Compilation Metaphor
-
-| Concept | Software Build | Way System |
-|---------|---------------|------------|
-| Source code | `.c` files | Policy documents |
-| Compiler | `gcc` | Human authoring process |
-| Object code | `.o` files | `{name}.md` way files |
-| Debug symbols | DWARF / PDB | `provenance:` frontmatter block |
-| Symbol table | `.map` file | `provenance-manifest.json` |
-
-Debug symbols don't affect program execution but are essential for debugging. Provenance metadata doesn't affect way injection but is essential for governance auditing.
-
-## Adding Provenance to a Way
-
-Add a `provenance:` block to the YAML frontmatter. The runtime strips all frontmatter before injection — these fields never reach the agent's context window. Zero cost.
-
-```yaml
----
-match: regex
-pattern: commit|push
-provenance:
-  policy:
-    - uri: governance/policies/code-lifecycle.md
-      type: governance-doc
-  controls:
-    - id: NIST SP 800-53 CM-3 (Configuration Change Control)
-      justifications:
-        - Conventional commit types classify changes by nature
-        - Atomic commits make each change independently reviewable
-    - id: SOC 2 CC8.1 (Change Management)
-      justifications:
-        - Type prefix and scope create structured change records
-  verified: 2026-02-05
-  rationale: >
-    Conventional commits create structured change records. Atomic commits
-    ensure each change is independently traceable and reversible.
----
-```
-
-Each control carries its own justifications — specific claims about how the way's guidance satisfies that control's requirements. This enables both graph queries (way → control → justification) and flat reporting (the spreadsheet auditors love).
 
 ### Fields
 
@@ -89,60 +48,57 @@ Each control carries its own justifications — specific claims about how the wa
 |-------|---------|
 | `policy[].uri` | Source policy document — relative path (same repo) or `github://org/repo/path` (cross-repo) |
 | `policy[].type` | Classification: `adr`, `governance-doc`, `regulatory-framework`, `control-spec` |
-| `controls[].id` | Regulatory control reference this way addresses |
-| `controls[].justifications[]` | Specific claims about how guidance satisfies the control |
-| `verified` | Date provenance was last confirmed accurate |
-| `rationale` | How policy intent became way guidance — the "compilation commentary" |
+| `controls[].id` | The control this way *claims* to be designed for |
+| `controls[].justifications[]` | How the guidance is meant to address the control — assertions, not evidence |
+| `verified` | Date the claim's authoring was last reviewed (not an assessment date) |
+| `rationale` | Summary of how the way's guidance compiles the cited controls into practice |
 
-Provenance is optional. Ways without it work exactly as before. Not every way is policy-derived — operational ways like `meta/todos` or `meta/memory` exist for system management, not compliance.
+A way without a `provenance.yaml` runs identically at runtime — claims are optional and
+additive. Operational ways (`meta/todos`, `meta/memory`) aren't policy-derived and
+shouldn't carry one; forcing a claim where none is honest is the anti-pattern.
 
-## Generating the Manifest
+## Check it
 
-```bash
-python3 ~/.claude/governance/provenance-scan.py
-python3 ~/.claude/governance/provenance-scan.py -o provenance-manifest.json
-```
-
-The manifest aggregates provenance across all ways into a single JSON artifact with:
-- Per-way provenance data
-- Inverted index: policy document → implementing ways
-- Inverted index: control reference → addressing ways
-- Coverage statistics
-
-## Running the Coverage Report
+`ways governance` reads the sidecars directly and builds its view **in memory** — there
+is no persisted manifest and no separate scripts (the former `governance.sh` /
+`provenance-scan.py` were consolidated into the `ways` binary, ADR-111):
 
 ```bash
-# Coverage report
-ways governance report
-
-# Full governance lint
-ways governance lint
-
-# Machine-readable
-ways governance report --json
+ways governance trace softwaredev/delivery/commits   # the chain for one way
+ways governance report                               # which ways carry a claim
+ways governance lint                                 # validate: URIs resolve, fields present
+ways governance report --json                        # machine-readable
 ```
 
-The report shows which ways have provenance, which policy documents are referenced, which controls are covered, and where gaps exist.
+## Keep it honest
 
-## Cross-Repo Pattern
+- A `justification` is an **assertion** about how the guidance is *designed* to address
+  the control — not proof it did. Substantiating a claim needs a session-derived
+  **finding** (SOC 2 Type II), which is the `ways-audit` direction
+  ([ADR-151](../architecture/system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md)),
+  not yet built.
+- Read `ways governance report` coverage as *claims made*, not *conformance achieved*.
+- Point a claim at a control you can defend by ID — and verify the control means what you
+  think, because an unchecked citation is itself a claim.
 
-In an enterprise, policy documents and way implementations typically live in separate repositories:
+## Cross-repo
+
+Policy documents and ways often live in separate repositories:
 
 ```
 compliance-repo/              your-claude-config/
-├── docs/architecture/        ├── hooks/ways/
-│   ├── ADR-150.md           │   ├── softwaredev/delivery/commits/commits.md
-│   └── ADR-200.md           │   │   (provenance: → ADR-150)
-├── audit-ledger.json        │   └── softwaredev/code/security/security.md
-└── controls.xlsx            └── provenance-manifest.json
+├── docs/architecture/        └── hooks/ways/softwaredev/delivery/commits/
+│   ├── ADR-150.md               ├── commits.md
+│   └── ADR-200.md               └── provenance.yaml   (policy uri → ADR-150)
+└── controls-catalog.md
 ```
 
-The provenance frontmatter in ways references policies by URI. The manifest bridges the repos at verification time. The audit ledger in the compliance repo traces controls to policies. Together, the full chain is walkable from regulatory framework to agent context.
+A claim references its policy by `uri`; `ways governance` resolves those URIs and builds
+the cross-repo view at query time. Nothing is persisted between the repos, so the two
+sides stay decoupled.
 
-## Why This Matters
+---
 
-Governance-as-code means the connection between stated policy and actual agent behavior is verifiable — not by reading two documents side-by-side and trusting that someone maintained the link, but by running a script that walks the chain.
-
-This doesn't require expensive GRC software. It requires frontmatter fields that the runtime ignores, a Python script that reads them, and a bash script that reports on them. The entire traceability system is three files and zero runtime cost.
-
-An auditor can ask: "Show me which agent governance implements NIST CM-3." The answer is a `jq` query against the manifest. The way file contains the compiled guidance. The policy document contains the rationale. The control reference closes the loop to the regulatory framework. All of it is in git, with cryptographic hashes and commit history.
+*Informally:* the way is compiled guidance and the sidecar is the note saying which
+standard it was compiled to address. The note is an assertion — only a finding turns it
+into evidence.

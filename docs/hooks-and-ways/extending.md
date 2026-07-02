@@ -7,7 +7,7 @@ How to create new ways, override existing ones, and manage domains. Writing a wa
 1. Create a directory: `~/.claude/hooks/ways/{domain}/{wayname}/`
 2. Add `{wayname}.md` with YAML frontmatter and guidance content
 3. Optionally add `macro.sh` for dynamic content
-4. Optionally add `provenance:` to frontmatter linking to policy sources (see [provenance.md](provenance.md))
+4. Optionally add a `provenance.yaml` sidecar claiming the controls the way is designed for (see [provenance.md](provenance.md))
 
 No configuration files to update. No registration step. The discovery scripts scan for `{wayname}.md` files automatically.
 

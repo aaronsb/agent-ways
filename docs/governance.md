@@ -1,52 +1,64 @@
-# Governance System
+# Governance & Compliance Traceability
 
-How policy traceability works for ways. This is the reference layer — for getting started, see [governance/README.md](../governance/README.md). For adding provenance to a way, see [provenance.md](hooks-and-ways/provenance.md).
+How agent-ways links its guidance to external control frameworks — and, plainly, what
+that link is and is not. This is the reference layer; for the model and its rationale
+see **[ADR-200](architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md)**
+(compliance claims and session-derived findings).
 
-## The Compilation Chain
+> **Read this first.** A way can carry a **claim** that its guidance is *designed* to
+> steer work toward a specific control (NIST 800-53, OWASP, ISO 27001, SOC 2, CIS,
+> IEEE). A claim is a control-*design* assertion — in audit terms the **SOC 2 Type I**
+> posture (suitably designed at a point in time) — **not** evidence that the control
+> operates. Evidence is a **finding**, produced later from real sessions (SOC 2 Type II;
+> the `ways-audit` direction in ADR-151). Today the tooling reports on **claims**, so
+> read any coverage number as *claims made*, not *conformance achieved*.
 
-Ways are compiled policy. A human reads a policy document, interprets it for the agent context, and writes a way file — compressed, directive, stripped of rationale. The governance system makes that compilation traceable.
+## The chain
+
+A way is authored guidance: a person (often Claude) reads a control or policy and writes
+compact, directive guidance that steers work into the shape the control expects. The
+claim records which control that guidance is *designed* to address, so the link is
+walkable in either direction:
 
 ```
-Regulatory Framework    (NIST, ISO, OWASP, SOC 2, CIS, IEEE...)
-       ↓
-Control Requirement     (NIST SP 800-53 CM-3, OWASP A03:Injection...)
-       ↓
-Policy Document         (governance/policies/*.md — human prose)
-       ↓
-Way File                (hooks/ways/*/{name}.md — compiled guidance)
-       ↓
-Agent Context           (injected at runtime when triggers match)
+Control framework   (NIST 800-53, OWASP, ISO 27001, SOC 2, CIS, IEEE…)
+       ↓  cited by
+Policy document     (governance/policies/*.md — human prose)
+       ↓  claimed by
+Way + claim         (hooks/ways/**/{name}.md  +  provenance.yaml sidecar)
+       ↓  injected at runtime (claim metadata stripped — zero tokens)
+Agent context       (the guidance fires when its triggers match)
 ```
 
-Each layer compresses the one above it. The regulatory framework is hundreds of pages. The control is a paragraph. The policy is a few pages. The way is 30 lines. The agent sees only the directives — but the full chain is walkable.
+Each layer compresses the one above it. But the link is a *design* claim — that the
+guidance was written to address the control — not proof the work conformed. Only a
+session-derived finding can show that.
 
-## Provenance Metadata
+## Where a claim lives: the `provenance.yaml` sidecar
 
-Ways carry optional `provenance:` blocks in their YAML frontmatter:
+A claim lives in a **`provenance.yaml` sidecar** beside the way (ADR-110), not in the
+way's own frontmatter. The runtime never reads the sidecar; way frontmatter is stripped
+before injection anyway, so a claim reaches the agent's context **never** — zero tokens,
+zero latency. It exists for the compliance tooling and for humans, not for the model.
 
 ```yaml
----
-pattern: commit|push
-provenance:
-  policy:
-    - uri: governance/policies/code-lifecycle.md
-      type: governance-doc
-  controls:
-    - id: NIST SP 800-53 CM-3 (Configuration Change Control)
-      justifications:
-        - Conventional commit types classify changes by nature
-        - Atomic commits make each change independently reviewable
-    - id: SOC 2 CC8.1 (Change Management)
-      justifications:
-        - Type prefix and scope create structured change records
-  verified: 2026-02-05
-  rationale: >
-    Conventional commits create structured change records with type
-    classification and justification.
----
+# hooks/ways/softwaredev/delivery/commits/provenance.yaml
+policy:
+  - uri: governance/policies/code-lifecycle.md
+    type: governance-doc
+controls:
+  - id: NIST SP 800-53 CM-3 (Configuration Change Control)
+    justifications:
+      - Conventional commit types classify changes by nature
+      - Atomic commits make each change independently reviewable
+  - id: SOC 2 CC8.1 (Change Management)
+    justifications:
+      - Type prefix and scope create structured change records
+verified: 2026-02-05
+rationale: >
+  Conventional commits create structured change records with type classification,
+  implementing auditable change control.
 ```
-
-**The runtime strips all frontmatter before injection.** Provenance metadata never reaches the agent's context window. Zero tokens. Zero latency. It exists purely for governance — the debug symbols of compiled policy.
 
 ### Fields
 
@@ -54,12 +66,38 @@ provenance:
 |-------|---------|
 | `policy[].uri` | Source policy document — relative path or `github://org/repo/path` |
 | `policy[].type` | Classification: `adr`, `governance-doc`, `regulatory-framework`, `control-spec` |
-| `controls[].id` | Regulatory control this way addresses |
-| `controls[].justifications[]` | Specific claims about how guidance satisfies the control |
-| `verified` | Date provenance was last confirmed accurate |
-| `rationale` | How policy intent became way guidance — the compilation commentary |
+| `controls[].id` | The control this way *claims* to be designed for |
+| `controls[].justifications[]` | How the guidance is meant to address the control (assertions, not evidence) |
+| `verified` | Date the claim's *authoring* was last reviewed (not an assessment date) |
+| `rationale` | Summary of how the way's guidance compiles the cited controls into practice |
 
-## Data Flow
+> **Proposed (ADR-200 §1), not yet in the schema:** a per-control *determination
+> criterion* — the observable session behavior that would move a claim from an assertion
+> to a *satisfied* / *other-than-satisfied* finding. It is what makes a claim assessable;
+> the current sidecars don't carry it yet.
+
+## What the tooling does today
+
+Compliance queries run through the `ways` CLI (`ways governance <mode>`). The command
+keeps the `governance` name for now; the claim/finding model and a dedicated `ways-audit`
+binary are the direction set in ADR-151, not yet shipped. The CLI scans the
+`provenance.yaml` sidecars directly and builds the manifest **in memory** — there is no
+persisted `provenance-manifest.json`, and no separate shell scripts (the former
+`governance.sh` / `provenance-scan.py` were consolidated into the binary, ADR-111).
+
+| Mode | Command | Output |
+|------|---------|--------|
+| **Coverage** | `ways governance report` | Which ways carry a claim, which don't |
+| **Trace** | `ways governance trace softwaredev/commits` | The full chain for one way |
+| **Control query** | `ways governance control OWASP` | Which ways *claim* a control |
+| **Policy query** | `ways governance policy code-lifecycle` | Which ways derive from a policy |
+| **Gaps** | `ways governance gaps` | Ways without a claim |
+| **Stale** | `ways governance stale 90` | Claims with old `verified` dates |
+| **Active** | `ways governance active` | Cross-reference claims with way firing stats |
+| **Matrix** | `ways governance matrix` | Flat sheet: way / control / justification |
+| **Lint** | `ways governance lint` | Validate claim integrity (URIs resolve, fields present) |
+
+All modes support `--json`.
 
 ```mermaid
 flowchart LR
@@ -67,75 +105,72 @@ flowchart LR
     classDef data fill:#FF9800,stroke:#E65100,color:#fff
     classDef output fill:#4CAF50,stroke:#2E7D32,color:#fff
 
-    W["way files<br/>(provenance frontmatter)"]:::data
+    W["way + provenance.yaml<br/>(claims)"]:::data
     P["governance/policies/<br/>(policy source docs)"]:::data
     CLI["ways governance"]:::tool
-    R["Reports<br/>(coverage, traces,<br/>matrices, lint)"]:::output
+    R["Reports<br/>(claim coverage, traces,<br/>matrix, lint)"]:::output
 
     W --> CLI
     P --> CLI
     CLI --> R
 ```
 
-## Tools
+## Honest scope
 
-All governance queries are handled by the `ways` CLI (`ways governance <mode>`). The CLI scans way files directly, generates the provenance manifest in memory, and runs queries against it.
+- A claim is a **design** assertion (SOC 2 Type I; in NIST's OSCAL model, a *Component
+  Definition*), **not** a finding.
+- The reports show **claim coverage**, not conformance. "Complete" is not a state a claim
+  can reach — it awaits a session-derived finding.
+- This is a **first-line** aid — in the Three Lines Model (the IIA's framework for
+  governance roles), the first line is the roles that own risk *in the doing of the
+  work*. It helps the work take a control-aligned shape at the point of work. It is
+  **not** an assessment, an attestation, or a certification — that is the third line,
+  and agent-ways is built to *feed* it, not to be it.
 
-| Mode | Command | Output |
-|------|---------|--------|
-| **Coverage** | `ways governance report` | Which ways have provenance, which don't |
-| **Trace** | `ways governance trace softwaredev/commits` | End-to-end chain for one way |
-| **Control query** | `ways governance control OWASP` | Which ways implement a control |
-| **Policy query** | `ways governance policy code-lifecycle` | Which ways derive from a policy |
-| **Gaps** | `ways governance gaps` | Ways without provenance |
-| **Stale** | `ways governance stale 90` | Ways with old verified dates |
-| **Active** | `ways governance active` | Cross-reference with way firing stats |
-| **Matrix** | `ways governance matrix` | Flat spreadsheet: way / control / justification |
-| **Lint** | `ways governance lint` | Validate provenance integrity |
+See ADR-200 for the full model and its non-goals.
 
-All modes support `--json` for machine-readable output.
+## Policy source documents
 
-## Policy Source Documents
+Policy documents live in `governance/policies/`. They are the human-readable
+interpretation layer — why a way exists, what principle it implements, where the
+boundaries are. `ways governance lint` validates that every `policy.uri` in a claim
+resolves to a real file; the chain breaks silently if policies move without the claims
+following.
 
-Policy documents live in `governance/policies/`. These are the human-readable interpretation layer — they explain why a way exists, what principle it implements, what the boundaries are. They're the "source code" that ways compile from.
+## Growth pattern
 
-The governance scanner validates that every `policy.uri` in way frontmatter points to a real file. The provenance chain breaks if policies are moved without updating URIs.
+Compliance claiming is optional and additive. Most users never touch it.
 
-## The Growth Pattern
+1. **Ways** — encode how you work. Everyone starts here.
+2. **Policies** — write down *why* (`governance/policies/`).
+3. **Claims** — link a way to the controls it's *designed* to address (`provenance.yaml`).
+4. **Reporting** — `ways governance` surfaces claim coverage and gaps.
+5. **Findings** — *(direction, ADR-151 / `ways-audit`)* session-derived evidence that the
+   claimed guidance actually shaped the work. Not yet built.
 
-Governance is optional and additive. Most users never need it. The progression:
+Each step builds on the previous without requiring it. A way without a claim runs
+identically at runtime. The system doesn't penalize partial adoption.
 
-1. **Ways** — encode how you do things. Everyone starts here.
-2. **Policies** — write down why. Emerges when ways need rationale or when new team members ask "why do we do it this way?"
-3. **Provenance** — link ways to policies and controls. Emerges when compliance asks "can you prove your agents follow policy?"
-4. **Reporting** — run the governance operator. Emerges when auditors need evidence.
+## Cross-repo pattern
 
-Each step builds on the previous without requiring it. A way without provenance works exactly the same at runtime. Provenance without reporting still documents intent. The system doesn't penalize partial adoption.
-
-## Cross-Repo Pattern
-
-In an enterprise, policy documents and way implementations typically live in separate repositories:
+In an enterprise, policy documents and way implementations typically live in separate
+repositories:
 
 ```
 compliance-repo/              your-claude-config/
 ├── docs/architecture/        ├── hooks/ways/
-│   ├── ADR-150.md           │   ├── softwaredev/delivery/commits/commits.md
-│   └── ADR-200.md           │   │   (provenance: → ADR-150)
-├── audit-ledger.json        │   └── softwaredev/code/security/security.md
-└── controls.xlsx            └── governance/
-                                 ├── policies/
-                                 └── provenance-manifest.json
+│   ├── ADR-150.md            │   └── softwaredev/delivery/commits/
+│   └── ADR-200.md            │       ├── commits.md
+├── controls-catalog.md       │       └── provenance.yaml   (claim → ADR-150)
+└── …                         └── governance/policies/
 ```
 
-The provenance frontmatter references policies by URI. The manifest bridges repos at verification time. The verify script supports `--ledger` for cross-referencing external control inventories.
+A claim references its policy by URI. `ways governance` resolves those URIs and builds
+the cross-repo view in memory at query time — nothing is persisted between repos, so the
+two sides stay decoupled.
 
-## Analogy
+---
 
-| Concept | Software Build | Governance System |
-|---------|---------------|-------------------|
-| Source code | `.c` files | `governance/policies/*.md` |
-| Compiler | `gcc` | Human authoring process |
-| Object code | `.o` files | `hooks/ways/*/{name}.md` |
-| Debug symbols | DWARF / PDB | `provenance:` frontmatter block |
-| Symbol table | `.map` file | `provenance-manifest.json` |
-| Build system | `make` | `ways governance` |
+*Informally:* a way is compiled guidance and a claim is the note saying which standard it
+was compiled to address — useful shorthand, but the note is an assertion, and only a
+finding turns an assertion into evidence.

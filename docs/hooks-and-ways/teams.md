@@ -73,7 +73,7 @@ When a team spawns, the team name propagates through the entire way-firing pipel
 Task tool (team_name param) → stash file → marker file → detect_team() → log events
 ```
 
-Every way that fires for a teammate logs the team name alongside the usual fields (way, domain, trigger, scope). The stats tool can then group activity by team — useful for understanding which teams triggered which governance and how much.
+Every way that fires for a teammate logs the team name alongside the usual fields (way, domain, trigger, scope). The stats tool can then group activity by team — useful for understanding which teams triggered which ways and how much.
 
 ## Working With Teams
 

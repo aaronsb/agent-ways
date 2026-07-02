@@ -471,7 +471,7 @@ ways permissions audit --global
 | `matrix` | Flat spreadsheet: way → control → justification |
 | `lint` | Provenance integrity check |
 | `trace <id>` | End-to-end provenance trace for a single way |
-| `control <id>` | Which ways implement a given control |
+| `control <id>` | Which ways *claim* a given control |
 | `policy <id>` | Which ways derive from a given policy |
 
 ```

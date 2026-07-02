@@ -14,7 +14,7 @@ flowchart LR
     classDef impl fill:#4CAF50,stroke:#2E7D32,color:#fff
 
     P["1. Principle"]:::principle
-    G["2. Governance<br/>Interpretation"]:::governance
+    G["2. Interpretation"]:::governance
     D["3. Documentation"]:::docs
     I["4. Implementation"]:::impl
 
@@ -29,7 +29,7 @@ An opinion about how things should work. This might come from experience, organi
 
 Principles are the raw input. They don't need to be formalized - they just need to be articulated clearly enough to act on.
 
-### 2. Governance Interpretation
+### 2. Interpretation
 
 How that principle applies in practice. This is where the principle meets the real world: what does it mean for this team, this stack, this workflow? What are the boundaries, exceptions, and trade-offs?
 
@@ -142,7 +142,7 @@ flowchart LR
 | **Dynamic content** | No | Yes (shell macros) | No |
 | **Session-gating** | No (always loaded when matched) | Yes (once per session, marker-gated) | No (always available) |
 | **Scope filtering** | No | Yes (agent/teammate/subagent) | No |
-| **Governance provenance** | No | Yes (zero-token provenance metadata) | No |
+| **Compliance claims** | No | Yes (zero-token provenance.yaml sidecars) | No |
 | **Tool restrictions** | No | No | Yes (`allowed-tools`) |
 | **Org-level scope** | Yes (`/etc/claude-code/`) | No | No |
 | **Zero-config** | Yes (drop a `.md` file) | No (requires hook infrastructure) | Yes (drop a `SKILL.md` file) |
@@ -174,7 +174,7 @@ A skill for rotating an AWS key works better when the security way has already e
 - **Cross-cutting concern** (security, testing, commit standards) → **way**
 - **Specific capability** invoked by intent → **skill**
 - Need **tool restrictions** → **skill** (`allowed-tools`)
-- Need **governance traceability** → **way** (provenance metadata)
+- Need to **claim a control** → **way** (`provenance.yaml` sidecar)
 
 <sub>Always, hallways, byways, pathways, crossways, doorways, sideways, stairways, airways, fairways, gateways, getaways. 12 dimensions in the comparison table. 12 ways. Coincidence? There are no coincidences — only ways.</sub>
 
@@ -186,7 +186,7 @@ Don't start by writing the way file. Start at stage 1.
 
 What's the opinion? Why does it matter? Write it down plainly. If you can't explain it in a paragraph, it's not clear enough to implement.
 
-### Step 2: Interpret for governance
+### Step 2: Interpret the principle
 
 How does this apply in practice? Write the prose doc (or add a section to an existing one under `docs/hooks-and-ways/`). Cover:
 
@@ -217,9 +217,9 @@ Test by triggering it and verifying the guidance is actionable.
 
 ### Step 5: Connect the layers
 
-Add a `provenance:` block to the way's frontmatter referencing the policy document, relevant control standards, and a rationale connecting policy intent to compiled guidance. The runtime strips all frontmatter before injection, so provenance metadata costs zero tokens.
+Add a `provenance.yaml` sidecar beside the way referencing the policy document, the controls its guidance *claims* to address, and a rationale connecting policy intent to the compiled guidance. The runtime never reads the sidecar (and way frontmatter is stripped before injection anyway), so the claim costs zero tokens.
 
-See [provenance.md](provenance.md) for the full traceability system — manifest generation, coverage reports, and cross-repo verification.
+See [provenance.md](provenance.md) for the full chain — claim coverage, control traces, and cross-repo resolution.
 
 ## Reading Order
 
@@ -243,6 +243,6 @@ If you're running agent teams:
 2. **[stats.md](stats.md)** — observability, interpreting the telemetry
 3. **[meta.md](meta.md)** — the meta ways (teams, memory, todos, tracking)
 
-If you care about governance traceability:
-1. **[provenance.md](provenance.md)** — the full chain from regulatory framework to agent context
-2. **[ADR-005: Governance Traceability](../architecture/legacy/ADR-005-governance-traceability.md)** — the design decision
+If you care about compliance claims:
+1. **[provenance.md](provenance.md)** — the full chain from control framework to agent context
+2. **[ADR-200: Compliance Claims and Session-Derived Findings](../architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md)** — the design decision
