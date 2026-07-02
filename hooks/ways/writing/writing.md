@@ -42,6 +42,7 @@ Write prose, not bullet points wearing a trenchcoat. Let ideas develop across se
 - Avoid staccato sentence fragments for rhetorical impact. Let the substance carry the weight.
 - Lead with the conclusion when the audience is busy. Lead with context when the audience needs persuading.
 - Cut filler on revision. "In order to" → "To". "It should be noted that" → delete.
+- Name the real term, then gloss it. For domain vocabulary, give the precise term *and* a plain-language gloss on first use — neither a jargon wall nor analogy-mush. Analogies illustrate; they don't carry the argument.
 
 **Ask the user** about style preferences early. Use literary terms when discussing: register (formal/informal), diction (word choice), syntax (sentence structure), cadence (rhythm), tone (attitude toward subject). These terms are precise and help the user articulate what they want.
 

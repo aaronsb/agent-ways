@@ -18,6 +18,8 @@ When you need to state how a system *actually* behaves — and especially when y
 
 Treat the prose layer — ADRs, design notes, specs, READMEs, docstrings — as **claims to verify**, not as truth. Read it, but confirm each load-bearing assertion against the executable side before you rely on it.
 
+The same holds for what you *write out*: a citation, an attribution, or a named term is itself a claim. Verify it against the cited artifact — the ADR you're quoting, the standard you're naming, the API you're describing — not your memory of it. An unchecked citation is an assertion in costume.
+
 This inverts the usual reflex ("the ADR says X, so X"). The failure mode it prevents is the one that compounds: a wrong premise adopted early mis-shapes everything built on it. If the yardstick is stale, every measurement taken with it is off.
 
 ## Each divergence is a finding
