@@ -49,8 +49,8 @@ After editing any `description`/`vocabulary`, regenerate so scores reflect it:
 `ways corpus`. Then rank the whole corpus in one batch:
 
 ```bash
-ways embed --query "$prompt"                  # ranked by cosine
-ways embed --query "$prompt" --threshold 0.1  # full landscape — debugging a miss
+ways embed "$prompt"    # full corpus ranking by cosine — read down the list to debug a miss
+                        # QUERY is positional; embed takes no --threshold (that's the per-way embed_threshold frontmatter field, not a CLI flag)
 ```
 
 For a single way, grep its id (path relative to the ways root, e.g.
