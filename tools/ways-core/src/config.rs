@@ -81,9 +81,10 @@ pub struct Config {
     pub refire_presets: HashMap<String, f64>,
     /// Override for where `ways settings` refreshes its Claude Code settings
     /// schema from (ADR-147). `None` = the built-in default (community
-    /// SchemaStore). Resolution precedence is env > this > default; see
-    /// [`crate::cmd::settings::source`]. A config surface so an org can point at
-    /// an internal mirror or a pinned version instead of the public schema.
+    /// SchemaStore). Resolution precedence is env > this > default; the resolver
+    /// lives in the `ways` binary's `cmd::settings::source`. A config surface so
+    /// an org can point at an internal mirror or a pinned version instead of the
+    /// public schema.
     pub settings_schema_url: Option<String>,
 }
 

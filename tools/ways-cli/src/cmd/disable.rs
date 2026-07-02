@@ -507,6 +507,6 @@ ways:
         let out2 = rewrite_block(&out, "meta/introspection", true);
         let mut cfg2 = crate::config::Config::default();
         cfg2.apply_project_ways_overlay_public(&out2);
-        assert_eq!(cfg2.disabled_ways.len(), 2);
+        assert_eq!(cfg2.disabled_ways().len(), 2);
     }
 }

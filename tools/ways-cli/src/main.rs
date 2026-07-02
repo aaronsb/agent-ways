@@ -2,14 +2,13 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-pub mod agents;
+// The shared engine now lives in the `ways-core` library crate (ADR-151).
+// Re-export it at the crate root so existing `crate::util::…`, `crate::paths::…`,
+// etc. paths across the command modules keep resolving unchanged.
+pub use ways_core::{agents, config, frontmatter, paths, scanner, util};
+
 mod cmd;
-pub mod config;
-mod frontmatter;
-pub mod paths;
-mod scanner;
 pub mod session;
-pub mod util;
 
 /// Full version string for `--version`: the semver plus the baked `git describe`
 /// build provenance (ADR-150), e.g. `1.0.0 (ways-v1.0.0-78-gc595437)`. This makes

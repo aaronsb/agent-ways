@@ -1,0 +1,18 @@
+[package]
+name = "ways-core"
+version = "1.0.0"
+edition = "2021"
+description = "Shared engine for the ways toolchain — discovery, frontmatter, paths, config"
+license = "MIT"
+
+[lib]
+name = "ways_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = { version = "1", features = ["preserve_order"] }
+walkdir = "2"
+anyhow = "1"
+sensor-trait = { path = "../sensor-trait" }
