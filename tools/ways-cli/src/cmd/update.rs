@@ -231,79 +231,85 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
         (Some(c), Some(s)) => compare_freshness(c, s, |a, b| is_ancestor(app, a, b)),
         _ => Freshness::Unknown,
     };
+    match &verdict {
+        Freshness::AtLeastAsNew => {}
+        Freshness::Older => eprintln!(
+            "  ⚠ downloaded pre-built ({}) is behind the pulled source ({}) — not a valid update.",
+            candidate.as_deref().unwrap_or("?"),
+            source.as_deref().unwrap_or("?"),
+        ),
+        Freshness::Unknown => eprintln!(
+            "  ⚠ could not verify the downloaded binary's lineage (candidate={}, source={}).",
+            candidate.as_deref().unwrap_or("?"),
+            source.as_deref().unwrap_or("?"),
+        ),
+    }
 
-    match verdict {
-        Freshness::AtLeastAsNew => {
+    match guard_action(&verdict, had, has_toolchain) {
+        GuardAction::KeepDownload => {
             if had {
                 let _ = std::fs::remove_file(&backup);
             }
             Ok(())
         }
-        Freshness::Older => {
-            eprintln!(
-                "  ⚠ downloaded pre-built ({}) is behind the pulled source ({}) — not a valid update.",
-                candidate.as_deref().unwrap_or("?"),
-                source.as_deref().unwrap_or("?"),
-            );
-            build_from_source_or_revert(app, &bin, &backup, had, has_toolchain,
-                "no pre-built matching the pulled source is published yet")
-        }
-        Freshness::Unknown => {
-            // Can't prove lineage (e.g. a legacy release binary without baked
-            // provenance). Prefer building — the checkout is authoritative — else
-            // accept the download as best effort.
-            if has_toolchain {
-                eprintln!(
-                    "  ⚠ could not verify the downloaded binary's lineage (candidate={}, source={}); \
-                     building from source to be safe.",
-                    candidate.as_deref().unwrap_or("?"),
-                    source.as_deref().unwrap_or("?"),
-                );
-                build_from_source_or_revert(app, &bin, &backup, had, true, "unverifiable pre-built")
-            } else {
-                eprintln!(
-                    "  ⚠ could not verify the downloaded binary's lineage and no toolchain is present \
-                     — keeping the downloaded binary."
-                );
+        GuardAction::BuildFromSource => {
+            eprintln!("     building ways from source (the pulled checkout is authoritative)…");
+            if run_make(app, &["ways-rebuild"]) && bin.exists() {
                 if had {
                     let _ = std::fs::remove_file(&backup);
                 }
                 Ok(())
+            } else {
+                if had {
+                    std::fs::rename(&backup, &bin)?;
+                }
+                bail!("source build failed — reverted to the previous binary");
             }
+        }
+        GuardAction::RestorePrevious => {
+            // guard_action only returns this when `had`, so the backup exists.
+            std::fs::rename(&backup, &bin).with_context(|| {
+                format!("restoring {} (unverifiable/older download, no toolchain)", bin.display())
+            })?;
+            bail!(
+                "downloaded ways binary is not a verified upgrade and no toolchain is present \
+                 — kept the previous binary (install a toolchain, then `ways update`)"
+            );
         }
     }
 }
 
-/// Build ways from source (`make ways-rebuild`) when a toolchain is present,
-/// keeping the build result; otherwise restore the previous binary. Either way
-/// the slot ends non-empty — never a downgrade, never a hole. `reason` explains
-/// why we're not keeping the just-downloaded binary.
-fn build_from_source_or_revert(
-    app: &Path,
-    bin: &Path,
-    backup: &Path,
-    had: bool,
-    has_toolchain: bool,
-    reason: &str,
-) -> Result<()> {
-    if has_toolchain {
-        eprintln!("     building ways from source ({reason})…");
-        if run_make(app, &["ways-rebuild"]) && bin.exists() {
-            if had {
-                let _ = std::fs::remove_file(backup);
+/// What the guard does with a freshly-downloaded binary.
+#[derive(Debug, PartialEq, Eq)]
+enum GuardAction {
+    /// Accept the download.
+    KeepDownload,
+    /// Build from the pulled source instead (the checkout is authoritative).
+    BuildFromSource,
+    /// Restore the previously-installed binary — never downgrade to something
+    /// older-or-unverifiable when we can't build.
+    RestorePrevious,
+}
+
+/// The guard's decision table (ADR-150 §3). A download that is provably at least
+/// as new is kept. Anything `Older` or `Unknown` is not trusted: build from source
+/// when a toolchain is present (the checkout can't be behind itself); else restore
+/// the previously-running binary rather than downgrade. The *only* time an
+/// unprovable/older download is kept is when there is no previous binary AND no
+/// toolchain — an empty slot is worse than an unverifiable one.
+fn guard_action(verdict: &Freshness, had: bool, has_toolchain: bool) -> GuardAction {
+    match verdict {
+        Freshness::AtLeastAsNew => GuardAction::KeepDownload,
+        Freshness::Older | Freshness::Unknown => {
+            if has_toolchain {
+                GuardAction::BuildFromSource
+            } else if had {
+                GuardAction::RestorePrevious
+            } else {
+                GuardAction::KeepDownload
             }
-            return Ok(());
         }
-        if had {
-            std::fs::rename(backup, bin)?;
-        }
-        bail!("source build failed after {reason} — reverted to the previous binary");
     }
-    // No toolchain: restore the previous binary rather than downgrade.
-    if had {
-        std::fs::rename(backup, bin)?;
-    }
-    bail!("{reason} and no build toolchain is present — kept the previous binary (install a toolchain, then `ways update`)");
 }
 
 /// Run a `make` target in `dir`, returning whether it succeeded.
@@ -316,7 +322,10 @@ fn run_make(dir: &Path, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// The pulled source's `git describe` (same flags build.rs bakes), or None.
+/// The pulled source's `git describe`, or None. KEEP IN LOCKSTEP with the flag
+/// list in build.rs (`WAYS_BUILD`): the guard compares shas derived from both, so
+/// the abbreviation length and `--long`/`--match` flags must be identical or it
+/// keys off divergent strings.
 fn source_describe(app: &Path) -> Option<String> {
     Command::new("git")
         .args(["describe", "--tags", "--always", "--long", "--dirty", "--match", "ways-v*"])
@@ -399,6 +408,11 @@ fn compare_freshness(
     if cand == src {
         return Freshness::AtLeastAsNew;
     }
+    // The shas are abbreviated. If the *same* commit is abbreviated to different
+    // lengths on the two sides (git auto-lengthens on ambiguity), this fast path
+    // misses and we fall to `is_ancestor`, which returns true (a commit is its own
+    // ancestor) → `Older` → a needless but safe source rebuild. Same repo + default
+    // abbrev makes this rare; the failure is toward caution, never a downgrade.
     match is_ancestor(&cand, &src) {
         Some(true) => Freshness::Older,
         Some(false) => Freshness::AtLeastAsNew,
@@ -543,5 +557,29 @@ mod tests {
             compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called")),
             Freshness::Unknown
         );
+    }
+
+    #[test]
+    fn guard_action_never_downgrades() {
+        use Freshness::*;
+        use GuardAction::*;
+        // A proven-fresh download is always kept, regardless of toolchain/previous.
+        for &had in &[true, false] {
+            for &tc in &[true, false] {
+                assert_eq!(guard_action(&AtLeastAsNew, had, tc), KeepDownload);
+            }
+        }
+        // Older/Unknown with a toolchain → build from source (authoritative checkout).
+        assert_eq!(guard_action(&Older, true, true), BuildFromSource);
+        assert_eq!(guard_action(&Unknown, false, true), BuildFromSource);
+        // Older/Unknown, no toolchain, but a previous binary exists → restore it
+        // rather than downgrade. (Finding #1: an Unknown legacy download must NOT
+        // evict a newer previous binary.)
+        assert_eq!(guard_action(&Older, true, false), RestorePrevious);
+        assert_eq!(guard_action(&Unknown, true, false), RestorePrevious);
+        // Older/Unknown, no toolchain, AND no previous binary → keep the download;
+        // an unverifiable binary still beats an empty slot.
+        assert_eq!(guard_action(&Older, false, false), KeepDownload);
+        assert_eq!(guard_action(&Unknown, false, false), KeepDownload);
     }
 }
