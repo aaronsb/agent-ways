@@ -17,16 +17,11 @@
 
 use super::compile::{self, Provenance};
 use super::fragment::{load_dir, Fragment, Scope};
+use super::project::reconciler_owned;
 use super::schema_doc;
 use anyhow::Result;
 use serde_json::{Map, Value};
 use std::path::Path;
-
-/// Keys the reconciler co-owns — `project` skips them, so their live status is
-/// "managed by the reconciler", not pending. Mirrors `project::reconciler_owned`.
-fn reconciler_owned(key: &str) -> bool {
-    matches!(key, "hooks" | "permissions")
-}
 
 pub fn run(store: &Path, key: Option<String>) -> Result<()> {
     if !store.is_dir() {
@@ -52,6 +47,7 @@ fn show_inventory(store: &Path, frags: &[Fragment]) -> Result<()> {
 
     let schema = schema_doc::active();
     let findings = super::lint::check(frags, schema);
+    let has_errors = findings.iter().any(|f| f.severity == super::lint::Severity::Error);
     let lint_verdict = lint_summary(&findings);
 
     for scope in [Scope::User, Scope::Project, Scope::Managed] {
@@ -81,7 +77,7 @@ fn show_inventory(store: &Path, frags: &[Fragment]) -> Result<()> {
             }
         }
 
-        print_scope_footer(scope, &scoped);
+        print_scope_footer(scope, &scoped, has_errors);
     }
 
     println!("\nlint: {lint_verdict}");
@@ -89,16 +85,20 @@ fn show_inventory(store: &Path, frags: &[Fragment]) -> Result<()> {
     Ok(())
 }
 
-fn print_scope_footer(scope: Scope, scoped: &[&Fragment]) {
+fn print_scope_footer(scope: Scope, scoped: &[&Fragment], gated: bool) {
     let target = match scope {
         Scope::User => "~/.claude/settings.json".to_string(),
         Scope::Project => "$CLAUDE_PROJECT_DIR/.claude/settings.json".to_string(),
         Scope::Managed => "(managed blob — pasted into the console, never auto-written)".to_string(),
     };
     let mut line = format!("  → {target}");
-    // Pending: owned keys whose compiled value differs from the live file.
     if scope != Scope::Managed {
-        if let Some(n) = pending_count(scope, scoped) {
+        // A store with lint errors won't compile/project, so a pending count would
+        // be a lie — say the gate is closed instead. (Matches the `lint:` verdict.)
+        if gated {
+            line.push_str("  ·  project gated until lint errors are fixed");
+        } else {
+            let n = pending_count(scope, scoped);
             if n > 0 {
                 let verb = if n == 1 { "key differs" } else { "keys differ" };
                 line.push_str(&format!("  ·  {n} {verb} from live"));
@@ -110,19 +110,50 @@ fn print_scope_footer(scope: Scope, scoped: &[&Fragment]) {
     println!("{line}");
 }
 
-/// How many owned keys the compiled scope would change vs the live `settings.json`.
-/// `None` if the scope doesn't compile cleanly (lint gate) — the footer stays quiet.
-fn pending_count(scope: Scope, scoped: &[&Fragment]) -> Option<usize> {
+/// How many owned keys `project` would change for this scope, read against the
+/// live `settings.json` and this scope's last-applied base.
+fn pending_count(scope: Scope, scoped: &[&Fragment]) -> usize {
     let (baked, _) = compile::merge_scope(scoped);
-    let baked_obj = baked.as_object()?;
-    let live = live_settings(scope);
-    let live_obj = live.as_object().cloned().unwrap_or_default();
-    let n = baked_obj
-        .iter()
-        .filter(|(k, _)| !reconciler_owned(k))
-        .filter(|(k, v)| live_obj.get(*k) != Some(*v))
-        .count();
-    Some(n)
+    let baked_obj = baked.as_object().cloned().unwrap_or_default();
+    let live_obj = live_settings(scope).as_object().cloned().unwrap_or_default();
+    let base_obj = read_base(scope).as_object().cloned().unwrap_or_default();
+    pending_of(&baked_obj, &live_obj, &base_obj)
+}
+
+/// Pure pending count, mirroring `project`'s three-way notion: an owned key
+/// differs if its compiled value isn't already the live value; a base-tracked
+/// owned key with no current fragment is a pending *removal* iff the live value
+/// still equals what we last wrote (so `project` would delete it — if the user
+/// has since changed it, `project` leaves it, so it isn't pending).
+fn pending_of(baked: &Map<String, Value>, live: &Map<String, Value>, base: &Map<String, Value>) -> usize {
+    let mut n = 0;
+    for (k, v) in baked {
+        if reconciler_owned(k) {
+            continue;
+        }
+        if live.get(k) != Some(v) {
+            n += 1;
+        }
+    }
+    for (k, v) in base {
+        if reconciler_owned(k) || baked.contains_key(k) {
+            continue;
+        }
+        if live.get(k) == Some(v) {
+            n += 1; // project would remove it
+        }
+    }
+    n
+}
+
+/// This scope's projector base (`$XDG_STATE/agent-ways/settings-fragments-<scope>.json`).
+/// Absent/unreadable → empty object. Mirrors `project::base_path`.
+fn read_base(scope: Scope) -> Value {
+    let path = crate::paths::state_root().join(format!("settings-fragments-{}.json", scope.as_str()));
+    match std::fs::read_to_string(&path) {
+        Ok(t) => serde_json::from_str(&t).unwrap_or_else(|_| Value::Object(Map::new())),
+        Err(_) => Value::Object(Map::new()),
+    }
 }
 
 // ── per-key detail ─────────────────────────────────────────────
@@ -136,6 +167,10 @@ fn show_key(store: &Path, frags: &[Fragment], key: &str) -> Result<()> {
 
     if scopes.is_empty() {
         println!("No fragment sets `{key}` in {}.", store.display());
+        if let Some((top, _)) = key.split_once('.') {
+            println!("`show` works on top-level keys — try `{top}`; nested values appear in its detail.");
+            return Ok(());
+        }
         let known = schema_doc::active().and_then(|s| s.get(key)).is_some();
         if known {
             println!("It's a valid key — scaffold it: ways settings new {key}");
@@ -177,13 +212,17 @@ fn show_key(store: &Path, frags: &[Fragment], key: &str) -> Result<()> {
             .filter_map(|f| f.path.file_name().and_then(|s| s.to_str()).map(String::from))
             .collect();
         if setters.len() > 1 {
-            println!("    note: set by {} fragments — last in filename order wins", setters.len());
+            println!(
+                "    note: {} fragments contribute — merged per ADR-147 (objects deep-merge, \
+                 permission lists union, scalars: last in filename order wins)",
+                setters.len()
+            );
         }
 
         println!("\nSCHEMA");
         match info {
-            Some(i) if !i.description.is_empty() => {
-                for line in wrap(&i.description, 72) {
+            Some(i) if !i.description.trim().is_empty() => {
+                for line in wrap(i.description.trim(), 72) {
                     println!("    {line}");
                 }
             }
@@ -202,23 +241,24 @@ fn show_key(store: &Path, frags: &[Fragment], key: &str) -> Result<()> {
         }
 
         println!("\nSTATUS");
-        println!("    {}", live_status(scope, key, value));
+        let live_obj = live_settings(scope).as_object().cloned().unwrap_or_default();
+        println!("    {}", live_status(scope, key, value, &live_obj));
         println!();
     }
     Ok(())
 }
 
 /// The live status of a key: does the store's value match the live settings, or
-/// is a projection pending? Pure over the inputs it's given the live value for.
-fn live_status(scope: Scope, key: &str, baked: Option<&Value>) -> String {
+/// is a projection pending? Pure — the caller supplies the live scope object, so
+/// every branch is unit-testable (the filesystem read lives in the caller).
+fn live_status(scope: Scope, key: &str, baked: Option<&Value>, live: &Map<String, Value>) -> String {
     if scope == Scope::Managed {
         return "managed scope — never auto-written; emitted as a console blob by `project`".into();
     }
     if reconciler_owned(key) {
         return "managed by the reconciler (`project` skips it; set via `ways reconcile`)".into();
     }
-    let live = live_settings(scope);
-    let live_val = live.as_object().and_then(|o| o.get(key));
+    let live_val = live.get(key);
     match (baked, live_val) {
         (Some(b), Some(l)) if b == l => "live in settings.json (matches the store)".into(),
         (Some(_), Some(_)) => "pending — the store differs from the live value; `project` would change it".into(),
@@ -366,7 +406,9 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
     for word in s.split_whitespace() {
-        if !cur.is_empty() && cur.len() + 1 + word.len() > width {
+        // char-based width (consistent with `truncate`) so a multibyte description
+        // wraps at the intended visual column, not a byte count.
+        if !cur.is_empty() && cur.chars().count() + 1 + word.chars().count() > width {
             lines.push(std::mem::take(&mut cur));
         }
         if !cur.is_empty() {
@@ -437,12 +479,38 @@ mod tests {
     }
 
     #[test]
-    fn live_status_matches_pending_and_added() {
-        // The status function reads live settings itself, so exercise the pure
-        // (Managed / reconciler-owned) branches that don't touch the filesystem.
-        assert!(live_status(Scope::Managed, "model", Some(&json!("opus"))).contains("managed scope"));
-        assert!(live_status(Scope::User, "hooks", Some(&json!({}))).contains("reconciler"));
-        assert!(live_status(Scope::User, "permissions", Some(&json!({}))).contains("reconciler"));
+    fn live_status_covers_every_branch() {
+        let live = |pairs: &[(&str, Value)]| -> Map<String, Value> {
+            pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        };
+        // Managed + reconciler-owned short-circuits (live map irrelevant).
+        assert!(live_status(Scope::Managed, "model", Some(&json!("opus")), &Map::new()).contains("managed scope"));
+        assert!(live_status(Scope::User, "hooks", Some(&json!({})), &Map::new()).contains("reconciler"));
+        assert!(live_status(Scope::User, "permissions", Some(&json!({})), &Map::new()).contains("reconciler"));
+        // Matches / pending-change / pending-add — now reachable without the FS.
+        let store_val = json!(30);
+        assert!(live_status(Scope::User, "cleanupPeriodDays", Some(&store_val), &live(&[("cleanupPeriodDays", json!(30))])).contains("matches"));
+        assert!(live_status(Scope::User, "cleanupPeriodDays", Some(&store_val), &live(&[("cleanupPeriodDays", json!(14))])).contains("would change"));
+        assert!(live_status(Scope::User, "cleanupPeriodDays", Some(&store_val), &Map::new()).contains("would add"));
+    }
+
+    #[test]
+    fn pending_of_counts_changes_and_removals() {
+        let m = |pairs: &[(&str, Value)]| -> Map<String, Value> {
+            pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        };
+        // In sync → 0.
+        assert_eq!(pending_of(&m(&[("model", json!("opus"))]), &m(&[("model", json!("opus"))]), &Map::new()), 0);
+        // Value differs → 1.
+        assert_eq!(pending_of(&m(&[("model", json!("opus"))]), &m(&[("model", json!("sonnet"))]), &Map::new()), 1);
+        // Not yet live → 1.
+        assert_eq!(pending_of(&m(&[("model", json!("opus"))]), &Map::new(), &Map::new()), 1);
+        // Reconciler-owned keys never count.
+        assert_eq!(pending_of(&m(&[("permissions", json!({"allow": []}))]), &Map::new(), &Map::new()), 0);
+        // Pending removal: base has a key, no fragment sets it, live still matches base → 1.
+        assert_eq!(pending_of(&Map::new(), &m(&[("cleanupPeriodDays", json!(30))]), &m(&[("cleanupPeriodDays", json!(30))])), 1);
+        // But if the user changed it since we wrote it, project leaves it → 0.
+        assert_eq!(pending_of(&Map::new(), &m(&[("cleanupPeriodDays", json!(99))]), &m(&[("cleanupPeriodDays", json!(30))])), 0);
     }
 
     #[test]
