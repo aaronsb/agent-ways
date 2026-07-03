@@ -24,23 +24,36 @@ pub struct PromptTurn {
     pub user_uuid: String,
 }
 
-/// The transcript path for a session. Uses the lossy `/`,`.`→`-` slug Claude Code
-/// names project dirs with (matching `rethink::build_token_timeline` and
-/// `session.rs`). Session ids are globally unique, so a slug miss could also be
-/// recovered by scanning every `projects/*` dir — deferred until it's needed.
-fn transcript_path(project: &str, session_id: &str) -> PathBuf {
+/// Locate a session's transcript. First tries the lossy `/`,`.`→`-` slug Claude
+/// Code names project dirs with (matching `rethink::build_token_timeline` and
+/// `session.rs`); on a miss — the recorded project can differ from the dir the
+/// transcript actually lives in (subagent cwd, a `session_start` logged elsewhere)
+/// — falls back to scanning every `projects/*` dir, since session ids are globally
+/// unique. `None` if no matching transcript exists.
+fn transcript_path(project: &str, session_id: &str) -> Option<PathBuf> {
+    let root = crate::paths::transcripts_root();
+    let file = format!("{session_id}.jsonl");
+
     let slug = project.replace(['/', '.'], "-");
-    crate::paths::transcripts_root()
-        .join(slug)
-        .join(format!("{session_id}.jsonl"))
+    let direct = root.join(&slug).join(&file);
+    if direct.is_file() {
+        return Some(direct);
+    }
+
+    // Slug miss → the id is unique, so find it wherever it lives.
+    std::fs::read_dir(&root)
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join(&file))
+        .find(|p| p.is_file())
 }
 
 /// Resolve every `UserPromptSubmit` injection in a session's transcript to its
 /// triggering user message. Empty when the transcript is absent/unreadable.
 pub fn prompt_turns(project: &str, session_id: &str) -> Vec<PromptTurn> {
-    match std::fs::read_to_string(transcript_path(project, session_id)) {
-        Ok(content) => prompt_turns_from_str(&content),
-        Err(_) => Vec::new(),
+    match transcript_path(project, session_id).and_then(|p| std::fs::read_to_string(p).ok()) {
+        Some(content) => prompt_turns_from_str(&content),
+        None => Vec::new(),
     }
 }
 

@@ -5,6 +5,7 @@ pub mod disable;
 pub mod embed;
 pub mod graph;
 pub mod init;
+pub mod introspect;
 pub mod language;
 pub mod lint;
 pub mod list;
