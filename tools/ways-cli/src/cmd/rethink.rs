@@ -431,10 +431,8 @@ fn handle_why_key(player: &mut Player, key: KeyEvent) {
 
 // ── Why-fired drill-down (ADR-154 §1, §2) ─────────────────────
 
-/// Per-way "why it fired", aggregated from the `SessionIntrospection` model across
-/// all of the way's fires in the session. Keyed by `way_id` — the join the
-/// drill-down uses, per the ADR-154 §1 boundary (no epoch alignment). Criteria are
-/// way-level (identical across a way's fires); matched spans are collected distinctly.
+/// One channel's "why it fired" for a way, aggregated from the model across the
+/// way's fires *on that channel*. Matched spans are collected distinctly.
 #[cfg(feature = "tui")]
 struct WhyEntry {
     way_path: Option<String>,
@@ -444,16 +442,29 @@ struct WhyEntry {
     matched_spans: Vec<String>,
 }
 
+/// Index key: `(way_id, trigger_channel)`. A single way commonly fires on several
+/// channels in one session (verified against the event log: e.g. `documentation`
+/// fires bash + file + keyword + semantic). Each channel is its own coherent facet —
+/// its own score and matched spans. Folding them into one `way_id` entry would let a
+/// keyword span be shown under a semantic trigger, fabricating a semantic matched
+/// term (the forbidden case, ADR-153). Keying by channel keeps each facet honest;
+/// the drill-down looks up the channel the focused frame shows for that way. Still a
+/// way_id-based join (no epoch alignment) per the ADR-154 §1 boundary — just at
+/// channel granularity.
 #[cfg(feature = "tui")]
-type WhyIndex = HashMap<String, WhyEntry>;
+type WhyKey = (String, String);
 
-/// Fold the model's per-turn fired-ways into a `way_id → WhyEntry` index.
+#[cfg(feature = "tui")]
+type WhyIndex = HashMap<WhyKey, WhyEntry>;
+
+/// Fold the model's per-turn fired-ways into a `(way_id, channel) → WhyEntry` index.
 #[cfg(feature = "tui")]
 fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
     let mut idx: WhyIndex = HashMap::new();
     for turn in &model.turns {
         for fw in &turn.fired_ways {
-            let e = idx.entry(fw.way_id.clone()).or_insert_with(|| WhyEntry {
+            let key = (fw.way_id.clone(), fw.trigger_channel.clone());
+            let e = idx.entry(key).or_insert_with(|| WhyEntry {
                 way_path: fw.way_path.clone(),
                 trigger_channel: fw.trigger_channel.clone(),
                 fire_score: fw.fire_score,
@@ -470,17 +481,33 @@ fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
     idx
 }
 
-/// Read a way file's body (everything after a leading frontmatter fence).
+/// Read a way file's body: everything after a leading `---`/`---` frontmatter
+/// block. Line-based so a body that legitimately opens with a markdown list (`- …`)
+/// or a `---` rule is preserved. A file with no opening fence, or an unterminated
+/// fence, is returned whole (nothing is silently dropped).
 #[cfg(feature = "tui")]
 fn read_way_body(path: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    let body = match content.strip_prefix("---\n") {
-        Some(rest) => match rest.find("\n---") {
-            Some(end) => rest[end + 4..].trim_start_matches(['\n', '-']).to_string(),
-            None => content,
-        },
-        None => content,
-    };
+    let mut lines = content.lines();
+    if lines.next() != Some("---") {
+        return Some(content); // no opening fence — treat all as body
+    }
+    let mut in_frontmatter = true;
+    let mut body = String::new();
+    for line in lines {
+        if in_frontmatter {
+            if line == "---" {
+                in_frontmatter = false; // consume the closing fence line
+            }
+            continue;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    // Unterminated frontmatter (no closing fence) → don't drop the whole file.
+    if in_frontmatter {
+        return Some(content);
+    }
     Some(body)
 }
 
@@ -590,10 +617,15 @@ fn render_why(player: &mut Player) -> String {
         let frame = &player.frames[player.current];
         epoch = frame.epoch;
 
+        // Look up the model facet for the channel this frame shows the way on, so a
+        // multi-channel way's detail is coherent (a keyword span never surfaces under
+        // a semantic trigger).
+        let facet = |w: &ActiveWay| idx.get(&(w.id.clone(), w.trigger.clone()));
+
         let mut left_lines: Vec<String> = Vec::with_capacity(frame.ways.len());
         for (i, w) in frame.ways.iter().enumerate() {
-            // A filled bullet marks a way the model has a fire record for.
-            let bullet = if idx.contains_key(&w.id) { "•" } else { "·" };
+            // A filled bullet marks a way the model has a fire record for on this channel.
+            let bullet = if facet(w).is_some() { "•" } else { "·" };
             let line = format!("{bullet} {}", w.id);
             if i == sel {
                 left_lines.push(format!("\x1b[7m{}\x1b[0m", compositor::fit_visible(&line, left_w)));
@@ -608,7 +640,7 @@ fn render_why(player: &mut Player) -> String {
         let detail = frame
             .ways
             .get(sel)
-            .map(|w| render_why_detail(&w.id, idx.get(&w.id)))
+            .map(|w| render_why_detail(&w.id, facet(w)))
             .unwrap_or_else(|| "\x1b[2mno ways fired in this frame\x1b[0m".to_string());
 
         (
@@ -1374,18 +1406,41 @@ mod why_tests {
         }
     }
 
+    fn key(way: &str, channel: &str) -> WhyKey {
+        (way.to_string(), channel.to_string())
+    }
+
     #[test]
-    fn why_index_folds_fires_and_dedups_spans() {
+    fn why_index_keys_by_channel_and_dedups_spans() {
         let m = model(vec![
             vec![fired("d/a", "keyword", Some("commit"), None)],
             vec![
-                fired("d/a", "keyword", Some("commit"), None), // dup span across turns
+                fired("d/a", "keyword", Some("commit"), None), // dup span, same channel
                 fired("d/a", "keyword", Some("stage"), None),  // new span
             ],
         ]);
         let idx = build_why_index(&m);
-        let e = idx.get("d/a").expect("way indexed");
-        assert_eq!(e.matched_spans, vec!["commit", "stage"], "deduped, in first-seen order");
+        let e = idx.get(&key("d/a", "keyword")).expect("keyed by (way, channel)");
+        assert_eq!(e.matched_spans, vec!["commit", "stage"], "deduped, first-seen order");
+    }
+
+    #[test]
+    fn multichannel_way_keeps_each_facet_honest() {
+        // The real hole (verified common in the event log): a way fires BOTH
+        // semantically and by keyword in one session. The semantic facet must never
+        // borrow the keyword fire's span (that would fabricate a semantic term).
+        let idx = build_why_index(&model(vec![
+            vec![fired("d/doc", "semantic:embedding:en", None, Some(0.71))], // semantic first
+            vec![fired("d/doc", "keyword", Some("diataxis"), None)],         // keyword later
+        ]));
+
+        let sem = render_why_detail("d/doc", idx.get(&key("d/doc", "semantic:embedding:en")));
+        assert!(sem.contains("no recoverable term"), "semantic facet stays term-free: {sem}");
+        assert!(!sem.contains("diataxis"), "keyword span must NOT appear under semantic");
+        assert!(sem.contains("score 0.71"));
+
+        let kw = render_why_detail("d/doc", idx.get(&key("d/doc", "keyword")));
+        assert!(kw.contains("diataxis"), "keyword facet shows its own real span");
     }
 
     #[test]
@@ -1394,7 +1449,7 @@ mod why_tests {
         let sem = build_why_index(&model(vec![vec![fired(
             "d/s", "semantic:embedding:en", None, Some(0.73),
         )]]));
-        let out = render_why_detail("d/s", sem.get("d/s"));
+        let out = render_why_detail("d/s", sem.get(&key("d/s", "semantic:embedding:en")));
         assert!(out.contains("no recoverable term"), "semantic honesty: {out}");
         assert!(out.contains("score 0.73"));
 
@@ -1402,15 +1457,36 @@ mod why_tests {
         let kw = build_why_index(&model(vec![vec![fired(
             "d/k", "keyword", Some("threat model"), None,
         )]]));
-        assert!(render_why_detail("d/k", kw.get("d/k")).contains("threat model"));
+        assert!(render_why_detail("d/k", kw.get(&key("d/k", "keyword"))).contains("threat model"));
 
         // Keyword fire, no span (pre-enrichment) → says so, invents nothing.
         let none = build_why_index(&model(vec![vec![fired("d/n", "keyword", None, None)]]));
-        assert!(render_why_detail("d/n", none.get("d/n")).contains("no span recorded"));
+        assert!(render_why_detail("d/n", none.get(&key("d/n", "keyword"))).contains("no span recorded"));
     }
 
     #[test]
     fn detail_handles_way_with_no_model_record() {
         assert!(render_why_detail("d/x", None).contains("no fire record"));
+    }
+
+    #[test]
+    fn read_way_body_preserves_leading_dashes_and_handles_edges() {
+        let base = std::env::temp_dir().join(format!("ways-body-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&base);
+        let write_read = |name: &str, content: &str| {
+            let p = base.join(name);
+            std::fs::write(&p, content).unwrap();
+            read_way_body(p.to_str().unwrap()).unwrap()
+        };
+        // A body opening with a markdown list keeps its leading dashes.
+        assert_eq!(
+            write_read("list.md", "---\ndescription: d\n---\n- one\n- two\n"),
+            "- one\n- two\n"
+        );
+        // Empty frontmatter → body is everything after the closing fence.
+        assert_eq!(write_read("empty.md", "---\n---\nbody line\n"), "body line\n");
+        // No opening fence → the whole file is the body.
+        assert_eq!(write_read("nofm.md", "just text\nmore\n"), "just text\nmore\n");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
