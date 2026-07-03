@@ -93,21 +93,43 @@ grain: keyed where a key exists, heuristic (time/token bucket) where it does not
 and every heuristic edge is labelled as such in the model so a consumer never
 mistakes a proximity guess for a foreign key.
 
-### 3. Enrich `way_fired` at fire time to make "why" precise
+### 3. Make "why" precise — `transcript_uuid` post-hoc, `matched_span` at fire time
 
-The precise "what caused this hook to fire" is unanswerable from today's log. Add,
-at the fire sites (`cmd/show/mod.rs`, `cmd/scan/mod.rs`):
+> **Correction (implementation finding, 2026-07-03).** The original §3 assumed the
+> fire path could record a `transcript_uuid` "because the hook receives the message
+> id on stdin." It does not: the real `UserPromptSubmit` hook payload carries only
+> `prompt`, `session_id`, `cwd`, `agent_id` — no message uuid (the prompt's uuid is
+> assigned by Claude Code, after the hook). Investigation of a live transcript found
+> a *better* source, so the two halves are sourced differently.
 
-- **`transcript_uuid`** — the triggering message id (the hook receives it on
-  stdin). Converts the heuristic time-join into a foreign key.
-- **`matched_span`** — for keyword/command/file channels, the regex/glob match
-  text. The only way to show the exact clip without transcript replay.
+- **`transcript_uuid` — resolved *post-hoc* from the transcript, not at fire
+  time.** Every `UserPromptSubmit` hook injection is recorded in the session
+  transcript as an `attachment` (its `.attachment.content` holds the injected way
+  bodies), and its `parentUuid` chain walks back to the triggering `user` message
+  (verified empirically). The introspection model reads the transcript, matches each
+  turn — its fire-timestamp cluster — to the corresponding `UserPromptSubmit`
+  attachment, and follows `parentUuid` to the user-message uuid: a genuine foreign
+  key. This is strictly better than fire-time capture — no hot-path change, and it
+  works for historical sessions whose transcript survives. Only the turn→attachment
+  step is heuristic (session + sub-second timestamp — the fire happens *inside* the
+  hook); the attachment→message link is keyed. A turn whose transcript is
+  absent/unmatched stays `Heuristic`.
+
+- **`matched_span` — recorded at fire time** (`cmd/show/*`, `cmd/scan/*`). The
+  transcript's injected content is way-*anonymous* (concatenated bodies for the
+  whole prompt), so *what text matched an individual way* cannot be recovered
+  post-hoc. For the keyword/command/file channels the fire path captures the
+  regex/glob match text — additive, forward-only (old records lack it), kept cheap
+  and line-atomic on the hot path.
+
 - Semantic stays **way-level**: `fire_score` ≥ `embed_threshold` is the honest
   grain; per-vocabulary-term attribution is impossible (one embedding per way) and
   must not be faked.
 
-Enrichment is **additive and forward-only** — old records lack the fields, the
-model marks their join heuristic, and no backfill is claimed.
+Both enrichments are **additive**: the model uses each field when present and falls
+back to the heuristic time/token-bucket grain when absent. The post-hoc transcript
+join degrades to `Heuristic` when the transcript is unavailable; `matched_span`
+claims no backfill.
 
 ### 4. Share the substrate with the compliance finding pipeline (ADR-201)
 
@@ -146,11 +168,15 @@ correlation rather than two drifting re-derivations.
   durable fix: it papers over the split-brain and re-breaks the next time a path
   moves. A single resolved writer path is the real correction (a bridging union
   read on top is fine as a transition).
-- **Reconstruct "why" purely by transcript replay, persist nothing new.** Works
-  for keyword/command (re-run the regex on the stored prompt) but fails when the
-  transcript is absent/truncated and gives no foreign key; semantic stays
-  way-level regardless. Enrichment is the only path to a precise, transcript-
-  independent "why."
+- **Reconstruct "why" purely by transcript replay, persist nothing new.** Split
+  outcome after §3's correction: transcript replay *is* the right source for the
+  **foreign key** (`transcript_uuid` via the `parentUuid` chain — a real message id
+  no fire-time capture can supply), but it *cannot* recover `matched_span` — the
+  injected content is way-anonymous, so which text matched an individual way is
+  lost. Hence the hybrid: post-hoc transcript for the key, fire-time enrichment for
+  the span. Pure replay alone also gives no "why" when the transcript is
+  absent/truncated (the join degrades to `Heuristic`), and semantic stays way-level
+  regardless.
 - **Fake semantic term-level attribution** (highlight the "matching" vocabulary
   word). Rejected: the corpus stores one vector per way; there is no matched term
   to recover. Presenting one would be a confabulated explanation — the exact
