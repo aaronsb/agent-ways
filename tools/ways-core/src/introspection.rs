@@ -265,16 +265,31 @@ impl SessionIntrospection {
 /// an adjacent prompt.
 const JOIN_TOLERANCE_SECS: u64 = 8;
 
-/// The prompt injection whose timestamp is closest to `turn_ts`, within tolerance.
+/// The prompt injection whose timestamp is closest to `turn_ts`, within tolerance
+/// — but only when the match is **unambiguous**. If two prompts submitted within
+/// tolerance of each other collapse into one turn (fires ≤3s apart cluster, and a
+/// rapid re-submit can land inside that window), their injections resolve to
+/// *different* user messages; there is then no single correct key for the turn, so
+/// this returns `None` and the turn stays `Heuristic`. `Keyed` thus always means an
+/// unambiguous foreign key — never a coin-flip between two candidate messages.
 fn nearest_prompt_turn<'a>(
     turn_ts: &str,
     prompt_turns: &'a [crate::transcript::PromptTurn],
 ) -> Option<&'a crate::transcript::PromptTurn> {
     let turn_secs = parse_ts_secs(turn_ts);
-    prompt_turns
+    let in_tolerance: Vec<(&crate::transcript::PromptTurn, u64)> = prompt_turns
         .iter()
         .map(|pt| (pt, parse_ts_secs(&pt.ts).abs_diff(turn_secs)))
         .filter(|(_, diff)| *diff <= JOIN_TOLERANCE_SECS)
+        .collect();
+
+    // Ambiguity guard: ≥2 candidates pointing at different messages → don't key.
+    let distinct: HashSet<&str> = in_tolerance.iter().map(|(pt, _)| pt.user_uuid.as_str()).collect();
+    if distinct.len() > 1 {
+        return None;
+    }
+    in_tolerance
+        .into_iter()
         .min_by_key(|(_, diff)| *diff)
         .map(|(pt, _)| pt)
 }
@@ -649,6 +664,34 @@ scope: subagent
         s2.join_transcript(&[]);
         assert_eq!(s2.summary.keyed_turns, 0);
         assert!(s2.turns.iter().all(|t| t.join_confidence == JoinConfidence::Heuristic));
+    }
+
+    #[test]
+    fn join_leaves_ambiguous_turns_heuristic() {
+        use crate::transcript::PromptTurn;
+        let events = vec![
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword"}),
+        ];
+        // Two DIFFERENT prompts within tolerance of the one turn → can't attribute.
+        let ambiguous = vec![
+            PromptTurn { ts: "2026-01-01T00:00:01Z".into(), user_uuid: "user-A".into() },
+            PromptTurn { ts: "2026-01-01T00:00:02Z".into(), user_uuid: "user-B".into() },
+        ];
+        let mut s = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        s.join_transcript(&ambiguous);
+        assert_eq!(s.turns[0].join_confidence, JoinConfidence::Heuristic, "ambiguous → not keyed");
+        assert_eq!(s.turns[0].transcript_uuid, None);
+        assert_eq!(s.summary.keyed_turns, 0);
+
+        // Two injections resolving to the SAME message are not ambiguous — key it.
+        let same = vec![
+            PromptTurn { ts: "2026-01-01T00:00:01Z".into(), user_uuid: "user-A".into() },
+            PromptTurn { ts: "2026-01-01T00:00:02Z".into(), user_uuid: "user-A".into() },
+        ];
+        let mut s2 = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        s2.join_transcript(&same);
+        assert_eq!(s2.turns[0].join_confidence, JoinConfidence::Keyed);
+        assert_eq!(s2.turns[0].transcript_uuid.as_deref(), Some("user-A"));
     }
 
     #[test]
