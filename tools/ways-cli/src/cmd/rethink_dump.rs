@@ -278,7 +278,7 @@ fn session_events<'a>(
 }
 
 /// Latest session (by session_start timestamp) within an optional project scope.
-fn most_recent_session(content: &str, scope: Option<&str>) -> Option<String> {
+pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<String> {
     let mut best: Option<(String, String)> = None; // (ts, session)
     for line in content.lines() {
         if !line.contains("session_start") {

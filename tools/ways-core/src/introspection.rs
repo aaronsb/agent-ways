@@ -499,7 +499,13 @@ pub fn default_criteria_map() -> CriteriaMap {
 
 /// The full ADR-143 corpus for a given project: project ways shadow user, user
 /// shadows core — so a fired way resolves to the criteria that actually fired.
+/// An empty `project` (unknown project) resolves user+core only — never a
+/// *relative* `.claude/ways` that would fold in whatever repo the CWD happens to
+/// be inside.
 pub fn project_criteria_map(project: &str) -> CriteriaMap {
+    if project.is_empty() {
+        return default_criteria_map();
+    }
     build_criteria_map(&[
         PathBuf::from(project).join(".claude").join("ways"),
         crate::paths::user_ways_root(),

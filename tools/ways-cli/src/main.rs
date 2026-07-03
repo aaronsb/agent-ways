@@ -271,6 +271,12 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Introspect a session over the SessionIntrospection model: which ways
+    /// fired, on which turn, and why (ADR-153/154). Currently: the `dump` mode.
+    Introspect {
+        #[command(subcommand)]
+        mode: IntrospectCommand,
+    },
     /// Engine health dashboard — binary, model, corpus, project status
     Status {
         /// Machine-readable JSON output
@@ -413,6 +419,24 @@ enum Commands {
     Settings {
         #[command(subcommand)]
         command: SettingsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum IntrospectCommand {
+    /// Dump a session's reconstructed introspection as JSON (agent-facing MVP):
+    /// turns, fired ways, their criteria, keyed transcript join, and matched
+    /// spans. Defaults to the most recent session in the current project.
+    Dump {
+        /// Session ID to dump (default: most recent in scope)
+        #[arg(long)]
+        session: Option<String>,
+        /// Scope to this project path (default: current project)
+        #[arg(long)]
+        project: Option<String>,
+        /// Pick the session across every project, not just the current one
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -685,6 +709,11 @@ fn main() -> Result<()> {
             (false, true) => cmd::rethink_dump::run_json(session.as_deref(), project.as_deref(), all),
             // interactive replay, or `--list` text.
             _ => cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list, all),
+        },
+        Commands::Introspect { mode } => match mode {
+            IntrospectCommand::Dump { session, project, all } => {
+                cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
+            }
         },
         Commands::Status { json } => cmd::status::run(json),
         Commands::Scan { mode } => match mode {
