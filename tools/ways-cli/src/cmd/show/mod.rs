@@ -176,7 +176,12 @@ pub fn way_scored(
     // *what* fired the way without transcript replay. First-fire only (a
     // redisclosure's re-trigger is a different match); semantic never carries one.
     if let (false, Some(span)) = (is_redisclosure, matched_span) {
-        log_fields.push(("matched_span", span.to_string()));
+        // A zero-width author pattern (e.g. `^`) fires but matches an empty string;
+        // recording an empty span is pure telemetry noise, so skip it (the fire
+        // decision was already made upstream — this only gates what's logged).
+        if !span.is_empty() {
+            log_fields.push(("matched_span", span.to_string()));
+        }
     }
     if let Some(ref p) = parent_id {
         log_fields.push(("parent", p.clone()));
