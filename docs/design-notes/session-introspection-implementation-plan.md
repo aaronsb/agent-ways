@@ -43,7 +43,8 @@ The bugs that make `rethink` wrong today. Land first; delivers value alone.
   add `--all`, fail-loud (or cwd-fallback) when detection is `None`, compare on
   slug/normalized path not substring. Insertion points: `rethink.rs:123-134` +
   `665-668`; `rethink_dump.rs:94-102` + `277-281`.
-- **`ways rethink --list --json`** — machine-listable session enumeration.
+- **`ways rethink --list --json`** — machine-listable session enumeration. (Becomes
+  `ways introspect list --json` at increment 4; the alias preserves this form.)
 - Key files: `session.rs` (log_event / new path cmd), the two shell hooks,
   `cmd/rethink.rs`, `cmd/rethink_dump.rs`, `ways-core/src/paths.rs`.
 
@@ -65,10 +66,12 @@ The bugs that make `rethink` wrong today. Land first; delivers value alone.
 - Model (increment 2) reads the new fields when present, falls back to heuristic
   when absent.
 
-### 4 — Non-interactive dump over the model — ADR-154 §1 (agent-facing MVP)
+### 4 — `ways introspect` surface + non-interactive dump — ADR-154 §1, §4 (agent-facing MVP)
 
-- Re-point `rethink_dump` (or a unified `ways introspect --json`) at the increment-2
-  model. This is the autonomous-investigation surface — ship it before the TUIs.
+- Introduce the `ways introspect <replay|live|dump|list>` command; wire `ways
+  rethink` as a deprecated alias → `introspect replay` (stderr notice, still works).
+- Re-point `rethink_dump` at the increment-2 model as `ways introspect dump`. This
+  is the autonomous-investigation surface — ship it before the TUIs.
 
 ### 5 — Micro-compositor + why-fired drill-down — ADR-154 §2
 
@@ -77,19 +80,25 @@ The bugs that make `rethink` wrong today. Land first; delivers value alone.
 - Drill-down tab in `rethink`: fired-ways list → enter → way body + `MatchCriteria`
   + matched clip (precise post-enrichment, heuristic-labelled before).
 
-### 6 — `ways think` live monitor — ADR-154 §3
+### 6 — `ways introspect live` monitor — ADR-154 §3
 
-- New command; reuse `rethink::tui_loop`'s `poll(Duration)` skeleton with the
+- New mode; reuse `rethink::tui_loop`'s `poll(Duration)` skeleton with the
   refresh interval as timeout; re-read tail of events-log + transcript on tick;
   mtime/size stat-gate to skip unchanged re-parse. Same compositor + model.
 
-## Open questions for the next session
+## Resolved decisions (settled 2026-07-02)
 
-- **Command naming:** `ways rethink`/`ways think` vs. a unified `ways introspect
-  <replay|live|dump>` (ADR-111 single-surface spirit). Decide before increment 4.
-- **Shared substrate with ADR-201:** confirm the `SessionIntrospection` model is
-  the finding pipeline's evidence source, so they don't diverge. Likely means the
-  model lives in `ways-core`, not `ways-cli`.
-- **ratatui escape-hatch trigger:** name the concrete feature (text selection?
-  resizable panes? mouse?) that would flip the decision, so it's a criterion, not a
-  vibe.
+- **Command naming — DECIDED:** one unified `ways introspect <replay|live|dump>`
+  surface (ADR-111 single-surface spirit), *not* the `ways rethink`/`ways think`
+  verb pair (rejected as too cute). `ways rethink` is kept as a **deprecated alias**
+  → `introspect replay` (and `rethink --json` → `introspect dump`) so existing
+  muscle memory keeps working. The `introspect` CLI surface + alias is a thin step
+  introduced at **increment 4** (the first new command); increments 1–3 fix and
+  factor the *underlying* code that `introspect replay` will call.
+- **Shared substrate with ADR-201 — DECIDED:** the `SessionIntrospection` model
+  lives in **`ways-core`** (not `ways-cli`) and is the finding pipeline's evidence
+  source, so introspection and findings read one correlation, not two drifting
+  re-derivations.
+- **ratatui escape-hatch trigger — DECIDED:** the concrete criterion is the
+  drill-down needing **text selection or resizable / mouse-driven panes**. Short of
+  that, the micro-compositor stays. It's a criterion now, not a vibe.

@@ -9,19 +9,19 @@ related:
   - ADR-111
 ---
 
-# ADR-154: rethink, think, and non-interactive introspection — one model, three front-ends
+# ADR-154: `ways introspect` — one model, three front-ends
 
 ## Context
 
 ADR-153 defines a shared `SessionIntrospection` model. This ADR decides the
-surfaces over it. There are three, plus a drill-down, and the user wants them to
-feel like one tool a user can move between:
+surfaces over it. There are three, plus a drill-down, and they should feel like
+one tool a user can move between — which §4 realizes as one `ways introspect
+<mode>` command:
 
-- **`rethink`** — post-hoc replay of a finished session (exists today).
-- **`think`** — a *live* monitor of the current session, same UI, refreshing as
-  new ways fire.
-- **non-interactive dump** — structured output an autonomous agent reads to
-  investigate a session (a JSON dump exists today via `rethink --json`).
+- **post-hoc replay** of a finished session (exists today as `ways rethink`).
+- a **live** monitor of the current session, same UI, refreshing as new ways fire.
+- a **non-interactive dump** — structured output an autonomous agent reads to
+  investigate a session (exists today via `rethink --json`).
 - **the why-fired drill-down** — from a list of fired ways, enter one and read the
   way, its trigger criteria, and the clip of session that matched.
 
@@ -51,12 +51,15 @@ Generalize the proven triplet into a module (mirroring the `cmd/scan`,
 - **model** — build `SessionIntrospection` (ADR-153).
 - **render** — extend `cmd/render`'s ANSI-`String` contract with
   `render_way_detail` / `render_clip`; no new rendering paradigm.
-- **front-ends**, each a thin loop over the same model:
-  - one-shot render → print (like `list`);
-  - **`think`** — the existing `rethink::tui_loop` poll skeleton, re-reading on a
+- **front-ends** (the `ways introspect <mode>` modes of §4), each a thin loop over
+  the same model:
+  - **`replay`** — one-shot render → print, then the frame-player loop (today's
+    `rethink`);
+  - **`live`** — the existing `rethink::tui_loop` poll skeleton, re-reading on a
     tick (see §3);
-  - **JSON** — serde-serialize (extend `rethink_dump`);
-  - **drill-down** — a selection/tab loop compositing model panels.
+  - **`dump`** — serde-serialize (extend `rethink_dump`);
+  - **drill-down** — a selection/tab loop compositing model panels, shared by
+    `replay` and `live`.
 
 ### 2. Keep crossterm; grow a small micro-compositor — do not adopt ratatui
 
@@ -78,7 +81,7 @@ with independent scroll"; ratatui is right for a true windowed inspector.
 
 ### 3. Live refresh: poll-with-timeout + mtime/size stat gate — not `notify`
 
-`think` reuses crossterm `poll(Duration)`: the timeout is the refresh interval
+`introspect live` reuses crossterm `poll(Duration)`: the timeout is the refresh interval
 (~100–250 ms, imperceptible), on timeout re-read the *tail* of the (append-only)
 events log + transcript and re-render, on key event handle input. Skip the
 re-parse when the files' mtime/length are unchanged. This stays synchronous, adds
@@ -89,23 +92,31 @@ large-tree advantage does not apply to two append-only files.
 
 ### 4. Command surface and scoping semantics
 
-- **`ways rethink`** — post-hoc. Default to the **current Claude Code project**;
+The surfaces unify under a single **`ways introspect <mode>`** command (ADR-111
+single-surface spirit) rather than sibling top-level verbs. Modes:
+
+- **`ways introspect replay`** — post-hoc replay of a finished session (the
+  behaviour `rethink` has today). Default to the **current Claude Code project**;
   add `--all` for every project and keep `--project <path>` for a specific one.
   When current-project detection returns `None`, **fail loud** (name the missing
   marker) or fall back to cwd — never silently globalize. Compare on the encoded
   project slug / normalized path, not a loose substring.
-- **`ways rethink --list --json`** — enumerate candidate sessions as structured
+- **`ways introspect list --json`** — enumerate candidate sessions as structured
   data so an agent can pick one before dumping it (closes the non-interactive
   enumeration gap).
-- **`ways think`** — live monitor of the current session; same scoping default.
-- **the drill-down** — a tab in `rethink`/`think`: a fired-ways list; entering a
+- **`ways introspect dump`** — the non-interactive JSON dump of a session (the
+  behaviour `rethink --json` has today).
+- **`ways introspect live`** — live monitor of the current session; same scoping
+  default.
+- **the drill-down** — a tab in `replay`/`live`: a fired-ways list; entering a
   way opens a read-as-a-human panel with the way body, its trigger criteria
   (ADR-153 `MatchCriteria`), and the matched session clip (precise once ADR-153 §3
   enrichment lands; heuristic-labelled before).
 
-Consolidation (ADR-111 single-surface spirit): whether these live under `ways
-rethink`/`ways think` or a unified `ways introspect <mode>` is an open naming
-question for the implementation — the *model* is shared regardless.
+**Migration:** `ways rethink` becomes a thin **deprecated alias** for `ways
+introspect replay` (and `rethink --json` → `introspect dump`), printing a
+one-line deprecation notice to stderr while continuing to work. Muscle memory
+keeps working; the canonical surface is the consolidated one.
 
 ## Consequences
 
@@ -127,9 +138,12 @@ question for the implementation — the *model* is shared regardless.
 ### Neutral
 
 - If the inspector's ambitions grow, the escape hatch to ratatui is deliberate and
-  documented — this decision is reversible, not a dead end.
-- Final command naming (`rethink`/`think` vs. `introspect`) is left to
-  implementation.
+  documented — this decision is reversible, not a dead end. The concrete trigger
+  that would flip it: the drill-down needing **text selection or resizable /
+  mouse-driven panes**; short of that, the micro-compositor stays.
+- Command naming is **decided**: one `ways introspect <replay|live|dump>` surface,
+  with `ways rethink` kept as a deprecated alias. The `think`/`rethink` verb pair
+  was rejected as too cute — the modes are plain and descriptive instead.
 
 ## Alternatives Considered
 
@@ -148,7 +162,7 @@ question for the implementation — the *model* is shared regardless.
 ## References
 
 - **ADR-153** — the `SessionIntrospection` substrate these front-ends render.
-- **ADR-111** — the single-tool-surface consolidation spirit informing the command
-  naming question.
+- **ADR-111** — the single-tool-surface consolidation spirit this ADR follows in
+  choosing one `ways introspect <mode>` command over sibling verbs.
 - Research pass 2026-07-02 (TUI stack, crossterm-vs-ratatui trade study, refresh
   mechanism, shared-model factoring) — the ground truth this ADR is built on.
