@@ -131,6 +131,9 @@ pub struct IntrospectionSummary {
     pub turns: usize,
     pub distinct_ways: usize,
     pub total_fires: u64,
+    /// Turns whose join was upgraded to `Keyed` by a transcript foreign key
+    /// (ADR-153 §3). `0` until [`SessionIntrospection::join_transcript`] runs.
+    pub keyed_turns: usize,
 }
 
 /// A session's introspection: its turns and the ways each fired.
@@ -209,6 +212,7 @@ impl SessionIntrospection {
             turns: turns.len(),
             distinct_ways: distinct.len(),
             total_fires,
+            keyed_turns: 0, // set by join_transcript once a transcript is joined
         };
 
         SessionIntrospection {
@@ -222,12 +226,57 @@ impl SessionIntrospection {
 
     /// Convenience: build for a session from the live event log (the increment-1
     /// union reader) and the project-aware way corpus (so a fired way resolves to
-    /// the criteria that actually fired, honoring ADR-143 override precedence).
+    /// the criteria that actually fired, honoring ADR-143 override precedence),
+    /// then upgrade the join with the session transcript when it's present.
     pub fn from_session(session_id: &str, project: &str, window_k: u64) -> Self {
         let events = crate::firing::load_events();
         let criteria = project_criteria_map(project);
-        Self::build(&events, session_id, project, window_k, &criteria)
+        let mut s = Self::build(&events, session_id, project, window_k, &criteria);
+        s.join_transcript(&crate::transcript::prompt_turns(project, session_id));
+        s
     }
+
+    /// Attach `transcript_uuid` to each turn by matching its fire timestamp to the
+    /// nearest `UserPromptSubmit` injection, flipping matched turns
+    /// `Heuristic`→`Keyed` (ADR-153 §3). The turn→injection match is the one
+    /// heuristic step (session + sub-second timestamp — the fire happens *inside*
+    /// the hook); the injection→message link the [`crate::transcript`] reader
+    /// already followed is keyed. Turns with no injection within tolerance keep
+    /// their `Heuristic` label. Passing an empty slice (absent transcript) is a
+    /// no-op — the model stays honestly heuristic.
+    pub fn join_transcript(&mut self, prompt_turns: &[crate::transcript::PromptTurn]) {
+        for turn in &mut self.turns {
+            if let Some(pt) = nearest_prompt_turn(&turn.ts, prompt_turns) {
+                turn.transcript_uuid = Some(pt.user_uuid.clone());
+                turn.join_confidence = JoinConfidence::Keyed;
+            }
+        }
+        self.summary.keyed_turns = self
+            .turns
+            .iter()
+            .filter(|t| t.join_confidence == JoinConfidence::Keyed)
+            .count();
+    }
+}
+
+/// The tolerance for matching a turn's fire timestamp to a prompt injection. The
+/// injection is recorded when the hook returns — at/just after the fires it
+/// carries — so a few seconds covers hook runtime and clock skew without reaching
+/// an adjacent prompt.
+const JOIN_TOLERANCE_SECS: u64 = 8;
+
+/// The prompt injection whose timestamp is closest to `turn_ts`, within tolerance.
+fn nearest_prompt_turn<'a>(
+    turn_ts: &str,
+    prompt_turns: &'a [crate::transcript::PromptTurn],
+) -> Option<&'a crate::transcript::PromptTurn> {
+    let turn_secs = parse_ts_secs(turn_ts);
+    prompt_turns
+        .iter()
+        .map(|pt| (pt, parse_ts_secs(&pt.ts).abs_diff(turn_secs)))
+        .filter(|(_, diff)| *diff <= JOIN_TOLERANCE_SECS)
+        .min_by_key(|(_, diff)| *diff)
+        .map(|(pt, _)| pt)
 }
 
 fn build_turn(cluster: &[&FireRow], epoch: u64, criteria: &CriteriaMap) -> Turn {
@@ -568,6 +617,38 @@ scope: subagent
         assert_eq!(todos.criteria.trigger.as_deref(), Some("context-threshold"));
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn join_transcript_keys_matching_turns_only() {
+        use crate::transcript::PromptTurn;
+        // Two turns, 5 min apart (distinct epochs).
+        let events = vec![
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword"}),
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:05:00Z","way":"d/b","trigger":"keyword"}),
+        ];
+        let mut s = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        assert_eq!(s.turns.len(), 2);
+        assert!(s.turns.iter().all(|t| t.join_confidence == JoinConfidence::Heuristic));
+
+        // One injection ~1s after the first turn; nothing near the second.
+        let pts = vec![PromptTurn {
+            ts: "2026-01-01T00:00:01Z".into(),
+            user_uuid: "user-1".into(),
+        }];
+        s.join_transcript(&pts);
+
+        assert_eq!(s.turns[0].join_confidence, JoinConfidence::Keyed);
+        assert_eq!(s.turns[0].transcript_uuid.as_deref(), Some("user-1"));
+        assert_eq!(s.turns[1].join_confidence, JoinConfidence::Heuristic, "no injection within tolerance");
+        assert_eq!(s.turns[1].transcript_uuid, None);
+        assert_eq!(s.summary.keyed_turns, 1);
+
+        // Absent transcript (empty slice) is a no-op — stays as-is.
+        let mut s2 = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        s2.join_transcript(&[]);
+        assert_eq!(s2.summary.keyed_turns, 0);
+        assert!(s2.turns.iter().all(|t| t.join_confidence == JoinConfidence::Heuristic));
     }
 
     #[test]
