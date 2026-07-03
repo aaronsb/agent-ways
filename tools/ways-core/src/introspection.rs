@@ -1,0 +1,579 @@
+//! Session-introspection substrate (ADR-153 §2).
+//!
+//! One typed, serde-serializable model that joins the firing-event log to way
+//! frontmatter: for a session, *which ways were injected, on which turn, and —
+//! as far as the recorded data honestly allows — why*. It lives in `ways-core`
+//! (not the CLI) because the ADR-201 finding pipeline shares this exact
+//! correlation; building it once keeps findings and introspection from drifting.
+//!
+//! **Join honesty (ADR-153).** The turn ↔ fired-way link is *heuristic* until
+//! fire-time enrichment (increment 3) records a transcript uuid: today the finest
+//! signal is a `(session, ts, token_position)` bucket. Every [`Turn`] is labelled
+//! [`JoinConfidence::Heuristic`] so a consumer never mistakes a proximity guess
+//! for a foreign key, and [`Turn::transcript_uuid`] / [`FiredWay::match_detail`]
+//! stay `None` until that enrichment lands.
+//!
+//! **No fabricated semantic "why."** There is one embedding per way, so a
+//! semantic fire has no recoverable matched term — only a way-level
+//! [`FiredWay::fire_score`]. `match_detail` will carry a span only for the
+//! keyword/command/file channels, and only once enrichment records it.
+//!
+//! This increment builds the model + the join from the event log; it does not yet
+//! rewire the `rethink` replay pipeline (still in `ways-cli`) to consume it — that
+//! convergence is increment 4.
+//!
+//! **The clustering shares the `≤3s` gap *rule* with `rethink::build_frames`, but
+//! is not identical to it** — the two are reconciled at increment 4, not assumed
+//! equivalent now. Deliberate differences: this model clusters the *fire* stream
+//! only (a [`Turn`] is defined by the ways that fired, not by `session_start` /
+//! `way_redisclosed` events the replay also folds in), sorts by timestamp, numbers
+//! epochs over fire-bearing clusters only, and takes each turn's token position
+//! from the event's own recorded value rather than a transcript-timeline lookup.
+//! Increment 4 must reconcile these where the surfaces need to agree — it cannot
+//! assume a drop-in swap.
+
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
+// ── Model ─────────────────────────────────────────────────────
+
+/// How confident the join between a fired way and its turn is (ADR-153 §2).
+/// `Keyed` = a foreign key (a transcript uuid) ties them; `Heuristic` = only a
+/// time/token-bucket proximity guess. Never present `Heuristic` as if `Keyed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinConfidence {
+    Keyed,
+    Heuristic,
+}
+
+/// A way's fire-bearing match criteria, unified from the frontmatter fields that
+/// decide whether a way fires. Consolidates the two inconsistent representations
+/// that exist today (the typed `Frontmatter`, which omits pattern/files/commands/
+/// trigger, and the untyped `WayCandidate` scan) into one honest surface.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct MatchCriteria {
+    /// Keyword channel — the regex matched against the prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    /// Bash channel — commands whose invocation fires the way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commands: Option<String>,
+    /// File channel — path globs whose touch fires the way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<String>,
+    /// State / explicit trigger channel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// Semantic channel — the vocabulary the way's embedding is built from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocabulary: Option<String>,
+    /// Semantic firing threshold (way-level cosine cutoff).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_threshold: Option<f64>,
+    /// Scope constraint (e.g. `subagent`, `teammate`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+/// What actually matched, when known (ADR-153 §3, forward-only enrichment).
+/// Absent for every record today; the type exists so the model's shape is stable
+/// once enrichment starts recording it. Semantic fires never get a `matched_span`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MatchDetail {
+    /// The matched span (regex / glob / command hit) for keyword/command/file
+    /// channels. `None` for semantic — there is no term to recover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_span: Option<String>,
+    pub confidence: JoinConfidence,
+}
+
+/// One way injected into context at a turn, with why it fired.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FiredWay {
+    pub way_id: String,
+    /// The match *channel* the event recorded: `keyword` / `semantic:embedding:*`
+    /// / `bash` / `file` / `state`. The mechanism, never the matched term.
+    pub trigger_channel: String,
+    /// Way-level cosine for semantic fires; `None` for deterministic channels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fire_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub way_path: Option<String>,
+    pub criteria: MatchCriteria,
+    /// What hit — `None` until fire-time enrichment (increment 3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_detail: Option<MatchDetail>,
+}
+
+/// One turn (an epoch cluster of fires) of a session.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Turn {
+    pub epoch: u64,
+    /// Recorded token position of the fires in this turn (the honest value the
+    /// event carried; `0` for channels that don't record one, e.g. state fires).
+    pub token_position: u64,
+    pub ts: String,
+    /// The triggering message id — `None` until enrichment (increment 3) turns the
+    /// heuristic time-join into a foreign key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_uuid: Option<String>,
+    /// Confidence of this turn's fired-way join. `Heuristic` until enrichment.
+    pub join_confidence: JoinConfidence,
+    pub fired_ways: Vec<FiredWay>,
+}
+
+/// Aggregate counts over a session's introspection.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct IntrospectionSummary {
+    pub turns: usize,
+    pub distinct_ways: usize,
+    pub total_fires: u64,
+}
+
+/// A session's introspection: its turns and the ways each fired.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SessionIntrospection {
+    pub id: String,
+    pub project: String,
+    pub window_k: u64,
+    pub summary: IntrospectionSummary,
+    pub turns: Vec<Turn>,
+}
+
+/// A way's resolved metadata: its file path and parsed criteria.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WayMeta {
+    pub path: Option<String>,
+    pub criteria: MatchCriteria,
+}
+
+/// Lookup from way id to its resolved metadata, built once per introspection.
+pub type CriteriaMap = HashMap<String, WayMeta>;
+
+// ── Build (the join) ──────────────────────────────────────────
+
+impl SessionIntrospection {
+    /// Build the introspection for one session from the raw event log, joining
+    /// each `way_fired` event to its frontmatter criteria via `criteria`.
+    ///
+    /// The turn↔fire join is HEURISTIC — every [`Turn`] is labelled as such —
+    /// until enrichment (ADR-153 §3) supplies a transcript uuid. Fires are grouped
+    /// into turns by the same `≤3s` timestamp-gap *rule* `rethink::build_frames`
+    /// uses (over the fire stream only — see the module note; the two are
+    /// reconciled at increment 4, not assumed identical). A way absent from
+    /// `criteria` still appears, with empty criteria — unknown, not invented.
+    pub fn build(
+        events: &[Value],
+        session_id: &str,
+        project: &str,
+        window_k: u64,
+        criteria: &CriteriaMap,
+    ) -> Self {
+        let mut fires: Vec<FireRow> = events
+            .iter()
+            .filter(|e| e["session"].as_str() == Some(session_id))
+            .filter(|e| e["event"].as_str() == Some("way_fired"))
+            .filter_map(FireRow::from_value)
+            .collect();
+        fires.sort_by(|a, b| a.ts.cmp(&b.ts));
+
+        let mut turns: Vec<Turn> = Vec::new();
+        let mut epoch: u64 = 0;
+        let mut cluster: Vec<&FireRow> = Vec::new();
+        let mut last_secs: u64 = 0;
+
+        for f in &fires {
+            let secs = parse_ts_secs(&f.ts);
+            if !cluster.is_empty() && secs > last_secs + 3 {
+                epoch += 1;
+                turns.push(build_turn(&cluster, epoch, criteria));
+                cluster.clear();
+            }
+            cluster.push(f);
+            last_secs = secs;
+        }
+        if !cluster.is_empty() {
+            epoch += 1;
+            turns.push(build_turn(&cluster, epoch, criteria));
+        }
+
+        let total_fires: u64 = turns.iter().map(|t| t.fired_ways.len() as u64).sum();
+        let distinct: HashSet<&str> = turns
+            .iter()
+            .flat_map(|t| t.fired_ways.iter().map(|w| w.way_id.as_str()))
+            .collect();
+        let summary = IntrospectionSummary {
+            turns: turns.len(),
+            distinct_ways: distinct.len(),
+            total_fires,
+        };
+
+        SessionIntrospection {
+            id: session_id.to_string(),
+            project: project.to_string(),
+            window_k,
+            summary,
+            turns,
+        }
+    }
+
+    /// Convenience: build for a session from the live event log (the increment-1
+    /// union reader) and the project-aware way corpus (so a fired way resolves to
+    /// the criteria that actually fired, honoring ADR-143 override precedence).
+    pub fn from_session(session_id: &str, project: &str, window_k: u64) -> Self {
+        let events = crate::firing::load_events();
+        let criteria = project_criteria_map(project);
+        Self::build(&events, session_id, project, window_k, &criteria)
+    }
+}
+
+fn build_turn(cluster: &[&FireRow], epoch: u64, criteria: &CriteriaMap) -> Turn {
+    let ts = cluster.first().map(|f| f.ts.clone()).unwrap_or_default();
+    let token_position = cluster.iter().map(|f| f.token_position).max().unwrap_or(0);
+    let fired_ways = cluster
+        .iter()
+        .map(|f| {
+            let meta = criteria.get(&f.way).cloned().unwrap_or_default();
+            FiredWay {
+                way_id: f.way.clone(),
+                trigger_channel: f.trigger.clone(),
+                fire_score: f.fire_score,
+                way_path: meta.path,
+                criteria: meta.criteria,
+                match_detail: None, // enrichment: increment 3
+            }
+        })
+        .collect();
+    Turn {
+        epoch,
+        token_position,
+        ts,
+        transcript_uuid: None,                    // enrichment: increment 3
+        join_confidence: JoinConfidence::Heuristic,
+        fired_ways,
+    }
+}
+
+/// A single `way_fired` row, projected from the JSONL. `log_event` writes every
+/// field as a JSON *string*, so numeric fields are parsed from strings (with a
+/// number fallback for robustness).
+struct FireRow {
+    ts: String,
+    way: String,
+    trigger: String,
+    fire_score: Option<f64>,
+    token_position: u64,
+}
+
+impl FireRow {
+    fn from_value(v: &Value) -> Option<Self> {
+        let way = v["way"].as_str().filter(|s| !s.is_empty())?;
+        Some(FireRow {
+            ts: v["ts"].as_str().unwrap_or("").to_string(),
+            way: way.to_string(),
+            trigger: v["trigger"].as_str().unwrap_or("").to_string(),
+            fire_score: str_or_num_f64(&v["fire_score"]),
+            token_position: str_or_num_u64(&v["token_position"]).unwrap_or(0),
+        })
+    }
+}
+
+fn str_or_num_f64(v: &Value) -> Option<f64> {
+    v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_f64())
+}
+
+fn str_or_num_u64(v: &Value) -> Option<u64> {
+    v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_u64())
+}
+
+/// Timestamp → seconds, for gap clustering. Mirrors `rethink::parse_ts_secs`:
+/// an approximate monotonic-enough encoding (dep-free; not calendar-exact), which
+/// is all the `≤3s` gap test needs. Increment 4 can hoist a single copy.
+fn parse_ts_secs(ts: &str) -> u64 {
+    if ts.len() < 19 {
+        return 0;
+    }
+    let year: u64 = ts[0..4].parse().unwrap_or(0);
+    let month: u64 = ts[5..7].parse().unwrap_or(0);
+    let day: u64 = ts[8..10].parse().unwrap_or(0);
+    let hour: u64 = ts[11..13].parse().unwrap_or(0);
+    let min: u64 = ts[14..16].parse().unwrap_or(0);
+    let sec: u64 = ts[17..19].parse().unwrap_or(0);
+    let days = year * 365 + year / 4 + month * 30 + day;
+    days * 86400 + hour * 3600 + min * 60 + sec
+}
+
+// ── Criteria parsing ──────────────────────────────────────────
+
+impl MatchCriteria {
+    /// Parse the fire-bearing fields from a way's raw frontmatter YAML. Reads each
+    /// field leniently and per-field, so an unexpected type on one field never
+    /// nukes the rest, and list-valued fields (`files: [a, b]`) join with `, `.
+    pub fn from_frontmatter_str(fm: &str) -> Self {
+        let map: Value = serde_yaml::from_str::<serde_yaml::Value>(fm)
+            .ok()
+            .and_then(|y| serde_json::to_value(y).ok())
+            .unwrap_or(Value::Null);
+        let get = |k: &str| flex_string(&map[k]);
+        MatchCriteria {
+            pattern: get("pattern"),
+            commands: get("commands"),
+            files: get("files"),
+            trigger: get("trigger"),
+            vocabulary: get("vocabulary"),
+            embed_threshold: str_or_num_f64(&map["embed_threshold"]),
+            scope: get("scope"),
+        }
+    }
+}
+
+/// A scalar (string/number/bool) → its text; a sequence → its items joined with
+/// `, `; anything else (map/null/missing/empty seq) → `None`.
+fn flex_string(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Bool(b) => Some(b.to_string()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Array(seq) => {
+            let parts: Vec<String> = seq.iter().filter_map(flex_string).collect();
+            (!parts.is_empty()).then(|| parts.join(", "))
+        }
+        _ => None,
+    }
+}
+
+/// The YAML frontmatter block of a way file — the text between the first two
+/// `---` fences. `None` if the file doesn't open with a fence.
+fn frontmatter_block(content: &str) -> Option<String> {
+    let rest = content.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    Some(rest[..end].to_string())
+}
+
+// ── Corpus resolver ───────────────────────────────────────────
+
+/// Build a [`CriteriaMap`] by scanning way roots once. First writer wins per id,
+/// so pass roots **highest-precedence first** (ADR-143: project > user > core, a
+/// user way shadows the core way of the same id). Unreadable roots/files skipped.
+///
+/// Recognition matches the *fire path* (`scan::candidates`), not the stricter
+/// [`crate::scanner`]: any `.md` with a frontmatter block is a way (skipping
+/// `.check.` re-fire files). Requiring a `description:` — as `scanner` does —
+/// would miss trigger-only ways like `meta/todos`, which fire but resolve to
+/// nothing. The key is the *domain-prefixed* id the fire sites record
+/// (`util::path_to_id` of the way file's parent dir — the same derivation
+/// `candidates::way_id_from_path` uses), so it joins the event `way` field.
+///
+/// A way whose id has since changed on disk (corpus evolution) simply won't be
+/// found by an old event referencing the former id — that fire keeps empty
+/// criteria (unknown, not invented), which the model surfaces honestly.
+pub fn build_criteria_map(roots: &[PathBuf]) -> CriteriaMap {
+    let mut map = CriteriaMap::new();
+    for root in roots {
+        for entry in walkdir::WalkDir::new(root)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(".check."))
+            {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            if !crate::util::has_frontmatter(&content) {
+                continue;
+            }
+            let Some(rel) = path.parent().and_then(|p| p.strip_prefix(root).ok()) else {
+                continue;
+            };
+            let id = crate::util::path_to_id(rel);
+            if id.is_empty() || map.contains_key(&id) {
+                continue;
+            }
+            let criteria = frontmatter_block(&content)
+                .map(|fm| MatchCriteria::from_frontmatter_str(&fm))
+                .unwrap_or_default();
+            map.insert(
+                id,
+                WayMeta {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    criteria,
+                },
+            );
+        }
+    }
+    map
+}
+
+/// The env-independent corpus in ADR-143 precedence order: user shadows core.
+pub fn default_criteria_map() -> CriteriaMap {
+    build_criteria_map(&[
+        crate::paths::user_ways_root(),
+        crate::paths::core_ways_root(),
+    ])
+}
+
+/// The full ADR-143 corpus for a given project: project ways shadow user, user
+/// shadows core — so a fired way resolves to the criteria that actually fired.
+pub fn project_criteria_map(project: &str) -> CriteriaMap {
+    build_criteria_map(&[
+        PathBuf::from(project).join(".claude").join("ways"),
+        crate::paths::user_ways_root(),
+        crate::paths::core_ways_root(),
+    ])
+}
+
+// ── Tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn crit(pattern: &str) -> MatchCriteria {
+        MatchCriteria {
+            pattern: Some(pattern.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn criteria_parses_lenient_fields() {
+        let fm = "\
+description: A way
+pattern: foo|bar
+files:
+  - src/**/*.rs
+  - README.md
+vocabulary: commit changes
+embed_threshold: 0.42
+scope: subagent
+";
+        let c = MatchCriteria::from_frontmatter_str(fm);
+        assert_eq!(c.pattern.as_deref(), Some("foo|bar"));
+        assert_eq!(c.files.as_deref(), Some("src/**/*.rs, README.md")); // list joined
+        assert_eq!(c.vocabulary.as_deref(), Some("commit changes"));
+        assert_eq!(c.embed_threshold, Some(0.42));
+        assert_eq!(c.scope.as_deref(), Some("subagent"));
+        assert!(c.commands.is_none()); // absent stays None
+    }
+
+    #[test]
+    fn criteria_tolerates_missing_and_empty() {
+        assert_eq!(MatchCriteria::from_frontmatter_str(""), MatchCriteria::default());
+        // A bad type on one field must not nuke the others.
+        let c = MatchCriteria::from_frontmatter_str("pattern: ok\nfiles: {a: 1}\n");
+        assert_eq!(c.pattern.as_deref(), Some("ok"));
+        assert!(c.files.is_none()); // a map is not a fire-bearing string
+    }
+
+    #[test]
+    fn frontmatter_block_extracts_between_fences() {
+        let doc = "---\npattern: x\nscope: y\n---\n# body\ntext\n";
+        let fm = frontmatter_block(doc).unwrap();
+        assert_eq!(fm, "pattern: x\nscope: y");
+        assert!(frontmatter_block("no frontmatter here").is_none());
+    }
+
+    #[test]
+    fn build_clusters_turns_and_labels_heuristic() {
+        // Two fires 1s apart (one turn), then a third 10s later (a second turn).
+        // A fire from another session and a non-fire event must be excluded.
+        let events = vec![
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword","token_position":"100"}),
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/b","trigger":"semantic:embedding:en","fire_score":"0.73","token_position":"120"}),
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:11Z","way":"d/a","trigger":"keyword","token_position":"400"}),
+            json!({"event":"way_fired","session":"other","ts":"2026-01-01T00:00:01Z","way":"d/z","trigger":"keyword"}),
+            json!({"event":"session_start","session":"s1","ts":"2026-01-01T00:00:00Z"}),
+        ];
+        let mut criteria = CriteriaMap::new();
+        criteria.insert("d/a".into(), WayMeta { path: Some("/w/a.md".into()), criteria: crit("aaa") });
+        // d/b intentionally absent → resolves to empty criteria, not a panic.
+
+        let s = SessionIntrospection::build(&events, "s1", "/proj", 200, &criteria);
+
+        assert_eq!(s.id, "s1");
+        assert_eq!(s.turns.len(), 2, "two epoch clusters");
+        assert_eq!(s.summary.turns, 2);
+        assert_eq!(s.summary.total_fires, 3, "other-session fire excluded");
+        assert_eq!(s.summary.distinct_ways, 2, "d/a and d/b");
+
+        let t0 = &s.turns[0];
+        assert_eq!(t0.epoch, 1);
+        assert_eq!(t0.token_position, 120, "max token_position in the cluster");
+        assert_eq!(t0.join_confidence, JoinConfidence::Heuristic);
+        assert_eq!(t0.transcript_uuid, None);
+        assert_eq!(t0.fired_ways.len(), 2);
+
+        // Resolved way carries its criteria + path; semantic carries a score.
+        let a = &t0.fired_ways[0];
+        assert_eq!(a.way_id, "d/a");
+        assert_eq!(a.trigger_channel, "keyword");
+        assert_eq!(a.fire_score, None);
+        assert_eq!(a.way_path.as_deref(), Some("/w/a.md"));
+        assert_eq!(a.criteria.pattern.as_deref(), Some("aaa"));
+        assert!(a.match_detail.is_none());
+
+        let b = &t0.fired_ways[1];
+        assert_eq!(b.way_id, "d/b");
+        assert_eq!(b.fire_score, Some(0.73)); // parsed from string
+        assert_eq!(b.criteria, MatchCriteria::default()); // unresolved → empty
+
+        assert_eq!(s.turns[1].epoch, 2);
+        assert_eq!(s.turns[1].token_position, 400);
+    }
+
+    #[test]
+    fn criteria_map_keys_match_event_ids_and_first_root_wins() {
+        let base = std::env::temp_dir().join(format!("ways-critmap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let hi = base.join("hi");
+        let lo = base.join("lo");
+        let write = |root: &std::path::Path, rel: &str, body: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, body).unwrap();
+        };
+        write(&hi, "api-design/dual-modes/dual-modes.md", "---\ndescription: d\npattern: HIGH\n---\nx\n");
+        write(&lo, "api-design/dual-modes/dual-modes.md", "---\ndescription: d\npattern: LOW\n---\nx\n");
+        write(&lo, "build/build.md", "---\ndescription: d\npattern: B\n---\nx\n");
+        // A trigger-only way with NO `description:` — fires in reality, so it must
+        // resolve here (the recognition bug that missed `meta/todos`).
+        write(&lo, "meta/todos/todos.md", "---\ntrigger: context-threshold\nthreshold: 75\n---\nx\n");
+        // A `.check.` re-fire file must be skipped.
+        write(&lo, "meta/todos/todos.check.md", "---\ndescription: check\n---\nx\n");
+
+        let map = build_criteria_map(&[hi.clone(), lo.clone()]);
+        // Keyed by the domain-prefixed id the fire sites record — not the
+        // scanner's domain-stripped id — or the join to events resolves nothing.
+        let dm = map.get("api-design/dual-modes").expect("keyed by domain-prefixed id");
+        assert_eq!(dm.criteria.pattern.as_deref(), Some("HIGH"), "first root shadows later");
+        assert!(!map.contains_key("dual-modes"), "domain-stripped id must not be a key");
+        // A top-level way keeps the bare domain as its id (matches events like `build`).
+        assert_eq!(map.get("build").and_then(|m| m.criteria.pattern.as_deref()), Some("B"));
+        // The description-less trigger way resolves, carrying its trigger criterion.
+        let todos = map.get("meta/todos").expect("trigger-only way must resolve");
+        assert_eq!(todos.criteria.trigger.as_deref(), Some("context-threshold"));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn build_on_empty_events_is_empty() {
+        let s = SessionIntrospection::build(&[], "s1", "/p", 200, &CriteriaMap::new());
+        assert_eq!(s.turns.len(), 0);
+        assert_eq!(s.summary, IntrospectionSummary::default());
+    }
+}
