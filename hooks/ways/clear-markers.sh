@@ -11,6 +11,12 @@ source "$(dirname "$0")/events-log.sh"
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 
+# The session's project. Prefer CLAUDE_PROJECT_DIR (the project root); fall back to
+# the hook payload's .cwd (the session's working directory) — NOT $PWD, which for a
+# SessionStart hook is the hooks dir (~/.claude) and mis-attributes every session's
+# project. Matches the resolution the check-*.sh hooks already use.
+PROJECT="${CLAUDE_PROJECT_DIR:-$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)}"
+
 # Clear session state
 if [[ -n "$SESSION_ID" ]]; then
   rm -rf "${SESSIONS_ROOT}/${SESSION_ID}" 2>/dev/null
@@ -23,7 +29,7 @@ fi
 mkdir -p "$(dirname "$EVENTS_LOG")" 2>/dev/null
 jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg event "session_start" \
-  --arg project "${CLAUDE_PROJECT_DIR:-$PWD}" \
+  --arg project "${PROJECT:-unknown}" \
   --arg session "${SESSION_ID:-unknown}" \
   '{ts:$ts,event:$event,project:$project,session:$session}' \
   >> "$EVENTS_LOG" 2>/dev/null
