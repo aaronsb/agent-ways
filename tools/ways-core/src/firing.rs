@@ -8,19 +8,24 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Load all firing events from the events log, one JSON object per line.
+/// Load all firing events, one JSON object per line, unioned across every
+/// existing events-log file (ADR-153 §1).
 ///
-/// A missing or unreadable log is not an error — it yields an empty vector
-/// (a fresh install simply has no firing history yet).
+/// A missing or unreadable log is not an error — it contributes nothing (a fresh
+/// install simply has no firing history yet). The union recovers `session_start`
+/// lines that older shell hooks orphaned in the legacy `~/.claude/stats` file
+/// after the XDG migration; see [`crate::paths::events_log_sources`] for why the
+/// files never overlap.
 pub fn load_events() -> Vec<Value> {
-    let path = crate::paths::events_log();
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    content
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
+    crate::paths::events_log_sources()
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .flat_map(|content| {
+            content
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect::<Vec<Value>>()
+        })
         .collect()
 }
 

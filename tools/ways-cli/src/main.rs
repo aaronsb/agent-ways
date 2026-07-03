@@ -305,6 +305,13 @@ enum Commands {
     /// CI) verify they resolve the same path as the binary on every platform —
     /// the contract documented in `hooks/ways/sessions-root.sh`.
     SessionsRoot,
+    /// Print the canonical events-log path. The single source of truth for every
+    /// telemetry writer — the Rust `session::log_event` and the shell hooks
+    /// (`clear-markers.sh`, `inject-subagent.sh` via `events-log.sh`) — and every
+    /// reader (`firing::load_events`). Resolving through the binary keeps the
+    /// hooks from hardcoding a path that drifts from `paths::events_log()` after
+    /// the ADR-142 XDG migration (ADR-153 §1).
+    EventsLogPath,
     /// Manage configuration (init/show/path)
     Config {
         #[command(subcommand)]
@@ -765,6 +772,10 @@ fn main() -> Result<()> {
         }
         Commands::SessionsRoot => {
             println!("{}", session::sessions_root());
+            Ok(())
+        }
+        Commands::EventsLogPath => {
+            println!("{}", paths::events_log().display());
             Ok(())
         }
         Commands::ResponseTopicsPath { session } => {

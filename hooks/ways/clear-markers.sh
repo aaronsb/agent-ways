@@ -6,6 +6,7 @@
 # Clears this session's state directory only — other sessions stay intact
 
 source "$(dirname "$0")/sessions-root.sh"
+source "$(dirname "$0")/events-log.sh"
 
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
@@ -18,11 +19,11 @@ else
   rm -rf "${SESSIONS_ROOT}" 2>/dev/null
 fi
 
-# Log session event
-mkdir -p "${HOME}/.claude/stats" 2>/dev/null
+# Log session event (canonical events-log path resolved via events-log.sh)
+mkdir -p "$(dirname "$EVENTS_LOG")" 2>/dev/null
 jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg event "session_start" \
   --arg project "${CLAUDE_PROJECT_DIR:-$PWD}" \
   --arg session "${SESSION_ID:-unknown}" \
   '{ts:$ts,event:$event,project:$project,session:$session}' \
-  >> "${HOME}/.claude/stats/events.jsonl" 2>/dev/null
+  >> "$EVENTS_LOG" 2>/dev/null
