@@ -105,8 +105,8 @@ pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()
             &embed_matches,
             near_miss_margin,
         ) {
-            PromptMatch::Fired { channel, score } => {
-                let out = capture_show_way(&way.id, session_id, &channel, score);
+            PromptMatch::Fired { channel, score, matched_span } => {
+                let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref());
                 if !out.is_empty() {
                     context.push_str(&out);
                     context.push_str("\n\n");
@@ -244,26 +244,19 @@ pub fn command(
             continue;
         }
 
-        let mut matched = false;
+        // Commands regex first, then the description pattern — capture the span
+        // of whichever matched (ADR-153 §3).
+        let matched_span = way
+            .commands
+            .as_deref()
+            .and_then(|p| regex_span(p, cmd))
+            .or_else(|| match (description, way.pattern.as_deref()) {
+                (Some(desc), Some(pat)) => regex_span(pat, &desc.to_lowercase()),
+                _ => None,
+            });
 
-        if let Some(ref cmds_pattern) = way.commands {
-            if regex_matches(cmds_pattern, cmd) {
-                matched = true;
-            }
-        }
-
-        if !matched {
-            if let Some(desc) = description {
-                if let Some(ref pat) = way.pattern {
-                    if regex_matches(pat, &desc.to_lowercase()) {
-                        matched = true;
-                    }
-                }
-            }
-        }
-
-        if matched {
-            let out = capture_show_way(&way.id, session_id, "bash", None);
+        if let Some(span) = matched_span {
+            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()));
             if !out.is_empty() {
                 context.push_str(&out);
             }
@@ -348,8 +341,8 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
         }
 
         if let Some(ref files_pattern) = way.files {
-            if regex_matches(files_pattern, filepath) {
-                let out = capture_show_way(&way.id, session_id, "file", None);
+            if let Some(span) = regex_span(files_pattern, filepath) {
+                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()));
                 if !out.is_empty() {
                     context.push_str(&out);
                 }
@@ -411,7 +404,9 @@ enum PromptMatch {
     /// The way fired. `channel` is the trigger channel; `score` is the
     /// embedding score that cleared threshold (`None` for deterministic keyword
     /// fires) — logged onto `way_fired` for embed_threshold tuning (ADR-134 D).
-    Fired { channel: String, score: Option<f64> },
+    /// `matched_span` is the regex match text for the keyword channel (ADR-153 §3);
+    /// `None` for semantic — one embedding per way, so there is no term to recover.
+    Fired { channel: String, score: Option<f64>, matched_span: Option<String> },
     /// The way did NOT fire, but at least one model scored within
     /// `near_miss_margin` below its effective threshold (ADR-134). Carries the
     /// already-computed scores for telemetry — no new embedding is done.
@@ -442,8 +437,12 @@ fn match_prompt(
     // Channel 1: Regex pattern — deterministic, scoreless. A pattern miss is
     // never a near-miss (there is no margin to be near).
     if let Some(ref pat) = pattern {
-        if regex_matches(pat, query) {
-            return PromptMatch::Fired { channel: "keyword".to_string(), score: None };
+        if let Some(span) = regex_span(pat, query) {
+            return PromptMatch::Fired {
+                channel: "keyword".to_string(),
+                score: None,
+                matched_span: Some(span),
+            };
         }
     }
 
@@ -457,10 +456,18 @@ fn match_prompt(
     let score_multi = scores.best_multi(corpus_id);
 
     if score_en.is_some_and(|s| s >= thresholds.en) {
-        return PromptMatch::Fired { channel: "semantic:embedding:en".to_string(), score: score_en };
+        return PromptMatch::Fired {
+            channel: "semantic:embedding:en".to_string(),
+            score: score_en,
+            matched_span: None,
+        };
     }
     if score_multi.is_some_and(|s| s >= thresholds.multi) {
-        return PromptMatch::Fired { channel: "semantic:embedding:multi".to_string(), score: score_multi };
+        return PromptMatch::Fired {
+            channel: "semantic:embedding:multi".to_string(),
+            score: score_multi,
+            matched_span: None,
+        };
     }
 
     // No fire. Record a near-miss when a model landed in the band just below
@@ -600,6 +607,21 @@ fn regex_matches(pattern: &str, text: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The first regex match in `text`, length-capped for the event log (ADR-153 §3
+/// `matched_span`). `None` if the pattern is invalid or doesn't match — mirroring
+/// [`regex_matches`]' error tolerance. The cap bounds how much of the matched
+/// input (a prompt/command/path fragment) lands in local telemetry; the pattern
+/// itself is author-controlled, so a match is normally a bounded keyword.
+fn regex_span(pattern: &str, text: &str) -> Option<String> {
+    const MAX_SPAN: usize = 120;
+    let m = Regex::new(pattern).ok()?.find(text)?;
+    let s = m.as_str();
+    Some(match s.char_indices().nth(MAX_SPAN) {
+        Some((byte, _)) => format!("{}…", &s[..byte]),
+        None => s.to_string(),
+    })
+}
+
 /// Emit accumulated context using the envelope shape required by the
 /// invoking hook event. The Claude Code hook contract treats
 /// `hookSpecificOutput` as canonical for all events; the simpler top-level
@@ -666,16 +688,18 @@ mod near_miss_tests {
         }
         // multi fire (EN below) carries the multi score, not EN's.
         match run(Some(0.20), Some(0.56), None) {
-            PromptMatch::Fired { channel, score } => {
+            PromptMatch::Fired { channel, score, matched_span } => {
                 assert_eq!(channel, "semantic:embedding:multi");
                 assert_eq!(score, Some(0.56));
+                assert_eq!(matched_span, None, "semantic carries no matched term");
             }
             _ => panic!("expected multi Fired"),
         }
         match run(Some(0.41), None, Some("query")) {
-            PromptMatch::Fired { channel, score } => {
+            PromptMatch::Fired { channel, score, matched_span } => {
                 assert_eq!(channel, "keyword");
                 assert_eq!(score, None);
+                assert_eq!(matched_span.as_deref(), Some("query"), "keyword records the regex match");
             }
             _ => panic!("expected keyword Fired"),
         }

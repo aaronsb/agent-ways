@@ -307,7 +307,13 @@ fn build_turn(cluster: &[&FireRow], epoch: u64, criteria: &CriteriaMap) -> Turn 
                 fire_score: f.fire_score,
                 way_path: meta.path,
                 criteria: meta.criteria,
-                match_detail: None, // enrichment: increment 3
+                // The matched span is a fire-time record of exactly what hit, so
+                // it is itself Keyed when present (ADR-153 §3). Absent for semantic
+                // (no term) and for pre-enrichment records.
+                match_detail: f.matched_span.clone().map(|span| MatchDetail {
+                    matched_span: Some(span),
+                    confidence: JoinConfidence::Keyed,
+                }),
             }
         })
         .collect();
@@ -330,6 +336,7 @@ struct FireRow {
     trigger: String,
     fire_score: Option<f64>,
     token_position: u64,
+    matched_span: Option<String>,
 }
 
 impl FireRow {
@@ -341,6 +348,7 @@ impl FireRow {
             trigger: v["trigger"].as_str().unwrap_or("").to_string(),
             fire_score: str_or_num_f64(&v["fire_score"]),
             token_position: str_or_num_u64(&v["token_position"]).unwrap_or(0),
+            matched_span: v["matched_span"].as_str().map(|s| s.to_string()),
         })
     }
 }
@@ -556,7 +564,7 @@ scope: subagent
         // Two fires 1s apart (one turn), then a third 10s later (a second turn).
         // A fire from another session and a non-fire event must be excluded.
         let events = vec![
-            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword","token_position":"100"}),
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword","token_position":"100","matched_span":"commit"}),
             json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/b","trigger":"semantic:embedding:en","fire_score":"0.73","token_position":"120"}),
             json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:11Z","way":"d/a","trigger":"keyword","token_position":"400"}),
             json!({"event":"way_fired","session":"other","ts":"2026-01-01T00:00:01Z","way":"d/z","trigger":"keyword"}),
@@ -588,12 +596,16 @@ scope: subagent
         assert_eq!(a.fire_score, None);
         assert_eq!(a.way_path.as_deref(), Some("/w/a.md"));
         assert_eq!(a.criteria.pattern.as_deref(), Some("aaa"));
-        assert!(a.match_detail.is_none());
+        // The recorded matched_span becomes a Keyed MatchDetail.
+        let md = a.match_detail.as_ref().expect("matched_span → match_detail");
+        assert_eq!(md.matched_span.as_deref(), Some("commit"));
+        assert_eq!(md.confidence, JoinConfidence::Keyed);
 
         let b = &t0.fired_ways[1];
         assert_eq!(b.way_id, "d/b");
         assert_eq!(b.fire_score, Some(0.73)); // parsed from string
         assert_eq!(b.criteria, MatchCriteria::default()); // unresolved → empty
+        assert!(b.match_detail.is_none(), "semantic fire has no matched span");
 
         assert_eq!(s.turns[1].epoch, 2);
         assert_eq!(s.turns[1].token_position, 400);
