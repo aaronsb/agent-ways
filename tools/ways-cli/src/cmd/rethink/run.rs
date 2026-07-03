@@ -144,8 +144,12 @@ pub fn run(
 #[cfg(feature = "tui")]
 pub fn run_live(session_id: &str, project: Option<&str>, speed: Option<u64>) -> Result<()> {
     let content = ways_core::firing::load_events_text();
-    let project_name = find_session_project(&content, session_id)
-        .or_else(|| project.map(str::to_string))
+    // Prefer the caller's project (where the monitor was launched) over the session's
+    // recorded project — the latter can be mislabeled by the boundary hook, and for a
+    // live view the launch directory is the right context for the label + transcript.
+    let project_name = project
+        .map(str::to_string)
+        .or_else(|| find_session_project(&content, session_id))
         .unwrap_or_else(|| "unknown".to_string());
 
     let events = load_session_events(&content, session_id);

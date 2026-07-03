@@ -231,14 +231,20 @@ fn justify(segments: &[String], width: usize) -> String {
 #[cfg(feature = "tui")]
 pub(super) fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<String> {
     let frame = &player.frames[player.current];
+    // When following the live tail, show how long ago the newest frame fired — a
+    // stale "2h ago" flags that this isn't the session you think it is; "3s ago"
+    // updating as you work is the proof it's yours.
     let live = if player.live {
         if player.following {
-            "  \x1b[1;32m● LIVE\x1b[0m"
+            let ago = seconds_ago(&frame.timestamp)
+                .map(|s| format!(" \x1b[2m· {}\x1b[0m", ago_label(s)))
+                .unwrap_or_default();
+            format!("  \x1b[1;32m● LIVE\x1b[0m{ago}")
         } else {
-            "  \x1b[1;33m● LIVE paused\x1b[0m"
+            "  \x1b[1;33m● LIVE paused\x1b[0m".to_string()
         }
     } else {
-        ""
+        String::new()
     };
     let mut h = vec![
         // Full session id (there's ample room), with the session's project path.
@@ -267,6 +273,48 @@ pub(super) fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<Stri
 fn friendly_ts(ts: &str) -> String {
     let spaced = ts.replace('T', " ");
     spaced.get(..16).unwrap_or(&spaced).to_string()
+}
+
+/// Whole seconds between an RFC-3339 UTC timestamp and now (`None` if unparseable,
+/// clamped at 0 for a future timestamp / clock skew).
+#[cfg(feature = "tui")]
+fn seconds_ago(ts: &str) -> Option<u64> {
+    let then = parse_rfc3339_unix(ts)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    Some((now - then).max(0) as u64)
+}
+
+/// Parse `YYYY-MM-DDTHH:MM:SSZ` to Unix seconds (UTC), via `days_from_civil`
+/// (Howard Hinnant). No dependency; the log's timestamps are always UTC `Z`.
+#[cfg(feature = "tui")]
+fn parse_rfc3339_unix(ts: &str) -> Option<i64> {
+    let num = |a: usize, z: usize| ts.get(a..z)?.parse::<i64>().ok();
+    let (y, mo, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    let (h, mi, s) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    let yc = if mo <= 2 { y - 1 } else { y };
+    let era = (if yc >= 0 { yc } else { yc - 399 }) / 400;
+    let yoe = yc - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some(days * 86400 + h * 3600 + mi * 60 + s)
+}
+
+/// A compact "N ago" label: seconds, minutes, hours, then days.
+#[cfg(feature = "tui")]
+fn ago_label(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
 }
 
 /// Fit rendered output to terminal dimensions.
@@ -305,6 +353,22 @@ mod tests {
     fn friendly_ts_trims_to_minute() {
         assert_eq!(friendly_ts("2026-07-03T16:52:00Z"), "2026-07-03 16:52");
         assert_eq!(friendly_ts("bogus"), "bogus"); // too short → returned as-is
+    }
+
+    #[test]
+    fn parse_rfc3339_unix_matches_known_epochs() {
+        assert_eq!(parse_rfc3339_unix("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_rfc3339_unix("2000-01-01T00:00:00Z"), Some(946_684_800));
+        assert_eq!(parse_rfc3339_unix("2026-07-03T00:00:00Z"), Some(1_783_036_800));
+        assert_eq!(parse_rfc3339_unix("bad"), None);
+    }
+
+    #[test]
+    fn ago_label_scales_units() {
+        assert_eq!(ago_label(5), "5s ago");
+        assert_eq!(ago_label(125), "2m ago");
+        assert_eq!(ago_label(7_200), "2h ago");
+        assert_eq!(ago_label(172_800), "2d ago");
     }
 
     #[test]
