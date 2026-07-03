@@ -3,7 +3,7 @@
 > **Type:** Design note (not an ADR)
 > **Status:** Working draft — sequencing for ADR-153 + ADR-154, deferred implementation
 > **Cites:** ADR-153 (introspection substrate), ADR-154 (three front-ends), ADR-201 (shared finding evidence), ADR-134 (near-miss telemetry)
-> **Motivates:** `ways rethink` fixes, `ways think`, non-interactive introspection, the why-fired drill-down
+> **Motivates:** the `ways introspect <replay|live|dump>` surface (`ways rethink` fixes + a live monitor + non-interactive dump) and the why-fired drill-down
 
 ## What this note is
 

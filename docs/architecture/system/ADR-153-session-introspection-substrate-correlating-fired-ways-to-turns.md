@@ -16,9 +16,10 @@ related:
 
 We want to answer, for any past or live session: **which ways were injected into
 context, on which turn, and *why* — what caused the hook to fire.** Three
-front-ends want this (post-hoc `rethink`, live `think`, a non-interactive dump
-for autonomous agents — ADR-154), so the correlation belongs in one shared
-substrate below them, not re-derived per front-end.
+front-ends want this (the `ways introspect <replay|live|dump>` surface of
+ADR-154 — post-hoc replay, live monitor, and a non-interactive dump for
+autonomous agents), so the correlation belongs in one shared substrate below
+them, not re-derived per front-end.
 
 A research pass (2026-07-02) mapped exactly what data exists. The findings define
 what the substrate can join today and what it cannot:
@@ -26,7 +27,9 @@ what the substrate can join today and what it cannot:
 **The firing-event log** (`$XDG_STATE/agent-ways/events.jsonl`, append-only JSONL;
 written by `session::log_event`, read by `firing::load_events`). A `way_fired`
 record carries `way`, `domain`, `trigger`, `scope`, `project`, `session`,
-`token_position`, and — for semantic fires only — `fire_score`. Sibling event
+`token_position`, and — for semantic fires only — `fire_score` (plus
+conditionally-emitted subagent/relationship fields `parent`, `tree_depth`,
+`epoch_distance`, `team`). Sibling event
 types: `way_nearmiss` (with `score_en/multi`, `thr_en/multi`, `margin`,
 `query_tokens` *count*), `session_start` (`{ts, project, session}` only),
 `check_fired`, `way_redisclosed`.
