@@ -211,10 +211,11 @@ impl SessionIntrospection {
     }
 
     /// Convenience: build for a session from the live event log (the increment-1
-    /// union reader) and the default way corpus.
+    /// union reader) and the project-aware way corpus (so a fired way resolves to
+    /// the criteria that actually fired, honoring ADR-143 override precedence).
     pub fn from_session(session_id: &str, project: &str, window_k: u64) -> Self {
         let events = crate::firing::load_events();
-        let criteria = default_criteria_map();
+        let criteria = project_criteria_map(project);
         Self::build(&events, session_id, project, window_k, &criteria)
     }
 }
@@ -354,29 +355,83 @@ fn frontmatter_block(content: &str) -> Option<String> {
 
 // ── Corpus resolver ───────────────────────────────────────────
 
-/// Build a [`CriteriaMap`] by scanning way roots once. First writer wins, so pass
-/// higher-priority roots first. Unreadable roots/files are skipped.
+/// Build a [`CriteriaMap`] by scanning way roots once. First writer wins per id,
+/// so pass roots **highest-precedence first** (ADR-143: project > user > core, a
+/// user way shadows the core way of the same id). Unreadable roots/files skipped.
+///
+/// Recognition matches the *fire path* (`scan::candidates`), not the stricter
+/// [`crate::scanner`]: any `.md` with a frontmatter block is a way (skipping
+/// `.check.` re-fire files). Requiring a `description:` — as `scanner` does —
+/// would miss trigger-only ways like `meta/todos`, which fire but resolve to
+/// nothing. The key is the *domain-prefixed* id the fire sites record
+/// (`util::path_to_id` of the way file's parent dir — the same derivation
+/// `candidates::way_id_from_path` uses), so it joins the event `way` field.
+///
+/// A way whose id has since changed on disk (corpus evolution) simply won't be
+/// found by an old event referencing the former id — that fire keeps empty
+/// criteria (unknown, not invented), which the model surfaces honestly.
 pub fn build_criteria_map(roots: &[PathBuf]) -> CriteriaMap {
     let mut map = CriteriaMap::new();
     for root in roots {
-        let Ok(ways) = crate::scanner::scan_ways(root) else {
-            continue;
-        };
-        for w in ways {
-            map.entry(w.id).or_insert_with(|| WayMeta {
-                path: Some(w.path.to_string_lossy().to_string()),
-                criteria: MatchCriteria::from_way_file(&w.path),
-            });
+        for entry in walkdir::WalkDir::new(root)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(".check."))
+            {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            if !crate::util::has_frontmatter(&content) {
+                continue;
+            }
+            let Some(rel) = path.parent().and_then(|p| p.strip_prefix(root).ok()) else {
+                continue;
+            };
+            let id = crate::util::path_to_id(rel);
+            if id.is_empty() || map.contains_key(&id) {
+                continue;
+            }
+            let criteria = frontmatter_block(&content)
+                .map(|fm| MatchCriteria::from_frontmatter_str(&fm))
+                .unwrap_or_default();
+            map.insert(
+                id,
+                WayMeta {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    criteria,
+                },
+            );
         }
     }
     map
 }
 
-/// The default corpus: shipped ways then user ways.
+/// The env-independent corpus in ADR-143 precedence order: user shadows core.
 pub fn default_criteria_map() -> CriteriaMap {
     build_criteria_map(&[
-        crate::paths::core_ways_root(),
         crate::paths::user_ways_root(),
+        crate::paths::core_ways_root(),
+    ])
+}
+
+/// The full ADR-143 corpus for a given project: project ways shadow user, user
+/// shadows core — so a fired way resolves to the criteria that actually fired.
+pub fn project_criteria_map(project: &str) -> CriteriaMap {
+    build_criteria_map(&[
+        PathBuf::from(project).join(".claude").join("ways"),
+        crate::paths::user_ways_root(),
+        crate::paths::core_ways_root(),
     ])
 }
 
@@ -478,6 +533,41 @@ scope: subagent
 
         assert_eq!(s.turns[1].epoch, 2);
         assert_eq!(s.turns[1].token_position, 400);
+    }
+
+    #[test]
+    fn criteria_map_keys_match_event_ids_and_first_root_wins() {
+        let base = std::env::temp_dir().join(format!("ways-critmap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let hi = base.join("hi");
+        let lo = base.join("lo");
+        let write = |root: &std::path::Path, rel: &str, body: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, body).unwrap();
+        };
+        write(&hi, "api-design/dual-modes/dual-modes.md", "---\ndescription: d\npattern: HIGH\n---\nx\n");
+        write(&lo, "api-design/dual-modes/dual-modes.md", "---\ndescription: d\npattern: LOW\n---\nx\n");
+        write(&lo, "build/build.md", "---\ndescription: d\npattern: B\n---\nx\n");
+        // A trigger-only way with NO `description:` — fires in reality, so it must
+        // resolve here (the recognition bug that missed `meta/todos`).
+        write(&lo, "meta/todos/todos.md", "---\ntrigger: context-threshold\nthreshold: 75\n---\nx\n");
+        // A `.check.` re-fire file must be skipped.
+        write(&lo, "meta/todos/todos.check.md", "---\ndescription: check\n---\nx\n");
+
+        let map = build_criteria_map(&[hi.clone(), lo.clone()]);
+        // Keyed by the domain-prefixed id the fire sites record — not the
+        // scanner's domain-stripped id — or the join to events resolves nothing.
+        let dm = map.get("api-design/dual-modes").expect("keyed by domain-prefixed id");
+        assert_eq!(dm.criteria.pattern.as_deref(), Some("HIGH"), "first root shadows later");
+        assert!(!map.contains_key("dual-modes"), "domain-stripped id must not be a key");
+        // A top-level way keeps the bare domain as its id (matches events like `build`).
+        assert_eq!(map.get("build").and_then(|m| m.criteria.pattern.as_deref()), Some("B"));
+        // The description-less trigger way resolves, carrying its trigger criterion.
+        let todos = map.get("meta/todos").expect("trigger-only way must resolve");
+        assert_eq!(todos.criteria.trigger.as_deref(), Some("context-threshold"));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
