@@ -16,7 +16,7 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None)
+    way_scored(id, session_id, trigger, None, None)
 }
 
 /// Like [`way`], but records the embedding score that caused a semantic fire
@@ -29,6 +29,7 @@ pub fn way_scored(
     session_id: &str,
     trigger: &str,
     fire_score: Option<f64>,
+    matched_span: Option<&str>,
 ) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
@@ -170,6 +171,17 @@ pub fn way_scored(
     // and makes the field self-documenting: its presence marks a placement event.
     if let (false, Some(score)) = (is_redisclosure, fire_score) {
         log_fields.push(("fire_score", format!("{score:.4}")));
+    }
+    // ADR-153 §3: the deterministic-channel match text, so introspection can show
+    // *what* fired the way without transcript replay. First-fire only (a
+    // redisclosure's re-trigger is a different match); semantic never carries one.
+    if let (false, Some(span)) = (is_redisclosure, matched_span) {
+        // A zero-width author pattern (e.g. `^`) fires but matches an empty string;
+        // recording an empty span is pure telemetry noise, so skip it (the fire
+        // decision was already made upstream — this only gates what's logged).
+        if !span.is_empty() {
+            log_fields.push(("matched_span", span.to_string()));
+        }
     }
     if let Some(ref p) = parent_id {
         log_fields.push(("parent", p.clone()));

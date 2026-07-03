@@ -175,8 +175,10 @@ pub(crate) fn capture_show_way(
     session_id: &str,
     trigger: &str,
     fire_score: Option<f64>,
+    matched_span: Option<&str>,
 ) -> String {
-    crate::cmd::show::way_scored(id, session_id, trigger, fire_score).unwrap_or_default()
+    crate::cmd::show::way_scored(id, session_id, trigger, fire_score, matched_span)
+        .unwrap_or_default()
 }
 
 pub(crate) fn capture_show_check(id: &str, session_id: &str, trigger: &str, score: f64) -> String {

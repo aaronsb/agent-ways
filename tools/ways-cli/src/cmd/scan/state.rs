@@ -109,7 +109,7 @@ pub fn state(
             }
         } else {
             // Standard one-shot: marker-gated via show
-            let out = capture_show_way(&way.id, session_id, "state", None);
+            let out = capture_show_way(&way.id, session_id, "state", None, None);
             if !out.is_empty() {
                 context.push_str(&out);
                 context.push_str("\n\n");
