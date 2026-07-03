@@ -60,9 +60,9 @@ git remote add upstream https://github.com/aaronsb/agent-ways
 ./scripts/install.sh
 ```
 
-Running the installer from inside the app dir is what links the `ways`/`attend`
-binaries onto your `PATH`; `make setup` alone builds them but does not. Pull
-upstream improvements later:
+Running the installer from inside the app dir is what links the suite binaries
+(`ways`, `ways-audit`, `attend`, `attend-chat`) onto your `PATH`; `make setup`
+alone builds them but does not. Pull upstream improvements later:
 
 ```bash
 cd "$XDG_DATA_HOME/agent-ways"
@@ -90,6 +90,8 @@ Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirector
 | Artifact | Size | Location | Source | Verification |
 |----------|------|----------|--------|--------------|
 | `ways` binary | ~3.6MB | `$XDG_DATA_HOME/agent-ways/bin/` (symlinked onto `PATH`) | GitHub Releases (or built from source) | SHA-256 checksum |
+| `ways-audit` binary | ~2.6MB | `$XDG_DATA_HOME/agent-ways/bin/` (symlinked onto `PATH`) | GitHub Releases (or built from source) | SHA-256 checksum |
+| `attend` / `attend-chat` binaries | ~2–3MB each | `$XDG_DATA_HOME/agent-ways/bin/` (symlinked onto `PATH`) | GitHub Releases (or built from source) | SHA-256 checksum |
 | `way-embed` binary | ~3MB | XDG cache (`…/user/`) | GitHub Releases | SHA-256 checksum |
 | `minilm-l6-v2.gguf` model | ~21MB | XDG cache (`…/user/`) | GitHub Releases (or HuggingFace) | SHA-256 checksum |
 

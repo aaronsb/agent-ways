@@ -95,6 +95,17 @@ corpus at scale (ADR-200 §7).
 `ways` has. The marginal cost is one CI job and one download path — the same
 prebuilt-binary machinery already planned for the other app binaries (ADR-142/ADR-146).
 
+**`ways-audit` is a first-class member of the suite, not an opt-in add-on.**
+`ways update` manages the *entire* agent-ways collection; we do not ship partial
+tool collections, and no binary has a separate lifecycle. So `make install` /
+`make setup` build and link `ways-audit` alongside `ways`/`attend`, and
+`ways update` refreshes it through the same download-first `refresh_component`
+path as the rest. "Deliberately-invoked" (§2) describes how the tool is *used* —
+you run `ways-audit assemble` when you want it, the way you run `/ship` — not
+whether it is *installed*: it is always present, like `ways` itself. (An earlier
+implementation kept it out of the default install "to stay lean"; that produced a
+published-but-unfetchable binary and is corrected here.)
+
 ## Relationship to ADR-111
 
 ADR-111 folded shell-script sprawl into one binary because the *abstraction layer* — one

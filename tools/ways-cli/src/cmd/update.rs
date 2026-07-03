@@ -11,12 +11,13 @@
 //!
 //! - **Prefer pre-built binaries.** `make update` force-*builds* via cargo/cmake,
 //!   which fails for anyone without a toolchain. This mirrors the *install* flow
-//!   instead: download-first, build-fallback (the Makefile's `ways` / way-embed
-//!   `setup-binary` targets). `attend`/`attend-chat` are download-first too now:
-//!   their `make` targets fetch the pre-built binary before building, so they
-//!   refresh without a toolchain — `attend` already publishes binaries, while
-//!   `attend-chat` falls back to a build until its first release is cut. Only the
-//!   build fallback needs cargo.
+//!   instead: download-first, build-fallback. Update manages the **whole suite**
+//!   uniformly — `ways` (downgrade-guarded), way-embed (its own cache path), and
+//!   the rest (`ways-audit`, `attend`, `attend-chat`) through one
+//!   `refresh_component` path via their download-first `make` targets. No tool has
+//!   a separate lifecycle, and none is optional to keep current; only the build
+//!   fallback needs cargo (`attend-chat` falls back to a build until its first
+//!   release is cut).
 //! - **Rename-then-revert, never leave a broken install.** Each component's
 //!   binary is *renamed* aside (not removed) to defeat the "already installed"
 //!   early-return; if re-acquiring it fails, the old binary is moved back. A
@@ -62,7 +63,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
         println!("  2. refresh ways               — download pre-built (guarded: never older than source), else build");
         println!("  3. refresh way-embed          — download pre-built, else build (optional)");
-        println!("  4. refresh attend/attend-chat — download pre-built, else build (optional)");
+        println!("  4. refresh ways-audit/attend/attend-chat — download pre-built, else build");
         println!("  5. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
         return Ok(());
@@ -102,8 +103,13 @@ pub fn run(dry_run: bool) -> Result<()> {
     //    try the pre-built binary before building), so they refresh even without a
     //    toolchain; the build fallback still needs cargo but the download path does
     //    not. A failed refresh reverts and keeps the current version.
-    eprintln!("==> refresh attend/attend-chat (pre-built first)");
-    for comp in ["attend", "attend-chat"] {
+    // These are the rest of the suite — ways-audit (compliance) and the attend
+    // awareness pair. `ways` (step 2, downgrade-guarded) and way-embed (step 3,
+    // its own cache path) are refreshed above; everything else flows through the
+    // same `refresh_component` path so the whole collection updates uniformly —
+    // no separate lifecycle for any one tool.
+    eprintln!("==> refresh ways-audit/attend/attend-chat (pre-built first)");
+    for comp in ["ways-audit", "attend", "attend-chat"] {
         if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
             eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
         }

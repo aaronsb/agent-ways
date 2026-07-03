@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
+.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -45,7 +45,7 @@ help:
 	@echo "  make sync-to-home-link  [legacy] symlink variant of sync-to-home"
 	@echo "  make ways         Get ways binary (download or build from source)"
 	@echo "  make ways-rebuild Force rebuild ways from source"
-	@echo "  make ways-audit   Build + link the optional compliance binary (ADR-151)"
+	@echo "  make ways-audit   Get ways-audit compliance binary (download or build)"
 	@echo "  make attend       Build attend binary"
 	@echo "  make attend-rebuild Force rebuild attend from source"
 	@echo "  make lint         Run clippy on Rust workspace (warnings = errors)"
@@ -95,7 +95,7 @@ deps:
 	@echo "Toolchain ready. Now run: make setup"
 
 # Build ways CLI + set up embedding engine + generate initial corpus.
-setup: ways attend attend-chat
+setup: ways ways-audit attend attend-chat
 	@echo "Setting up embedding engine..."
 	@# Optional accelerator — if its build deps are missing, warn and continue so
 	@# the rest of install (incl. the PATH symlinks) still completes. Without it,
@@ -117,6 +117,7 @@ setup: ways attend attend-chat
 install: hooks-executable setup hooks-install
 	@mkdir -p "$(XDG_BIN)"
 	@$(LINK) "$(CURDIR)/$(WAYS_BIN)" "$(XDG_BIN)/ways"
+	@$(LINK) "$(CURDIR)/$(WAYS_AUDIT_BIN)" "$(XDG_BIN)/ways-audit"
 	@$(LINK) "$(CURDIR)/$(ATTEND_BIN)" "$(XDG_BIN)/attend"
 	@$(LINK) "$(CURDIR)/$(ATTEND_CHAT_BIN)" "$(XDG_BIN)/attend-chat"
 	@mkdir -p "$(CLAUDE_BIN)"
@@ -131,6 +132,7 @@ install: hooks-executable setup hooks-install
 	@echo ""
 	@echo "Install complete."
 	@echo "  ways binary:        $(XDG_BIN)/ways → $(CURDIR)/$(WAYS_BIN)"
+	@echo "  ways-audit binary:  $(XDG_BIN)/ways-audit → $(CURDIR)/$(WAYS_AUDIT_BIN)"
 	@echo "  attend binary:      $(XDG_BIN)/attend → $(CURDIR)/$(ATTEND_BIN)"
 	@echo "  attend-chat binary: $(XDG_BIN)/attend-chat → $(CURDIR)/$(ATTEND_CHAT_BIN)"
 	@echo "  way-embed binary:   $(CLAUDE_BIN)/way-embed → $(CURDIR)/$(WAY_EMBED_BIN)"
@@ -179,7 +181,7 @@ sync-to-home-test:
 # on the same `make update` run that pulls the change — sub-makes
 # re-read the Makefile, but the in-memory `update:` recipe is fixed at
 # make-process startup.
-update-binaries: ways-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
+update-binaries: ways-rebuild ways-audit-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
 
 # --- Build ---
 
@@ -214,20 +216,39 @@ ways-rebuild:
 	@$(LINK) "$(CURDIR)/tools/target/release/ways$(EXE)" $(WAYS_BIN)
 	@echo "Built: $(WAYS_BIN) ($$(ls -lh $(WAYS_BIN) | awk '{print $$5}'))"
 
-# Build the ways-audit compliance binary from source and link it onto PATH.
-# Deliberately NOT part of `make setup`/`install` — it is optional, operator-
-# invoked tooling (ADR-151), so the default install stays lean. Run on demand.
+# Get the ways-audit compliance binary: try existing → download → build. A
+# first-class member of the suite (installed and updated like the others); it is
+# *deliberately-invoked* in the sense that you run `ways-audit` when you want it,
+# not that it's optional to install.
 ways-audit:
+	@if [ -x $(WAYS_AUDIT_BIN) ] && $(WAYS_AUDIT_BIN) --version >/dev/null 2>&1; then \
+		echo "ways-audit already installed: $$($(WAYS_AUDIT_BIN) --version)"; \
+	elif bash tools/ways-audit/download-ways-audit.sh 2>/dev/null; then \
+		echo "Pre-built ways-audit binary installed."; \
+	elif command -v cargo >/dev/null 2>&1; then \
+		echo "No pre-built binary, building ways-audit from source..."; \
+		bash scripts/check-rust.sh || exit 1; \
+		cargo build --release --manifest-path tools/Cargo.toml -p ways-audit; \
+		mkdir -p bin; \
+		$(LINK) "$(CURDIR)/tools/target/release/ways-audit$(EXE)" $(WAYS_AUDIT_BIN); \
+		echo "Built: $(WAYS_AUDIT_BIN) ($$(ls -lh $(WAYS_AUDIT_BIN) | awk '{print $$5}'))"; \
+	else \
+		echo "error: No pre-built binary and cargo not found."; \
+		echo "Install Rust: https://rustup.rs/"; \
+		exit 1; \
+	fi
+
+# Force rebuild ways-audit from source (ignores existing binary and download).
+ways-audit-rebuild:
 	@if ! command -v cargo >/dev/null 2>&1; then \
 		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
 		exit 1; \
 	fi
 	@bash scripts/check-rust.sh
 	cargo build --release --manifest-path tools/Cargo.toml -p ways-audit
-	@mkdir -p bin "$(XDG_BIN)"
+	@mkdir -p bin
 	@$(LINK) "$(CURDIR)/tools/target/release/ways-audit$(EXE)" $(WAYS_AUDIT_BIN)
-	@$(LINK) "$(CURDIR)/$(WAYS_AUDIT_BIN)" "$(XDG_BIN)/ways-audit"
-	@echo "Built + linked: $(XDG_BIN)/ways-audit → $(CURDIR)/$(WAYS_AUDIT_BIN)"
+	@echo "Built: $(WAYS_AUDIT_BIN) ($$(ls -lh $(WAYS_AUDIT_BIN) | awk '{print $$5}'))"
 
 # Build attend binary from workspace.
 attend:
