@@ -621,22 +621,47 @@ fn handle_timeline_key(player: &mut Player, key: KeyEvent) {
     }
 }
 
-/// Drill-down keys: ▲▼ select a fired way, ◀▶ move between frames without leaving
-/// the drill-down, PgUp/PgDn (or `[`/`]`) scroll the detail panel.
+/// Drill-down keys. ▲▼ select a fired way (resets the reader to the top of its
+/// document); `j`/`k` scroll the selected way's document within the detail window
+/// (vim-style, the same pattern used to read subagent output); PgUp/PgDn page it,
+/// `g`/`G` jump to top/bottom; ◀▶ / `h` `l` move between frames.
 #[cfg(feature = "tui")]
 fn handle_why_key(player: &mut Player, key: KeyEvent) {
     let ways_len = player.frames[player.current].ways.len();
+    // A near-full page for PgUp/PgDn, sized to the detail window.
+    let page = (player.term_height as usize).saturating_sub(9).max(1);
     match key {
-        KeyEvent { code: KeyCode::Up, .. } | KeyEvent { code: KeyCode::Char('k'), .. } => {
+        // Select a way (arrows only, so j/k stay free for reading the document).
+        KeyEvent { code: KeyCode::Up, .. } => {
             player.why_selected = player.why_selected.saturating_sub(1);
             player.why_detail_scroll = 0;
         }
-        KeyEvent { code: KeyCode::Down, .. } | KeyEvent { code: KeyCode::Char('j'), .. } => {
+        KeyEvent { code: KeyCode::Down, .. } => {
             if player.why_selected + 1 < ways_len {
                 player.why_selected += 1;
             }
             player.why_detail_scroll = 0;
         }
+        // Scroll the way document (render_why clamps to its length).
+        KeyEvent { code: KeyCode::Char('j'), .. } => {
+            player.why_detail_scroll = player.why_detail_scroll.saturating_add(1);
+        }
+        KeyEvent { code: KeyCode::Char('k'), .. } => {
+            player.why_detail_scroll = player.why_detail_scroll.saturating_sub(1);
+        }
+        KeyEvent { code: KeyCode::PageDown, .. } => {
+            player.why_detail_scroll = player.why_detail_scroll.saturating_add(page);
+        }
+        KeyEvent { code: KeyCode::PageUp, .. } => {
+            player.why_detail_scroll = player.why_detail_scroll.saturating_sub(page);
+        }
+        KeyEvent { code: KeyCode::Char('g'), .. } | KeyEvent { code: KeyCode::Home, .. } => {
+            player.why_detail_scroll = 0;
+        }
+        KeyEvent { code: KeyCode::Char('G'), .. } | KeyEvent { code: KeyCode::End, .. } => {
+            player.why_detail_scroll = usize::MAX; // render_why clamps to the bottom
+        }
+        // Frame navigation (time axis).
         KeyEvent { code: KeyCode::Right, .. } | KeyEvent { code: KeyCode::Char('l'), .. } => {
             player.following = false;
             jump_frame(player, player.current + 1);
@@ -645,15 +670,6 @@ fn handle_why_key(player: &mut Player, key: KeyEvent) {
         KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Char('h'), .. } => {
             player.following = false;
             jump_frame(player, player.current.saturating_sub(1));
-            player.why_detail_scroll = 0;
-        }
-        KeyEvent { code: KeyCode::PageDown, .. } | KeyEvent { code: KeyCode::Char(']'), .. } => {
-            player.why_detail_scroll = player.why_detail_scroll.saturating_add(5);
-        }
-        KeyEvent { code: KeyCode::PageUp, .. } | KeyEvent { code: KeyCode::Char('['), .. } => {
-            player.why_detail_scroll = player.why_detail_scroll.saturating_sub(5);
-        }
-        KeyEvent { code: KeyCode::Home, .. } | KeyEvent { code: KeyCode::Char('g'), .. } => {
             player.why_detail_scroll = 0;
         }
         _ => {}
@@ -1121,8 +1137,8 @@ fn render_status_bar(out: &mut String, player: &Player) {
         }
         View::WhyFired => {
             segs.push("\x1b[7m ▲▼ \x1b[0m way".into());
+            segs.push("\x1b[7m j/k \x1b[0m read".into());
             segs.push("\x1b[7m ◀▶ \x1b[0m frame".into());
-            segs.push("\x1b[7m PgUp/Dn \x1b[0m scroll".into());
         }
     }
     segs.push("\x1b[7m tab \x1b[0m view".into());
