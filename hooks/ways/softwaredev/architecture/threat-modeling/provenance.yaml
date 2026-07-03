@@ -4,21 +4,26 @@ policy:
 controls:
   - id: OWASP Threat Modeling Cheat Sheet
     justifications:
-      - STRIDE framework applied at design phase before code review
+      - STRIDE framework applied across the design's trust boundaries
       - Trust boundaries identified between components and external systems
     satisfied_when: >
-      Before implementation, the session performed a STRIDE pass over the design
-      and enumerated the trust boundaries where data crosses trust levels — the
-      threat analysis preceded writing the code rather than following it.
+      The trust boundaries in the design where data crosses trust levels are
+      enumerated, and each is examined against the STRIDE categories for
+      applicable threats. A trust boundary that carries untrusted input across a
+      trust level with no threat identified against it — an attack surface
+      introduced without analysis — is the failure case.
   - id: NIST SP 800-30 (Risk Assessment)
     justifications:
-      - Risk register documents accepted risks with expiration dates
+      - Accepted risks documented with a recorded acceptance rationale
       - Likelihood and impact assessed for each identified threat
     satisfied_when: >
-      Identified threats were recorded in a risk register with likelihood and
-      impact assessed for each, and any risk marked accepted carries an expiration
-      date rather than being accepted indefinitely.
-verified: 2026-02-17
+      Each identified threat is recorded with its likelihood and impact assessed,
+      so its risk level is ranked rather than unknown, and any risk that is
+      accepted rather than mitigated carries a documented rationale for the
+      acceptance. A threat recorded without the likelihood-and-impact scoring
+      needed to rank and triage it, or a risk accepted with no recorded rationale
+      — silent acceptance — is the failure case.
+verified: 2026-07-03
 rationale: >
   Security Way covers code-level detection (SQL injection, XSS, secrets).
   Threat modeling operates at design altitude — understanding adversaries,
