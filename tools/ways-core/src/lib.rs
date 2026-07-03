@@ -17,6 +17,7 @@ pub mod config;
 pub mod finding;
 pub mod firing;
 pub mod frontmatter;
+pub mod introspection;
 pub mod paths;
 pub mod provenance;
 pub mod scanner;
