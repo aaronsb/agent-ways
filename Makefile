@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
+.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -113,22 +113,28 @@ setup: ways ways-audit attend attend-chat
 	@echo "Generating corpus..."
 	@$(WAYS_BIN) corpus --quiet
 
+# Idempotent (re)linking of the suite binaries onto PATH. Only links what exists
+# in bin/, so it is safe to run before every binary is built and safe to re-run.
+# Both `install` and `ways update` call this — that is what lets a binary NEWLY
+# ADDED to the suite get its PATH symlink without a fresh `make install`. The
+# suite binaries (ways, ways-audit, attend, attend-chat) link into $(XDG_BIN);
+# way-embed lives in $(CLAUDE_BIN).
+relink:
+	@mkdir -p "$(XDG_BIN)"
+	@for b in ways ways-audit attend attend-chat; do \
+		if [ -e "$(CURDIR)/bin/$$b" ]; then \
+			$(LINK) "$(CURDIR)/bin/$$b" "$(XDG_BIN)/$$b"; \
+		fi; \
+	done
+	@if [ -e "$(CURDIR)/$(WAY_EMBED_BIN)" ]; then \
+		mkdir -p "$(CLAUDE_BIN)"; \
+		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$(CLAUDE_BIN)/way-embed" ]; then :; \
+		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$(CLAUDE_BIN)/way-embed"; fi; \
+	fi
+
 # Full install: build, setup, symlink to PATH.
 install: hooks-executable setup hooks-install
-	@mkdir -p "$(XDG_BIN)"
-	@$(LINK) "$(CURDIR)/$(WAYS_BIN)" "$(XDG_BIN)/ways"
-	@$(LINK) "$(CURDIR)/$(WAYS_AUDIT_BIN)" "$(XDG_BIN)/ways-audit"
-	@$(LINK) "$(CURDIR)/$(ATTEND_BIN)" "$(XDG_BIN)/attend"
-	@$(LINK) "$(CURDIR)/$(ATTEND_CHAT_BIN)" "$(XDG_BIN)/attend-chat"
-	@mkdir -p "$(CLAUDE_BIN)"
-	@# When the repo IS ~/.claude, $(CURDIR)/bin/way-embed already equals
-	@# $(CLAUDE_BIN)/way-embed — linking a file to itself errors ("same file").
-	@# Skip the link in that case; the binary is already where tools look for it.
-	@if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$(CLAUDE_BIN)/way-embed" ]; then \
-		echo "  way-embed: already in place ($(CLAUDE_BIN)/way-embed) — no link needed"; \
-	else \
-		$(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$(CLAUDE_BIN)/way-embed"; \
-	fi
+	@$(MAKE) -s --no-print-directory relink
 	@echo ""
 	@echo "Install complete."
 	@echo "  ways binary:        $(XDG_BIN)/ways → $(CURDIR)/$(WAYS_BIN)"
