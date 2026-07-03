@@ -1,4 +1,5 @@
 pub mod banner;
+pub mod compositor;
 pub mod context;
 pub mod corpus;
 pub mod disable;
