@@ -1091,41 +1091,68 @@ fn render_frame(player: &mut Player) -> String {
     compose_screen(top, rows, sel_line, extras, nav, drawable)
 }
 
-/// The unified 2-row footer shared by both views: a rule, then the tab-bar (active
-/// view highlighted) + view-appropriate key hints. The `tab`/`esc`/frame-position
-/// tail is identical across views so the legend never jumps when toggling.
+/// The unified 2-row footer shared by both views: a full-width rule, then the
+/// tab-bar + view-appropriate key hints, distributed evenly across the terminal
+/// width (space-between). The `tab`/`esc`/position tail is identical across views so
+/// the legend never jumps when toggling.
 fn render_status_bar(out: &mut String, player: &Player) {
-    let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(85));
+    let width = (player.term_width as usize).max(1);
+    let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(width));
 
     let active = if player.view == View::WhyFired { 1 } else { 0 };
-    let tabs = compositor::tab_bar(&["Timeline", "Why fired"], active);
-    let pos = format!("\x1b[1m{}/{}\x1b[0m", player.current + 1, player.frames.len());
 
-    let hints = match player.view {
+    // Each element is one `[key] label` unit; `justify` spreads them across `width`.
+    let mut segs: Vec<String> = vec![compositor::tab_bar(&["Timeline", "Why fired"], active)];
+    match player.view {
         View::Timeline => {
-            let mode = if player.live {
-                if player.following {
-                    "\x1b[7m space \x1b[0m follow  \x1b[1;32m● following\x1b[0m".to_string()
+            segs.push("\x1b[7m ▲▼ \x1b[0m select".into());
+            segs.push("\x1b[7m ⏎ \x1b[0m why".into());
+            segs.push("\x1b[7m ◀▶ \x1b[0m frame".into());
+            if player.live {
+                segs.push(if player.following {
+                    "\x1b[7m space \x1b[0m \x1b[1;32m● following\x1b[0m".into()
                 } else {
-                    "\x1b[7m space \x1b[0m follow  \x1b[1;33m● paused\x1b[0m".to_string()
-                }
+                    "\x1b[7m space \x1b[0m \x1b[1;33m● paused\x1b[0m".into()
+                });
             } else {
-                format!(
-                    "\x1b[7m space \x1b[0m play  \x1b[7m +- \x1b[0m speed  \x1b[2m{}\x1b[0m",
-                    SPEEDS[player.speed_idx].1
-                )
-            };
-            format!("\x1b[7m ▲▼ \x1b[0m select  \x1b[7m ⏎ \x1b[0m why  \x1b[7m ◀▶ \x1b[0m frame  {mode}")
+                segs.push("\x1b[7m space \x1b[0m play".into());
+                segs.push(format!("\x1b[7m +- \x1b[0m \x1b[2m{}\x1b[0m", SPEEDS[player.speed_idx].1));
+            }
         }
         View::WhyFired => {
-            "\x1b[7m ▲▼ \x1b[0m way  \x1b[7m ◀▶ \x1b[0m frame  \x1b[7m PgUp/Dn \x1b[0m scroll".to_string()
+            segs.push("\x1b[7m ▲▼ \x1b[0m way".into());
+            segs.push("\x1b[7m ◀▶ \x1b[0m frame".into());
+            segs.push("\x1b[7m PgUp/Dn \x1b[0m scroll".into());
         }
-    };
+    }
+    segs.push("\x1b[7m tab \x1b[0m view".into());
+    segs.push("\x1b[7m esc \x1b[0m quit".into());
+    segs.push(format!("\x1b[1m{}/{}\x1b[0m", player.current + 1, player.frames.len()));
 
-    let _ = write!(
-        out,
-        " {tabs}  {hints}  \x1b[7m tab \x1b[0m view  \x1b[7m esc \x1b[0m quit  \x1b[2m│\x1b[0m {pos}"
-    );
+    out.push_str(&justify(&segs, width));
+}
+
+/// Lay `segments` out across `width` with even gaps between them (space-between):
+/// the first hugs the left edge, the last the right, the rest spread evenly. Falls
+/// back to a single-space join when the content is already wider than `width`.
+#[cfg(feature = "tui")]
+fn justify(segments: &[String], width: usize) -> String {
+    let content: usize = segments.iter().map(|s| compositor::visible_len(s)).sum();
+    let gaps = segments.len().saturating_sub(1);
+    if gaps == 0 || content + gaps >= width {
+        return segments.join(" ");
+    }
+    let total_space = width - content;
+    let base = total_space / gaps;
+    let extra = total_space % gaps;
+    let mut out = String::new();
+    for (i, seg) in segments.iter().enumerate() {
+        out.push_str(seg);
+        if i < gaps {
+            out.push_str(&" ".repeat(base + usize::from(i < extra)));
+        }
+    }
+    out
 }
 
 /// The unified 4-row header both views share, so toggling never makes the header
@@ -1134,7 +1161,6 @@ fn render_status_bar(out: &mut String, player: &Player) {
 #[cfg(feature = "tui")]
 fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<String> {
     let frame = &player.frames[player.current];
-    let short_id = &player.session_id[..player.session_id.len().min(12)];
     let live = if player.live {
         if player.following {
             "  \x1b[1;32m● LIVE\x1b[0m"
@@ -1145,21 +1171,32 @@ fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<String> {
         ""
     };
     let mut h = vec![
+        // Full session id (there's ample room), with the session's project path.
         format!(
-            "\x1b[1mSession\x1b[0m {short_id}…  \x1b[2m{}\x1b[0m",
-            player.project_name
+            "\x1b[1mSession\x1b[0m {}  \x1b[2m{}\x1b[0m",
+            player.session_id, player.project_name
         ),
+        // The current frame's wall-clock time anchors "when" you are as you scrub
+        // windows/frames — otherwise every window looks alike.
         format!(
-            "  \x1b[2mepoch {} · {}K ctx · {} ways · window {}/{}\x1b[0m{live}",
+            "  \x1b[2mepoch {} · {}K ctx · {} ways · window {}/{} · {}\x1b[0m{live}",
             frame.epoch,
             player.context_window_k,
             frame.ways.len(),
             frame.window,
             player.windows,
+            friendly_ts(&frame.timestamp),
         ),
     ];
     h.extend(col_header);
     h
+}
+
+/// `2026-07-03T16:52:00Z` → `2026-07-03 16:52` (minute precision, no `T`/`Z`).
+#[cfg(feature = "tui")]
+fn friendly_ts(ts: &str) -> String {
+    let spaced = ts.replace('T', " ");
+    spaced.get(..16).unwrap_or(&spaced).to_string()
 }
 
 // ── Frame construction ────────────────────────────────────────
@@ -1909,6 +1946,24 @@ mod why_tests {
         // Moving forward (or a frame where the way is still present) → exact id match.
         let f = frame_of(vec![active("a", 1), active("b", 3), active("c", 5)]);
         assert_eq!(reselect_by_anchor(&f, "b", 3), 1);
+    }
+
+    #[test]
+    fn justify_spreads_segments_to_full_width() {
+        let segs = vec!["a".to_string(), "bb".to_string(), "c".to_string()];
+        let line = justify(&segs, 20);
+        assert_eq!(compositor::visible_len(&line), 20, "fills the full width");
+        assert!(line.starts_with('a'), "first segment hugs the left");
+        assert!(line.ends_with('c'), "last segment hugs the right");
+        // Content wider than the width → single-space join, no panic.
+        let tight = justify(&segs, 3);
+        assert_eq!(tight, "a bb c");
+    }
+
+    #[test]
+    fn friendly_ts_trims_to_minute() {
+        assert_eq!(friendly_ts("2026-07-03T16:52:00Z"), "2026-07-03 16:52");
+        assert_eq!(friendly_ts("bogus"), "bogus"); // too short → returned as-is
     }
 
     #[test]
