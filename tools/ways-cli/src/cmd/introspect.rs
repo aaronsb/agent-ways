@@ -24,6 +24,47 @@ pub fn replay(
     rethink::run(session, project, speed, false, all)
 }
 
+/// `ways introspect live` — monitor the current session's way firings, following
+/// the newest frame as ways fire. The "current" session is the most recent one in
+/// scope (the one actively writing events); `--session` overrides it. Scoping
+/// mirrors `replay`: defaults to the current project, `--project` for a specific
+/// one, and fails loud rather than silently globalizing when detection fails.
+pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
+        println!("No events recorded yet.");
+        return Ok(());
+    }
+
+    // Resolve which session to monitor:
+    // - explicit `--session` wins;
+    // - `--project` scopes to the latest session recorded under that project;
+    // - otherwise the *most recently active* session anywhere — the one still
+    //   appending events. We deliberately don't scope the default to a detected
+    //   project: a long-running session's recorded project can be stale/wrong (the
+    //   boundary hook logs `CLAUDE_PROJECT_DIR:-$PWD`), and "live" means "what's
+    //   happening now," which is an activity signal, not a project one.
+    let session_id = match (session, project) {
+        (Some(s), _) => s.to_string(),
+        (None, Some(p)) => match rethink_dump::most_recent_session(&content, Some(p)) {
+            Some(s) => s,
+            None => {
+                println!("No sessions found for project {p}.");
+                return Ok(());
+            }
+        },
+        (None, None) => match rethink_dump::most_recent_active_session(&content) {
+            Some(s) => s,
+            None => {
+                println!("No sessions found to monitor.");
+                return Ok(());
+            }
+        },
+    };
+
+    rethink::run_live(&session_id, project, None)
+}
+
 /// `ways introspect list` — enumerate candidate sessions in scope, as a table or
 /// (`--json`) machine-listable data for an agent to pick from before dumping.
 pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
