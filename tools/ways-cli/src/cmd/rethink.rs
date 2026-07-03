@@ -1334,12 +1334,28 @@ fn build_frames(
                 "way_redisclosed" => {
                     if !ev.way.is_empty() {
                         new_events.push(format!("↻ {}", ev.way));
-                        active_ways.entry(ev.way.clone()).and_modify(|w| {
-                            w.epoch_fired = epoch;
-                            w.token_pos = token_k * 1000;
-                            w.is_redisclosed = true;
-                            w.is_new = false;
-                        });
+                        // A redisclosure means the way is active (re-injected). Update it
+                        // if present; otherwise ADD it — after a compaction-window reset a
+                        // still-active way first reappears via redisclosure, not a fresh
+                        // fire, and must repopulate the window or it looks empty.
+                        active_ways
+                            .entry(ev.way.clone())
+                            .and_modify(|w| {
+                                w.epoch_fired = epoch;
+                                w.token_pos = token_k * 1000;
+                                w.is_redisclosed = true;
+                                w.is_new = false;
+                            })
+                            .or_insert_with(|| ActiveWay {
+                                id: ev.way.clone(),
+                                trigger: ev.trigger.clone(),
+                                epoch_fired: epoch,
+                                token_pos: token_k * 1000,
+                                check_fires: check_fires.get(&ev.way).copied().unwrap_or(0),
+                                is_new: false,
+                                is_redisclosed: true,
+                                refire_threshold_k: refire_for(&ev.way),
+                            });
                     }
                 }
                 _ => {}
@@ -1939,6 +1955,33 @@ mod why_tests {
         assert!(frames
             .iter()
             .any(|f| f.new_events.iter().any(|e| e.contains("compaction"))));
+    }
+
+    #[test]
+    fn redisclosure_repopulates_a_reset_window() {
+        let ev = |ts: &str, event: &str, way: &str| WayEvent {
+            ts: ts.into(),
+            event: event.into(),
+            way: way.into(),
+            trigger: "keyword".into(),
+            check: String::new(),
+        };
+        // A way fires in window 1; after a compaction, it only *re-discloses* (no
+        // fresh fire) in window 2 — as a mature window mostly does. It must still show
+        // in window 2, or the current window looks empty (the regression this fixes).
+        let events = vec![
+            ev("2026-01-01T00:00:00Z", "session_start", ""),
+            ev("2026-01-01T00:00:01Z", "way_fired", "d/a"),
+            ev("2026-01-01T02:00:00Z", "session_start", ""),
+            ev("2026-01-01T02:00:01Z", "way_redisclosed", "d/a"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        let last = frames.last().unwrap();
+        assert_eq!(last.window, 2);
+        assert!(
+            last.ways.iter().any(|w| w.id == "d/a"),
+            "a redisclosure must repopulate the reset window"
+        );
     }
 
     #[test]
