@@ -516,6 +516,11 @@ fn current_selected_way(player: &Player) -> Option<(String, u64)> {
 /// the anchor's (frame.ways is epoch-ascending, so that's the last such row), else
 /// the first row. Moving forward the anchor way is always present (frames are
 /// cumulative); moving backward it can vanish, and we snap to the nearest lesser epoch.
+///
+/// The epoch comparison is only meaningful *within* a window (epochs restart per
+/// compaction window). Across a window boundary the id-match usually resolves it, and
+/// the epoch fallback is just cursor placement — never correctness — so a cross-window
+/// mismatch at worst lands the cursor on a reasonable nearby row.
 #[cfg(feature = "tui")]
 fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_epoch: u64) -> usize {
     if let Some(i) = frame.ways.iter().position(|w| w.id == anchor_id) {
