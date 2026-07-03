@@ -73,6 +73,8 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
 | [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Accepted |
 | [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
+| [ADR-153](./system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) | Session-introspection substrate — correlating fired ways to turns | Accepted |
+| [ADR-154](./system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) | `ways introspect` — one model, three front-ends | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
