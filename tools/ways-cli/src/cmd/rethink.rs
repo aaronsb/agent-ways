@@ -13,7 +13,7 @@ use crossterm::{
 };
 
 use anyhow::{bail, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
@@ -137,6 +137,13 @@ pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<
 /// Whether an event's stored `project` path belongs to `scope`, compared as
 /// normalized absolute paths — replacing the old loose `contains` substring test
 /// that let unrelated projects (`/a/foo` vs `/a/foo-bar`) bleed together.
+///
+/// The comparison is exact (modulo trailing slash). On the primary path this is
+/// right: `CLAUDE_PROJECT_DIR` is the scope at both write and read time, so the
+/// strings match. On a *manual* run where scope falls back to `detect_project_dir`
+/// (a symlink-resolved cwd), a session whose stored `project` was a logical or
+/// symlinked path — or a subdirectory `$PWD` — won't match and is simply absent
+/// from the list (not an error). Pass `--all` or an explicit `--project` to see it.
 pub(crate) fn project_matches(stored: &str, scope: &str) -> bool {
     normalize_project_path(stored) == normalize_project_path(scope)
 }
@@ -683,6 +690,11 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
     let mut sessions: Vec<SessionInfo> = Vec::new();
     let mut event_counts: HashMap<String, (u32, u32)> = HashMap::new();
     let mut last_ts: HashMap<String, String> = HashMap::new();
+    // One entry per session id. `clear-markers.sh` writes `session_start` on both
+    // SessionStart and post-compaction, so a compacted session has several such
+    // lines; keep the first (its origin) and let the post-loop pass fill the
+    // aggregated counts, so the list (and the `--list --json` `count`) don't dupe.
+    let mut seen: HashSet<String> = HashSet::new();
 
     for line in content.lines() {
         if line.is_empty() {
@@ -707,14 +719,16 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
                     continue;
                 }
             }
-            sessions.push(SessionInfo {
-                id: sid.clone(),
-                ts: ts.clone(),
-                project,
-                event_count: 0,
-                way_fires: 0,
-                duration_secs: 0,
-            });
+            if seen.insert(sid.clone()) {
+                sessions.push(SessionInfo {
+                    id: sid.clone(),
+                    ts: ts.clone(),
+                    project,
+                    event_count: 0,
+                    way_fires: 0,
+                    duration_secs: 0,
+                });
+            }
         }
 
         let counts = event_counts.entry(sid.clone()).or_insert((0, 0));
@@ -990,6 +1004,23 @@ mod tests {
         assert!(!project_matches("/home/a/proj-2", "/home/a/proj"));
         assert!(!project_matches("/home/a/proj", "proj"));
         assert!(!project_matches("/home/a/other", "/home/a/proj"));
+    }
+
+    #[test]
+    fn gather_sessions_dedups_compaction_restarts() {
+        // Same session id with two `session_start` lines (initial + post-compaction).
+        let content = concat!(
+            r#"{"event":"session_start","session":"s1","ts":"2026-01-01T00:00:00Z","project":"/p"}"#, "\n",
+            r#"{"event":"way_fired","session":"s1","ts":"2026-01-01T00:01:00Z","way":"a/b"}"#, "\n",
+            r#"{"event":"session_start","session":"s1","ts":"2026-01-02T00:00:00Z","project":"/p"}"#, "\n",
+            r#"{"event":"way_fired","session":"s1","ts":"2026-01-02T00:01:00Z","way":"a/c"}"#, "\n",
+        );
+        let sessions = gather_sessions(content, Some("/p"));
+        assert_eq!(sessions.len(), 1, "one entry per session id, not per session_start");
+        assert_eq!(sessions[0].id, "s1");
+        assert_eq!(sessions[0].ts, "2026-01-01T00:00:00Z", "keeps the origin start");
+        assert_eq!(sessions[0].event_count, 4, "counts aggregate across the whole session");
+        assert_eq!(sessions[0].way_fires, 2);
     }
 
     #[test]
