@@ -62,7 +62,19 @@ pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
         },
     };
 
-    rethink::run_live(&session_id, project, None)
+    // The project shown (and used for the transcript lookup) is where you launched
+    // the monitor — CLAUDE_PROJECT_DIR, or the current directory — NOT the session's
+    // recorded project, which the boundary hook may have mislabeled. For a live view,
+    // "the project" is where you're working now.
+    let launch_project = project.map(str::to_string).or_else(|| {
+        std::env::var("CLAUDE_PROJECT_DIR").ok().or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+    });
+
+    rethink::run_live(&session_id, launch_project.as_deref(), None)
 }
 
 /// `ways introspect list` — enumerate candidate sessions in scope, as a table or
