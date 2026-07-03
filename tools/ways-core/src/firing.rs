@@ -29,6 +29,21 @@ pub fn load_events() -> Vec<Value> {
         .collect()
 }
 
+/// Concatenated raw text of every existing events-log file (ADR-153 §1 union).
+///
+/// The line-oriented timeline reconstruction in `ways rethink` works over raw
+/// JSONL lines rather than parsed values, so it needs the text, not
+/// [`load_events`]'s `Vec<Value>`. Same union guarantee: recovers `session_start`
+/// lines orphaned in the legacy log. Files are joined with a newline; the empty
+/// line any trailing newline produces is inert to line parsers.
+pub fn load_events_text() -> String {
+    crate::paths::events_log_sources()
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Count `way_fired` events per way ID across the given events.
 pub fn count_fires(events: &[Value]) -> HashMap<String, u64> {
     let mut counts: HashMap<String, u64> = HashMap::new();
