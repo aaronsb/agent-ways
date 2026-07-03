@@ -1437,7 +1437,7 @@ fn find_token_position(timeline: &[(String, u64)], ts: &str) -> u64 {
 // ── Event loading ─────────────────────────────────────────────
 
 pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEvent> {
-    content
+    let mut events: Vec<WayEvent> = content
         .lines()
         .filter(|l| l.contains(session_id))
         .filter_map(|line| {
@@ -1453,7 +1453,14 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 check: v["check"].as_str().unwrap_or("").to_string(),
             })
         })
-        .collect()
+        .collect();
+    // The event log is a UNION of sources (state + legacy projection) concatenated
+    // without sorting, so a session's events can arrive out of order — which would
+    // scramble build_frames' ≤3s clustering and its compaction-window boundaries
+    // (the symptom: the "newest" frame stuck at an old legacy tail). Sort by
+    // timestamp so the stream is chronological. RFC-3339 UTC strings sort lexically.
+    events.sort_by(|a, b| a.ts.cmp(&b.ts));
+    events
 }
 
 pub(crate) fn find_session_project(content: &str, session_id: &str) -> Option<String> {
@@ -1917,6 +1924,22 @@ mod why_tests {
             new_events: vec![],
             window: 1,
         }
+    }
+
+    #[test]
+    fn load_session_events_sorts_by_timestamp() {
+        // The union of log sources can present a recent event before an older one;
+        // build_frames needs them chronological or its clustering/windows scramble.
+        let content = concat!(
+            r#"{"ts":"2026-01-02T00:00:00Z","event":"way_fired","session":"s","way":"d/late"}"#,
+            "\n",
+            r#"{"ts":"2026-01-01T00:00:00Z","event":"way_fired","session":"s","way":"d/early"}"#,
+            "\n",
+        );
+        let evs = load_session_events(content, "s");
+        assert_eq!(evs.len(), 2);
+        assert_eq!(evs[0].ts, "2026-01-01T00:00:00Z", "earliest first");
+        assert_eq!(evs[1].ts, "2026-01-02T00:00:00Z");
     }
 
     #[test]
