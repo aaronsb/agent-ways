@@ -57,14 +57,27 @@ The bugs that make `rethink` wrong today. Land first; delivers value alone.
   `cmd/scan/candidates.rs`'s raw extraction).
 - No UI yet — model + unit tests over sample events + a fixture transcript.
 
-### 3 — Fire-time enrichment — ADR-153 §3 (forward-only)
+### 3 — Precise "why" — ADR-153 §3 (revised: split by source)
 
-- Add `transcript_uuid` (message id from hook stdin) + `matched_span` (regex/glob
-  match for keyword/command/file) at the fire sites: `cmd/show/mod.rs:152-186`,
-  `cmd/scan/mod.rs:108`, `cmd/scan/state.rs`.
-- Keep the fire path cheap and line-atomic. Semantic stays `fire_score` only.
-- Model (increment 2) reads the new fields when present, falls back to heuristic
-  when absent.
+Investigation (2026-07-03) corrected §3: no message uuid is available at fire time
+(`UserPromptSubmit` carries none), but the transcript records each hook injection
+with a `parentUuid` chain back to its user message. So the two halves are sourced
+differently and land as two independently-shippable sub-increments:
+
+- **3a — `transcript_uuid`, post-hoc in the ways-core model (no hot path).** Read
+  the transcript, index `UserPromptSubmit` `attachment`s (their `parentUuid` walks
+  to the triggering `user` message), match each turn to its attachment by
+  session + fire-timestamp, follow to the user-message uuid, and flip that turn's
+  join `Heuristic`→`Keyed`. Absent/unmatched transcript → stays `Heuristic`. Reuse
+  the transcript-reading pattern from `context.rs`/`rethink::build_token_timeline`.
+- **3b — `matched_span`, fire-time enrichment (hot path).** The injected content is
+  way-anonymous, so *what text matched a way* must be captured when it fires. Add
+  `matched_span` for the keyword/command/file channels at the fire sites
+  (`cmd/show/mod.rs` `way_scored` log block ~155-186, via `scan/scoring.rs:179`;
+  `cmd/scan/state.rs`). Plumb the regex/glob match through `PromptMatch::Fired` →
+  `scoring.rs` → `way_scored`. Cheap, line-atomic. Semantic stays `fire_score` only.
+- Model reads each field when present, falls back to the heuristic grain when
+  absent.
 
 ### 4 — `ways introspect` surface + non-interactive dump — ADR-154 §1, §4 (agent-facing MVP)
 
