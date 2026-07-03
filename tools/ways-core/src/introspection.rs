@@ -18,19 +18,24 @@
 //! [`FiredWay::fire_score`]. `match_detail` will carry a span only for the
 //! keyword/command/file channels, and only once enrichment records it.
 //!
-//! This increment builds the model + the join from the event log; it does not yet
-//! rewire the `rethink` replay pipeline (still in `ways-cli`) to consume it — that
-//! convergence is increment 4.
+//! This model is the *analytical* substrate (why a way fired: criteria, matched
+//! span, transcript key). The `rethink` **replay** pipeline (still in `ways-cli`)
+//! stays a distinct *animation* projection — `build_frames` folds the full event
+//! stream into cumulative "what's active at epoch N" frames. The two are **not**
+//! unified into one clustering (decided 2026-07-03, ADR-153 module note / ADR-154
+//! §1): they are different views serving different jobs, joined only where they
+//! meet — the why-fired drill-down looks up a frame's focused way in this model
+//! **by `way_id`**, which needs no epoch alignment.
 //!
 //! **The clustering shares the `≤3s` gap *rule* with `rethink::build_frames`, but
-//! is not identical to it** — the two are reconciled at increment 4, not assumed
-//! equivalent now. Deliberate differences: this model clusters the *fire* stream
-//! only (a [`Turn`] is defined by the ways that fired, not by `session_start` /
+//! is deliberately not identical to it** — and, per the boundary above, is not
+//! meant to be. Deliberate differences: this model clusters the *fire* stream only
+//! (a [`Turn`] is defined by the ways that fired, not by the `session_start` /
 //! `way_redisclosed` events the replay also folds in), sorts by timestamp, numbers
 //! epochs over fire-bearing clusters only, and takes each turn's token position
 //! from the event's own recorded value rather than a transcript-timeline lookup.
-//! Increment 4 must reconcile these where the surfaces need to agree — it cannot
-//! assume a drop-in swap.
+//! A consumer that needs the cumulative timeline reads `build_frames`; one that
+//! needs the per-turn "why" reads this model; the drill-down bridges them by id.
 
 use crate::util::parse_ts_secs;
 use serde::Serialize;

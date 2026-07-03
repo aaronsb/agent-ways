@@ -21,6 +21,11 @@ use crate::cmd::render::{self, WayRow};
 use crate::session;
 use crate::util::{detect_project_dir, home_dir, parse_ts_secs};
 
+#[cfg(feature = "tui")]
+use crate::cmd::compositor::{self, Panel};
+#[cfg(feature = "tui")]
+use ways_core::introspection::{MatchCriteria, SessionIntrospection};
+
 // ── Data structures ───────────────────────────────────────────
 
 /// A way event from events.jsonl.
@@ -64,6 +69,15 @@ pub(crate) struct Frame {
     pub(crate) new_events: Vec<String>,
 }
 
+/// Which view the replay shows. `Timeline` is the cumulative frame table; `WhyFired`
+/// is the drill-down that joins the current frame's ways to the `SessionIntrospection`
+/// model by `way_id` (ADR-154 §1 boundary — no epoch alignment).
+#[derive(Clone, Copy, PartialEq)]
+enum View {
+    Timeline,
+    WhyFired,
+}
+
 /// Playback state.
 struct Player {
     frames: Vec<Frame>,
@@ -71,9 +85,20 @@ struct Player {
     playing: bool,
     speed_idx: usize,
     session_id: String,
+    project_name: String,
     context_window_k: u64,
     term_width: u16,
     term_height: u16,
+    /// Current view; the drill-down state below is only meaningful in `WhyFired`.
+    view: View,
+    /// The per-way "why" index, built lazily on first entry to the drill-down so a
+    /// plain replay never pays for the model + transcript read.
+    #[cfg(feature = "tui")]
+    why_index: Option<WhyIndex>,
+    /// Which fired way of the current frame is focused in the drill-down.
+    why_selected: usize,
+    /// Scroll offset into the focused way's detail panel.
+    why_detail_scroll: usize,
 }
 
 const SPEEDS: &[(u64, &str)] = &[
@@ -217,9 +242,14 @@ pub fn run(
         playing: false,
         speed_idx,
         session_id,
+        project_name,
         context_window_k,
         term_width,
         term_height,
+        view: View::Timeline,
+        why_index: None,
+        why_selected: 0,
+        why_detail_scroll: 0,
     };
 
     run_tui(&mut player)
@@ -264,7 +294,10 @@ fn tui_loop(player: &mut Player) -> Result<()> {
             player.term_height = h;
         }
 
-        let raw_output = render_frame(player);
+        let raw_output = match player.view {
+            View::Timeline => render_frame(player),
+            View::WhyFired => render_why(player),
+        };
         let output = fit_to_terminal(&raw_output, player.term_width as usize, player.term_height as usize);
         execute!(stdout, cursor::MoveTo(0, 0), terminal::Clear(ClearType::All))?;
         write!(stdout, "{output}")?;
@@ -278,59 +311,29 @@ fn tui_loop(player: &mut Player) -> Result<()> {
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
+                // Global keys, then per-view dispatch.
                 match key {
                     KeyEvent { code: KeyCode::Esc, .. }
                     | KeyEvent { code: KeyCode::Char('q'), .. } => break,
 
                     KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. } => break,
 
-                    KeyEvent { code: KeyCode::Right, .. }
-                    | KeyEvent { code: KeyCode::Char('l'), .. } => {
+                    // Tab toggles the why-fired drill-down. Entering it pauses
+                    // playback and starts the focus at the top of the frame's ways.
+                    KeyEvent { code: KeyCode::Tab, .. } => {
+                        player.view = match player.view {
+                            View::Timeline => View::WhyFired,
+                            View::WhyFired => View::Timeline,
+                        };
                         player.playing = false;
-                        if player.current < player.frames.len() - 1 {
-                            player.current += 1;
-                        }
+                        player.why_selected = 0;
+                        player.why_detail_scroll = 0;
                     }
 
-                    KeyEvent { code: KeyCode::Left, .. }
-                    | KeyEvent { code: KeyCode::Char('h'), .. } => {
-                        player.playing = false;
-                        if player.current > 0 {
-                            player.current -= 1;
-                        }
-                    }
-
-                    KeyEvent { code: KeyCode::Char(' '), .. } => {
-                        player.playing = !player.playing;
-                    }
-
-                    KeyEvent { code: KeyCode::Up, .. }
-                    | KeyEvent { code: KeyCode::Char('k'), .. } => {
-                        if player.speed_idx < SPEEDS.len() - 1 {
-                            player.speed_idx += 1;
-                        }
-                    }
-
-                    KeyEvent { code: KeyCode::Down, .. }
-                    | KeyEvent { code: KeyCode::Char('j'), .. } => {
-                        if player.speed_idx > 0 {
-                            player.speed_idx -= 1;
-                        }
-                    }
-
-                    KeyEvent { code: KeyCode::Home, .. }
-                    | KeyEvent { code: KeyCode::Char('g'), .. } => {
-                        player.current = 0;
-                        player.playing = false;
-                    }
-
-                    KeyEvent { code: KeyCode::End, .. }
-                    | KeyEvent { code: KeyCode::Char('G'), .. } => {
-                        player.current = player.frames.len() - 1;
-                        player.playing = false;
-                    }
-
-                    _ => {}
+                    _ => match player.view {
+                        View::Timeline => handle_timeline_key(player, key),
+                        View::WhyFired => handle_why_key(player, key),
+                    },
                 }
             }
         } else if player.playing {
@@ -342,6 +345,343 @@ fn tui_loop(player: &mut Player) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Timeline-view keys: frame navigation, play/pause, and speed.
+#[cfg(feature = "tui")]
+fn handle_timeline_key(player: &mut Player, key: KeyEvent) {
+    match key {
+        KeyEvent { code: KeyCode::Right, .. } | KeyEvent { code: KeyCode::Char('l'), .. } => {
+            player.playing = false;
+            if player.current < player.frames.len() - 1 {
+                player.current += 1;
+            }
+        }
+        KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Char('h'), .. } => {
+            player.playing = false;
+            if player.current > 0 {
+                player.current -= 1;
+            }
+        }
+        KeyEvent { code: KeyCode::Char(' '), .. } => player.playing = !player.playing,
+        KeyEvent { code: KeyCode::Up, .. } | KeyEvent { code: KeyCode::Char('k'), .. } => {
+            if player.speed_idx < SPEEDS.len() - 1 {
+                player.speed_idx += 1;
+            }
+        }
+        KeyEvent { code: KeyCode::Down, .. } | KeyEvent { code: KeyCode::Char('j'), .. } => {
+            if player.speed_idx > 0 {
+                player.speed_idx -= 1;
+            }
+        }
+        KeyEvent { code: KeyCode::Home, .. } | KeyEvent { code: KeyCode::Char('g'), .. } => {
+            player.current = 0;
+            player.playing = false;
+        }
+        KeyEvent { code: KeyCode::End, .. } | KeyEvent { code: KeyCode::Char('G'), .. } => {
+            player.current = player.frames.len() - 1;
+            player.playing = false;
+        }
+        _ => {}
+    }
+}
+
+/// Drill-down keys: ▲▼ select a fired way, ◀▶ move between frames without leaving
+/// the drill-down, PgUp/PgDn (or `[`/`]`) scroll the detail panel.
+#[cfg(feature = "tui")]
+fn handle_why_key(player: &mut Player, key: KeyEvent) {
+    let ways_len = player.frames[player.current].ways.len();
+    match key {
+        KeyEvent { code: KeyCode::Up, .. } | KeyEvent { code: KeyCode::Char('k'), .. } => {
+            player.why_selected = player.why_selected.saturating_sub(1);
+            player.why_detail_scroll = 0;
+        }
+        KeyEvent { code: KeyCode::Down, .. } | KeyEvent { code: KeyCode::Char('j'), .. } => {
+            if player.why_selected + 1 < ways_len {
+                player.why_selected += 1;
+            }
+            player.why_detail_scroll = 0;
+        }
+        KeyEvent { code: KeyCode::Right, .. } | KeyEvent { code: KeyCode::Char('l'), .. } => {
+            if player.current < player.frames.len() - 1 {
+                player.current += 1;
+            }
+            player.why_selected = 0;
+            player.why_detail_scroll = 0;
+        }
+        KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Char('h'), .. } => {
+            if player.current > 0 {
+                player.current -= 1;
+            }
+            player.why_selected = 0;
+            player.why_detail_scroll = 0;
+        }
+        KeyEvent { code: KeyCode::PageDown, .. } | KeyEvent { code: KeyCode::Char(']'), .. } => {
+            player.why_detail_scroll = player.why_detail_scroll.saturating_add(5);
+        }
+        KeyEvent { code: KeyCode::PageUp, .. } | KeyEvent { code: KeyCode::Char('['), .. } => {
+            player.why_detail_scroll = player.why_detail_scroll.saturating_sub(5);
+        }
+        KeyEvent { code: KeyCode::Home, .. } | KeyEvent { code: KeyCode::Char('g'), .. } => {
+            player.why_detail_scroll = 0;
+        }
+        _ => {}
+    }
+}
+
+// ── Why-fired drill-down (ADR-154 §1, §2) ─────────────────────
+
+/// One channel's "why it fired" for a way, aggregated from the model across the
+/// way's fires *on that channel*. Matched spans are collected distinctly.
+#[cfg(feature = "tui")]
+struct WhyEntry {
+    way_path: Option<String>,
+    trigger_channel: String,
+    fire_score: Option<f64>,
+    criteria: MatchCriteria,
+    matched_spans: Vec<String>,
+}
+
+/// Index key: `(way_id, trigger_channel)`. A single way commonly fires on several
+/// channels in one session (verified against the event log: e.g. `documentation`
+/// fires bash + file + keyword + semantic). Each channel is its own coherent facet —
+/// its own score and matched spans. Folding them into one `way_id` entry would let a
+/// keyword span be shown under a semantic trigger, fabricating a semantic matched
+/// term (the forbidden case, ADR-153). Keying by channel keeps each facet honest;
+/// the drill-down looks up the channel the focused frame shows for that way. Still a
+/// way_id-based join (no epoch alignment) per the ADR-154 §1 boundary — just at
+/// channel granularity.
+#[cfg(feature = "tui")]
+type WhyKey = (String, String);
+
+#[cfg(feature = "tui")]
+type WhyIndex = HashMap<WhyKey, WhyEntry>;
+
+/// Fold the model's per-turn fired-ways into a `(way_id, channel) → WhyEntry` index.
+#[cfg(feature = "tui")]
+fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
+    let mut idx: WhyIndex = HashMap::new();
+    for turn in &model.turns {
+        for fw in &turn.fired_ways {
+            let key = (fw.way_id.clone(), fw.trigger_channel.clone());
+            let e = idx.entry(key).or_insert_with(|| WhyEntry {
+                way_path: fw.way_path.clone(),
+                trigger_channel: fw.trigger_channel.clone(),
+                fire_score: fw.fire_score,
+                criteria: fw.criteria.clone(),
+                matched_spans: Vec::new(),
+            });
+            if let Some(span) = fw.match_detail.as_ref().and_then(|m| m.matched_span.clone()) {
+                if !e.matched_spans.contains(&span) {
+                    e.matched_spans.push(span);
+                }
+            }
+        }
+    }
+    idx
+}
+
+/// Read a way file's body: everything after a leading `---`/`---` frontmatter
+/// block. Line-based so a body that legitimately opens with a markdown list (`- …`)
+/// or a `---` rule is preserved. A file with no opening fence, or an unterminated
+/// fence, is returned whole (nothing is silently dropped).
+#[cfg(feature = "tui")]
+fn read_way_body(path: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut lines = content.lines();
+    if lines.next() != Some("---") {
+        return Some(content); // no opening fence — treat all as body
+    }
+    let mut in_frontmatter = true;
+    let mut body = String::new();
+    for line in lines {
+        if in_frontmatter {
+            if line == "---" {
+                in_frontmatter = false; // consume the closing fence line
+            }
+            continue;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    // Unterminated frontmatter (no closing fence) → don't drop the whole file.
+    if in_frontmatter {
+        return Some(content);
+    }
+    Some(body)
+}
+
+/// Render the detail panel for one way: its trigger, resolved `MatchCriteria`, the
+/// matched spans (or an honest note when there's no recoverable term), and the way
+/// body a human would read. `None` entry means the frame's way has no model record.
+#[cfg(feature = "tui")]
+fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "\x1b[1m{way_id}\x1b[0m");
+    let Some(e) = entry else {
+        let _ = writeln!(out, "\x1b[2mno fire record in the model for this way\x1b[0m");
+        return out;
+    };
+    if let Some(p) = &e.way_path {
+        let _ = writeln!(out, "\x1b[2m{p}\x1b[0m");
+    }
+    let _ = writeln!(out);
+
+    let channel = render::format_trigger(&e.trigger_channel);
+    match e.fire_score {
+        Some(s) => {
+            let _ = writeln!(out, "\x1b[1mTrigger\x1b[0m  {channel}  \x1b[2m(score {s:.2})\x1b[0m");
+        }
+        None => {
+            let _ = writeln!(out, "\x1b[1mTrigger\x1b[0m  {channel}");
+        }
+    }
+
+    let _ = writeln!(out, "\x1b[1mCriteria\x1b[0m");
+    let c = &e.criteria;
+    let mut wrote = false;
+    for (label, val) in [
+        ("pattern", &c.pattern),
+        ("commands", &c.commands),
+        ("files", &c.files),
+        ("trigger", &c.trigger),
+        ("vocabulary", &c.vocabulary),
+        ("scope", &c.scope),
+    ] {
+        if let Some(v) = val {
+            let _ = writeln!(out, "  \x1b[2m{label}:\x1b[0m {v}");
+            wrote = true;
+        }
+    }
+    if let Some(t) = c.embed_threshold {
+        let _ = writeln!(out, "  \x1b[2membed_threshold:\x1b[0m {t}");
+        wrote = true;
+    }
+    if !wrote {
+        let _ = writeln!(out, "  \x1b[2m(none recorded)\x1b[0m");
+    }
+
+    let _ = writeln!(out);
+    let _ = writeln!(out, "\x1b[1mMatched\x1b[0m");
+    if e.matched_spans.is_empty() {
+        if e.trigger_channel.starts_with("semantic") {
+            let _ = writeln!(out, "  \x1b[2msemantic fire — matched by embedding; no recoverable term\x1b[0m");
+        } else {
+            let _ = writeln!(out, "  \x1b[2mno span recorded (fired before matched-span enrichment)\x1b[0m");
+        }
+    } else {
+        for span in &e.matched_spans {
+            let _ = writeln!(out, "  \x1b[0;36m“{span}”\x1b[0m");
+        }
+    }
+
+    if let Some(body) = e.way_path.as_deref().and_then(read_way_body) {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "\x1b[2m── way ─────────────\x1b[0m");
+        for line in body.lines() {
+            let _ = writeln!(out, "{line}");
+        }
+    }
+    out
+}
+
+/// Render the why-fired drill-down: the current frame's fired ways on the left,
+/// the selected way's model-derived detail on the right, composed with the
+/// micro-compositor (ADR-154 §2). The model index is built lazily on first entry.
+#[cfg(feature = "tui")]
+fn render_why(player: &mut Player) -> String {
+    if player.why_index.is_none() {
+        let model = SessionIntrospection::from_session(
+            &player.session_id,
+            &player.project_name,
+            player.context_window_k,
+        );
+        player.why_index = Some(build_why_index(&model));
+    }
+
+    let ways_len = player.frames[player.current].ways.len();
+    let sel = player.why_selected.min(ways_len.saturating_sub(1));
+    player.why_selected = sel;
+
+    let total_w = player.term_width as usize;
+    let body_h = (player.term_height as usize).saturating_sub(6).max(3);
+    let gap = 2;
+    let left_w = (total_w / 3).clamp(16, 40).min(total_w.saturating_sub(gap + 12).max(16));
+    let right_w = total_w.saturating_sub(left_w + gap).max(12);
+
+    // Build both panels while borrowing the index + frame, then drop those borrows
+    // before the scroll write-backs below.
+    let epoch;
+    let (left, right) = {
+        let idx = player.why_index.as_ref().unwrap();
+        let frame = &player.frames[player.current];
+        epoch = frame.epoch;
+
+        // Look up the model facet for the channel this frame shows the way on, so a
+        // multi-channel way's detail is coherent (a keyword span never surfaces under
+        // a semantic trigger).
+        let facet = |w: &ActiveWay| idx.get(&(w.id.clone(), w.trigger.clone()));
+
+        let mut left_lines: Vec<String> = Vec::with_capacity(frame.ways.len());
+        for (i, w) in frame.ways.iter().enumerate() {
+            // A filled bullet marks a way the model has a fire record for on this channel.
+            let bullet = if facet(w).is_some() { "•" } else { "·" };
+            let line = format!("{bullet} {}", w.id);
+            if i == sel {
+                left_lines.push(format!("\x1b[7m{}\x1b[0m", compositor::fit_visible(&line, left_w)));
+            } else {
+                left_lines.push(line);
+            }
+        }
+        if left_lines.is_empty() {
+            left_lines.push("\x1b[2m(no ways in this frame)\x1b[0m".to_string());
+        }
+
+        let detail = frame
+            .ways
+            .get(sel)
+            .map(|w| render_why_detail(&w.id, facet(w)))
+            .unwrap_or_else(|| "\x1b[2mno ways fired in this frame\x1b[0m".to_string());
+
+        (
+            Panel::from_lines(left_lines).fixed_width(left_w),
+            Panel::from_text(&detail).fixed_width(right_w),
+        )
+    };
+
+    let detail_scroll = player.why_detail_scroll.min(right.max_scroll(body_h));
+    player.why_detail_scroll = detail_scroll;
+    let left_scroll = sel
+        .saturating_sub(body_h.saturating_sub(1))
+        .min(left.max_scroll(body_h));
+
+    let composited = compositor::hjoin2(
+        &left.viewport(left_scroll, body_h),
+        &right.viewport(detail_scroll, body_h),
+        gap,
+    );
+
+    let mut out = String::new();
+    let short_id = &player.session_id[..player.session_id.len().min(12)];
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "{}  \x1b[2mSession {short_id}… · epoch {epoch} · frame {}/{}\x1b[0m",
+        compositor::tab_bar(&["Timeline", "Why fired"], 1),
+        player.current + 1,
+        player.frames.len(),
+    );
+    let _ = writeln!(out);
+    for line in composited {
+        let _ = writeln!(out, "{line}");
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(total_w.min(85)));
+    let _ = write!(
+        out,
+        " \x1b[7m ▲▼ \x1b[0m way  \x1b[7m ◀ ▶ \x1b[0m frame  \x1b[7m PgUp/Dn \x1b[0m scroll  \x1b[7m tab \x1b[0m timeline  \x1b[7m esc \x1b[0m quit"
+    );
+    out
 }
 
 // ── Frame renderer ────────────────────────────────────────────
@@ -1019,5 +1359,134 @@ mod tests {
             resolve_project_scope(Some("/home/a/proj"), false).unwrap(),
             Some("/home/a/proj".to_string())
         );
+    }
+}
+
+// Drill-down "why" folding + rendering (the join-honesty-critical part).
+#[cfg(all(test, feature = "tui"))]
+mod why_tests {
+    use super::*;
+    use ways_core::introspection::{
+        FiredWay, IntrospectionSummary, JoinConfidence, MatchCriteria, MatchDetail,
+        SessionIntrospection, Turn,
+    };
+
+    fn fired(way: &str, channel: &str, span: Option<&str>, score: Option<f64>) -> FiredWay {
+        FiredWay {
+            way_id: way.into(),
+            trigger_channel: channel.into(),
+            fire_score: score,
+            way_path: None,
+            criteria: MatchCriteria { pattern: Some("p".into()), ..Default::default() },
+            match_detail: span.map(|s| MatchDetail {
+                matched_span: Some(s.into()),
+                confidence: JoinConfidence::Keyed,
+            }),
+        }
+    }
+
+    fn model(turns_ways: Vec<Vec<FiredWay>>) -> SessionIntrospection {
+        let turns = turns_ways
+            .into_iter()
+            .map(|fired_ways| Turn {
+                epoch: 1,
+                token_position: 0,
+                ts: "2026-01-01T00:00:00Z".into(),
+                transcript_uuid: None,
+                join_confidence: JoinConfidence::Heuristic,
+                fired_ways,
+            })
+            .collect();
+        SessionIntrospection {
+            id: "s".into(),
+            project: "/p".into(),
+            window_k: 200,
+            summary: IntrospectionSummary::default(),
+            turns,
+        }
+    }
+
+    fn key(way: &str, channel: &str) -> WhyKey {
+        (way.to_string(), channel.to_string())
+    }
+
+    #[test]
+    fn why_index_keys_by_channel_and_dedups_spans() {
+        let m = model(vec![
+            vec![fired("d/a", "keyword", Some("commit"), None)],
+            vec![
+                fired("d/a", "keyword", Some("commit"), None), // dup span, same channel
+                fired("d/a", "keyword", Some("stage"), None),  // new span
+            ],
+        ]);
+        let idx = build_why_index(&m);
+        let e = idx.get(&key("d/a", "keyword")).expect("keyed by (way, channel)");
+        assert_eq!(e.matched_spans, vec!["commit", "stage"], "deduped, first-seen order");
+    }
+
+    #[test]
+    fn multichannel_way_keeps_each_facet_honest() {
+        // The real hole (verified common in the event log): a way fires BOTH
+        // semantically and by keyword in one session. The semantic facet must never
+        // borrow the keyword fire's span (that would fabricate a semantic term).
+        let idx = build_why_index(&model(vec![
+            vec![fired("d/doc", "semantic:embedding:en", None, Some(0.71))], // semantic first
+            vec![fired("d/doc", "keyword", Some("diataxis"), None)],         // keyword later
+        ]));
+
+        let sem = render_why_detail("d/doc", idx.get(&key("d/doc", "semantic:embedding:en")));
+        assert!(sem.contains("no recoverable term"), "semantic facet stays term-free: {sem}");
+        assert!(!sem.contains("diataxis"), "keyword span must NOT appear under semantic");
+        assert!(sem.contains("score 0.71"));
+
+        let kw = render_why_detail("d/doc", idx.get(&key("d/doc", "keyword")));
+        assert!(kw.contains("diataxis"), "keyword facet shows its own real span");
+    }
+
+    #[test]
+    fn detail_labels_semantic_and_missing_spans_honestly() {
+        // Semantic fire → names the embedding + score, never a fabricated term.
+        let sem = build_why_index(&model(vec![vec![fired(
+            "d/s", "semantic:embedding:en", None, Some(0.73),
+        )]]));
+        let out = render_why_detail("d/s", sem.get(&key("d/s", "semantic:embedding:en")));
+        assert!(out.contains("no recoverable term"), "semantic honesty: {out}");
+        assert!(out.contains("score 0.73"));
+
+        // Keyword fire with a span → shows the quoted span.
+        let kw = build_why_index(&model(vec![vec![fired(
+            "d/k", "keyword", Some("threat model"), None,
+        )]]));
+        assert!(render_why_detail("d/k", kw.get(&key("d/k", "keyword"))).contains("threat model"));
+
+        // Keyword fire, no span (pre-enrichment) → says so, invents nothing.
+        let none = build_why_index(&model(vec![vec![fired("d/n", "keyword", None, None)]]));
+        assert!(render_why_detail("d/n", none.get(&key("d/n", "keyword"))).contains("no span recorded"));
+    }
+
+    #[test]
+    fn detail_handles_way_with_no_model_record() {
+        assert!(render_why_detail("d/x", None).contains("no fire record"));
+    }
+
+    #[test]
+    fn read_way_body_preserves_leading_dashes_and_handles_edges() {
+        let base = std::env::temp_dir().join(format!("ways-body-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&base);
+        let write_read = |name: &str, content: &str| {
+            let p = base.join(name);
+            std::fs::write(&p, content).unwrap();
+            read_way_body(p.to_str().unwrap()).unwrap()
+        };
+        // A body opening with a markdown list keeps its leading dashes.
+        assert_eq!(
+            write_read("list.md", "---\ndescription: d\n---\n- one\n- two\n"),
+            "- one\n- two\n"
+        );
+        // Empty frontmatter → body is everything after the closing fence.
+        assert_eq!(write_read("empty.md", "---\n---\nbody line\n"), "body line\n");
+        // No opening fence → the whole file is the body.
+        assert_eq!(write_read("nofm.md", "just text\nmore\n"), "just text\nmore\n");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -61,6 +61,24 @@ Generalize the proven triplet into a module (mirroring the `cmd/scan`,
   - **drill-down** — a selection/tab loop compositing model panels, shared by
     `replay` and `live`.
 
+**Model ↔ replay-timeline boundary (resolved 2026-07-03).** The
+`SessionIntrospection` model and `rethink::build_frames` are **two distinct
+views, not one clustering** — and are deliberately kept that way rather than
+unified. `build_frames` is the *animation* projection: it folds the full event
+stream (`way_fired` + `check_fired` + `way_redisclosed`) into cumulative
+"what's active at epoch N" frames, and drives `replay`'s timeline. The model is
+the *analytical* substrate: per-turn fired-way deltas joined to `MatchCriteria`,
+`matched_span`, and the transcript key, and it drives `dump` and the drill-down's
+"why" panel. The drill-down bridges them **by `way_id`** — focus a way in a
+`build_frames` frame, and its detail is looked up in the model by id — so their
+divergent epoch numbering never has to be reconciled. This preserves the proven
+replay timeline untouched, keeps the model scoped to the fire stream (ADR-153),
+and confines the JSON-vs-TUI drift the model guards against to the two surfaces
+that actually share it (`dump` and the drill-down), both of which read the model.
+Converging `build_frames` onto the model was rejected: it would load the
+fire-stream substrate with cumulative-state, redisclosure, refire-threshold, and
+token-timeline concerns that belong to the animation view alone.
+
 ### 2. Keep crossterm; grow a small micro-compositor — do not adopt ratatui
 
 Build a ~200–400-line internal compositor over the existing ANSI-`String` panels:
