@@ -255,6 +255,11 @@ enum Commands {
         /// Filter to sessions from this project path
         #[arg(long)]
         project: Option<String>,
+        /// Replay across every project, not just the current one (default is the
+        /// current project; detection failure is an error, never a silent
+        /// globalize)
+        #[arg(long)]
+        all: bool,
         /// Initial frame speed in milliseconds (default: 1000)
         #[arg(long)]
         speed: Option<u64>,
@@ -305,6 +310,13 @@ enum Commands {
     /// CI) verify they resolve the same path as the binary on every platform —
     /// the contract documented in `hooks/ways/sessions-root.sh`.
     SessionsRoot,
+    /// Print the canonical events-log path. The single source of truth for every
+    /// telemetry writer — the Rust `session::log_event` and the shell hooks
+    /// (`clear-markers.sh`, `inject-subagent.sh` via `events-log.sh`) — and every
+    /// reader (`firing::load_events`). Resolving through the binary keeps the
+    /// hooks from hardcoding a path that drifts from `paths::events_log()` after
+    /// the ADR-142 XDG migration (ADR-153 §1).
+    EventsLogPath,
     /// Manage configuration (init/show/path)
     Config {
         #[command(subcommand)]
@@ -666,13 +678,14 @@ fn main() -> Result<()> {
         Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet, false)
         }
-        Commands::Rethink { session, project, speed, list, json } => {
-            if json {
-                cmd::rethink_dump::run_json(session.as_deref(), project.as_deref())
-            } else {
-                cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list)
-            }
-        }
+        Commands::Rethink { session, project, all, speed, list, json } => match (list, json) {
+            // `--list --json`: machine-listable session enumeration (ADR-154 §4).
+            (true, true) => cmd::rethink_dump::run_list_json(project.as_deref(), all),
+            // `--json`: dump one session's reconstructed timeline.
+            (false, true) => cmd::rethink_dump::run_json(session.as_deref(), project.as_deref(), all),
+            // interactive replay, or `--list` text.
+            _ => cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list, all),
+        },
         Commands::Status { json } => cmd::status::run(json),
         Commands::Scan { mode } => match mode {
             ScanCommand::Prompt { query, session, project } => {
@@ -765,6 +778,10 @@ fn main() -> Result<()> {
         }
         Commands::SessionsRoot => {
             println!("{}", session::sessions_root());
+            Ok(())
+        }
+        Commands::EventsLogPath => {
+            println!("{}", paths::events_log().display());
             Ok(())
         }
         Commands::ResponseTopicsPath { session } => {

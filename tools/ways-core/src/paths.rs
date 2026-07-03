@@ -243,6 +243,34 @@ fn resolve_events(state: &Path, projection: &Path) -> PathBuf {
     preferred
 }
 
+/// Every existing event-log file a reader should union, newest-canonical first
+/// (ADR-153 §1, transitional). [`events_log`] resolves the single *write* target;
+/// this resolves the set to *read*. On a migrated install where the shell hooks
+/// were still hardcoding the legacy `~/.claude/stats/events.jsonl` (pre-fix),
+/// their `session_start` lines were orphaned in the legacy file while the Rust
+/// writer moved to `$XDG_STATE`. Reading both recovers those orphaned sessions
+/// without a backfill. The migrator *moves* `stats/` (never copies), so the two
+/// files never overlap and the union is a plain concatenation — no dedup needed.
+pub fn events_log_sources() -> Vec<PathBuf> {
+    resolve_event_sources(&state_root(), &projection_root())
+}
+
+/// Pure resolution for [`events_log_sources`], factored out for testing without
+/// touching `$XDG_STATE`/`$HOME`. Returns only files that exist, preferred
+/// (`$XDG_STATE`) before legacy, and never lists the same path twice.
+fn resolve_event_sources(state: &Path, projection: &Path) -> Vec<PathBuf> {
+    let preferred = state.join("events.jsonl");
+    let legacy = projection.join("stats").join("events.jsonl");
+    let mut out = Vec::new();
+    if preferred.exists() {
+        out.push(preferred.clone());
+    }
+    if legacy.exists() && legacy != preferred {
+        out.push(legacy);
+    }
+    out
+}
+
 // --- cache ($XDG_CACHE) ---
 
 /// The embedding-engine working dir (model, corpus, manifest):
@@ -321,6 +349,35 @@ mod tests {
         // State events present → state wins (post-migration).
         std::fs::write(state.join("events.jsonl"), "{}\n").unwrap();
         assert!(resolve_events(&state, &projection).starts_with(&state));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn event_sources_unions_state_and_orphaned_legacy() {
+        let base = std::env::temp_dir().join(format!("ways-evsrc-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        let projection = base.join(".claude");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(projection.join("stats")).unwrap();
+
+        // Neither exists → empty (a reader over this is simply empty history).
+        assert!(resolve_event_sources(&state, &projection).is_empty());
+
+        // Only legacy → just legacy (un-migrated install).
+        std::fs::write(projection.join("stats/events.jsonl"), "{}\n").unwrap();
+        let only_legacy = resolve_event_sources(&state, &projection);
+        assert_eq!(only_legacy.len(), 1);
+        assert!(only_legacy[0].starts_with(&projection));
+
+        // Both present → union, preferred (state) first, legacy second. This is
+        // the post-migration orphaned-session_start case the union recovers.
+        std::fs::write(state.join("events.jsonl"), "{}\n").unwrap();
+        let both = resolve_event_sources(&state, &projection);
+        assert_eq!(both.len(), 2);
+        assert!(both[0].starts_with(&state));
+        assert!(both[1].starts_with(&projection));
 
         let _ = std::fs::remove_dir_all(&base);
     }

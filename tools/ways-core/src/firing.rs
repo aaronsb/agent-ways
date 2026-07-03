@@ -8,20 +8,40 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Load all firing events from the events log, one JSON object per line.
+/// Load all firing events, one JSON object per line, unioned across every
+/// existing events-log file (ADR-153 §1).
 ///
-/// A missing or unreadable log is not an error — it yields an empty vector
-/// (a fresh install simply has no firing history yet).
+/// A missing or unreadable log is not an error — it contributes nothing (a fresh
+/// install simply has no firing history yet). The union recovers `session_start`
+/// lines that older shell hooks orphaned in the legacy `~/.claude/stats` file
+/// after the XDG migration; see [`crate::paths::events_log_sources`] for why the
+/// files never overlap.
 pub fn load_events() -> Vec<Value> {
-    let path = crate::paths::events_log();
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    content
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
+    crate::paths::events_log_sources()
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .flat_map(|content| {
+            content
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect::<Vec<Value>>()
+        })
         .collect()
+}
+
+/// Concatenated raw text of every existing events-log file (ADR-153 §1 union).
+///
+/// The line-oriented timeline reconstruction in `ways rethink` works over raw
+/// JSONL lines rather than parsed values, so it needs the text, not
+/// [`load_events`]'s `Vec<Value>`. Same union guarantee: recovers `session_start`
+/// lines orphaned in the legacy log. Files are joined with a newline; the empty
+/// line any trailing newline produces is inert to line parsers.
+pub fn load_events_text() -> String {
+    crate::paths::events_log_sources()
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Count `way_fired` events per way ID across the given events.

@@ -15,6 +15,7 @@
 # context regardless of what the parent already triggered.
 
 source "$(dirname "$0")/sessions-root.sh"
+source "$(dirname "$0")/events-log.sh"
 
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
@@ -144,11 +145,11 @@ while IFS= read -r waypath; do
     log_args=(event=way_fired way="$waypath" domain="$DOMAIN"
       trigger="${MATCH_CH}" scope="$scope" project="$PROJECT_DIR" session="$SESSION_ID")
     [[ -n "$TEAM_NAME" ]] && log_args+=(team="$TEAM_NAME")
-    # Inline event logging
-    mkdir -p "${HOME}/.claude/stats" 2>/dev/null
+    # Inline event logging (canonical events-log path resolved via events-log.sh)
+    mkdir -p "$(dirname "$EVENTS_LOG")" 2>/dev/null
     _args=(--arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)") _obj="ts:\$ts"
     for _kv in "${log_args[@]}"; do _args+=(--arg "${_kv%%=*}" "${_kv#*=}"); _obj+=",${_kv%%=*}:\$${_kv%%=*}"; done
-    jq -nc "${_args[@]}" "{${_obj}}" >> "${HOME}/.claude/stats/events.jsonl" 2>/dev/null
+    jq -nc "${_args[@]}" "{${_obj}}" >> "$EVENTS_LOG" 2>/dev/null
   fi
 done <<< "$WAYS"
 

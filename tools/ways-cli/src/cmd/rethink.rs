@@ -12,8 +12,8 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 
-use anyhow::Result;
-use std::collections::HashMap;
+use anyhow::{bail, Result};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
@@ -108,27 +108,67 @@ impl Drop for TermGuard {
     }
 }
 
+// ── Project scoping ───────────────────────────────────────────
+
+/// Resolve which project(s) to replay. `Ok(None)` means *every* project
+/// (`--all`); `Ok(Some(path))` scopes to one. Defaults to the current project
+/// and — the correctness fix (ADR-154 §4) — **fails loud** instead of silently
+/// globalizing when the current project can't be detected.
+pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<Option<String>> {
+    if all {
+        return Ok(None);
+    }
+    if let Some(p) = project {
+        return Ok(Some(p.to_string()));
+    }
+    match std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .or_else(detect_project_dir)
+    {
+        Some(p) => Ok(Some(p)),
+        None => bail!(
+            "couldn't detect the current project: CLAUDE_PROJECT_DIR is unset and no \
+             .claude/settings.json or CLAUDE.md was found above the working directory. \
+             Pass --project <path> to scope to a project, or --all to replay across every project."
+        ),
+    }
+}
+
+/// Whether an event's stored `project` path belongs to `scope`, compared as
+/// normalized absolute paths — replacing the old loose `contains` substring test
+/// that let unrelated projects (`/a/foo` vs `/a/foo-bar`) bleed together.
+///
+/// The comparison is exact (modulo trailing slash). On the primary path this is
+/// right: `CLAUDE_PROJECT_DIR` is the scope at both write and read time, so the
+/// strings match. On a *manual* run where scope falls back to `detect_project_dir`
+/// (a symlink-resolved cwd), a session whose stored `project` was a logical or
+/// symlinked path — or a subdirectory `$PWD` — won't match and is simply absent
+/// from the list (not an error). Pass `--all` or an explicit `--project` to see it.
+pub(crate) fn project_matches(stored: &str, scope: &str) -> bool {
+    normalize_project_path(stored) == normalize_project_path(scope)
+}
+
+fn normalize_project_path(p: &str) -> String {
+    p.trim_end_matches('/').to_string()
+}
+
 // ── Entry point ───────────────────────────────────────────────
 
 #[cfg(feature = "tui")]
-pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, list: bool) -> Result<()> {
-    let events_file = crate::paths::events_log();
-    if !events_file.is_file() {
+pub fn run(
+    session: Option<&str>,
+    project: Option<&str>,
+    speed: Option<u64>,
+    list: bool,
+    all: bool,
+) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
         println!("No events recorded yet.");
         return Ok(());
     }
 
-    let content = std::fs::read_to_string(&events_file)?;
-
-    // Auto-detect project scope if not explicitly provided
-    let detected_project = if project.is_none() {
-        std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(detect_project_dir)
-    } else {
-        None
-    };
-    let project_scope = project.map(|s| s.to_string()).or(detected_project);
+    let project_scope = resolve_project_scope(project, all)?;
 
     if list {
         return list_sessions(&content, project_scope.as_deref());
@@ -186,15 +226,21 @@ pub fn run(session: Option<&str>, project: Option<&str>, speed: Option<u64>, lis
 }
 
 #[cfg(not(feature = "tui"))]
-pub fn run(_session: Option<&str>, _project: Option<&str>, _speed: Option<u64>, list: bool) -> Result<()> {
+pub fn run(
+    _session: Option<&str>,
+    project: Option<&str>,
+    _speed: Option<u64>,
+    list: bool,
+    all: bool,
+) -> Result<()> {
     if list {
-        let events_file = crate::paths::events_log();
-        if !events_file.is_file() {
+        let content = ways_core::firing::load_events_text();
+        if content.trim().is_empty() {
             println!("No events recorded yet.");
             return Ok(());
         }
-        let content = std::fs::read_to_string(&events_file)?;
-        return list_sessions(&content, None);
+        let scope = resolve_project_scope(project, all)?;
+        return list_sessions(&content, scope.as_deref());
     }
     println!("Rethink requires the 'tui' feature. Build with: cargo build --features tui");
     Ok(())
@@ -630,19 +676,25 @@ pub(crate) fn find_session_project(content: &str, session_id: &str) -> Option<St
 
 // ── Session listing and picker ────────────────────────────────
 
-struct SessionInfo {
-    id: String,
-    ts: String,
-    project: String,
-    event_count: u32,
-    way_fires: u32,
-    duration_secs: u64,
+#[derive(serde::Serialize)]
+pub(crate) struct SessionInfo {
+    pub(crate) id: String,
+    pub(crate) ts: String,
+    pub(crate) project: String,
+    pub(crate) event_count: u32,
+    pub(crate) way_fires: u32,
+    pub(crate) duration_secs: u64,
 }
 
-fn gather_sessions(content: &str, project_filter: Option<&str>) -> Vec<SessionInfo> {
+pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Vec<SessionInfo> {
     let mut sessions: Vec<SessionInfo> = Vec::new();
     let mut event_counts: HashMap<String, (u32, u32)> = HashMap::new();
     let mut last_ts: HashMap<String, String> = HashMap::new();
+    // One entry per session id. `clear-markers.sh` writes `session_start` on both
+    // SessionStart and post-compaction, so a compacted session has several such
+    // lines; keep the first (its origin) and let the post-loop pass fill the
+    // aggregated counts, so the list (and the `--list --json` `count`) don't dupe.
+    let mut seen: HashSet<String> = HashSet::new();
 
     for line in content.lines() {
         if line.is_empty() {
@@ -663,18 +715,20 @@ fn gather_sessions(content: &str, project_filter: Option<&str>) -> Vec<SessionIn
         if event == "session_start" {
             let project = v["project"].as_str().unwrap_or("").to_string();
             if let Some(pf) = project_filter {
-                if !project.contains(pf) {
+                if !project_matches(&project, pf) {
                     continue;
                 }
             }
-            sessions.push(SessionInfo {
-                id: sid.clone(),
-                ts: ts.clone(),
-                project,
-                event_count: 0,
-                way_fires: 0,
-                duration_secs: 0,
-            });
+            if seen.insert(sid.clone()) {
+                sessions.push(SessionInfo {
+                    id: sid.clone(),
+                    ts: ts.clone(),
+                    project,
+                    event_count: 0,
+                    way_fires: 0,
+                    duration_secs: 0,
+                });
+            }
         }
 
         let counts = event_counts.entry(sid.clone()).or_insert((0, 0));
@@ -933,4 +987,51 @@ fn truncate_visible(s: &str, max_visible: usize) -> String {
         result.push_str("\x1b[0m");
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_matches_is_exact_not_substring() {
+        // Exact path (and trailing-slash normalization) matches.
+        assert!(project_matches("/home/a/proj", "/home/a/proj"));
+        assert!(project_matches("/home/a/proj/", "/home/a/proj"));
+        assert!(project_matches("/home/a/proj", "/home/a/proj/"));
+        // The bug the fix closes: sibling / prefixed projects must NOT match,
+        // which the old `contains` substring test wrongly conflated.
+        assert!(!project_matches("/home/a/proj-2", "/home/a/proj"));
+        assert!(!project_matches("/home/a/proj", "proj"));
+        assert!(!project_matches("/home/a/other", "/home/a/proj"));
+    }
+
+    #[test]
+    fn gather_sessions_dedups_compaction_restarts() {
+        // Same session id with two `session_start` lines (initial + post-compaction).
+        let content = concat!(
+            r#"{"event":"session_start","session":"s1","ts":"2026-01-01T00:00:00Z","project":"/p"}"#, "\n",
+            r#"{"event":"way_fired","session":"s1","ts":"2026-01-01T00:01:00Z","way":"a/b"}"#, "\n",
+            r#"{"event":"session_start","session":"s1","ts":"2026-01-02T00:00:00Z","project":"/p"}"#, "\n",
+            r#"{"event":"way_fired","session":"s1","ts":"2026-01-02T00:01:00Z","way":"a/c"}"#, "\n",
+        );
+        let sessions = gather_sessions(content, Some("/p"));
+        assert_eq!(sessions.len(), 1, "one entry per session id, not per session_start");
+        assert_eq!(sessions[0].id, "s1");
+        assert_eq!(sessions[0].ts, "2026-01-01T00:00:00Z", "keeps the origin start");
+        assert_eq!(sessions[0].event_count, 4, "counts aggregate across the whole session");
+        assert_eq!(sessions[0].way_fires, 2);
+    }
+
+    #[test]
+    fn scope_all_is_none_and_explicit_wins() {
+        // `--all` → every project, regardless of env.
+        assert_eq!(resolve_project_scope(None, true).unwrap(), None);
+        assert_eq!(resolve_project_scope(Some("/x"), true).unwrap(), None);
+        // Explicit `--project` is honored without touching detection.
+        assert_eq!(
+            resolve_project_scope(Some("/home/a/proj"), false).unwrap(),
+            Some("/home/a/proj".to_string())
+        );
+    }
 }

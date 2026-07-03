@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 
 use super::rethink;
 use crate::session;
-use crate::util::detect_project_dir;
 
 // ── Output shape ──────────────────────────────────────────────
 
@@ -83,23 +82,22 @@ struct NearMiss {
 
 /// Emit a session's reconstructed timeline as a single pretty-printed JSON
 /// document. With no `session`, dumps the most recent session in scope.
-pub fn run_json(session: Option<&str>, project: Option<&str>) -> Result<()> {
-    let events_file = crate::paths::events_log();
-    if !events_file.is_file() {
+pub fn run_json(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
         return Ok(());
     }
-    let content = std::fs::read_to_string(&events_file)?;
 
-    // Auto-detect project scope when not given, mirroring `rethink::run`.
-    let detected = if project.is_none() {
-        std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(detect_project_dir)
-    } else {
-        None
+    // Scope to the current project by default; emit a JSON error (not a bail) so
+    // agent consumers get structured output even on the fail-loud path.
+    let scope = match rethink::resolve_project_scope(project, all) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);
+            return Ok(());
+        }
     };
-    let scope = project.map(|s| s.to_string()).or(detected);
 
     let session_id = match session {
         Some(s) => s.to_string(),
@@ -116,6 +114,29 @@ pub fn run_json(session: Option<&str>, project: Option<&str>) -> Result<()> {
         Some(dump) => println!("{}", serde_json::to_string_pretty(&dump)?),
         None => println!("{{\"error\":\"no events for session\",\"session\":\"{session_id}\"}}"),
     }
+    Ok(())
+}
+
+/// `ways rethink --list --json`: enumerate candidate sessions in scope as
+/// structured data, so an agent can pick one before dumping it (ADR-154 §4).
+/// Newest first. `scope` is null when `--all` was passed.
+pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    let scope = match rethink::resolve_project_scope(project, all) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);
+            return Ok(());
+        }
+    };
+    let mut sessions = rethink::gather_sessions(&content, scope.as_deref());
+    sessions.sort_by(|a, b| b.ts.cmp(&a.ts)); // newest first
+    let out = serde_json::json!({
+        "scope": scope,
+        "count": sessions.len(),
+        "sessions": sessions,
+    });
+    println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
 }
 
@@ -275,7 +296,7 @@ fn most_recent_session(content: &str, scope: Option<&str>) -> Option<String> {
             _ => continue,
         };
         if let Some(sc) = scope {
-            if !v["project"].as_str().unwrap_or("").contains(sc) {
+            if !rethink::project_matches(v["project"].as_str().unwrap_or(""), sc) {
                 continue;
             }
         }
