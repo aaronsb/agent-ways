@@ -95,10 +95,20 @@ struct Player {
     /// plain replay never pays for the model + transcript read.
     #[cfg(feature = "tui")]
     why_index: Option<WhyIndex>,
-    /// Which fired way of the current frame is focused in the drill-down.
+    /// The selected way of the current frame — highlighted in the Timeline table
+    /// (↑/↓ move it, Enter opens its why-fired detail) and focused in the drill-down.
+    /// Shared so Enter/Tab carry the selection between the two views.
     why_selected: usize,
     /// Scroll offset into the focused way's detail panel.
     why_detail_scroll: usize,
+    /// `live` mode re-reads the event log on a tick and follows the newest frame
+    /// (ADR-154 §3). `following` is on until the user scrolls back to inspect an
+    /// earlier frame; End/`G` resumes it. `events_sig` is the stat-gate: skip the
+    /// re-parse while the event sources' combined (length, mtime) is unchanged.
+    live: bool,
+    following: bool,
+    #[cfg(feature = "tui")]
+    events_sig: (u64, u64),
 }
 
 const SPEEDS: &[(u64, &str)] = &[
@@ -248,8 +258,10 @@ pub fn run(
         term_height,
         view: View::Timeline,
         why_index: None,
-        why_selected: 0,
-        why_detail_scroll: 0,
+        why_selected: 0,        why_detail_scroll: 0,
+        live: false,
+        following: false,
+        events_sig: (0, 0),
     };
 
     run_tui(&mut player)
@@ -274,6 +286,122 @@ pub fn run(
     }
     println!("Rethink requires the 'tui' feature. Build with: cargo build --features tui");
     Ok(())
+}
+
+// ── Live monitor (ADR-154 §3) ─────────────────────────────────
+
+/// `ways introspect live` — monitor `session_id` as new ways fire, following the
+/// newest frame. Reuses the replay TUI; the loop re-reads the event log on a tick,
+/// gated by a stat check (§3). `project` is the resolved scope (the session's own
+/// recorded project takes precedence when present).
+#[cfg(feature = "tui")]
+pub fn run_live(session_id: &str, project: Option<&str>, speed: Option<u64>) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    let project_name = find_session_project(&content, session_id)
+        .or_else(|| project.map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let events = load_session_events(&content, session_id);
+    if events.is_empty() {
+        println!("No events for the current session yet.");
+        return Ok(());
+    }
+
+    let context_window = session::detect_context_window_for(&project_name, session_id);
+    let context_window_k = context_window / 1000;
+    let frames = reconstruct_frames(&events, &project_name, session_id, context_window);
+    if frames.is_empty() {
+        println!("No frames to monitor yet.");
+        return Ok(());
+    }
+
+    let speed_idx = match speed {
+        Some(ms) => SPEEDS.iter().position(|(s, _)| *s <= ms).unwrap_or(1),
+        None => 1,
+    };
+    let (term_width, term_height) = terminal::size().unwrap_or((120, 40));
+
+    let last = frames.len() - 1;
+    let mut player = Player {
+        frames,
+        current: last, // start pinned to the newest frame
+        playing: false,
+        speed_idx,
+        session_id: session_id.to_string(),
+        project_name,
+        context_window_k,
+        term_width,
+        term_height,
+        view: View::Timeline,
+        why_index: None,
+        why_selected: 0,        why_detail_scroll: 0,
+        live: true,
+        following: true,
+        events_sig: events_signature(),
+    };
+    run_tui(&mut player)
+}
+
+#[cfg(not(feature = "tui"))]
+pub fn run_live(_session_id: &str, _project: Option<&str>, _speed: Option<u64>) -> Result<()> {
+    println!("Live monitor requires the 'tui' feature. Build with: cargo build --features tui");
+    Ok(())
+}
+
+/// The stat-gate signature over the event sources: combined byte length and the
+/// newest mtime (seconds). A change in either means new events to re-read; equality
+/// means the append-only log is untouched, so the live loop skips the re-parse.
+#[cfg(feature = "tui")]
+fn events_signature() -> (u64, u64) {
+    let mut total_len = 0u64;
+    let mut max_mtime = 0u64;
+    for p in ways_core::paths::events_log_sources() {
+        if let Ok(meta) = std::fs::metadata(&p) {
+            total_len = total_len.saturating_add(meta.len());
+            if let Ok(secs) = meta
+                .modified()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other))
+            {
+                max_mtime = max_mtime.max(secs.as_secs());
+            }
+        }
+    }
+    (total_len, max_mtime)
+}
+
+/// Re-read the live session's events if the stat-gate shows a change, rebuild
+/// frames, and (when following) pin to the newest frame. Invalidates the drill-down
+/// index so its "why" panels rebuild against the fresh frames. A no-op while the log
+/// is unchanged, so idle ticks are cheap.
+#[cfg(feature = "tui")]
+fn refresh_live(player: &mut Player) {
+    let sig = events_signature();
+    if sig == player.events_sig {
+        return;
+    }
+    player.events_sig = sig;
+
+    let content = ways_core::firing::load_events_text();
+    let events = load_session_events(&content, &player.session_id);
+    if events.is_empty() {
+        return;
+    }
+    let context_window = player.context_window_k * 1000;
+    let frames = reconstruct_frames(&events, &player.project_name, &player.session_id, context_window);
+    if frames.is_empty() {
+        return;
+    }
+
+    let was_last = player.current + 1 >= player.frames.len();
+    player.frames = frames;
+    let last = player.frames.len() - 1;
+    // Follow the newest frame unless the user has scrolled back to inspect history.
+    player.current = if player.following || was_last {
+        last
+    } else {
+        player.current.min(last)
+    };
+    player.why_index = None; // fresh frames → rebuild the drill-down index lazily
 }
 
 // ── TUI loop ──────────────────────────────────────────────────
@@ -303,7 +431,9 @@ fn tui_loop(player: &mut Player) -> Result<()> {
         write!(stdout, "{output}")?;
         stdout.flush()?;
 
-        let timeout = if player.playing {
+        let timeout = if player.live {
+            std::time::Duration::from_millis(LIVE_REFRESH_MS)
+        } else if player.playing {
             std::time::Duration::from_millis(SPEEDS[player.speed_idx].0)
         } else {
             std::time::Duration::from_secs(60)
@@ -318,15 +448,14 @@ fn tui_loop(player: &mut Player) -> Result<()> {
 
                     KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. } => break,
 
-                    // Tab toggles the why-fired drill-down. Entering it pauses
-                    // playback and starts the focus at the top of the frame's ways.
+                    // Tab toggles the why-fired drill-down, carrying the current
+                    // selection with it (like Enter). Entering it pauses playback.
                     KeyEvent { code: KeyCode::Tab, .. } => {
                         player.view = match player.view {
                             View::Timeline => View::WhyFired,
                             View::WhyFired => View::Timeline,
                         };
                         player.playing = false;
-                        player.why_selected = 0;
                         player.why_detail_scroll = 0;
                     }
 
@@ -336,51 +465,145 @@ fn tui_loop(player: &mut Player) -> Result<()> {
                     },
                 }
             }
-        } else if player.playing {
+        } else if player.playing && !player.live {
             if player.current < player.frames.len() - 1 {
                 player.current += 1;
             } else {
                 player.playing = false;
             }
         }
+
+        // Live mode re-reads the (append-only) event log each tick; the stat-gate
+        // in refresh_live makes an unchanged log a cheap no-op.
+        if player.live {
+            refresh_live(player);
+        }
     }
     Ok(())
 }
 
-/// Timeline-view keys: frame navigation, play/pause, and speed.
+/// The live-monitor refresh interval — the `poll` timeout in live mode (ADR-154 §3
+/// suggests ~100–250 ms; imperceptible, and the stat-gate keeps idle ticks cheap).
+#[cfg(feature = "tui")]
+const LIVE_REFRESH_MS: u64 = 250;
+
+/// The currently selected way's `(id, epoch_fired)` — the anchor carried across a
+/// frame change so the cursor stays on the same way instead of jumping to row 0.
+#[cfg(feature = "tui")]
+fn current_selected_way(player: &Player) -> Option<(String, u64)> {
+    let frame = player.frames.get(player.current)?;
+    if frame.ways.is_empty() {
+        return None;
+    }
+    let idx = player.why_selected.min(frame.ways.len() - 1);
+    frame.ways.get(idx).map(|w| (w.id.clone(), w.epoch_fired))
+}
+
+/// The row in `frame` that best preserves an anchor across a frame change: the same
+/// way if it's still active, else the nearest still-active way with `epoch_fired ≤`
+/// the anchor's (frame.ways is epoch-ascending, so that's the last such row), else
+/// the first row. Moving forward the anchor way is always present (frames are
+/// cumulative); moving backward it can vanish, and we snap to the nearest lesser epoch.
+#[cfg(feature = "tui")]
+fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_epoch: u64) -> usize {
+    if let Some(i) = frame.ways.iter().position(|w| w.id == anchor_id) {
+        return i;
+    }
+    frame
+        .ways
+        .iter()
+        .rposition(|w| w.epoch_fired <= anchor_epoch)
+        .unwrap_or(0)
+}
+
+/// Move to frame `target` (clamped), preserving the selected way via its anchor.
+/// Shared by the Timeline table and the drill-down so both keep the cursor put.
+#[cfg(feature = "tui")]
+fn jump_frame(player: &mut Player, target: usize) {
+    let anchor = current_selected_way(player);
+    let last = player.frames.len().saturating_sub(1);
+    player.current = target.min(last);
+    player.why_selected = match anchor {
+        Some((id, ep)) => reselect_by_anchor(&player.frames[player.current], &id, ep),
+        None => 0,
+    };
+}
+
+/// Timeline-view keys. ▲▼ select a way in the current frame (the viewport follows);
+/// Enter opens its why-fired detail. ◀▶/Home/End move along the time axis, keeping
+/// the cursor on the same way (nearest lesser epoch when it's rewound out of view).
+/// `+`/`-` set playback speed (the arrows now select, not speed). In live mode,
+/// manual navigation drops out of follow-the-newest; Space toggles following, and
+/// End/`G` resumes it.
 #[cfg(feature = "tui")]
 fn handle_timeline_key(player: &mut Player, key: KeyEvent) {
+    let ways_len = player.frames[player.current].ways.len();
     match key {
+        // Row selection within the current frame.
+        KeyEvent { code: KeyCode::Up, .. } | KeyEvent { code: KeyCode::Char('k'), .. } => {
+            player.why_selected = player.why_selected.saturating_sub(1);
+        }
+        KeyEvent { code: KeyCode::Down, .. } | KeyEvent { code: KeyCode::Char('j'), .. } => {
+            if player.why_selected + 1 < ways_len {
+                player.why_selected += 1;
+            }
+        }
+        KeyEvent { code: KeyCode::PageUp, .. } => {
+            player.why_selected = player.why_selected.saturating_sub(10);
+        }
+        KeyEvent { code: KeyCode::PageDown, .. } => {
+            player.why_selected = (player.why_selected + 10).min(ways_len.saturating_sub(1));
+        }
+        // Enter drills into the selected way's why-fired detail.
+        KeyEvent { code: KeyCode::Enter, .. } => {
+            if ways_len > 0 {
+                player.view = View::WhyFired;
+                player.playing = false;
+                player.why_detail_scroll = 0;
+            }
+        }
+        // Frame navigation (time axis); keeps the cursor on the same way.
         KeyEvent { code: KeyCode::Right, .. } | KeyEvent { code: KeyCode::Char('l'), .. } => {
             player.playing = false;
-            if player.current < player.frames.len() - 1 {
-                player.current += 1;
-            }
+            player.following = false;
+            jump_frame(player, player.current + 1);
         }
         KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Char('h'), .. } => {
             player.playing = false;
-            if player.current > 0 {
-                player.current -= 1;
+            player.following = false;
+            jump_frame(player, player.current.saturating_sub(1));
+        }
+        KeyEvent { code: KeyCode::Home, .. } | KeyEvent { code: KeyCode::Char('g'), .. } => {
+            player.playing = false;
+            player.following = false;
+            jump_frame(player, 0);
+        }
+        KeyEvent { code: KeyCode::End, .. } | KeyEvent { code: KeyCode::Char('G'), .. } => {
+            player.playing = false;
+            player.following = player.live; // resume following the live tail
+            jump_frame(player, usize::MAX);
+        }
+        KeyEvent { code: KeyCode::Char(' '), .. } => {
+            // Live: pause/resume following. Replay: play/pause the animation.
+            if player.live {
+                player.following = !player.following;
+                if player.following {
+                    jump_frame(player, usize::MAX); // to newest, keeping the selected way
+                }
+            } else {
+                player.playing = !player.playing;
             }
         }
-        KeyEvent { code: KeyCode::Char(' '), .. } => player.playing = !player.playing,
-        KeyEvent { code: KeyCode::Up, .. } | KeyEvent { code: KeyCode::Char('k'), .. } => {
+        // Playback speed (moved off the arrows, which now select rows).
+        KeyEvent { code: KeyCode::Char('+'), .. } | KeyEvent { code: KeyCode::Char('='), .. } => {
             if player.speed_idx < SPEEDS.len() - 1 {
                 player.speed_idx += 1;
             }
         }
-        KeyEvent { code: KeyCode::Down, .. } | KeyEvent { code: KeyCode::Char('j'), .. } => {
+        KeyEvent { code: KeyCode::Char('-'), .. } | KeyEvent { code: KeyCode::Char('_'), .. } => {
             if player.speed_idx > 0 {
                 player.speed_idx -= 1;
             }
-        }
-        KeyEvent { code: KeyCode::Home, .. } | KeyEvent { code: KeyCode::Char('g'), .. } => {
-            player.current = 0;
-            player.playing = false;
-        }
-        KeyEvent { code: KeyCode::End, .. } | KeyEvent { code: KeyCode::Char('G'), .. } => {
-            player.current = player.frames.len() - 1;
-            player.playing = false;
         }
         _ => {}
     }
@@ -403,17 +626,13 @@ fn handle_why_key(player: &mut Player, key: KeyEvent) {
             player.why_detail_scroll = 0;
         }
         KeyEvent { code: KeyCode::Right, .. } | KeyEvent { code: KeyCode::Char('l'), .. } => {
-            if player.current < player.frames.len() - 1 {
-                player.current += 1;
-            }
-            player.why_selected = 0;
+            player.following = false;
+            jump_frame(player, player.current + 1);
             player.why_detail_scroll = 0;
         }
         KeyEvent { code: KeyCode::Left, .. } | KeyEvent { code: KeyCode::Char('h'), .. } => {
-            if player.current > 0 {
-                player.current -= 1;
-            }
-            player.why_selected = 0;
+            player.following = false;
+            jump_frame(player, player.current.saturating_sub(1));
             player.why_detail_scroll = 0;
         }
         KeyEvent { code: KeyCode::PageDown, .. } | KeyEvent { code: KeyCode::Char(']'), .. } => {
@@ -604,37 +823,63 @@ fn render_why(player: &mut Player) -> String {
     player.why_selected = sel;
 
     let total_w = player.term_width as usize;
-    let body_h = (player.term_height as usize).saturating_sub(6).max(3);
+    // Shared chrome is header (4) + footer (2) = 6 rows; the body fills the rest of
+    // the drawable height (`term_height − 1`, since fit_to_terminal drops the last
+    // cell to avoid a scroll), so 4 + body_h + 2 == term_height − 1.
+    let body_h = (player.term_height as usize).saturating_sub(7).max(3);
     let gap = 2;
     let left_w = (total_w / 3).clamp(16, 40).min(total_w.saturating_sub(gap + 12).max(16));
     let right_w = total_w.saturating_sub(left_w + gap).max(12);
 
     // Build both panels while borrowing the index + frame, then drop those borrows
     // before the scroll write-backs below.
-    let epoch;
     let (left, right) = {
         let idx = player.why_index.as_ref().unwrap();
         let frame = &player.frames[player.current];
-        epoch = frame.epoch;
 
         // Look up the model facet for the channel this frame shows the way on, so a
         // multi-channel way's detail is coherent (a keyword span never surfaces under
         // a semantic trigger).
         let facet = |w: &ActiveWay| idx.get(&(w.id.clone(), w.trigger.clone()));
 
+        // Prefix each row with the epoch the way fired in, so a row cross-references
+        // straight back to the Timeline's Epoch column. Right-align to the widest
+        // epoch in the frame so the way ids stay aligned.
+        let epoch_w = frame
+            .ways
+            .iter()
+            .map(|w| w.epoch_fired)
+            .max()
+            .unwrap_or(0)
+            .to_string()
+            .len();
+
+        // A 2-space left margin aligns this list with the Timeline's Way column (and
+        // `ways list`), so the lists don't shift horizontally when toggling views.
         let mut left_lines: Vec<String> = Vec::with_capacity(frame.ways.len());
         for (i, w) in frame.ways.iter().enumerate() {
             // A filled bullet marks a way the model has a fire record for on this channel.
             let bullet = if facet(w).is_some() { "•" } else { "·" };
-            let line = format!("{bullet} {}", w.id);
             if i == sel {
-                left_lines.push(format!("\x1b[7m{}\x1b[0m", compositor::fit_visible(&line, left_w)));
+                // Margin stays plain; only the content is reversed (as write_way_row does),
+                // so the highlight bar starts at the Way column, not in the margin.
+                let raw = format!("{bullet} e{:>ew$} {}", w.epoch_fired, w.id, ew = epoch_w);
+                left_lines.push(format!(
+                    "  \x1b[7m{}\x1b[0m",
+                    compositor::fit_visible(&raw, left_w.saturating_sub(2))
+                ));
             } else {
-                left_lines.push(line);
+                // Dim the epoch tag so the way id stays prominent.
+                left_lines.push(format!(
+                    "  {bullet} \x1b[2me{:>ew$}\x1b[0m {}",
+                    w.epoch_fired,
+                    w.id,
+                    ew = epoch_w
+                ));
             }
         }
         if left_lines.is_empty() {
-            left_lines.push("\x1b[2m(no ways in this frame)\x1b[0m".to_string());
+            left_lines.push("  \x1b[2m(no ways in this frame)\x1b[0m".to_string());
         }
 
         let detail = frame
@@ -661,120 +906,248 @@ fn render_why(player: &mut Player) -> String {
         gap,
     );
 
-    let mut out = String::new();
-    let short_id = &player.session_id[..player.session_id.len().min(12)];
-    let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "{}  \x1b[2mSession {short_id}… · epoch {epoch} · frame {}/{}\x1b[0m",
-        compositor::tab_bar(&["Timeline", "Why fired"], 1),
-        player.current + 1,
-        player.frames.len(),
+    // Shared footer (same 2 rows as the Timeline).
+    let mut nav_buf = String::new();
+    render_status_bar(&mut nav_buf, player);
+    let nav: Vec<String> = nav_buf.lines().map(str::to_string).collect();
+
+    // Shared header, with the drill-down's own column labels + rule so the two
+    // panels are named the way the Timeline's columns are.
+    let labels = format!(
+        "\x1b[1m{}\x1b[0m{}\x1b[1mWhy it fired\x1b[0m",
+        compositor::pad_visible("  Way · epoch", left_w),
+        " ".repeat(gap),
     );
-    let _ = writeln!(out);
-    for line in composited {
-        let _ = writeln!(out, "{line}");
-    }
-    let _ = writeln!(out);
-    let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(total_w.min(85)));
-    let _ = write!(
-        out,
-        " \x1b[7m ▲▼ \x1b[0m way  \x1b[7m ◀ ▶ \x1b[0m frame  \x1b[7m PgUp/Dn \x1b[0m scroll  \x1b[7m tab \x1b[0m timeline  \x1b[7m esc \x1b[0m quit"
+    let rule = format!(
+        "\x1b[2m{}\x1b[0m",
+        "─".repeat((left_w + gap + right_w).min(total_w))
     );
-    out
+    let header = header_lines(player, vec![labels, rule]);
+
+    // header (4) + body (body_h) + footer (2) = exactly the drawable height, so the
+    // chrome lines up row-for-row with the Timeline view when toggling.
+    let mut lines = header;
+    lines.extend(composited);
+    lines.extend(nav);
+    lines.join("\n")
 }
 
 // ── Frame renderer ────────────────────────────────────────────
 
-fn render_frame(player: &Player) -> String {
-    let frame = &player.frames[player.current];
-    let current_epoch = frame.epoch;
-    let context_window_k = player.context_window_k;
-    let current_tokens_k = frame.token_position_k;
+/// Assemble a **fixed-height** screen so the nav legend is always pinned to the
+/// bottom rows, whatever the content length or terminal size:
+///
+/// - `top` (header) is pinned at the top;
+/// - `rows` is the scrollable region, viewported to keep `sel_line` visible and
+///   blank-padded so it always fills its share of the height;
+/// - `extras` (e.g. the token timeline) are pinned just above the nav, but only
+///   when the terminal is tall enough to also show a few rows of the list;
+/// - `nav` is pinned as the final lines.
+///
+/// The result is exactly `drawable` lines — the height `fit_to_terminal` will keep
+/// (`term_height − 1`) — so nothing gets pushed off the bottom.
+#[cfg(feature = "tui")]
+fn compose_screen(
+    top: Vec<String>,
+    rows: Vec<String>,
+    sel_line: usize,
+    extras: Vec<String>,
+    nav: Vec<String>,
+    drawable: usize,
+) -> String {
+    let mut rows_area = drawable.saturating_sub(top.len() + nav.len()).max(1);
 
-    let mut out = String::new();
-
-    // Header
-    let short_id = &player.session_id[..player.session_id.len().min(12)];
-    let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "\x1b[1mSession\x1b[0m {short_id}...  \x1b[2mepoch {current_epoch} · {context_window_k}K ctx · {} ways fired\x1b[0m",
-        frame.ways.len()
-    );
-    let _ = writeln!(
-        out,
-        "\x1b[2m  {} · +{}s elapsed\x1b[0m",
-        &frame.timestamp[..frame.timestamp.len().min(19)],
-        frame.elapsed_secs
-    );
-    let _ = writeln!(out);
-
-    if frame.ways.is_empty() {
-        let _ = writeln!(out, "  \x1b[2mNo ways triggered yet.\x1b[0m");
-        let _ = writeln!(out);
-        render_status_bar(&mut out, player);
-        return out;
+    // Show the extras only if they still leave a few rows of the list visible.
+    let show_extras = !extras.is_empty() && rows_area > extras.len() + 3;
+    if show_extras {
+        rows_area = rows_area.saturating_sub(extras.len());
     }
 
+    // Reserve one row of the list area for the scroll hint when the list overflows.
+    let overflow = rows.len() > rows_area;
+    let view_h = if overflow { rows_area.saturating_sub(1).max(1) } else { rows_area };
+    let scroll = if overflow {
+        let max_scroll = rows.len().saturating_sub(view_h);
+        // Bottom-anchor the selected line (same behaviour as the drill-down list).
+        sel_line.saturating_sub(view_h.saturating_sub(1)).min(max_scroll)
+    } else {
+        0
+    };
+
+    let mut lines: Vec<String> = Vec::with_capacity(drawable);
+    lines.extend(top);
+
+    let mut filled = 0;
+    for r in rows.iter().skip(scroll).take(view_h) {
+        lines.push(r.clone());
+        filled += 1;
+    }
+    if overflow {
+        let below = rows.len().saturating_sub(view_h + scroll);
+        lines.push(format!("  \x1b[2m⋮ {scroll} above · {below} below · ↑↓\x1b[0m"));
+        filled += 1;
+    }
+    // Pad the list area so the extras/nav stay anchored at the bottom.
+    while filled < rows_area {
+        lines.push(String::new());
+        filled += 1;
+    }
+
+    if show_extras {
+        lines.extend(extras);
+    }
+    lines.extend(nav);
+    lines.truncate(drawable); // safety net; the arithmetic already sums to `drawable`
+    lines.join("\n")
+}
+
+#[cfg(feature = "tui")]
+fn render_frame(player: &mut Player) -> String {
+    // Clamp the shared selection to this frame before borrowing it.
+    let ways_len = player.frames[player.current].ways.len();
+    let selected = player.why_selected.min(ways_len.saturating_sub(1));
+    player.why_selected = selected;
+
+    // `fit_to_terminal` keeps `term_height − 1` rows (it leaves the last cell empty
+    // to avoid a scroll), so that's the height we compose to.
+    let drawable = (player.term_height as usize).saturating_sub(1).max(6);
+    let context_window_k = player.context_window_k;
+
+    // Footer + header are the shared chrome (built before borrowing the frame).
+    let mut nav_buf = String::new();
+    render_status_bar(&mut nav_buf, player);
+    let nav: Vec<String> = nav_buf.lines().map(str::to_string).collect();
+
+    // The Timeline's column header is the shared ways-table header (labels + rule).
+    let mut th = String::new();
+    render::write_table_header(&mut th);
+    let top = header_lines(player, th.lines().map(str::to_string).collect());
+
+    let frame = &player.frames[player.current];
+    if frame.ways.is_empty() {
+        let rows = vec!["  \x1b[2mNo ways triggered yet.\x1b[0m".to_string()];
+        return compose_screen(top, rows, 0, Vec::new(), nav, drawable);
+    }
+
+    let current_epoch = frame.epoch;
+    let current_tokens_k = frame.token_position_k;
     let bar_positions = render::compute_bar_positions(&frame.ways, context_window_k);
     let unique_pos = render::unique_positions(&bar_positions);
 
-    render::write_table_header(&mut out);
-
+    // ── Scrollable, selectable rows ──
+    // One selectable unit per way; its rendered block (1 line, or 2 with a
+    // check-fires line) is tracked so the viewport can keep the selection visible.
+    let mut rows: Vec<String> = Vec::new();
+    let mut way_start_line: Vec<usize> = Vec::with_capacity(frame.ways.len());
     for (i, w) in frame.ways.iter().enumerate() {
-        let (prefix, suffix) = if w.is_new {
+        way_start_line.push(rows.len());
+        // The selection highlight takes visual precedence over new/redisclosed color.
+        let (prefix, suffix) = if i == selected {
+            ("\x1b[7m", "\x1b[0m")
+        } else if w.is_new {
             ("\x1b[1;32m", "\x1b[0m")
         } else if w.is_redisclosed {
             ("\x1b[1;36m", "\x1b[0m")
         } else {
             ("", "")
         };
-
+        let mut block = String::new();
         render::write_way_row(
-            &mut out, w, current_epoch, current_tokens_k,
+            &mut block, w, current_epoch, current_tokens_k,
             &bar_positions, &unique_pos, i, prefix, suffix,
         );
+        rows.extend(block.lines().map(str::to_string));
     }
+    let sel_line = way_start_line.get(selected).copied().unwrap_or(0);
 
+    // ── Extras pinned above the nav (token timeline + new events) ──
+    let mut extras: Vec<String> = Vec::new();
     if current_tokens_k > 0 {
-        let _ = writeln!(out);
+        let mut tl = String::new();
+        let _ = writeln!(tl);
         render::write_token_timeline(
-            &mut out, &frame.ways, &unique_pos,
+            &mut tl, &frame.ways, &unique_pos,
             current_tokens_k, context_window_k,
         );
+        extras.extend(tl.lines().map(str::to_string));
     }
-
-    let _ = writeln!(out);
-
-    // New events this frame
     if !frame.new_events.is_empty() {
-        let _ = writeln!(out, "  \x1b[1;32m+ {}\x1b[0m", frame.new_events.join(", "));
-        let _ = writeln!(out);
+        extras.push(String::new());
+        extras.push(format!("  \x1b[1;32m+ {}\x1b[0m", frame.new_events.join(", ")));
     }
 
-    render_status_bar(&mut out, player);
-    out
+    compose_screen(top, rows, sel_line, extras, nav, drawable)
 }
 
+/// The unified 2-row footer shared by both views: a rule, then the tab-bar (active
+/// view highlighted) + view-appropriate key hints. The `tab`/`esc`/frame-position
+/// tail is identical across views so the legend never jumps when toggling.
 fn render_status_bar(out: &mut String, player: &Player) {
-    let total = player.frames.len();
-    let current = player.current + 1;
-    let speed_label = SPEEDS[player.speed_idx].1;
-    let state = if player.playing { "▶ playing" } else { "⏸ paused" };
-
     let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(85));
+
+    let active = if player.view == View::WhyFired { 1 } else { 0 };
+    let tabs = compositor::tab_bar(&["Timeline", "Why fired"], active);
+    let pos = format!("\x1b[1m{}/{}\x1b[0m", player.current + 1, player.frames.len());
+
+    let hints = match player.view {
+        View::Timeline => {
+            let mode = if player.live {
+                if player.following {
+                    "\x1b[7m space \x1b[0m follow  \x1b[1;32m● following\x1b[0m".to_string()
+                } else {
+                    "\x1b[7m space \x1b[0m follow  \x1b[1;33m● paused\x1b[0m".to_string()
+                }
+            } else {
+                format!(
+                    "\x1b[7m space \x1b[0m play  \x1b[7m +- \x1b[0m speed  \x1b[2m{}\x1b[0m",
+                    SPEEDS[player.speed_idx].1
+                )
+            };
+            format!("\x1b[7m ▲▼ \x1b[0m select  \x1b[7m ⏎ \x1b[0m why  \x1b[7m ◀▶ \x1b[0m frame  {mode}")
+        }
+        View::WhyFired => {
+            "\x1b[7m ▲▼ \x1b[0m way  \x1b[7m ◀▶ \x1b[0m frame  \x1b[7m PgUp/Dn \x1b[0m scroll".to_string()
+        }
+    };
+
     let _ = write!(
         out,
-        " \x1b[7m ◀ ▶ \x1b[0m frame  \
-         \x1b[7m ⏵ \x1b[0m play/pause  \
-         \x1b[7m ▲▼ \x1b[0m speed  \
-         \x1b[7m esc \x1b[0m quit  \
-         \x1b[2m│\x1b[0m  \
-         \x1b[1m{current}/{total}\x1b[0m  \
-         {speed_label}  \
-         {state}"
+        " {tabs}  {hints}  \x1b[7m tab \x1b[0m view  \x1b[7m esc \x1b[0m quit  \x1b[2m│\x1b[0m {pos}"
     );
+}
+
+/// The unified 4-row header both views share, so toggling never makes the header
+/// jump: `Session <id>  <path>`, a metrics line, then the view's own 2-row column
+/// header (labels + rule). `col_header` must be exactly 2 lines.
+#[cfg(feature = "tui")]
+fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<String> {
+    let frame = &player.frames[player.current];
+    let short_id = &player.session_id[..player.session_id.len().min(12)];
+    let live = if player.live {
+        if player.following {
+            "  \x1b[1;32m● LIVE\x1b[0m"
+        } else {
+            "  \x1b[1;33m● LIVE paused\x1b[0m"
+        }
+    } else {
+        ""
+    };
+    let mut h = vec![
+        format!(
+            "\x1b[1mSession\x1b[0m {short_id}…  \x1b[2m{}\x1b[0m",
+            player.project_name
+        ),
+        format!(
+            "  \x1b[2mepoch {} · {}K ctx · {} ways fired · frame {}/{}\x1b[0m{live}",
+            frame.epoch,
+            player.context_window_k,
+            frame.ways.len(),
+            player.current + 1,
+            player.frames.len(),
+        ),
+    ];
+    h.extend(col_header);
+    h
 }
 
 // ── Frame construction ────────────────────────────────────────
@@ -1278,39 +1651,8 @@ fn fit_to_terminal(output: &str, width: usize, height: usize) -> String {
         if line_count >= max_lines {
             break;
         }
-        result.push_str(&truncate_visible(line, width));
+        result.push_str(&crate::cmd::compositor::truncate_visible(line, width));
         result.push_str("\r\n");
-    }
-    result
-}
-
-/// Truncate a string to `max_visible` visible characters, preserving ANSI escapes.
-fn truncate_visible(s: &str, max_visible: usize) -> String {
-    let mut result = String::new();
-    let mut visible = 0;
-    let mut in_escape = false;
-
-    for ch in s.chars() {
-        if in_escape {
-            result.push(ch);
-            if ch.is_ascii_alphabetic() {
-                in_escape = false;
-            }
-            continue;
-        }
-        if ch == '\x1b' {
-            in_escape = true;
-            result.push(ch);
-            continue;
-        }
-        if visible >= max_visible {
-            break;
-        }
-        result.push(ch);
-        visible += 1;
-    }
-    if result.contains('\x1b') {
-        result.push_str("\x1b[0m");
     }
     result
 }
@@ -1467,6 +1809,69 @@ mod why_tests {
     #[test]
     fn detail_handles_way_with_no_model_record() {
         assert!(render_why_detail("d/x", None).contains("no fire record"));
+    }
+
+    fn active(id: &str, epoch: u64) -> ActiveWay {
+        ActiveWay {
+            id: id.into(),
+            trigger: "keyword".into(),
+            epoch_fired: epoch,
+            token_pos: 0,
+            check_fires: 0,
+            is_new: false,
+            is_redisclosed: false,
+            refire_threshold_k: 0,
+        }
+    }
+
+    fn frame_of(ways: Vec<ActiveWay>) -> Frame {
+        Frame {
+            epoch: ways.iter().map(|w| w.epoch_fired).max().unwrap_or(0),
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            elapsed_secs: 0,
+            token_position_k: 0,
+            ways,
+            new_events: vec![],
+        }
+    }
+
+    #[test]
+    fn anchor_keeps_same_way_when_still_active() {
+        // Moving forward (or a frame where the way is still present) → exact id match.
+        let f = frame_of(vec![active("a", 1), active("b", 3), active("c", 5)]);
+        assert_eq!(reselect_by_anchor(&f, "b", 3), 1);
+    }
+
+    #[test]
+    fn compose_screen_is_fixed_height_with_nav_pinned() {
+        let top = vec!["h1".to_string(), "h2".to_string()];
+        let nav = vec!["sep".to_string(), "nav".to_string()];
+
+        // Long list, short screen → exactly `drawable` lines, nav on the last line.
+        let rows: Vec<String> = (0..50).map(|i| format!("row{i}")).collect();
+        let out = compose_screen(top.clone(), rows, 40, vec![], nav.clone(), 20);
+        let lines: Vec<&str> = out.split('\n').collect();
+        assert_eq!(lines.len(), 20, "composes to exactly the drawable height");
+        assert_eq!(lines[0], "h1", "header pinned at the top");
+        assert_eq!(lines[19], "nav", "nav pinned to the last line even when overflowing");
+
+        // Short list → the middle is blank-padded so the nav still sits at the bottom.
+        let out2 = compose_screen(top, vec!["only".to_string()], 0, vec![], nav, 20);
+        let l2: Vec<&str> = out2.split('\n').collect();
+        assert_eq!(l2.len(), 20);
+        assert_eq!(l2[2], "only");
+        assert_eq!(l2[19], "nav", "nav stays anchored to the bottom, not floating up");
+        assert_eq!(l2[10], "", "the list area is padded with blanks");
+    }
+
+    #[test]
+    fn anchor_snaps_to_nearest_lesser_epoch_when_rewound_out() {
+        // Rewound frame missing "c" (epoch 5): anchor c@5 → nearest present epoch ≤ 5
+        // is b@3 (row 1). Frames are epoch-ascending, so it's the last such row.
+        let f = frame_of(vec![active("a", 1), active("b", 3)]);
+        assert_eq!(reselect_by_anchor(&f, "c", 5), 1);
+        // Anchor epoch below everything present → first row.
+        assert_eq!(reselect_by_anchor(&f, "z", 0), 0);
     }
 
     #[test]

@@ -465,6 +465,17 @@ enum IntrospectCommand {
         #[arg(long)]
         all: bool,
     },
+    /// Live-monitor the current session's way firings, following the newest frame
+    /// as ways fire (the replay TUI, refreshing on a tick). Defaults to the most
+    /// recent session in the current project.
+    Live {
+        /// Session ID to monitor (default: most recent in the current project)
+        #[arg(long)]
+        session: Option<String>,
+        /// Scope to this project path (default: current project)
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -752,6 +763,9 @@ fn main() -> Result<()> {
             }
             IntrospectCommand::Dump { session, project, all } => {
                 cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
+            }
+            IntrospectCommand::Live { session, project } => {
+                cmd::introspect::live(session.as_deref(), project.as_deref())
             }
         },
         Commands::Status { json } => cmd::status::run(json),

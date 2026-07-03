@@ -24,6 +24,35 @@ pub fn replay(
     rethink::run(session, project, speed, false, all)
 }
 
+/// `ways introspect live` — monitor the current session's way firings, following
+/// the newest frame as ways fire. The "current" session is the most recent one in
+/// scope (the one actively writing events); `--session` overrides it. Scoping
+/// mirrors `replay`: defaults to the current project, `--project` for a specific
+/// one, and fails loud rather than silently globalizing when detection fails.
+pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
+        println!("No events recorded yet.");
+        return Ok(());
+    }
+
+    // Live is inherently single-project (the session you're in), so no `--all`.
+    let scope = rethink::resolve_project_scope(project, false)?;
+
+    let session_id = match session {
+        Some(s) => s.to_string(),
+        None => match rethink_dump::most_recent_session(&content, scope.as_deref()) {
+            Some(s) => s,
+            None => {
+                println!("No sessions found in scope to monitor.");
+                return Ok(());
+            }
+        }
+    };
+
+    rethink::run_live(&session_id, scope.as_deref(), None)
+}
+
 /// `ways introspect list` — enumerate candidate sessions in scope, as a table or
 /// (`--json`) machine-listable data for an agent to pick from before dumping.
 pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {

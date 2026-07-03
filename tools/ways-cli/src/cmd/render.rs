@@ -197,7 +197,7 @@ pub fn write_way_row_with<W: WayRow>(
     };
 
     // Pad re-disclosure to fixed visible width (ANSI-aware)
-    let next_padded = ansi_pad(&next, 13);
+    let next_padded = crate::cmd::compositor::pad_visible(&next, 13);
 
     let _ = writeln!(
         out,
@@ -510,28 +510,5 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// Pad a string containing ANSI codes to a fixed visible width.
-fn ansi_pad(s: &str, width: usize) -> String {
-    let visible = ansi_visible_len(s);
-    if visible >= width {
-        s.to_string()
-    } else {
-        format!("{s}{}", " ".repeat(width - visible))
-    }
-}
-
-/// Measure visible length of a string, ignoring ANSI escape sequences.
-fn ansi_visible_len(s: &str) -> usize {
-    let mut len = 0;
-    let mut in_escape = false;
-    for c in s.chars() {
-        if in_escape {
-            if c == 'm' { in_escape = false; }
-        } else if c == '\x1b' {
-            in_escape = true;
-        } else {
-            len += 1;
-        }
-    }
-    len
-}
+// ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `cmd::compositor`
+// — the canonical home — so `render`, `rethink`, and the compositor share one copy.

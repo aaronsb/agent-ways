@@ -10,13 +10,12 @@
 //! need text selection or resizable/mouse panes, the ADR's escape hatch to ratatui
 //! applies; short of that, this stays.
 //!
-//! It provides ANSI-visible-width primitives ([`visible_len`], [`truncate_visible`],
-//! [`pad_visible`]) meant as the canonical home for that logic — `render.rs`
-//! (`ansi_pad`/`ansi_visible_len`) and `rethink.rs` (`truncate_visible`) still carry
-//! their own older copies, which can migrate here in a follow-up. Width is measured
-//! in `char`s, ignoring SGR escapes — the same grain those callers already use;
-//! East-Asian double-width and combining marks are not accounted for (that would
-//! need a new dependency the lean binary declines).
+//! It owns the canonical ANSI-visible-width primitives ([`visible_len`],
+//! [`truncate_visible`], [`pad_visible`]): `render.rs`'s row padding and
+//! `rethink.rs`'s `fit_to_terminal` both call these instead of the local copies
+//! they used to keep. Width is measured in `char`s, ignoring SGR escapes — the same
+//! grain those callers already use; East-Asian double-width and combining marks are
+//! not accounted for (that would need a new dependency the lean binary declines).
 
 use std::fmt::Write;
 
