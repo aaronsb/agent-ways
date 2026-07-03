@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -132,8 +132,8 @@ keeps working; the canonical surface is the consolidated one.
 
 - The micro-compositor is hand-built layout code (panes, scroll, tabs) — bounded
   (~200–400 lines) but genuinely new, and less capable than ratatui's widgets.
-- A live `think` loop re-reading files is more moving parts than a one-shot dump;
-  the stat-gate must be correct to avoid needless re-parse flicker.
+- A live `introspect live` loop re-reading files is more moving parts than a
+  one-shot dump; the stat-gate must be correct to avoid needless re-parse flicker.
 
 ### Neutral
 
