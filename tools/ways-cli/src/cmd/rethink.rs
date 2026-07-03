@@ -953,10 +953,16 @@ fn render_why(player: &mut Player) -> String {
     let header = header_lines(player, vec![labels, rule]);
 
     // header (4) + body (body_h) + footer (2) = exactly the drawable height, so the
-    // chrome lines up row-for-row with the Timeline view when toggling.
+    // chrome lines up row-for-row with the Timeline view when toggling. On a very
+    // short terminal (where body_h hits its floor) drop from the top so the footer
+    // stays visible, mirroring compose_screen.
+    let drawable = (player.term_height as usize).saturating_sub(1).max(4);
     let mut lines = header;
     lines.extend(composited);
     lines.extend(nav);
+    if lines.len() > drawable {
+        lines.drain(0..lines.len() - drawable);
+    }
     lines.join("\n")
 }
 
@@ -1025,7 +1031,11 @@ fn compose_screen(
         lines.extend(extras);
     }
     lines.extend(nav);
-    lines.truncate(drawable); // safety net; the arithmetic already sums to `drawable`
+    // On a very short terminal the pinned header + nav alone can exceed the height;
+    // drop from the TOP so the nav legend is never the thing that gets clipped.
+    if lines.len() > drawable {
+        lines.drain(0..lines.len() - drawable);
+    }
     lines.join("\n")
 }
 
@@ -2068,6 +2078,20 @@ mod why_tests {
         assert_eq!(l2[2], "only");
         assert_eq!(l2[19], "nav", "nav stays anchored to the bottom, not floating up");
         assert_eq!(l2[10], "", "the list area is padded with blanks");
+
+        // Tiny terminal where the pinned header+nav alone exceed the height: the nav
+        // must survive (the header is dropped instead of the footer).
+        let tiny = compose_screen(
+            vec!["h1".into(), "h2".into(), "h3".into()],
+            vec!["r".into()],
+            0,
+            vec![],
+            vec!["sep".into(), "nav".into()],
+            4,
+        );
+        let tl: Vec<&str> = tiny.split('\n').collect();
+        assert_eq!(tl.len(), 4, "never exceeds the drawable height");
+        assert_eq!(tl[3], "nav", "footer survives; the header is clipped instead");
     }
 
     #[test]
