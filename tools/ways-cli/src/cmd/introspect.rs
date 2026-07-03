@@ -36,21 +36,33 @@ pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    // Live is inherently single-project (the session you're in), so no `--all`.
-    let scope = rethink::resolve_project_scope(project, false)?;
-
-    let session_id = match session {
-        Some(s) => s.to_string(),
-        None => match rethink_dump::most_recent_session(&content, scope.as_deref()) {
+    // Resolve which session to monitor:
+    // - explicit `--session` wins;
+    // - `--project` scopes to the latest session recorded under that project;
+    // - otherwise the *most recently active* session anywhere — the one still
+    //   appending events. We deliberately don't scope the default to a detected
+    //   project: a long-running session's recorded project can be stale/wrong (the
+    //   boundary hook logs `CLAUDE_PROJECT_DIR:-$PWD`), and "live" means "what's
+    //   happening now," which is an activity signal, not a project one.
+    let session_id = match (session, project) {
+        (Some(s), _) => s.to_string(),
+        (None, Some(p)) => match rethink_dump::most_recent_session(&content, Some(p)) {
             Some(s) => s,
             None => {
-                println!("No sessions found in scope to monitor.");
+                println!("No sessions found for project {p}.");
                 return Ok(());
             }
-        }
+        },
+        (None, None) => match rethink_dump::most_recent_active_session(&content) {
+            Some(s) => s,
+            None => {
+                println!("No sessions found to monitor.");
+                return Ok(());
+            }
+        },
     };
 
-    rethink::run_live(&session_id, scope.as_deref(), None)
+    rethink::run_live(&session_id, project, None)
 }
 
 /// `ways introspect list` — enumerate candidate sessions in scope, as a table or

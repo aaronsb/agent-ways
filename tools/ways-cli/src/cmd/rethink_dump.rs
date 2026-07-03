@@ -277,6 +277,31 @@ fn session_events<'a>(
         .filter(move |v| v["session"].as_str() == Some(session_id))
 }
 
+/// The session with the most recent event of *any* kind — "what's live right now".
+/// Unlike [`most_recent_session`], this keys off the latest activity, not the latest
+/// `session_start`, and ignores the recorded project: a long-running session's
+/// `session_start` is old, and its project may be mis-recorded (the boundary hook
+/// logs `CLAUDE_PROJECT_DIR:-$PWD`, which isn't always the real project). For a live
+/// monitor, the currently-active session is the one still appending events.
+pub(crate) fn most_recent_active_session(content: &str) -> Option<String> {
+    let mut best: Option<(String, String)> = None; // (ts, session)
+    for line in content.lines() {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let sid = match v["session"].as_str() {
+            Some(s) if !s.is_empty() => s,
+            _ => continue,
+        };
+        let ts = v["ts"].as_str().unwrap_or("");
+        if best.as_ref().map(|(b, _)| ts > b.as_str()).unwrap_or(true) {
+            best = Some((ts.to_string(), sid.to_string()));
+        }
+    }
+    best.map(|(_, s)| s)
+}
+
 /// Latest session (by session_start timestamp) within an optional project scope.
 pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<String> {
     let mut best: Option<(String, String)> = None; // (ts, session)
