@@ -20,8 +20,17 @@
 //!
 //! This increment builds the model + the join from the event log; it does not yet
 //! rewire the `rethink` replay pipeline (still in `ways-cli`) to consume it — that
-//! convergence is increment 4. Until then the epoch clustering here deliberately
-//! mirrors `rethink::build_frames`' `≤3s` rule so the two do not diverge.
+//! convergence is increment 4.
+//!
+//! **The clustering shares the `≤3s` gap *rule* with `rethink::build_frames`, but
+//! is not identical to it** — the two are reconciled at increment 4, not assumed
+//! equivalent now. Deliberate differences: this model clusters the *fire* stream
+//! only (a [`Turn`] is defined by the ways that fired, not by `session_start` /
+//! `way_redisclosed` events the replay also folds in), sorts by timestamp, numbers
+//! epochs over fire-bearing clusters only, and takes each turn's token position
+//! from the event's own recorded value rather than a transcript-timeline lookup.
+//! Increment 4 must reconcile these where the surfaces need to agree — it cannot
+//! assume a drop-in swap.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -152,9 +161,10 @@ impl SessionIntrospection {
     ///
     /// The turn↔fire join is HEURISTIC — every [`Turn`] is labelled as such —
     /// until enrichment (ADR-153 §3) supplies a transcript uuid. Fires are grouped
-    /// into turns by the same `≤3s` timestamp-gap rule `rethink::build_frames`
-    /// uses, so the model and the replay agree on epoch boundaries. A way absent
-    /// from `criteria` still appears, with empty criteria — unknown, not invented.
+    /// into turns by the same `≤3s` timestamp-gap *rule* `rethink::build_frames`
+    /// uses (over the fire stream only — see the module note; the two are
+    /// reconciled at increment 4, not assumed identical). A way absent from
+    /// `criteria` still appears, with empty criteria — unknown, not invented.
     pub fn build(
         events: &[Value],
         session_id: &str,
@@ -317,16 +327,6 @@ impl MatchCriteria {
             embed_threshold: str_or_num_f64(&map["embed_threshold"]),
             scope: get("scope"),
         }
-    }
-
-    /// Parse criteria from a way file on disk (frontmatter block between the first
-    /// two `---` lines). Missing file or absent frontmatter → empty criteria.
-    pub fn from_way_file(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|c| frontmatter_block(&c))
-            .map(|fm| Self::from_frontmatter_str(&fm))
-            .unwrap_or_default()
     }
 }
 
