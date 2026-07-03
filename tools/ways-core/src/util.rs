@@ -44,6 +44,32 @@ pub fn path_to_id(rel: &Path) -> String {
         .join("/")
 }
 
+/// Parse an ISO-8601 timestamp (`YYYY-MM-DDThh:mm:ss…`) to approximate epoch
+/// seconds — enough for gap and nearest-neighbour comparisons within a session
+/// (the introspection turn clustering and the transcript join). Calendar-correct
+/// on month/year boundaries (cumulative month days + leap years), so adjacent days
+/// never collide the way a naive `month*30` does. The absolute base is arbitrary;
+/// only differences are meaningful, and both sides route through here.
+pub fn parse_ts_secs(ts: &str) -> u64 {
+    if ts.len() < 19 {
+        return 0;
+    }
+    let field = |a: usize, b: usize| ts.get(a..b).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let (year, month, day) = (field(0, 4), field(5, 7), field(8, 10));
+    let (hour, min, sec) = (field(11, 13), field(14, 16), field(17, 19));
+
+    // Days before the 1st of each month in a non-leap year.
+    const CUM: [u64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    let m = (month.clamp(1, 12) - 1) as usize;
+    let leap_days = |y: u64| y / 4 - y / 100 + y / 400; // leap days in years [1, y]
+    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let mut days = year * 365 + leap_days(year.saturating_sub(1)) + CUM[m] + day;
+    if m >= 2 && is_leap {
+        days += 1; // this year's Feb-29 precedes March onward
+    }
+    days * 86_400 + hour * 3_600 + min * 60 + sec
+}
+
 /// Encode a real project path into the namespace key that prefixes
 /// project-local way IDs in the corpus.
 ///
@@ -215,6 +241,21 @@ pub fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_ts_secs_diffs_are_calendar_correct() {
+        let s = parse_ts_secs;
+        // Same second → equal; a 3s gap is exactly 3.
+        assert_eq!(s("2026-07-03T01:02:03Z"), s("2026-07-03T01:02:03.999Z"));
+        assert_eq!(s("2026-07-03T01:02:06Z") - s("2026-07-03T01:02:03Z"), 3);
+        // Adjacent days across a month boundary differ by exactly one day — the
+        // month*30 bug reported Jan31≡Feb01 (diff 0) here.
+        assert_eq!(s("2026-02-01T00:00:00Z") - s("2026-01-31T00:00:00Z"), 86_400);
+        // Leap year: Feb has 29 days, so Mar 1 is one day after Feb 29 (2024).
+        assert_eq!(s("2024-03-01T00:00:00Z") - s("2024-02-29T00:00:00Z"), 86_400);
+        // Too-short input degrades to 0, not a panic.
+        assert_eq!(s("2026-07"), 0);
+    }
 
     #[test]
     fn days_to_ymd_known_dates() {

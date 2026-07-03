@@ -32,6 +32,7 @@
 //! Increment 4 must reconcile these where the surfaces need to agree — it cannot
 //! assume a drop-in swap.
 
+use crate::util::parse_ts_secs;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -359,23 +360,6 @@ fn str_or_num_f64(v: &Value) -> Option<f64> {
 
 fn str_or_num_u64(v: &Value) -> Option<u64> {
     v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_u64())
-}
-
-/// Timestamp → seconds, for gap clustering. Mirrors `rethink::parse_ts_secs`:
-/// an approximate monotonic-enough encoding (dep-free; not calendar-exact), which
-/// is all the `≤3s` gap test needs. Increment 4 can hoist a single copy.
-fn parse_ts_secs(ts: &str) -> u64 {
-    if ts.len() < 19 {
-        return 0;
-    }
-    let year: u64 = ts[0..4].parse().unwrap_or(0);
-    let month: u64 = ts[5..7].parse().unwrap_or(0);
-    let day: u64 = ts[8..10].parse().unwrap_or(0);
-    let hour: u64 = ts[11..13].parse().unwrap_or(0);
-    let min: u64 = ts[14..16].parse().unwrap_or(0);
-    let sec: u64 = ts[17..19].parse().unwrap_or(0);
-    let days = year * 365 + year / 4 + month * 30 + day;
-    days * 86400 + hour * 3600 + min * 60 + sec
 }
 
 // ── Criteria parsing ──────────────────────────────────────────
