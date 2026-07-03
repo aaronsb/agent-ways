@@ -64,7 +64,8 @@ pub fn run(dry_run: bool) -> Result<()> {
         println!("  2. refresh ways               — download pre-built (guarded: never older than source), else build");
         println!("  3. refresh way-embed          — download pre-built, else build (optional)");
         println!("  4. refresh ways-audit/attend/attend-chat — download pre-built, else build");
-        println!("  5. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
+        println!("  5. make relink                — ensure every suite binary is symlinked onto PATH");
+        println!("  6. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
         return Ok(());
     }
@@ -113,6 +114,19 @@ pub fn run(dry_run: bool) -> Result<()> {
         if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
             eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
         }
+    }
+
+    // Ensure every suite binary is linked onto PATH. Refreshing only updates
+    // `bin/`; a binary NEWLY ADDED to the suite (e.g. ways-audit for an install
+    // that predates it) has no `$XDG_BIN` symlink from the original `make install`,
+    // so without this it would sit in `bin/` unreachable. `make relink` is
+    // idempotent and only links what exists.
+    eprintln!("==> relink suite binaries onto PATH");
+    if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
+        eprintln!(
+            "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
+            app.display()
+        );
     }
 
     // 5. Regenerate the corpus (best-effort — it self-heals on next session) and
