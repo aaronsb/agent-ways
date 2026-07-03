@@ -67,6 +67,11 @@ pub(crate) struct Frame {
     pub(crate) token_position_k: u64,
     pub(crate) ways: Vec<ActiveWay>,
     pub(crate) new_events: Vec<String>,
+    /// Which compaction window (1-based) this frame belongs to. A long session is
+    /// segmented at each `session_start` boundary; epoch/distance restart per window
+    /// and the accumulated ways reset, so the latest window mirrors `ways list`. The
+    /// boundary itself surfaces as a `⎯ compaction ⎯` entry in `new_events`.
+    pub(crate) window: u64,
 }
 
 /// Which view the replay shows. `Timeline` is the cumulative frame table; `WhyFired`
@@ -87,6 +92,8 @@ struct Player {
     session_id: String,
     project_name: String,
     context_window_k: u64,
+    /// Total compaction windows across the frames (for the `window W/M` header).
+    windows: u64,
     term_width: u16,
     term_height: u16,
     /// Current view; the drill-down state below is only meaningful in `WhyFired`.
@@ -238,6 +245,7 @@ pub fn run(
         println!("No frames to replay.");
         return Ok(());
     }
+    let windows = frames.iter().map(|f| f.window).max().unwrap_or(1);
 
     let speed_idx = match speed {
         Some(ms) => SPEEDS.iter().position(|(s, _)| *s <= ms).unwrap_or(1),
@@ -254,6 +262,7 @@ pub fn run(
         session_id,
         project_name,
         context_window_k,
+        windows,
         term_width,
         term_height,
         view: View::Timeline,
@@ -314,6 +323,7 @@ pub fn run_live(session_id: &str, project: Option<&str>, speed: Option<u64>) -> 
         println!("No frames to monitor yet.");
         return Ok(());
     }
+    let windows = frames.iter().map(|f| f.window).max().unwrap_or(1);
 
     let speed_idx = match speed {
         Some(ms) => SPEEDS.iter().position(|(s, _)| *s <= ms).unwrap_or(1),
@@ -330,6 +340,7 @@ pub fn run_live(session_id: &str, project: Option<&str>, speed: Option<u64>) -> 
         session_id: session_id.to_string(),
         project_name,
         context_window_k,
+        windows,
         term_width,
         term_height,
         view: View::Timeline,
@@ -394,6 +405,7 @@ fn refresh_live(player: &mut Player) {
 
     let was_last = player.current + 1 >= player.frames.len();
     player.frames = frames;
+    player.windows = player.frames.iter().map(|f| f.window).max().unwrap_or(1);
     let last = player.frames.len() - 1;
     // Follow the newest frame unless the user has scrolled back to inspect history.
     player.current = if player.following || was_last {
@@ -1138,12 +1150,12 @@ fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<String> {
             player.project_name
         ),
         format!(
-            "  \x1b[2mepoch {} · {}K ctx · {} ways fired · frame {}/{}\x1b[0m{live}",
+            "  \x1b[2mepoch {} · {}K ctx · {} ways · window {}/{}\x1b[0m{live}",
             frame.epoch,
             player.context_window_k,
             frame.ways.len(),
-            player.current + 1,
-            player.frames.len(),
+            frame.window,
+            player.windows,
         ),
     ];
     h.extend(col_header);
@@ -1194,6 +1206,7 @@ fn build_frames(
     let mut active_ways: HashMap<String, ActiveWay> = HashMap::new();
     let mut check_fires: HashMap<String, u64> = HashMap::new();
     let mut epoch: u64 = 0;
+    let mut window: u64 = 1;
 
     let start_ts = events.first().map(|e| &e.ts).cloned().unwrap_or_default();
     let start_secs = parse_ts_secs(&start_ts);
@@ -1216,6 +1229,19 @@ fn build_frames(
     }
 
     for cluster in &clusters {
+        // A `session_start` after the session's origin is a compaction boundary: the
+        // real markers were cleared there, so reset the accumulated window state and
+        // restart epoch numbering. The latest window then reflects only what fired
+        // since the last compaction — the same grain `ways list` shows.
+        let boundary = !frames.is_empty()
+            && cluster.iter().any(|ev| ev.event == "session_start");
+        if boundary {
+            active_ways.clear();
+            check_fires.clear();
+            window += 1;
+            epoch = 0;
+        }
+
         epoch += 1;
         let cluster_ts = cluster[0].ts.clone();
         let cluster_secs = parse_ts_secs(&cluster_ts);
@@ -1224,6 +1250,9 @@ fn build_frames(
         let token_k = find_token_position(token_timeline, &cluster_ts);
 
         let mut new_events: Vec<String> = Vec::new();
+        if boundary {
+            new_events.push(format!("⎯ compaction · window {window} ⎯"));
+        }
 
         // Mark all existing ways as not-new
         for w in active_ways.values_mut() {
@@ -1290,6 +1319,7 @@ fn build_frames(
             token_position_k: token_k,
             ways,
             new_events,
+            window,
         });
     }
 
@@ -1832,7 +1862,46 @@ mod why_tests {
             token_position_k: 0,
             ways,
             new_events: vec![],
+            window: 1,
         }
+    }
+
+    #[test]
+    fn build_frames_segments_at_compaction_boundaries() {
+        let ev = |ts: &str, event: &str, way: &str| WayEvent {
+            ts: ts.into(),
+            event: event.into(),
+            way: way.into(),
+            trigger: "keyword".into(),
+            check: String::new(),
+        };
+        // Window 1: origin session_start + two fires. A second session_start
+        // (a compaction) opens window 2, which starts fresh with one fire.
+        let events = vec![
+            ev("2026-01-01T00:00:00Z", "session_start", ""),
+            ev("2026-01-01T00:00:01Z", "way_fired", "d/a"),
+            ev("2026-01-01T00:01:00Z", "way_fired", "d/b"),
+            ev("2026-01-01T02:00:00Z", "session_start", ""),
+            ev("2026-01-01T02:00:01Z", "way_fired", "d/c"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+
+        // The latest window reset the accumulated ways and restarted epoch numbering.
+        let last = frames.last().unwrap();
+        assert_eq!(last.window, 2);
+        let ids: Vec<&str> = last.ways.iter().map(|w| w.id.as_str()).collect();
+        assert_eq!(ids, vec!["d/c"], "window 2 shows only its own fires (reset)");
+        assert!(last.epoch <= 2, "epoch restarted per window, not continued from w1");
+
+        // Window 1 still accumulated both of its ways.
+        let w1 = frames.iter().find(|f| f.window == 1 && f.ways.len() == 2).unwrap();
+        assert!(w1.ways.iter().any(|w| w.id == "d/a"));
+        assert!(w1.ways.iter().any(|w| w.id == "d/b"));
+
+        // The boundary frame carries a compaction marker.
+        assert!(frames
+            .iter()
+            .any(|f| f.new_events.iter().any(|e| e.contains("compaction"))));
     }
 
     #[test]
