@@ -424,7 +424,34 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum IntrospectCommand {
-    /// Dump a session's reconstructed introspection as JSON (agent-facing MVP):
+    /// Interactively replay a session's way firings (the animated TUI).
+    Replay {
+        /// Session ID to replay directly (default: pick interactively)
+        #[arg(long)]
+        session: Option<String>,
+        /// Scope to this project path (default: current project)
+        #[arg(long)]
+        project: Option<String>,
+        /// Consider sessions from every project, not just the current one
+        #[arg(long)]
+        all: bool,
+        /// Initial frame speed in milliseconds (default: 1000)
+        #[arg(long)]
+        speed: Option<u64>,
+    },
+    /// List candidate sessions in scope (table, or `--json` for an agent).
+    List {
+        /// Scope to this project path (default: current project)
+        #[arg(long)]
+        project: Option<String>,
+        /// List sessions from every project, not just the current one
+        #[arg(long)]
+        all: bool,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Dump a session's reconstructed introspection as JSON (agent-facing):
     /// turns, fired ways, their criteria, keyed transcript join, and matched
     /// spans. Defaults to the most recent session in the current project.
     Dump {
@@ -702,15 +729,27 @@ fn main() -> Result<()> {
         Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet, false)
         }
-        Commands::Rethink { session, project, all, speed, list, json } => match (list, json) {
-            // `--list --json`: machine-listable session enumeration (ADR-154 §4).
-            (true, true) => cmd::rethink_dump::run_list_json(project.as_deref(), all),
-            // `--json`: dump one session's reconstructed timeline.
-            (false, true) => cmd::rethink_dump::run_json(session.as_deref(), project.as_deref(), all),
-            // interactive replay, or `--list` text.
-            _ => cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list, all),
-        },
+        Commands::Rethink { session, project, all, speed, list, json } => {
+            eprintln!(
+                "note: `ways rethink` is deprecated — use `ways introspect replay` \
+                 (or `introspect list` / `introspect dump`). It still works for now."
+            );
+            match (list, json) {
+                // `--list --json`: machine-listable session enumeration (ADR-154 §4).
+                (true, true) => cmd::rethink_dump::run_list_json(project.as_deref(), all),
+                // `--json`: dump one session's reconstructed timeline.
+                (false, true) => cmd::rethink_dump::run_json(session.as_deref(), project.as_deref(), all),
+                // interactive replay, or `--list` text.
+                _ => cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list, all),
+            }
+        }
         Commands::Introspect { mode } => match mode {
+            IntrospectCommand::Replay { session, project, all, speed } => {
+                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed)
+            }
+            IntrospectCommand::List { project, all, json } => {
+                cmd::introspect::list(project.as_deref(), all, json)
+            }
             IntrospectCommand::Dump { session, project, all } => {
                 cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
             }

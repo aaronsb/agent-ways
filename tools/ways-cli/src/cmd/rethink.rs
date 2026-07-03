@@ -19,7 +19,7 @@ use std::io::Write;
 
 use crate::cmd::render::{self, WayRow};
 use crate::session;
-use crate::util::{detect_project_dir, home_dir};
+use crate::util::{detect_project_dir, home_dir, parse_ts_secs};
 
 // ── Data structures ───────────────────────────────────────────
 
@@ -927,20 +927,6 @@ fn format_duration(secs: u64) -> String {
     }
 }
 
-fn parse_ts_secs(ts: &str) -> u64 {
-    if ts.len() < 19 {
-        return 0;
-    }
-    let year: u64 = ts[0..4].parse().unwrap_or(0);
-    let month: u64 = ts[5..7].parse().unwrap_or(0);
-    let day: u64 = ts[8..10].parse().unwrap_or(0);
-    let hour: u64 = ts[11..13].parse().unwrap_or(0);
-    let min: u64 = ts[14..16].parse().unwrap_or(0);
-    let sec: u64 = ts[17..19].parse().unwrap_or(0);
-
-    let days = year * 365 + year / 4 + month * 30 + day;
-    days * 86400 + hour * 3600 + min * 60 + sec
-}
 
 /// Fit rendered output to terminal dimensions.
 /// Uses \r\n because raw mode requires explicit carriage return.

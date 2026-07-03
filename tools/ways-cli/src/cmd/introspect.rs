@@ -1,12 +1,38 @@
 //! `ways introspect` — the user/agent-facing surface over the ways-core
-//! `SessionIntrospection` model (ADR-154 §1). This increment ships only the
-//! non-interactive `dump` mode (the agent-facing MVP); `replay`/`live` and the
-//! why-fired drill-down follow.
+//! `SessionIntrospection` model (ADR-154). Modes: `replay` (interactive),
+//! `list`, `dump` (agent-facing JSON). `live` and the why-fired drill-down
+//! follow in later increments.
+//!
+//! `replay`/`list` currently delegate to the proven `rethink` pipeline
+//! (`build_frames` → TUI); re-pointing them at the `SessionIntrospection` model
+//! is deferred until the drill-down needs it, since it requires reconciling that
+//! model's fire-centric clustering with `build_frames`' full-event-stream
+//! clustering (ADR-154 §1 — not a drop-in swap). `dump` already reads the model.
 
 use anyhow::Result;
 
 use crate::cmd::{rethink, rethink_dump};
 use crate::session;
+
+/// `ways introspect replay` — interactive replay of a session's way firings.
+pub fn replay(
+    session: Option<&str>,
+    project: Option<&str>,
+    all: bool,
+    speed: Option<u64>,
+) -> Result<()> {
+    rethink::run(session, project, speed, false, all)
+}
+
+/// `ways introspect list` — enumerate candidate sessions in scope, as a table or
+/// (`--json`) machine-listable data for an agent to pick from before dumping.
+pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
+    if json {
+        rethink_dump::run_list_json(project, all)
+    } else {
+        rethink::run(None, project, None, true, all)
+    }
+}
 
 /// `ways introspect dump` — emit a session's reconstructed introspection (turns,
 /// fired ways, criteria, keyed transcript join, matched spans) as JSON, so an
