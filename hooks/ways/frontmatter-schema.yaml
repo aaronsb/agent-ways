@@ -49,6 +49,17 @@ way:
         always — reserve it for exact tokens (slash-command names, patterns
         that deliberately target URLs). Do not combine with common-word
         alternations; that reintroduces the noise the gate exists to veto.
+    pattern_keep:
+      type: string
+      required: optional
+      role: >
+        Whitespace-separated bare words in pattern: that the pattern-hygiene
+        lint should NOT flag as common/short (ADR-155 §5). Each is a measured,
+        calibration-backed exception (ADR-156): the keyword is load-bearing and
+        its off-sense noise scores below the keyword floor τ_k, so the heuristic
+        flag is a known false alarm. Annotate with an inline `# reason` comment.
+        Only silences the common-word and short-token rules — never the
+        unbounded `.*` rule, which is a structural defect, not a judgement call.
     files:
       type: regex
       required: optional

@@ -212,7 +212,10 @@ pub(super) fn lint_file(
     // anchored, term-of-art triggers; suggestive common words belong in
     // vocabulary:. Advisory WARNINGs, not errors.
     if let Some(val) = get_field_value(&fm_str, "pattern") {
-        super::pattern::check_pattern(&rel, &val, warnings);
+        let keep = get_field_value(&fm_str, "pattern_keep")
+            .map(|k| super::pattern::parse_keep(&k))
+            .unwrap_or_default();
+        super::pattern::check_pattern(&rel, &val, &keep, warnings);
     }
 
     // Scope enum
