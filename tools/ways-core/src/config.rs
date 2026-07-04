@@ -535,7 +535,7 @@ mod tests {
             "ways:\n  \
              itops/incident:\n    \
              enabled: false\n    \
-             embed_threshold: 0.50\n",
+             future_reserved_key: 0.50\n",
         );
         assert_eq!(cfg.disabled_ways, vec!["itops/incident".to_string()]);
     }

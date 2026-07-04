@@ -133,10 +133,6 @@ fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>, width: usize) -> St
             wrote = true;
         }
     }
-    if let Some(t) = c.embed_threshold {
-        let _ = writeln!(out, "  \x1b[2membed_threshold:\x1b[0m {t}");
-        wrote = true;
-    }
     if !wrote {
         let _ = writeln!(out, "  \x1b[2m(none recorded)\x1b[0m");
     }

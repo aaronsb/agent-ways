@@ -1,7 +1,6 @@
 ---
 description: Code quality, testing, security, and performance — the craft of writing and maintaining production code
 vocabulary: code quality clean refactor improve test secure perform optimize review best practice pattern antipattern smell tech debt maintainability readability
-embed_threshold: 0.30
 scope: agent, subagent
 refire: 0.2
 ---

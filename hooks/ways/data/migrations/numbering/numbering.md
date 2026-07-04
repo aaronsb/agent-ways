@@ -2,7 +2,6 @@
 description: how migration files are numbered, ordered, and tracked — the applied-migrations ledger, gap-tolerant sequencing, and avoiding number collisions
 vocabulary: numbering sequence order version ledger applied filename prefix zero-pad monotonic gap collision timestamp schema_migrations sequential
 pattern: schema_migrations|migration.?(number|order|sequenc|version|ledger)|zero.?pad|\b0\d\d_|applied_at
-embed_threshold: 0.38
 scope: agent, subagent
 refire: 0.15
 ---

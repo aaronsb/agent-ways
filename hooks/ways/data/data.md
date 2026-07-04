@@ -2,7 +2,6 @@
 description: choosing and scoping a data store — how much database machinery a project actually needs, from a flat file or SQLite up to a migrated multi-schema relational or graph database
 vocabulary: database data store persistence sql sqlite postgres postgresql mysql duckdb mariadb schema table relational nosql document graph datastore db datamodel persistence
 pattern: sqlite|postgres(ql)?|mysql|mariadb|duckdb|datastore|\.db\b|persistence.?layer|data.?(model|store|layer)|database
-embed_threshold: 0.30
 scope: agent, subagent
 refire: 0.15
 ---

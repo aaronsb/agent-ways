@@ -3,7 +3,6 @@ description: persistent SSH agent on a workstation — ssh-add, keychain integra
 vocabulary: ssh-agent ssh-add keychain apple-use-keychain launchd systemd gnome-keyring SSH_AUTH_SOCK ed25519 AddKeysToAgent UseKeychain IdentityFile persistent socket keygen
 files: /\.ssh/config$
 commands: ssh-add\b|ssh-agent\b|ssh-keygen\b
-embed_threshold: 0.40
 scope: agent
 refire: 0.15
 ---

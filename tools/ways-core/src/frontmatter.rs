@@ -118,8 +118,6 @@ pub struct Frontmatter {
     #[serde(default)]
     #[allow(dead_code)] // parsed for serde compat, accessed via scan's own scope field
     pub scope: Option<String>,
-    #[serde(default)]
-    pub embed_threshold: Option<f64>,
     /// ADR-123 firing-dynamics curve. Required for ways that fire
     /// predictively or reactively; optional during parse for static
     /// consumers (tune/corpus/graph) that don't invoke the engine.
@@ -695,7 +693,6 @@ curve:
     fn does_not_fire_on_empty_or_non_channel_fields() {
         assert!(!fires_on_something(""));
         assert!(!fires_on_something("scope: user\n"));
-        assert!(!fires_on_something("embed_threshold: 0.5\n"));
         // curve: and refire: are cadence fields, not firing channels
         assert!(!fires_on_something("curve:\n  type: Flat\n"));
         assert!(!fires_on_something("refire: 0.2\n"));

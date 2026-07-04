@@ -381,7 +381,6 @@ fn scan_ways_dir(
             "id": id,
             "description": fm.description,
             "vocabulary": fm.vocabulary.unwrap_or_default(),
-            "embed_threshold": fm.embed_threshold.unwrap_or(0.35),
             "embed_model": "en",
         });
 

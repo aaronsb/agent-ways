@@ -1,7 +1,6 @@
 ---
 description: version-numbered identifiers, function/class/variable names, and docstrings/comments — process_v2, HandlerV2, _FOO_V0, 'v0 seed for the namespace'; the symbol name should describe what the thing is, not which revision it is
 vocabulary: identifier symbol naming rename suffix function class variable module docstring comment glueball twin revision snapshot versioned
-embed_threshold: 0.45
 refire: 0.15
 scope: agent,subagent
 ---
