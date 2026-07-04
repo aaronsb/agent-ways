@@ -22,6 +22,7 @@
 //! alternations (split on `|` at paren depth 0), so a grouped inner `|` such as
 //! `alert.?(response|triage)` is treated as one alternation, not three.
 
+use std::collections::HashSet;
 use std::fmt::Display;
 
 /// Literal alternations at or above this length are common enough in normal
@@ -67,9 +68,33 @@ const COMMON_WORDS: &[&str] = &[
     "performance",
 ];
 
+/// Parse a `pattern_keep:` value into the set of lowercased bare words the
+/// author has measured and deliberately kept in `pattern:` despite the
+/// common-word / short-token heuristics. Whitespace-separated; an inline
+/// `# reason` comment (plain scalar) is stripped so the value carries only the
+/// exempted tokens. Each entry documents a calibration-backed exception
+/// (ADR-155 §5 sweep, ADR-156 ruler): the keyword is load-bearing and its noise
+/// is floor-gated, so the heuristic flag is a known false alarm.
+pub(super) fn parse_keep(raw: &str) -> HashSet<String> {
+    let (body, was_quoted) = unquote(raw.trim());
+    let val = if was_quoted {
+        body
+    } else {
+        strip_yaml_comment(body)
+    };
+    val.split_whitespace().map(|w| w.to_lowercase()).collect()
+}
+
 /// Run all three pattern-hygiene rules against one way's `pattern:` value.
-/// `warnings` accumulates the project-wide counter owned by the caller.
-pub(super) fn check_pattern(rel: &dyn Display, pattern: &str, warnings: &mut u32) {
+/// `keep` lists bare words exempted from the common-word / short rules (see
+/// [`parse_keep`]); the structural `.*` rule is never exempted. `warnings`
+/// accumulates the project-wide counter owned by the caller.
+pub(super) fn check_pattern(
+    rel: &dyn Display,
+    pattern: &str,
+    keep: &HashSet<String>,
+    warnings: &mut u32,
+) {
     // Read the value the way the matcher's YAML loader does: strip a plain
     // scalar's inline `# comment` (only for unquoted values — quotes make `#`
     // literal) and a leading whole-pattern inline flag group like `(?i)`.
@@ -104,6 +129,14 @@ pub(super) fn check_pattern(rel: &dyn Display, pattern: &str, warnings: &mut u32
         // alternations (groups, character classes, multi-word phrases joined
         // by `.?`/`.*`) are outside the vocabulary-demotion doctrine.
         if !info.is_bare_word {
+            continue;
+        }
+
+        // Author-acknowledged exception: a measured, calibration-backed keep
+        // (`pattern_keep:`) exempts this bare word from the two heuristic
+        // rules. The structural `.*` rule above is intentionally not exemptable
+        // — a wildcard span is a defect, not a judgement call.
+        if keep.contains(&info.word) {
             continue;
         }
 
@@ -271,7 +304,13 @@ mod tests {
 
     fn warnings_for(pattern: &str) -> u32 {
         let mut n = 0;
-        check_pattern(&"way", pattern, &mut n);
+        check_pattern(&"way", pattern, &HashSet::new(), &mut n);
+        n
+    }
+
+    fn warnings_with_keep(pattern: &str, keep: &str) -> u32 {
+        let mut n = 0;
+        check_pattern(&"way", pattern, &parse_keep(keep), &mut n);
         n
     }
 
@@ -356,7 +395,7 @@ mod tests {
         // `.*?` is unbounded too; still flagged, but not mislabeled "greedy".
         let mut n = 0;
         // capture is not straightforward; just assert it fires exactly once.
-        check_pattern(&"way", "alert.*?ack", &mut n);
+        check_pattern(&"way", "alert.*?ack", &HashSet::new(), &mut n);
         assert_eq!(n, 1);
     }
 
@@ -382,5 +421,48 @@ mod tests {
     #[test]
     fn longer_uncommon_bare_word_is_clean() {
         assert_eq!(warnings_for("orchestrat|multiagent"), 0);
+    }
+
+    #[test]
+    fn pattern_keep_exempts_measured_common_word() {
+        // 'slow' is a common word but a measured keep: pattern_keep silences
+        // rule 1 for it, while other alternations stay checked.
+        assert_eq!(warnings_for("slow|optimi|latency"), 1);
+        assert_eq!(warnings_with_keep("slow|optimi|latency", "slow"), 0);
+        // Multiple kept words (deps: package + library), whitespace-separated.
+        assert_eq!(warnings_for("package|library|upgrade"), 3);
+        assert_eq!(
+            warnings_with_keep("package|library|upgrade", "package library"),
+            1 // only 'upgrade' remains
+        );
+    }
+
+    #[test]
+    fn pattern_keep_exempts_short_token() {
+        // A short unanchored term-of-art can be kept as-is if measured safe.
+        assert_eq!(warnings_for("erd|entity"), 1);
+        assert_eq!(warnings_with_keep("erd|entity", "erd"), 0);
+    }
+
+    #[test]
+    fn pattern_keep_does_not_exempt_wildcard() {
+        // The structural `.*` rule is never silenced, even if the word is kept.
+        assert_eq!(warnings_with_keep("slow|save.*memory", "slow save"), 1);
+    }
+
+    #[test]
+    fn pattern_keep_strips_inline_reason_comment() {
+        // Authors annotate the keep with a reason; the comment is not a token.
+        assert_eq!(
+            warnings_with_keep("slow|optimi", "slow # measured: floor-gated"),
+            0
+        );
+    }
+
+    #[test]
+    fn pattern_keep_is_case_insensitive_and_anchor_aware() {
+        // Keep matches the lowercased bare word, so an anchored/cased keyword
+        // is still exempted by its plain form.
+        assert_eq!(warnings_with_keep(r"\bCommit\b", "commit"), 0);
     }
 }

@@ -1,7 +1,7 @@
 ---
 description: building and maintaining a project's own CLI tooling — encoding repeated operations as commands rather than manual shell sequences
 vocabulary: tool tooling cli script subcommand automate automation repeated manual incantation workflow efficiency wrapper helper scaffold makefile
-pattern: build.?a.?(tool|script|cli)|tooling|subcommand|automate|manual.?(step|process)|shell.?(script|incantation)|repeated.?(command|operation)
+pattern: build.?a.?(tool|script|cli)|subcommand|manual.?(step|process)|shell.?(script|incantation)|repeated.?(command|operation)
 files: (scripts|tools|bin)/.*|Makefile$
 scope: agent, subagent
 refire: 0.2

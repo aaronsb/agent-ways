@@ -1,7 +1,7 @@
 ---
 description: When to surface publishing a repo's onboarding guide as a share link a teammate's own agent can open directly, instead of asking them to clone the repo and hunt for the file
 vocabulary: onboarding share link teammate colleague new engineer collaborator handoff hand off bring up to speed get started repo working model share guide invite agent context publish onboard
-pattern: onboard|onboarding guide|share .*(guide|link)|bring .* up to speed|hand(ing)? off|get .* started on (the|this) repo
+pattern: onboard|onboarding guide|share .{0,30}(guide|link)|bring .{0,30} up to speed|hand(ing)? off|get .{0,30} started on (the|this) repo
 scope: agent, subagent
 refire: 0.15
 ---

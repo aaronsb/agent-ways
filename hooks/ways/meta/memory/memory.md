@@ -3,7 +3,7 @@ description: Persistent memory system — MEMORY.md, topic files, what to record
 vocabulary: remember memory save note forget recall persist session learning gotcha pattern
 trigger: context-threshold
 threshold: 80
-pattern: remember|save.*(to|this|that).*memory|note.*(for|this).*(later|next)|don't forget|keep.*in.*mind
+pattern: save.{0,30}(to|this|that).{0,30}memory|note.{0,30}(for|this).{0,30}(later|next)|don't forget|keep.{0,20}in.{0,10}mind
 files: projects/[^/]+/memory/.*\.md$
 macro: prepend
 scope: agent

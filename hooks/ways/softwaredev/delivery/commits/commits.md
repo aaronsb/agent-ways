@@ -1,7 +1,7 @@
 ---
 description: git commit messages, branch naming, conventional commits, atomic changes
 vocabulary: commit message branch conventional feat fix refactor scope atomic squash amend stash rebase cherry
-pattern: commit|push.*(remote|origin|upstream)
+pattern: push.{0,30}(remote|origin|upstream)
 commands: git\ commit
 refire: 0.15
 scope: agent, subagent

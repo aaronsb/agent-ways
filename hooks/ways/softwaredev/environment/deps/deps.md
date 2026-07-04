@@ -1,7 +1,8 @@
 ---
 description: dependency management, package installation, library evaluation, security auditing of third-party code
 vocabulary: dependency package library install upgrade outdated audit vulnerability license bundle npm pip cargo
-pattern: dependenc|package|library|npm.?install|pip.?install|upgrade.*version
+pattern: dependenc|package|library|npm.?install|pip.?install|upgrade.{0,30}version
+pattern_keep: package library  # measured (ADR-155 §5): floor-band load-bearing ('install the react package' g=0.22); off-sense noise floor-gated (public library g=0.01, delivery package g=0.13)
 commands: npm\ install|yarn\ add|pip\ install|cargo\ add|go\ get
 refire: 0.15
 scope: agent, subagent

@@ -1,7 +1,7 @@
 ---
 description: choosing a documentation mode — Diátaxis classification (tutorial / how-to / reference / explanation) for a catalog page
-vocabulary: diataxis tutorial how-to reference explanation mode classify learning working practical theoretical study newcomer goal information understanding catalog page
-pattern: di[aá]taxis|which (mode|kind of (doc|page))|tutorial vs|reference vs|explanation vs|classif.*(doc|page)|what mode
+vocabulary: diataxis tutorial how-to reference explanation mode classify learning working practical theoretical study newcomer goal information understanding catalog page classification document
+pattern: di[aá]taxis|which (mode|kind of (doc|page))|tutorial vs|reference vs|explanation vs|what mode
 scope: agent, subagent
 refire: 0.15
 ---

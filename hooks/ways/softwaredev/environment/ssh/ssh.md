@@ -1,7 +1,7 @@
 ---
 description: SSH remote access, key management, secure file transfer, non-interactive authentication
 vocabulary: ssh remote key scp rsync bastion jumphost tunnel forwarding batchmode noninteractive
-pattern: ssh|remote.?server|remote.?host|sshpass
+pattern: (?i)\bssh\b|remote.?server|remote.?host|sshpass
 commands: ^ssh\ |^scp\ |^rsync.*:|\bsshpass\b
 scope: agent, subagent
 refire: 0.15
