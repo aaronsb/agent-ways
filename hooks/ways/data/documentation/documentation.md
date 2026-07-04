@@ -1,7 +1,7 @@
 ---
 description: generating database documentation from the schema — a reference page and an entity-relationship diagram derived from the DDL, kept in sync in CI
 vocabulary: schema documentation erd entity relationship diagram dbml docgen generate ddl reference data dictionary table column pg_dump introspect catalog
-pattern: erd|entity.?relationship|dbml|schema.?(doc|diagram|reference|dictionary)|data.?dictionary|pg_dump.*(doc|diagram)
+pattern: \berd\b|entity.?relationship|\bdbml\b|schema.?(doc|diagram|reference|dictionary)|data.?dictionary|pg_dump.{0,30}(doc|diagram)
 scope: agent, subagent
 refire: 0.15
 ---

@@ -1,7 +1,7 @@
 ---
 description: When to reach for the Workflow tool — deterministic multi-agent orchestration, versus a single agent, a skill, or a plain task list
 vocabulary: workflow orchestrate orchestration fan out pipeline multi-agent parallel stage deterministic deliver decompose verify synthesize substrate gate remediate adversarially scale
-pattern: workflow|orchestrat|fan.?out|pipeline|multi.?agent
+pattern: orchestrat|fan.?out|pipeline|multi.?agent
 scope: agent
 refire: 0.15
 ---

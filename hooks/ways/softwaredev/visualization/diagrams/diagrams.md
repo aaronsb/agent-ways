@@ -1,7 +1,7 @@
 ---
 description: Render Mermaid diagrams as terminal art using mmaid — flowcharts, sequences, state machines, ER diagrams, pie charts, gantt, git graphs, and more
 vocabulary: mermaid diagram flowchart sequence state class er entity relationship pie chart gantt timeline kanban mindmap git graph block treemap quadrant render terminal visualize architecture
-pattern: mermaid|diagram|flowchart|sequence.*diagram|state.*diagram|er.*diagram|class.*diagram|gantt|mindmap|visuali[sz]e.*architecture
+pattern: mermaid|diagram|flowchart|gantt|mindmap
 scope: agent, subagent
 refire: 0.15
 ---

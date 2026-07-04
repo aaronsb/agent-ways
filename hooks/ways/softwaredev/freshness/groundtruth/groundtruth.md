@@ -1,7 +1,7 @@
 ---
 description: when describing how a system actually behaves, derive ground truth from executable artifacts (code, migrations, runtime config) and treat design docs / ADRs / specs as claims to verify
 vocabulary: source of truth ground truth authoritative audit security review reconcile docs vs code spec vs implementation adr design doc stale proposal what does the system actually do how does this really work migrations schema enforcement code drift baseline supersede
-pattern: source.?of.?truth|ground.?truth|audit|security.?review|reconcile|docs?.vs.?code|spec.vs.?implementation|actually (do|behave|work|enforce)|is (this|the|that).*(up.?to.?date|still (true|accurate|current))|stale (adr|doc|spec)
+pattern: source.?of.?truth|ground.?truth|security.?review|reconcile|docs?.vs.?code|spec.vs.?implementation|actually (do|behave|work|enforce)|is (this|the|that).{0,30}(up.?to.?date|still (true|accurate|current))|stale (adr|doc|spec)
 scope: agent, subagent
 refire: 0.2
 ---

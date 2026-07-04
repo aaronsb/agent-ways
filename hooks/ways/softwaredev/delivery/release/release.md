@@ -3,6 +3,7 @@ description: software releases, changelog generation, version bumping, semantic 
 vocabulary: release changelog version bump semver tag publish ship major minor breaking
 refire: 0.15
 pattern: release|changelog|semver|git.?tag|release.?(notes|candidate)|npm.?publish|cargo.?publish
+pattern_keep: release  # measured (ADR-155 §5): load-bearing ('github release with binaries' g=0.46, keyword-only); noise floor-gated (median g=0.01)
 scope: agent, subagent
 ---
 <!-- epistemic: heuristic -->

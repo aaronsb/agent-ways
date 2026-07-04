@@ -1,7 +1,7 @@
 ---
 description: presenting genuine decisions to the human as explicit choices rather than burying options in prose or deciding silently
 vocabulary: choice option decision present ask user select alternatives branch point recommend tradeoff prefer fork pick which clarify
-pattern: which (one|option|approach)|present.*(option|choice)|ask the user|let.*decide|how (should|do) (we|you|i)|prefer.*(or|over)
+pattern: which (one|option|approach)|ask the user|let (the user|the human|me|you) decide|how (should|do) (we|you|i)
 scope: agent, subagent
 refire: 0.15
 ---

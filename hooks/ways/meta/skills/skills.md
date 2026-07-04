@@ -1,7 +1,7 @@
 ---
 description: How we write Claude Code skills in this repo — when a skill vs a way vs a slash command, naming and scope conventions, the global-scope caveat; defers SKILL.md mechanics to the official docs
 vocabulary: skill slash command SKILL.md create author write invoke user-invocable plugin convention scope global
-pattern: skill|SKILL\.md|skill.?(creation|author|write)|claude.?code.?skill|~\/\.claude\/skills
+pattern: SKILL\.md|skill.?(creation|author|write)|claude.?code.?skill|~\/\.claude\/skills
 scope: agent, subagent
 refire: 0.15
 ---
