@@ -256,12 +256,6 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
     }
 }
 
-#[cfg(not(feature = "tui"))]
-pub(super) fn pick_session(_content: &str, _project_filter: Option<&str>) -> Option<String> {
-    eprintln!("Interactive picker requires the 'tui' feature.");
-    None
-}
-
 fn format_duration(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")

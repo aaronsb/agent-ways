@@ -37,6 +37,9 @@ hooks/ways/.obsidian/
 /.claude/*
 !/.claude/ways/
 !/.claude/skills/
+# ...except the way-authoring scaffold `ways init` regenerates on demand — it's
+# generated (from TEMPLATE_CONTENT in cmd/init.rs), not a tracked source.
+/.claude/ways/_template.md
 
 # --- Secrets / local env ---
 # The conventional (track-by-default) posture has no implicit safety net, so guard
