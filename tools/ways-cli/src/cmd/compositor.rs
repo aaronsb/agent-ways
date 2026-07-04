@@ -17,6 +17,7 @@
 //! grain those callers already use; East-Asian double-width and combining marks are
 //! not accounted for (that would need a new dependency the lean binary declines).
 
+#[cfg(feature = "tui")]
 use std::fmt::Write;
 
 // ── ANSI-visible-width primitives ─────────────────────────────
@@ -43,6 +44,7 @@ pub fn visible_len(s: &str) -> usize {
 /// Truncate `s` to at most `max` **visible** chars, preserving ANSI escapes
 /// (escape bytes don't count toward the budget). If truncation cuts the string
 /// mid-style, a reset (`\x1b[0m`) is appended so styling can't bleed past the cut.
+#[cfg(feature = "tui")]
 pub fn truncate_visible(s: &str, max: usize) -> String {
     let mut result = String::new();
     let mut visible = 0;
@@ -88,6 +90,7 @@ pub fn pad_visible(s: &str, width: usize) -> String {
 }
 
 /// Fit `s` to exactly `width` visible chars: truncate if longer, pad if shorter.
+#[cfg(feature = "tui")]
 pub fn fit_visible(s: &str, width: usize) -> String {
     pad_visible(&truncate_visible(s, width), width)
 }
@@ -97,12 +100,14 @@ pub fn fit_visible(s: &str, width: usize) -> String {
 /// A rectangular block of ANSI-styled text: its `lines` and their common visible
 /// `width`. Construction records the width so downstream placement doesn't have to
 /// re-measure the whole block.
+#[cfg(feature = "tui")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Panel {
     pub lines: Vec<String>,
     pub width: usize,
 }
 
+#[cfg(feature = "tui")]
 impl Panel {
     /// A panel from raw lines; `width` is the widest line's visible length.
     pub fn from_lines(lines: Vec<String>) -> Self {
@@ -163,6 +168,7 @@ impl Panel {
 /// stay aligned; a panel shorter than the tallest contributes blank rows for its
 /// missing lines. Give panels equal height first (via [`Panel::viewport`]) when a
 /// stable frame is wanted.
+#[cfg(feature = "tui")]
 pub fn hjoin(panels: &[Panel], gap: usize) -> Vec<String> {
     let rows = panels.iter().map(Panel::height).max().unwrap_or(0);
     let spacer = " ".repeat(gap);
@@ -181,6 +187,7 @@ pub fn hjoin(panels: &[Panel], gap: usize) -> Vec<String> {
 }
 
 /// Two-panel convenience over [`hjoin`].
+#[cfg(feature = "tui")]
 pub fn hjoin2(left: &Panel, right: &Panel, gap: usize) -> Vec<String> {
     hjoin(&[left.clone(), right.clone()], gap)
 }
@@ -190,6 +197,7 @@ pub fn hjoin2(left: &Panel, right: &Panel, gap: usize) -> Vec<String> {
 /// A one-line tab bar: each label padded with a space on each side, the `active`
 /// index shown in reverse video (`\x1b[7m`), the rest dim (`\x1b[2m`). Out-of-range
 /// `active` simply highlights nothing.
+#[cfg(feature = "tui")]
 pub fn tab_bar(tabs: &[&str], active: usize) -> String {
     let mut out = String::new();
     for (i, label) in tabs.iter().enumerate() {
@@ -204,7 +212,7 @@ pub fn tab_bar(tabs: &[&str], active: usize) -> String {
 
 // ── Tests ─────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tui"))]
 mod tests {
     use super::*;
 

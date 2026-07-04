@@ -1,6 +1,7 @@
 //! Screen composition: the fixed-height frame layout, the shared header and status
 //! bar both views use, and terminal fitting.
 
+#[cfg(feature = "tui")]
 use std::fmt::Write;
 
 #[cfg(feature = "tui")]
@@ -8,6 +9,7 @@ use crate::cmd::compositor;
 #[cfg(feature = "tui")]
 use crate::cmd::render;
 
+#[cfg(feature = "tui")]
 use super::model::{Player, View, SPEEDS};
 
 // ── Frame renderer ────────────────────────────────────────────
@@ -165,6 +167,7 @@ pub(super) fn render_frame(player: &mut Player) -> String {
 /// tab-bar + view-appropriate key hints, distributed evenly across the terminal
 /// width (space-between). The `tab`/`esc`/position tail is identical across views so
 /// the legend never jumps when toggling.
+#[cfg(feature = "tui")]
 pub(super) fn render_status_bar(out: &mut String, player: &Player) {
     let width = (player.term_width as usize).max(1);
     let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(width));
@@ -319,6 +322,7 @@ fn ago_label(secs: u64) -> String {
 
 /// Fit rendered output to terminal dimensions.
 /// Uses \r\n because raw mode requires explicit carriage return.
+#[cfg(feature = "tui")]
 pub(super) fn fit_to_terminal(output: &str, width: usize, height: usize) -> String {
     let mut result = String::new();
     let max_lines = height.saturating_sub(1);

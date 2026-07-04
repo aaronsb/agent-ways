@@ -55,12 +55,16 @@ pub(crate) struct Frame {
     /// segmented at each `session_start` boundary; epoch/distance restart per window
     /// and the accumulated ways reset, so the latest window mirrors `ways list`. The
     /// boundary itself surfaces as a `⎯ compaction ⎯` entry in `new_events`.
+    /// Set unconditionally by frame reconstruction, but only *read* by the tui
+    /// header (`window W/M`), so it's dead in a non-tui build.
+    #[cfg_attr(not(feature = "tui"), allow(dead_code))]
     pub(crate) window: u64,
 }
 
 /// Which view the replay shows. `Timeline` is the cumulative frame table; `WhyFired`
 /// is the drill-down that joins the current frame's ways to the `SessionIntrospection`
 /// model by `way_id` (ADR-154 §1 boundary — no epoch alignment).
+#[cfg(feature = "tui")]
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum View {
     Timeline,
@@ -68,6 +72,7 @@ pub(super) enum View {
 }
 
 /// Playback state.
+#[cfg(feature = "tui")]
 pub(super) struct Player {
     pub(super) frames: Vec<Frame>,
     pub(super) current: usize,
@@ -102,6 +107,7 @@ pub(super) struct Player {
     pub(super) events_sig: (u64, u64),
 }
 
+#[cfg(feature = "tui")]
 pub(super) const SPEEDS: &[(u64, &str)] = &[
     (2000, "2.0s"),
     (1000, "1.0s"),
