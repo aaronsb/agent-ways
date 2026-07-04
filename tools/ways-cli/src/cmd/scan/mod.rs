@@ -254,7 +254,20 @@ pub fn command(
 
     let mut context = String::new();
 
-    // Way matching: commands regex + pattern regex
+    // One embed pass for the whole surface (ways and checks share it).
+    // ADR-130: cap embed input. Heredoc bodies (gh pr create --body
+    // "$(cat <<EOF…)"), curl -d JSON payloads, and similar argument-
+    // body bash commands can run kilobytes long. The regex matchers
+    // below see the full cmd; only the embed query is reduced.
+    let query_for_embed = format!(
+        "{} {}",
+        cmd,
+        description.unwrap_or("")
+    );
+    let reduced_for_embed = reduce::reduce_for_embed(&query_for_embed, BUDGET_COMMAND);
+    let embed_matches = batch_embed_score(&reduced_for_embed);
+
+    // Way matching: commands regex + pattern regex + semantic (ADR-155 §4)
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
             continue;
@@ -279,22 +292,40 @@ pub fn command(
             if !out.is_empty() {
                 context.push_str(&out);
             }
+            continue;
+        }
+
+        // Semantic lane at the bash surface (ADR-155 §4): the tool
+        // `description` is Claude's own natural-language statement of intent,
+        // scored with the same per-way thresholds as the prompt surface,
+        // against embeddings this event already computed for checks. State-
+        // triggered ways are excluded, mirroring the task surface — their
+        // trigger is a condition, not a topic. No near-miss logging here:
+        // bash events are the highest-volume surface, and the tuning stream
+        // (ADR-134) is fed by the prompt/task surfaces.
+        if way.trigger.is_some() {
+            continue;
+        }
+        let t = effective_thresholds(way, session_id);
+        let score_en = embed_matches.best_en(&way.corpus_id);
+        let score_multi = embed_matches.best_multi(&way.corpus_id);
+        let fired = if score_en.is_some_and(|s| s >= t.en) {
+            Some(("bash:semantic:en", score_en))
+        } else if score_multi.is_some_and(|s| s >= t.multi) {
+            Some(("bash:semantic:multi", score_multi))
+        } else {
+            None
+        };
+        if let Some((channel, score)) = fired {
+            let out = capture_show_way(&way.id, session_id, channel, score, None);
+            if !out.is_empty() {
+                context.push_str(&out);
+            }
         }
     }
 
     // Check matching: commands regex + semantic scoring.
-    // ADR-130: cap embed input. Heredoc bodies (gh pr create --body
-    // "$(cat <<EOF…)"), curl -d JSON payloads, and similar argument-
-    // body bash commands can run kilobytes long. The regex matcher
-    // above already saw the full cmd; only the embed query is reduced.
     let checks = collect_checks(&project_dir);
-    let query_for_checks = format!(
-        "{} {}",
-        cmd,
-        description.unwrap_or("")
-    );
-    let reduced_for_checks = reduce::reduce_for_embed(&query_for_checks, BUDGET_COMMAND);
-    let embed_check_matches = batch_embed_score(&reduced_for_checks);
 
     for check in &checks {
         if !session::scope_matches(&check.scope, &scope) {
@@ -313,7 +344,7 @@ pub fn command(
         }
 
         if match_score == 0.0 && !check.description.is_empty() && !check.vocabulary.is_empty() {
-            match_score = check_semantic_score(check, session_id, &embed_check_matches);
+            match_score = check_semantic_score(check, session_id, &embed_matches);
         }
 
         if match_score > 0.0 {
