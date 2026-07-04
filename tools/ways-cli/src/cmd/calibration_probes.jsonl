@@ -1,0 +1,98 @@
+# ADR-156 calibration probe corpus. {"prompt","way","label"} label=1 intent / 0 noise.
+# Doubles as the regression asset. Expand as telemetry surfaces offenders.
+{"prompt": "write a commit message", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "what should the commit message say", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "make an atomic commit", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "squash these commits before merging", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "conventional commit format for a bugfix", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "amend the last commit", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "should this be one commit or several", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "stage and commit these changes", "way": "softwaredev/delivery/commits", "label": 1}
+{"prompt": "i'm not fully committed to this approach", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "we have a strong commitment to quality", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "let's commit to shipping friday", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "he committed to the relationship", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "the committee will decide next week", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "commit to a decision and move on", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "our commitment to customers is unwavering", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "she is a committed athlete", "way": "softwaredev/delivery/commits", "label": 0}
+{"prompt": "author a new skill for claude code", "way": "meta/skills", "label": 1}
+{"prompt": "how do I write a SKILL.md", "way": "meta/skills", "label": 1}
+{"prompt": "create a custom skill", "way": "meta/skills", "label": 1}
+{"prompt": "when should this be a skill vs a way", "way": "meta/skills", "label": 1}
+{"prompt": "register a user-invocable skill", "way": "meta/skills", "label": 1}
+{"prompt": "what goes in the skill frontmatter", "way": "meta/skills", "label": 1}
+{"prompt": "scaffold a skill directory", "way": "meta/skills", "label": 1}
+{"prompt": "make a slash command skill", "way": "meta/skills", "label": 1}
+{"prompt": "let's improve the team communication skills", "way": "meta/skills", "label": 0}
+{"prompt": "he has strong leadership skills", "way": "meta/skills", "label": 0}
+{"prompt": "practice your guitar skills", "way": "meta/skills", "label": 0}
+{"prompt": "her people skills are excellent", "way": "meta/skills", "label": 0}
+{"prompt": "list the skills on my resume", "way": "meta/skills", "label": 0}
+{"prompt": "soft skills matter in interviews", "way": "meta/skills", "label": 0}
+{"prompt": "level up your negotiation skills", "way": "meta/skills", "label": 0}
+{"prompt": "the job requires technical skills", "way": "meta/skills", "label": 0}
+{"prompt": "write documentation for this module", "way": "documentation", "label": 1}
+{"prompt": "how should I organize the docs", "way": "documentation", "label": 1}
+{"prompt": "add a reference page to the catalog", "way": "documentation", "label": 1}
+{"prompt": "structure the documentation as a diataxis tree", "way": "documentation", "label": 1}
+{"prompt": "lint the documentation frontmatter", "way": "documentation", "label": 1}
+{"prompt": "what taxonomy for our docs site", "way": "documentation", "label": 1}
+{"prompt": "generate the docs catalog", "way": "documentation", "label": 1}
+{"prompt": "author a how-to guide page", "way": "documentation", "label": 1}
+{"prompt": "the docs say the flight leaves at noon", "way": "documentation", "label": 0}
+{"prompt": "check the legal documents before signing", "way": "documentation", "label": 0}
+{"prompt": "the doctor reviewed my medical records", "way": "documentation", "label": 0}
+{"prompt": "upload the tax documents", "way": "documentation", "label": 0}
+{"prompt": "the documentary was well made", "way": "documentation", "label": 0}
+{"prompt": "google docs is down again", "way": "documentation", "label": 0}
+{"prompt": "notarize the closing documents", "way": "documentation", "label": 0}
+{"prompt": "he documented the trip in photos", "way": "documentation", "label": 0}
+{"prompt": "remember this for next time", "way": "meta/memory", "label": 1}
+{"prompt": "save this to memory", "way": "meta/memory", "label": 1}
+{"prompt": "note this so you don't forget it later", "way": "meta/memory", "label": 1}
+{"prompt": "keep this in mind for future sessions", "way": "meta/memory", "label": 1}
+{"prompt": "store this fact in your memory file", "way": "meta/memory", "label": 1}
+{"prompt": "record this preference so it persists", "way": "meta/memory", "label": 1}
+{"prompt": "add this to MEMORY.md", "way": "meta/memory", "label": 1}
+{"prompt": "don't forget this gotcha next session", "way": "meta/memory", "label": 1}
+{"prompt": "remember when the server crashed last year", "way": "meta/memory", "label": 0}
+{"prompt": "i don't remember the exact syntax", "way": "meta/memory", "label": 0}
+{"prompt": "remember to water the plants", "way": "meta/memory", "label": 0}
+{"prompt": "do you remember that movie", "way": "meta/memory", "label": 0}
+{"prompt": "the computer needs more memory", "way": "meta/memory", "label": 0}
+{"prompt": "in loving memory of our founder", "way": "meta/memory", "label": 0}
+{"prompt": "my memory is foggy this morning", "way": "meta/memory", "label": 0}
+{"prompt": "memory bandwidth is the bottleneck", "way": "meta/memory", "label": 0}
+{"prompt": "this function is too slow, profile it", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "optimize the hot loop", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "reduce the latency of this endpoint", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "find the performance bottleneck", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "the query is slow, add an index plan", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "cpu profile shows a flamegraph spike", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "speed up this batch job", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "memory leak is degrading throughput", "way": "softwaredev/code/performance", "label": 1}
+{"prompt": "the slow cooker recipe takes hours", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "business has been slow this quarter", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "he gave a strong performance on stage", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "slow down and enjoy the view", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "her performance review is next week", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "the slow train to the coast", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "a slow news day", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "the orchestra's performance was moving", "way": "softwaredev/code/performance", "label": 0}
+{"prompt": "upgrade this dependency to the latest version", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "should I add this package or vendor it", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "the library has a security advisory", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "pin the dependency versions in the lockfile", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "npm install is pulling a vulnerable transitive dep", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "which package provides this function", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "audit the dependency tree", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "this library is unmaintained, find an alternative", "way": "softwaredev/environment/deps", "label": 1}
+{"prompt": "the public library closes at eight", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "she is a package tour guide", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "the delivery package arrived damaged", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "a library of congress catalog number", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "the vacation package includes flights", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "he works at the library downtown", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "gift package wrapping service", "way": "softwaredev/environment/deps", "label": 0}
+{"prompt": "the software comes as a complete package deal", "way": "softwaredev/environment/deps", "label": 0}

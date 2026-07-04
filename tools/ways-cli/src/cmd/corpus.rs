@@ -187,6 +187,9 @@ pub fn run(
     // Auto-embed if way-embed binary and model are available
     auto_embed(&out_dir, &engine_dir, &corpus_path, &log)?;
 
+    // Fit per-model calibration g(s)=σ(a·s+b) from the probe corpus (ADR-156).
+    let calibration = fit_calibration(&out_dir, &engine_dir, &log);
+
     // Write manifest
     let manifest = json!({
         "global_hash": global_hash,
@@ -195,6 +198,7 @@ pub fn run(
         "user_count": user_count,
         "total_count": total,
         "projects": manifest_projects,
+        "calibration": calibration,
     });
     let manifest_path = out_dir.join("embed-manifest.json");
     std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
@@ -744,4 +748,137 @@ fn is_newer_than(file: &Path, reference: &Path) -> bool {
         (Some(f), Some(r)) => f > r,
         _ => false,
     }
+}
+
+// ── ADR-156 calibration fit ─────────────────────────────────────
+
+/// Fit per-model calibration `g(s) = σ(a·s + b)` from the committed probe corpus
+/// against the freshly generated aliases, gated on AUC separability. Returns
+/// empty lanes when the engine, probes, or aliases are unavailable, or a lane's
+/// fit is below the floor — the scan then degrades rather than trust a bad fit.
+fn fit_calibration(
+    out_dir: &Path,
+    engine_dir: &Path,
+    log: &dyn Fn(&str),
+) -> ways_core::calibration::Calibration {
+    use ways_core::calibration::Calibration;
+    const PROBES: &str = include_str!("calibration_probes.jsonl");
+    const AUC_FLOOR: f64 = 0.70;
+
+    let bin = engine_dir.join("way-embed");
+    if !bin.is_file() {
+        return Calibration::default();
+    }
+
+    let aliases = match load_aliases(&out_dir.join("ways-corpus-en.jsonl")) {
+        Some(m) if !m.is_empty() => m,
+        _ => return Calibration::default(),
+    };
+
+    // Parse probes (skip `#` comments and blank lines).
+    let probes: Vec<(String, String, bool)> = PROBES
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .filter_map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).ok()?;
+            Some((
+                v["prompt"].as_str()?.to_string(),
+                v["way"].as_str()?.to_string(),
+                v["label"].as_i64()? == 1,
+            ))
+        })
+        .collect();
+
+    let fit_lane = |model_name: &str, label: &str| -> Option<ways_core::calibration::ModelCalibration> {
+        let model = engine_dir.join(model_name);
+        if !model.is_file() {
+            return None;
+        }
+        // (prompt, alias) pairs for probes whose way has an alias in the corpus.
+        let mut pairs = Vec::new();
+        let mut labels = Vec::new();
+        for (prompt, way, lbl) in &probes {
+            if let Some(alias) = aliases.get(way) {
+                pairs.push(format!("{prompt}\t{alias}"));
+                labels.push(*lbl);
+            }
+        }
+        if pairs.len() < 2 {
+            return None;
+        }
+        let cosines = batch_similarity(&bin, &model, &pairs)?;
+        if cosines.len() != labels.len() {
+            log(&format!(
+                "  calibration[{label}]: score count {} != probe count {} — lane left uncalibrated",
+                cosines.len(),
+                labels.len()
+            ));
+            return None;
+        }
+        let samples: Vec<(f64, bool)> = cosines.into_iter().zip(labels).collect();
+        let cal = ways_core::calibration::fit(&samples)?;
+        if cal.auc < AUC_FLOOR {
+            log(&format!(
+                "  calibration[{label}] REJECTED: AUC {:.3} < {AUC_FLOOR:.2} — lane left uncalibrated",
+                cal.auc
+            ));
+            return None;
+        }
+        log(&format!(
+            "  calibration[{label}]: a={:.2} b={:.2} AUC={:.3} (n={})",
+            cal.a, cal.b, cal.auc, cal.n
+        ));
+        Some(cal)
+    };
+
+    let en = fit_lane("minilm-l6-v2.gguf", "en");
+    let multi = fit_lane("multilingual-minilm-l12-v2-q8.gguf", "multi");
+    Calibration { en, multi }
+}
+
+/// Build `id -> "description vocabulary"` from a generated corpus JSONL, so the
+/// fit scores each probe against the same alias text the corpus embedded.
+fn load_aliases(corpus: &Path) -> Option<HashMap<String, String>> {
+    let content = std::fs::read_to_string(corpus).ok()?;
+    let mut m = HashMap::new();
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = serde_json::from_str(line).ok()?;
+        if let Some(id) = v["id"].as_str() {
+            let desc = v["description"].as_str().unwrap_or("");
+            let vocab = v["vocabulary"].as_str().unwrap_or("");
+            m.insert(id.to_string(), format!("{desc} {vocab}").trim().to_string());
+        }
+    }
+    Some(m)
+}
+
+/// Run `way-embed similarity --batch` over `prompt\talias` pairs on stdin,
+/// returning one cosine per pair (order preserved).
+fn batch_similarity(bin: &Path, model: &Path, pairs: &[String]) -> Option<Vec<f64>> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(bin)
+        .args(["similarity", "--model", model.to_str()?, "--batch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    {
+        let mut stdin = child.stdin.take()?;
+        stdin.write_all(pairs.join("\n").as_bytes()).ok()?;
+        stdin.write_all(b"\n").ok()?;
+    } // stdin dropped here → EOF, so way-embed can finish
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect(),
+    )
 }
