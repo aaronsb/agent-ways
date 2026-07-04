@@ -208,6 +208,13 @@ pub(super) fn lint_file(
         }
     }
 
+    // Pattern hygiene (ADR-155 §5): the keyword lane should carry exact,
+    // anchored, term-of-art triggers; suggestive common words belong in
+    // vocabulary:. Advisory WARNINGs, not errors.
+    if let Some(val) = get_field_value(&fm_str, "pattern") {
+        super::pattern::check_pattern(&rel, &val, warnings);
+    }
+
     // Scope enum
     if let Some(val) = get_field_value(&fm_str, "scope") {
         for part in val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
