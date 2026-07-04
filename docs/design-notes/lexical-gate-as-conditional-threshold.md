@@ -141,6 +141,18 @@ semantic lane's threshold cannot be moved independently. The coupling is an
 artifact of the parameterization, and naming it is the contribution — it is
 precisely the knob a future decoupling would add.
 
+**Ranking vs. gating.** The retrieval literature calibrates scores to *combine
+and order* results; here the same calibration serves a *fire/no-fire* decision.
+That is why thresholds (`τ_s`, `τ_k`) and their independence are load-bearing for
+us and absent there — different decision, shared substrate. It also locates where
+this reading is thin: the calibration folds the whole prior into the intercept
+`b` (`c` above is constant across ways). Practitioners deriving a *structured*
+prior from cheap features — term frequency, field length, specificity — and
+letting it vary per unit (Turnbull's probabilistic-BM25 note) point at the
+generalization: a per-alternation prior, where a keyword's specificity sets its
+own `β`. That is the principled form of the pattern-hygiene keep/remove call, and
+the horizon past the global calibration ADR-156 ships.
+
 ## See also
 
 - ADR-155 — the semantic gate on the keyword channel (the mechanism read here)
@@ -151,3 +163,7 @@ precisely the knob a future decoupling would add.
   frame the log-odds fusion rests on
 - Bayesian BM25 (github.com/cognica-io/bayesian-bm25) — log-odds lexical–semantic
   fusion; the continuous-score sibling of this gate
+- Turnbull, *The Probabilistic BM25 Utopia* (softwaredoug.com, 2026) — calibrating
+  a raw lexical score to a probability via logistic scaling plus a structured
+  prior, so signals become combinable; the ranking-side counterpart of `g(s)`,
+  and the source of the per-alternation-prior horizon
