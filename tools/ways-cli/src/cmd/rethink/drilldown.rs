@@ -314,6 +314,7 @@ mod tests {
         FiredWay {
             way_id: way.into(),
             trigger_channel: channel.into(),
+            gated: false,
             fire_score: score,
             way_path: None,
             criteria: MatchCriteria { pattern: Some("p".into()), ..Default::default() },

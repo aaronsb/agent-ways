@@ -45,6 +45,15 @@ way:
       type: regex
       required: optional
       role: Supplementary regex trigger — use alongside semantic, not instead of
+    pattern_strict:
+      type: boolean
+      required: optional
+      role: >
+        Opt out of the semantic keyword gate AND the URL/code-fence mask
+        (ADR-155). A strict pattern fires on exactly what the user typed,
+        always — reserve it for exact tokens (slash-command names, patterns
+        that deliberately target URLs). Do not combine with common-word
+        alternations; that reintroduces the noise the gate exists to veto.
     files:
       type: regex
       required: optional

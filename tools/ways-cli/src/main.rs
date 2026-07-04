@@ -491,6 +491,10 @@ enum ScanCommand {
         /// Project directory
         #[arg(long)]
         project: Option<String>,
+        /// Claude's last response (raw), from the Stop hook (ADR-155 §3).
+        /// Feeds only the embed lane — never the keyword regex lane.
+        #[arg(long)]
+        response_context: Option<String>,
     },
     /// Scan ways against a bash command
     Command {
@@ -796,8 +800,8 @@ fn run() -> Result<()> {
         },
         Commands::Status { json } => cmd::status::run(json),
         Commands::Scan { mode } => match mode {
-            ScanCommand::Prompt { query, session, project } => {
-                cmd::scan::prompt(&query, &session, project.as_deref())
+            ScanCommand::Prompt { query, session, project, response_context } => {
+                cmd::scan::prompt(&query, &session, project.as_deref(), response_context.as_deref())
             }
             ScanCommand::Command { command, description, session, project } => {
                 cmd::scan::command(&command, description.as_deref(), &session, project.as_deref())
