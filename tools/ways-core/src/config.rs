@@ -66,6 +66,18 @@ pub struct Config {
     /// models produce scores in different distributions, so comparing
     /// them directly (max, average) is apples-to-oranges.
     pub default_multi_embed_threshold: f64,
+    /// Keyword gate fraction (ADR-155). A `pattern:` hit on the prompt/task
+    /// surface fires only if the way's embedding score also clears
+    /// `keyword_gate_fraction × effective_threshold` on at least one model
+    /// lane. The gate vetoes lexical coincidence (a pasted URL containing
+    /// "github", "I remember the tektronix…") using the score the batch
+    /// embedding pass already computed — it adds no model work. 0.0 disables
+    /// the gate (every pattern hit fires, the pre-ADR-155 behavior); ways can
+    /// opt out individually with `pattern_strict: true`. Default 0.5: on the
+    /// default EN threshold (0.40) the floor is 0.20, which sits above every
+    /// observed false fire (0.09–0.15) and below every observed true fire
+    /// (0.28+) at decision time.
+    pub keyword_gate_fraction: f64,
     /// Near-miss margin (ADR-134). A way that did NOT fire is logged as a
     /// `way_nearmiss` telemetry event when at least one model's score landed
     /// within this much *below* its effective threshold (`thr - margin <=
@@ -127,6 +139,7 @@ impl Default for Config {
             parent_boost_floor: 0.40,
             default_embed_threshold: 0.40,
             default_multi_embed_threshold: 0.55,
+            keyword_gate_fraction: 0.5,
             near_miss_margin: 0.05,
             refire_presets,
             settings_schema_url: None,
@@ -232,6 +245,9 @@ impl Config {
         }
         if let Some(v) = doc.get("default_multi_embed_threshold").and_then(|v| v.as_f64()) {
             self.default_multi_embed_threshold = v;
+        }
+        if let Some(v) = doc.get("keyword_gate_fraction").and_then(|v| v.as_f64()) {
+            self.keyword_gate_fraction = v;
         }
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;

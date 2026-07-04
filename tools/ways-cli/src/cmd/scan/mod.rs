@@ -40,6 +40,10 @@ pub(crate) struct WayCandidate {
     pub corpus_id: String,
     pub path: PathBuf,
     pub pattern: Option<String>,
+    /// Opt-out from the semantic keyword gate (ADR-155). `true` means every
+    /// pattern hit fires regardless of embedding score — for patterns that
+    /// genuinely mean "this exact token, always" (e.g. slash-command names).
+    pub pattern_strict: bool,
     pub commands: Option<String>,
     pub files: Option<String>,
     pub description: String,
@@ -81,10 +85,13 @@ pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()
 
     // ADR-130: cap embed input to the model's working window via the
     // sentence-salience reducer. Pattern/keyword matching downstream
-    // still operates on `query` (the full prompt) — only the embed
-    // signal sees the reduced form.
+    // operates on the masked full prompt (ADR-155 §2: URLs and fenced
+    // code are not lexical intent) — only the embed signal sees the
+    // reduced form, and it sees the unmasked original.
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
     let embed_matches = batch_embed_score(&reduced);
+    let masked = mask_nonlinguistic(query);
+    let gate_fraction = crate::config::global().keyword_gate_fraction;
 
     let mut context = String::new();
 
@@ -98,12 +105,14 @@ pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()
 
         // Additive matching: pattern OR semantic
         match match_prompt(
-            query,
+            &masked,
             &way.pattern,
+            way.pattern_strict,
             &way.corpus_id,
             effective_thresholds(way, session_id),
             &embed_matches,
             near_miss_margin,
+            gate_fraction,
         ) {
             PromptMatch::Fired { channel, score, matched_span } => {
                 let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref());
@@ -111,6 +120,9 @@ pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()
                     context.push_str(&out);
                     context.push_str("\n\n");
                 }
+            }
+            PromptMatch::KeywordGated(kg) => {
+                log_keyword_gated(way, &kg, "prompt", &scope, &project_dir, session_id);
             }
             PromptMatch::NearMiss(nm) => {
                 log_near_miss(way, &nm, "prompt", &scope, &project_dir, session_id, query);
@@ -149,6 +161,8 @@ pub fn task(
     // practice. Reduce to the model's window before embedding.
     let reduced = reduce::reduce_for_embed(query, BUDGET_TASK);
     let embed_matches = batch_embed_score(&reduced);
+    let masked = mask_nonlinguistic(query);
+    let gate_fraction = crate::config::global().keyword_gate_fraction;
 
     let mut matched: Vec<(String, String)> = Vec::new(); // (way_id, channel)
 
@@ -173,14 +187,19 @@ pub fn task(
         }
 
         match match_prompt(
-            query,
+            &masked,
             &way.pattern,
+            way.pattern_strict,
             &way.corpus_id,
             effective_thresholds(way, session_id),
             &embed_matches,
             near_miss_margin,
+            gate_fraction,
         ) {
             PromptMatch::Fired { channel, .. } => matched.push((way.id.clone(), channel)),
+            PromptMatch::KeywordGated(kg) => {
+                log_keyword_gated(way, &kg, "task", task_scope, &project_dir, session_id);
+            }
             PromptMatch::NearMiss(nm) => {
                 log_near_miss(way, &nm, "task", task_scope, &project_dir, session_id, query);
             }
@@ -407,12 +426,27 @@ enum PromptMatch {
     /// `matched_span` is the regex match text for the keyword channel (ADR-153 §3);
     /// `None` for semantic — one embedding per way, so there is no term to recover.
     Fired { channel: String, score: Option<f64>, matched_span: Option<String> },
+    /// The pattern matched but the embedding score fell below the keyword gate
+    /// floor on every available model lane (ADR-155): a lexical coincidence,
+    /// vetoed. Carries the already-computed evidence for `way_keyword_gated`
+    /// telemetry — the stream that calibrates `keyword_gate_fraction`.
+    KeywordGated(KeywordGated),
     /// The way did NOT fire, but at least one model scored within
     /// `near_miss_margin` below its effective threshold (ADR-134). Carries the
     /// already-computed scores for telemetry — no new embedding is done.
     NearMiss(NearMiss),
     /// No match, and not close enough to record.
     NoMatch,
+}
+
+/// Evidence for a gated keyword hit (ADR-155): what the pattern matched and
+/// how far below the gate floor each model lane scored.
+struct KeywordGated {
+    matched_span: String,
+    score_en: Option<f64>,
+    score_multi: Option<f64>,
+    floor_en: f64,
+    floor_multi: f64,
 }
 
 /// A below-threshold embedding result close enough to log (ADR-134 Decision 1).
@@ -429,20 +463,46 @@ struct NearMiss {
 fn match_prompt(
     query: &str,
     pattern: &Option<String>,
+    pattern_strict: bool,
     corpus_id: &str,
     thresholds: EffectiveThresholds,
     scores: &EmbedScores,
     near_miss_margin: f64,
+    gate_fraction: f64,
 ) -> PromptMatch {
-    // Channel 1: Regex pattern — deterministic, scoreless. A pattern miss is
-    // never a near-miss (there is no margin to be near).
+    let score_en = scores.best_en(corpus_id);
+    let score_multi = scores.best_multi(corpus_id);
+
+    // Channel 1: Regex pattern — deterministic, but gated (ADR-155): the hit
+    // fires only if the way's embedding score also clears
+    // `gate_fraction × effective_threshold` on at least one model lane. The
+    // gate consumes scores the batch pass already computed — no extra model
+    // work. It fails OPEN when no lane produced a score (engine unavailable,
+    // way absent from the corpus): with no semantic evidence either direction,
+    // the author's explicit trigger stands. `pattern_strict: true` and
+    // `gate_fraction: 0.0` both restore unconditional keyword fires.
+    // A pattern miss is never a near-miss (there is no margin to be near).
     if let Some(ref pat) = pattern {
         if let Some(span) = regex_span(pat, query) {
-            return PromptMatch::Fired {
-                channel: "keyword".to_string(),
-                score: None,
-                matched_span: Some(span),
-            };
+            let floor_en = thresholds.en * gate_fraction;
+            let floor_multi = thresholds.multi * gate_fraction;
+            let no_signal = score_en.is_none() && score_multi.is_none();
+            let clears = score_en.is_some_and(|s| s >= floor_en)
+                || score_multi.is_some_and(|s| s >= floor_multi);
+            if pattern_strict || no_signal || clears {
+                return PromptMatch::Fired {
+                    channel: "keyword".to_string(),
+                    score: None,
+                    matched_span: Some(span),
+                };
+            }
+            return PromptMatch::KeywordGated(KeywordGated {
+                matched_span: span,
+                score_en,
+                score_multi,
+                floor_en,
+                floor_multi,
+            });
         }
     }
 
@@ -452,9 +512,6 @@ fn match_prompt(
     // each model's noise band sits below its gate:
     //   - EN model (0.40): sharp on English, noise below 0.35
     //   - multi model (0.55): cross-lingual but coarser, noise at 0.30-0.50
-    let score_en = scores.best_en(corpus_id);
-    let score_multi = scores.best_multi(corpus_id);
-
     if score_en.is_some_and(|s| s >= thresholds.en) {
         return PromptMatch::Fired {
             channel: "semantic:embedding:en".to_string(),
@@ -538,6 +595,40 @@ fn log_near_miss(
     ]);
 }
 
+/// Emit a `way_keyword_gated` telemetry event (ADR-155): a pattern hit vetoed
+/// because the way's embedding score sat below the gate floor on every model
+/// lane. Same shape discipline as `log_near_miss` — persistence of
+/// already-computed evidence, consumed by the tuning passes to calibrate
+/// `keyword_gate_fraction` before any tightening. The `matched_span` names the
+/// alternation that would have fired, which is exactly the per-alternation
+/// precision signal the pattern-hygiene rework (ADR-155 §5) needs.
+fn log_keyword_gated(
+    way: &WayCandidate,
+    kg: &KeywordGated,
+    trigger: &str,
+    scope: &str,
+    project_dir: &str,
+    session_id: &str,
+) {
+    let fmt = |v: Option<f64>| v.map(|s| format!("{s:.4}")).unwrap_or_default();
+    let domain = way.id.split('/').next().unwrap_or(&way.id);
+    session::log_event(&[
+        ("event", "way_keyword_gated"),
+        ("way", &way.id),
+        ("corpus_id", &way.corpus_id),
+        ("domain", domain),
+        ("matched_span", &kg.matched_span),
+        ("score_en", &fmt(kg.score_en)),
+        ("score_multi", &fmt(kg.score_multi)),
+        ("floor_en", &format!("{:.4}", kg.floor_en)),
+        ("floor_multi", &format!("{:.4}", kg.floor_multi)),
+        ("trigger", trigger),
+        ("scope", scope),
+        ("project", project_dir),
+        ("session", session_id),
+    ]);
+}
+
 /// Per-model thresholds for a way at a given moment in a session.
 #[derive(Clone, Copy)]
 struct EffectiveThresholds {
@@ -601,6 +692,21 @@ fn check_semantic_score(check: &WayCandidate, session_id: &str, scores: &EmbedSc
     }
 }
 
+/// Mask non-linguistic spans out of the text the keyword channel matches
+/// (ADR-155 §2): fenced code blocks first (they often contain URLs), then
+/// URLs. A pasted link containing "github" is not GitHub-workflow intent, and
+/// pasted code is quoted material, not the user speaking. Each masked span is
+/// replaced by a single space so word boundaries around it survive. The embed
+/// lane sees the original text — the ADR-130 reducer already weighs pasted
+/// content by sentence salience there. An unclosed fence is left as-is: better
+/// to over-match than to blind the keyword channel to half the prompt.
+fn mask_nonlinguistic(text: &str) -> String {
+    let fenced = Regex::new(r"(?s)```.*?```").expect("static regex");
+    let url = Regex::new(r"https?://\S+").expect("static regex");
+    let no_fences = fenced.replace_all(text, " ");
+    url.replace_all(&no_fences, " ").into_owned()
+}
+
 fn regex_matches(pattern: &str, text: &str) -> bool {
     Regex::new(pattern)
         .map(|re| re.is_match(text))
@@ -661,14 +767,30 @@ mod near_miss_tests {
         }
     }
 
+    /// Production-default gate fraction (0.5): keyword floors sit at half the
+    /// fire thresholds — 0.20 EN / 0.275 multi against [`THR`].
+    const GATE: f64 = 0.5;
+
     fn run(en: Option<f64>, multi: Option<f64>, pattern: Option<&str>) -> PromptMatch {
+        run_gated(en, multi, pattern, false, GATE)
+    }
+
+    fn run_gated(
+        en: Option<f64>,
+        multi: Option<f64>,
+        pattern: Option<&str>,
+        strict: bool,
+        gate_fraction: f64,
+    ) -> PromptMatch {
         match_prompt(
             "query text",
             &pattern.map(|p| p.to_string()),
+            strict,
             "w",
             THR,
             &scores(en, multi),
             MARGIN,
+            gate_fraction,
         )
     }
 
@@ -761,8 +883,98 @@ mod near_miss_tests {
     fn discriminant(m: &PromptMatch) -> &'static str {
         match m {
             PromptMatch::Fired { .. } => "Fired",
+            PromptMatch::KeywordGated(_) => "KeywordGated",
             PromptMatch::NearMiss(_) => "NearMiss",
             PromptMatch::NoMatch => "NoMatch",
         }
+    }
+
+    // ── ADR-155: the semantic gate on keyword fires ──────────────
+
+    #[test]
+    fn keyword_below_gate_floor_is_gated_with_evidence() {
+        // Floor is 0.20 EN; a hit at 0.10 is a lexical coincidence.
+        match run(Some(0.10), None, Some("query")) {
+            PromptMatch::KeywordGated(kg) => {
+                assert_eq!(kg.matched_span, "query");
+                assert_eq!(kg.score_en, Some(0.10));
+                assert_eq!(kg.score_multi, None);
+                assert!((kg.floor_en - 0.20).abs() < 1e-9);
+                assert!((kg.floor_multi - 0.275).abs() < 1e-9);
+            }
+            other => panic!("expected KeywordGated, got {}", discriminant(&other)),
+        }
+    }
+
+    #[test]
+    fn keyword_at_or_above_gate_floor_fires() {
+        // Exactly at the floor fires — same >= convention as the fire threshold.
+        assert!(matches!(run(Some(0.20), None, Some("query")),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn either_lane_clearing_its_floor_passes_the_gate() {
+        // EN deep below its floor, multi above its own floor (0.275) — passes.
+        assert!(matches!(run(Some(0.05), Some(0.30), Some("query")),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn pattern_strict_bypasses_the_gate() {
+        assert!(matches!(run_gated(Some(0.05), None, Some("query"), true, GATE),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn gate_fails_open_without_any_embed_signal() {
+        // Engine unavailable / way absent from corpus: the explicit trigger stands.
+        assert!(matches!(run(None, None, Some("query")),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn zero_gate_fraction_restores_unconditional_keyword_fires() {
+        assert!(matches!(run_gated(Some(0.01), None, Some("query"), false, 0.0),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn gated_keyword_does_not_shadow_a_semantic_fire() {
+        // Score clears the full threshold: it also clears the gate floor, so a
+        // pattern hit fires on the keyword channel (gate passes trivially).
+        assert!(matches!(run(Some(0.41), None, Some("query")),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    // ── ADR-155 §2: masking the keyword lane ─────────────────────
+
+    #[test]
+    fn urls_are_masked_but_prose_survives() {
+        let masked = mask_nonlinguistic(
+            "inspired by https://github.com/example/flow and btop's graphs",
+        );
+        assert!(!masked.contains("github"), "URL text must not feed the regex lane");
+        assert!(masked.contains("btop's graphs"), "prose survives masking");
+        // Word boundaries around the masked span survive (replaced by a space,
+        // so the neighbors never fuse into one token).
+        assert!(!masked.contains("byand"), "masked span must not fuse neighbors: {masked:?}");
+    }
+
+    #[test]
+    fn fenced_code_is_masked_including_urls_inside() {
+        let masked = mask_nonlinguistic(
+            "please review\n```\ngit remember = https://github.com/x\n```\nthe diff",
+        );
+        assert!(!masked.contains("remember"));
+        assert!(!masked.contains("github"));
+        assert!(masked.contains("please review"));
+        assert!(masked.contains("the diff"));
+    }
+
+    #[test]
+    fn unclosed_fence_is_left_intact() {
+        let text = "start ```unclosed block with words";
+        assert_eq!(mask_nonlinguistic(text), text);
     }
 }

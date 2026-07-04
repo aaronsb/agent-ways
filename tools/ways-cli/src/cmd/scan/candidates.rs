@@ -214,6 +214,7 @@ fn parse_candidate(id: &str, corpus_prefix: &str, path: &Path, content: &str) ->
         corpus_id: format!("{corpus_prefix}{id}"),
         path: path.to_path_buf(),
         pattern: get_fm_field(&fm, "pattern"),
+        pattern_strict: get_fm_field(&fm, "pattern_strict").as_deref() == Some("true"),
         commands: get_fm_field(&fm, "commands"),
         files: get_fm_field(&fm, "files"),
         description: get_fm_field(&fm, "description").unwrap_or_default(),
