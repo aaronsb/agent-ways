@@ -95,7 +95,7 @@ fn read_way_body(path: &str) -> Option<String> {
 /// matched spans (or an honest note when there's no recoverable term), and the way
 /// body a human would read. `None` entry means the frame's way has no model record.
 #[cfg(feature = "tui")]
-fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>) -> String {
+fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>, width: usize) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "\x1b[1m{way_id}\x1b[0m");
     let Some(e) = entry else {
@@ -158,7 +158,9 @@ fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>) -> String {
     if let Some(body) = e.way_path.as_deref().and_then(read_way_body) {
         let _ = writeln!(out);
         let _ = writeln!(out, "\x1b[2m── way ─────────────\x1b[0m");
-        for line in body.lines() {
+        // Render the authored markdown to ANSI rather than dumping raw `#`/`**`/`` ` ``
+        // symbols; the compositor's visible_len ignores the added SGR (super::markdown).
+        for line in super::markdown::render_markdown(&body, width) {
             let _ = writeln!(out, "{line}");
         }
     }
@@ -246,7 +248,7 @@ pub(super) fn render_why(player: &mut Player) -> String {
         let detail = frame
             .ways
             .get(sel)
-            .map(|w| render_why_detail(&w.id, facet(w)))
+            .map(|w| render_why_detail(&w.id, facet(w), right_w))
             .unwrap_or_else(|| "\x1b[2mno ways fired in this frame\x1b[0m".to_string());
 
         (
@@ -371,12 +373,12 @@ mod tests {
             vec![fired("d/doc", "keyword", Some("diataxis"), None)],         // keyword later
         ]));
 
-        let sem = render_why_detail("d/doc", idx.get(&key("d/doc", "semantic:embedding:en")));
+        let sem = render_why_detail("d/doc", idx.get(&key("d/doc", "semantic:embedding:en")), 80);
         assert!(sem.contains("no recoverable term"), "semantic facet stays term-free: {sem}");
         assert!(!sem.contains("diataxis"), "keyword span must NOT appear under semantic");
         assert!(sem.contains("score 0.71"));
 
-        let kw = render_why_detail("d/doc", idx.get(&key("d/doc", "keyword")));
+        let kw = render_why_detail("d/doc", idx.get(&key("d/doc", "keyword")), 80);
         assert!(kw.contains("diataxis"), "keyword facet shows its own real span");
     }
 
@@ -386,7 +388,7 @@ mod tests {
         let sem = build_why_index(&model(vec![vec![fired(
             "d/s", "semantic:embedding:en", None, Some(0.73),
         )]]));
-        let out = render_why_detail("d/s", sem.get(&key("d/s", "semantic:embedding:en")));
+        let out = render_why_detail("d/s", sem.get(&key("d/s", "semantic:embedding:en")), 80);
         assert!(out.contains("no recoverable term"), "semantic honesty: {out}");
         assert!(out.contains("score 0.73"));
 
@@ -394,16 +396,16 @@ mod tests {
         let kw = build_why_index(&model(vec![vec![fired(
             "d/k", "keyword", Some("threat model"), None,
         )]]));
-        assert!(render_why_detail("d/k", kw.get(&key("d/k", "keyword"))).contains("threat model"));
+        assert!(render_why_detail("d/k", kw.get(&key("d/k", "keyword")), 80).contains("threat model"));
 
         // Keyword fire, no span (pre-enrichment) → says so, invents nothing.
         let none = build_why_index(&model(vec![vec![fired("d/n", "keyword", None, None)]]));
-        assert!(render_why_detail("d/n", none.get(&key("d/n", "keyword"))).contains("no span recorded"));
+        assert!(render_why_detail("d/n", none.get(&key("d/n", "keyword")), 80).contains("no span recorded"));
     }
 
     #[test]
     fn detail_handles_way_with_no_model_record() {
-        assert!(render_why_detail("d/x", None).contains("no fire record"));
+        assert!(render_why_detail("d/x", None, 80).contains("no fire record"));
     }
 
     #[test]

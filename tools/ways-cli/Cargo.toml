@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [features]
 default = ["tui"]
-tui = ["crossterm"]
+tui = ["crossterm", "dep:pulldown-cmark"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -27,4 +27,5 @@ crossterm = { version = "0.29", optional = true }
 agent-fmt = { path = "../agent-fmt" }
 sensor-trait = { path = "../sensor-trait" }
 ways-core = { path = "../ways-core" }
+pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 

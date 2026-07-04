@@ -25,6 +25,8 @@ mod run;
 mod drilldown;
 #[cfg(feature = "tui")]
 mod keys;
+#[cfg(feature = "tui")]
+mod markdown;
 mod layout;
 
 // Re-export the surface referenced as `crate::cmd::rethink::X` by main.rs,
