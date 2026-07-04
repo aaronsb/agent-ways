@@ -36,14 +36,16 @@ fn flush(lines: &mut Vec<String>, cur: &mut String) {
     lines.push(std::mem::take(cur));
 }
 
-/// Append a text run under the active style stack (reset + re-apply, so nesting
-/// is order-independent). A no-op reset is skipped when nothing is styled.
+/// Append a text run showing *exactly* the active styles: reset first, then
+/// re-apply the stack. The reset is unconditional on purpose — an inline span's
+/// `End` only pops the stack (it never emits an off-code), so a plain run right
+/// after a styled span would otherwise inherit the popped style and bleed its
+/// color/weight onto following text (and, in a table cell, onto later text in the
+/// same cell). Resetting every run keeps each run scoped to its own styles.
 fn emit(cur: &mut String, styles: &[&str], text: &str) {
-    if !styles.is_empty() {
-        cur.push_str(RST);
-        for s in styles {
-            cur.push_str(s);
-        }
+    cur.push_str(RST);
+    for s in styles {
+        cur.push_str(s);
     }
     cur.push_str(text);
 }
@@ -281,6 +283,11 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                 }
                 TagEnd::CodeBlock => {
                     in_code_block = false;
+                    // Flush a final code line with no trailing newline; guarded so an
+                    // already-empty buffer doesn't emit a spurious blank.
+                    if !cur.is_empty() {
+                        flush(&mut lines, &mut cur);
+                    }
                     lines.push(String::new());
                 }
                 TagEnd::TableCell => {
@@ -306,12 +313,16 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                     emit(&mut tcell, &styles, &t);
                 } else if in_code_block {
                     // Fenced blocks carry their own newlines; one display line each.
+                    // The split's trailing "" (from a terminating '\n') must not push
+                    // a bare CODE, or it dangles into the next block (yellow bleed).
                     for (i, seg) in t.split('\n').enumerate() {
                         if i > 0 {
                             flush(&mut lines, &mut cur);
                         }
-                        cur.push_str(CODE);
-                        cur.push_str(seg);
+                        if !seg.is_empty() {
+                            cur.push_str(CODE);
+                            cur.push_str(seg);
+                        }
                     }
                 } else {
                     emit(&mut cur, &styles, &t);
@@ -423,6 +434,35 @@ mod tests {
     #[test]
     fn empty_body_is_empty() {
         assert!(render("").is_empty());
+    }
+
+    #[test]
+    fn inline_style_does_not_bleed_onto_following_text() {
+        // Text after a **bold** span must not stay bold. The bold run is sealed
+        // with a reset before the trailing plain text.
+        let line = &render("a **b** c")[0];
+        let bold_at = line.find("\x1b[1m").expect("bold present");
+        let c_at = line.find(" c").expect("trailing text present");
+        let between = &line[bold_at..c_at];
+        assert!(
+            between.contains(RST),
+            "bold must be reset before the trailing text: {line:?}"
+        );
+    }
+
+    #[test]
+    fn paragraph_after_code_block_is_not_code_colored() {
+        // The trailing empty segment of a fenced block must not leave CODE (yellow)
+        // dangling into the next paragraph.
+        let out = render("```\ncode line\n```\n\nafter para");
+        let after = out
+            .iter()
+            .find(|l| visible(l).contains("after para"))
+            .expect("paragraph rendered");
+        assert!(
+            !after.contains(CODE),
+            "paragraph after a code block must not be code-colored: {after:?}"
+        );
     }
 
     #[test]
