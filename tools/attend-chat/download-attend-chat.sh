@@ -11,6 +11,10 @@
 
 set -euo pipefail
 
+# Shared retry/backoff helpers — a transient gh/API blip must not silently
+# degrade `ways update` to a from-source build.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)/prebuilt-lib.sh"
+
 # Platform detection
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/arm64/aarch64/')
@@ -69,8 +73,14 @@ mkdir -p "$OUTPUT_DIR"
 
 # Find the latest attend-chat release
 if [[ "$RELEASE_TAG" == "latest" ]]; then
-  RELEASE_TAG=$(gh release list --repo "$GH_REPO" --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null \
-    | grep '^attend-chat-v' | head -1)
+  # Retry transient API failures, then distinguish "couldn't reach the API"
+  # (retries exhausted → honest error) from "reached it, no matching release".
+  if ! release_tags=$(retry gh release list --repo "$GH_REPO" --limit 30 --json tagName --jq '.[].tagName'); then
+    echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
+    echo "  Falling back to build-from-source: cd \"$REPO_ROOT\" && make attend-chat" >&2
+    exit 1
+  fi
+  RELEASE_TAG=$(echo "$release_tags" | grep '^attend-chat-v' | head -1 || true)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No attend-chat release found. Build from source:" >&2
     echo "  cd \"$REPO_ROOT\" && make attend-chat" >&2
@@ -82,10 +92,15 @@ echo "Platform: ${PLATFORM}" >&2
 echo "Release:  ${RELEASE_TAG}" >&2
 
 # Check if our platform binary exists in the release
-if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -q "^${BIN_NAME}$"; then
+if ! release_assets=$(retry gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name'); then
+  echo "error: could not read assets of ${RELEASE_TAG} after retries (network/gh/auth?)." >&2
+  echo "  Falling back to build-from-source: cd \"$REPO_ROOT\" && make attend-chat" >&2
+  exit 1
+fi
+if ! echo "$release_assets" | grep -q "^${BIN_NAME}$"; then
   echo "No pre-built binary for ${PLATFORM} in release ${RELEASE_TAG}." >&2
   echo "Available binaries:" >&2
-  gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null |  grep "^attend-chat-" | sed 's/^/  /' >&2
+  echo "$release_assets" | grep "^attend-chat-" | sed 's/^/  /' >&2
   echo "" >&2
   echo "Build from source instead:" >&2
   echo "  cd \"$REPO_ROOT\" && make attend-chat" >&2
@@ -94,20 +109,33 @@ fi
 
 # Download binary + checksums
 echo "Downloading ${BIN_NAME}..." >&2
-gh release download "$RELEASE_TAG" \
-  --repo "$GH_REPO" \
-  --pattern "$BIN_NAME" \
-  --dir "$OUTPUT_DIR" \
-  --clobber
-
-# Verify checksum
-CHECKSUMS_FILE="${OUTPUT_DIR}/checksums.txt"
-if gh release download "$RELEASE_TAG" \
+if ! retry gh release download "$RELEASE_TAG" \
     --repo "$GH_REPO" \
-    --pattern "checksums.txt" \
+    --pattern "$BIN_NAME" \
     --dir "$OUTPUT_DIR" \
-    --clobber 2>/dev/null; then
-  expected_hash=$(grep "${BIN_NAME}" "$CHECKSUMS_FILE" | awk '{print $1}')
+    --clobber; then
+  echo "error: download of ${BIN_NAME} failed after retries — building from source instead." >&2
+  echo "  cd \"$REPO_ROOT\" && make attend-chat" >&2
+  exit 1
+fi
+
+# Verify checksum. Whether the release HAS a checksums.txt is known from the
+# assets list, so a download failure here is a transient blip (retry), not
+# "absent" — and if it's present but unfetchable we refuse to install unverified
+# rather than silently skipping the integrity check.
+CHECKSUMS_FILE="${OUTPUT_DIR}/checksums.txt"
+if echo "$release_assets" | grep -q '^checksums\.txt$'; then
+  if ! retry gh release download "$RELEASE_TAG" \
+      --repo "$GH_REPO" \
+      --pattern "checksums.txt" \
+      --dir "$OUTPUT_DIR" \
+      --clobber; then
+    echo "error: checksums.txt is in ${RELEASE_TAG} but its download failed after retries —" >&2
+    echo "  refusing to install ${BIN_NAME} unverified. Build from source: cd \"$REPO_ROOT\" && make attend-chat" >&2
+    rm -f "$PLATFORM_FILE"
+    exit 1
+  fi
+  expected_hash=$(grep "${BIN_NAME}" "$CHECKSUMS_FILE" | awk '{print $1}' || true)
   if [[ -n "$expected_hash" ]]; then
     actual_hash=$(sha256sum "$PLATFORM_FILE" 2>/dev/null | cut -d' ' -f1 \
       || shasum -a 256 "$PLATFORM_FILE" 2>/dev/null | cut -d' ' -f1)
@@ -122,7 +150,7 @@ if gh release download "$RELEASE_TAG" \
   fi
   rm -f "$CHECKSUMS_FILE"
 else
-  echo "WARNING: checksums.txt not found in release — skipping verification" >&2
+  echo "WARNING: no checksums.txt in ${RELEASE_TAG} — skipping verification" >&2
 fi
 
 # Make executable and install
