@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Stop hook: Analyze Claude's response for topic awareness
+# Stop hook: capture Claude's response for topic awareness (ADR-155 §3)
 #
-# Reads the transcript after Claude responds, extracts topics,
-# and writes state for the next UserPromptSubmit to use.
-#
-# This enables ways to trigger based on what Claude discussed,
-# not just what the user asked.
+# Reads the transcript after Claude responds and stores the last assistant
+# message RAW for the next UserPromptSubmit. No extraction happens here —
+# the scan-time sentence-salience reducer (ADR-130) selects what matters,
+# and the stored text feeds only the embed lane, never the keyword regex
+# lane. This replaced a 24-word grep whitelist that both missed Claude's
+# actual reasoning and leaked way-trigger tokens ("way", "pr", "commit")
+# into the next prompt's keyword matching.
 
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
@@ -25,28 +27,17 @@ STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 STATE_FILE=$("${HOME}/.claude/bin/ways" response-topics-path "$SESSION_ID")
 
 # Extract last assistant message from transcript (JSONL format)
-# Use tail instead of tac to avoid reading entire file
+# Use tail instead of tac to avoid reading entire file. 2000 chars is
+# plenty: the reducer's budget is ~110 tokens, and the response competes
+# with the user's prompt on salience anyway.
 LAST_RESPONSE=$(tail -100 "$TRANSCRIPT" | grep '"type":"assistant"' | tail -1 | jq -r '.message.content[]?.text // empty' 2>/dev/null | head -c 2000)
 
 [[ -z "$LAST_RESPONSE" ]] && exit 0
 
-# Extract potential topics (simple keyword extraction)
-# Look for: capitalized terms, technical words, repeated nouns
-TOPICS=$(echo "$LAST_RESPONSE" | tr '[:upper:]' '[:lower:]' | \
-  grep -oE '\b(api|test|debug|config|security|auth|database|migration|deploy|git|commit|pr|issue|error|hook|trigger|way|todo|context|token|model|prompt)\b' | \
-  sort | uniq -c | sort -rn | head -10 | awk '{print $2}' | tr '\n' ' ')
-
-# Write state for next turn
-if [[ -n "$TOPICS" ]]; then
-  cat > "$STATE_FILE" << EOF
-{
-  "timestamp": "$(date -Iseconds)",
-  "topics": "$TOPICS",
-  "response_length": ${#LAST_RESPONSE}
-}
-EOF
-fi
-
-# Stop hooks can output but it doesn't inject into next turn
-# This is just for logging/debugging
-# echo "Topics detected: $TOPICS"
+# Write state for next turn. jq -n builds the JSON so quotes/newlines in
+# the response can't break the document (the old heredoc could).
+jq -n \
+  --arg ts "$(date -Iseconds)" \
+  --arg ctx "$LAST_RESPONSE" \
+  '{timestamp: $ts, context: $ctx, response_length: ($ctx | length)}' \
+  > "$STATE_FILE"

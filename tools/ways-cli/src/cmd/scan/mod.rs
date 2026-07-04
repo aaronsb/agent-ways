@@ -71,7 +71,20 @@ pub(crate) struct WayCandidate {
 /// ever reused from another hook event, just pass that event's name —
 /// `SessionStart` and `PreToolUse` are the only events that take the
 /// legacy top-level `additionalContext` envelope.
-pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()> {
+///
+/// `response_context` (ADR-155 §3) is Claude's last response, stored raw by
+/// the Stop hook. It feeds ONLY the embed input — never the regex lane — so
+/// ways can trigger on what Claude was just reasoning about without response
+/// tokens keyword-firing ways the user never mentioned. The ADR-130 reducer
+/// weighs the prompt's and the response's sentences by salience within one
+/// budget: a terse follow-up ("yes, do it") lets the response carry the
+/// topic; a substantive prompt dominates on its own salience.
+pub fn prompt(
+    query: &str,
+    session_id: &str,
+    project: Option<&str>,
+    response_context: Option<&str>,
+) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
         .unwrap_or_else(default_project);
@@ -87,8 +100,13 @@ pub fn prompt(query: &str, session_id: &str, project: Option<&str>) -> Result<()
     // sentence-salience reducer. Pattern/keyword matching downstream
     // operates on the masked full prompt (ADR-155 §2: URLs and fenced
     // code are not lexical intent) — only the embed signal sees the
-    // reduced form, and it sees the unmasked original.
-    let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
+    // reduced form, and it sees the unmasked prompt plus Claude's last
+    // response (ADR-155 §3), competing on sentence salience.
+    let embed_input = match response_context {
+        Some(rc) if !rc.trim().is_empty() => format!("{query}\n{rc}"),
+        _ => query.to_string(),
+    };
+    let reduced = reduce::reduce_for_embed(&embed_input, BUDGET_PROMPT);
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
     let gate_fraction = crate::config::global().keyword_gate_fraction;
