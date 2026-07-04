@@ -14,7 +14,7 @@
 //! - [`scanning`] walks the project's ways directory and hands files to
 //!   `per_file`.
 //! - [`pattern`] runs the ADR-155 §5 pattern-hygiene rules over the
-//!   `pattern:` regex (common words, short unanchored tokens, greedy `.*`).
+//!   `pattern:` regex (common words, short unanchored tokens, unbounded `.*`).
 //! - [`locale_stubs`] validates `*.locales.jsonl` per-language overrides
 //!   against the `locale_stub:` schema block.
 //! - [`requires`] is the ADR-116 scan-macro-to-permissions machinery.

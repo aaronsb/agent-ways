@@ -8,16 +8,19 @@
 //!
 //! 1. **Bare common word** — an alternation that is a plain dictionary word
 //!    (from [`COMMON_WORDS`]) fires on unrelated prose. Move it to
-//!    `vocabulary:`.
+//!    `vocabulary:`. Applies regardless of anchoring — an anchored `\bcommit\b`
+//!    is still the word "commit".
 //! 2. **Short unanchored alternation** — a literal alternation shorter than
 //!    [`SHORT_ALTERNATION_FLOOR`] with no word-boundary anchoring collides
 //!    with substrings of larger words. Anchor it (term of art) or demote it.
-//! 3. **`.*` in a prompt pattern** — an unbounded greedy wildcard makes the
-//!    trigger match almost anything between its literals.
+//! 3. **Unbounded `.*` wildcard** — a `.*` (greedy or lazy) makes the trigger
+//!    match almost anything between its literals.
 //!
-//! The rules operate on top-level alternations (split on `|` at paren depth
-//! 0), so a grouped inner `|` such as `alert.?(response|triage)` is treated
-//! as one alternation, not three.
+//! The analysis mirrors the regex the matcher actually compiles: the value is
+//! read as the matcher's YAML loader sees it (inline `# comment` and a leading
+//! `(?i)`-style flag group stripped), and the rules operate on top-level
+//! alternations (split on `|` at paren depth 0), so a grouped inner `|` such as
+//! `alert.?(response|triage)` is treated as one alternation, not three.
 
 use std::fmt::Display;
 
@@ -67,23 +70,35 @@ const COMMON_WORDS: &[&str] = &[
 /// Run all three pattern-hygiene rules against one way's `pattern:` value.
 /// `warnings` accumulates the project-wide counter owned by the caller.
 pub(super) fn check_pattern(rel: &dyn Display, pattern: &str, warnings: &mut u32) {
-    let pattern = unquote(pattern.trim());
-    for alt in split_top_level(pattern) {
-        let alt = alt.trim();
+    // Read the value the way the matcher's YAML loader does: strip a plain
+    // scalar's inline `# comment` (only for unquoted values — quotes make `#`
+    // literal) and a leading whole-pattern inline flag group like `(?i)`.
+    let (body_val, was_quoted) = unquote(pattern.trim());
+    let val = if was_quoted {
+        body_val
+    } else {
+        strip_yaml_comment(body_val)
+    };
+    let val = strip_inline_flags(val);
+
+    for raw in split_top_level(val) {
+        let alt = raw.trim();
         if alt.is_empty() {
             continue;
         }
 
-        // Rule 3: unbounded greedy wildcard.
+        // Rule 3: unbounded wildcard (greedy `.*` or lazy `.*?`).
         if alt.contains(".*") {
             eprintln!(
-                "  WARNING: {rel} — pattern alternation '{alt}' uses '.*' (greedy); \
-                 prompt patterns should avoid unbounded wildcards — bound or restructure it (ADR-155 §5)"
+                "  WARNING: {rel} — pattern alternation '{alt}' uses an unbounded '.*' wildcard; \
+                 prompt patterns should bound or restructure it (ADR-155 §5)"
             );
             *warnings += 1;
         }
 
-        let info = classify(alt);
+        // Classify against the untrimmed alternation so leading/trailing space
+        // anchoring (` erd `) is detected before it is trimmed away.
+        let info = classify(raw);
 
         // Rules 1 and 2 only apply to bare literal words; structured
         // alternations (groups, character classes, multi-word phrases joined
@@ -91,11 +106,11 @@ pub(super) fn check_pattern(rel: &dyn Display, pattern: &str, warnings: &mut u32
         if !info.is_bare_word {
             continue;
         }
-        let core = info.core.to_ascii_lowercase();
 
-        // Rule 2: common word (length-independent). Takes precedence over the
-        // short-token rule so an alternation earns at most one of these two.
-        if COMMON_WORDS.contains(&core.as_str()) {
+        // Rule 1: common word (length-independent, anchoring-independent).
+        // Takes precedence over the short-token rule so an alternation earns
+        // at most one of these two.
+        if COMMON_WORDS.contains(&info.word.as_str()) {
             eprintln!(
                 "  WARNING: {rel} — pattern alternation '{alt}' is a common word; \
                  move it to vocabulary: (semantic lane) and keep pattern: for exact triggers (ADR-155 §5)"
@@ -104,23 +119,50 @@ pub(super) fn check_pattern(rel: &dyn Display, pattern: &str, warnings: &mut u32
             continue;
         }
 
-        // Rule 1: short and unanchored.
-        if !info.is_anchored && info.core.len() < SHORT_ALTERNATION_FLOOR {
-            let n = info.core.len();
+        // Rule 2: short and unanchored.
+        if !info.is_anchored && info.char_len < SHORT_ALTERNATION_FLOOR {
+            let n = info.char_len;
+            let word = &info.word;
             eprintln!(
                 "  WARNING: {rel} — pattern alternation '{alt}' is short ({n} chars) and unanchored; \
-                 anchor it (\\b{core}\\b) if it's a term of art, or move it to vocabulary: (ADR-155 §5)"
+                 anchor it (\\b{word}\\b) if it's a term of art, or move it to vocabulary: (ADR-155 §5)"
             );
             *warnings += 1;
         }
     }
 }
 
-/// Strip one layer of matching YAML quotes, if present.
-fn unquote(s: &str) -> &str {
+/// Strip one layer of matching YAML quotes. Returns the inner text and whether
+/// a quote layer was removed (quoted values do not honor `#` comments).
+fn unquote(s: &str) -> (&str, bool) {
     for q in ['"', '\''] {
         if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
-            return &s[1..s.len() - 1];
+            return (&s[1..s.len() - 1], true);
+        }
+    }
+    (s, false)
+}
+
+/// Drop a plain-scalar inline comment (` #…`), matching serde_yaml. A `#` not
+/// preceded by whitespace is literal and kept.
+fn strip_yaml_comment(s: &str) -> &str {
+    match s.find(" #") {
+        Some(i) => s[..i].trim_end(),
+        None => s,
+    }
+}
+
+/// Drop a leading whole-pattern inline flag group (`(?i)`, `(?ims)`, `(?i-u)`)
+/// so it is not misread as part of the first alternation. A non-capturing
+/// `(?:…)` or named `(?P<…>…)` group is left intact (its inner content is real
+/// pattern text).
+fn strip_inline_flags(s: &str) -> &str {
+    if let Some(rest) = s.strip_prefix("(?") {
+        if let Some(close) = rest.find(')') {
+            let flags = &rest[..close];
+            if !flags.is_empty() && flags.chars().all(|c| c.is_ascii_alphabetic() || c == '-') {
+                return &rest[close + 1..];
+            }
         }
     }
     s
@@ -158,11 +200,15 @@ fn split_top_level(pattern: &str) -> Vec<&str> {
 }
 
 struct AltInfo {
-    /// Alphanumeric characters of the alternation, in order.
-    core: String,
-    /// The alternation is a single literal word (only word chars, optionally
-    /// with anchor decoration and an optional trailing `?`) — not a phrase or
-    /// structured regex.
+    /// The literal word after anchor decoration is stripped, lowercased. Empty
+    /// when the alternation is not a bare word.
+    word: String,
+    /// Character count of the literal word (Unicode scalar values, so accented
+    /// and non-Latin tokens count correctly).
+    char_len: usize,
+    /// The alternation is a single literal word (only alphanumeric chars,
+    /// optionally with anchor decoration and an optional trailing `?`) — not a
+    /// phrase or structured regex.
     is_bare_word: bool,
     /// Carries word-boundary anchoring (`\b`, `^`/`$`, `(^| )`/`( |$)`, or a
     /// leading/trailing literal or escaped space).
@@ -170,14 +216,16 @@ struct AltInfo {
 }
 
 fn classify(alt: &str) -> AltInfo {
-    let core: String = alt.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    // Detect anchoring on the untrimmed alternation so surrounding spaces
+    // count as boundaries before they are trimmed off below.
     let is_anchored = detect_anchor(alt);
 
-    // Strip anchor decoration, then test whether the remainder is a single
-    // literal word. `\b`, `^`, `$`, `(^| )`, `( |$)`, and boundary spaces are
-    // removed; a single trailing `?` (optional last letter, e.g. `ways?`) is
-    // allowed. Anything else (`.`, `*`, `+`, groups, classes, interior `?`)
-    // means the alternation is not a bare word.
+    // Reduce to the literal word: strip anchor decoration, then a single
+    // trailing `?` (optional last letter, e.g. `ways?`). `\b`, `^`, `$`,
+    // `(^| )`, `( |$)`, and boundary spaces are removed; anything else (`.`,
+    // `*`, `+`, groups, classes, interior `?`) means the alternation is not a
+    // bare word. Word chars are tested with Unicode `is_alphanumeric` so
+    // localized patterns are classified, not silently skipped.
     let mut s = alt.trim();
     s = s
         .trim_start_matches("(^| )")
@@ -189,11 +237,17 @@ fn classify(alt: &str) -> AltInfo {
     s = s.trim_start_matches('^').trim_end_matches('$');
     s = s.trim_start_matches("\\ ").trim_end_matches("\\ ");
     let s = s.trim();
-    let body = s.strip_suffix('?').unwrap_or(s);
-    let is_bare_word = !body.is_empty() && body.chars().all(|c| c.is_ascii_alphanumeric());
+    let word_src = s.strip_suffix('?').unwrap_or(s);
+    let is_bare_word = !word_src.is_empty() && word_src.chars().all(|c| c.is_alphanumeric());
+    let (word, char_len) = if is_bare_word {
+        (word_src.to_lowercase(), word_src.chars().count())
+    } else {
+        (String::new(), 0)
+    };
 
     AltInfo {
-        core,
+        word,
+        char_len,
         is_bare_word,
         is_anchored,
     }
@@ -249,6 +303,25 @@ mod tests {
     }
 
     #[test]
+    fn anchored_common_word_still_flagged() {
+        // \bcommit\b — the `\b` must not leak into the word; "commit" is still
+        // a common word and should be flagged (regression for the core/body
+        // corruption bug).
+        assert_eq!(warnings_for(r"\bcommit\b"), 1);
+        assert_eq!(warnings_for(r"\bdocs\b|diataxis"), 1);
+    }
+
+    #[test]
+    fn inline_flag_group_stripped() {
+        // (?i) applies to the whole pattern; the first alternation is "commit".
+        assert_eq!(warnings_for("(?i)commit|remember"), 2);
+        // Non-capturing groups are left intact (not a flag group): only the
+        // bare `baz` warns. If `(?:…)` were wrongly stripped as flags, the
+        // pattern would become `foo|bar|baz` and warn three times.
+        assert_eq!(warnings_for("(?:foo|bar)|baz"), 1);
+    }
+
+    #[test]
     fn short_unanchored_flagged() {
         assert_eq!(warnings_for("erd|entity.?relationship"), 1); // erd short
         assert_eq!(warnings_for("dbml"), 1);
@@ -257,6 +330,34 @@ mod tests {
     #[test]
     fn short_but_anchored_is_clean() {
         assert_eq!(warnings_for(r"\berd\b|entity"), 0);
+    }
+
+    #[test]
+    fn space_anchored_middle_token_is_clean() {
+        // A middle alternation anchored by surrounding spaces must not warn
+        // (regression for anchor detection running before the trim).
+        assert_eq!(warnings_for("longword| erd |otherword"), 0);
+    }
+
+    #[test]
+    fn non_ascii_short_word_is_classified() {
+        // Accented/non-Latin bare words must be seen, not silently skipped.
+        assert_eq!(warnings_for("añ|entityname"), 1); // "añ" short + unanchored
+    }
+
+    #[test]
+    fn inline_comment_stripped() {
+        // serde_yaml drops ` # trigger`; lint must too, so "erd" is still seen.
+        assert_eq!(warnings_for("pr|erd # trigger"), 2); // pr + erd, both short
+    }
+
+    #[test]
+    fn lazy_wildcard_flagged_without_greedy_label() {
+        // `.*?` is unbounded too; still flagged, but not mislabeled "greedy".
+        let mut n = 0;
+        // capture is not straightforward; just assert it fires exactly once.
+        check_pattern(&"way", "alert.*?ack", &mut n);
+        assert_eq!(n, 1);
     }
 
     #[test]
