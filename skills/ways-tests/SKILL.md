@@ -122,9 +122,10 @@ load-bearing **common word** the pattern-hygiene lint would strip, add it to
 `pattern_keep` — the keyword stays and its off-sense noise is held back by the `τ_k`
 floor.
 
-At *scan* time (not here), a child way's effective semantic bar is lowered toward
-`parent_boost_floor` (**0.30**, in probability space) when an ancestor has fired this
-session — the progressive-disclosure mechanism (ADR-104/105/126). For multilingual
+At *scan* time (not here), when an ancestor has fired this session a child's effective
+semantic bar is lowered from `τ_s` to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)`
+— by default `max(0.5×0.8, 0.30) = 0.40`, in probability space (the multiplier boosts, the floor
+caps) — the progressive-disclosure mechanism (ADR-104/105/126). For multilingual
 stubs, `ways tune` reports locale fidelity/discrimination (see the
 `knowledge/optimization/tuning` way).
 
@@ -165,8 +166,9 @@ and depth > 4.
 
 Structural analysis of a disclosure tree (depth, breadth, per-level vocabulary
 specificity). There are **no per-level thresholds** — firing uses the global
-`τ_s`/`τ_k`, and disclosure is governed by `parent_boost_floor` plus how much more
-specific each level's vocabulary is than its parent's. Flag: **weak narrowing** (a
+`τ_s`/`τ_k`, and disclosure is governed by parent-boost (`parent_threshold_multiplier`,
+floored at `parent_boost_floor`) plus how much more specific each level's vocabulary is than
+its parent's. Flag: **weak narrowing** (a
 child no more specific than its parent — nothing for progressive disclosure to earn),
 sibling **Jaccard > 0.15** (`ways siblings`), **orphans** (a way file with no ancestor
 way), **depth > 4** / **breadth > 7** (over-decomposed).
@@ -206,7 +208,7 @@ refactor helped.
 
 Read the session's disclosure metrics (`ways list`, or the metrics JSONL under the
 sessions root). Reports per-tree coverage (which children fired, epoch distance) and
-parent-activated bar lowering (`parent_boost_floor`). Flag: **orphaned roots** (root
+parent-activated bar lowering (`parent_threshold_multiplier`, floored at `parent_boost_floor`). Flag: **orphaned roots** (root
 fires, no children), **instant cascades** (parent+child same epoch = co-disclosed,
 not progressive), **never-fire children** (vocabulary too narrow), **parent-only**
 sessions (fine — the root sufficed).

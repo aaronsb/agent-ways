@@ -37,7 +37,17 @@ controls; they are not.
 | "raise / lower the threshold on a way" (as a remedy) | REMOVED | edit vocabulary/pattern, then measure |
 | per-way threshold tuning (any framing) | REMOVED | global `τ_s` / `τ_k` only |
 | raw-cosine thresholding `s ≥ T` | REMOVED | `g(s)=σ(a·s+b)` → probability, threshold in prob space |
-| `parent_threshold_multiplier` (0.8 / "20% lower") | REMOVED | `parent_boost_floor` (0.30), applied in prob space |
+| parent-boost applied to a raw per-way cosine threshold | CHANGED | the boost now operates in probability space — see below |
+
+**Parent-boost is NOT retired.** Both `parent_threshold_multiplier` (0.8) and
+`parent_boost_floor` (0.30) are live config keys (`config.rs`). When an ancestor way has
+fired in the session, an in-domain child's semantic bar is lowered from `τ_s` to
+`(τ_s × parent_threshold_multiplier).max(parent_boost_floor)` — by default
+`max(0.5 × 0.8, 0.30) = 0.40` (`scan/mod.rs` `effective_thresholds`). The multiplier boosts
+the child (lowers its bar); the floor stops cascading boosts from reaching the noise band.
+ADR-156's change was that this acts on the global probability `τ_s`, not a raw per-way cosine
+threshold — the multiplier itself was not removed. Do not write that `parent_boost_floor`
+"replaced" the multiplier; they work together.
 
 ## Concepts docs must now teach
 

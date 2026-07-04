@@ -51,8 +51,9 @@ Three way roots (ADR-143) — don't confuse *reading* one with *authoring* in it
 - **Project ways:** `$PROJECT/.claude/ways/{domain}/{wayname}/{wayname}.md` — override global ways at the same path
 - Disable domains: `$XDG_CONFIG_HOME/agent-ways/config.yaml` → `disabled_domains: [domain]` (legacy `$XDG_CONFIG_HOME/ways/config.yaml` and `~/.claude/ways.json` → `{"disabled": [...]}` still honored)
 - Ways can nest: `{domain}/{parent}/{child}/{child}.md` for progressive disclosure
-- When a parent way fires, its in-domain children become eligible on weaker signal via a
-  probability floor (config `parent_boost_floor`, default 0.30) — domain context is established
+- When a parent way fires, its in-domain children become eligible on weaker signal: the child's
+  semantic bar drops from `τ_s` to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)`
+  = `max(0.5×0.8, 0.30) = 0.40` by default (multiplier boosts, floor caps) — domain context is established
 - Tree disclosure metrics are tracked per-session (parent, depth, epoch distance, sibling coverage)
 - Think strategies are multi-turn ways that steer reasoning across several turns (auto-detected, opt-out)
 
