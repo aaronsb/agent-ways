@@ -75,6 +75,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
 | [ADR-153](./system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) | Session-introspection substrate — correlating fired ways to turns | Accepted |
 | [ADR-154](./system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) | `ways introspect` — one model, three front-ends | Accepted |
+| [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
