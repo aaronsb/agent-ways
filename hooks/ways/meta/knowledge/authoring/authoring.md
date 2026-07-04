@@ -1,5 +1,5 @@
 ---
-files: \.claude/ways/.*\.md$
+files: (\.claude|agent-ways)/ways/.*\.md$
 scope: agent, subagent
 refire: 0.15
 ---
@@ -27,7 +27,17 @@ Regex-only matching (`pattern:` without `description:`/`vocabulary:`) will miss 
 
 If you still want regex-only, that's your choice, but expect poor recall on natural language prompts.
 
-**When to add `pattern:` alongside semantic:** As a supplementary trigger for exact matches you never want to miss. Matching is additive — pattern OR semantic, either fires the way. Use both when you need guaranteed activation on specific terms AND broad natural language coverage.
+**When to add `pattern:` alongside semantic:** As a supplementary trigger for exact terms you never want to miss on the strong-signal path. The two lanes are **not** an unconditional OR. A way fires when `g(s) ≥ τ_s ∨ (keyword_match ∧ g(s) ≥ τ_k)`, where `g(s) = σ(a·s + b)` is the calibrated relevance probability (ADR-156), `τ_s = 0.5` is the semantic bar, and `τ_k = 0.15` is the keyword floor. The keyword lane is **floor-gated**: a pattern hit only fires when the semantic probability already clears `τ_k`, so a keyword can't drag in an unrelated prompt — *as long as calibration is loaded.* With no calibrated signal (a non-embeddable way, the engine not run, or no calibration present) the keyword lane **fails open** and fires unconditionally, so the author's explicit trigger still stands. If you want a keyword to fire unconditionally *by design* — bypassing the gate even when calibrated — set `pattern_strict: true`. That is the only way to guarantee a keyword fires regardless of semantic signal.
+
+**Keep `pattern:` clean — this is how future ways stay compatible.** Reserve the keyword lane
+for *specific, term-of-art* triggers (`erd`, `mttr`, exact command or file names). Suggestive or
+common words ("optimize", "review", "guidance", "knowledge") belong in `vocabulary:`, where the
+semantic lane weighs them in context. A bare common word in `pattern:` fires on unrelated prose and
+only avoids leaking because the `τ_k` floor happens to gate it — don't rely on that. `ways lint`
+flags common-word, short-unanchored, and unbounded-`.*` alternations for exactly this reason
+(ADR-155 §5); fix them by moving the term to `vocabulary:`, anchoring a genuine term of art
+(`\berd\b`), or bounding the wildcard (`.{0,30}`). This keeps a way about a specific topic from
+firing during unrelated work — the semantic lane is the topic isolation.
 
 **Other trigger types** (not prompt-based, semantic doesn't apply):
 - `files:` — regex matched against file paths (Edit/Write hooks)
@@ -48,13 +58,15 @@ threshold: 90             # percentage (0-100)
 
 **Pattern-based:**
 - `pattern:` - Regex matched against user prompts
+- `pattern_strict:` - `true` makes a pattern hit fire **unconditionally**, bypassing the `τ_k` floor gate. The only way to guarantee a keyword fires regardless of semantic signal. Use sparingly.
+- `pattern_keep:` - Space-separated list exempting a *measured* common-word keep from the pattern-hygiene lint (ADR-155 §5). Use only when the keyword is load-bearing and its off-sense noise is floor-gated by `τ_k` — measure before adding it.
 - `files:` - Regex matched against file paths (Edit/Write)
 - `commands:` - Regex matched against bash commands
 
 **Semantic:**
 - `description:` - Natural language reference text for what this way covers
 - `vocabulary:` - Space-separated domain keywords users would say
-- `embed_threshold:` - Cosine similarity threshold (optional, per-way tuning; default applied if absent)
+- Firing is global: the embedded prompt's cosine `s` against the alias (`description` + `vocabulary`) maps through the calibrated `g(s)` to a relevance probability, thresholded against global `τ_s` / `τ_k`. There is no per-way threshold (ADR-156).
 - Engine: embedding-only (per ADR-125). Explicit `pattern:` / `commands:` regex still fire independently.
 
 **State-based:**
@@ -146,9 +158,9 @@ For state transitions and process flows, prefer Cypher-style notation over ASCII
 
 When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language/tool-specific variants), decompose into a tree. The supply chain tree (`softwaredev/code/supplychain/`) is the reference implementation.
 
-**How disclosure works now** (ADR-125): ways are nodes in a DAG. When a parent fires, a session marker is set. Child ways get a threshold boost (`config.parent_threshold_multiplier`, default 0.8) whenever any ancestor has a marker — so children fire more easily once their domain is active. This is the mechanism behind "progressive disclosure": children are always candidates, but the boost makes in-domain children fire on weaker signal. Full model in [hooks-and-ways/matching.md](../../../../docs/hooks-and-ways/matching.md).
+**How disclosure works now** (ADR-125): ways are nodes in a DAG. When a parent fires, a session marker is set. Whenever any ancestor has a marker, an in-domain child's semantic bar is lowered from `τ_s` to `(τ_s × config.parent_threshold_multiplier).max(config.parent_boost_floor)` — by default `max(0.5 × 0.8, 0.30) = 0.40` — so children fire on weaker signal once their domain is active. The multiplier (0.8) is the boost; the floor (0.30) stops cascading boosts from reaching the noise band; both operate in probability space (ADR-156). This is the mechanism behind "progressive disclosure": children are always candidates, but the boost makes in-domain children easier to fire. Full model in [hooks-and-ways/matching.md](../../../../docs/hooks-and-ways/matching.md).
 
-**Embedding thresholds** — only English frontmatter carries `embed_threshold:`. Broader ways at the root typically leave it unset (use the default 0.35); more specific children may set a higher value (e.g., 0.45) to avoid cross-firing with the root. Locale stubs don't carry thresholds.
+**Cross-firing between a child and its root** — thresholds are global (`τ_s` / `τ_k`), not per-way, so there is no threshold to raise on the child. When a child cross-fires with the root (or a sibling), sharpen the child's own signal instead: add discriminating vocabulary, tighten the `pattern:`, then verify with `tools/scripts/probe-measure.py`. The remedy loop is always **measure → edit vocabulary/pattern → re-measure** — never move a threshold (there is none to move).
 
 **Vocabulary isolation** — sibling ways MUST NOT share vocabulary:
 - Target Jaccard similarity < 0.15 between siblings
@@ -191,7 +203,7 @@ Use `/ways-tests` and the `ways` CLI to validate matching quality. **Use the bui
 - `way-embed match --corpus ... --query "..."` — embedding similarity scores
 
 **Tree validation**:
-- `/ways-tests tree <path>` — structural analysis (depth, breadth, threshold progression)
+- `/ways-tests tree <path>` — structural analysis (depth, breadth, disclosure boost)
 - `/ways-tests budget <path>` — token cost per way, per path, worst-case
 - `/ways-tests crowding "prompt"` — vocabulary overlap detection
 - `/ways-tests metrics` — session disclosure tracking (after live use)
@@ -208,7 +220,7 @@ Ways can have native-language matching stubs stored in `{wayname}.locales.jsonl`
 {"lang":"ja","description":"セキュリティ脆弱性スキャン","vocabulary":"セキュリティ 脆弱性 CVE"}
 ```
 
-No per-locale threshold field: the node's English `embed_threshold` governs all aliases.
+No per-locale threshold field — and none per-node either. Firing is the global calibrated gate (`g(s)` against `τ_s` / `τ_k`) for every alias, English or localized; locale stubs correctly carry no threshold.
 
 **Audit your stubs** with `ways tune` — it measures fidelity (do sibling translations agree?) and discrimination (does another way's alias outrank yours?). Entries where a non-sibling confuser wins need the stub re-authored with sharper vocabulary. See `knowledge/optimization/tuning(meta)` for the full workflow and failure-mode categories. Full guide: `docs/hooks-and-ways/languages.md`.
 
