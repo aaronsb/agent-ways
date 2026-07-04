@@ -80,7 +80,7 @@ if [[ "$RELEASE_TAG" == "latest" ]]; then
     echo "  Falling back to build-from-source: cd \"$REPO_ROOT\" && make attend" >&2
     exit 1
   fi
-  RELEASE_TAG=$(echo "$release_tags" | grep '^attend-v' | head -1)
+  RELEASE_TAG=$(echo "$release_tags" | grep '^attend-v' | head -1 || true)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No attend release found. Build from source:" >&2
     echo "  cd \"$REPO_ROOT\" && make attend" >&2
@@ -119,14 +119,23 @@ if ! retry gh release download "$RELEASE_TAG" \
   exit 1
 fi
 
-# Verify checksum
+# Verify checksum. Whether the release HAS a checksums.txt is known from the
+# assets list, so a download failure here is a transient blip (retry), not
+# "absent" — and if it's present but unfetchable we refuse to install unverified
+# rather than silently skipping the integrity check.
 CHECKSUMS_FILE="${OUTPUT_DIR}/checksums.txt"
-if gh release download "$RELEASE_TAG" \
-    --repo "$GH_REPO" \
-    --pattern "checksums.txt" \
-    --dir "$OUTPUT_DIR" \
-    --clobber 2>/dev/null; then
-  expected_hash=$(grep "${BIN_NAME}" "$CHECKSUMS_FILE" | awk '{print $1}')
+if echo "$release_assets" | grep -q '^checksums\.txt$'; then
+  if ! retry gh release download "$RELEASE_TAG" \
+      --repo "$GH_REPO" \
+      --pattern "checksums.txt" \
+      --dir "$OUTPUT_DIR" \
+      --clobber; then
+    echo "error: checksums.txt is in ${RELEASE_TAG} but its download failed after retries —" >&2
+    echo "  refusing to install ${BIN_NAME} unverified. Build from source: cd \"$REPO_ROOT\" && make attend" >&2
+    rm -f "$PLATFORM_FILE"
+    exit 1
+  fi
+  expected_hash=$(grep "${BIN_NAME}" "$CHECKSUMS_FILE" | awk '{print $1}' || true)
   if [[ -n "$expected_hash" ]]; then
     actual_hash=$(sha256sum "$PLATFORM_FILE" 2>/dev/null | cut -d' ' -f1 \
       || shasum -a 256 "$PLATFORM_FILE" 2>/dev/null | cut -d' ' -f1)
@@ -141,7 +150,7 @@ if gh release download "$RELEASE_TAG" \
   fi
   rm -f "$CHECKSUMS_FILE"
 else
-  echo "WARNING: checksums.txt not found in release — skipping verification" >&2
+  echo "WARNING: no checksums.txt in ${RELEASE_TAG} — skipping verification" >&2
 fi
 
 # Make executable and install
