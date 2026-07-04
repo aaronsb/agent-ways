@@ -697,9 +697,15 @@ fn main() -> Result<()> {
     // crashing the spawned release binary immediately with STATUS_STACK_OVERFLOW
     // (0xC00000FD) and no output — while in-process unit tests, which run on the
     // test harness's larger-stack threads, pass. Run the real work on a thread
-    // with an explicit, generous stack so behavior matches across platforms (the
-    // same shape rustc uses for its own main thread). The Err/panic outcome is
-    // propagated unchanged so exit codes and error messages are preserved.
+    // with an explicit, generous stack (the same shape rustc uses for its own
+    // main thread).
+    //
+    // Outcome is preserved on both panic profiles: a returned `Err` flows straight
+    // out of `main` (Termination prints `Error: …`, exit 1). A panic under release
+    // `panic = "abort"` (tools/Cargo.toml) aborts at the site — thread-agnostic, so
+    // the same single message + abort exit as before; the `resume_unwind` arm is
+    // only live under unwind (dev/test), where it re-propagates the panic out of
+    // `main` without re-invoking the hook (no double "panicked at" line).
     let worker = std::thread::Builder::new()
         .name("ways-main".into())
         .stack_size(16 * 1024 * 1024)
