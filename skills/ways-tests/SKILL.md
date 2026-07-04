@@ -37,11 +37,31 @@ skill is the **interpretation layer** over the `ways` binary's measurement comma
 
 ## Engine
 
-Embedding-based semantic scoring is the sole retrieval tier (`all-MiniLM-L6-v2`,
-~20ms batch). Cosine similarity on a **0–1** scale; a way fires when
-`cosine(query, way) >= embed_threshold` (per-way, default **0.35**). Engine health
-is `ways status` (binary / model / corpus state; if degraded → `make setup`, stale
-corpus → `ways corpus`). That command *is* embed-status mode.
+A way has **two lanes** (ADR-156).
+
+- **Keyword lane** — the regex `pattern:` frontmatter field, matched against the prompt.
+- **Semantic lane** — the prompt is embedded (`all-MiniLM-L6-v2`, ~20ms batch) and
+  scored by cosine `s` against the way's alias (`description` + `vocabulary`) on a
+  **0–1** scale. That raw cosine is mapped through a per-model logistic
+  `g(s) = σ(a·s + b)` — fit at corpus-generation and stored in `embed-manifest.json`
+  — into a **relevance probability**.
+
+A way **fires** when
+
+```
+g(s) ≥ τ_s   ∨   (keyword_match ∧ g(s) ≥ τ_k)
+```
+
+with **global** thresholds `τ_s = 0.5` (`semantic_fire_probability`) and
+`τ_k = 0.15` (`keyword_floor_probability`), independent of each other. The keyword
+lane is **floor-gated**: a `pattern:` hit only fires when the semantic probability
+already clears `τ_k`, so a keyword can never drag in an unrelated prompt.
+`pattern_strict: true` bypasses the gate (unconditional keyword fire). There is **no
+per-way threshold** — the cutoffs are global and live in probability space, not raw
+cosine.
+
+Engine health is `ways status` (binary / model / corpus state; if degraded →
+`make setup`, stale corpus → `ways corpus`). That command *is* embed-status mode.
 
 ## Scoring  (score / score-all / embed-score)
 
@@ -50,7 +70,9 @@ After editing any `description`/`vocabulary`, regenerate so scores reflect it:
 
 ```bash
 ways embed "$prompt"    # full corpus ranking by cosine — read down the list to debug a miss
-                        # QUERY is positional; embed takes no --threshold (that's the per-way embed_threshold frontmatter field, not a CLI flag)
+                        # QUERY is positional. There is no --threshold flag: firing is the
+                        # global probability gate (τ_s / τ_k) after calibration, not a per-way
+                        # cutoff. The keyword lane is the way's pattern: field, not a CLI option.
 ```
 
 For a single way, grep its id (path relative to the ways root, e.g.
@@ -58,13 +80,14 @@ For a single way, grep its id (path relative to the ways root, e.g.
 
 **Always include cross-way context.** When scoring one way, also show the top 5–8
 ranking, so you can see whether it *wins*, *defers* to a more specific way, or
-*overlaps* a competitor:
+*overlaps* a competitor. Read the decision off the calibrated probability `g(s)`
+against the global semantic bar `τ_s = 0.5` (keyword-lane fires against `τ_k = 0.15`):
 
 ```
-Cosine  Thr   Match  Way
-0.62    0.35  YES    softwaredev/environment/makefile  ← target
-0.41    0.35  YES    documentation/standards
-0.29    0.35  no     softwaredev/environment/deps
+Cosine  g(s)   Fire  Way
+0.62    0.88   YES   softwaredev/environment/makefile  ← target (semantic lane)
+0.41    0.57   YES   documentation/standards
+0.29    0.34   no    softwaredev/environment/deps      ← below τ_s; keyword hit needed
 ```
 
 Flag: **overlap** (two ways within 0.05 cosine), **false dominance** (a non-target
@@ -75,20 +98,35 @@ complementary).
 that should clearly match one way, some healthy co-fires, some boundary cases, some
 that should match nothing. Gives a landscape view of the ecosystem.
 
-### Interpreting cosine scores
+### Interpreting scores
 
-| Range | Meaning |
-|-------|---------|
-| ≥ 0.7 | Strong — semantically close |
-| 0.5–0.7 | Moderate — related domain |
-| 0.35–0.5 | Weak — at/near default threshold |
-| < 0.35 | Below default — no match |
+The raw cosine is the **input** to `g(s)`, not a fire cutoff. Read the decision off
+the calibrated probability:
 
-Raise a way's `embed_threshold` to suppress weak false positives; lower toward 0.25
-for broader catch on niche topics. At *scan* time (not here), a child's effective
-threshold is ×0.8 when an ancestor has fired this session — the progressive-
-disclosure mechanism (ADR-125). For multilingual stubs, `ways tune` reports locale
-fidelity/discrimination (see the `knowledge/optimization/tuning` way).
+| `g(s)` | Meaning |
+|--------|---------|
+| ≥ τ_s (0.5) | Fires on the semantic lane alone |
+| τ_k–τ_s (0.15–0.5) | Below the semantic bar; fires **only** with a keyword (`pattern:`) hit, floor-gated |
+| < τ_k (0.15) | Below the keyword floor; no fire even on a pattern hit (unless `pattern_strict`) |
+
+`g(s) = σ(a·s + b)` is per-model — the `a`/`b` coefficients come from
+`embed-manifest.json`, so the same cosine maps to different probabilities under the EN
+and multilingual models. Don't reason about a raw-cosine cutoff; reason about `g(s)`
+vs `τ_s`/`τ_k`.
+
+When a way fires too broadly or misses, the remedy is **measure → edit
+vocabulary/pattern → re-measure** through `tools/scripts/probe-measure.py` — never
+"move a threshold" (there is none per-way to move). Sharpen or widen the vocabulary
+for the semantic lane; add or tighten `pattern:` for the keyword lane. For a
+load-bearing **common word** the pattern-hygiene lint would strip, add it to
+`pattern_keep` — the keyword stays and its off-sense noise is held back by the `τ_k`
+floor.
+
+At *scan* time (not here), a child way's effective semantic bar is lowered toward
+`parent_boost_floor` (**0.30**, in probability space) when an ancestor has fired this
+session — the progressive-disclosure mechanism (ADR-104/105/126). For multilingual
+stubs, `ways tune` reports locale fidelity/discrimination (see the
+`knowledge/optimization/tuning` way).
 
 ## Resolving way paths
 
@@ -120,15 +158,18 @@ ways lint --schema   # full field reference
 Checks: unknown/typo fields, invalid values, incomplete description↔vocabulary
 pairs, `when:` blocks, `*.check.md` structure, sibling Jaccard (>0.15 warn, >0.25
 error). It does **not** flag absent *optional* fields. With `--all` it also checks
-tree health: threshold progression, orphans, >500-token ways, depth > 4.
+tree health: vocabulary/pattern isolation between siblings, orphans, >500-token ways,
+and depth > 4.
 
 ## Tree — `ways tree <path>`
 
-Structural analysis of a disclosure tree (depth, breadth, per-level thresholds).
-Flag: **threshold inversion** (child ≤ parent — breaks progressive disclosure),
-**flat thresholds** (no narrowing), sibling **Jaccard > 0.15** (`ways siblings`),
-**orphans** (a way file with no ancestor way), **depth > 4** / **breadth > 7**
-(over-decomposed).
+Structural analysis of a disclosure tree (depth, breadth, per-level vocabulary
+specificity). There are **no per-level thresholds** — firing uses the global
+`τ_s`/`τ_k`, and disclosure is governed by `parent_boost_floor` plus how much more
+specific each level's vocabulary is than its parent's. Flag: **weak narrowing** (a
+child no more specific than its parent — nothing for progressive disclosure to earn),
+sibling **Jaccard > 0.15** (`ways siblings`), **orphans** (a way file with no ancestor
+way), **depth > 4** / **breadth > 7** (over-decomposed).
 
 ## Jaccard — `ways siblings <tree>`
 
@@ -156,17 +197,18 @@ worst-case (all fire) > 5000, or one way accounting for > 40% of a tree's total.
 
 ## Compare — two trees side by side
 
-No subcommand: present depth, total ways, threshold range, worst-case/avg tokens,
-and max sibling Jaccard for each, then assess which is more mature and whether the
-simpler one has room to grow. Useful for judging whether a refactor helped.
+No subcommand: present depth, total ways, vocabulary-specificity narrowing,
+worst-case/avg tokens, and max sibling Jaccard for each, then assess which is more
+mature and whether the simpler one has room to grow. Useful for judging whether a
+refactor helped.
 
 ## Metrics — session disclosure
 
 Read the session's disclosure metrics (`ways list`, or the metrics JSONL under the
 sessions root). Reports per-tree coverage (which children fired, epoch distance) and
-parent-activated threshold lowering. Flag: **orphaned roots** (root fires, no
-children), **instant cascades** (parent+child same epoch = co-disclosed, not
-progressive), **never-fire children** (vocabulary too narrow), **parent-only**
+parent-activated bar lowering (`parent_boost_floor`). Flag: **orphaned roots** (root
+fires, no children), **instant cascades** (parent+child same epoch = co-disclosed,
+not progressive), **never-fire children** (vocabulary too narrow), **parent-only**
 sessions (fine — the root sufficed).
 
 ## Check — scoring curve
@@ -196,12 +238,16 @@ intended prompts.
 
 **Sparsity as overfitting guard.** Every added vocabulary term is a surface for
 false matches. 15 precise terms beat 40 general ones; one term per concept (don't
-add "released/landed/merged" when "shipped" fixes the miss); threshold is a second
-lever; accept some misses — 90% recall at 0 false-positives beats 100% recall at 5%.
+add "released/landed/merged" when "shipped" fixes the miss). The two levers are
+**vocabulary** (the semantic lane) and **pattern** (the regex keyword lane) — both
+measured through the calibration, neither a per-way threshold. Accept some misses —
+90% recall at 0 false-positives beats 100% recall at 5%.
 
 ## Notes
 
-- Scores are cosine on the 0–1 scale; `embed_threshold` (default 0.35) is the per-way cutoff.
+- Scores are cosine on the 0–1 scale, mapped through `g(s) = σ(a·s + b)` to a
+  probability; the fire cutoffs are the **global** `τ_s = 0.5` / `τ_k = 0.15`, not a
+  per-way value.
 - The `way-embed` binary + model live under `~/.cache/claude-ways/user/` (via `make setup`); `ways status` checks them.
 - After editing any `description`/`vocabulary`, run `ways corpus` so embedding scores reflect the change.
 - Present results human-readably, not raw machine output.

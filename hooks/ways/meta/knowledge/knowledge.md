@@ -1,7 +1,7 @@
 ---
 description: Overview of the ways system — how ways, skills, and hooks relate, domain organization, matching modes
 vocabulary: ways way knowledge guidance context inject hook trigger matching semantic vocabulary domain
-pattern: (^| )ways?( |$)|knowledge|guidance|context.?inject
+pattern: (^| )ways?( |$)|context.?inject
 scope: agent, subagent
 refire: 0.15
 ---
@@ -51,7 +51,8 @@ Three way roots (ADR-143) — don't confuse *reading* one with *authoring* in it
 - **Project ways:** `$PROJECT/.claude/ways/{domain}/{wayname}/{wayname}.md` — override global ways at the same path
 - Disable domains: `$XDG_CONFIG_HOME/agent-ways/config.yaml` → `disabled_domains: [domain]` (legacy `$XDG_CONFIG_HOME/ways/config.yaml` and `~/.claude/ways.json` → `{"disabled": [...]}` still honored)
 - Ways can nest: `{domain}/{parent}/{child}/{child}.md` for progressive disclosure
-- When a parent way fires, child thresholds are lowered 20% (domain context is established)
+- When a parent way fires, its in-domain children become eligible on weaker signal via a
+  probability floor (config `parent_boost_floor`, default 0.30) — domain context is established
 - Tree disclosure metrics are tracked per-session (parent, depth, epoch distance, sibling coverage)
 - Think strategies are multi-turn ways that steer reasoning across several turns (auto-detected, opt-out)
 

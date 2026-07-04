@@ -1,6 +1,6 @@
 ---
-description: optimizing way vocabulary, tuning thresholds, reviewing matching quality, analyzing gaps and coverage
-vocabulary: optimize vocabulary suggest gaps coverage unused threshold tune scoring health audit sparsity discrimination overlap
+description: optimizing way vocabulary, reviewing matching quality, analyzing gaps and coverage, sharpening discrimination
+vocabulary: optimize vocabulary suggest gaps coverage unused tune scoring health audit sparsity discrimination overlap
 macro: prepend
 scope: agent
 requires: ["Read", "Bash(awk:*)", "Bash(find:*)", "Bash(grep:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(ways:*)"]
@@ -41,24 +41,31 @@ The goal isn't to maximize each way's score — it's to maximize the **semantic 
 /ways-tests score-all "the ambiguous prompt"
 ```
 
-Ideal outcome: one way scores well above threshold, others score well below. If two ways both match the same prompt, their semantic regions overlap — they need sharpening.
+Ideal outcome: one way clears the fire probability (`g(s) ≥ τ_s`) while others fall below it. If two ways both match the same prompt, their semantic regions overlap — they need sharpening.
 
 **Sharpening strategies:**
 - Add discriminating terms unique to each way's domain
 - Remove shared generic terms that don't differentiate
-- Raise the threshold on the less-specific way
+- Remedy overlap by editing the vocabulary/pattern content — add discriminating terms, drop shared generic terms, anchor or bound the pattern alternations — then measure the change through the calibration (`tools/scripts/probe-measure.py`). There is no per-way threshold to move.
 - Don't blindly expand vocabulary — more terms can *reduce* sparsity by creating new overlaps
 
 ## Which Ways Use Semantic Matching
 
 Only ways with both `description:` and `vocabulary:` frontmatter fields use semantic matching. Ways with `match: regex`, `files:`, or `commands:` triggers don't need vocabulary optimization — they match on patterns.
 
-## Thresholds
+## How Firing Is Scored
 
-- **Embedding threshold** (frontmatter `embed_threshold:`): Cosine similarity, 0–1 scale. One value per node (English frontmatter); default is `config.default_embed_threshold` (0.35). Locale stubs do NOT carry their own thresholds (ADR-125).
-- **Parent-boost**: once an ancestor way has fired in the session, a child's effective threshold is multiplied by `config.parent_threshold_multiplier` (default 0.8). This is how progressive disclosure amplifies in-domain children; see [hooks-and-ways/matching.md](../../../../docs/hooks-and-ways/matching.md).
+Firing is decided globally, not by a per-way threshold (ADR-156):
 
-Lowering the base threshold increases recall but risks false positives. The test harness tracks FP rate — **0 FP is the hard constraint**.
+- The semantic lane embeds the prompt and takes cosine `s` against the way's alias (`description` + `vocabulary`). A per-model logistic maps that cosine to a **relevance probability**, `g(s) = σ(a·s + b)`, fit at corpus-generation and stored in `embed-manifest.json`.
+- A way fires when `g(s) ≥ τ_s`, or when a keyword pattern hits and `g(s) ≥ τ_k`. The bars are **global and independent**: `τ_s = 0.5` (`semantic_fire_probability`), `τ_k = 0.15` (`keyword_floor_probability`).
+- **Parent-boost**: once an ancestor way has fired in the session, an in-domain child's probability is lifted toward `parent_boost_floor` (0.30), applied in probability space. This is how progressive disclosure amplifies in-domain children; see [hooks-and-ways/matching.md](../../../../docs/hooks-and-ways/matching.md).
+
+Recall and precision are shaped by the **content** of a way's vocabulary and pattern, measured through the calibration — not by moving a threshold. A way that misses in-domain prompts needs more discriminating vocabulary; a way that leaks needs its shared generic terms removed or its pattern bounded. The test harness tracks the false-positive rate — **0 FP is the hard constraint** and holds as a test invariant regardless of what content changes.
+
+### The remedy loop
+
+When a way mis-fires, the fix is **measure → edit vocabulary/pattern → re-measure**, never "move a threshold." Measure through `tools/scripts/probe-measure.py`, which scores candidate probes against the calibrated `g(s)`. For a keyword that is a common word and would otherwise trip the pattern-hygiene lint, list it in `pattern_keep` (ADR-155 §5): the keep is a *measured* exemption — the keyword is load-bearing and its off-sense noise stays floor-gated by `τ_k`.
 
 ### Locale alias audit with `ways tune`
 
