@@ -45,6 +45,21 @@ fn ways() -> Command {
     c
 }
 
+/// Build a `file://` URL from a local path that curl accepts on every OS. On
+/// Windows `canonicalize()` yields a `\\?\D:\..` verbatim path with backslashes,
+/// which is not a valid URL (curl can't fetch `file://\\?\D:\...`); normalize to
+/// forward slashes, drop the `\\?\` verbatim prefix, and use the
+/// `file:///<drive>/...` form. On Unix an absolute `/path` yields `file:///path`.
+fn file_url(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy().replace('\\', "/");
+    let s = s.strip_prefix("//?/").unwrap_or(&s);
+    if s.starts_with('/') {
+        format!("file://{s}") // Unix: /home/x -> file:///home/x
+    } else {
+        format!("file:///{s}") // Windows: D:/a/x -> file:///D:/a/x
+    }
+}
+
 fn store(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/settings-store")
@@ -186,7 +201,7 @@ fn schema_refresh_writes_the_user_copy() {
     let src = repo_schema().canonicalize().unwrap();
     let out = Command::new(ways_bin())
         .env("XDG_CONFIG_HOME", &cfg)
-        .env("WAYS_SETTINGS_SCHEMA_URL", format!("file://{}", src.display()))
+        .env("WAYS_SETTINGS_SCHEMA_URL", file_url(&src))
         .args(["settings", "schema", "--refresh"])
         .output()
         .unwrap();
