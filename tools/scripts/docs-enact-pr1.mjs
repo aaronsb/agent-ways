@@ -14,7 +14,7 @@ const FILES = [
     remove: [
       "L57 frontmatter-catalog row: `embed_threshold:` — DELETE the field entry entirely.",
       "L30 'Matching is additive — pattern OR semantic ... Use both ... guaranteed activation on specific terms' — the keyword lane is FLOOR-GATED, not an unconditional OR. Rewrite: fire iff g(s) >= tau_s OR (keyword_match AND g(s) >= tau_k). Guaranteed/unconditional keyword firing requires pattern_strict: true (bypasses the gate).",
-      "L149 'Child ways get a threshold boost (config.parent_threshold_multiplier, default 0.8)' — parent-boost is now config parent_boost_floor (default 0.30) in probability space.",
+      "L149 'Child ways get a threshold boost (config.parent_threshold_multiplier, default 0.8)' — KEEP the multiplier; state the full mechanism: effective child bar = (τ_s × parent_threshold_multiplier).max(parent_boost_floor) = max(0.5×0.8, 0.30) = 0.40 by default, in probability space (ADR-156). Both keys are live; the multiplier is the boost, the floor caps the cascade.",
       "L151 whole 'Embedding thresholds' paragraph (embed_threshold, default 0.35, child sets 0.45 to avoid cross-firing) — DELETE. Replace the cross-firing remedy with: sharpen the child's vocabulary/pattern (add discriminating terms, tighten the pattern) and verify with tools/scripts/probe-measure.py; thresholds are global, not per-way.",
       "L211 'the node's English embed_threshold governs all aliases' — locale stubs correctly carry no threshold, but drop the embed_threshold reference; there is no per-node threshold now, firing is the global calibrated gate.",
     ],
@@ -30,7 +30,7 @@ const FILES = [
     target_mode: 'how-to (way body)',
     remove: [
       "L49 sharpening bullet 'Raise the threshold on the less-specific way' — replace with: remedy overlap by editing vocabulary/pattern (add discriminating terms, remove shared generic terms, anchor/bound alternations) and measure through the calibration (tools/scripts/probe-measure.py).",
-      "L56-62 the whole 'Thresholds' reference section (embed_threshold, config.default_embed_threshold 0.35, parent_threshold_multiplier 0.8, 'lowering the base threshold') — rewrite to the calibrated model: cosine -> g(s)=sigma(a*s+b) -> probability; global tau_s=0.5 / tau_k=0.15; parent-boost = parent_boost_floor (0.30). Recall/precision is shaped by vocabulary/pattern content measured through the calibration, not by moving a per-way threshold. The 0-FP hard constraint still holds as a test invariant.",
+      "L56-62 the whole 'Thresholds' reference section (embed_threshold, config.default_embed_threshold 0.35, parent_threshold_multiplier 0.8, 'lowering the base threshold') — rewrite to the calibrated model: cosine -> g(s)=sigma(a*s+b) -> probability; global tau_s=0.5 / tau_k=0.15; parent-boost = (tau_s × parent_threshold_multiplier 0.8).max(parent_boost_floor 0.30) = 0.40 (both keys live). Recall/precision is shaped by vocabulary/pattern content measured through the calibration, not by moving a per-way threshold. The 0-FP hard constraint still holds as a test invariant.",
       "L44 'one way scores well above threshold, others score well below' — reword: one way clears the fire probability (g(s) >= tau_s) while others fall below it.",
     ],
     add: ["A short pointer to pattern_keep and probe-measure.py as the measurement path for the remedy loop."],
@@ -45,7 +45,7 @@ const FILES = [
       "L63-68 sample output 'Thr' column showing 0.35 + per-way YES/no — recentre the decision on calibrated g(s) vs global tau_s (and keyword tau_k).",
       "L79-86 'Interpreting cosine scores' table (0.35-0.5 weak / <0.35 no match) — recentre on calibrated probability g(s) vs tau_s=0.5; raw cosine is the INPUT to g(s), not a fire cutoff.",
       "L87-88 'Raise/lower a way's embed_threshold' remedy — replace with vocab/pattern edit measured via tools/scripts/probe-measure.py; for a load-bearing common word use pattern_keep (noise floor-gated by tau_k).",
-      "L88-90 'child's effective threshold is x0.8 when an ancestor fired' — parent-boost is parent_boost_floor (0.30); progressive disclosure itself still valid.",
+      "L88-90 'child's effective threshold is x0.8 when an ancestor fired' — the x0.8 is CORRECT (parent_threshold_multiplier); state it fully as (τ_s × 0.8).max(parent_boost_floor 0.30) = 0.40, now in probability space (ADR-156). Progressive disclosure still valid.",
       "L123 / L127-131 tree-health 'threshold progression / per-level thresholds / threshold inversion / flat thresholds' — there are NO per-level thresholds; tree health = vocabulary/pattern isolation, orphans, token budget, depth/breadth; disclosure governed by parent_boost_floor + per-level specificity.",
       "L199-200 'threshold is a second lever' — the two levers are VOCABULARY and PATTERN (regex keyword lane), both measured through the calibration; no per-way threshold lever.",
       "L204 Notes 'embed_threshold (default 0.35) is the per-way cutoff' — the cutoffs are the global tau_s=0.5 / tau_k=0.15 probabilities.",

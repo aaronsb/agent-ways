@@ -19,7 +19,9 @@ works.
 > `τ_s = 0.5` (`semantic_fire_probability`) and `τ_k = 0.15`
 > (`keyword_floor_probability`), which are **independent**. The keyword lane is
 > **floor-gated**: a pattern hit only fires when the semantic probability already
-> clears `τ_k`, so a keyword can never drag in an unrelated prompt.
+> clears `τ_k`, so a keyword can't drag in an unrelated prompt *when calibration is
+> loaded*. With no calibrated signal the keyword lane fails open (fires unconditionally),
+> which is also what `pattern_strict: true` forces by design.
 > `pattern_strict: true` bypasses the gate (unconditional keyword fire).
 
 If a doc says anything that contradicts that paragraph, the doc is wrong.

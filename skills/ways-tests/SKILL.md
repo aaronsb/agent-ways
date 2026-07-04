@@ -55,8 +55,9 @@ g(s) ≥ τ_s   ∨   (keyword_match ∧ g(s) ≥ τ_k)
 with **global** thresholds `τ_s = 0.5` (`semantic_fire_probability`) and
 `τ_k = 0.15` (`keyword_floor_probability`), independent of each other. The keyword
 lane is **floor-gated**: a `pattern:` hit only fires when the semantic probability
-already clears `τ_k`, so a keyword can never drag in an unrelated prompt.
-`pattern_strict: true` bypasses the gate (unconditional keyword fire). There is **no
+already clears `τ_k`, so a keyword can't drag in an unrelated prompt *when calibration is
+loaded* (with no calibrated signal the keyword lane fails open and fires unconditionally).
+`pattern_strict: true` bypasses the gate (unconditional keyword fire) by design. There is **no
 per-way threshold** — the cutoffs are global and live in probability space, not raw
 cosine.
 

@@ -33,8 +33,11 @@ RETIRED / STALE — flag any doc that still teaches these as live:
   The remedy for a mis-firing way is now a VOCABULARY or PATTERN edit (add/remove
   discriminating terms; remove/anchor/bound alternations) measured through the
   calibration (tools/scripts/probe-measure.py), NOT moving a threshold.
-- parent-boost via \`parent_threshold_multiplier\` — the mechanism is now
-  \`parent_boost_floor\` (config default 0.30); verify any parent-boost claim.
+- parent-boost: BOTH \`parent_threshold_multiplier\` (0.8) and \`parent_boost_floor\`
+  (0.30) are LIVE. Effective child bar = (τ_s × 0.8).max(0.30) = 0.40 by default
+  (scan/mod.rs effective_thresholds). ADR-156 moved this to probability space (the
+  operand is τ_s, not a raw per-way cosine threshold); it did NOT remove the multiplier.
+  Flag any doc that says the multiplier was retired/replaced.
 
 STILL CURRENT (do NOT flag these as stale):
 - \`ways tune\` = LOCALE alias audit (fidelity/discrimination vs the English root
