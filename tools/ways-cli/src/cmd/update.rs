@@ -501,11 +501,14 @@ mod tests {
         // Prior run was killed after rename-aside: slot empty, good copy in backup.
         let app = tmp();
         std::fs::create_dir_all(app.join("bin")).unwrap();
-        std::fs::write(app.join("bin").join("ways.pre-update"), "GOOD").unwrap();
+        // Use the same OS-aware binary name the production code derives via `exe()`
+        // (`ways.exe` on Windows); hardcoding the Unix name here made the recovery
+        // branch look for a backup the test never created, failing Windows-only.
+        std::fs::write(app.join("bin").join(format!("{}.pre-update", exe("ways"))), "GOOD").unwrap();
         // Even though this refresh's make target fails, recovery restores the good
         // copy first, and the revert keeps it in place.
         let _ = refresh_component(&app, "ways", &["bogus-target"], &app);
-        let bin = app.join("bin").join("ways");
+        let bin = app.join("bin").join(exe("ways"));
         assert!(bin.exists(), "orphaned backup must be restored");
         assert_eq!(std::fs::read_to_string(&bin).unwrap(), "GOOD");
         let _ = std::fs::remove_dir_all(&app);
@@ -517,14 +520,16 @@ mod tests {
         // original binary in place, not stranded.
         let app = tmp();
         std::fs::create_dir_all(app.join("bin")).unwrap();
-        let bin = app.join("bin").join("ways");
+        // OS-aware name (see the sibling recovery test): keeps this test genuinely
+        // exercising the revert path on Windows rather than passing vacuously.
+        let bin = app.join("bin").join(exe("ways"));
         std::fs::write(&bin, "OLD-BINARY").unwrap();
         // No Makefile / bogus target -> make fails -> revert.
         let err = refresh_component(&app, "ways", &["definitely-not-a-real-target"], &app).unwrap_err();
         assert!(err.to_string().contains("reverted"), "got: {err}");
         assert!(bin.exists(), "original binary must be restored");
         assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD-BINARY", "and be the same file");
-        assert!(!app.join("bin").join("ways.pre-update").exists(), "backup consumed by the revert");
+        assert!(!app.join("bin").join(format!("{}.pre-update", exe("ways"))).exists(), "backup consumed by the revert");
         let _ = std::fs::remove_dir_all(&app);
     }
 
