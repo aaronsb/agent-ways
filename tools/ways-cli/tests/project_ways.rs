@@ -109,6 +109,24 @@ impl Drop for Env {
     }
 }
 
+/// Run a configured `ways corpus` invocation, asserting it exits 0 and — on
+/// failure — surfacing the exit code plus the child's stdout/stderr. On the
+/// windows-latest CI leg these tests fail with `success() == false` while
+/// `.status()` (inherited) left the streams empty, hiding the cause. Capturing
+/// the exit *code* is the tell (e.g. 0xC0000005 access violation / a large
+/// unsigned code vs 101 for a Rust panic), and callers run corpus WITHOUT
+/// `--quiet` so its own progress log shows how far it got before dying.
+fn assert_corpus_ok(cmd: &mut Command, ctx: &str) {
+    let out = cmd.output().expect("spawn ways corpus");
+    assert!(
+        out.status.success(),
+        "ways corpus failed [{ctx}]: exit={:?}\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
 fn corpus_ids(jsonl: &Path) -> Vec<String> {
     let content = std::fs::read_to_string(jsonl).unwrap_or_default();
     content
@@ -126,12 +144,10 @@ fn project_way_embeds_with_namespaced_id() {
 
     let mut cmd = Command::new(ways_bin());
     env.apply(&mut cmd);
-    let status = cmd
-        .args(["corpus", "--quiet"])
-        .env("CLAUDE_PROJECT_DIR", &project)
-        .status()
-        .expect("run ways corpus");
-    assert!(status.success(), "ways corpus failed");
+    assert_corpus_ok(
+        cmd.args(["corpus"]).env("CLAUDE_PROJECT_DIR", &project),
+        "embed",
+    );
 
     let ids = corpus_ids(&env.corpus_jsonl());
     let expected = format!("{}/projdomain/projway", encode_project_key(&project));
@@ -153,12 +169,10 @@ fn project_way_fires_via_keyword() {
     // the end-to-end path the reporter exercised).
     let mut gen = Command::new(ways_bin());
     env.apply(&mut gen);
-    assert!(gen
-        .args(["corpus", "--quiet"])
-        .env("CLAUDE_PROJECT_DIR", &project)
-        .status()
-        .expect("run ways corpus")
-        .success());
+    assert_corpus_ok(
+        gen.args(["corpus"]).env("CLAUDE_PROJECT_DIR", &project),
+        "keyword",
+    );
 
     let mut scan = Command::new(ways_bin());
     env.apply(&mut scan);
@@ -205,12 +219,10 @@ fn project_way_fires_via_semantic_when_model_present() {
 
     let mut gen = Command::new(ways_bin());
     env.apply(&mut gen);
-    assert!(gen
-        .args(["corpus", "--quiet"])
-        .env("CLAUDE_PROJECT_DIR", &project)
-        .status()
-        .expect("run ways corpus")
-        .success());
+    assert_corpus_ok(
+        gen.args(["corpus"]).env("CLAUDE_PROJECT_DIR", &project),
+        "semantic",
+    );
 
     // A semantic-only query: shares vocabulary with the way but does NOT match
     // its `(?i)zqxplugintest` keyword pattern, so a hit proves the embedding
@@ -268,7 +280,8 @@ fn crlf_authored_project_way_still_fires() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("CRLF Way"),
-        "CRLF-authored way was skipped by the collector.\nstdout: {stdout}\nstderr: {}",
+        "CRLF-authored way was skipped by the collector (scan exit={:?}).\nstdout: {stdout}\nstderr: {}",
+        out.status.code(),
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -290,14 +303,13 @@ fn ways_dir_with_output_does_not_clobber_canonical() {
 
     let mut cmd = Command::new(ways_bin());
     env.apply(&mut cmd);
-    let status = cmd
-        .args(["corpus", "--quiet", "--ways-dir"])
-        .arg(&empty_ways)
-        .arg("--output")
-        .arg(&out_dir)
-        .status()
-        .expect("run ways corpus --output");
-    assert!(status.success());
+    assert_corpus_ok(
+        cmd.args(["corpus", "--ways-dir"])
+            .arg(&empty_ways)
+            .arg("--output")
+            .arg(&out_dir),
+        "clobber/--output",
+    );
 
     // Canonical corpus must be untouched; the isolated output must be written.
     assert_eq!(
@@ -328,7 +340,9 @@ fn ways_dir_without_output_warns_about_canonical() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("WARNING") && stderr.contains("--output"),
-        "Bug C: expected a footgun warning steering to --output.\nstderr: {stderr}"
+        "Bug C: expected a footgun warning steering to --output (corpus exit={:?}).\nstdout: {}\nstderr: {stderr}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout)
     );
 }
 
@@ -348,7 +362,7 @@ fn user_way_shadows_core_way() {
 
     let mut cmd = Command::new(ways_bin());
     env.apply(&mut cmd);
-    assert!(cmd.args(["corpus", "--quiet"]).status().expect("run ways corpus").success());
+    assert_corpus_ok(cmd.args(["corpus"]), "shadow");
 
     let ids = corpus_ids(&env.corpus_jsonl());
     assert_eq!(
