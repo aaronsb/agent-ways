@@ -195,10 +195,10 @@ update-binaries: ways-rebuild ways-audit-rebuild attend-rebuild attend-chat-rebu
 ways:
 	@if [ -x $(WAYS_BIN) ] && $(WAYS_BIN) --version >/dev/null 2>&1; then \
 		echo "ways already installed: $$($(WAYS_BIN) --version)"; \
-	elif bash tools/ways-cli/download-ways.sh 2>/dev/null; then \
+	elif bash tools/ways-cli/download-ways.sh; then \
 		echo "Pre-built binary installed."; \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "No pre-built binary, building from source..."; \
+		echo "Pre-built unavailable (see above) — building from source..."; \
 		bash scripts/check-rust.sh || exit 1; \
 		cargo build --release --manifest-path tools/Cargo.toml -p ways; \
 		mkdir -p bin; \
@@ -229,10 +229,10 @@ ways-rebuild:
 ways-audit:
 	@if [ -x $(WAYS_AUDIT_BIN) ] && $(WAYS_AUDIT_BIN) --version >/dev/null 2>&1; then \
 		echo "ways-audit already installed: $$($(WAYS_AUDIT_BIN) --version)"; \
-	elif bash tools/ways-audit/download-ways-audit.sh 2>/dev/null; then \
+	elif bash tools/ways-audit/download-ways-audit.sh; then \
 		echo "Pre-built ways-audit binary installed."; \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "No pre-built binary, building ways-audit from source..."; \
+		echo "Pre-built unavailable (see above) — building ways-audit from source..."; \
 		bash scripts/check-rust.sh || exit 1; \
 		cargo build --release --manifest-path tools/Cargo.toml -p ways-audit; \
 		mkdir -p bin; \
@@ -260,11 +260,11 @@ ways-audit-rebuild:
 attend:
 	@if [ -x $(ATTEND_BIN) ] && $(ATTEND_BIN) --version >/dev/null 2>&1; then \
 		echo "attend already built."; \
-	elif bash tools/attend/download-attend.sh 2>/dev/null; then \
+	elif bash tools/attend/download-attend.sh; then \
 		echo "Pre-built attend binary installed."; \
 		$(MAKE) -s --no-print-directory _attend_state_hint; \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "No pre-built binary, building attend from source..."; \
+		echo "Pre-built unavailable (see above) — building attend from source..."; \
 		cargo build --release --manifest-path tools/Cargo.toml -p attend; \
 		mkdir -p bin; \
 		$(LINK) "$(CURDIR)/tools/target/release/attend$(EXE)" $(ATTEND_BIN); \
@@ -300,11 +300,11 @@ attend-rebuild:
 attend-chat:
 	@if [ -x $(ATTEND_CHAT_BIN) ] && $(ATTEND_CHAT_BIN) --version >/dev/null 2>&1; then \
 		echo "attend-chat already built."; \
-	elif bash tools/attend-chat/download-attend-chat.sh 2>/dev/null; then \
+	elif bash tools/attend-chat/download-attend-chat.sh; then \
 		echo "Pre-built attend-chat binary installed."; \
 		$(MAKE) -s --no-print-directory _attend_state_hint; \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "No pre-built binary, building attend-chat from source..."; \
+		echo "Pre-built unavailable (see above) — building attend-chat from source..."; \
 		cargo build --release --manifest-path tools/Cargo.toml -p attend-chat; \
 		mkdir -p bin; \
 		$(LINK) "$(CURDIR)/tools/target/release/attend-chat$(EXE)" $(ATTEND_CHAT_BIN); \
