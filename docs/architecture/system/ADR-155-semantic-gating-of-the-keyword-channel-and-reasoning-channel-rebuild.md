@@ -182,9 +182,17 @@ pattern-bearing ways:
 
 Parts 1–2 land first (one file, `scan/mod.rs`, plus config/frontmatter
 plumbing) — they make the system safe against the *existing* noisy patterns.
-Part 3 and 4 follow. Part 5 (frontmatter rework + corpus rebuild + lint) runs
-last, validated by embed-scoring regression prompts, so pattern demotion
-happens with the gate already protecting the transition.
+Part 3 and 4 follow. Part 5 (frontmatter rework + corpus rebuild + lint) is
+**blocked on a deployed release of parts 1–4**, not merely on their merge:
+the rework pass tunes against live behavior — `way_keyword_gated` telemetry
+saying which alternations the gate is actually vetoing, and the bash-surface
+semantic fires showing where vocabulary already carries a way without its
+pattern. Without that stream the demotion decisions are guesses; with it,
+each pattern edit is validated against what the gate observed in real
+sessions. Part 5 also rebuilds the corpus (vocabulary changes move every
+reworked way's embedding coordinate) and is validated by embed-scoring
+regression prompts, so it runs as its own branch with the gate already
+protecting the transition.
 
 ## Consequences
 
