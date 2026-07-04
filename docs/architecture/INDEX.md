@@ -76,6 +76,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-153](./system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) | Session-introspection substrate — correlating fired ways to turns | Accepted |
 | [ADR-154](./system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) | `ways introspect` — one model, three front-ends | Accepted |
 | [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | Draft |
+| [ADR-156](./system/ADR-156-calibrated-relevance-scoring-for-the-semantic-lane.md) | Calibrated relevance scoring for the semantic lane | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
