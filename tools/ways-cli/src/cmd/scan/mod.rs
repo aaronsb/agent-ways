@@ -50,9 +50,6 @@ pub(crate) struct WayCandidate {
     pub vocabulary: String,
     /// Context-threshold percentage (only meaningful for trigger: context-threshold).
     pub threshold: f64,
-    /// Per-way cosine-similarity threshold. When absent, uses config default.
-    /// Parent-boost (ADR-125) multiplies this at match time if any ancestor has fired.
-    pub embed_threshold: Option<f64>,
     pub scope: String,
     pub when_project: Option<String>,
     pub when_file_exists: Option<String>,
@@ -106,6 +103,7 @@ pub fn prompt(
     let scope = session::detect_scope(session_id);
     let candidates = collect_candidates(&project_dir);
     let near_miss_margin = crate::config::global().near_miss_margin;
+    let keyword_floor = crate::config::global().keyword_floor_probability;
 
     // ADR-130: cap embed input to the model's working window via the
     // sentence-salience reducer. Pattern/keyword matching downstream
@@ -120,7 +118,6 @@ pub fn prompt(
     let reduced = reduce::reduce_for_embed(&embed_input, BUDGET_PROMPT);
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
-    let gate_fraction = crate::config::global().keyword_gate_fraction;
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -158,7 +155,7 @@ pub fn prompt(
             thresholds,
             &embed_matches,
             near_miss_margin,
-            gate_fraction,
+            keyword_floor,
         );
 
         // Gate re-check against the prompt alone before accepting the veto.
@@ -176,7 +173,7 @@ pub fn prompt(
                     thresholds,
                     scores,
                     near_miss_margin,
-                    gate_fraction,
+                    keyword_floor,
                 );
             }
         }
@@ -221,6 +218,7 @@ pub fn task(
     let is_teammate = team.is_some();
     let candidates = collect_candidates(&project_dir);
     let near_miss_margin = crate::config::global().near_miss_margin;
+    let keyword_floor = crate::config::global().keyword_floor_probability;
     // Session scope for telemetry: the task channel is subagent unless a team
     // name marks it as a teammate dispatch.
     let task_scope = if is_teammate { "teammate" } else { "subagent" };
@@ -230,7 +228,6 @@ pub fn task(
     let reduced = reduce::reduce_for_embed(query, BUDGET_TASK);
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
-    let gate_fraction = crate::config::global().keyword_gate_fraction;
 
     let mut matched: Vec<(String, String)> = Vec::new(); // (way_id, channel)
 
@@ -265,7 +262,7 @@ pub fn task(
             effective_thresholds(way, session_id),
             &embed_matches,
             near_miss_margin,
-            gate_fraction,
+            keyword_floor,
         ) {
             PromptMatch::Fired { channel, .. } => matched.push((way.id.clone(), channel)),
             PromptMatch::KeywordGated(kg) => {
@@ -378,15 +375,15 @@ pub fn command(
             continue;
         }
         let t = effective_thresholds(way, session_id);
-        let score_en = embed_matches.best_en(&way.corpus_id);
-        let score_multi = embed_matches.best_multi(&way.corpus_id);
+        let prob_en = embed_matches.prob_en(&way.corpus_id, way.embeddable());
+        let prob_multi = embed_matches.prob_multi(&way.corpus_id, way.embeddable());
         // `semantic:` prefix keeps every consumer that special-cases semantic
         // channels (drill-down's "no recoverable term" note, span handling)
         // treating this lane correctly.
-        let fired = if score_en.is_some_and(|s| s >= t.en) {
-            Some(("semantic:bash:en", score_en))
-        } else if score_multi.is_some_and(|s| s >= t.multi) {
-            Some(("semantic:bash:multi", score_multi))
+        let fired = if prob_en.is_some_and(|p| p >= t.semantic) {
+            Some(("semantic:bash:en", prob_en))
+        } else if prob_multi.is_some_and(|p| p >= t.semantic) {
+            Some(("semantic:bash:multi", prob_multi))
         } else {
             None
         };
@@ -544,27 +541,28 @@ enum PromptMatch {
     NoMatch,
 }
 
-/// Evidence for a gated keyword hit (ADR-155): what the pattern matched and
-/// how far below the gate floor each model lane scored.
+/// Evidence for a gated keyword hit (ADR-155/156): what the pattern matched and
+/// the calibrated relevance probability each model lane produced, against the
+/// keyword floor probability τ_k that vetoed it.
 struct KeywordGated {
     matched_span: String,
-    score_en: Option<f64>,
-    score_multi: Option<f64>,
-    floor_en: f64,
-    floor_multi: f64,
+    prob_en: Option<f64>,
+    prob_multi: Option<f64>,
+    floor: f64,
 }
 
-/// A below-threshold embedding result close enough to log (ADR-134 Decision 1).
+/// A below-threshold embedding result close enough to log (ADR-134 Decision 1),
+/// now in calibrated probability space (ADR-156).
 struct NearMiss {
-    score_en: Option<f64>,
-    score_multi: Option<f64>,
-    thr_en: f64,
-    thr_multi: f64,
-    /// Smallest `threshold - score` among the models within margin — how close
+    prob_en: Option<f64>,
+    prob_multi: Option<f64>,
+    tau_s: f64,
+    /// Smallest `τ_s - probability` among the models within margin — how close
     /// the way came to firing on its best path.
     margin: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn match_prompt(
     query: &str,
     pattern: &Option<String>,
@@ -574,37 +572,30 @@ fn match_prompt(
     thresholds: EffectiveThresholds,
     scores: &EmbedScores,
     near_miss_margin: f64,
-    gate_fraction: f64,
+    keyword_floor: f64,
 ) -> PromptMatch {
-    let score_en = scores.best_en(corpus_id);
-    let score_multi = scores.best_multi(corpus_id);
+    // Calibrated relevance probability per lane (ADR-156). `None` means no
+    // calibrated signal: the lane didn't run, the way isn't embeddable, or no
+    // calibration is loaded. An embeddable way that ran but is missing from the
+    // results scores as g(cos 0.0) — a low probability, not absence of signal.
+    let tau_s = thresholds.semantic;
+    let tau_k = keyword_floor;
+    let prob_en = scores.prob_en(corpus_id, embeddable);
+    let prob_multi = scores.prob_multi(corpus_id, embeddable);
 
-    // Channel 1: Regex pattern — deterministic, but gated (ADR-155): the hit
-    // fires only if the way's embedding score also clears
-    // `gate_fraction × effective_threshold` on at least one model lane. The
-    // gate consumes scores the batch pass already computed — no extra model
-    // work. It fails OPEN when there is genuinely no semantic evidence either
-    // direction — the engine didn't run, or the way isn't embeddable (no
-    // description/vocabulary, so it can't be in the corpus): the author's
-    // explicit trigger stands. But a lane that RAN and has no row for an
-    // embeddable way is not absence of signal — way-embed emits only scores
-    // ≥ 0.0, so a missing row means negative cosine, the strongest
-    // "unrelated" verdict there is. That resolves to 0.0 here, keeping the
-    // gate monotonic in relatedness (the worst matches must not out-fire
-    // mild ones). `pattern_strict: true` and `gate_fraction: 0.0` both
-    // restore unconditional keyword fires.
-    // A pattern miss is never a near-miss (there is no margin to be near).
+    // Channel 1: Regex pattern — deterministic, but gated (ADR-155/156): the hit
+    // fires only if the way's calibrated probability also clears the keyword
+    // floor τ_k on at least one model lane, using probabilities the batch pass
+    // already produced — no extra model work. It fails OPEN when there is
+    // genuinely no calibrated signal either direction — the engine didn't run,
+    // the way isn't embeddable, or no calibration is loaded: the author's
+    // explicit trigger stands. `pattern_strict: true` restores an unconditional
+    // keyword fire. A pattern miss is never a near-miss.
     if let Some(ref pat) = pattern {
         if let Some(span) = regex_span(pat, query) {
-            let floor_en = thresholds.en * gate_fraction;
-            let floor_multi = thresholds.multi * gate_fraction;
-            let gate_en =
-                score_en.or_else(|| (embeddable && scores.en.is_some()).then_some(0.0));
-            let gate_multi =
-                score_multi.or_else(|| (embeddable && scores.multi.is_some()).then_some(0.0));
-            let no_signal = gate_en.is_none() && gate_multi.is_none();
-            let clears = gate_en.is_some_and(|s| s >= floor_en)
-                || gate_multi.is_some_and(|s| s >= floor_multi);
+            let no_signal = prob_en.is_none() && prob_multi.is_none();
+            let clears =
+                prob_en.is_some_and(|p| p >= tau_k) || prob_multi.is_some_and(|p| p >= tau_k);
             if pattern_strict || no_signal || clears {
                 return PromptMatch::Fired {
                     channel: "keyword".to_string(),
@@ -614,59 +605,50 @@ fn match_prompt(
             }
             return PromptMatch::KeywordGated(KeywordGated {
                 matched_span: span,
-                score_en: gate_en,
-                score_multi: gate_multi,
-                floor_en,
-                floor_multi,
+                prob_en,
+                prob_multi,
+                floor: tau_k,
             });
         }
     }
 
-    // Channel 2: Embedding. Each model path stands on its own threshold;
-    // scores don't cross-compare (apples and oranges). Either path firing
-    // is sufficient, but the thresholds are calibrated independently so
-    // each model's noise band sits below its gate:
-    //   - EN model (0.40): sharp on English, noise below 0.35
-    //   - multi model (0.55): cross-lingual but coarser, noise at 0.30-0.50
-    if score_en.is_some_and(|s| s >= thresholds.en) {
+    // Channel 2: Embedding. Calibration makes probabilities comparable across
+    // models, so both lanes share one semantic threshold τ_s; either firing is
+    // sufficient.
+    if prob_en.is_some_and(|p| p >= tau_s) {
         return PromptMatch::Fired {
             channel: "semantic:embedding:en".to_string(),
-            score: score_en,
+            score: prob_en,
             matched_span: None,
         };
     }
-    if score_multi.is_some_and(|s| s >= thresholds.multi) {
+    if prob_multi.is_some_and(|p| p >= tau_s) {
         return PromptMatch::Fired {
             channel: "semantic:embedding:multi".to_string(),
-            score: score_multi,
+            score: prob_multi,
             matched_span: None,
         };
     }
 
-    // No fire. Record a near-miss when a model landed in the band just below
-    // its threshold: `thr - margin <= score < thr`. The reported margin is the
-    // smallest shortfall across qualifying models. Measured against the SAME
-    // effective thresholds the fire path uses, so parent-boost is honored.
-    let shortfall = |score: Option<f64>, thr: f64| -> Option<f64> {
-        score.and_then(|s| {
-            let gap = thr - s;
+    // No fire. Record a near-miss when a lane's probability landed in the band
+    // just below τ_s: `τ_s - margin <= p < τ_s`. The reported margin is the
+    // smallest shortfall across lanes, against the SAME τ_s the fire path uses.
+    let shortfall = |p: Option<f64>| -> Option<f64> {
+        p.and_then(|v| {
+            let gap = tau_s - v;
             (gap > 0.0 && gap <= near_miss_margin).then_some(gap)
         })
     };
-    let margin = [
-        shortfall(score_en, thresholds.en),
-        shortfall(score_multi, thresholds.multi),
-    ]
-    .into_iter()
-    .flatten()
-    .fold(None, |acc: Option<f64>, g| Some(acc.map_or(g, |a| a.min(g))));
+    let margin = [shortfall(prob_en), shortfall(prob_multi)]
+        .into_iter()
+        .flatten()
+        .fold(None, |acc: Option<f64>, g| Some(acc.map_or(g, |a| a.min(g))));
 
     match margin {
         Some(margin) => PromptMatch::NearMiss(NearMiss {
-            score_en,
-            score_multi,
-            thr_en: thresholds.en,
-            thr_multi: thresholds.multi,
+            prob_en,
+            prob_multi,
+            tau_s,
             margin,
         }),
         None => PromptMatch::NoMatch,
@@ -698,10 +680,9 @@ fn log_near_miss(
         ("way", &way.id),
         ("corpus_id", &way.corpus_id),
         ("domain", domain),
-        ("score_en", &fmt(nm.score_en)),
-        ("score_multi", &fmt(nm.score_multi)),
-        ("thr_en", &format!("{:.4}", nm.thr_en)),
-        ("thr_multi", &format!("{:.4}", nm.thr_multi)),
+        ("prob_en", &fmt(nm.prob_en)),
+        ("prob_multi", &fmt(nm.prob_multi)),
+        ("tau_s", &format!("{:.4}", nm.tau_s)),
         ("margin", &format!("{:.4}", nm.margin)),
         ("trigger", trigger),
         ("scope", scope),
@@ -738,10 +719,9 @@ fn log_keyword_gated(
         ("corpus_id", &way.corpus_id),
         ("domain", domain),
         ("matched_span", &kg.matched_span),
-        ("score_en", &fmt(kg.score_en)),
-        ("score_multi", &fmt(kg.score_multi)),
-        ("floor_en", &format!("{:.4}", kg.floor_en)),
-        ("floor_multi", &format!("{:.4}", kg.floor_multi)),
+        ("prob_en", &fmt(kg.prob_en)),
+        ("prob_multi", &fmt(kg.prob_multi)),
+        ("floor", &format!("{:.4}", kg.floor)),
         ("trigger", trigger),
         ("scope", scope),
         ("project", project_dir),
@@ -750,27 +730,24 @@ fn log_keyword_gated(
     ]);
 }
 
-/// Per-model thresholds for a way at a given moment in a session.
+/// The effective semantic fire probability τ_s for a way at a given moment in a
+/// session (ADR-156). Calibration makes probabilities comparable across models,
+/// so one threshold serves both lanes; the keyword floor τ_k is global and read
+/// separately.
 #[derive(Clone, Copy)]
 struct EffectiveThresholds {
-    en: f64,
-    multi: f64,
+    semantic: f64,
 }
 
-/// Compute effective thresholds for both models, accounting for parent-boost.
+/// Compute the effective semantic fire probability, accounting for parent-boost.
 ///
-/// Parent-boost (ADR-125): if any ancestor has fired in the session, each
-/// model's base threshold is multiplied by `parent_threshold_multiplier`
-/// (default 0.8), floored at `parent_boost_floor`. The floor prevents
-/// cascading boosts from pushing children into the noise band.
-///
-/// The EN base comes from the way's frontmatter `embed_threshold:` or
-/// `default_embed_threshold`. The multi base uses `default_multi_embed_threshold`
-/// uniformly — locale aliases don't carry per-way thresholds (ADR-125).
+/// Parent-boost (ADR-125): if any ancestor has fired in the session, the base
+/// τ_s is multiplied by `parent_threshold_multiplier` (default 0.8), floored at
+/// `parent_boost_floor`. The floor prevents cascading boosts from pushing
+/// children into the noise band. All values are calibrated probabilities.
 fn effective_thresholds(way: &WayCandidate, session_id: &str) -> EffectiveThresholds {
     let cfg = crate::config::global();
-    let en_base = way.embed_threshold.unwrap_or(cfg.default_embed_threshold);
-    let multi_base = cfg.default_multi_embed_threshold;
+    let base = cfg.semantic_fire_probability;
 
     let ancestor_shown = {
         let mut path = way.id.as_str();
@@ -785,16 +762,12 @@ fn effective_thresholds(way: &WayCandidate, session_id: &str) -> EffectiveThresh
         found
     };
 
-    if ancestor_shown {
-        let boost = cfg.parent_threshold_multiplier;
-        let floor = cfg.parent_boost_floor;
-        EffectiveThresholds {
-            en: (en_base * boost).max(floor),
-            multi: (multi_base * boost).max(floor),
-        }
+    let semantic = if ancestor_shown {
+        (base * cfg.parent_threshold_multiplier).max(cfg.parent_boost_floor)
     } else {
-        EffectiveThresholds { en: en_base, multi: multi_base }
-    }
+        base
+    };
+    EffectiveThresholds { semantic }
 }
 
 /// Semantic score for a check, taking the higher of the two model paths
@@ -804,8 +777,12 @@ fn effective_thresholds(way: &WayCandidate, session_id: &str) -> EffectiveThresh
 /// path clears.
 fn check_semantic_score(check: &WayCandidate, session_id: &str, scores: &EmbedScores) -> f64 {
     let t = effective_thresholds(check, session_id);
-    let en = scores.best_en(&check.corpus_id).filter(|s| *s >= t.en);
-    let mu = scores.best_multi(&check.corpus_id).filter(|s| *s >= t.multi);
+    let en = scores
+        .prob_en(&check.corpus_id, check.embeddable())
+        .filter(|p| *p >= t.semantic);
+    let mu = scores
+        .prob_multi(&check.corpus_id, check.embeddable())
+        .filter(|p| *p >= t.semantic);
     match (en, mu) {
         (Some(e), Some(m)) => e.max(m),
         (Some(s), None) | (None, Some(s)) => s,
@@ -878,34 +855,32 @@ mod near_miss_tests {
     //! the pure score/threshold arithmetic — no embedding subprocess, no I/O.
     use super::*;
 
-    const THR: EffectiveThresholds = EffectiveThresholds { en: 0.40, multi: 0.55 };
+    use ways_core::calibration::{Calibration, ModelCalibration};
+
+    // ADR-156: match_prompt scores calibrated probabilities. The tests feed raw
+    // cosines through a fixed test calibration `g(s) = σ(10·s − 2.5)`, chosen so
+    // g(0.25)=0.5 exactly (the τ_s boundary) and g(0.0)≈0.076 (a missing row —
+    // negative cosine — lands well below the keyword floor).
+    const THR: EffectiveThresholds = EffectiveThresholds { semantic: 0.5 };
     const MARGIN: f64 = 0.05;
+    const FLOOR: f64 = 0.15; // τ_k, mirrors config default keyword_floor_probability
+    const TEST_CAL: ModelCalibration = ModelCalibration { a: 10.0, b: -2.5, auc: 1.0, n: 0 };
+
+    /// Calibrated probability for a cosine under the test calibration.
+    fn p(cosine: f64) -> f64 {
+        TEST_CAL.probability(cosine)
+    }
 
     fn scores(en: Option<f64>, multi: Option<f64>) -> EmbedScores {
         EmbedScores {
             en: en.map(|s| vec![("w".to_string(), s)]),
             multi: multi.map(|s| vec![("w".to_string(), s)]),
+            calibration: Calibration { en: Some(TEST_CAL), multi: Some(TEST_CAL) },
         }
     }
 
-    /// Test gate fraction (0.5, round arithmetic): keyword floors sit at half
-    /// the fire thresholds — 0.20 EN / 0.275 multi against [`THR`]. The
-    /// production default is 0.4 (config.rs), calibrated so multi-word intent
-    /// phrases ("ship it" ≈ 0.17) clear while lexical coincidences (≤0.15) gate.
-    const GATE: f64 = 0.5;
-
     fn run(en: Option<f64>, multi: Option<f64>, pattern: Option<&str>) -> PromptMatch {
-        run_gated(en, multi, pattern, false, GATE)
-    }
-
-    fn run_gated(
-        en: Option<f64>,
-        multi: Option<f64>,
-        pattern: Option<&str>,
-        strict: bool,
-        gate_fraction: f64,
-    ) -> PromptMatch {
-        run_full(scores(en, multi), pattern, strict, true, gate_fraction)
+        run_full(scores(en, multi), pattern, false, true)
     }
 
     fn run_full(
@@ -913,7 +888,6 @@ mod near_miss_tests {
         pattern: Option<&str>,
         strict: bool,
         embeddable: bool,
-        gate_fraction: f64,
     ) -> PromptMatch {
         match_prompt(
             "query text",
@@ -924,34 +898,37 @@ mod near_miss_tests {
             THR,
             &scores,
             MARGIN,
-            gate_fraction,
+            FLOOR,
         )
     }
 
     #[test]
     fn en_clears_fires_en() {
-        assert!(matches!(run(Some(0.41), None, None),
+        // cos 0.35 → g ≈ 0.73 ≥ τ_s 0.5.
+        assert!(matches!(run(Some(0.35), None, None),
             PromptMatch::Fired { channel: c, .. } if c == "semantic:embedding:en"));
     }
 
     #[test]
-    fn semantic_fire_carries_its_score_keyword_does_not() {
-        // ADR-134 D: the firing embedding score rides on Fired for telemetry;
-        // a deterministic keyword fire carries none.
-        match run(Some(0.41), None, None) {
-            PromptMatch::Fired { score, .. } => assert_eq!(score, Some(0.41)),
+    fn semantic_fire_carries_its_probability_keyword_does_not() {
+        // ADR-134 D / ADR-156: the firing calibrated probability rides on Fired
+        // for telemetry; a deterministic keyword fire carries none.
+        match run(Some(0.35), None, None) {
+            PromptMatch::Fired { score, .. } => {
+                assert!((score.unwrap() - p(0.35)).abs() < 1e-9);
+            }
             _ => panic!("expected Fired"),
         }
-        // multi fire (EN below) carries the multi score, not EN's.
-        match run(Some(0.20), Some(0.56), None) {
+        // multi fire (EN below τ_s) carries the multi probability, not EN's.
+        match run(Some(0.20), Some(0.35), None) {
             PromptMatch::Fired { channel, score, matched_span } => {
                 assert_eq!(channel, "semantic:embedding:multi");
-                assert_eq!(score, Some(0.56));
+                assert!((score.unwrap() - p(0.35)).abs() < 1e-9);
                 assert_eq!(matched_span, None, "semantic carries no matched term");
             }
             _ => panic!("expected multi Fired"),
         }
-        match run(Some(0.41), None, Some("query")) {
+        match run(Some(0.35), None, Some("query")) {
             PromptMatch::Fired { channel, score, matched_span } => {
                 assert_eq!(channel, "keyword");
                 assert_eq!(score, None);
@@ -963,17 +940,18 @@ mod near_miss_tests {
 
     #[test]
     fn multi_clears_when_en_below_fires_multi() {
-        assert!(matches!(run(Some(0.20), Some(0.56), None),
+        assert!(matches!(run(Some(0.20), Some(0.35), None),
             PromptMatch::Fired { channel: c, .. } if c == "semantic:embedding:multi"));
     }
 
     #[test]
     fn within_margin_is_near_miss_with_shortfall() {
-        match run(Some(0.37), None, None) {
+        // cos 0.24 → g ≈ 0.475, just below τ_s 0.5 (shortfall ≈ 0.025 < MARGIN).
+        match run(Some(0.24), None, None) {
             PromptMatch::NearMiss(nm) => {
-                assert!((nm.margin - 0.03).abs() < 1e-9, "margin = thr - score");
-                assert_eq!(nm.score_en, Some(0.37));
-                assert_eq!(nm.score_multi, None);
+                assert!((nm.margin - (0.5 - p(0.24))).abs() < 1e-9, "margin = τ_s - prob");
+                assert!((nm.prob_en.unwrap() - p(0.24)).abs() < 1e-9);
+                assert_eq!(nm.prob_multi, None);
             }
             other => panic!("expected NearMiss, got {:?}", discriminant(&other)),
         }
@@ -981,22 +959,25 @@ mod near_miss_tests {
 
     #[test]
     fn smallest_shortfall_wins_across_models() {
-        // en short by 0.03, multi short by 0.02 -> reported margin is 0.02.
-        match run(Some(0.37), Some(0.53), None) {
-            PromptMatch::NearMiss(nm) => assert!((nm.margin - 0.02).abs() < 1e-9),
+        // en short by ~0.025, multi short by ~0.0125 -> reported margin is the multi one.
+        match run(Some(0.24), Some(0.245), None) {
+            PromptMatch::NearMiss(nm) => {
+                assert!((nm.margin - (0.5 - p(0.245))).abs() < 1e-9);
+            }
             other => panic!("expected NearMiss, got {:?}", discriminant(&other)),
         }
     }
 
     #[test]
     fn beyond_margin_is_no_match() {
-        assert!(matches!(run(Some(0.30), None, None), PromptMatch::NoMatch));
+        // cos 0.20 → g ≈ 0.378, shortfall ≈ 0.12 > MARGIN.
+        assert!(matches!(run(Some(0.20), None, None), PromptMatch::NoMatch));
     }
 
     #[test]
     fn pattern_match_preempts_near_miss() {
-        // Scores would be a near-miss, but a keyword hit is a deterministic fire.
-        assert!(matches!(run(Some(0.37), None, Some("query")),
+        // Would be a near-miss, but a keyword hit (g ≈ 0.475 ≥ τ_k) fires.
+        assert!(matches!(run(Some(0.24), None, Some("query")),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
     }
 
@@ -1006,11 +987,10 @@ mod near_miss_tests {
     }
 
     #[test]
-    fn score_exactly_at_threshold_fires_not_near_miss() {
-        // The boundary where the `>=` fire check and the `gap > 0.0` near-miss
-        // guard must agree: a score equal to the threshold fires, it is never
-        // a (zero-shortfall) near-miss.
-        assert!(matches!(run(Some(0.40), None, None),
+    fn probability_exactly_at_threshold_fires_not_near_miss() {
+        // cos 0.25 → g = 0.5 exactly = τ_s. The `>=` fire check and the
+        // `gap > 0.0` near-miss guard must agree: it fires, never a near-miss.
+        assert!(matches!(run(Some(0.25), None, None),
             PromptMatch::Fired { channel: c, .. } if c == "semantic:embedding:en"));
     }
 
@@ -1027,36 +1007,35 @@ mod near_miss_tests {
 
     #[test]
     fn keyword_below_gate_floor_is_gated_with_evidence() {
-        // Floor is 0.20 EN; a hit at 0.10 is a lexical coincidence.
-        match run(Some(0.10), None, Some("query")) {
+        // cos 0.05 → g ≈ 0.119 < τ_k 0.15: a lexical coincidence, vetoed.
+        match run(Some(0.05), None, Some("query")) {
             PromptMatch::KeywordGated(kg) => {
                 assert_eq!(kg.matched_span, "query");
-                assert_eq!(kg.score_en, Some(0.10));
-                assert_eq!(kg.score_multi, None);
-                assert!((kg.floor_en - 0.20).abs() < 1e-9);
-                assert!((kg.floor_multi - 0.275).abs() < 1e-9);
+                assert!((kg.prob_en.unwrap() - p(0.05)).abs() < 1e-9);
+                assert_eq!(kg.prob_multi, None);
+                assert!((kg.floor - FLOOR).abs() < 1e-9);
             }
             other => panic!("expected KeywordGated, got {}", discriminant(&other)),
         }
     }
 
     #[test]
-    fn keyword_at_or_above_gate_floor_fires() {
-        // Exactly at the floor fires — same >= convention as the fire threshold.
-        assert!(matches!(run(Some(0.20), None, Some("query")),
+    fn keyword_above_gate_floor_fires() {
+        // cos 0.10 → g ≈ 0.182 ≥ τ_k 0.15.
+        assert!(matches!(run(Some(0.10), None, Some("query")),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
     }
 
     #[test]
-    fn either_lane_clearing_its_floor_passes_the_gate() {
-        // EN deep below its floor, multi above its own floor (0.275) — passes.
-        assert!(matches!(run(Some(0.05), Some(0.30), Some("query")),
+    fn either_lane_clearing_the_floor_passes_the_gate() {
+        // EN below τ_k (g ≈ 0.119), multi above it (g ≈ 0.182) — passes.
+        assert!(matches!(run(Some(0.05), Some(0.10), Some("query")),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
     }
 
     #[test]
     fn pattern_strict_bypasses_the_gate() {
-        assert!(matches!(run_gated(Some(0.05), None, Some("query"), true, GATE),
+        assert!(matches!(run_full(scores(Some(0.05), None), Some("query"), true, true),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
     }
 
@@ -1069,15 +1048,19 @@ mod near_miss_tests {
 
     #[test]
     fn missing_row_on_a_ran_lane_gates_an_embeddable_way() {
-        // way-embed emits only scores >= 0.0: a lane that ran with no row for
-        // an embeddable way means NEGATIVE cosine — the strongest "unrelated"
-        // signal. It must gate (as 0.0), not fail open, or the worst matches
-        // out-fire mild ones (gate monotonicity, ADR-155 review).
-        let lane_ran_no_row = EmbedScores { en: Some(vec![]), multi: None };
-        match run_full(lane_ran_no_row, Some("query"), false, true, GATE) {
+        // way-embed emits only scores >= 0.0: a lane that ran with no row for an
+        // embeddable way means NEGATIVE cosine — the strongest "unrelated"
+        // signal. It scores as g(0.0) ≈ 0.076, below τ_k, so it gates rather
+        // than fails open (gate monotonicity, ADR-155/156).
+        let lane_ran_no_row = EmbedScores {
+            en: Some(vec![]),
+            multi: None,
+            calibration: Calibration { en: Some(TEST_CAL), multi: None },
+        };
+        match run_full(lane_ran_no_row, Some("query"), false, true) {
             PromptMatch::KeywordGated(kg) => {
-                assert_eq!(kg.score_en, Some(0.0), "missing row resolves to 0.0");
-                assert_eq!(kg.score_multi, None, "lane that didn't run stays None");
+                assert!((kg.prob_en.unwrap() - p(0.0)).abs() < 1e-9, "missing row → g(0.0)");
+                assert_eq!(kg.prob_multi, None, "lane that didn't run stays None");
             }
             other => panic!("expected KeywordGated, got {}", discriminant(&other)),
         }
@@ -1085,27 +1068,37 @@ mod near_miss_tests {
 
     #[test]
     fn non_embeddable_way_fails_open_even_when_lanes_ran() {
-        // A trigger-only way (no description/vocabulary) can't be in the
-        // corpus; a missing row says nothing about it. The explicit trigger
-        // stands.
-        let lane_ran_no_row = EmbedScores { en: Some(vec![]), multi: None };
+        // A trigger-only way (no description/vocabulary) can't be in the corpus;
+        // a missing row says nothing about it. The explicit trigger stands.
+        let lane_ran_no_row = EmbedScores {
+            en: Some(vec![]),
+            multi: None,
+            calibration: Calibration { en: Some(TEST_CAL), multi: None },
+        };
         assert!(matches!(
-            run_full(lane_ran_no_row, Some("query"), false, false, GATE),
+            run_full(lane_ran_no_row, Some("query"), false, false),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"
         ));
     }
 
     #[test]
-    fn zero_gate_fraction_restores_unconditional_keyword_fires() {
-        assert!(matches!(run_gated(Some(0.01), None, Some("query"), false, 0.0),
+    fn no_calibration_fails_open_on_keyword() {
+        // A corpus that predates calibration: no calibrated signal, so the
+        // keyword fires open (degraded), never the retired raw-cosine path.
+        let uncalibrated = EmbedScores {
+            en: Some(vec![("w".to_string(), 0.05)]),
+            multi: None,
+            calibration: Calibration::default(),
+        };
+        assert!(matches!(run_full(uncalibrated, Some("query"), false, true),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
     }
 
     #[test]
     fn gated_keyword_does_not_shadow_a_semantic_fire() {
-        // Score clears the full threshold: it also clears the gate floor, so a
-        // pattern hit fires on the keyword channel (gate passes trivially).
-        assert!(matches!(run(Some(0.41), None, Some("query")),
+        // cos 0.35 clears τ_s: it also clears τ_k, so a pattern hit fires on the
+        // keyword channel (gate passes trivially).
+        assert!(matches!(run(Some(0.35), None, Some("query")),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
     }
 

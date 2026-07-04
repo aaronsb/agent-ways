@@ -14,6 +14,11 @@ pub(crate) struct EmbedScores {
     /// Scores from the multilingual model × multilingual corpus.
     /// `None` means the engine/corpus/model is unavailable.
     pub(crate) multi: Option<Vec<(String, f64)>>,
+    /// Per-model calibration `g(s) = σ(a·s + b)` loaded from the corpus manifest
+    /// (ADR-156). Empty lanes when the corpus predates calibration — the matcher
+    /// then treats semantic scores as absent (degraded: keyword fires open,
+    /// semantic silent), never the retired raw-cosine path.
+    pub(crate) calibration: ways_core::calibration::Calibration,
 }
 
 impl EmbedScores {
@@ -22,14 +27,33 @@ impl EmbedScores {
         self.en.is_some() || self.multi.is_some()
     }
 
-    /// Best score for `way_id` in the EN corpus, or None if absent.
-    pub(crate) fn best_en(&self, way_id: &str) -> Option<f64> {
-        best_score(self.en.as_deref(), way_id)
+    /// Calibrated relevance probability `g_en(cos)` for `way_id`, or `None` when
+    /// there is no calibrated EN signal: the lane did not run, the way is not
+    /// embeddable (absent from the corpus), or no EN calibration is loaded. An
+    /// embeddable way that ran but is missing from the results scores as cosine
+    /// 0.0 (negative cosine → strongest "unrelated"), i.e. `g_en(0.0)`.
+    pub(crate) fn prob_en(&self, way_id: &str, embeddable: bool) -> Option<f64> {
+        Self::prob(self.en.as_deref(), self.calibration.en.as_ref(), way_id, embeddable)
     }
 
-    /// Best score for `way_id` in the multi corpus, or None if absent.
-    pub(crate) fn best_multi(&self, way_id: &str) -> Option<f64> {
-        best_score(self.multi.as_deref(), way_id)
+    /// Calibrated relevance probability `g_multi(cos)` for `way_id`. See [`prob_en`].
+    pub(crate) fn prob_multi(&self, way_id: &str, embeddable: bool) -> Option<f64> {
+        Self::prob(self.multi.as_deref(), self.calibration.multi.as_ref(), way_id, embeddable)
+    }
+
+    fn prob(
+        rows: Option<&[(String, f64)]>,
+        cal: Option<&ways_core::calibration::ModelCalibration>,
+        way_id: &str,
+        embeddable: bool,
+    ) -> Option<f64> {
+        if !embeddable {
+            return None; // not in corpus → no signal → keyword fails open
+        }
+        let rows = rows?; // lane did not run
+        let cal = cal?; // no calibration loaded → degraded to no signal
+        let cos = best_score(Some(rows), way_id).unwrap_or(0.0);
+        Some(cal.probability(cos))
     }
 }
 
@@ -56,9 +80,10 @@ pub(crate) fn multilingual_enabled(output_language: &str) -> bool {
 /// Either or both may be None if their engine/model is unavailable.
 pub(crate) fn batch_embed_score(query: &str) -> EmbedScores {
     let Some(embed_bin) = find_way_embed() else {
-        return EmbedScores { en: None, multi: None };
+        return EmbedScores { en: None, multi: None, calibration: Default::default() };
     };
     let xdg = crate::paths::corpus_dir();
+    let calibration = load_calibration(&xdg);
 
     let en_corpus = xdg.join("ways-corpus-en.jsonl");
     let en_model = xdg.join("minilm-l6-v2.gguf");
@@ -80,11 +105,29 @@ pub(crate) fn batch_embed_score(query: &str) -> EmbedScores {
         let combined = xdg.join("ways-corpus.jsonl");
         if combined.is_file() && en_model.is_file() {
             let fallback = run_embed_match(&embed_bin, &combined, &en_model, query);
-            return EmbedScores { en: fallback, multi: None };
+            return EmbedScores { en: fallback, multi: None, calibration };
         }
     }
 
-    EmbedScores { en, multi }
+    EmbedScores { en, multi, calibration }
+}
+
+/// Load per-model calibration (ADR-156) from the corpus manifest
+/// (`embed-manifest.json`, `calibration` block). Returns empty lanes when the
+/// manifest is absent, unparseable, or predates calibration — the matcher then
+/// degrades (keyword fires open, semantic silent) rather than falling back to
+/// the retired raw-cosine path.
+fn load_calibration(xdg: &std::path::Path) -> ways_core::calibration::Calibration {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        #[serde(default)]
+        calibration: ways_core::calibration::Calibration,
+    }
+    std::fs::read_to_string(xdg.join("embed-manifest.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Manifest>(&s).ok())
+        .map(|m| m.calibration)
+        .unwrap_or_default()
 }
 
 fn run_if_ready(

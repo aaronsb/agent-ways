@@ -659,7 +659,7 @@ scope: subagent
         // with the gate's own channel label, but never counts as a fire.
         let events = vec![
             json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword","token_position":"100","matched_span":"commit"}),
-            json!({"event":"way_keyword_gated","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/g","trigger":"prompt","matched_span":"remember","score_en":"0.1450","floor_en":"0.2000"}),
+            json!({"event":"way_keyword_gated","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/g","trigger":"prompt","matched_span":"remember","prob_en":"0.0759","floor":"0.1500"}),
         ];
         let s = SessionIntrospection::build(&events, "s1", "/proj", 200, &CriteriaMap::new());
 

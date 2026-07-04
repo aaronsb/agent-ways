@@ -71,10 +71,9 @@ struct NearMiss {
     epoch: u64,
     timestamp: String,
     way: String,
-    score_en: f64,
-    score_multi: f64,
-    thr_en: f64,
-    thr_multi: f64,
+    prob_en: f64,
+    prob_multi: f64,
+    tau_s: f64,
     margin: f64,
 }
 
@@ -253,10 +252,9 @@ fn build_near_misses(content: &str, session_id: &str, frames: &[rethink::Frame])
                 epoch: epoch_for_ts(frames, &ts),
                 timestamp: ts,
                 way: v["way"].as_str().unwrap_or("").to_string(),
-                score_en: field_f64(&v, "score_en"),
-                score_multi: field_f64(&v, "score_multi"),
-                thr_en: field_f64(&v, "thr_en"),
-                thr_multi: field_f64(&v, "thr_multi"),
+                prob_en: field_f64(&v, "prob_en"),
+                prob_multi: field_f64(&v, "prob_multi"),
+                tau_s: field_f64(&v, "tau_s"),
                 margin: field_f64(&v, "margin"),
             }
         })
