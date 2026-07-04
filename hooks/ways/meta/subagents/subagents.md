@@ -1,7 +1,7 @@
 ---
 description: Sub-agent delegation — when and how to spawn specialized sub-agents for token-intensive work
 vocabulary: subagent delegate spawn background task parallel worker teammate planner
-pattern: subagent|delegat|spawn.{0,30}agent|review.{0,30}pr|organiz.{0,30}docs
+pattern: (?i)subagent|delegat|spawn.{0,30}agent|review.{0,30}\bpr\b|organiz.{0,30}docs
 scope: agent
 refire: 0.15
 ---

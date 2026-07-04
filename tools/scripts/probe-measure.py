@@ -24,6 +24,9 @@ BIN_CANDIDATES = [
     HOME / ".cache/agent-ways/user/way-embed",
 ]
 CACHE = HOME / ".cache/agent-ways/user"
+# Override with --cache-dir to score against an isolated corpus build (e.g. a
+# `ways corpus --output <dir>` refit of an un-deployed branch). The model always
+# lives in the canonical cache.
 CORPUS = CACHE / "ways-corpus-en.jsonl"
 MANIFEST = CACHE / "embed-manifest.json"
 EN_MODEL = CACHE / "minilm-l6-v2.gguf"
@@ -121,7 +124,14 @@ def main():
     ap.add_argument("--intent", nargs="*", default=[])
     ap.add_argument("--noise", nargs="*", default=[])
     ap.add_argument("--json", action="store_true", help="read {intent,noise} from stdin")
+    ap.add_argument("--cache-dir", help="dir holding ways-corpus-en.jsonl + embed-manifest.json to use instead of the canonical cache")
     args = ap.parse_args()
+
+    global CORPUS, MANIFEST
+    if args.cache_dir:
+        d = Path(args.cache_dir)
+        CORPUS = d / "ways-corpus-en.jsonl"
+        MANIFEST = d / "embed-manifest.json"
 
     intent, noise = args.intent, args.noise
     if args.json:
@@ -136,11 +146,15 @@ def main():
     rows = measure(bin_path, alias, cal, intent, "INTENT") + \
            measure(bin_path, alias, cal, noise, "NOISE")
 
+    a, b = cal["en"]["a"], cal["en"]["b"]
+    # cos at which g(s)=tau: solve a*s+b = logit(tau). Guard a<=0 (a degenerate
+    # or missing fit that load_calibration let through) rather than dividing by 0.
+    def cos_at(tau):
+        return (math.log(tau / (1 - tau)) - b) / a if a > 0 else float("nan")
     print(f"# way: {args.way_id}")
     print(f"# alias: {alias[:120]}{'...' if len(alias) > 120 else ''}")
-    print(f"# EN calibration: a={cal['en']['a']:.3f} b={cal['en']['b']:.3f} "
-          f"(tau_s={TAU_S} -> cos>={(math.log(TAU_S/(1-TAU_S)) - cal['en']['b'])/cal['en']['a']:.3f}, "
-          f"tau_k={TAU_K} -> cos>={(math.log(TAU_K/(1-TAU_K)) - cal['en']['b'])/cal['en']['a']:.3f})")
+    print(f"# EN calibration: a={a:.3f} b={b:.3f} "
+          f"(tau_s={TAU_S} -> cos>={cos_at(TAU_S):.3f}, tau_k={TAU_K} -> cos>={cos_at(TAU_K):.3f})")
     print(f"{'LABEL':7} {'cos':>6} {'g_en':>6} {'sem':>4} {'floor':>5}  probe")
     for r in rows:
         print(f"{r['label']:7} {r['cos']:6.3f} {r['g_en']:6.3f} "

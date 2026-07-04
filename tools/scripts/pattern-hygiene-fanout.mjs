@@ -6,6 +6,8 @@ export const meta = {
   ],
 }
 
+// Session-specific absolute repo root (workflow scripts have no cwd/fs access to
+// derive it). Edit this if replaying the methodology from another checkout.
 const REPO = '/home/aaron/Projects/ai/agent-ways'
 // Findings manifest inlined (see scratchpad/findings-manifest.json) — avoids the
 // fragile args-passing path that reached the script as a non-array.
@@ -73,7 +75,7 @@ const SCHEMA = {
 function prompt(w) {
   const findingsBlock = [
     w.common.length ? `  COMMON-WORD (flagged as too generic for pattern:): ${JSON.stringify(w.common)}` : null,
-    w.short.length ? `  SHORT-UNANCHORED (<4 chars, no \\b): ${JSON.stringify(w.short)}` : null,
+    w.short.length ? `  SHORT-UNANCHORED (under 5 chars, no \\b): ${JSON.stringify(w.short)}` : null,
     w.greedy.length ? `  GREEDY-WILDCARD (unbounded .*): ${JSON.stringify(w.greedy)}` : null,
   ].filter(Boolean).join('\n')
 
