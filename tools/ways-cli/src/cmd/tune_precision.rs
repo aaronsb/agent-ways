@@ -98,7 +98,7 @@ impl Flag {
         match self {
             Flag::Ok => "-",
             Flag::LowN => "insufficient sample",
-            Flag::MisTargeted => "raise embed_threshold / narrow vocab / scope trigger",
+            Flag::MisTargeted => "narrow vocab / scope trigger / demote keyword to vocabulary",
             Flag::CrossCutting => "broad by design? scope by trigger — do NOT narrow vocab",
         }
     }

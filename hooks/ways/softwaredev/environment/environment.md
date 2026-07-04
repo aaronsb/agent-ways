@@ -1,7 +1,6 @@
 ---
 description: Development environment — configuration, dependencies, debugging, SSH, and build tooling
 vocabulary: environment setup config configure dependency install package build tool debug troubleshoot ssh remote connect server dev local machine workspace
-embed_threshold: 0.30
 scope: agent, subagent
 refire: 0.15
 ---

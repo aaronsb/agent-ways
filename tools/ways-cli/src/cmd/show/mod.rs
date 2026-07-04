@@ -161,8 +161,8 @@ pub fn way_scored(
         ("session", session_id.to_string()),
         ("token_position", token_pos.to_string()),
     ];
-    // ADR-134 task D: the embedding score that fired this way, for deriving a
-    // principled embed_threshold from observed fires. Recorded only on a
+    // ADR-134 task D: the calibrated probability that fired this way, feeding the
+    // fire-score telemetry that calibration (ADR-156) is fit from. Recorded only on a
     // first-fire (way_fired), never a redisclosure: threshold tuning is about
     // what score gates a way's *entry* to a session, and a redisclosure's score
     // reflects the re-triggering prompt — a different population that would bias

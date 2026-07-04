@@ -1,7 +1,6 @@
 ---
 description: attend binary — active awareness sensor loop, peer session discovery, inter-session signaling for Claude Code
 vocabulary: attend attend-run attend-send attend-focus attend-peers attend-status attend-scene sensor-loop awareness-layer focus-group signal-file disclosure-governor peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private scene-open
-embed_threshold: 0.28
 pattern: attend|awareness.?layer|peer.?session|peer.?discover|signal.?file|focus.?group|sensor.?loop
 commands: attend
 refire: 0.15

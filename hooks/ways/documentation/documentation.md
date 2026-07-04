@@ -3,7 +3,6 @@ description: documentation as a typed graph — taxonomy, catalog frontmatter, l
 vocabulary: documentation docs catalog taxonomy diataxis frontmatter markdown linting graph node edge serialization readme reference tutorial how-to explanation mode domain mkdocs obsidian
 pattern: documentation|docs|catalog|diataxis|taxonomy|doclint|document.*(structure|model|graph|classif)
 files: README\.md$|docs/.*\.md$|mkdocs\.ya?ml$
-embed_threshold: 0.30
 macro: prepend
 scope: agent, subagent
 requires: ["Bash(chmod:*)", "Bash(cp:*)", "Bash(mkdir:*)", "Bash(touch:*)"]

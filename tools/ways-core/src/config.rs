@@ -44,42 +44,30 @@ pub struct Config {
     /// per-way knobs to user-scope `apply_yaml` would have to also touch
     /// this field, which sits right next to a load-bearing doc comment.
     pub(crate) disabled_ways: Vec<String>,
-    /// Parent-boost multiplier: a child way's effective embed_threshold is
-    /// multiplied by this value when any ancestor way has fired in the
-    /// session. Values <1.0 make children fire more easily once their parent
-    /// domain is active (progressive disclosure). 1.0 disables the boost.
+    /// Parent-boost multiplier: a child way's effective semantic fire
+    /// probability is multiplied by this value when any ancestor way has fired
+    /// in the session. Values <1.0 make children fire more easily once their
+    /// parent domain is active (progressive disclosure). 1.0 disables the boost.
+    /// (ADR-156: applies in calibrated probability space, not raw cosine.)
     pub parent_threshold_multiplier: f64,
-    /// Minimum effective threshold after parent-boost. Without a floor,
+    /// Minimum effective fire probability after parent-boost. Without a floor,
     /// cascading boosts can push children into the noise band where any
-    /// generic-word collision fires. Default 0.40 — just below the per-way
-    /// default but well above the multilingual-corpus noise floor (~0.30).
+    /// generic-word collision fires. A calibrated probability (ADR-156).
     pub parent_boost_floor: f64,
-    /// Default cosine threshold for the English model/corpus path.
-    /// Used when a way's frontmatter doesn't specify embed_threshold.
-    /// The EN model (384-dim, English-only) has sharper discrimination
-    /// than the multilingual model, so this can sit lower.
-    pub default_embed_threshold: f64,
-    /// Default cosine threshold for the multilingual model/corpus path.
-    /// The multilingual model (768-dim, 52 languages) has coarser
-    /// discrimination and produces a wider noise band, so multi-corpus
-    /// matches need a stricter bar. Kept separate from EN — the two
-    /// models produce scores in different distributions, so comparing
-    /// them directly (max, average) is apples-to-oranges.
-    pub default_multi_embed_threshold: f64,
-    /// Keyword gate fraction (ADR-155). A `pattern:` hit on the prompt/task
-    /// surface fires only if the way's embedding score also clears
-    /// `keyword_gate_fraction × effective_threshold` on at least one model
-    /// lane. The gate vetoes lexical coincidence (a pasted URL containing
-    /// "github", "I remember the tektronix…") using the score the batch
-    /// embedding pass already computed — it adds no model work. 0.0 disables
-    /// the gate (every pattern hit fires, the pre-ADR-155 behavior); ways can
-    /// opt out individually with `pattern_strict: true`. Default 0.4: on the
-    /// default EN threshold (0.40) the floor is 0.16, which sits above every
-    /// observed false fire (0.04–0.15) and below every observed true fire at
-    /// decision time — including multi-word intent phrases ("ship it",
-    /// 0.17–0.18), which score lower than topical prompts (0.26+) but are
-    /// deliberate pattern authorship, not lexical coincidence.
-    pub keyword_gate_fraction: f64,
+    /// Semantic fire probability τ_s (ADR-156). A way fires on its own
+    /// relatedness when the calibrated probability `g_m(cos) ≥ τ_s` on at least
+    /// one model lane. Replaces the raw-cosine `default_embed_threshold`:
+    /// calibration makes the boundary comparable across ways, so one global
+    /// probability suffices where per-way cosine thresholds were needed before.
+    /// Default 0.5 — the calibrated intent/noise decision boundary.
+    pub semantic_fire_probability: f64,
+    /// Keyword floor probability τ_k (ADR-156). A `pattern:` hit on the
+    /// prompt/task surface fires only if the calibrated probability
+    /// `g_m(cos) ≥ τ_k` on at least one model lane. Independent of `τ_s`
+    /// (retires `keyword_gate_fraction` and its coupling to the semantic
+    /// threshold): a leaky keyword is tightened by raising τ_k without moving
+    /// the semantic bar. Ways opt out with `pattern_strict: true`. Default 0.15.
+    pub keyword_floor_probability: f64,
     /// Near-miss margin (ADR-134). A way that did NOT fire is logged as a
     /// `way_nearmiss` telemetry event when at least one model's score landed
     /// within this much *below* its effective threshold (`thr - margin <=
@@ -138,10 +126,9 @@ impl Default for Config {
             disabled_domains: Vec::new(),
             disabled_ways: Vec::new(),
             parent_threshold_multiplier: 0.8,
-            parent_boost_floor: 0.40,
-            default_embed_threshold: 0.40,
-            default_multi_embed_threshold: 0.55,
-            keyword_gate_fraction: 0.4,
+            parent_boost_floor: 0.30,
+            semantic_fire_probability: 0.5,
+            keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
             refire_presets,
             settings_schema_url: None,
@@ -214,6 +201,17 @@ impl Config {
         }
     }
 
+    /// Read a probability-valued config key, clamped to `[0, 1]`, warning on an
+    /// out-of-range value. `None` when the key is absent or non-numeric.
+    fn read_probability(doc: &serde_yaml::Value, key: &str) -> Option<f64> {
+        let v = doc.get(key)?.as_f64()?;
+        let clamped = v.clamp(0.0, 1.0);
+        if !(0.0..=1.0).contains(&v) {
+            eprintln!("[ways] config: {key} {v} out of range, clamped to {clamped}");
+        }
+        Some(clamped)
+    }
+
     /// Apply values from a YAML config file.
     fn apply_yaml(&mut self, content: &str) {
         let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
@@ -242,27 +240,31 @@ impl Config {
         if let Some(v) = doc.get("parent_boost_floor").and_then(|v| v.as_f64()) {
             self.parent_boost_floor = v;
         }
-        if let Some(v) = doc.get("default_embed_threshold").and_then(|v| v.as_f64()) {
-            self.default_embed_threshold = v;
+        // Probabilities live in [0, 1]; a value outside that range is a config
+        // typo that must not silently invert firing.
+        if let Some(v) = Self::read_probability(&doc, "semantic_fire_probability") {
+            self.semantic_fire_probability = v;
         }
-        if let Some(v) = doc.get("default_multi_embed_threshold").and_then(|v| v.as_f64()) {
-            self.default_multi_embed_threshold = v;
-        }
-        if let Some(v) = doc.get("keyword_gate_fraction").and_then(|v| v.as_f64()) {
-            // Clamp to [0, 1]. A fraction above 1.0 would put the gate floor
-            // ABOVE the fire threshold, silently suppressing pattern hits on
-            // ways whose embedding clears the full semantic bar — a config
-            // typo must not be able to invert the gate's meaning.
-            self.keyword_gate_fraction = v.clamp(0.0, 1.0);
-            if !(0.0..=1.0).contains(&v) {
-                eprintln!(
-                    "[ways] config: keyword_gate_fraction {v} out of range, clamped to {}",
-                    self.keyword_gate_fraction
-                );
-            }
+        if let Some(v) = Self::read_probability(&doc, "keyword_floor_probability") {
+            self.keyword_floor_probability = v;
         }
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
+        }
+        // ADR-156 retired the raw-cosine threshold config keys. A silently
+        // ignored key would revert an operator's deliberate tuning; name it and
+        // point at the replacement instead.
+        for (retired, replacement) in [
+            ("default_embed_threshold", "semantic_fire_probability"),
+            ("default_multi_embed_threshold", "semantic_fire_probability"),
+            ("keyword_gate_fraction", "keyword_floor_probability"),
+        ] {
+            if doc.get(retired).is_some() {
+                eprintln!(
+                    "[ways] config: `{retired}` was retired by ADR-156 (calibrated scoring) \
+                     and is ignored — use `{replacement}` (a probability in [0,1])."
+                );
+            }
         }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
@@ -388,9 +390,9 @@ mod tests {
         assert_eq!(cfg.language, "auto");
         assert_eq!(cfg.default_scope, "agent");
         assert_eq!(cfg.parent_threshold_multiplier, 0.8);
-        assert_eq!(cfg.parent_boost_floor, 0.40);
-        assert_eq!(cfg.default_embed_threshold, 0.40);
-        assert_eq!(cfg.default_multi_embed_threshold, 0.55);
+        assert_eq!(cfg.parent_boost_floor, 0.30);
+        assert_eq!(cfg.semantic_fire_probability, 0.5);
+        assert_eq!(cfg.keyword_floor_probability, 0.15);
         assert_eq!(cfg.refire_presets.get("once").copied(), Some(1.0));
         assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
         assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
@@ -452,13 +454,21 @@ mod tests {
     fn apply_yaml_threshold_fields() {
         let mut cfg = Config::default();
         cfg.apply_yaml(
-            "default_embed_threshold: 0.35\n\
-             default_multi_embed_threshold: 0.60\n\
-             parent_boost_floor: 0.30",
+            "semantic_fire_probability: 0.6\n\
+             keyword_floor_probability: 0.2\n\
+             parent_boost_floor: 0.25",
         );
-        assert_eq!(cfg.default_embed_threshold, 0.35);
-        assert_eq!(cfg.default_multi_embed_threshold, 0.60);
-        assert_eq!(cfg.parent_boost_floor, 0.30);
+        assert_eq!(cfg.semantic_fire_probability, 0.6);
+        assert_eq!(cfg.keyword_floor_probability, 0.2);
+        assert_eq!(cfg.parent_boost_floor, 0.25);
+    }
+
+    #[test]
+    fn probability_fields_clamp_out_of_range() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("semantic_fire_probability: 1.5\nkeyword_floor_probability: -0.2");
+        assert_eq!(cfg.semantic_fire_probability, 1.0);
+        assert_eq!(cfg.keyword_floor_probability, 0.0);
     }
 
     #[test]
@@ -539,7 +549,7 @@ mod tests {
             "ways:\n  \
              itops/incident:\n    \
              enabled: false\n    \
-             embed_threshold: 0.50\n",
+             future_reserved_key: 0.50\n",
         );
         assert_eq!(cfg.disabled_ways, vec!["itops/incident".to_string()]);
     }

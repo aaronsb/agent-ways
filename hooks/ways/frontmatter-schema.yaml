@@ -18,11 +18,6 @@ way:
       type: string
       required: conditional  # required if description present
       role: Space-separated domain keywords reinforcing the description (embedded as part of the canonical way alias per ADR-125)
-    embed_threshold:
-      type: number
-      required: optional
-      default: 0.35
-      role: Cosine similarity threshold for the embedding engine (0.0-1.0, higher = stricter). One per node (English frontmatter); no per-locale override — ADR-125.
     refire:
       type: scalar
       required: recommended

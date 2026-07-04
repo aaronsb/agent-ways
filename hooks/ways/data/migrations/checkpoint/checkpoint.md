@@ -2,7 +2,6 @@
 description: consolidating a long migration history into a single generated checkpoint baseline, and proving the baseline faithful by replay-and-diff before retiring the old files
 vocabulary: consolidate consolidation checkpoint baseline squash compact collapse rebaseline migration history archived replay diff drift snapshot faithful
 pattern: consolidat|checkpoint.?(baseline|migration|schema)|baseline.?(migration|schema|snapshot)|squash.?migration|compact.?migration|re-?baseline|collapse.?migration
-embed_threshold: 0.42
 scope: agent, subagent
 refire: rare
 ---

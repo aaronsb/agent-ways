@@ -18,7 +18,6 @@ Each way lives in `{domain}/{wayname}/{wayname}.md` with YAML frontmatter.
 ---
 description: what this way covers, in natural language
 vocabulary: domain specific keywords users would say
-embed_threshold: 0.35     # cosine similarity threshold (optional, per-way tuning)
 refire: 0.15              # firing cadence; see "Firing cadence" section below
 scope: agent
 ---

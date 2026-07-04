@@ -13,6 +13,7 @@
 //! the compliance operator surface lives in the `ways-audit` binary.
 
 pub mod agents;
+pub mod calibration;
 pub mod config;
 pub mod finding;
 pub mod firing;
