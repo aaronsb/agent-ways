@@ -148,11 +148,24 @@ fn phase_backup(ctx: &Ctx) -> Result<Vec<String>> {
         return Ok(vec![format!("copy {} files → {}", n, ctx.backup.display())]);
     }
     copy_tree(&ctx.dest, &ctx.backup, false)?;
-    // Postcondition: backup exists and holds ~the same number of files.
-    let got = count_files(&ctx.backup);
-    if got < n {
-        bail!("backup incomplete: {got}/{n} files copied to {}", ctx.backup.display());
+    // Postcondition: every *meaningful* source file made it into the backup.
+    // Compare by set, not raw count: macOS Spotlight can drop a `.DS_Store` into a
+    // directory between the pre-count and the copy, and such OS-transients aren't
+    // part of the user's tree — counting them made the backup fail spuriously on
+    // macOS only (the `43/44` flake). If a real file is ever missing, it's named.
+    let missing: Vec<String> = missing_files(&ctx.dest, &ctx.backup)
+        .into_iter()
+        .filter(|p| !is_os_transient(p))
+        .collect();
+    if !missing.is_empty() {
+        bail!(
+            "backup incomplete: {} source file(s) not in the backup at {}: {:?}",
+            missing.len(),
+            ctx.backup.display(),
+            missing,
+        );
     }
+    let got = count_files(&ctx.backup);
     Ok(vec![format!("backed up {got} files → {}", ctx.backup.display())])
 }
 
@@ -351,6 +364,41 @@ fn count_files(root: &Path) -> usize {
         .count()
 }
 
+/// Relative paths of the regular files under `root` (for diffing two trees).
+fn relative_files(root: &Path) -> std::collections::BTreeSet<String> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            e.path()
+                .strip_prefix(root)
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+/// Files present in `src` but not in `dst` (by relative path) — the backup gap.
+fn missing_files(src: &Path, dst: &Path) -> Vec<String> {
+    let have = relative_files(dst);
+    relative_files(src)
+        .into_iter()
+        .filter(|p| !have.contains(p))
+        .collect()
+}
+
+/// OS-created noise that isn't part of the user's `~/.claude` tree (macOS
+/// Spotlight, Windows Explorer). These get created/removed racily, so a backup
+/// that faithfully copies the real tree must not fail merely for missing one.
+fn is_os_transient(rel: &str) -> bool {
+    let base = Path::new(rel)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    matches!(base, ".DS_Store" | "Thumbs.db" | "desktop.ini") || base.starts_with("._")
+}
+
 fn git_run(dir: &Path, args: &[&str]) -> Result<()> {
     let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output()?;
     if !out.status.success() {
@@ -477,6 +525,31 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static SEQ: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn backup_tolerates_os_transients_but_flags_real_gaps() {
+        // A .DS_Store in the source but not the backup must NOT count as missing
+        // (the macOS-only flake); a genuinely-missing file still is.
+        let base = sandbox("transient");
+        let src = base.join("src");
+        let dst = base.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("real.txt"), "x").unwrap();
+        std::fs::write(src.join(".DS_Store"), "junk").unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("real.txt"), "x").unwrap(); // faithful copy of the real tree
+
+        let filter = |src: &Path, dst: &Path| -> Vec<String> {
+            missing_files(src, dst)
+                .into_iter()
+                .filter(|p| !is_os_transient(p))
+                .collect()
+        };
+        assert!(filter(&src, &dst).is_empty(), "the missing .DS_Store must be tolerated");
+
+        std::fs::write(src.join("lost.txt"), "y").unwrap();
+        assert_eq!(filter(&src, &dst), vec!["lost.txt".to_string()], "a real gap is reported");
+    }
 
     fn sandbox(tag: &str) -> PathBuf {
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
