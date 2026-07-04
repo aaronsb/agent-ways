@@ -73,10 +73,12 @@ pub struct Config {
     /// "github", "I remember the tektronix…") using the score the batch
     /// embedding pass already computed — it adds no model work. 0.0 disables
     /// the gate (every pattern hit fires, the pre-ADR-155 behavior); ways can
-    /// opt out individually with `pattern_strict: true`. Default 0.5: on the
-    /// default EN threshold (0.40) the floor is 0.20, which sits above every
-    /// observed false fire (0.09–0.15) and below every observed true fire
-    /// (0.28+) at decision time.
+    /// opt out individually with `pattern_strict: true`. Default 0.4: on the
+    /// default EN threshold (0.40) the floor is 0.16, which sits above every
+    /// observed false fire (0.04–0.15) and below every observed true fire at
+    /// decision time — including multi-word intent phrases ("ship it",
+    /// 0.17–0.18), which score lower than topical prompts (0.26+) but are
+    /// deliberate pattern authorship, not lexical coincidence.
     pub keyword_gate_fraction: f64,
     /// Near-miss margin (ADR-134). A way that did NOT fire is logged as a
     /// `way_nearmiss` telemetry event when at least one model's score landed
@@ -139,7 +141,7 @@ impl Default for Config {
             parent_boost_floor: 0.40,
             default_embed_threshold: 0.40,
             default_multi_embed_threshold: 0.55,
-            keyword_gate_fraction: 0.5,
+            keyword_gate_fraction: 0.4,
             near_miss_margin: 0.05,
             refire_presets,
             settings_schema_url: None,
@@ -247,7 +249,17 @@ impl Config {
             self.default_multi_embed_threshold = v;
         }
         if let Some(v) = doc.get("keyword_gate_fraction").and_then(|v| v.as_f64()) {
-            self.keyword_gate_fraction = v;
+            // Clamp to [0, 1]. A fraction above 1.0 would put the gate floor
+            // ABOVE the fire threshold, silently suppressing pattern hits on
+            // ways whose embedding clears the full semantic bar — a config
+            // typo must not be able to invert the gate's meaning.
+            self.keyword_gate_fraction = v.clamp(0.0, 1.0);
+            if !(0.0..=1.0).contains(&v) {
+                eprintln!(
+                    "[ways] config: keyword_gate_fraction {v} out of range, clamped to {}",
+                    self.keyword_gate_fraction
+                );
+            }
         }
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;

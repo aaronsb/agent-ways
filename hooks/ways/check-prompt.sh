@@ -41,8 +41,21 @@ export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 # Use --opt=value (not --opt value): a prompt may begin with '-' (e.g. the user
 # pastes "-spawn ..."), and the space form makes clap parse that as a flag.
 # The = form binds the value unambiguously even when it starts with a dash.
-"${HOME}/.claude/bin/ways" scan prompt \
+#
+# Deploy-order skew guard: if the projected hooks are newer than the
+# installed binary (reconcile ran before a rebuild), clap rejects the
+# unknown --response-context flag with a non-zero exit — which the
+# UserPromptSubmit contract reads as "block the prompt". Degrade to the
+# flagless pre-ADR-155 invocation rather than blocking every prompt.
+if ! OUTPUT=$("${HOME}/.claude/bin/ways" scan prompt \
   --query="$PROMPT" \
   --session="$SESSION_ID" \
   --project="$PROJECT_DIR" \
-  --response-context="$RESPONSE_CONTEXT"
+  --response-context="$RESPONSE_CONTEXT" 2>/dev/null); then
+  OUTPUT=$("${HOME}/.claude/bin/ways" scan prompt \
+    --query="$PROMPT" \
+    --session="$SESSION_ID" \
+    --project="$PROJECT_DIR")
+fi
+[[ -n "$OUTPUT" ]] && printf '%s\n' "$OUTPUT"
+exit 0

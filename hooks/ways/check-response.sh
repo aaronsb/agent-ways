@@ -32,7 +32,14 @@ STATE_FILE=$("${HOME}/.claude/bin/ways" response-topics-path "$SESSION_ID")
 # with the user's prompt on salience anyway.
 LAST_RESPONSE=$(tail -100 "$TRANSCRIPT" | grep '"type":"assistant"' | tail -1 | jq -r '.message.content[]?.text // empty' 2>/dev/null | head -c 2000)
 
-[[ -z "$LAST_RESPONSE" ]] && exit 0
+# Nothing extractable this turn (tool-use-only stop, no assistant line in
+# the tail window): clear the state instead of leaving a previous turn's
+# raw response to be re-embedded as if it were current. Stale context is
+# worse than none — it steers matching toward a topic that may be turns old.
+if [[ -z "$LAST_RESPONSE" ]]; then
+  rm -f "$STATE_FILE"
+  exit 0
+fi
 
 # Write state for next turn. jq -n builds the JSON so quotes/newlines in
 # the response can't break the document (the old heredoc could).

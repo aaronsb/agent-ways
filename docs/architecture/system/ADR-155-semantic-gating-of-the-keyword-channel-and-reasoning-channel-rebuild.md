@@ -99,25 +99,46 @@ score also clears a **gate floor**:
 gate_floor = keyword_gate_fraction × effective_threshold(way)
 ```
 
-with `keyword_gate_fraction` a global config value (default **0.5**), applied
-per model lane the same way fire thresholds are (EN and multi each gate on
-their own floor; clearing either lane passes). Parent-boost applies to the
-effective threshold before the fraction, so a keyword hit under a fired parent
-is gated more leniently — consistent with ADR-125's disclosure semantics.
+with `keyword_gate_fraction` a global config value (default **0.4**, clamped
+to [0, 1] on load — a fraction above 1.0 would put the floor above the fire
+threshold and invert the gate's meaning), applied per model lane the same way
+fire thresholds are (EN and multi each gate on their own floor; clearing
+either lane passes). Parent-boost applies to the effective threshold before
+the fraction, so a keyword hit under a fired parent is gated more leniently —
+consistent with ADR-125's disclosure semantics.
 
-With the defaults this yields floors of 0.14–0.20. Against the observed data:
-the three false fires above (0.09, 0.15, 0.22 vs floors 0.20, 0.175, 0.20) are
-suppressed or borderline; every observed true fire clears with margin.
+With the defaults this yields floors of 0.11–0.16. Against the observed data,
+three score bands emerge: lexical coincidences land at 0.04–0.15 (gated);
+multi-word intent phrases the pattern author deliberately encoded ("ship it"
+against the github way) land at 0.17–0.18 (must fire); topical prompts land
+at 0.26+ (fire with margin). The 0.4 fraction places the floor in the gap
+between the first two bands. Calibration review found 0.5 (floor 0.20)
+vetoed the intent-phrase band.
+
+A lane that ran but returned no row for a way that *is* embeddable (has
+description + vocabulary) is treated as a score of 0.0, not as absent signal:
+`way-embed` emits only non-negative cosines, so a missing row means negative
+cosine — the strongest "unrelated" verdict. Fail-open is reserved for cases
+with genuinely no evidence: the engine didn't run, or the way is trigger-only
+and cannot be in the corpus. This keeps the gate monotonic in relatedness
+(without it, the worst matches would out-fire mild ones).
 
 The gate is a *veto on noise*, not a second retrieval tier: the pattern
 remains the explicit trigger, and the score consulted is the one
 `batch_embed_score` already produced for the fire path. Zero additional model
-invocations; zero added latency.
+invocations on the common path; when part 3's response context contributed to
+the shared embed vector, a hit that lands below the floor is re-checked
+against a lazily computed prompt-only embedding before the veto stands — the
+user's own typed keyword must never be gated by what Claude said last turn.
+That second pass runs at most once per scan, only on turns where a hit was
+actually gated with response context present.
 
 **Escape hatch:** a way may declare `pattern_strict: true` in frontmatter to
-opt out of gating — for patterns that genuinely mean "fire on this exact
-token, always" (e.g. slash-command references like `/wrap`). The lint warns
-when `pattern_strict` is combined with common-word alternations.
+opt out of gating **and of §2's masking** — strict means "fire on exactly
+this text, always": slash-command references like `/wrap`, or patterns that
+deliberately target URL content (`github\.com/\S+/pull`), which the mask
+would otherwise hide from the regex lane. The lint warns when
+`pattern_strict` is combined with common-word alternations.
 
 **Telemetry:** a gated-off hit logs a `way_keyword_gated` event carrying
 `matched_span`, both scores, both floors — the same shape as `way_nearmiss`
@@ -132,17 +153,24 @@ URLs (`https?://\S+`) and fenced code blocks are masked out of the query
 **for the keyword channel only** before pattern matching. A pasted link
 containing "github" is not GitHub-workflow intent. The embed query is
 untouched — the ADR-130 salience reducer already handles long pasted content
-for that lane.
+for that lane. Ways whose patterns deliberately target URL or code content
+opt out with `pattern_strict: true` (§1's escape hatch covers both the gate
+and the mask).
 
 ### 3. Rebuild the response-topics channel
 
-`check-response.sh`'s 24-word grep whitelist is removed. The Stop hook instead
-passes the last assistant message through the ADR-130 sentence-salience
-reducer (exposed via the `ways` binary so the hook stays a thin dispatcher)
-and stores the reduced text. On the next prompt scan, that stored text feeds
-**only the embed query, never the regex query**. The keyword channel matches
-what the user actually typed; the semantic channel sees user intent *plus*
-what Claude was just reasoning about.
+`check-response.sh`'s 24-word grep whitelist is removed. The Stop hook stores
+the last assistant message **raw** (bounded excerpt) — no extraction at Stop
+time at all; the ADR-130 sentence-salience reducer selects what matters at
+scan time, where it already runs on every prompt. On the next prompt scan,
+that stored text rides a separate `--response-context` flag and feeds **only
+the embed query, never the regex query**. The keyword channel matches what
+the user actually typed; the semantic channel sees user intent *plus* what
+Claude was just reasoning about. A turn with nothing extractable (tool-only
+stop) clears the state file rather than leaving a stale response to be
+re-embedded as current. The hook degrades to the flagless invocation if the
+installed binary predates the flag, so a hooks-before-binary deploy order
+cannot block prompts.
 
 This is the fix for under-firing on Claude's own reasoning: full-sentence
 salient content replaces a fixed vocabulary, and it reaches the lane designed
@@ -221,7 +249,7 @@ protecting the transition.
   alone; "why didn't my pattern fire" now has a second cause. Introspect
   surfacing the gated row is the answer path.
 - Behavior change for existing installs: some previously-firing ways go
-  quiet. The gate defaults are deliberately loose (0.5 × threshold) and
+  quiet. The gate defaults are deliberately loose (0.4 × threshold) and
   telemetry-adjustable.
 
 ### Neutral

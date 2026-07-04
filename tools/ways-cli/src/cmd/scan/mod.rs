@@ -61,6 +61,17 @@ pub(crate) struct WayCandidate {
     pub trigger_path: Option<String>,
 }
 
+impl WayCandidate {
+    /// Whether this way can appear in the embedding corpus. Mirrors the corpus
+    /// builder's gate (`cmd::corpus`): an entry needs both a description and a
+    /// vocabulary. The keyword gate (ADR-155) uses this to tell "the way was
+    /// never embedded" (fail open) apart from "the lane ran and scored this
+    /// way below way-embed's 0.0 emission floor" (gate on 0.0).
+    fn embeddable(&self) -> bool {
+        !self.description.is_empty() && !self.vocabulary.is_empty()
+    }
+}
+
 // ── Prompt scan ─────────────────────────────────────────────────
 
 /// Match user prompt against ways and emit matched bodies for the agent.
@@ -111,6 +122,16 @@ pub fn prompt(
     let masked = mask_nonlinguistic(query);
     let gate_fraction = crate::config::global().keyword_gate_fraction;
 
+    // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
+    // review): the shared embed vector mixes the response context in, which
+    // can dilute a way's score below the gate floor even though the USER's
+    // text carries the keyword — a terse "ship it" after an off-topic
+    // response must not be vetoed by that response. Only turns where a hit
+    // actually lands below the floor pay the second embed pass, and only
+    // when response context contributed at all.
+    let response_contributed = embed_input != query;
+    let mut prompt_only_scores: Option<EmbedScores> = None;
+
     let mut context = String::new();
 
     for way in &candidates {
@@ -121,17 +142,46 @@ pub fn prompt(
             continue;
         }
 
+        // pattern_strict means "this exact text, always": it bypasses the
+        // mask as well as the gate, so a strict pattern can target URL or
+        // code-fence content the mask would otherwise hide (ADR-155 §2).
+        let regex_text: &str = if way.pattern_strict { query } else { &masked };
+        let thresholds = effective_thresholds(way, session_id);
+
         // Additive matching: pattern OR semantic
-        match match_prompt(
-            &masked,
+        let mut outcome = match_prompt(
+            regex_text,
             &way.pattern,
             way.pattern_strict,
+            way.embeddable(),
             &way.corpus_id,
-            effective_thresholds(way, session_id),
+            thresholds,
             &embed_matches,
             near_miss_margin,
             gate_fraction,
-        ) {
+        );
+
+        // Gate re-check against the prompt alone before accepting the veto.
+        if let PromptMatch::KeywordGated(_) = outcome {
+            if response_contributed {
+                let scores = prompt_only_scores.get_or_insert_with(|| {
+                    batch_embed_score(&reduce::reduce_for_embed(query, BUDGET_PROMPT))
+                });
+                outcome = match_prompt(
+                    regex_text,
+                    &way.pattern,
+                    way.pattern_strict,
+                    way.embeddable(),
+                    &way.corpus_id,
+                    thresholds,
+                    scores,
+                    near_miss_margin,
+                    gate_fraction,
+                );
+            }
+        }
+
+        match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
                 let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref());
                 if !out.is_empty() {
@@ -204,10 +254,13 @@ pub fn task(
             continue;
         }
 
+        // Same strict semantics as the prompt surface: bypass mask + gate.
+        let regex_text: &str = if way.pattern_strict { query } else { &masked };
         match match_prompt(
-            &masked,
+            regex_text,
             &way.pattern,
             way.pattern_strict,
+            way.embeddable(),
             &way.corpus_id,
             effective_thresholds(way, session_id),
             &embed_matches,
@@ -327,10 +380,13 @@ pub fn command(
         let t = effective_thresholds(way, session_id);
         let score_en = embed_matches.best_en(&way.corpus_id);
         let score_multi = embed_matches.best_multi(&way.corpus_id);
+        // `semantic:` prefix keeps every consumer that special-cases semantic
+        // channels (drill-down's "no recoverable term" note, span handling)
+        // treating this lane correctly.
         let fired = if score_en.is_some_and(|s| s >= t.en) {
-            Some(("bash:semantic:en", score_en))
+            Some(("semantic:bash:en", score_en))
         } else if score_multi.is_some_and(|s| s >= t.multi) {
-            Some(("bash:semantic:multi", score_multi))
+            Some(("semantic:bash:multi", score_multi))
         } else {
             None
         };
@@ -513,6 +569,7 @@ fn match_prompt(
     query: &str,
     pattern: &Option<String>,
     pattern_strict: bool,
+    embeddable: bool,
     corpus_id: &str,
     thresholds: EffectiveThresholds,
     scores: &EmbedScores,
@@ -526,18 +583,28 @@ fn match_prompt(
     // fires only if the way's embedding score also clears
     // `gate_fraction × effective_threshold` on at least one model lane. The
     // gate consumes scores the batch pass already computed — no extra model
-    // work. It fails OPEN when no lane produced a score (engine unavailable,
-    // way absent from the corpus): with no semantic evidence either direction,
-    // the author's explicit trigger stands. `pattern_strict: true` and
-    // `gate_fraction: 0.0` both restore unconditional keyword fires.
+    // work. It fails OPEN when there is genuinely no semantic evidence either
+    // direction — the engine didn't run, or the way isn't embeddable (no
+    // description/vocabulary, so it can't be in the corpus): the author's
+    // explicit trigger stands. But a lane that RAN and has no row for an
+    // embeddable way is not absence of signal — way-embed emits only scores
+    // ≥ 0.0, so a missing row means negative cosine, the strongest
+    // "unrelated" verdict there is. That resolves to 0.0 here, keeping the
+    // gate monotonic in relatedness (the worst matches must not out-fire
+    // mild ones). `pattern_strict: true` and `gate_fraction: 0.0` both
+    // restore unconditional keyword fires.
     // A pattern miss is never a near-miss (there is no margin to be near).
     if let Some(ref pat) = pattern {
         if let Some(span) = regex_span(pat, query) {
             let floor_en = thresholds.en * gate_fraction;
             let floor_multi = thresholds.multi * gate_fraction;
-            let no_signal = score_en.is_none() && score_multi.is_none();
-            let clears = score_en.is_some_and(|s| s >= floor_en)
-                || score_multi.is_some_and(|s| s >= floor_multi);
+            let gate_en =
+                score_en.or_else(|| (embeddable && scores.en.is_some()).then_some(0.0));
+            let gate_multi =
+                score_multi.or_else(|| (embeddable && scores.multi.is_some()).then_some(0.0));
+            let no_signal = gate_en.is_none() && gate_multi.is_none();
+            let clears = gate_en.is_some_and(|s| s >= floor_en)
+                || gate_multi.is_some_and(|s| s >= floor_multi);
             if pattern_strict || no_signal || clears {
                 return PromptMatch::Fired {
                     channel: "keyword".to_string(),
@@ -547,8 +614,8 @@ fn match_prompt(
             }
             return PromptMatch::KeywordGated(KeywordGated {
                 matched_span: span,
-                score_en,
-                score_multi,
+                score_en: gate_en,
+                score_multi: gate_multi,
                 floor_en,
                 floor_multi,
             });
@@ -661,6 +728,10 @@ fn log_keyword_gated(
 ) {
     let fmt = |v: Option<f64>| v.map(|s| format!("{s:.4}")).unwrap_or_default();
     let domain = way.id.split('/').next().unwrap_or(&way.id);
+    // token_position mirrors way_fired (show/mod.rs): the introspection join
+    // clusters gated rows into the same turns as fires, so they must carry
+    // the same position signal instead of an implicit 0.
+    let token_pos = session::get_token_position(session_id);
     session::log_event(&[
         ("event", "way_keyword_gated"),
         ("way", &way.id),
@@ -675,6 +746,7 @@ fn log_keyword_gated(
         ("scope", scope),
         ("project", project_dir),
         ("session", session_id),
+        ("token_position", &token_pos.to_string()),
     ]);
 }
 
@@ -816,8 +888,10 @@ mod near_miss_tests {
         }
     }
 
-    /// Production-default gate fraction (0.5): keyword floors sit at half the
-    /// fire thresholds — 0.20 EN / 0.275 multi against [`THR`].
+    /// Test gate fraction (0.5, round arithmetic): keyword floors sit at half
+    /// the fire thresholds — 0.20 EN / 0.275 multi against [`THR`]. The
+    /// production default is 0.4 (config.rs), calibrated so multi-word intent
+    /// phrases ("ship it" ≈ 0.17) clear while lexical coincidences (≤0.15) gate.
     const GATE: f64 = 0.5;
 
     fn run(en: Option<f64>, multi: Option<f64>, pattern: Option<&str>) -> PromptMatch {
@@ -831,13 +905,24 @@ mod near_miss_tests {
         strict: bool,
         gate_fraction: f64,
     ) -> PromptMatch {
+        run_full(scores(en, multi), pattern, strict, true, gate_fraction)
+    }
+
+    fn run_full(
+        scores: EmbedScores,
+        pattern: Option<&str>,
+        strict: bool,
+        embeddable: bool,
+        gate_fraction: f64,
+    ) -> PromptMatch {
         match_prompt(
             "query text",
             &pattern.map(|p| p.to_string()),
             strict,
+            embeddable,
             "w",
             THR,
-            &scores(en, multi),
+            &scores,
             MARGIN,
             gate_fraction,
         )
@@ -976,10 +1061,38 @@ mod near_miss_tests {
     }
 
     #[test]
-    fn gate_fails_open_without_any_embed_signal() {
-        // Engine unavailable / way absent from corpus: the explicit trigger stands.
+    fn gate_fails_open_when_no_lane_ran() {
+        // Engine unavailable: the explicit trigger stands.
         assert!(matches!(run(None, None, Some("query")),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn missing_row_on_a_ran_lane_gates_an_embeddable_way() {
+        // way-embed emits only scores >= 0.0: a lane that ran with no row for
+        // an embeddable way means NEGATIVE cosine — the strongest "unrelated"
+        // signal. It must gate (as 0.0), not fail open, or the worst matches
+        // out-fire mild ones (gate monotonicity, ADR-155 review).
+        let lane_ran_no_row = EmbedScores { en: Some(vec![]), multi: None };
+        match run_full(lane_ran_no_row, Some("query"), false, true, GATE) {
+            PromptMatch::KeywordGated(kg) => {
+                assert_eq!(kg.score_en, Some(0.0), "missing row resolves to 0.0");
+                assert_eq!(kg.score_multi, None, "lane that didn't run stays None");
+            }
+            other => panic!("expected KeywordGated, got {}", discriminant(&other)),
+        }
+    }
+
+    #[test]
+    fn non_embeddable_way_fails_open_even_when_lanes_ran() {
+        // A trigger-only way (no description/vocabulary) can't be in the
+        // corpus; a missing row says nothing about it. The explicit trigger
+        // stands.
+        let lane_ran_no_row = EmbedScores { en: Some(vec![]), multi: None };
+        assert!(matches!(
+            run_full(lane_ran_no_row, Some("query"), false, false, GATE),
+            PromptMatch::Fired { channel: c, .. } if c == "keyword"
+        ));
     }
 
     #[test]

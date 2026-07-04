@@ -105,8 +105,9 @@ pub struct MatchDetail {
 pub struct FiredWay {
     pub way_id: String,
     /// The match *channel* the event recorded: `keyword` / `semantic:embedding:*`
-    /// / `bash` / `file` / `state`. Gated rows carry `keyword:gated`. The
-    /// mechanism, never the matched term.
+    /// / `semantic:bash:*` (the PreToolUse embed lane, ADR-155 §4) / `bash` /
+    /// `file` / `state`. Gated rows carry `keyword:gated`. The mechanism,
+    /// never the matched term.
     pub trigger_channel: String,
     /// `true` for a suppressed candidate (ADR-155 keyword gate) — the pattern
     /// matched (see `match_detail`) but the way did not fire.

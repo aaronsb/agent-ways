@@ -485,6 +485,8 @@ pub fn format_trigger(trigger: &str) -> String {
         "semantic:embedding" | "semantic" => "embed".to_string(),
         "semantic:embedding:en" => "embed:en".to_string(),
         "semantic:embedding:multi" => "embed:multi".to_string(),
+        "semantic:bash:en" => "embed:bash:en".to_string(),
+        "semantic:bash:multi" => "embed:bash:multi".to_string(),
         "keyword" => "keyword".to_string(),
         "check-pull" => "check-pull".to_string(),
         "bash" | "file" | "state" => trigger.to_string(),
