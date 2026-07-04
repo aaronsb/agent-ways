@@ -201,6 +201,17 @@ impl Config {
         }
     }
 
+    /// Read a probability-valued config key, clamped to `[0, 1]`, warning on an
+    /// out-of-range value. `None` when the key is absent or non-numeric.
+    fn read_probability(doc: &serde_yaml::Value, key: &str) -> Option<f64> {
+        let v = doc.get(key)?.as_f64()?;
+        let clamped = v.clamp(0.0, 1.0);
+        if !(0.0..=1.0).contains(&v) {
+            eprintln!("[ways] config: {key} {v} out of range, clamped to {clamped}");
+        }
+        Some(clamped)
+    }
+
     /// Apply values from a YAML config file.
     fn apply_yaml(&mut self, content: &str) {
         let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
@@ -229,28 +240,31 @@ impl Config {
         if let Some(v) = doc.get("parent_boost_floor").and_then(|v| v.as_f64()) {
             self.parent_boost_floor = v;
         }
-        if let Some(v) = doc.get("semantic_fire_probability").and_then(|v| v.as_f64()) {
-            // Probabilities live in [0, 1]; a value outside that range is a
-            // config typo that must not silently invert firing.
-            self.semantic_fire_probability = v.clamp(0.0, 1.0);
-            if !(0.0..=1.0).contains(&v) {
-                eprintln!(
-                    "[ways] config: semantic_fire_probability {v} out of range, clamped to {}",
-                    self.semantic_fire_probability
-                );
-            }
+        // Probabilities live in [0, 1]; a value outside that range is a config
+        // typo that must not silently invert firing.
+        if let Some(v) = Self::read_probability(&doc, "semantic_fire_probability") {
+            self.semantic_fire_probability = v;
         }
-        if let Some(v) = doc.get("keyword_floor_probability").and_then(|v| v.as_f64()) {
-            self.keyword_floor_probability = v.clamp(0.0, 1.0);
-            if !(0.0..=1.0).contains(&v) {
-                eprintln!(
-                    "[ways] config: keyword_floor_probability {v} out of range, clamped to {}",
-                    self.keyword_floor_probability
-                );
-            }
+        if let Some(v) = Self::read_probability(&doc, "keyword_floor_probability") {
+            self.keyword_floor_probability = v;
         }
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
+        }
+        // ADR-156 retired the raw-cosine threshold config keys. A silently
+        // ignored key would revert an operator's deliberate tuning; name it and
+        // point at the replacement instead.
+        for (retired, replacement) in [
+            ("default_embed_threshold", "semantic_fire_probability"),
+            ("default_multi_embed_threshold", "semantic_fire_probability"),
+            ("keyword_gate_fraction", "keyword_floor_probability"),
+        ] {
+            if doc.get(retired).is_some() {
+                eprintln!(
+                    "[ways] config: `{retired}` was retired by ADR-156 (calibrated scoring) \
+                     and is ignored — use `{replacement}` (a probability in [0,1])."
+                );
+            }
         }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {

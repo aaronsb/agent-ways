@@ -56,6 +56,9 @@ fn sigmoid(z: f64) -> f64 {
 /// its separability. Returns `None` when there is nothing to fit (empty, or all
 /// one class — no gradient toward a boundary).
 pub fn fit(samples: &[(f64, bool)]) -> Option<ModelCalibration> {
+    // Drop non-finite cosines (a stray "nan"/"inf" token from the embedder would
+    // otherwise poison the fit and the sort in `auc`).
+    let samples: Vec<(f64, bool)> = samples.iter().copied().filter(|(c, _)| c.is_finite()).collect();
     if samples.len() < 2 {
         return None;
     }
@@ -63,11 +66,21 @@ pub fn fit(samples: &[(f64, bool)]) -> Option<ModelCalibration> {
     if pos == 0 || pos == samples.len() {
         return None; // single-class: no decision boundary to estimate
     }
-    let (a, b) = fit_logistic(samples);
+    let (a, b) = fit_logistic(&samples);
+    // Relevance must be monotonically increasing in cosine: a non-positive (or
+    // non-finite) slope means the probe data is degenerate or backwards. Reject
+    // rather than ship a calibration that maps higher cosine to lower probability.
+    if !a.is_finite() || a <= 0.0 {
+        return None;
+    }
+    // Measure separability on the FITTED predictor `a·x + b`, not raw cosine: a
+    // near-flat fit (a ≈ 0) scores ≈ 0.5 and fails the caller's AUC ship-gate,
+    // where raw-cosine separability alone would have passed it.
+    let scored: Vec<(f64, bool)> = samples.iter().map(|(x, l)| (a * x + b, *l)).collect();
     Some(ModelCalibration {
         a,
         b,
-        auc: auc(samples),
+        auc: auc(&scored),
         n: samples.len(),
     })
 }
@@ -119,7 +132,9 @@ pub fn auc(samples: &[(f64, bool)]) -> f64 {
     }
     // Rank scores ascending (average rank for ties), sum ranks of positives.
     let mut idx: Vec<usize> = (0..samples.len()).collect();
-    idx.sort_by(|&i, &j| samples[i].0.partial_cmp(&samples[j].0).unwrap());
+    // total_cmp is a total order over f64 (NaN-safe), so a stray non-finite
+    // score can never panic the sort.
+    idx.sort_by(|&i, &j| samples[i].0.total_cmp(&samples[j].0));
     let mut rank = vec![0.0; samples.len()];
     let mut i = 0;
     while i < idx.len() {
@@ -194,6 +209,35 @@ mod tests {
     fn fit_rejects_single_class() {
         assert!(fit(&[(0.5, true), (0.6, true)]).is_none());
         assert!(fit(&[]).is_none());
+    }
+
+    #[test]
+    fn fit_drops_non_finite_samples() {
+        let s = [
+            (0.20, false),
+            (f64::NAN, true),
+            (0.60, true),
+            (0.25, false),
+            (f64::INFINITY, false),
+            (0.65, true),
+        ];
+        let c = fit(&s).expect("fit from the finite subset");
+        assert!(c.a > 0.0);
+        assert_eq!(c.n, 4, "NaN and inf dropped before fitting");
+    }
+
+    #[test]
+    fn fit_rejects_inverted_slope() {
+        // Intent at low cosine, noise at high cosine → non-positive slope.
+        let s = [(0.8, false), (0.9, false), (0.1, true), (0.2, true)];
+        assert!(fit(&s).is_none(), "backwards probe data must not ship a calibration");
+    }
+
+    #[test]
+    fn auc_survives_non_finite_score() {
+        // total_cmp keeps the sort from panicking even on a NaN.
+        let s = [(0.1, false), (f64::NAN, true), (0.9, true)];
+        let _ = auc(&s); // must not panic
     }
 
     #[test]

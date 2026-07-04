@@ -591,6 +591,7 @@ fn match_prompt(
     // the way isn't embeddable, or no calibration is loaded: the author's
     // explicit trigger stands. `pattern_strict: true` restores an unconditional
     // keyword fire. A pattern miss is never a near-miss.
+    let mut gated: Option<KeywordGated> = None;
     if let Some(ref pat) = pattern {
         if let Some(span) = regex_span(pat, query) {
             let no_signal = prob_en.is_none() && prob_multi.is_none();
@@ -603,7 +604,11 @@ fn match_prompt(
                     matched_span: Some(span),
                 };
             }
-            return PromptMatch::KeywordGated(KeywordGated {
+            // Gated — but τ_k and τ_s are independent (ADR-156), so τ_k may sit
+            // above τ_s. Hold the veto and let the semantic lane fire first;
+            // matching stays additive-OR (a gated keyword never shadows a way
+            // that clears the semantic bar).
+            gated = Some(KeywordGated {
                 matched_span: span,
                 prob_en,
                 prob_multi,
@@ -628,6 +633,12 @@ fn match_prompt(
             score: prob_multi,
             matched_span: None,
         };
+    }
+
+    // A keyword hit that was gated and whose way did not clear the semantic bar
+    // is a vetoed lexical coincidence — report it (preempts near-miss logging).
+    if let Some(kg) = gated {
+        return PromptMatch::KeywordGated(kg);
     }
 
     // No fire. Record a near-miss when a lane's probability landed in the band
@@ -1100,6 +1111,20 @@ mod near_miss_tests {
         // keyword channel (gate passes trivially).
         assert!(matches!(run(Some(0.35), None, Some("query")),
             PromptMatch::Fired { channel: c, .. } if c == "keyword"));
+    }
+
+    #[test]
+    fn high_keyword_floor_does_not_shadow_a_semantic_fire() {
+        // τ_k (0.6) > τ_s (0.5): a pattern hit at cos 0.27 (g ≈ 0.55) fails the
+        // keyword floor but clears the semantic bar — it must fire semantically,
+        // not be vetoed by the gate (ADR-156: τ_k and τ_s are independent).
+        let outcome = match_prompt(
+            "query text", &Some("query".to_string()), false, true, "w",
+            THR, &scores(Some(0.27), None), MARGIN, 0.6,
+        );
+        assert!(matches!(outcome,
+            PromptMatch::Fired { channel: ref c, .. } if c == "semantic:embedding:en"),
+            "got {:?}", discriminant(&outcome));
     }
 
     // ── ADR-155 §2: masking the keyword lane ─────────────────────

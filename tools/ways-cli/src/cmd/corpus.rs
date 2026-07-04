@@ -789,21 +789,35 @@ fn fit_calibration(
         })
         .collect();
 
+    // Build (prompt, alias) pairs once — they are model-independent. A probe
+    // whose `way` has no corpus alias (a renamed/removed way) is dropped; log the
+    // count so path drift that would starve the fit is visible, not silent.
+    let mut pairs = Vec::new();
+    let mut labels = Vec::new();
+    for (prompt, way, lbl) in &probes {
+        if let Some(alias) = aliases.get(way) {
+            // Guard the TSV framing: a tab/newline in a prompt or alias would
+            // mispair the similarity input.
+            let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
+            pairs.push(format!("{}\t{}", clean(prompt), clean(alias)));
+            labels.push(*lbl);
+        }
+    }
+    let dropped = probes.len() - pairs.len();
+    if dropped > 0 {
+        log(&format!(
+            "  calibration: {dropped}/{} probes reference a way not in the corpus (dropped)",
+            probes.len()
+        ));
+    }
+    if pairs.len() < 2 {
+        log("  calibration: too few usable probes — left uncalibrated");
+        return Calibration::default();
+    }
+
     let fit_lane = |model_name: &str, label: &str| -> Option<ways_core::calibration::ModelCalibration> {
         let model = engine_dir.join(model_name);
         if !model.is_file() {
-            return None;
-        }
-        // (prompt, alias) pairs for probes whose way has an alias in the corpus.
-        let mut pairs = Vec::new();
-        let mut labels = Vec::new();
-        for (prompt, way, lbl) in &probes {
-            if let Some(alias) = aliases.get(way) {
-                pairs.push(format!("{prompt}\t{alias}"));
-                labels.push(*lbl);
-            }
-        }
-        if pairs.len() < 2 {
             return None;
         }
         let cosines = batch_similarity(&bin, &model, &pairs)?;
@@ -815,7 +829,7 @@ fn fit_calibration(
             ));
             return None;
         }
-        let samples: Vec<(f64, bool)> = cosines.into_iter().zip(labels).collect();
+        let samples: Vec<(f64, bool)> = cosines.into_iter().zip(labels.iter().copied()).collect();
         let cal = ways_core::calibration::fit(&samples)?;
         if cal.auc < AUC_FLOOR {
             log(&format!(
@@ -832,6 +846,10 @@ fn fit_calibration(
     };
 
     let en = fit_lane("minilm-l6-v2.gguf", "en");
+    // The multi lane is fit from the ENGLISH probe corpus and aliases. That is
+    // correct for the English target; in localized mode the multi model scores
+    // translated text, so this calibration is approximate until a localized
+    // probe corpus ships (ADR-156 names multilingual calibration a follow-on).
     let multi = fit_lane("multilingual-minilm-l12-v2-q8.gguf", "multi");
     Calibration { en, multi }
 }
@@ -842,10 +860,15 @@ fn load_aliases(corpus: &Path) -> Option<HashMap<String, String>> {
     let content = std::fs::read_to_string(corpus).ok()?;
     let mut m = HashMap::new();
     for line in content.lines() {
-        if line.trim().is_empty() {
+        let line = line.trim();
+        // Skip blanks and any non-JSON line rather than abandoning the whole
+        // map (and therefore all calibration) on a single malformed line.
+        if line.is_empty() {
             continue;
         }
-        let v: serde_json::Value = serde_json::from_str(line).ok()?;
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if let Some(id) = v["id"].as_str() {
             let desc = v["description"].as_str().unwrap_or("");
             let vocab = v["vocabulary"].as_str().unwrap_or("");

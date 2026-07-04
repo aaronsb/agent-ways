@@ -76,9 +76,6 @@ pub struct MatchCriteria {
     /// Semantic channel — the vocabulary the way's embedding is built from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vocabulary: Option<String>,
-    /// Semantic firing threshold (way-level cosine cutoff).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub embed_threshold: Option<f64>,
     /// Scope constraint (e.g. `subagent`, `teammate`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
@@ -432,7 +429,6 @@ impl MatchCriteria {
             files: get("files"),
             trigger: get("trigger"),
             vocabulary: get("vocabulary"),
-            embed_threshold: str_or_num_f64(&map["embed_threshold"]),
             scope: get("scope"),
         }
     }
@@ -572,14 +568,12 @@ files:
   - src/**/*.rs
   - README.md
 vocabulary: commit changes
-embed_threshold: 0.42
 scope: subagent
 ";
         let c = MatchCriteria::from_frontmatter_str(fm);
         assert_eq!(c.pattern.as_deref(), Some("foo|bar"));
         assert_eq!(c.files.as_deref(), Some("src/**/*.rs, README.md")); // list joined
         assert_eq!(c.vocabulary.as_deref(), Some("commit changes"));
-        assert_eq!(c.embed_threshold, Some(0.42));
         assert_eq!(c.scope.as_deref(), Some("subagent"));
         assert!(c.commands.is_none()); // absent stays None
     }

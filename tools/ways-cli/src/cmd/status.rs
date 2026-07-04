@@ -54,6 +54,13 @@ pub fn run(json_output: bool) -> Result<()> {
         .unwrap_or("")
         .to_string();
 
+    // ADR-156 calibration: the semantic lane fires only when a calibration is
+    // present. Surface it so a corpus that predates calibration (semantic lane
+    // silently keyword-only) is visible rather than a mystery.
+    let calibration = manifest.as_ref().and_then(|m| m.get("calibration"));
+    let cal_en_auc = calibration.and_then(|c| c["en"]["auc"].as_f64());
+    let cal_multi_auc = calibration.and_then(|c| c["multi"]["auc"].as_f64());
+
     // Project data from manifest
     let projects: Vec<serde_json::Value> = manifest
         .as_ref()
@@ -97,6 +104,11 @@ pub fn run(json_output: bool) -> Result<()> {
                 "path": corpus_path.display().to_string(),
                 "exists": corpus_exists,
                 "entries": corpus_count,
+            },
+            "calibration": {
+                "present": cal_en_auc.is_some(),
+                "en_auc": cal_en_auc,
+                "multi_auc": cal_multi_auc,
             },
             "manifest": {
                 "exists": manifest.is_some(),
@@ -158,6 +170,21 @@ pub fn run(json_output: bool) -> Result<()> {
             println!("  Multi corpus: {} ways", multi_count);
             if multi_count > 0 && !multi_model_path.is_file() {
                 println!("  ⚠ {} multilingual ways but model missing — run: make setup", multi_count);
+            }
+        }
+
+        // Calibration (ADR-156): without it the semantic lane cannot fire.
+        if corpus_exists {
+            match cal_en_auc {
+                Some(auc) => {
+                    let multi = cal_multi_auc
+                        .map(|a| format!(", multi AUC {a:.3}"))
+                        .unwrap_or_default();
+                    println!("Calibration: EN AUC {auc:.3}{multi}");
+                }
+                None => println!(
+                    "Calibration: MISSING — semantic lane disabled (keyword-only); run `ways corpus`"
+                ),
             }
         }
         println!();
