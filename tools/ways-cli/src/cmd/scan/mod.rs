@@ -4,6 +4,7 @@
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
 pub(crate) mod candidates;
+mod machine;
 mod reduce;
 mod scoring;
 mod state;
@@ -119,6 +120,22 @@ pub fn prompt(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
+    // ADR-160: when enabled, the chunked matching machine decides the semantic
+    // channel over the reduced surface (chunk → softmax-share → body-confirm),
+    // computed once here and consulted per way in match_prompt. It falls back to
+    // the single-vector gate (None) whenever it can't run. The keyword gate and
+    // near-miss telemetry keep using the single-vector batch scores either way.
+    let machine = if crate::config::global().matching_machine {
+        let bodies: std::collections::HashMap<String, PathBuf> = candidates
+            .iter()
+            .filter(|c| c.embeddable())
+            .map(|c| (c.corpus_id.clone(), c.path.clone()))
+            .collect();
+        machine::run(&reduced, &bodies)
+    } else {
+        None
+    };
+
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
     // can dilute a way's score below the gate floor even though the USER's
@@ -156,6 +173,7 @@ pub fn prompt(
             &embed_matches,
             near_miss_margin,
             keyword_floor,
+            machine.as_ref(),
         );
 
         // Gate re-check against the prompt alone before accepting the veto.
@@ -174,6 +192,7 @@ pub fn prompt(
                     scores,
                     near_miss_margin,
                     keyword_floor,
+                    machine.as_ref(),
                 );
             }
         }
@@ -263,6 +282,7 @@ pub fn task(
             &embed_matches,
             near_miss_margin,
             keyword_floor,
+            None, // ADR-160 machine is prompt-channel only for now
         ) {
             PromptMatch::Fired { channel, .. } => matched.push((way.id.clone(), channel)),
             PromptMatch::KeywordGated(kg) => {
@@ -575,6 +595,7 @@ fn match_prompt(
     scores: &EmbedScores,
     near_miss_margin: f64,
     keyword_floor: f64,
+    machine: Option<&machine::MachineVerdicts>,
 ) -> PromptMatch {
     // Calibrated relevance probability per lane (ADR-156). `None` means no
     // calibrated signal: the lane didn't run, the way isn't embeddable, or no
@@ -619,22 +640,34 @@ fn match_prompt(
         }
     }
 
-    // Channel 2: Embedding. Calibration makes probabilities comparable across
-    // models, so both lanes share one semantic threshold τ_s; either firing is
-    // sufficient.
-    if prob_en.is_some_and(|p| p >= tau_s) {
-        return PromptMatch::Fired {
-            channel: "semantic:embedding:en".to_string(),
-            score: prob_en,
-            matched_span: None,
-        };
-    }
-    if prob_multi.is_some_and(|p| p >= tau_s) {
-        return PromptMatch::Fired {
-            channel: "semantic:embedding:multi".to_string(),
-            score: prob_multi,
-            matched_span: None,
-        };
+    // Channel 2: Embedding. When the ADR-160 machine is engaged it owns the
+    // semantic decision for this way (chunk → softmax-share → body-confirm, run
+    // once upstream); otherwise the single-vector calibrated gate does —
+    // calibration makes probabilities comparable across models, so both lanes
+    // share one threshold τ_s and either firing is sufficient.
+    if let Some(m) = machine {
+        if let Some(share) = m.fired_score(corpus_id) {
+            return PromptMatch::Fired {
+                channel: "semantic:machine:en".to_string(),
+                score: Some(share),
+                matched_span: None,
+            };
+        }
+    } else {
+        if prob_en.is_some_and(|p| p >= tau_s) {
+            return PromptMatch::Fired {
+                channel: "semantic:embedding:en".to_string(),
+                score: prob_en,
+                matched_span: None,
+            };
+        }
+        if prob_multi.is_some_and(|p| p >= tau_s) {
+            return PromptMatch::Fired {
+                channel: "semantic:embedding:multi".to_string(),
+                score: prob_multi,
+                matched_span: None,
+            };
+        }
     }
 
     // A keyword hit that was gated and whose way did not clear the semantic bar
@@ -925,6 +958,7 @@ mod near_miss_tests {
             &scores,
             MARGIN,
             FLOOR,
+            None,
         )
     }
 
@@ -1152,7 +1186,7 @@ mod near_miss_tests {
         // not be vetoed by the gate (ADR-156: τ_k and τ_s are independent).
         let outcome = match_prompt(
             "query text", &Some("query".to_string()), false, true, "w",
-            THR, &scores(Some(0.27), None), MARGIN, 0.6,
+            THR, &scores(Some(0.27), None), MARGIN, 0.6, None,
         );
         assert!(matches!(outcome,
             PromptMatch::Fired { channel: ref c, .. } if c == "semantic:embedding:en"),

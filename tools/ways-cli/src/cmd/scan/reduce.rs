@@ -124,7 +124,7 @@ fn tokenize(s: &str) -> Vec<String> {
 /// double-newline boundaries. Cheap and good enough for prose; falls
 /// through to single-element on code/JSON/heredoc inputs (which the
 /// caller handles via the fallback path).
-fn split_sentences(s: &str) -> Vec<&str> {
+pub(crate) fn split_sentences(s: &str) -> Vec<&str> {
     let mut sentences = Vec::new();
     let bytes = s.as_bytes();
     let mut start = 0;

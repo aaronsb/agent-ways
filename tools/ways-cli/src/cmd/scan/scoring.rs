@@ -203,7 +203,7 @@ fn line_count(path: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
-fn find_way_embed() -> Option<std::path::PathBuf> {
+pub(crate) fn find_way_embed() -> Option<std::path::PathBuf> {
     let xdg = crate::paths::corpus_dir().join("way-embed");
     if xdg.is_file() { return Some(xdg); }
     let bin = crate::util::normalize_path_sep(&home_dir().join(".claude/bin/way-embed"));
