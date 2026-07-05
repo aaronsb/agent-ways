@@ -1,5 +1,15 @@
 ## Session Introspection — Implementation Plan
 
+> *Written during the ADR-153/154 sequencing work, before ADR-156 shipped
+> (pre-156). The body below still treats a semantic fire as raw cosine
+> `fire_score ≥ embed_threshold` (§ "No fabricated semantic 'why.'") — the
+> retired model. ADR-156 superseded that: a fire is now `g(s) ≥ τ_s` in
+> probability space, where `g(s) = σ(a·s + b)` is a per-model logistic fit at
+> corpus generation and `τ_s = 0.5` is a global threshold — there is no
+> `embed_threshold` frontmatter field and no per-way threshold. Preserved for the
+> reasoning that led here; for the shipped model see ADR-156 and
+> `../hooks-and-ways/engine-reference.md`.*
+
 > **Type:** Design note (not an ADR)
 > **Status:** Working draft — sequencing for ADR-153 + ADR-154, deferred implementation
 > **Cites:** ADR-153 (introspection substrate), ADR-154 (three front-ends), ADR-201 (shared finding evidence), ADR-134 (near-miss telemetry)

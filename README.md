@@ -146,7 +146,6 @@ Each way is a `{wayname}.md` file with YAML frontmatter in `~/.claude/hooks/ways
 ---
 description: semantic text    # embedding semantic matching (preferred)
 vocabulary: domain keywords   # space-separated terms augmenting the embedding
-embed_threshold: 0.35         # cosine similarity threshold (optional per-way tuning)
 pattern: commit|push          # regex on user prompts (supplementary)
 commands: git\ commit         # regex on bash commands
 files: \.env$                 # regex on file paths
@@ -155,7 +154,7 @@ scope: agent, subagent        # injection scope
 ---
 ```
 
-Matching is **additive** — regex and semantic are OR'd. A way with both can fire from either channel.
+Matching has two independent lanes. A way fires when the semantic probability `g(s)` clears the global threshold `τ_s`, **or** when a `pattern:`/`commands:`/`files:` regex matches *and* `g(s)` clears the lower keyword floor `τ_k`. The keyword lane is **floor-gated** — a regex hit can't drag in an unrelated prompt — except it fails open when no calibration is loaded, and `pattern_strict: true` bypasses the gate by design. See the [engine reference](docs/hooks-and-ways/engine-reference.md) for the exact fire rule.
 
 **Project-local ways** live in `$PROJECT/.claude/ways/{domain}/{wayname}/{wayname}.md` and override global ways with the same path. Project macros are disabled by default — trust a project with `echo "/path/to/project" >> ~/.claude/trusted-project-macros`.
 

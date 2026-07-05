@@ -434,7 +434,7 @@ The integral character arises because the human responds to *accumulated* error 
 
 The danger of integral control is **windup** — if the error persists for too long (because the human is disengaged), the accumulated correction can overshoot when finally applied. In LLM terms, this manifests as the frustrated user who issues an aggressive correction prompt ("You keep forgetting to run the tests! ALWAYS run tests after ANY code change!") that overcorrects and causes the model to run tests unnecessarily.
 
-The once-per-session gating of ways serves as **anti-windup**: it prevents the injection system from accumulating redundant corrections that would compound with an eventual human correction.
+The token-gated re-fire of ways serves as **anti-windup**: a way that has fired is suppressed from re-injecting until a set fraction of the context window has elapsed since its last fire (the `refire` interval, ADR-126 — see [engine-reference.md](engine-reference.md)), which prevents the injection system from accumulating redundant corrections that would compound with an eventual human correction.
 
 ---
 

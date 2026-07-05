@@ -49,7 +49,7 @@ Three of these six channels have no RAG equivalent. You can't embed a `git commi
 
 In a standard RAG pipeline, each chunk's retrieval probability depends only on its similarity to the current query. Prior retrievals don't change future retrieval behavior.
 
-Ways have **progressive disclosure trees**: when a parent way fires, its children's triggering thresholds drop by 20%. The system's sensitivity adapts within a session based on what context has already been established. If the security parent way has fired, security sub-topics become easier to trigger — because the conversational domain has been established.
+Ways have **progressive disclosure trees**: when a parent way fires, an in-domain child's semantic firing bar is lowered — in probability space, from the global relevance threshold `τ_s` (0.5) to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)`, i.e. `max(0.5 × 0.8, 0.30) = 0.40` by default (the multiplier lowers the bar; the floor stops cascading boosts from reaching the noise band — see [engine-reference.md](engine-reference.md)). The system's sensitivity adapts within a session based on what context has already been established. If the security parent way has fired, security sub-topics become easier to trigger — because the conversational domain has been established.
 
 This is a feedback loop in the retrieval system itself. Building this on top of RAG would require a separate state-tracking orchestration layer — at which point you've left RAG's architecture and built something closer to Ways.
 

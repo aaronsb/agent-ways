@@ -10,7 +10,7 @@ This is the self-referential way - it explains the ways system itself. It fires 
 
 Covers:
 - Way file format and all frontmatter fields
-- Matching modes (regex, semantic, model)
+- Matching lanes: regex keyword and calibrated semantic (see [engine-reference.md](engine-reference.md))
 - State triggers (context-threshold, file-exists, session-start)
 - The marker state machine
 - Project-local way creation and override semantics

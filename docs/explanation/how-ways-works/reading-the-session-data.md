@@ -85,7 +85,7 @@ The output is one JSON object with four parts:
 | top-level | `session`, `project`, `context_window_k` |
 | `summary` | epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, the trigger breakdown, and the top ways by fire count |
 | `frames` | the turn-by-turn timeline — each frame has its epoch, timestamp, token position, the cumulative set of active ways (with per-way trigger, fire epoch, check count, and new / re-disclosed flags), and a `new_events` list of what changed that turn |
-| `near_misses` | every way that scored close but didn't fire — with its English and multilingual scores, both thresholds, the margin, and the epoch it occurred in |
+| `near_misses` | every way that scored close but didn't fire — with its English and multilingual relevance probabilities (`prob_en` / `prob_multi`), the semantic threshold `τ_s` it fell short of, the margin, and the epoch it occurred in |
 
 The `summary` is the at-a-glance shape of the session — the five numbers that open
 [[01.018.E]] come straight from it. The `frames` are the replay. The `near_misses`
@@ -131,9 +131,14 @@ A few readings that turn raw fields into judgement:
   physically did. Neither is wrong; they're different shapes of work.
 - **A way with many near-misses and few fires** is brushing the work without
   matching it — a vocabulary-tuning opportunity. **A near-miss with a tiny margin
-  right before a mistake** is a threshold set too high. Both feed the empirical
-  tuning loop ([[ADR-134]]); `ways tune-curves` and `ways tune-precision` read the
-  same log to suggest the adjustments.
+  right before a mistake** is that signal sharpened: a way that would have steered
+  the turn landed just short of the global semantic bar `τ_s`. There is no per-way
+  threshold to lower — firing is global `τ_s` / `τ_k` on the calibrated `g(s)`
+  ([the engine reference](../../hooks-and-ways/engine-reference.md)) — so the remedy
+  is to strengthen the way's vocabulary or pattern and re-measure. `ways tune-curves`
+  (firing cadence, [[ADR-123]]) and `ways tune-precision` (a precision flag,
+  [[ADR-134]]) read the same event log, but they audit *how often* and *where* a way
+  fires, not relevance thresholds.
 - **`context_window_k`** anchors every token figure. The same way re-discloses far
   more often in a 200K window than a 1M one, because the token-gated cooldown is a
   fraction of the window — so always read fire counts against the window size.

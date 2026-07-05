@@ -89,8 +89,11 @@ flowchart TB
 ```
 
 **First-fire — precision matching.** A way fires the first time its trigger
-matches: a keyword in the prompt, a semantic embedding score over threshold, a
-file being edited, a bash command about to run, a context-threshold crossed.
+matches: a keyword in the prompt (floor-gated), a semantic match whose
+calibrated relevance probability `g(s)` clears the global fire threshold `τ_s`, a
+file being edited, a bash command about to run, a context-threshold crossed. (The
+fire rule is global, not per-way — see [the engine
+reference](../../hooks-and-ways/engine-reference.md).)
 The trigger type is recorded verbatim (`keyword`, `semantic:embedding:en`,
 `semantic:embedding:multi`, `state`, `bash`, `file`, `check-pull`). The mix of
 trigger types across a session is the clearest single signal of *how* ways is
@@ -110,14 +113,17 @@ core premises many times over. The cadence of that re-disclosure is itself
 tunable from this data ([[ADR-123]]).
 
 **Near-miss — the threshold boundary.** When a way scores within a small margin
-of its effective threshold but doesn't clear it, the matcher records the
-would-be fire — its English and multilingual scores, both thresholds, and the
-margin by which it missed ([[ADR-134]]). Near-misses are the only window onto
+of its effective semantic threshold but doesn't clear it, the matcher records the
+would-be fire — its English and multilingual relevance probabilities, the
+semantic threshold `τ_s`, and the margin by which it missed ([[ADR-134]]).
+Near-misses are the only window onto
 *false silence*: the guidance that almost helped and was held back. They are
 invisible in the conversation and invisible in the TUI replay; the JSON dump
 ([[01.019.E]]) is the only way to see them. A way that near-misses constantly is
-a vocabulary-tuning opportunity; a near-miss right before a mistake is a
-threshold set too high.
+a vocabulary-tuning opportunity; a near-miss right before a mistake is guidance
+that should have surfaced — the remedy is to strengthen the way's vocabulary or
+pattern until the match clears `τ_s`, since firing is global and there is no
+per-way threshold to lower.
 
 **Check — depth on demand.** Some ways are trees: a parent premise fires, and
 under it sit *checks* — finer-grained sub-ways that pull in only when their own
@@ -173,9 +179,9 @@ it, which is precisely why the conversation can't reveal it and the JSON dump
 
 The events are written by the same code path that does the matching, at the
 moment the decision is made — not reconstructed after the fact, not inferred from
-the transcript. The `fire_score` on a first-fire is the exact embedding score
-that cleared the threshold; the near-miss scores are the exact scores that
-didn't. This is persistence of a decision already made, not new computation
+the transcript. The `fire_score` on a first-fire is the exact calibrated relevance probability
+`g(s)` that cleared the threshold `τ_s`; the near-miss probabilities are the exact
+values that didn't. This is persistence of a decision already made, not new computation
 ([[ADR-134]]). What you read back is what actually happened.
 
 The one caveat worth holding: re-disclosure thresholds shown in a *replay*

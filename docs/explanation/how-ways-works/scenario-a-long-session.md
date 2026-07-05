@@ -154,12 +154,19 @@ without quite matching it. That's the matcher being honest about precision: it
 would rather stay silent than fire `security/injection` into a session that only
 glancingly touched the topic. But the record makes the trade-off *visible* — and
 that's the point. A concrete example from this session: at epoch 26,
-`architecture/adr/migration` scored **0.4203** against its multilingual threshold
-of **0.44** — a margin of **0.0197**. It missed by two hundredths. If that miss
-sat right before a migration mistake, it's evidence the threshold is a touch too
-high; if the session never did a migration, it's the precision discipline
-working exactly as intended. Either way, you can now *see it* and decide —
-which is the whole basis of the empirical tuning loop ([[ADR-134]]).
+`architecture/adr/migration` logged a `way_nearmiss` — its multilingual relevance
+probability `prob_multi` landed at **0.4812** against the global semantic fire
+threshold **τ_s = 0.5**, a `margin` of **0.0188** below it (inside the
+`near_miss_margin` of 0.05, which is what marks the score a near-miss rather than
+plain silence). It missed by under two hundredths. If that miss sat right before a
+migration mistake, it's evidence the way's alias undershoots on genuinely
+migration-shaped prompts — a signal to edit its vocabulary and re-measure, not to
+move a threshold: firing is the global τ_s on the calibrated `g(s)`, and there is
+no per-way threshold to raise (see
+[engine-reference.md](../../hooks-and-ways/engine-reference.md)). If the session
+never did a migration, it's the precision discipline working exactly as intended.
+Either way, you can now *see it* and decide — which is the whole basis of the
+empirical tuning loop ([[ADR-134]]).
 
 ## What the session shows
 
