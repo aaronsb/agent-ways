@@ -4,7 +4,7 @@
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
 pub(crate) mod candidates;
-mod machine;
+mod late_interaction;
 mod reduce;
 mod scoring;
 mod state;
@@ -120,14 +120,14 @@ pub fn prompt(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
-    // ADR-160: the chunked matching machine IS the semantic matcher. It decides
+    // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
     // the semantic channel over the reduced surface (chunk → softmax-share →
     // body-confirm), computed once here and consulted per way in match_prompt.
     // The single-vector calibrated gate is retained only as the fail-safe: when
-    // the machine can't run (surface too sparse to chunk, engine unavailable) it
+    // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let machine = machine::run(&reduced, &machine_bodies(&candidates));
+    let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -166,7 +166,7 @@ pub fn prompt(
             &embed_matches,
             near_miss_margin,
             keyword_floor,
-            machine.as_ref(),
+            verdicts.as_ref(),
         );
 
         // Gate re-check against the prompt alone before accepting the veto.
@@ -185,7 +185,7 @@ pub fn prompt(
                     scores,
                     near_miss_margin,
                     keyword_floor,
-                    machine.as_ref(),
+                    verdicts.as_ref(),
                 );
             }
         }
@@ -240,9 +240,9 @@ pub fn task(
     let reduced = reduce::reduce_for_embed(query, BUDGET_TASK);
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
-    // ADR-160: the machine is the semantic matcher on the task surface too;
+    // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
-    let machine = machine::run(&reduced, &machine_bodies(&candidates));
+    let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
 
     let mut matched: Vec<(String, String)> = Vec::new(); // (way_id, channel)
 
@@ -278,7 +278,7 @@ pub fn task(
             &embed_matches,
             near_miss_margin,
             keyword_floor,
-            machine.as_ref(),
+            verdicts.as_ref(),
         ) {
             PromptMatch::Fired { channel, .. } => matched.push((way.id.clone(), channel)),
             PromptMatch::KeywordGated(kg) => {
@@ -581,8 +581,8 @@ struct NearMiss {
 }
 
 /// Map each embeddable candidate's corpus id to its `.md` path, for the
-/// matching machine's body-confirmation stage (ADR-160).
-fn machine_bodies(candidates: &[WayCandidate]) -> std::collections::HashMap<String, PathBuf> {
+/// late-interaction matcher's body-confirmation stage (ADR-160).
+fn body_map(candidates: &[WayCandidate]) -> std::collections::HashMap<String, PathBuf> {
     candidates
         .iter()
         .filter(|c| c.embeddable())
@@ -601,7 +601,7 @@ fn match_prompt(
     scores: &EmbedScores,
     near_miss_margin: f64,
     keyword_floor: f64,
-    machine: Option<&machine::MachineVerdicts>,
+    verdicts: Option<&late_interaction::Verdicts>,
 ) -> PromptMatch {
     // Calibrated relevance probability per lane (ADR-156). `None` means no
     // calibrated signal: the lane didn't run, the way isn't embeddable, or no
@@ -646,15 +646,16 @@ fn match_prompt(
         }
     }
 
-    // Channel 2: Embedding. When the ADR-160 machine is engaged it owns the
-    // semantic decision for this way (chunk → softmax-share → body-confirm, run
+    // Channel 2: Embedding. When the ADR-160 late-interaction matcher is engaged
+    // it owns the semantic decision for this way (chunk → softmax-share →
+    // body-confirm, run
     // once upstream); otherwise the single-vector calibrated gate does —
     // calibration makes probabilities comparable across models, so both lanes
     // share one threshold τ_s and either firing is sufficient.
-    if let Some(m) = machine {
+    if let Some(m) = verdicts {
         if let Some(share) = m.fired_score(corpus_id) {
             return PromptMatch::Fired {
-                channel: "semantic:machine:en".to_string(),
+                channel: "semantic:late-interaction:en".to_string(),
                 score: Some(share),
                 matched_span: None,
             };

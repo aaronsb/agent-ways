@@ -1,8 +1,8 @@
-//! scan/machine.rs — ADR-160 chunked late-interaction matching machine.
+//! scan/late_interaction.rs — ADR-160 chunked late-interaction late-interaction matcher.
 //!
 //! An alternative to the single-vector semantic gate (scoring.rs). Instead of
 //! embedding one reduced surface and thresholding each way's calibrated cosine,
-//! the machine:
+//! the matcher:
 //!
 //!   2. **chunks** the surface into sentences and embeds each chunk (one batched
 //!      `way-embed match` call — the ADR-160 prerequisite primitive);
@@ -22,12 +22,12 @@
 //! stances on purpose — that split is the load-bearing choice (ADR-160).
 //!
 //! **Operating points are HAND-SET and UNCALIBRATED.** ADR-160 stays Proposed
-//! until they are fit against a precision metric (task #5). This module exists to
-//! be deployed and *tried*, behind the `matching_machine` config flag.
+//! until they are fit against a precision metric (task #5). It is the semantic
+//! matcher (not opt-in); until calibration lands it stays on its branch.
 //!
 //! **Fail-safe.** Every stage returns `None` when it cannot run (no binary /
 //! corpus / model, a surface too sparse to chunk), and the caller falls back to
-//! the single-vector path. The machine never partially decides.
+//! the single-vector path. The matcher never partially decides.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -54,24 +54,24 @@ const MIN_CHUNK_CHARS: usize = 12;
 /// Only the strongest ranking survivors are worth a body-confirm pass.
 const MAX_WINNERS_TO_CONFIRM: usize = 6;
 
-/// The machine's decision for a scan: the ways it fired, keyed by corpus id, with
+/// The matcher's decision for a scan: the ways it fired, keyed by corpus id, with
 /// a representative score (the summed softmax-share) for telemetry.
-pub(crate) struct MachineVerdicts {
+pub(crate) struct Verdicts {
     fired: HashMap<String, f64>,
 }
 
-impl MachineVerdicts {
-    /// The share score if the machine fired `corpus_id`, else `None`.
+impl Verdicts {
+    /// The share score if the matcher fired `corpus_id`, else `None`.
     pub(crate) fn fired_score(&self, corpus_id: &str) -> Option<f64> {
         self.fired.get(corpus_id).copied()
     }
 }
 
-/// Run the machine over `surface`. `bodies` maps a way's corpus id to its `.md`
-/// path (for body-confirm). Returns `None` when the machine cannot run — the
+/// Run the matcher over `surface`. `bodies` maps a way's corpus id to its `.md`
+/// path (for body-confirm). Returns `None` when the matcher cannot run — the
 /// caller then falls back to the single-vector semantic gate.
-pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<MachineVerdicts> {
-    let dbg = std::env::var("WAYS_MACHINE_DEBUG").is_ok();
+pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Verdicts> {
+    let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
     let bin = find_way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
@@ -125,7 +125,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ma
         }
     }
     if dbg { eprintln!("MACHINE: fired {} ways", fired.len()); }
-    Some(MachineVerdicts { fired })
+    Some(Verdicts { fired })
 }
 
 /// Split the surface into sentence chunks, drop trivially short fragments and
