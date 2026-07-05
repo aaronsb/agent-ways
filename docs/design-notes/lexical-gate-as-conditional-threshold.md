@@ -1,5 +1,15 @@
 # The Lexical Gate as a Conditional Threshold
 
+> *Written 2026-07-04, during the ADR-156 exploration (pre-ship). The body treats
+> the `γ·T_w` gate on raw cosine, the per-way `embed_threshold`, and the global
+> `keyword_gate_fraction` (γ) as the live control surface. ADR-156 superseded that
+> framing: cosine `s` is now mapped by a calibrated per-model logistic `g(s) = σ(a·s + b)`
+> to a relevance probability, and firing is decided in probability space by two
+> **independent global** thresholds — `τ_s` (`semantic_fire_probability`) and `τ_k`
+> (`keyword_floor_probability`) — with no per-way threshold and no γ. Preserved for the
+> ROC / log-odds reasoning that led there, which the shipped model still rests on. For
+> the shipped model see ADR-156 and `docs/hooks-and-ways/engine-reference.md`.*
+
 A reading of what the ADR-155 keyword gate *is*, underneath the implementation:
 each way's keyword pattern is a one-dimensional detector, the gate is that
 detector's operating point, and the point is placed — today — by a single

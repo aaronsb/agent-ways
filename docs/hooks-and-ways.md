@@ -126,7 +126,14 @@ See [teams.md](hooks-and-ways/teams.md) for the full team coordination model.
 
 ## Way Matching Modes
 
-Each way declares how it should be matched in its YAML frontmatter.
+Each way declares how it should be matched in its YAML frontmatter. There are two lanes and they are additive-OR: a way with both a `pattern:` and a `description:` + `vocabulary:` can fire from either.
+
+- **Keyword lane** — the regex `pattern:` (matched against the user prompt), plus the deterministic `commands:` and `files:` triggers on the tool surfaces.
+- **Semantic lane** — the prompt is embedded and scored by cosine against the way's alias (`description` + `vocabulary`); the cosine is mapped to a relevance probability by a calibrated logistic and compared to a global threshold.
+
+The exact fire rule, thresholds, and calibration are stated once in
+[hooks-and-ways/engine-reference.md](hooks-and-ways/engine-reference.md) — the
+single source of truth. The summary below must agree with it.
 
 ```mermaid
 flowchart TD
@@ -139,25 +146,26 @@ flowchart TD
     W -->|"pattern: / commands: / files:"| R
     W -->|"description: + vocabulary:"| S
 
-    subgraph RX ["Pattern Matching"]
+    subgraph RX ["Keyword lane"]
         R[Regex Match]:::regex
         R --> RP["pattern: → user prompt"]:::regex
         R --> RC["commands: → bash command"]:::regex
         R --> RF["files: → file path"]:::regex
     end
 
-    subgraph SM ["Semantic Matching (additive)"]
+    subgraph SM ["Semantic lane"]
         S[Embedding Scorer]:::semantic
-        S --> BM["ways embed<br/>all-MiniLM-L6-v2 cosine similarity"]:::semantic
+        S --> BM["ways embed → cosine s<br/>g(s)=σ(a·s+b) → probability"]:::semantic
     end
 
-    RP -->|match| FIRE[Fire Way]:::result
-    RC -->|match| FIRE
-    RF -->|match| FIRE
-    BM -->|"cosine ≥ embed_threshold"| FIRE
+    RP --> GATE{"g(s) ≥ τ_k ?<br/>floor gate<br/>(fails open / pattern_strict bypasses)"}:::decision
+    GATE -->|"yes"| FIRE[Fire Way]:::result
+    RC -->|"regex match"| FIRE
+    RF -->|"regex match"| FIRE
+    BM -->|"g(s) ≥ τ_s"| FIRE
 ```
 
-Matching is **additive** — pattern and semantic are OR'd. A way with both `pattern:` and `description:`+`vocabulary:` can fire from either channel.
+Matching is **additive** — the keyword and semantic lanes are OR'd. A gated keyword never shadows a semantic fire: the semantic lane is checked first and the gated verdict is only reported if nothing cleared `τ_s`.
 
 ### Pattern
 
@@ -167,25 +175,56 @@ commands: git\ commit         # matched against bash commands
 files: \.env$|config\.json    # matched against file paths
 ```
 
-Fast and precise. Most ways use this.
+Fast and precise. Most ways use this. Keyword matching is **case-sensitive** against the original-case prompt — only code fences and URLs are stripped, no lowercasing.
+
+The prompt `pattern:` hit is **floor-gated**: it fires only when the way's calibrated probability also clears the keyword floor `τ_k` on at least one model lane, so a lexical coincidence can't drag in an unrelated prompt. Two carve-outs let the author's explicit trigger stand: the gate **fails open** when there is genuinely no calibrated signal (the engine didn't run, the way isn't embeddable, or no calibration is loaded), and `pattern_strict: true` forces an unconditional keyword fire by design (`scan/mod.rs` `match_prompt`).
 
 ### Semantic Matching
 
 ```yaml
 description: "API design, REST endpoints, request handling"
 vocabulary: api endpoint route handler middleware
-embed_threshold: 0.35 # cosine similarity threshold
 ```
+
+There is **no** `embed_threshold` frontmatter field and **no** per-way threshold — firing is decided by global thresholds in probability space (see below).
 
 Embedding-only engine, built into the `ways` binary:
 
-| Engine | How it works |
-|--------|-------------|
-| **Embedding** | all-MiniLM-L6-v2 sentence embeddings via `way-embed` binary + GGUF model. Pre-computed 384-dim vectors in corpus. Cosine similarity against all ways (~20ms). |
+| Model | How it works |
+|-------|-------------|
+| **EN** | `all-MiniLM-L6-v2` sentence embeddings via the `way-embed` binary + GGUF model. Pre-computed 384-dim vectors in the corpus. Cosine similarity against all ways (~20ms). |
+| **Multilingual** | 768-dim model for localized mode. Routes native-language queries through locale-stub aliases without per-language stemmer wiring. |
 
 The embedding model is a hard dependency of `ways`. `make setup` fetches the binary and GGUF model on four supported platforms.
 
 **Embedding engine** (ADR-108, ADR-125): Semantic similarity captures concepts that lexical scoring would miss — "SSH agent" and "AI agent" share the same English stem but have distant embedding vectors, and the multilingual variant routes native-language queries through locale-stub aliases without per-language stemmer wiring.
+
+#### Calibration and the fire rule
+
+A raw cosine is not the firing signal. ADR-156 maps each model's cosine `s` to a
+**relevance probability** with a per-model logistic `g(s) = σ(a·s + b)`, fit at
+corpus-generation from a committed probe corpus and stored in
+`embed-manifest.json` (deployed EN `AUC ≈ 0.955`, multi `AUC ≈ 0.941`). A fit is
+rejected unless its slope `a > 0` and it clears an `AUC_FLOOR` of 0.70; a bad fit
+is not written, and scan then degrades (keyword fails open, semantic silent)
+rather than trust it.
+
+A way **fires** when `g(s) ≥ τ_s ∨ (keyword_match ∧ g(s) ≥ τ_k)`, with global
+`τ_s = 0.5` (`semantic_fire_probability`) and `τ_k = 0.15`
+(`keyword_floor_probability`). The two thresholds are **independent** — a leaky
+keyword is tightened by raising `τ_k` without touching the semantic bar `τ_s`.
+Because calibration makes the boundary comparable across ways, one global
+probability suffices where per-way cosine thresholds were once needed.
+
+**Parent-boost.** When an ancestor way has already been shown this session, an
+in-domain child's semantic bar is lowered from `τ_s` to
+`(τ_s × parent_threshold_multiplier).max(parent_boost_floor)` — by default
+`max(0.5 × 0.8, 0.30) = 0.40`. Both keys are live: the multiplier (0.8) lowers
+the child's bar; the floor (0.30) stops cascading boosts from reaching the noise
+band. `τ_k` is not parent-boosted.
+
+The authoritative statement of all of the above, with source line citations, is
+[hooks-and-ways/engine-reference.md](hooks-and-ways/engine-reference.md).
 
 #### Setup
 
@@ -216,9 +255,9 @@ ways tune-precision
 ways tune-curves
 ```
 
-`ways tune-precision` is a report-only relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate plus a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session (remedy: raise `embed_threshold`, narrow vocabulary, or change the trigger channel); **cross-cutting** is a way that fires broadly by design, e.g. meta/tracking ways (remedy: scope by trigger — never auto-narrow vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
+`ways tune-precision` is a report-only relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate plus a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session (remedy: narrow its vocabulary, tighten its `pattern:`, or change the trigger channel, then re-measure — there is no per-way threshold to move; a globally leaky keyword is tightened by raising `τ_k`); **cross-cutting** is a way that fires broadly by design, e.g. meta/tracking ways (remedy: scope by trigger — never auto-narrow vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
 
-`ways tune-curves` (ADR-123 Phase E) groups `way_fired`/`way_redisclosed` events by (way, session), computes token-position deltas between consecutive fires, and suggests a `half_life` ≈ the median delta. Dry-run by default; `--apply` rewrites the `curve:` block in place via line surgery. (Vocabulary and `embed_threshold` are never auto-applied — they stay authorial.)
+`ways tune-curves` (ADR-123 Phase E) groups `way_fired`/`way_redisclosed` events by (way, session), computes token-position deltas between consecutive fires, and suggests a `half_life` ≈ the median delta. Dry-run by default; `--apply` rewrites the `curve:` block in place via line surgery. Vocabulary and matching metadata are never auto-applied — they stay authorial.
 
 ## State Triggers
 
@@ -396,16 +435,16 @@ sequenceDiagram
 
 ## Telemetry
 
-Firing activity is logged to `~/.claude/stats/events.jsonl` — one JSON object per line. Beyond the `way_fired`/`way_redisclosed` cadence events that `tune-curves` reads, two signals feed the precision and recall tuning above (ADR-134):
+Firing activity is logged to `$XDG_STATE/agent-ways/events.jsonl` — one JSON object per line (legacy installs may still read `~/.claude/stats/events.jsonl`). Beyond the `way_fired`/`way_redisclosed` cadence events that `tune-curves` reads, two signals feed the precision and recall tuning above (ADR-134):
 
-- **`fire_score`** — recorded on `way_fired` events for **first-fires only** (not redisclosures): the embedding score that cleared threshold. It is the raw material for future `embed_threshold` tuning.
-- **`way_nearmiss`** — emitted when a way scored within `near_miss_margin` *below* its effective threshold but did **not** fire. Fields: `score_en`, `score_multi`, `thr_en`, `thr_multi`, `margin`, `trigger`, `query_tokens`. This is a recall signal — it measures the likely false silences a threshold drop would recover.
+- **`fire_score`** — recorded on `way_fired` events for **first-fires only** (not redisclosures): the calibrated probability `g(s)` that cleared the threshold and admitted the way to the session. It is a recall/precision telemetry signal that feeds the **deferred** ADR-134 auto-tune — **not** the source of the `g(s)` calibration, which is fit at corpus-generation from the committed `calibration_probes.jsonl` (`ways-cli/src/cmd/corpus.rs`), never from this runtime stream.
+- **`way_nearmiss`** — emitted when a way scored within `near_miss_margin` *below* its effective semantic threshold `τ_s` but did **not** fire (`τ_s - margin ≤ p < τ_s`). Score fields: `prob_en`, `prob_multi`, `tau_s`, `margin`; plus `trigger`, `query_tokens`, and the `way_fired`-convention identity fields (`event`, `way`, `corpus_id`, `domain`, `scope`, `project`, `session`). This is a recall signal — it measures the likely false silences a `τ_s` drop would recover (`scan/mod.rs` `log_near_miss`).
 
-`near_miss_margin` (default `0.05`) is a config knob, parsed from the ways config YAML alongside `default_embed_threshold` and `default_multi_embed_threshold`.
+`near_miss_margin` (default `0.05`) is a purely-logging config knob — it never changes firing — parsed from the ways config YAML alongside `semantic_fire_probability` and `keyword_floor_probability` (`config.rs`).
 
-The near-miss and fire-score streams grow the log faster than fires alone, so its size is **bounded**: `log_event` tail-compacts `events.jsonl` once it exceeds ~32 MiB, keeping the most recent ~24 MiB (cut at a line boundary, written atomically via temp + rename). Compaction is lossy only on the oldest events; readers are unaffected.
+The near-miss and fire-score streams grow the log faster than fires alone, so its size is **bounded**: `log_event` tail-compacts `events.jsonl` once it exceeds `MAX_EVENTS_BYTES` (~32 MiB), keeping the most recent `KEEP_EVENTS_BYTES` (~24 MiB, cut at a line boundary, written atomically via temp + rename). The ~8 MiB gap provides hysteresis so the rewrite is rare, not per-append. Compaction is lossy only on the oldest events; readers are unaffected (`session.rs`).
 
-ADR-134 ("Empirical auto-tuning from fire and near-miss telemetry") is Accepted. One slice — the gated `embed_threshold` `--apply` — is deferred until the `fire_score` population accumulates enough to validate against, tracked as GitHub issue #123.
+ADR-134 ("Empirical auto-tuning from fire and near-miss telemetry") is Accepted. One slice — the gated `--apply` that would auto-write a tuned threshold — is deferred until the `fire_score` population accumulates enough to validate against, tracked as GitHub issue #123.
 
 ## Macros
 
