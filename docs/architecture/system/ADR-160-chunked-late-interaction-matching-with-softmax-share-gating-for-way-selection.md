@@ -39,6 +39,15 @@ The pipeline is lenient where it ranks (peak + softmax-share admit a way on its 
 
 **Status: Accepted — shipped with provisional operating points.** The operating points (softmax temperature, share gate, confirm gate) are hand-set. The one over-pruning failure a live trial surfaced — a mean-of-max confirm over every surface chunk diluting a way that matched only part of a multi-topic surface — is resolved by scoping confirmation to the winning chunk (stage 5), and the matcher ships as *the* semantic matcher on `main`. The points remain **provisional, not finally calibrated**: the follow-up is (a) a **precision instrument** — replaying each fire's surface from the transcript at its logged token position so relevance is judgeable — and (b) tuning the points against it and against live observation of whether ways are better-behaved. That is refinement of a shipped matcher, not a gate on adoption; a regression is handled by tuning or, in the limit, superseding this ADR.
 
+### Calibration findings (in progress)
+
+First observations from the read-side precision instrument and the late-interaction authoring diagnostic (`ways match`), on `main` once a `--batch`-capable embedder was actually deployed — a deployment defect had been silently routing every scan to the single-vector fail-safe, so the operating points had never been exercised against real late-interaction surfaces at all:
+
+- **Single-topic surfaces fire cleanly.** A focused multi-sentence prompt lands its owning way well above gate (e.g. a testing prompt → `softwaredev/code/testing` share 0.36, confirm 0.45; a commit prompt → `softwaredev/delivery/commits` share 0.42, confirm 0.54). The confirm stage behaves as designed.
+- **Topic-diverse surfaces under-fire.** On a three-topic prompt (ADR + migration + PR) *nothing* fires: the best-matched way (`documentation/adr`) has a strong peak (0.54) but a share of only 0.13, below the 0.15 share gate, so confirmation is never reached. The cause is structural: `share = Σ(per-chunk softmax mass) / n_chunks` caps a way that legitimately owns *one* of N topics at ≈ 1/N, so a genuinely-specific match on a diverse surface is diluted below any fixed share gate. Real session prompts are highly multi-topic, so this is the common case, not an edge one.
+- **Hypothesis to evaluate:** admit a way on a strong *peak* even when its share is diluted — fire on `share ≥ SHARE_GATE` **or** (`peak ≥ PEAK_GATE` **and** confirm clears) — letting the body-confirm (already strict) carry precision for the high-peak/low-share case. This is an algorithm change to stage 4, not just a number, and wants evaluation against a judged set before adoption.
+- **ADR-vs-implementation gap:** stage 4 above specifies routing the summed mass through *the existing calibrated fire gate* (ADR-156, `g(s) ≥ τ_s`); the implementation instead divides by `n_chunks` and thresholds a **hand-set** `SHARE_GATE = 0.15`, bypassing ADR-156's calibration. Calibration must reconcile the two — either the share is a calibrated quantity or the ADR text is updated to match a deliberately hand-set gate.
+
 ## Consequences
 
 ### Positive
