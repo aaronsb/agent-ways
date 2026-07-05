@@ -466,6 +466,27 @@ enum IntrospectCommand {
         #[arg(long)]
         project: Option<String>,
     },
+    /// List semantic way fires as `score · surface · way`, read straight from
+    /// events.jsonl (no introspection model) — the read-side precision instrument:
+    /// eyeball whether each fire matched the surface it fired on. Defaults to the
+    /// most recent session in the current project, borderline (lowest-score) first.
+    Fires {
+        /// Session ID to read (default: most recent in scope)
+        #[arg(long)]
+        session: Option<String>,
+        /// Scope to this project path (default: current project)
+        #[arg(long)]
+        project: Option<String>,
+        /// Pick the session across every project, not just the current one
+        #[arg(long)]
+        all: bool,
+        /// Only show fires at or below this score (surface the suspect tail)
+        #[arg(long)]
+        max_score: Option<f64>,
+        /// Cap the number of rows shown (default: all)
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -786,6 +807,9 @@ fn run() -> Result<()> {
             }
             IntrospectCommand::Live { session, project } => {
                 cmd::introspect::live(session.as_deref(), project.as_deref())
+            }
+            IntrospectCommand::Fires { session, project, all, max_score, limit } => {
+                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit)
             }
         },
         Commands::Status { json } => cmd::status::run(json),

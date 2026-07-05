@@ -140,3 +140,106 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
     println!("{}", serde_json::to_string_pretty(&model)?);
     Ok(())
 }
+
+/// `ways introspect fires` — the read-side precision instrument (task #2 of the
+/// ADR-160 calibration work). Reads `way_fired`/`way_redisclosed` events straight
+/// from events.jsonl — no `SessionIntrospection` reconstruction, no re-embedding —
+/// and prints each *semantic* fire as `score · surface · way`, borderline (lowest
+/// score) first, so a human can judge whether the matcher fired on text that
+/// actually warranted the way. Pair with `--max-score` to isolate the suspect tail
+/// that gate calibration (task #5) has to defend.
+pub fn fires(
+    session: Option<&str>,
+    project: Option<&str>,
+    all: bool,
+    max_score: Option<f64>,
+    limit: Option<usize>,
+) -> Result<()> {
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
+        println!("No events recorded yet.");
+        return Ok(());
+    }
+
+    let scope = rethink::resolve_project_scope(project, all)?;
+    let session_id = match session {
+        Some(s) => s.to_string(),
+        None => match rethink_dump::most_recent_session(&content, scope.as_deref()) {
+            Some(s) => s,
+            None => {
+                println!("No sessions found in scope.");
+                return Ok(());
+            }
+        }
+    };
+
+    // Pull semantic fires for this session. A fire is semantic when its trigger
+    // begins `semantic:` (`semantic:embedding:en|multi`); keyword/state fires have
+    // no score or surface to eyeball, so they are out of scope for this view.
+    let mut rows: Vec<(f64, String, String, bool)> = Vec::new();
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if v.get("session").and_then(|s| s.as_str()) != Some(session_id.as_str()) {
+            continue;
+        }
+        let event = v.get("event").and_then(|e| e.as_str()).unwrap_or("");
+        let redisclosed = match event {
+            "way_fired" => false,
+            "way_redisclosed" => true,
+            _ => continue,
+        };
+        let trigger = v.get("trigger").and_then(|t| t.as_str()).unwrap_or("");
+        if !trigger.starts_with("semantic:") {
+            continue;
+        }
+        // `fire_score` is written as a formatted string field (see show::way_scored).
+        let Some(score) = v.get("fire_score").and_then(|s| s.as_str()).and_then(|s| s.parse::<f64>().ok())
+        else {
+            continue;
+        };
+        if let Some(cap) = max_score {
+            if score > cap {
+                continue;
+            }
+        }
+        let way = v.get("way").and_then(|w| w.as_str()).unwrap_or("?").to_string();
+        // `surface` only rides fires logged after the read-side instrument shipped;
+        // older events legitimately lack it — show a placeholder rather than drop them.
+        let surface = v
+            .get("surface")
+            .and_then(|s| s.as_str())
+            .unwrap_or("—")
+            .to_string();
+        rows.push((score, way, surface, redisclosed));
+    }
+
+    if rows.is_empty() {
+        println!(
+            "No semantic fires for session {} (keyword/state fires carry no score/surface).",
+            &session_id[..session_id.len().min(12)]
+        );
+        return Ok(());
+    }
+
+    // Borderline first: the lowest-scoring fires are the ones whose relevance is
+    // most in question, so they lead the readout.
+    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let total = rows.len();
+    let shown = limit.unwrap_or(total).min(total);
+
+    println!(
+        "{} semantic fire{} · session {} · lowest score first{}",
+        total,
+        if total == 1 { "" } else { "s" },
+        &session_id[..session_id.len().min(12)],
+        max_score.map(|c| format!(" · ≤ {c:.2}")).unwrap_or_default(),
+    );
+    for (score, way, surface, redisclosed) in rows.into_iter().take(shown) {
+        let mark = if redisclosed { "↻" } else { " " };
+        println!("  {score:.3} {mark} {way:<44}  {surface}");
+    }
+    if shown < total {
+        println!("  … {} more (raise --limit)", total - shown);
+    }
+    Ok(())
+}

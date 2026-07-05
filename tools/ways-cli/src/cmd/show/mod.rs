@@ -16,7 +16,22 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None, None)
+    way_scored(id, session_id, trigger, None, None, None)
+}
+
+/// Bound a matched surface to a single readable line for the `surface` telemetry
+/// field: collapse all whitespace to single spaces and truncate to ~200 chars on
+/// a char boundary (appending `…`). The snippet is a human read-side aid — a
+/// judgeable record of *what* the semantic channel matched on — so it favours
+/// legibility over fidelity.
+const SURFACE_SNIPPET_CHARS: usize = 200;
+fn surface_snippet(surface: &str) -> String {
+    let collapsed = surface.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= SURFACE_SNIPPET_CHARS {
+        return collapsed;
+    }
+    let head: String = collapsed.chars().take(SURFACE_SNIPPET_CHARS).collect();
+    format!("{head}…")
 }
 
 /// Like [`way`], but records the embedding score that caused a semantic fire
@@ -24,12 +39,19 @@ pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
 /// `Some` only for embedding-channel fires from the in-process scan path;
 /// keyword/state/CLI fires pass `None` and log no score (they have none). The
 /// firing model is already implicit in `trigger` (`semantic:embedding:en|multi`).
+///
+/// `surface` is the noise-stripped surface the matcher scored (the `reduce_for_embed`
+/// output common to both the late-interaction and single-vector paths). It is logged
+/// — bounded by [`surface_snippet`] — only alongside a `fire_score`, i.e. on semantic
+/// fires, giving the read-side precision instrument a judgeable record of what fired
+/// each way without re-embedding history. Keyword fires already carry `matched_span`.
 pub fn way_scored(
     id: &str,
     session_id: &str,
     trigger: &str,
     fire_score: Option<f64>,
     matched_span: Option<&str>,
+    surface: Option<&str>,
 ) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
@@ -174,6 +196,13 @@ pub fn way_scored(
     // no score (they have none).
     if let Some(score) = fire_score {
         log_fields.push(("fire_score", format!("{score:.4}")));
+        // The surface rides with the score (semantic fires only): together they make
+        // a fire judgeable on the read side — "this score, on this text" — without
+        // re-embedding the historical surface. A redisclosure carries its own surface,
+        // so this is not gated on first-fire (unlike `matched_span`).
+        if let Some(s) = surface.filter(|s| !s.is_empty()) {
+            log_fields.push(("surface", surface_snippet(s)));
+        }
     }
     // ADR-153 §3: the deterministic-channel match text, so introspection can show
     // *what* fired the way without transcript replay. First-fire only (a
@@ -425,6 +454,28 @@ fn normalize_way_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surface_snippet_collapses_whitespace() {
+        assert_eq!(
+            surface_snippet("write   an\nADR\tand   open a PR"),
+            "write an ADR and open a PR"
+        );
+    }
+
+    #[test]
+    fn surface_snippet_bounds_long_input_on_char_boundary() {
+        let long = "é".repeat(500); // multi-byte; truncation must not split a char
+        let out = surface_snippet(&long);
+        assert_eq!(out.chars().count(), SURFACE_SNIPPET_CHARS + 1, "200 chars + ellipsis");
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn surface_snippet_leaves_short_input_untruncated() {
+        let s = "short surface";
+        assert_eq!(surface_snippet(s), s);
+    }
 
     #[test]
     fn normalize_collapses_duplicate_leaf() {

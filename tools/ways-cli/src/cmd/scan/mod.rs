@@ -192,7 +192,7 @@ pub fn prompt(
 
         match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
-                let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref());
+                let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref(), Some(reduced.as_str()));
                 if !out.is_empty() {
                     context.push_str(&out);
                     context.push_str("\n\n");
@@ -381,7 +381,7 @@ pub fn command(
             });
 
         if let Some(span) = matched_span {
-            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()));
+            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()), None);
             if !out.is_empty() {
                 context.push_str(&out);
             }
@@ -413,7 +413,7 @@ pub fn command(
             None
         };
         if let Some((channel, score)) = fired {
-            let out = capture_show_way(&way.id, session_id, channel, score, None);
+            let out = capture_show_way(&way.id, session_id, channel, score, None, Some(reduced_for_embed.as_str()));
             if !out.is_empty() {
                 context.push_str(&out);
             }
@@ -488,7 +488,7 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
 
         if let Some(ref files_pattern) = way.files {
             if let Some(span) = regex_span(files_pattern, filepath) {
-                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()));
+                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()), None);
                 if !out.is_empty() {
                     context.push_str(&out);
                 }
