@@ -78,6 +78,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | Draft |
 | [ADR-156](./system/ADR-156-calibrated-relevance-scoring-for-the-semantic-lane.md) | Calibrated relevance scoring for the semantic lane | Accepted |
 | [ADR-157](./system/ADR-157-case-insensitive-trigger-regex-compilation.md) | Case-insensitive trigger regex compilation | Accepted |
+| [ADR-158](./system/ADR-158-calibration-boundary-quality-hard-negatives-and-fire-breadth-ship-gate.md) | Calibration boundary quality — hard negatives and a fire-breadth ship gate | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_

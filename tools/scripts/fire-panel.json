@@ -1,0 +1,35 @@
+{
+  "_comment": "Fire-breadth measurement panel (ADR-158). Each bucket carries an expectation for how many ways SHOULD fire on the semantic lane. off_topic: ~0 (nothing in the dev/meta corpus is relevant). narrow: 1-4 (a single concrete task touches one domain). adjacent: a few (dev/meta-flavored but should resolve to the 1-3 on-point ways, not light up the neighborhood). broad: many, legitimately (a prompt that names every domain). session_meta: ~0 (session chatter — 'resume', 'continue', 'undo' — must not fire domain ways; these are real held-out over-firing cases observed live). Used by fire-panel.py to quantify over-firing before/after a calibration refit. Grow this with real over-firing cases; it is the regression guard for boundary quality.",
+  "buckets": {
+    "off_topic": [
+      "what is the capital of France",
+      "write a haiku about autumn leaves",
+      "what's a good recipe for sourdough bread",
+      "explain the plot of Hamlet in two sentences",
+      "how tall is Mount Everest"
+    ],
+    "narrow": [
+      "fix a css flexbox alignment bug in the navbar",
+      "rename this python variable for clarity",
+      "add a unit test for the parseDate function",
+      "bump the lodash dependency to the latest version",
+      "what does this regular expression match"
+    ],
+    "adjacent": [
+      "write an adr documenting this architecture decision",
+      "review this pull request for me",
+      "help me author a new way for git commit conventions",
+      "optimize the performance of this database query",
+      "draw an erd for the user and orders tables"
+    ],
+    "broad": [
+      "let's wrap up: land the ADR, run the tests, review the PR, tag the release, and update the docs and the migration guide"
+    ],
+    "session_meta": [
+      "ok I ran ways update to get intermediary changes and we're resumed",
+      "let's continue where we left off",
+      "can you summarize what we did so far",
+      "actually never mind, undo that"
+    ]
+  }
+}

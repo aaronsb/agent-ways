@@ -1,5 +1,5 @@
 ---
-description: Post-ADR implementation — planning work breakdown, safe parallelization, and briefing the human before executing
+description: Implementation planning — work breakdown, safe parallelization, and briefing the human before writing code
 vocabulary: implement build begin start work execute plan breakdown parallelize worktree task sprint kick off begin coding
 macro: append
 scope: agent
