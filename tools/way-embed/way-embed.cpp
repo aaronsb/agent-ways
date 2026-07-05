@@ -401,30 +401,18 @@ static int cmd_generate(const char *corpus_path, const char *model_path, const c
     return 0;
 }
 
-/* match: embed query, score against pre-computed corpus vectors */
-static int cmd_match(const char *corpus_path, const char *model_path, const char *query,
-                     double default_threshold) {
-    std::vector<corpus_entry> corpus;
-    if (load_corpus(corpus_path, corpus) < 0) return 1;
-
-    /* verify corpus has embeddings */
-    int has_embeddings = 0;
-    for (const auto &entry : corpus) {
-        if (!entry.embedding.empty()) has_embeddings++;
-    }
-    if (has_embeddings == 0) {
-        fprintf(stderr, "error: corpus has no embeddings. Run 'way-embed generate' first.\n");
-        return 1;
-    }
-
-    embed_engine *engine = engine_init(model_path);
-    if (!engine) return 1;
-
-    /* embed the query */
+/* Score one query against the pre-loaded corpus and emit its matches.
+ * qindex < 0  → single-query mode: output "id<TAB>score" (unchanged format).
+ * qindex >= 0 → batch mode: output "qindex<TAB>id<TAB>score" so a caller can
+ * group a stream of results back to the query that produced them. */
+static void score_query(embed_engine *engine,
+                        const std::vector<corpus_entry> &corpus,
+                        const std::string &query,
+                        double default_threshold,
+                        int qindex) {
     std::vector<float> query_vec = engine_embed(engine, query);
     int n_embd = engine->n_embd;
 
-    /* score and collect matches */
     struct match_result {
         std::string id;
         float score;
@@ -448,9 +436,54 @@ static int cmd_match(const char *corpus_path, const char *model_path, const char
                   return a.score > b.score;
               });
 
-    /* output: id<TAB>score (matches way-match score output format) */
     for (const auto &m : matches) {
-        printf("%s\t%.4f\n", m.id.c_str(), m.score);
+        if (qindex >= 0) printf("%d\t%s\t%.4f\n", qindex, m.id.c_str(), m.score);
+        else             printf("%s\t%.4f\n", m.id.c_str(), m.score);
+    }
+}
+
+/* match: embed query, score against pre-computed corpus vectors.
+ * Single-query mode scores --query. Batch mode (--batch) loads the model and
+ * corpus once, then reads one query per line from stdin — the batched-embedding
+ * primitive that amortizes the ~22ms model load across every chunk a hook needs
+ * to match in a single invocation (ADR-160). */
+static int cmd_match(const char *corpus_path, const char *model_path, const char *query,
+                     double default_threshold, bool batch) {
+    std::vector<corpus_entry> corpus;
+    if (load_corpus(corpus_path, corpus) < 0) return 1;
+
+    /* verify corpus has embeddings */
+    int has_embeddings = 0;
+    for (const auto &entry : corpus) {
+        if (!entry.embedding.empty()) has_embeddings++;
+    }
+    if (has_embeddings == 0) {
+        fprintf(stderr, "error: corpus has no embeddings. Run 'way-embed generate' first.\n");
+        return 1;
+    }
+
+    embed_engine *engine = engine_init(model_path);
+    if (!engine) return 1;
+
+    if (batch) {
+        /* One query per stdin line. Blank lines are skipped and do NOT advance
+         * the index, so callers must send only non-empty, single-line queries
+         * (flatten any embedded newlines) to keep qindex aligned with input. */
+        char *line = (char *)malloc(MAX_LINE);
+        if (!line) { engine_free(engine); return 1; }
+        int qindex = 0;
+        while (fgets(line, MAX_LINE, stdin)) {
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+                line[--len] = '\0';
+            if (len == 0) continue;
+            score_query(engine, corpus, line, default_threshold, qindex);
+            fflush(stdout);
+            qindex++;
+        }
+        free(line);
+    } else {
+        score_query(engine, corpus, query, default_threshold, -1);
     }
 
     engine_free(engine);
@@ -467,9 +500,11 @@ static void usage(const char *prog) {
         "Usage:\n"
         "  %s generate --corpus FILE --model FILE [--output FILE]\n"
         "    Embed all corpus descriptions, write vectors to JSONL.\n\n"
-        "  %s match --corpus FILE --model FILE --query TEXT [--threshold N]\n"
+        "  %s match --corpus FILE --model FILE (--query TEXT | --batch) [--threshold N]\n"
         "    Score query against pre-computed corpus embeddings.\n"
-        "    Output: id<TAB>score for each match above threshold.\n\n"
+        "    Single: --query TEXT   → id<TAB>score per match above threshold.\n"
+        "    Batch:  --batch        → read one query per line from stdin, load\n"
+        "            model+corpus once, emit qindex<TAB>id<TAB>score per match.\n\n"
         "  %s similarity --model FILE --text1 TEXT --text2 TEXT\n"
         "    Embed two texts and print their cosine similarity.\n\n"
         "Options:\n"
@@ -543,11 +578,11 @@ int main(int argc, char **argv) {
         return cmd_generate(corpus_path, model_path, output_path);
 
     } else if (strcmp(command, "match") == 0) {
-        if (!corpus_path || !model_path || !query) {
-            fprintf(stderr, "error: match requires --corpus, --model, and --query\n");
+        if (!corpus_path || !model_path || (!batch && !query)) {
+            fprintf(stderr, "error: match requires --corpus, --model, and (--query TEXT | --batch)\n");
             return 1;
         }
-        return cmd_match(corpus_path, model_path, query, threshold);
+        return cmd_match(corpus_path, model_path, query, threshold, batch);
 
     } else if (strcmp(command, "similarity") == 0) {
         if (!model_path || (!batch && (!text1 || !text2))) {
