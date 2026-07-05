@@ -1,4 +1,4 @@
-//! scan/late_interaction.rs — ADR-160 chunked late-interaction late-interaction matcher.
+//! scan/late_interaction.rs — ADR-160 chunked late-interaction matcher.
 //!
 //! An alternative to the single-vector semantic gate (scoring.rs). Instead of
 //! embedding one reduced surface and thresholding each way's calibrated cosine,
@@ -13,13 +13,17 @@
 //!      compete in a zero-sum softmax (which defeats the anisotropic cosine floor
 //!      — a way must *win* a chunk, not merely clear an absolute score), and a
 //!      way's share is summed across chunks;
-//!   5. **confirms** each survivor by the *mean-of-max* cross-similarity of the
-//!      surface chunks against the winning way's body chunks — breadth, which
-//!      rejects single-token collisions and covers the softmax's blind spot (it
-//!      always hands the winner mass, even when nothing is truly relevant).
+//!   5. **confirms** each survivor by cross-similarity of the chunk it *won*
+//!      (its peak chunk) against the winning way's body chunks — corroborating
+//!      the evidence that fired the way, which rejects single-token collisions
+//!      (a collided chunk finds no support in the way's own body) and covers the
+//!      softmax's blind spot (it always hands the winner mass, even when nothing
+//!      is truly relevant). Confirming the *winning* chunk rather than every
+//!      surface chunk avoids diluting a way that legitimately matched only part
+//!      of a multi-topic surface.
 //!
-//! Peak (lenient, specificity) and mean-confirm (strict, breadth) take opposite
-//! stances on purpose — that split is the load-bearing choice (ADR-160).
+//! Peak/share are lenient (specificity + competition); the body-confirm is the
+//! strict corroboration — the two take opposite stances on purpose (ADR-160).
 //!
 //! **Operating points are HAND-SET and UNCALIBRATED.** ADR-160 stays Proposed
 //! until they are fit against a precision metric (task #5). It is the semantic
@@ -45,7 +49,8 @@ const SOFTMAX_TAU: f64 = 0.08;
 const TOP_K_PER_CHUNK: usize = 8;
 /// Summed-share / n_chunks a way must reach to survive ranking into confirmation.
 const SHARE_GATE: f64 = 0.15;
-/// Mean-of-max body cross-similarity a survivor must reach to actually fire.
+/// Body cross-similarity (winning chunk vs body chunks, max) a survivor must
+/// reach to actually fire.
 const CONFIRM_GATE: f64 = 0.40;
 /// Caps — keep the batched embedding bounded on a pathological surface/body.
 const MAX_SURFACE_CHUNKS: usize = 12;
@@ -58,6 +63,18 @@ const MAX_WINNERS_TO_CONFIRM: usize = 6;
 /// a representative score (the summed softmax-share) for telemetry.
 pub(crate) struct Verdicts {
     fired: HashMap<String, f64>,
+}
+
+/// One way's ranking evidence from the chunk-match stage.
+struct Ranked {
+    id: String,
+    /// Max cosine over chunks (specificity — the way's strongest single match).
+    peak: f64,
+    /// Index of the chunk the way peaked on — its strongest evidence, which the
+    /// confirmation stage corroborates against the body.
+    peak_chunk: usize,
+    /// Summed per-chunk softmax mass / n_chunks (competition / breadth).
+    share: f64,
 }
 
 impl Verdicts {
@@ -77,54 +94,59 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     let corpus = xdg.join("ways-corpus-en.jsonl");
     let model = xdg.join("minilm-l6-v2.gguf");
     if !corpus.is_file() || !model.is_file() {
-        if dbg { eprintln!("MACHINE: corpus/model missing → fallback"); }
+        if dbg { eprintln!("LI: corpus/model missing → fallback"); }
         return None;
     }
 
     // Stage 2 (chunk). Too few chunks → no competition to run; fall back.
     let chunks = chunk_surface(surface);
-    if dbg { eprintln!("MACHINE: {} chunks: {:?}", chunks.len(), chunks); }
+    if dbg { eprintln!("LI: {} chunks: {:?}", chunks.len(), chunks); }
     if chunks.len() < 2 {
-        if dbg { eprintln!("MACHINE: <2 chunks → fallback"); }
+        if dbg { eprintln!("LI: <2 chunks → fallback"); }
         return None;
     }
 
     // Stage 2 (match): one batched pass, all chunks against the corpus.
     let per_chunk = batch_match(&bin, &corpus, &model, &chunks)?;
-    if dbg { eprintln!("MACHINE: per_chunk rows: {:?}", per_chunk.iter().map(|c| c.len()).collect::<Vec<_>>()); }
+    if dbg { eprintln!("LI: per_chunk rows: {:?}", per_chunk.iter().map(|c| c.len()).collect::<Vec<_>>()); }
 
     // Stages 3+4: peak rank + per-chunk softmax-share, sorted by share desc.
     let ranked = aggregate(&per_chunk, chunks.len());
 
     // Stage 4 gate: survivors above the share gate, strongest first.
     if dbg {
-        eprintln!("MACHINE: top ranked (id, peak, share):");
-        for (id, peak, share) in ranked.iter().take(8) {
-            eprintln!("  {share:.3} share  {peak:.3} peak  {id}");
+        eprintln!("LI: top ranked (share, peak, chunk, id):");
+        for r in ranked.iter().take(8) {
+            eprintln!("  {:.3} share  {:.3} peak  c{}  {}", r.share, r.peak, r.peak_chunk, r.id);
         }
     }
-    let survivors: Vec<(String, f64)> = ranked
+    let survivors: Vec<Ranked> = ranked
         .into_iter()
-        .filter(|(_, _peak, share)| *share >= SHARE_GATE)
+        .filter(|r| r.share >= SHARE_GATE)
         .take(MAX_WINNERS_TO_CONFIRM)
-        .map(|(id, _peak, share)| (id, share))
         .collect();
-    if dbg { eprintln!("MACHINE: {} survivors above share gate {SHARE_GATE}", survivors.len()); }
+    if dbg { eprintln!("LI: {} survivors above share gate {SHARE_GATE}", survivors.len()); }
 
-    // Stage 5: body-confirm each survivor (breadth check).
+    // Stage 5: confirm each survivor against the chunk it WON (its peak chunk),
+    // not the whole surface. Confirming against every surface chunk diluted a way
+    // that legitimately matched only part of a multi-topic surface (measured — it
+    // rejected an ADR way on an ADR-plus-PR-plus-tests prompt). Corroborating the
+    // winning evidence against the body still rejects single-token collisions (a
+    // collided chunk finds no support in the way's own body) without the dilution.
     let mut fired = HashMap::new();
-    for (id, share) in survivors {
-        let Some(path) = bodies.get(&id) else {
-            if dbg { eprintln!("MACHINE:   {id} → no body path"); }
+    for r in survivors {
+        let Some(path) = bodies.get(&r.id) else {
+            if dbg { eprintln!("LI:   {} → no body path", r.id); }
             continue;
         };
-        let confirm = body_confirm(&bin, &model, &chunks, path)?;
-        if dbg { eprintln!("MACHINE:   {id} confirm={confirm:.3} (gate {CONFIRM_GATE})"); }
+        let won = &chunks[r.peak_chunk..=r.peak_chunk];
+        let confirm = body_confirm(&bin, &model, won, path)?;
+        if dbg { eprintln!("LI:   {} confirm={confirm:.3} (gate {CONFIRM_GATE})", r.id); }
         if confirm >= CONFIRM_GATE {
-            fired.insert(id, share);
+            fired.insert(r.id, r.share);
         }
     }
-    if dbg { eprintln!("MACHINE: fired {} ways", fired.len()); }
+    if dbg { eprintln!("LI: fired {} ways", fired.len()); }
     Some(Verdicts { fired })
 }
 
@@ -189,16 +211,17 @@ fn batch_match(
 /// Stages 3+4: fold per-chunk scores into `(id, peak, share)` sorted by share.
 /// - **peak** = max cosine over chunks (ranking / specificity).
 /// - **share** = (summed per-chunk softmax mass) / n_chunks (gate / competition).
-fn aggregate(per_chunk: &[Vec<(String, f64)>], n_chunks: usize) -> Vec<(String, f64, f64)> {
-    let mut peak: HashMap<&str, f64> = HashMap::new();
+fn aggregate(per_chunk: &[Vec<(String, f64)>], n_chunks: usize) -> Vec<Ranked> {
+    // Track each way's peak cosine AND which chunk it peaked on — the chunk that
+    // is the way's strongest evidence, which confirmation then corroborates.
+    let mut peak: HashMap<&str, (f64, usize)> = HashMap::new();
     let mut mass: HashMap<&str, f64> = HashMap::new();
 
-    for chunk in per_chunk {
-        // Peak over the whole chunk.
+    for (ci, chunk) in per_chunk.iter().enumerate() {
         for (id, cos) in chunk {
-            let e = peak.entry(id.as_str()).or_insert(f64::MIN);
-            if *cos > *e {
-                *e = *cos;
+            let e = peak.entry(id.as_str()).or_insert((f64::MIN, 0));
+            if *cos > e.0 {
+                *e = (*cos, ci);
             }
         }
         // Softmax over the chunk's top-K (rows are already sorted desc).
@@ -212,14 +235,14 @@ fn aggregate(per_chunk: &[Vec<(String, f64)>], n_chunks: usize) -> Vec<(String, 
     }
 
     let n = n_chunks.max(1) as f64;
-    let mut out: Vec<(String, f64, f64)> = mass
+    let mut out: Vec<Ranked> = mass
         .iter()
         .map(|(id, m)| {
-            let p = peak.get(id).copied().unwrap_or(0.0);
-            ((*id).to_string(), p, m / n)
+            let (p, idx) = peak.get(id).copied().unwrap_or((0.0, 0));
+            Ranked { id: (*id).to_string(), peak: p, peak_chunk: idx, share: m / n }
         })
         .collect();
-    out.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    out.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
     out
 }
 
@@ -365,9 +388,10 @@ mod tests {
             vec![("a".to_string(), 0.8), ("b".to_string(), 0.25)],
         ];
         let ranked = aggregate(&per_chunk, 2);
-        assert_eq!(ranked[0].0, "a");
-        assert!((ranked[0].1 - 0.9).abs() < 1e-9, "peak = max over chunks");
-        assert!(ranked[0].2 > ranked[1].2, "a's share dominates b's");
-        assert!(ranked[0].2 <= 1.0);
+        assert_eq!(ranked[0].id, "a");
+        assert!((ranked[0].peak - 0.9).abs() < 1e-9, "peak = max over chunks");
+        assert_eq!(ranked[0].peak_chunk, 0, "a peaks on chunk 0 (0.9 > 0.8)");
+        assert!(ranked[0].share > ranked[1].share, "a's share dominates b's");
+        assert!(ranked[0].share <= 1.0);
     }
 }
