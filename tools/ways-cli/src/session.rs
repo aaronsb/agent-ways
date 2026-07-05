@@ -76,6 +76,32 @@ fn session_dir(session_id: &str) -> PathBuf {
     PathBuf::from(format!("{}/{session_id}", sessions_root()))
 }
 
+/// Path to the per-session queued-message scan mark (ADR-161). Stores the newest
+/// `queue-operation`/`enqueue` transcript timestamp already matched by the
+/// PostToolUse queued-message lane, so each mid-turn operator message is scanned
+/// at most once.
+pub fn queued_scan_mark_path(session_id: &str) -> PathBuf {
+    session_dir(session_id).join("queued-scan-mark")
+}
+
+/// Read the queued-message scan mark (an ISO-8601 timestamp), if one exists.
+pub fn read_queued_scan_mark(session_id: &str) -> Option<String> {
+    std::fs::read_to_string(queued_scan_mark_path(session_id))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Advance the queued-message scan mark to the newest consumed timestamp.
+/// Best-effort: a write failure only risks re-scanning a message, never loss.
+pub fn write_queued_scan_mark(session_id: &str, ts: &str) {
+    let path = queued_scan_mark_path(session_id);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, ts);
+}
+
 /// Path to the per-session response-topics state file written by the Stop
 /// hook (`check-response.sh`) and consumed on the next turn by
 /// `check-prompt.sh` to enrich prompt matching with topics from Claude's

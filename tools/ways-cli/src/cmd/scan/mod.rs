@@ -94,12 +94,130 @@ pub fn prompt(
     project: Option<&str>,
     response_context: Option<&str>,
 ) -> Result<()> {
+    // A user prompt starts a turn: bump the epoch.
+    scan_prompt_surface(query, session_id, project, response_context, true, "UserPromptSubmit")
+}
+
+/// ADR-161: the queued-message scan lane. A message the operator types while the
+/// agent is working is queued (recorded in the transcript as a
+/// `queue-operation`/`enqueue` entry) and never reaches `UserPromptSubmit`, so
+/// the prompt lane never sees it. On PostToolUse, aggregate every enqueue newer
+/// than the per-session scan mark into ONE surface — so a burst of short
+/// fragments becomes a ≥2-chunk late-interaction surface instead of each lone
+/// fragment falling to the single-vector fallback — match it through the same
+/// engine as a prompt (without bumping the epoch: this is mid-turn, not a new
+/// turn), then advance the mark.
+pub fn messages(
+    session_id: &str,
+    project: Option<&str>,
+    transcript: Option<&str>,
+) -> Result<()> {
+    let Some(path) = transcript else {
+        return Ok(()); // PostToolUse always supplies transcript_path; nothing to do without it.
+    };
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Ok(()), // transcript not readable yet
+    };
+
+    let mark = session::read_queued_scan_mark(session_id);
+    let scan = collect_queued(&content, mark.as_deref());
+
+    // Advance the mark first: a failure mid-scan must not re-fire endlessly.
+    // Skipped system envelopes still advance it (newest tracks all enqueues).
+    if let Some(n) = scan.newest {
+        session::write_queued_scan_mark(session_id, &n);
+    }
+    if scan.fragments.is_empty() {
+        return Ok(());
+    }
+
+    // Aggregate the burst into one surface; lowercase to match the prompt lane's
+    // keyword expectations (check-prompt.sh lowercases the prompt).
+    let surface = scan.fragments.join("\n").to_lowercase();
+    scan_prompt_surface(&surface, session_id, project, None, false, "PostToolUse")
+}
+
+/// Result of selecting queued operator messages from a transcript: the operator
+/// prose `fragments` to aggregate, and the `newest` enqueue timestamp seen
+/// (which advances the scan mark even if every fragment was a filtered envelope).
+struct QueuedScan {
+    fragments: Vec<String>,
+    newest: Option<String>,
+}
+
+/// Pure selection of queued mid-turn operator messages (ADR-161). Reads a
+/// transcript's lines, keeps `queue-operation`/`enqueue` entries strictly newer
+/// than `mark` (ISO-8601 sorts lexicographically, so a string compare is a time
+/// compare), and separates genuine operator prose from harness envelopes that
+/// ride the same queue.
+fn collect_queued(content: &str, mark: Option<&str>) -> QueuedScan {
+    let mut fragments: Vec<String> = Vec::new();
+    let mut newest: Option<String> = None;
+
+    for line in content.lines() {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if v.get("type").and_then(|x| x.as_str()) != Some("queue-operation")
+            || v.get("operation").and_then(|x| x.as_str()) != Some("enqueue")
+        {
+            continue;
+        }
+        let Some(ts) = v.get("timestamp").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        if let Some(m) = mark {
+            if ts <= m {
+                continue;
+            }
+        }
+        // Track the newest timestamp regardless of whether the content is kept,
+        // so a skipped envelope still advances the mark past it.
+        if newest.as_deref().is_none_or(|n| ts > n) {
+            newest = Some(ts.to_string());
+        }
+        let msg = v
+            .get("content")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim();
+        if msg.is_empty() || is_system_envelope(msg) {
+            continue;
+        }
+        fragments.push(msg.to_string());
+    }
+
+    QueuedScan { fragments, newest }
+}
+
+/// A queued entry whose content is a harness-generated envelope, not operator
+/// prose — it should not be matched as intent.
+fn is_system_envelope(s: &str) -> bool {
+    let t = s.trim_start();
+    t.starts_with("<task-notification")
+        || t.starts_with("<system-reminder")
+        || t.starts_with("<local-command")
+        || t.starts_with("<command-")
+        || t.starts_with("<persisted-output")
+}
+
+fn scan_prompt_surface(
+    query: &str,
+    session_id: &str,
+    project: Option<&str>,
+    response_context: Option<&str>,
+    bump_epoch: bool,
+    hook_event: &str,
+) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
         .unwrap_or_else(default_project);
 
-    // Bump epoch
-    session::bump_epoch(session_id);
+    if bump_epoch {
+        session::bump_epoch(session_id);
+    }
 
     let scope = session::detect_scope(session_id);
     let candidates = collect_candidates(&project_dir);
@@ -209,7 +327,7 @@ pub fn prompt(
     }
 
     if !context.is_empty() {
-        emit_hook_context("UserPromptSubmit", context.trim_end());
+        emit_hook_context(hook_event, context.trim_end());
     }
 
     Ok(())
@@ -1255,5 +1373,81 @@ mod near_miss_tests {
     fn unclosed_fence_is_left_intact() {
         let text = "start ```unclosed block with words";
         assert_eq!(mask_nonlinguistic(text), text);
+    }
+}
+
+#[cfg(test)]
+mod queued_tests {
+    //! ADR-161: pure selection of queued mid-turn operator messages from a
+    //! transcript — dedup by mark, envelope filtering, burst aggregation. No
+    //! I/O, no matcher.
+    use super::*;
+
+    fn enq(ts: &str, content: &str) -> String {
+        format!(
+            r#"{{"type":"queue-operation","operation":"enqueue","timestamp":"{ts}","content":{}}}"#,
+            serde_json::to_string(content).unwrap()
+        )
+    }
+
+    #[test]
+    fn selects_enqueues_and_tracks_newest() {
+        let t = [
+            enq("2026-07-05T19:59:09.679Z", "use the mermaid way"),
+            enq("2026-07-05T19:59:15.732Z", "to diagram the flow"),
+        ]
+        .join("\n");
+        let s = collect_queued(&t, None);
+        assert_eq!(s.fragments, vec!["use the mermaid way", "to diagram the flow"]);
+        assert_eq!(s.newest.as_deref(), Some("2026-07-05T19:59:15.732Z"));
+    }
+
+    #[test]
+    fn mark_excludes_already_scanned() {
+        let t = [
+            enq("2026-07-05T19:59:09.679Z", "old fragment"),
+            enq("2026-07-05T19:59:15.732Z", "new fragment"),
+        ]
+        .join("\n");
+        let s = collect_queued(&t, Some("2026-07-05T19:59:09.679Z"));
+        assert_eq!(s.fragments, vec!["new fragment"]);
+        assert_eq!(s.newest.as_deref(), Some("2026-07-05T19:59:15.732Z"));
+    }
+
+    #[test]
+    fn dequeue_and_non_queue_lines_ignored() {
+        let t = [
+            r#"{"type":"user","message":{"role":"user","content":"hi"}}"#.to_string(),
+            r#"{"type":"queue-operation","operation":"remove","timestamp":"2026-07-05T20:00:00Z"}"#.to_string(),
+            enq("2026-07-05T20:00:01Z", "real message"),
+            "not json at all".to_string(),
+        ]
+        .join("\n");
+        let s = collect_queued(&t, None);
+        assert_eq!(s.fragments, vec!["real message"]);
+        assert_eq!(s.newest.as_deref(), Some("2026-07-05T20:00:01Z"));
+    }
+
+    #[test]
+    fn system_envelope_filtered_but_still_advances_mark() {
+        // A completed-agent notification rides the same queue; it must not be
+        // matched as operator intent, yet the mark must move past it so it is
+        // not re-examined forever.
+        let t = [
+            enq("2026-07-05T20:16:30Z", "<task-notification>\n<task-id>abc</task-id>\n</task-notification>"),
+        ]
+        .join("\n");
+        let s = collect_queued(&t, None);
+        assert!(s.fragments.is_empty());
+        assert_eq!(s.newest.as_deref(), Some("2026-07-05T20:16:30Z"));
+    }
+
+    #[test]
+    fn empty_and_no_matches_are_none() {
+        assert!(collect_queued("", None).newest.is_none());
+        let only_old = enq("2026-07-05T10:00:00Z", "old");
+        let s = collect_queued(&only_old, Some("2026-07-05T11:00:00Z"));
+        assert!(s.fragments.is_empty());
+        assert!(s.newest.is_none());
     }
 }

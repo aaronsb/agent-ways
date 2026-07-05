@@ -516,6 +516,21 @@ enum ScanCommand {
         #[arg(long)]
         response_context: Option<String>,
     },
+    /// Scan queued mid-turn operator messages from the transcript (ADR-161).
+    /// Aggregates every `queue-operation`/`enqueue` newer than the per-session
+    /// scan mark into one surface and matches it like a prompt. Runs on
+    /// PostToolUse, where UserPromptSubmit never fired for these messages.
+    Messages {
+        /// Session ID
+        #[arg(long)]
+        session: String,
+        /// Project directory
+        #[arg(long)]
+        project: Option<String>,
+        /// Transcript path (from the PostToolUse hook input)
+        #[arg(long)]
+        transcript: Option<String>,
+    },
     /// Scan ways against a bash command
     Command {
         /// Command string
@@ -831,6 +846,9 @@ fn run() -> Result<()> {
         Commands::Scan { mode } => match mode {
             ScanCommand::Prompt { query, session, project, response_context } => {
                 cmd::scan::prompt(&query, &session, project.as_deref(), response_context.as_deref())
+            }
+            ScanCommand::Messages { session, project, transcript } => {
+                cmd::scan::messages(&session, project.as_deref(), transcript.as_deref())
             }
             ScanCommand::Command { command, description, session, project } => {
                 cmd::scan::command(&command, description.as_deref(), &session, project.as_deref())
