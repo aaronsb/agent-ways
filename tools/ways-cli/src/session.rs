@@ -320,6 +320,44 @@ fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
     fallback()
 }
 
+#[cfg(test)]
+mod context_window_tests {
+    use super::*;
+
+    #[test]
+    fn detects_opus_1m_but_falls_back_before_first_model_turn() {
+        let dir = std::env::temp_dir();
+        let opus = dir.join(format!("ways-ctx-opus-{}.jsonl", std::process::id()));
+        let early = dir.join(format!("ways-ctx-early-{}.jsonl", std::process::id()));
+
+        // A transcript with an opus-4 assistant turn resolves to the 1M window.
+        std::fs::write(
+            &opus,
+            "{\"type\":\"user\"}\n{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(context_window_from_transcript(&opus), 1_000_000);
+
+        // The launch race: the monitor can start seconds into a session, before the
+        // first assistant turn is written. With no model to read, detection returns
+        // the fallback — NOT 1M — which is why the live view must re-detect on refresh
+        // rather than cache this startup value for the whole session.
+        std::fs::write(&early, "{\"type\":\"user\"}\n").unwrap();
+        assert_ne!(
+            context_window_from_transcript(&early),
+            1_000_000,
+            "no assistant turn yet → cannot detect the 1M window"
+        );
+        // Absent a CLAUDE_CONTEXT_WINDOW override, the fallback is the 200K default.
+        if std::env::var("CLAUDE_CONTEXT_WINDOW").is_err() {
+            assert_eq!(context_window_from_transcript(&early), 200_000);
+        }
+
+        let _ = std::fs::remove_file(&opus);
+        let _ = std::fs::remove_file(&early);
+    }
+}
+
 // ── Check fire count ────────────────────────────────────────────
 
 /// Get and increment fire count for a check.
