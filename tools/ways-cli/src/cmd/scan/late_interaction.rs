@@ -47,11 +47,18 @@ use super::scoring::find_way_embed;
 const SOFTMAX_TAU: f64 = 0.08;
 /// Ways entering each chunk's softmax (the rest score ~0 mass anyway).
 const TOP_K_PER_CHUNK: usize = 8;
-/// Summed-share / n_chunks a way must reach to survive ranking into confirmation.
+/// Summed-share / n_chunks that admits a way into confirmation.
 const SHARE_GATE: f64 = 0.15;
-/// Body cross-similarity (winning chunk vs body chunks, max) a survivor must
+/// Peak per-chunk cosine that, on its own, admits a way into confirmation even
+/// when its share is diluted (the peak co-gate). On a topic-diverse surface
+/// `share = Σmass / n_chunks` caps a way that owns one of N topics at ≈1/N, so a
+/// specific, decisive single-chunk match never clears the share gate; admitting on
+/// a strong peak and letting the (strict) body-confirm carry precision recovers
+/// that case. Set high enough that only a decisive chunk win qualifies.
+const PEAK_GATE: f64 = 0.50;
+/// Body cross-similarity (winning chunk vs body chunks, max) an admitted way must
 /// reach to actually fire.
-const CONFIRM_GATE: f64 = 0.40;
+const CONFIRM_GATE: f64 = 0.35;
 /// Caps — keep the batched embedding bounded on a pathological surface/body.
 const MAX_SURFACE_CHUNKS: usize = 12;
 const MAX_BODY_CHUNKS: usize = 8;
@@ -88,6 +95,7 @@ impl Verdicts {
 // The gates a way must clear to fire, exposed so the diagnostic can annotate
 // each candidate's outcome the way an author needs to read it.
 pub(crate) const DIAG_SHARE_GATE: f64 = SHARE_GATE;
+pub(crate) const DIAG_PEAK_GATE: f64 = PEAK_GATE;
 pub(crate) const DIAG_CONFIRM_GATE: f64 = CONFIRM_GATE;
 
 /// One candidate's full late-interaction evidence, for the authoring view. Unlike
@@ -103,9 +111,11 @@ pub(crate) struct DiagRow {
     /// The surface chunk the way peaked on — the evidence that would fire it.
     pub won_chunk: String,
     /// Body cross-similarity of the won chunk against the way's body. `None` when
-    /// the way fell below the share gate (confirmation is not run for it).
+    /// the way was admitted by neither gate (confirmation is not run for it).
     pub confirm: Option<f64>,
-    /// Cleared both gates — would fire in production.
+    /// Admitted into confirmation — cleared the share gate or the peak co-gate.
+    pub admitted: bool,
+    /// Cleared admission AND body-confirm — would fire in production.
     pub fired: bool,
 }
 
@@ -120,37 +130,28 @@ pub(crate) fn run_diagnostic(
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
 ) -> Option<Vec<DiagRow>> {
-    let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
-    let Some(bin) = find_way_embed() else {
-        if dbg { eprintln!("DIAG: find_way_embed → None"); }
-        return None;
-    };
+    let bin = find_way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
     let model = xdg.join("minilm-l6-v2.gguf");
     if !corpus.is_file() || !model.is_file() {
-        if dbg { eprintln!("DIAG: corpus={} exists={} model={} exists={}", corpus.display(), corpus.is_file(), model.display(), model.is_file()); }
         return None;
     }
-
-    if dbg { eprintln!("DIAG: bin={} corpus={} model={}", bin.display(), corpus.display(), model.display()); }
     let chunks = chunk_surface(surface);
-    if dbg { eprintln!("DIAG: {} chunks", chunks.len()); }
     if chunks.len() < 2 {
         return None;
     }
-    let Some(per_chunk) = batch_match(&bin, &corpus, &model, &chunks) else {
-        if dbg { eprintln!("DIAG: batch_match → None"); }
-        return None;
-    };
+    let per_chunk = batch_match(&bin, &corpus, &model, &chunks)?;
     let ranked = aggregate(&per_chunk, chunks.len());
 
     let mut rows = Vec::new();
     for r in ranked.into_iter().take(top_n) {
         let won_chunk = chunks.get(r.peak_chunk).cloned().unwrap_or_default();
-        // Confirmation is only defined for share-gate survivors — the same set the
-        // live matcher would confirm — so a below-share row reports `confirm: None`.
-        let confirm = if r.share >= SHARE_GATE {
+        // Confirmation runs for any admitted candidate — share-gate OR peak co-gate —
+        // matching the live matcher's survivor set; a candidate admitted by neither
+        // reports `confirm: None`.
+        let admitted = r.share >= SHARE_GATE || r.peak >= PEAK_GATE;
+        let confirm = if admitted {
             bodies
                 .get(&r.id)
                 .and_then(|path| body_confirm(&bin, &model, &chunks[r.peak_chunk..=r.peak_chunk], path))
@@ -158,7 +159,7 @@ pub(crate) fn run_diagnostic(
             None
         };
         let fired = confirm.is_some_and(|c| c >= CONFIRM_GATE);
-        rows.push(DiagRow { id: r.id, peak: r.peak, share: r.share, won_chunk, confirm, fired });
+        rows.push(DiagRow { id: r.id, peak: r.peak, share: r.share, won_chunk, confirm, admitted, fired });
     }
     Some(rows)
 }
@@ -192,19 +193,25 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     // Stages 3+4: peak rank + per-chunk softmax-share, sorted by share desc.
     let ranked = aggregate(&per_chunk, chunks.len());
 
-    // Stage 4 gate: survivors above the share gate, strongest first.
+    // Stage 4 gate: admit a way into confirmation on EITHER a sufficient
+    // softmax-share OR a decisive peak (the peak co-gate — a specific single-chunk
+    // win that share dilution would otherwise suppress on a topic-diverse surface).
+    // Body-confirm (stage 5) then carries precision for the peak-admitted case.
     if dbg {
         eprintln!("LI: top ranked (share, peak, chunk, id):");
         for r in ranked.iter().take(8) {
             eprintln!("  {:.3} share  {:.3} peak  c{}  {}", r.share, r.peak, r.peak_chunk, r.id);
         }
     }
-    let survivors: Vec<Ranked> = ranked
+    let mut survivors: Vec<Ranked> = ranked
         .into_iter()
-        .filter(|r| r.share >= SHARE_GATE)
-        .take(MAX_WINNERS_TO_CONFIRM)
+        .filter(|r| r.share >= SHARE_GATE || r.peak >= PEAK_GATE)
         .collect();
-    if dbg { eprintln!("LI: {} survivors above share gate {SHARE_GATE}", survivors.len()); }
+    // Confirm the strongest evidence first, bounded: peak is the specificity signal,
+    // so peak-admitted candidates are not starved by a share-desc order.
+    survivors.sort_by(|a, b| b.peak.partial_cmp(&a.peak).unwrap_or(std::cmp::Ordering::Equal));
+    survivors.truncate(MAX_WINNERS_TO_CONFIRM);
+    if dbg { eprintln!("LI: {} survivors (share ≥ {SHARE_GATE} OR peak ≥ {PEAK_GATE})", survivors.len()); }
 
     // Stage 5: confirm each survivor against the chunk it WON (its peak chunk),
     // not the whole surface. Confirming against every surface chunk diluted a way
