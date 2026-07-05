@@ -92,7 +92,7 @@ pub fn state(
         // the branch was dead. (The mark-tasks-active hook still writes the marker;
         // it is dormant, kept as the hook-point should per-way tasks-active
         // suppression be wanted again.)
-        let out = capture_show_way(&way.id, session_id, "state", None, None);
+        let out = capture_show_way(&way.id, session_id, "state", None, None, None);
         if !out.is_empty() {
             context.push_str(&out);
             context.push_str("\n\n");
