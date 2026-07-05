@@ -158,3 +158,25 @@ existing tag scheme and independent CI workflows.
 - **Embed a monotonic build number instead of `git describe`.** Rejected: it
   needs external state (a counter), where `git describe` derives ordering from
   the repo itself for free and is human-legible.
+
+## Amendment (2026-07-05): the downgrade guard does not apply to `--ref`
+
+The guard above governs the **release channel**: `ways update` pulls the tracked
+branch and must never replace a binary with an older published one. `ways update
+--ref <branch|tag|sha>` (ADR-142's amendment) is a different lifecycle — an
+explicit pin to a chosen ref, built from source — and the guard is
+**intentionally bypassed** there, for two reasons:
+
+- **Download-first cannot apply.** An unpublished ref has no GitHub Release
+  binary, so `--ref` always builds from source. There is no downloaded candidate
+  to compare — which is the only thing the guard gates.
+- **"Never move backward" is the wrong invariant for an explicit pin.** The guard
+  exists because a *channel* update should be monotonic. Choosing to deploy a
+  specific commit — including one behind the current build, to reproduce or
+  bisect — is a deliberate act, not an accidental downgrade. The guard's job is to
+  stop *silent* regressions; a named `--ref` is neither silent nor accidental.
+
+The safety that remains is structural, not guard-based: `--ref` still touches only
+app-scope (`$XDG_DATA` plus the regenerable projection) per ADR-142 §5, and
+returning to the release channel is one command (`ways update --ref main`), after
+which the guard governs again as normal.

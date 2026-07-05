@@ -399,6 +399,11 @@ enum Commands {
         /// Show what would run without executing it
         #[arg(long)]
         dry_run: bool,
+        /// Pin the install to a specific branch, tag, or commit and build the
+        /// whole suite from source, instead of pulling the latest release.
+        /// Leaves the release channel until `ways update --ref main`.
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
     },
     /// settings.json fragment store — author settings as composable YAML fragments (ADR-147)
     Settings {
@@ -887,7 +892,7 @@ fn run() -> Result<()> {
                 PermissionsCommand::Audit => cmd::permissions::audit(global),
             }
         }
-        Commands::Update { dry_run } => cmd::update::run(dry_run),
+        Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
         Commands::Settings { command } => match command {
             SettingsCommand::Lint { path, json } => {
                 let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
