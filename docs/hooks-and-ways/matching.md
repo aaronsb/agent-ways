@@ -139,7 +139,7 @@ The default and most common mode. Three fields can be tested independently:
 - `commands:` - tested against bash commands (PreToolUse:Bash)
 - `files:` - tested against file paths (PreToolUse:Edit|Write)
 
-A way can declare any combination. Each field is a standard regex evaluated case-insensitively against its input.
+A way can declare any combination. Each field is a standard regex evaluated case-insensitively against its input (ADR-157 — the pattern is compiled case-insensitively; the input keeps its original case).
 
 ### Why regex is the default
 

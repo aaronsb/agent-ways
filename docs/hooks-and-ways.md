@@ -175,7 +175,7 @@ commands: git\ commit         # matched against bash commands
 files: \.env$|config\.json    # matched against file paths
 ```
 
-Fast and precise. Most ways use this. Keyword matching is **case-sensitive** against the original-case prompt — only code fences and URLs are stripped, no lowercasing.
+Fast and precise. Most ways use this. Keyword matching is **case-insensitive** (ADR-157): the pattern is compiled case-insensitively so a lowercase pattern matches the uppercase acronyms users type (`\bssh\b` → `SSH`). The prompt text keeps its original case — only code fences and URLs are stripped — so write patterns in lowercase and mean the concept. See [engine-reference.md](hooks-and-ways/engine-reference.md).
 
 The prompt `pattern:` hit is **floor-gated**: it fires only when the way's calibrated probability also clears the keyword floor `τ_k` on at least one model lane, so a lexical coincidence can't drag in an unrelated prompt. Two carve-outs let the author's explicit trigger stand: the gate **fails open** when there is genuinely no calibrated signal (the engine didn't run, the way isn't embeddable, or no calibration is loaded), and `pattern_strict: true` forces an unconditional keyword fire by design (`scan/mod.rs` `match_prompt`).
 

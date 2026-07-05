@@ -351,7 +351,9 @@ pub fn command(
             .as_deref()
             .and_then(|p| regex_span(p, cmd))
             .or_else(|| match (description, way.pattern.as_deref()) {
-                (Some(desc), Some(pat)) => regex_span(pat, &desc.to_lowercase()),
+                // Pattern compiles case-insensitively (ADR-157), so match the
+                // description in its original case for a truer captured span.
+                (Some(desc), Some(pat)) => regex_span(pat, desc),
                 _ => None,
             });
 
@@ -816,8 +818,21 @@ fn mask_nonlinguistic(text: &str) -> String {
     url.replace_all(&no_fences, " ").into_owned()
 }
 
+/// Compile a trigger pattern case-insensitively (ADR-157). The keyword lane
+/// means the *concept*, not a casing — `\bssh\b` must match `SSH`, `\bpr\b`
+/// must match `PR`. The flag lives on the compiled pattern rather than on the
+/// text so deliberately-uppercase patterns (`SKILL\.md`) still match and the
+/// captured span keeps its original case. A pattern may override with an inline
+/// `(?-i)` scope if it ever needs case-sensitivity.
+fn compile_trigger(pattern: &str) -> Option<Regex> {
+    regex::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .ok()
+}
+
 fn regex_matches(pattern: &str, text: &str) -> bool {
-    Regex::new(pattern)
+    compile_trigger(pattern)
         .map(|re| re.is_match(text))
         .unwrap_or(false)
 }
@@ -829,7 +844,7 @@ fn regex_matches(pattern: &str, text: &str) -> bool {
 /// itself is author-controlled, so a match is normally a bounded keyword.
 fn regex_span(pattern: &str, text: &str) -> Option<String> {
     const MAX_SPAN: usize = 120;
-    let m = Regex::new(pattern).ok()?.find(text)?;
+    let m = compile_trigger(pattern)?.find(text)?;
     let s = m.as_str();
     Some(match s.char_indices().nth(MAX_SPAN) {
         Some((byte, _)) => format!("{}…", &s[..byte]),
@@ -947,6 +962,23 @@ mod near_miss_tests {
             }
             _ => panic!("expected keyword Fired"),
         }
+    }
+
+    #[test]
+    fn trigger_regex_is_case_insensitive() {
+        // ADR-157: lowercase patterns match the uppercase acronyms users type,
+        // corpus-wide, without per-way (?i). Both helpers share compile_trigger.
+        assert!(regex_matches(r"\bssh\b", "connect over SSH"));
+        assert!(regex_matches(r"\bpr\b", "open a PR for this"));
+        assert_eq!(
+            regex_span(r"\berd\b", "draw an ERD diagram").as_deref(),
+            Some("ERD"),
+            "captured span keeps the input's original case"
+        );
+        // Deliberately-uppercase pattern still matches its lowercase form.
+        assert!(regex_matches(r"SKILL\.md", "editing skill.md"));
+        // An inline (?-i) scope can still opt back into case-sensitivity.
+        assert!(!regex_matches(r"(?-i)SSH", "lowercase ssh only"));
     }
 
     #[test]

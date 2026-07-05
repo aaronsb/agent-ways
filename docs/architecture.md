@@ -224,7 +224,7 @@ flowchart LR
     classDef output fill:#2E7D32,stroke:#1B5E20,color:#fff
 
     subgraph Input
-        Prompt["User prompt<br/>(lowercased)"]:::input
+        Prompt["User prompt<br/>(masked: fences/URLs stripped)"]:::input
         Cmd["Bash command"]:::input
         File["File path"]:::input
     end

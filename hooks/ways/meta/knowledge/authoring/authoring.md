@@ -37,7 +37,9 @@ only avoids leaking because the `τ_k` floor happens to gate it — don't rely o
 flags common-word, short-unanchored, and unbounded-`.*` alternations for exactly this reason
 (ADR-155 §5); fix them by moving the term to `vocabulary:`, anchoring a genuine term of art
 (`\berd\b`), or bounding the wildcard (`.{0,30}`). This keeps a way about a specific topic from
-firing during unrelated work — the semantic lane is the topic isolation.
+firing during unrelated work — the semantic lane is the topic isolation. The keyword lane is
+**case-insensitive** (ADR-157), so write patterns in lowercase and mean the concept — `\bpr\b`
+matches the `PR` a user types, no `(?i)` needed.
 
 **Other trigger types** (not prompt-based, semantic doesn't apply):
 - `files:` — regex matched against file paths (Edit/Write hooks)

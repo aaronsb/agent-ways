@@ -1,7 +1,7 @@
 ---
 description: going over the stuff you have added to a machine over time and deciding what you no longer need — auditing a workstation for forgotten, unused, or leftover software you installed and stopped using, reviewing what accumulated, grouping it by subject, and trimming the cruft. The retrospective audit-and-cull side of installing software, distinct from project dependency management.
 vocabulary: stuff I added installation machine workstation unneeded dont need anymore no longer use forgotten unused leftover smelly leftovers cruft accumulated go over review audit clean up trim prune get rid of remove uninstall what did I add what have I installed group by subject still need AUR yay go over the stuff I added go over what I installed
-pattern: (?i)stuff i.?ve added|what (did|have) i install|(unneeded|leftover|forgotten|unused) (things|stuff|packages|software)|(don.?t|do not) (need|want) (it|them|this|that|th[eo]se|any ?more)|no longer (use|need)|(clean up|get rid of|trim|prune|cull).{0,30}(cruft|leftover|smelly|packages)|smelly .{0,20}leftover
+pattern: stuff i.?ve added|what (did|have) i install|(unneeded|leftover|forgotten|unused) (things|stuff|packages|software)|(don.?t|do not) (need|want) (it|them|this|that|th[eo]se|any ?more)|no longer (use|need)|(clean up|get rid of|trim|prune|cull).{0,30}(cruft|leftover|smelly|packages)|smelly .{0,20}leftover
 scope: agent
 refire: 0.12
 ---
