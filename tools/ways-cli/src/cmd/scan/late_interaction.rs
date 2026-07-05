@@ -47,27 +47,18 @@ use super::scoring::find_way_embed;
 const SOFTMAX_TAU: f64 = 0.08;
 /// Ways entering each chunk's softmax (the rest score ~0 mass anyway).
 const TOP_K_PER_CHUNK: usize = 8;
-/// Summed-share / n_chunks a way must reach to survive ranking into confirmation.
+/// Summed-share / n_chunks that admits a way into confirmation.
 const SHARE_GATE: f64 = 0.15;
 /// Peak per-chunk cosine that, on its own, admits a way into confirmation even
-/// when its share is diluted (the peak co-gate, ADR-160 calibration). On a
-/// topic-diverse surface `share = Σmass / n_chunks` caps a way that owns one of N
-/// topics at ≈1/N, so a specific, decisive single-chunk match never clears the
-/// share gate; admitting on a strong peak and letting the (strict) body-confirm
-/// carry precision recovers that case. Set high enough that only a decisive chunk
-/// win qualifies.
+/// when its share is diluted (the peak co-gate). On a topic-diverse surface
+/// `share = Σmass / n_chunks` caps a way that owns one of N topics at ≈1/N, so a
+/// specific, decisive single-chunk match never clears the share gate; admitting on
+/// a strong peak and letting the (strict) body-confirm carry precision recovers
+/// that case. Set high enough that only a decisive chunk win qualifies.
 const PEAK_GATE: f64 = 0.50;
-/// Body cross-similarity (winning chunk vs body chunks, max) a survivor must
+/// Body cross-similarity (winning chunk vs body chunks, max) an admitted way must
 /// reach to actually fire.
-const CONFIRM_GATE: f64 = 0.40;
-
-/// Read an operating point from the environment (for calibration sweeps without a
-/// rebuild), falling back to the compiled default. `WAYS_LI_{SHARE,PEAK,CONFIRM}_GATE`.
-/// A peak gate of e.g. `2.0` is unreachable, disabling the co-gate (the pre-co-gate
-/// behaviour) for a clean before/after comparison.
-fn gate(var: &str, default: f64) -> f64 {
-    std::env::var(var).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
-}
+const CONFIRM_GATE: f64 = 0.35;
 /// Caps — keep the batched embedding bounded on a pathological surface/body.
 const MAX_SURFACE_CHUNKS: usize = 12;
 const MAX_BODY_CHUNKS: usize = 8;
@@ -139,41 +130,27 @@ pub(crate) fn run_diagnostic(
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
 ) -> Option<Vec<DiagRow>> {
-    let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
-    let Some(bin) = find_way_embed() else {
-        if dbg { eprintln!("DIAG: find_way_embed → None"); }
-        return None;
-    };
+    let bin = find_way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
     let model = xdg.join("minilm-l6-v2.gguf");
     if !corpus.is_file() || !model.is_file() {
-        if dbg { eprintln!("DIAG: corpus={} exists={} model={} exists={}", corpus.display(), corpus.is_file(), model.display(), model.is_file()); }
         return None;
     }
-
-    if dbg { eprintln!("DIAG: bin={} corpus={} model={}", bin.display(), corpus.display(), model.display()); }
     let chunks = chunk_surface(surface);
-    if dbg { eprintln!("DIAG: {} chunks", chunks.len()); }
     if chunks.len() < 2 {
         return None;
     }
-    let Some(per_chunk) = batch_match(&bin, &corpus, &model, &chunks) else {
-        if dbg { eprintln!("DIAG: batch_match → None"); }
-        return None;
-    };
+    let per_chunk = batch_match(&bin, &corpus, &model, &chunks)?;
     let ranked = aggregate(&per_chunk, chunks.len());
 
-    let share_gate = gate("WAYS_LI_SHARE_GATE", SHARE_GATE);
-    let peak_gate = gate("WAYS_LI_PEAK_GATE", PEAK_GATE);
-    let confirm_gate = gate("WAYS_LI_CONFIRM_GATE", CONFIRM_GATE);
     let mut rows = Vec::new();
     for r in ranked.into_iter().take(top_n) {
         let won_chunk = chunks.get(r.peak_chunk).cloned().unwrap_or_default();
         // Confirmation runs for any admitted candidate — share-gate OR peak co-gate —
         // matching the live matcher's survivor set; a candidate admitted by neither
         // reports `confirm: None`.
-        let admitted = r.share >= share_gate || r.peak >= peak_gate;
+        let admitted = r.share >= SHARE_GATE || r.peak >= PEAK_GATE;
         let confirm = if admitted {
             bodies
                 .get(&r.id)
@@ -181,7 +158,7 @@ pub(crate) fn run_diagnostic(
         } else {
             None
         };
-        let fired = confirm.is_some_and(|c| c >= confirm_gate);
+        let fired = confirm.is_some_and(|c| c >= CONFIRM_GATE);
         rows.push(DiagRow { id: r.id, peak: r.peak, share: r.share, won_chunk, confirm, admitted, fired });
     }
     Some(rows)
@@ -220,8 +197,6 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     // softmax-share OR a decisive peak (the peak co-gate — a specific single-chunk
     // win that share dilution would otherwise suppress on a topic-diverse surface).
     // Body-confirm (stage 5) then carries precision for the peak-admitted case.
-    let share_gate = gate("WAYS_LI_SHARE_GATE", SHARE_GATE);
-    let peak_gate = gate("WAYS_LI_PEAK_GATE", PEAK_GATE);
     if dbg {
         eprintln!("LI: top ranked (share, peak, chunk, id):");
         for r in ranked.iter().take(8) {
@@ -230,13 +205,13 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     }
     let mut survivors: Vec<Ranked> = ranked
         .into_iter()
-        .filter(|r| r.share >= share_gate || r.peak >= peak_gate)
+        .filter(|r| r.share >= SHARE_GATE || r.peak >= PEAK_GATE)
         .collect();
     // Confirm the strongest evidence first, bounded: peak is the specificity signal,
     // so peak-admitted candidates are not starved by a share-desc order.
     survivors.sort_by(|a, b| b.peak.partial_cmp(&a.peak).unwrap_or(std::cmp::Ordering::Equal));
     survivors.truncate(MAX_WINNERS_TO_CONFIRM);
-    if dbg { eprintln!("LI: {} survivors (share ≥ {share_gate} OR peak ≥ {peak_gate})", survivors.len()); }
+    if dbg { eprintln!("LI: {} survivors (share ≥ {SHARE_GATE} OR peak ≥ {PEAK_GATE})", survivors.len()); }
 
     // Stage 5: confirm each survivor against the chunk it WON (its peak chunk),
     // not the whole surface. Confirming against every surface chunk diluted a way

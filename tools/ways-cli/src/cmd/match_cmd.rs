@@ -107,12 +107,9 @@ pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
     // Hand-format: `agent_fmt::Table` shrinks columns to the terminal width when
     // piped, ellipsizing the scores to `0.5…` — useless for a diagnostic. Fixed
     // columns keep full precision; only the won-chunk (last) column is bounded.
-    // Honor the same env overrides run_diagnostic uses, so a calibration sweep's
-    // header reflects the gates actually applied.
-    let env_gate = |v: &str, d: f64| std::env::var(v).ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
-    let share_gate = env_gate("WAYS_LI_SHARE_GATE", crate::cmd::scan::DIAG_SHARE_GATE);
-    let peak_gate = env_gate("WAYS_LI_PEAK_GATE", crate::cmd::scan::DIAG_PEAK_GATE);
-    let confirm_gate = env_gate("WAYS_LI_CONFIRM_GATE", crate::cmd::scan::DIAG_CONFIRM_GATE);
+    let share_gate = crate::cmd::scan::DIAG_SHARE_GATE;
+    let peak_gate = crate::cmd::scan::DIAG_PEAK_GATE;
+    let confirm_gate = crate::cmd::scan::DIAG_CONFIRM_GATE;
     let fired_n = rows.iter().filter(|r| r.fired).count();
 
     println!();
