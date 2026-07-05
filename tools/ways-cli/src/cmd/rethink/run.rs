@@ -234,6 +234,18 @@ fn refresh_live(player: &mut Player) {
     }
     player.events_sig = sig;
 
+    // Re-detect the context window. At launch the transcript may hold no assistant
+    // message yet (the monitor can start seconds into a session, before the first
+    // model turn is written), so startup detection returns the 200K fallback and,
+    // uncorrected, every re-disclosure threshold — scaled off the window — reads far
+    // too tight (a 1M session mislabeled 200K marks nearly everything "re-disclose
+    // now"). Re-detecting here self-heals once a model turn lands. Adopt only an
+    // upgrade: the fallback is a floor a real detection replaces, and a real window
+    // never shrinks mid-session, so `max` also ignores a transient read error or a
+    // stray sub-agent (e.g. haiku) message being the newest one detection sees.
+    let detected_k = session::detect_context_window_for(&player.project_name, &player.session_id) / 1000;
+    player.context_window_k = player.context_window_k.max(detected_k);
+
     let content = ways_core::firing::load_events_text();
     let events = load_session_events(&content, &player.session_id);
     if events.is_empty() {
