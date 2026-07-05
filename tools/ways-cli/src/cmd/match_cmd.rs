@@ -84,6 +84,79 @@ pub fn run(query: String, _corpus: Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// Late-interaction diagnostic (ADR-160) — the authoring view that reflects the
+/// live fire path, replacing the single-vector cosine table for way authoring.
+///
+/// For each top candidate it shows the matcher's actual decision quantities: the
+/// **peak** per-chunk cosine (specificity), the summed-**share** (what the share
+/// gate reads), the **body-confirm** (winning chunk vs the way's own body prose),
+/// and whether the way **fired** — plus the surface chunk it won on, so an author
+/// can see the exact evidence a fire hinges on. Falls back to the single-vector
+/// view when late-interaction cannot run (sparse surface / no engine), mirroring
+/// production's fail-safe.
+pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
+    const TOP_N: usize = 20;
+    let Some((reduced, rows)) = crate::cmd::scan::diagnose(&query, project, TOP_N) else {
+        eprintln!(
+            "late-interaction unavailable for this query (surface too sparse to chunk, \
+             or the embedding engine is not set up) — showing the single-vector view.\n"
+        );
+        return run(query, None);
+    };
+
+    // Hand-format: `agent_fmt::Table` shrinks columns to the terminal width when
+    // piped, ellipsizing the scores to `0.5…` — useless for a diagnostic. Fixed
+    // columns keep full precision; only the won-chunk (last) column is bounded.
+    let share_gate = crate::cmd::scan::DIAG_SHARE_GATE;
+    let confirm_gate = crate::cmd::scan::DIAG_CONFIRM_GATE;
+    let fired_n = rows.iter().filter(|r| r.fired).count();
+
+    println!();
+    println!(
+        "late-interaction (ADR-160) · share gate ≥ {share_gate:.2} · confirm gate ≥ {confirm_gate:.2} · {fired_n} would fire"
+    );
+    println!("reduced surface: {reduced}");
+    println!();
+    println!("  {:<34}  {:>5}  {:>5}  {:>7}  {:<8}  won chunk", "way", "peak", "share", "confirm", "outcome");
+    println!("  {}", "─".repeat(96));
+
+    for r in rows {
+        let confirm = match r.confirm {
+            Some(c) => format!("{c:.3}"),
+            None => "  —  ".to_string(), // below share gate → confirmation not run
+        };
+        // Annotate why a candidate did not fire, so authoring is actionable.
+        let outcome = if r.fired {
+            "fired ✓"
+        } else if r.share < share_gate {
+            "< share"
+        } else {
+            "< confirm"
+        };
+        let id = truncate_col(&r.id, 34);
+        let chunk = truncate_col(&r.won_chunk, 46);
+        println!(
+            "  {id:<34}  {:>5.3}  {:>5.3}  {confirm:>7}  {outcome:<8}  {chunk}",
+            r.peak, r.share
+        );
+    }
+
+    println!();
+    println!("fired ✓ = cleared both gates · '< share'/'< confirm' = fell short of that gate");
+    println!("(ranked by share, the share-gate quantity; peak is the way's strongest single-chunk cosine)");
+    println!();
+    Ok(())
+}
+
+/// Truncate a display column on a char boundary, appending `…` when cut.
+fn truncate_col(s: &str, width: usize) -> String {
+    if s.chars().count() <= width {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(width.saturating_sub(1)).collect();
+    format!("{head}…")
+}
+
 fn load_descriptions(corpus_path: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     if let Ok(content) = std::fs::read_to_string(corpus_path) {

@@ -84,6 +84,85 @@ impl Verdicts {
     }
 }
 
+// ── Authoring diagnostic (task #5 — the late-interaction `ways match`) ──
+// The gates a way must clear to fire, exposed so the diagnostic can annotate
+// each candidate's outcome the way an author needs to read it.
+pub(crate) const DIAG_SHARE_GATE: f64 = SHARE_GATE;
+pub(crate) const DIAG_CONFIRM_GATE: f64 = CONFIRM_GATE;
+
+/// One candidate's full late-interaction evidence, for the authoring view. Unlike
+/// [`Verdicts`] (fired-only, share-only), this carries the peak, the winning chunk,
+/// and the body-confirm — everything an author needs to see *why* a way fired or
+/// fell short of a gate.
+pub(crate) struct DiagRow {
+    pub id: String,
+    /// Max per-chunk cosine (specificity — the way's strongest single match).
+    pub peak: f64,
+    /// Summed softmax-share / n_chunks (the ranking + share-gate quantity).
+    pub share: f64,
+    /// The surface chunk the way peaked on — the evidence that would fire it.
+    pub won_chunk: String,
+    /// Body cross-similarity of the won chunk against the way's body. `None` when
+    /// the way fell below the share gate (confirmation is not run for it).
+    pub confirm: Option<f64>,
+    /// Cleared both gates — would fire in production.
+    pub fired: bool,
+}
+
+/// Run the matcher in diagnostic mode: the same chunk → share → body-confirm
+/// pipeline as [`run`], but returning the top `top_n` candidates by share with
+/// their full evidence (including those that failed a gate, so an author can see
+/// how close a way came). Returns `None` on the same fail-safe conditions as
+/// [`run`] — the caller then reports that late-interaction could not run and falls
+/// back to the single-vector view, mirroring production.
+pub(crate) fn run_diagnostic(
+    surface: &str,
+    bodies: &HashMap<String, PathBuf>,
+    top_n: usize,
+) -> Option<Vec<DiagRow>> {
+    let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
+    let Some(bin) = find_way_embed() else {
+        if dbg { eprintln!("DIAG: find_way_embed → None"); }
+        return None;
+    };
+    let xdg = crate::paths::corpus_dir();
+    let corpus = xdg.join("ways-corpus-en.jsonl");
+    let model = xdg.join("minilm-l6-v2.gguf");
+    if !corpus.is_file() || !model.is_file() {
+        if dbg { eprintln!("DIAG: corpus={} exists={} model={} exists={}", corpus.display(), corpus.is_file(), model.display(), model.is_file()); }
+        return None;
+    }
+
+    if dbg { eprintln!("DIAG: bin={} corpus={} model={}", bin.display(), corpus.display(), model.display()); }
+    let chunks = chunk_surface(surface);
+    if dbg { eprintln!("DIAG: {} chunks", chunks.len()); }
+    if chunks.len() < 2 {
+        return None;
+    }
+    let Some(per_chunk) = batch_match(&bin, &corpus, &model, &chunks) else {
+        if dbg { eprintln!("DIAG: batch_match → None"); }
+        return None;
+    };
+    let ranked = aggregate(&per_chunk, chunks.len());
+
+    let mut rows = Vec::new();
+    for r in ranked.into_iter().take(top_n) {
+        let won_chunk = chunks.get(r.peak_chunk).cloned().unwrap_or_default();
+        // Confirmation is only defined for share-gate survivors — the same set the
+        // live matcher would confirm — so a below-share row reports `confirm: None`.
+        let confirm = if r.share >= SHARE_GATE {
+            bodies
+                .get(&r.id)
+                .and_then(|path| body_confirm(&bin, &model, &chunks[r.peak_chunk..=r.peak_chunk], path))
+        } else {
+            None
+        };
+        let fired = confirm.is_some_and(|c| c >= CONFIRM_GATE);
+        rows.push(DiagRow { id: r.id, peak: r.peak, share: r.share, won_chunk, confirm, fired });
+    }
+    Some(rows)
+}
+
 /// Run the matcher over `surface`. `bodies` maps a way's corpus id to its `.md`
 /// path (for body-confirm). Returns `None` when the matcher cannot run — the
 /// caller then falls back to the single-vector semantic gate.
