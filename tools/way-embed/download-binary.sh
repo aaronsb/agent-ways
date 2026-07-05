@@ -139,5 +139,19 @@ else
   exit 1
 fi
 
+# Capability gate: the late-interaction matcher (ADR-160) requires `match --batch`,
+# added in #319. A release binary cut before that runs fine (`--version` passes) but
+# lacks --batch — and the matcher then silently degrades to the single-vector
+# fail-safe on every scan, so ADR-160 is effectively off. The version string does not
+# distinguish them (both report 0.1.0), so probe the contract directly: the supporting
+# binary names `--batch` in its `match` usage. Reject a binary that does not, so
+# `setup-binary` falls through to a source build until a new release is cut.
+if ! "$OUTPUT_FILE" match --batch </dev/null 2>&1 | grep -q -- "--batch"; then
+  echo "Downloaded way-embed predates the required 'match --batch' primitive (ADR-160, #319)." >&2
+  echo "Building from source instead." >&2
+  rm -f "$OUTPUT_FILE" "$PLATFORM_FILE"
+  exit 1
+fi
+
 # Output path for scripts to capture
 echo "$OUTPUT_FILE"
