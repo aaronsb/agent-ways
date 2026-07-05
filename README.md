@@ -41,7 +41,7 @@ sequenceDiagram
     end
 ```
 
-**Ways** = policy and process encoded as contextual guidance. Triggered by keywords, commands, and file patterns — they fire before tools execute, re-disclose on a token-distance cadence as their influence fades, and carry into subagents.
+**Ways** = policy and process encoded as contextual guidance. Triggered by keywords, commands, and file patterns — they fire once per session, before tools execute, and carry into subagents.
 
 **Why this works:** System prompt adherence decays as a power law over conversation turns — instructions at position zero lose influence as context grows. This is the forgetting curve (Ebbinghaus) operating over token distance instead of days, and the countermeasure is the one human learning already uses: spaced repetition. Ways inject small, relevant guidance near the attention cursor at the moment it matters and re-disclose it as its influence fades, maintaining steady-state adherence instead of a damped sawtooth. It's [progressive disclosure](docs/hooks-and-ways/context-decay.md) applied to the model itself.
 
@@ -111,7 +111,7 @@ The built-in ways cover software development, but the framework is domain-agnost
 1. **UserPromptSubmit** scans your message for keyword and semantic (embedding) matches
 2. **PreToolUse** intercepts commands and file edits *before they execute*
 3. **SubagentStart** injects relevant ways into subagents spawned via Task
-4. A way fires when matched, then **re-discloses on its `refire:` cadence** (a fraction of the context window, ADR-126) as its salience decays — marker files track the first fire and drive that re-disclosure state machine, they don't permanently block re-triggering
+4. Each way fires **once per session** — marker files prevent re-triggering
 
 Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy.
 

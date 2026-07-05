@@ -477,7 +477,7 @@ flowchart TB
     M3 -->|Yes| S3["✗ Silent"]:::silent
 ```
 
-Each way has its own marker - multiple ways can fire from one prompt, and each re-discloses on its own `refire:` cadence (ADR-126) as its salience decays, rather than re-firing on every prompt.
+Each way has its own marker - multiple ways can fire from one prompt, but each only fires once per session.
 
 ## Project-Local Override
 
