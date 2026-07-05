@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 date: 2026-07-05
 deciders:
   - aaronsb
@@ -28,14 +28,16 @@ Adopt a multi-stage evidence pipeline for way selection, replacing single-vector
 2. **Chunk and match.** Split the surface into sub-units, embed each, and match each against the corpus — multi-vector late interaction instead of one vector per surface.
 3. **Rank by peak.** A way's ranking score is the maximum over its per-chunk similarities. Peak preserves specificity; it deliberately discards how many chunks agreed.
 4. **Gate by softmax-share.** Within each chunk, take a softmax over the candidate ways (competition-normalized and zero-sum, which defeats the anisotropic floor: a way must *win* the chunk, not merely clear an absolute score). Sum this mass across chunks and route it through the existing calibrated fire gate (ADR-156) to decide firing.
-5. **Confirm the winner.** Cross-compare the winner's full body (chunked) against the surface chunks and require breadth of alignment — the mean of each surface chunk's best body-chunk match. This rejects single-token collisions and covers the softmax gate's zero-sum blind spot (it always hands the winner mass, even when nothing is truly relevant).
-6. **Exclude structurally, never with negated text.** Exclusion (scope, domain, project) is expressed as a filter or rule, because dense bi-encoders cannot represent negation — negated text in an alias moves it *toward* the negated topic.
+5. **Confirm the winner.** Cross-compare the winning way's body chunks against the *chunk it won* (its peak chunk) and require the best of those to clear a bar. Corroborating the winning evidence — rather than averaging over every surface chunk — still rejects single-token collisions (a collided chunk finds no support in the way's own body) and covers the softmax gate's zero-sum blind spot (it always hands the winner mass, even when nothing is truly relevant), without diluting a way that legitimately matched only part of a multi-topic surface.
+6. **Exclude structurally, never with negated text.** Exclusion (scope, domain, project) is expressed as a filter or rule, because dense bi-encoders cannot represent negation — negated text in an alias moves it *toward* the negated topic. The corpus-authoring corollary: a way's embedded prose (`description` + `vocabulary`) states only what the way is *for*, in positive terms, using its own distinctive vocabulary; it never names, contrasts with, or excludes another item — all exclusion lives in the scope gate. Naming or negating another item only pulls the alias *toward* it.
 
-The pipeline takes deliberately opposite stances on breadth at its two ends: **peak** for ranking (specificity, a lenient recall pass) and **mean** for confirmation (breadth, a strict coverage check). This is the load-bearing design choice.
+The pipeline is lenient where it ranks (peak + softmax-share admit a way on its strongest evidence) and strict where it confirms (the body must corroborate that winning evidence). An earlier design averaged the confirm over *every* surface chunk; a live trial showed that over-prunes multi-topic surfaces, so confirmation is scoped to the winning chunk. This lenient-rank / strict-confirm split is the load-bearing design choice.
 
 **Required primitive.** The pipeline embeds many chunks per surface, so the embedder must embed a **batch per model load**, and ideally **multiple batches per load** (all chunks across all surfaces a hook needs in one invocation). Per-chunk model reloads are not viable. This is a hard prerequisite, not an optimization.
 
-**Status is Proposed, not Accepted.** The pipeline's operating points — softmax temperature, the share gate, the confirmation threshold — are load-bearing and currently unmeasured; hand-set values work on individual cases but cannot be eyeballed at corpus scale. Adoption to Accepted is gated on (a) a **precision instrument** that makes the poorly-matched rate a measurable quantity, and (b) **calibration** of the operating points against it, in the discipline ADR-156 applied to `τ_s`. Until then the single-vector path (ADR-156) remains the shipped default, and the pipeline must fail safe to it when a surface is too sparse to chunk.
+**The late-interaction pipeline is the semantic matcher, not an opt-in alternative.** It replaces the single-vector calibrated gate on the prompt and task surfaces; the single-vector path (ADR-156) is retained only as the **fail-safe fallback** for surfaces too sparse to chunk (fewer than two chunks) or when the embedder is unavailable — it is neither a user-selectable mode nor the default. There is deliberately no config flag to A/B the two: committing to one matcher is the non-clever choice.
+
+**Status: Accepted — shipped with provisional operating points.** The operating points (softmax temperature, share gate, confirm gate) are hand-set. The one over-pruning failure a live trial surfaced — a mean-of-max confirm over every surface chunk diluting a way that matched only part of a multi-topic surface — is resolved by scoping confirmation to the winning chunk (stage 5), and the matcher ships as *the* semantic matcher on `main`. The points remain **provisional, not finally calibrated**: the follow-up is (a) a **precision instrument** — replaying each fire's surface from the transcript at its logged token position so relevance is judgeable — and (b) tuning the points against it and against live observation of whether ways are better-behaved. That is refinement of a shipped matcher, not a gate on adoption; a regression is handled by tuning or, in the limit, superseding this ADR.
 
 ## Consequences
 
@@ -54,12 +56,12 @@ The pipeline takes deliberately opposite stances on breadth at its two ends: **p
 ### Neutral
 
 - Requires the **batched-embedding primitive** (single- and multi-batch per model load) as a prerequisite deliverable.
-- Requires **forward telemetry** (per-fire query hash, score on all fires, and an acted-upon/productivity signal) to measure precision — independently useful, and the prerequisite for calibration.
+- Requires **forward telemetry** (`fire_score` on *every* semantic fire, not just first-fires) plus a **read-side replay instrument** — replaying each fire's surface from the transcript at its logged token position, so relevance (and derived signals like self-reference and productivity) can be judged — to measure precision; the prerequisite for calibration. A per-fire query *hash* was considered and dropped: a hash can only be deduplicated, never judged for relevance.
 - Channel-agnostic; roll-out is sequenced by measured fire-volume per channel, not by channel identity.
 
 ## Alternatives Considered
 
-- **Single-vector cosine threshold (status quo, ADR-156).** The problem this ADR addresses: an anisotropic floor thresholded with no attribution. Retained as the fail-safe fallback and the shipped default until this pipeline is calibrated.
+- **Single-vector cosine threshold (status quo, ADR-156).** The problem this ADR addresses: an anisotropic floor thresholded with no attribution. Retained only as the fail-safe fallback for surfaces too sparse to chunk — not as the default and not as an opt-in alternative to the late-interaction matcher.
 - **Generative LLM reranker (local or remote).** Rejected as the primary mechanism. A probe kept the very false positive it was meant to reject when given only the thin alias as evidence; it adds cost and nondeterminism, and the leverage proved to be *evidence quality*, not model capability. Retained only as a possible last resort for residual within-domain ambiguity, behind the deterministic stages.
 - **Resident model daemon.** Deferred. Unnecessary for the embedding tier — batched embedding suffices for the load. Relevant only if a larger reasoning model is later introduced as a reranker.
 - **Negated alias text ("not for X").** Rejected. Dense bi-encoders move *toward* a negated topic; measured directly. Exclusion must be structural.
