@@ -162,14 +162,17 @@ pub fn way_scored(
         ("token_position", token_pos.to_string()),
     ];
     // ADR-134 task D: the calibrated probability that fired this way, feeding the
-    // fire-score telemetry that calibration (ADR-156) is fit from. Recorded only on a
-    // first-fire (way_fired), never a redisclosure: threshold tuning is about
-    // what score gates a way's *entry* to a session, and a redisclosure's score
-    // reflects the re-triggering prompt — a different population that would bias
-    // the derivation. (Redisclosure dynamics are a separate cadence signal.)
-    // This also aligns with how tune-precision reads placement (way_fired only)
-    // and makes the field self-documenting: its presence marks a placement event.
-    if let (false, Some(score)) = (is_redisclosure, fire_score) {
+    // fire-score telemetry that calibration (ADR-156) is fit from. Logged on every
+    // semantic fire — first-fire *and* redisclosure — so precision is measurable
+    // across the whole fire population, not just the first-fire slice. The score is
+    // worth writing at fire time because it is not cheaply recoverable later (that
+    // would mean re-embedding the historical surface against the corpus).
+    // Calibration still isolates the *placement* population cleanly by filtering on
+    // the event kind (`way_fired`, per tune_precision.rs), so widening the score to
+    // redisclosures does not bias the derivation — it just makes the redisclosure
+    // score available as a cadence signal. Keyword/state/CLI fires pass None and log
+    // no score (they have none).
+    if let Some(score) = fire_score {
         log_fields.push(("fire_score", format!("{score:.4}")));
     }
     // ADR-153 §3: the deterministic-channel match text, so introspection can show
