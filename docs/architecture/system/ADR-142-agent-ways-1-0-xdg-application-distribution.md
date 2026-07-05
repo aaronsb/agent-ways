@@ -329,3 +329,30 @@ Accepted:
 - **Whether the two children stay separate ADRs or fold into this spine** — see ADR-143 / ADR-144;
   current recommendation is to keep them separate (below).
 - Bootstrap-exemption mechanism and Windows materialization specifics are parked in **child ADR-144**.
+
+## Amendment (2026-07-05): source-pinned deploys — `ways update --ref`
+
+§4's **out-of-date → update** from-state advances `$XDG_DATA` to the *latest
+release* on the tracked branch and refreshes binaries download-first (§7). A
+development need sits alongside it: deploying an **unpublished ref** — a feature
+branch, a tag, or a bare commit — onto a live install to dogfood it, without
+publishing to `main` and cutting a release.
+
+`ways update --ref <branch|tag|sha>` serves that need as a variant of the update
+from-state, with three deliberate differences from the release-channel path:
+
+- **Fetch + detached checkout of the ref**, not a pull of the tracking branch.
+  The checkout lands on a detached HEAD at the ref; `ways update --ref main`
+  returns to the release channel.
+- **Build the whole suite from source** (`ways-rebuild` and the sibling
+  `*-rebuild` targets, plus way-embed's source target) — an unpublished ref has
+  no pre-built release binary to download, so download-first (§7) does not apply.
+- **The ADR-150 downgrade guard is bypassed** (see that ADR's amendment): pinning
+  an explicit ref is a deliberate choice, not a channel update, so "never move
+  backward" is not the right invariant.
+
+The reconciler tail is unchanged: after the source build it runs the same relink
++ corpus regen + `ways reconcile` projection as any other update, so the trust
+posture (§5: app-scope plus the one `settings.json` merge) is identical. This
+stays a developer/dogfooding affordance layered on the update from-state, not a
+fifth reconciler mode.
