@@ -85,35 +85,17 @@ pub fn state(
             continue;
         }
 
-        // Handle repeating context-threshold ways
-        if trigger_type == "context-threshold" && way.repeat {
-            let tasks_marker = format!("{}/{session_id}/tasks-active", crate::session::sessions_root());
-            if std::path::Path::new(&tasks_marker).exists() {
-                continue; // tasks active, suppress repeat
-            }
-            // Repeating: output body directly (no marker gating)
-            let content = std::fs::read_to_string(&way.path).unwrap_or_default();
-            let body = strip_frontmatter(&content);
-            if !body.is_empty() {
-                context.push_str(&body);
-                context.push_str("\n\n");
-                session::log_event(&[
-                    ("event", "way_fired"),
-                    ("way", &way.id),
-                    ("domain", way.id.split('/').next().unwrap_or(&way.id)),
-                    ("trigger", "state"),
-                    ("scope", &scope),
-                    ("project", &project_dir),
-                    ("session", session_id),
-                ]);
-            }
-        } else {
-            // Standard one-shot: marker-gated via show
-            let out = capture_show_way(&way.id, session_id, "state", None, None);
-            if !out.is_empty() {
-                context.push_str(&out);
-                context.push_str("\n\n");
-            }
+        // Marker-gated via show; refire cadence follows the way's own `refire:`
+        // curve (ADR-126). The former `repeat: true` bypass — which dumped the
+        // body every threshold crossing and consulted a `tasks-active` marker —
+        // is gone: no way uses `repeat` since todos moved to its refire curve, so
+        // the branch was dead. (The mark-tasks-active hook still writes the marker;
+        // it is dormant, kept as the hook-point should per-way tasks-active
+        // suppression be wanted again.)
+        let out = capture_show_way(&way.id, session_id, "state", None, None);
+        if !out.is_empty() {
+            context.push_str(&out);
+            context.push_str("\n\n");
         }
     }
 

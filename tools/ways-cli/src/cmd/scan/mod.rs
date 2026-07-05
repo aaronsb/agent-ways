@@ -55,7 +55,6 @@ pub(crate) struct WayCandidate {
     pub when_project: Option<String>,
     pub when_file_exists: Option<String>,
     pub trigger: Option<String>,
-    pub repeat: bool,
     pub trigger_path: Option<String>,
 }
 

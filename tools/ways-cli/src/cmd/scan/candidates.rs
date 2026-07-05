@@ -233,7 +233,6 @@ fn parse_candidate(id: &str, corpus_prefix: &str, path: &Path, content: &str) ->
         when_project: get_when_field(&fm, "project"),
         when_file_exists: get_when_field(&fm, "file_exists"),
         trigger: get_fm_field(&fm, "trigger"),
-        repeat: get_fm_field(&fm, "repeat").as_deref() == Some("true"),
         trigger_path: get_fm_field(&fm, "path"),
     })
 }
