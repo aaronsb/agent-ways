@@ -96,3 +96,48 @@
 {"prompt": "he works at the library downtown", "way": "softwaredev/environment/deps", "label": 0}
 {"prompt": "gift package wrapping service", "way": "softwaredev/environment/deps", "label": 0}
 {"prompt": "the software comes as a complete package deal", "way": "softwaredev/environment/deps", "label": 0}
+# --- ADR-158 batch 1: hard negatives + balancing intents for diagnosed over-firing ways ---
+# documentation/adr — anchor the true intent (currently unprobed; fires at 0.735)
+{"prompt": "write an adr documenting this architecture decision", "way": "documentation/adr", "label": 1}
+{"prompt": "record this technical choice as an architecture decision record", "way": "documentation/adr", "label": 1}
+{"prompt": "create a new adr for the database choice", "way": "documentation/adr", "label": 1}
+{"prompt": "what's the rationale we should capture in this decision record", "way": "documentation/adr", "label": 1}
+{"prompt": "fix a css flexbox alignment bug", "way": "documentation/adr", "label": 0}
+{"prompt": "bump the lodash dependency", "way": "documentation/adr", "label": 0}
+# softwaredev/delivery/implement — post-ADR coding briefing; NOT writing docs/ADRs
+{"prompt": "let's start implementing the plan from the adr", "way": "softwaredev/delivery/implement", "label": 1}
+{"prompt": "break this work down into parallel tasks", "way": "softwaredev/delivery/implement", "label": 1}
+{"prompt": "brief me before we start coding this", "way": "softwaredev/delivery/implement", "label": 1}
+{"prompt": "kick off the implementation and plan the work breakdown", "way": "softwaredev/delivery/implement", "label": 1}
+{"prompt": "write an adr documenting this architecture decision", "way": "softwaredev/delivery/implement", "label": 0}
+{"prompt": "should we write a design doc for this", "way": "softwaredev/delivery/implement", "label": 0}
+{"prompt": "review this pull request for me", "way": "softwaredev/delivery/implement", "label": 0}
+{"prompt": "draw an erd for these tables", "way": "softwaredev/delivery/implement", "label": 0}
+# softwaredev/architecture/design/prototype — probe EXTERNAL systems before accepting; not ADR-writing
+{"prompt": "spike a throwaway to measure the api latency before we accept this", "way": "softwaredev/architecture/design/prototype", "label": 1}
+{"prompt": "probe the real endpoint to confirm the payload size assumption", "way": "softwaredev/architecture/design/prototype", "label": 1}
+{"prompt": "build a proof of concept to validate the rate limit before committing", "way": "softwaredev/architecture/design/prototype", "label": 1}
+{"prompt": "write an adr documenting this architecture decision", "way": "softwaredev/architecture/design/prototype", "label": 0}
+{"prompt": "record this decision as an adr", "way": "softwaredev/architecture/design/prototype", "label": 0}
+{"prompt": "review this pull request for me", "way": "softwaredev/architecture/design/prototype", "label": 0}
+{"prompt": "let's start implementing the plan", "way": "softwaredev/architecture/design/prototype", "label": 0}
+# softwaredev/freshness/groundtruth — verify docs against executable truth; not ADR-writing
+{"prompt": "does the code actually match what the doc claims", "way": "softwaredev/freshness/groundtruth", "label": 1}
+{"prompt": "verify this behavior against the source before we rely on it", "way": "softwaredev/freshness/groundtruth", "label": 1}
+{"prompt": "reconcile the spec with the actual implementation", "way": "softwaredev/freshness/groundtruth", "label": 1}
+{"prompt": "write an adr documenting this architecture decision", "way": "softwaredev/freshness/groundtruth", "label": 0}
+{"prompt": "let's start implementing the plan", "way": "softwaredev/freshness/groundtruth", "label": 0}
+{"prompt": "review this pull request for me", "way": "softwaredev/freshness/groundtruth", "label": 0}
+# meta/introspection — reflect WHEN creating a PR; not generic PR review
+{"prompt": "let's open a pr and reflect on what we learned this session", "way": "meta/introspection", "label": 1}
+{"prompt": "create a pr and capture the session learnings", "way": "meta/introspection", "label": 1}
+{"prompt": "review this pull request for me", "way": "meta/introspection", "label": 0}
+{"prompt": "adversarially audit this external patch for backdoors", "way": "meta/introspection", "label": 0}
+{"prompt": "write an adr documenting this architecture decision", "way": "meta/introspection", "label": 0}
+# softwaredev/code/security/contributions — adversarial review of UNTRUSTED contributors only
+{"prompt": "review this pr from an unknown contributor for anything malicious", "way": "softwaredev/code/security/contributions", "label": 1}
+{"prompt": "adversarially audit this external patch for backdoors or exfiltration", "way": "softwaredev/code/security/contributions", "label": 1}
+{"prompt": "scrutinize this driveby fork contribution for a supply-chain trojan", "way": "softwaredev/code/security/contributions", "label": 1}
+{"prompt": "review this pull request for me", "way": "softwaredev/code/security/contributions", "label": 0}
+{"prompt": "can you review my pr before I merge it", "way": "softwaredev/code/security/contributions", "label": 0}
+{"prompt": "open a pr and reflect on the session", "way": "softwaredev/code/security/contributions", "label": 0}

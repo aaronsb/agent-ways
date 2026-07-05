@@ -1,6 +1,6 @@
 ---
-description: when an ADR or design rests on external-system behavior, performance, latency, or data-volume assumptions, build a throwaway prototype or probe the real system to confirm or kill the decision BEFORE flipping it to Accepted
-vocabulary: prototype probe spike throwaway validate empirically measure benchmark external api third-party rate limit latency budget payload size data volume webhook poll assumption aspirational adr proposed draft accept ratify load-bearing claim feasibility proof of concept
+description: when a design decision rests on external-system behavior, performance, latency, or data-volume assumptions, build a throwaway prototype or probe the real system to confirm or kill it BEFORE committing
+vocabulary: prototype probe spike throwaway validate empirically measure benchmark external api third-party rate limit latency budget payload size data volume webhook poll assumption load-bearing claim feasibility proof of concept
 scope: agent, subagent
 refire: 0.2
 ---
