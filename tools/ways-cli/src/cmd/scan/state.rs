@@ -162,21 +162,6 @@ fn evaluate_file_exists(pattern: &str, project_dir: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn strip_frontmatter(content: &str) -> String {
-    let mut fm_count = 0;
-    let mut body = Vec::new();
-    for line in content.lines() {
-        if line == "---" {
-            fm_count += 1;
-            continue;
-        }
-        if fm_count >= 2 {
-            body.push(line);
-        }
-    }
-    body.join("\n")
-}
-
 fn capture_show_core(session_id: &str) -> String {
     crate::cmd::show::core(session_id).unwrap_or_default()
 }
