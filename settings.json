@@ -269,6 +269,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-post.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-queued.sh"
           }
         ]
       }
