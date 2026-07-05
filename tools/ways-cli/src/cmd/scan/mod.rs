@@ -215,6 +215,25 @@ pub fn prompt(
     Ok(())
 }
 
+// ── Authoring diagnostic (task #5) ─────────────────────────────
+
+pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_SHARE_GATE};
+
+/// Run the late-interaction matcher over `query` for way authoring — the modern
+/// equivalent of the single-vector `ways match`. Reduces the query exactly as the
+/// prompt scan does (so the diagnostic sees the surface production sees), then
+/// returns the top candidates' evidence (peak / share / body-confirm / fired) with
+/// the reduced surface for context. `None` means late-interaction could not run
+/// (engine unavailable, or the surface is too sparse to chunk) — the caller then
+/// falls back to the single-vector view, mirroring production's fail-safe.
+pub fn diagnose(query: &str, project: Option<&str>, top_n: usize) -> Option<(String, Vec<DiagRow>)> {
+    let project_dir = project.map(|s| s.to_string()).unwrap_or_else(default_project);
+    let candidates = collect_candidates(&project_dir);
+    let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
+    let rows = late_interaction::run_diagnostic(&reduced, &body_map(&candidates), top_n)?;
+    Some((reduced, rows))
+}
+
 // ── Task scan (subagent/teammate stash) ────────────────────────
 
 pub fn task(
