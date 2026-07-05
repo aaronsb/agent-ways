@@ -26,7 +26,7 @@ This distinction matters when the model doesn't know what it doesn't know. A dev
 
 RAG systems are typically stateless between queries. Each retrieval is independent — the system doesn't remember what it already retrieved. This leads to a well-known problem: the same chunks get re-injected across turns, consuming context window budget with redundant information.
 
-Ways maintain session state through marker files. Each way fires **once per session**. The state machine is simple — `not_shown → shown` — but it solves a problem that RAG handles poorly: knowing when to stop retrieving the same thing.
+Ways maintain session state through marker files. A way fires when matched, then **re-discloses on a token-distance cadence** (its `refire:` fraction of the window, ADR-126) as its salience decays. The state machine — `not_shown → shown → (salience decays) → re-disclosed` — solves a problem RAG handles poorly: knowing *when re-injecting the same thing is worth the budget*, rather than re-retrieving on every query.
 
 ### 3. One Trigger Channel vs. Many
 
@@ -49,7 +49,7 @@ Three of these six channels have no RAG equivalent. You can't embed a `git commi
 
 In a standard RAG pipeline, each chunk's retrieval probability depends only on its similarity to the current query. Prior retrievals don't change future retrieval behavior.
 
-Ways have **progressive disclosure trees**: when a parent way fires, its children's triggering thresholds drop by 20%. The system's sensitivity adapts within a session based on what context has already been established. If the security parent way has fired, security sub-topics become easier to trigger — because the conversational domain has been established.
+Ways have **progressive disclosure trees**: when a parent way fires, an in-domain child's semantic firing bar is lowered — in probability space, from the global relevance threshold `τ_s` (0.5) to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)`, i.e. `max(0.5 × 0.8, 0.30) = 0.40` by default (the multiplier lowers the bar; the floor stops cascading boosts from reaching the noise band — see [engine-reference.md](engine-reference.md)). The system's sensitivity adapts within a session based on what context has already been established. If the security parent way has fired, security sub-topics become easier to trigger — because the conversational domain has been established.
 
 This is a feedback loop in the retrieval system itself. Building this on top of RAG would require a separate state-tracking orchestration layer — at which point you've left RAG's architecture and built something closer to Ways.
 
@@ -89,7 +89,7 @@ Ways are not universally superior. RAG wins when:
 Ways win when:
 
 - **Guidance must fire on actions, not just text.** Tool invocation, file editing, and state transitions have no natural representation as RAG queries.
-- **Context budget is constrained.** Ways' once-per-session injection and small payload size keep the context window lean. RAG's re-retrieval pattern consumes more budget over time.
+- **Context budget is constrained.** Ways re-disclose on a *salience-gated* cadence (spaced repetition, ADR-126) — deliberate, bounded re-injection as influence fades — rather than RAG's re-retrieval on every query. That plus small payload size keeps the context window lean by design.
 - **Behavioral adherence over long sessions matters.** The [context decay model](context-decay.md) shows that injection timing — proximity to the generation cursor — dominates content quality for sustained adherence. Ways inject at the tool-call boundary; RAG injects at the query boundary.
 - **The corpus is small and curated.** Twenty well-authored behavioral constraints don't need vector search. They need precise triggering.
 

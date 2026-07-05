@@ -16,7 +16,9 @@ The switch is the resolved `Config.language`:
 | **English** (default) | `language` is `en` / `auto` / unset | English corpus + English (384-dim) matching only. The 127MB multilingual model is **never downloaded or loaded**. No locale tuning. The intl pipeline is dormant — zero cost. |
 | **Localized** | `language` is a specific non-English code (e.g. `es`) | The multilingual corpus is built with the English root as anchor, the 768-dim multilingual lane runs as a *second* lane, and `ways tune --lang` audits the localization. |
 
-Both modes match by embedding cosine — the difference is the model, not the method.
+Both modes match by the same rule — embed the prompt, take cosine against the way's
+alias, map it through the per-model logistic `g(s)`, and fire on the global `τ_s` / `τ_k`
+(see `engine-reference.md`). The difference is the model, not the method.
 
 ### Setting the switch — two configs, one bridge
 
@@ -86,10 +88,11 @@ One `.locales.jsonl` file per way, co-located with its `.md`, one line per langu
 {"lang":"es","description":"seguridad general, codificación segura","vocabulary":"seguridad vulnerable defensa owasp"}
 ```
 
-Just `lang`, `description`, `vocabulary` — no per-stub threshold (per ADR-125,
-thresholds are per-node on the English frontmatter, not per locale). A full
-native-language way can override a stub by existing as `security.es.md`. New/edited
-ways are authored **English-only**; `ways-localize` derives the locale layer.
+Just `lang`, `description`, `vocabulary` — no per-stub threshold, and no per-way
+threshold anywhere: firing is the global `τ_s` / `τ_k` on the calibrated `g(s)`, never a
+per-node or per-locale threshold (see `engine-reference.md`). A full native-language way
+can override a stub by existing as `security.es.md`. New/edited ways are authored
+**English-only**; `ways-localize` derives the locale layer.
 
 ## Tuning — the acceptance gate
 

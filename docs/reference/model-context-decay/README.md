@@ -39,7 +39,7 @@ Benchmarks from Anthropic's Claude 4.6 model card (March 2026).
 
 ### The Problem
 
-The current "disclose once per session" rule was designed for 200K context windows where the entire conversation was within a single effective attention span. At 1M tokens:
+Ways originally disclosed once per session — a marker-file rule designed for 200K context windows where the entire conversation fit within a single effective attention span. That rule is retired: the engine now re-discloses on a token-distance axis (ADR-104 → ADR-123 → ADR-126). The motivating problem is unchanged — at 1M tokens:
 
 - A way disclosed at token 50K has measurably degraded influence at token 500K
 - Retrieval accuracy for that disclosure drops ~15-20% (Opus) or ~30%+ (Sonnet)
@@ -59,31 +59,30 @@ Sonnet retrieval: ~91%          ~82%          ~73%          ~69%          ~65%
 Way influence:    STRONG ────── WARM ────────── COOL ──────── COLD ──────── FADED
 ```
 
-### Recommended Re-Disclosure Interval
+### Re-Disclosure Interval
 
-**25% of context window.** A single percentage-based threshold that scales automatically:
+The interval is **window-relative and per-way**, not a single global threshold. Each way's `refire:` preset is a fraction of the session context window; at fire evaluation the preset is multiplied by the operator's current window, so intervals scale automatically to new context tiers with no code change (ADR-126). The shipped presets:
 
-| Model | Window | 25% interval | Max re-disclosures |
-|-------|--------|-------------|-------------------|
-| **Opus 4.6** | 1M | 250K tokens | ~3-4 per session |
-| **Sonnet 4.6** | 200K | 50K tokens | ~3 per session |
-| **Haiku 4.5** | 200K | 50K tokens | ~3 per session |
+| Preset | Fraction of window | Cadence |
+|--------|-------------------|---------|
+| `once` | 1.0 | effectively once per session |
+| `rare` | 0.4 | ~2 re-fires across a full window |
+| `normal` | 0.15 | the standard load-bearing cadence |
+| `frequent` | 0.05 | re-fires on each fresh occurrence of its trigger |
 
-The 25% figure maps to the empirical degradation knee: retrieval drops ~10-15% per quarter-window across models. This is enough to meaningfully affect rule compliance but not so frequent that it wastes context.
-
-Using a percentage rather than fixed token counts means the system automatically adapts to new context tiers without code changes.
+A way needing finer shaping declares an explicit `curve:` block instead (ADR-123); `refire:` wins when both are present. An early design proposed a flat 25%-of-window global constant (retired ADR-104); it was superseded by these per-way presets. See `docs/hooks-and-ways/engine-reference.md` and ADR-126.
 
 ### Token Budget Consideration
 
-Re-disclosure has a cost: each way injection is ~200-500 tokens. At 25% intervals, that's ~3-4 re-disclosures per way per session. For a session that triggers 5 ways, that's ~6-10K tokens total — well under 1% of even a 200K budget.
+Re-disclosure has a cost: each way injection is ~200-500 tokens. At the `normal` preset (~15% of the window), that's a handful of re-disclosures per way per session. For a session that triggers 5 ways, that's ~6-10K tokens total — well under 1% of even a 200K budget.
 
 ## How This Connects to Epochs
 
-The current epoch counter tracks **events** (hook firings). Token distance is a different axis:
+The epoch counter tracks **event distance** — turns / tool actions since a way fired. Token distance is a separate axis, and both are already live:
 
 | Metric | What it measures | Good for |
 |--------|-----------------|----------|
 | **Epoch distance** | How many tool actions since way fired | Check decay (is the model still thinking about this domain?) |
 | **Token distance** | How much context has accumulated since way fired | Re-disclosure (has the way faded from retrievable memory?) |
 
-Both are useful. Epoch distance drives check scoring (ADR-103). Token distance drives way re-disclosure. They complement each other.
+Both are useful. Epoch distance drives check scoring (ADR-103). Token distance drives way re-disclosure — the window-relative `refire:` mechanism (ADR-126; see `docs/hooks-and-ways/engine-reference.md`). They complement each other.

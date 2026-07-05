@@ -109,7 +109,7 @@ Reading this formula:
 
 The denominator $1 + k \cdot N_\mathrm{concurrent}$ grows linearly with the number of injections, so effective adherence drops hyperbolically. One injection gets nearly full strength. Two split the budget. Five are each fighting for scraps. The "+1" in the denominator ensures that a single injection ($N_\mathrm{concurrent} = 0$ additional competitors) gets the full $A_\mathrm{inject}$.
 
-This is why ways are designed to be small (20-60 lines each), fire once per session (marker-gated deduplication), and trigger selectively (embedding-based semantic scoring, not blanket activation). The goal is high signal-to-noise at the cursor position, not maximum information delivered. Three precisely timed injections outperform twenty simultaneous ones.
+This is why ways are designed to be small (20-60 lines each), re-disclose on a spaced cadence (marker-gated, per-way `refire:` — see below), and trigger selectively (embedding-based semantic scoring, not blanket activation). The goal is high signal-to-noise at the cursor position, not maximum information delivered. Three precisely timed injections outperform twenty simultaneous ones.
 
 <img src="../images/context-decay-saturation.png" alt="Saturation curve: effective adherence per injection drops sharply as concurrent injections increase" width="100%" />
 

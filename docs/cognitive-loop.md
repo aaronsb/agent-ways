@@ -91,7 +91,6 @@ description: Guide Claude in writing commit messages when invoking git commit
 trigger:
   type: PreToolUse
   commands: git commit
-embed_threshold: 0.55
 ---
 
 When writing a commit message:
@@ -129,17 +128,17 @@ The mental model: **ways are a rate-limited stream of premises**. Claude does no
 
 The thresholds, half-lives, and vocabularies above were all set by authorial judgment. **Empirical auto-tuning** ([ADR-134](architecture/system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)) closes the loop by feeding the matcher's own firing record back into those settings. This is optional operational tooling, not part of the per-turn loop — but it is what keeps the precision-first discipline honest over time.
 
-Two signals accumulate in `~/.claude/stats/events.jsonl`, both written by the cheap substrate at fire time:
+Two signals accumulate in `$XDG_STATE/agent-ways/events.jsonl` (the legacy `~/.claude/stats/events.jsonl` is migrated forward), both written by the cheap substrate at fire time:
 
-- **`way_nearmiss` events** — a *recall* signal. When a way scores within `near_miss_margin` (default 0.05) of its effective threshold but does not fire, the matcher records the would-be miss (`score_en`, `score_multi`, `thr_en`, `thr_multi`, `margin`, `trigger`, `query_tokens`). The scores are already computed; this is persistence, not new work. False silences — the way that *should* have fired — were structurally invisible before this; now they are measurable.
-- **`fire_score` on `way_fired` events** — the embedding score that cleared threshold, recorded on first-fires only (never on re-disclosures, whose score reflects the re-triggering prompt). This is the population a future `embed_threshold` raise would tune against.
+- **`way_nearmiss` events** — a *recall* signal. When a way's calibrated relevance probability `g(s)` falls short of the semantic fire threshold τ_s (its effective value after any parent-boost) by no more than `near_miss_margin` (default 0.05) but does not fire, the matcher records the would-be miss (`prob_en`, `prob_multi`, `tau_s`, `margin`, `trigger`, `query_tokens`). The probabilities are already computed; this is persistence, not new work. False silences — the way that *should* have fired — were structurally invisible before this; now they are measurable.
+- **`fire_score` on `way_fired` events** — the calibrated relevance probability `g(s)` that cleared the semantic threshold τ_s, recorded on first-fires only (never on re-disclosures, whose score reflects the re-triggering prompt). This is the population the deferred ADR-134 threshold auto-tune would work from.
 
 Two report-only subcommands read this record:
 
 - **`ways tune-curves`** (ADR-123 Phase E) groups `way_fired` / `way_redisclosed` by `(way, session)`, computes token-position deltas between fires, and suggests `half_life ≈ median delta`. `--apply` rewrites the way's `curve:` block in place as an ordinary, reviewable git diff.
-- **`ways tune-precision`** is a heuristic relevance audit. For each way it estimates how often its fires landed off-class — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate. A narrow way repeatedly firing into the same wrong kind of session is flagged **mis-targeted** (remedy: raise `embed_threshold`, narrow vocabulary, or change trigger channel); a way that fires broadly by design (e.g. `meta/tracking`) is flagged **cross-cutting** and the vocabulary-narrowing remedy is suppressed — those are scoped by trigger, never auto-narrowed. Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
+- **`ways tune-precision`** is a heuristic relevance audit. For each way it estimates how often its fires landed off-class — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate. A narrow way repeatedly firing into the same wrong kind of session is flagged **mis-targeted** (remedy: narrow vocabulary or change trigger channel — there is no per-way threshold to raise); a way that fires broadly by design (e.g. `meta/tracking`) is flagged **cross-cutting** and the vocabulary-narrowing remedy is suppressed — those are scoped by trigger, never auto-narrowed. Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
 
-Both report by default. Vocabulary is never auto-applied — it re-shapes the embedding neighborhood and stays authorial. The `embed_threshold` apply slice is deferred until the `fire_score` population accumulates (tracked as issue #123); the threshold is read alongside `default_embed_threshold` and `default_multi_embed_threshold` in the ways config, which is also where `near_miss_margin` lives.
+Both report by default. Vocabulary is never auto-applied — it re-shapes the embedding neighborhood and stays authorial. The threshold apply slice is deferred until the `fire_score` population accumulates (tracked as issue #123); it would adjust the global `semantic_fire_probability` (τ_s, default 0.5) in the ways config, which is also where `keyword_floor_probability` (τ_k) and `near_miss_margin` live. See [engine-reference.md](hooks-and-ways/engine-reference.md) for the fire rule and the current config keys.
 
 ## Memory across sessions: ledger and optional projections
 
@@ -155,7 +154,7 @@ Memory projections are **configurable and never required**. The KG is one exampl
 
 The **forgetting principle** is the critical counterpart. Most of what passes through a session is not worth keeping. Reflection captures what was reasoned about; everything else evaporates when the session ends. This keeps the ledger a journal rather than a log. The gate is: *did Claude actually reason about this?* If yes, eligible for ledger. If no, it dies with the session.
 
-The same principle bounds the raw telemetry. The fire/near-miss log (`~/.claude/stats/events.jsonl`, the input to the tuning loop above) is append-only, so it needs a ceiling: when it exceeds ~32 MiB, `log_event` tail-compacts it to the most recent ~24 MiB at a line boundary via an atomic temp-and-rename. The rewrite is rare, lossy on the oldest events only, and invisible to readers — tuning works from recent behavior, so the old tail is the part safe to forget.
+The same principle bounds the raw telemetry. The fire/near-miss log (`$XDG_STATE/agent-ways/events.jsonl`, the input to the tuning loop above) is append-only, so it needs a ceiling: when it exceeds ~32 MiB, `log_event` tail-compacts it to the most recent ~24 MiB at a line boundary via an atomic temp-and-rename. The rewrite is rare, lossy on the oldest events only, and invisible to readers — tuning works from recent behavior, so the old tail is the part safe to forget.
 
 ## Active perception: the awareness layer
 

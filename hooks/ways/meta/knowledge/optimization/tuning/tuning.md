@@ -10,8 +10,9 @@ refire: 0.15
 `ways tune` is the **acceptance gate** for adopter-run localization (ADR-139). It runs
 only in **localized mode** (a non-English `output_language`); in English mode there is
 nothing to audit and it returns clean. It measures embedding health against the
-multilingual model and does not write thresholds — per ADR-125 thresholds are per-node
-(the English frontmatter), and stub quality is fixed by re-authoring, not by moving gates.
+multilingual model and does not write thresholds — there are no per-way thresholds to
+write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see
+engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
 
 English is the **source of truth.** Each way's English frontmatter is embedded into the
 multilingual corpus as the per-way **anchor**, and every localized alias is scored

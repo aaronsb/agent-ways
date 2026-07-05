@@ -10,7 +10,7 @@ This is the self-referential way - it explains the ways system itself. It fires 
 
 Covers:
 - Way file format and all frontmatter fields
-- Matching modes (regex, semantic, model)
+- Matching lanes: regex keyword and calibrated semantic (see [engine-reference.md](engine-reference.md))
 - State triggers (context-threshold, file-exists, session-start)
 - The marker state machine
 - Project-local way creation and override semantics
@@ -68,7 +68,7 @@ The way covers context passing (include specific file paths and line ranges, sta
 The enforcement mechanism for task list continuity across compaction. This way is unusual in two respects:
 
 1. **It's a state trigger**, not a pattern match. It fires based on how full the context window is, not what the user said.
-2. **It repeats** until the condition is resolved. Most ways fire once per session. This one nags on every prompt until `TaskCreate` is used.
+2. **It repeats** until the condition is resolved. Most ways re-disclose on a slow `refire:` cadence; this one nags on every prompt until `TaskCreate` is used.
 
 The rationale: compaction is the biggest risk to work continuity. When the context window fills up, Claude Code compresses the conversation history. If there's no task list, the compressed context may lose track of what was being worked on, what's been completed, and what remains.
 

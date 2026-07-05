@@ -19,7 +19,7 @@ No configuration files to update. No registration step. The discovery scripts sc
 | A broad concept users describe variously | `description:` + `vocabulary:` (embedding semantic matching) |
 | A session condition, not content | `trigger:` with `context-threshold`, `file-exists`, or `session-start` |
 
-Matching is additive — pattern and semantic are OR'd. A way can have both a `pattern:` and `description:` + `vocabulary:`; either channel can fire it. Semantic matching uses embeddings (`ways embed`) — a subcommand of the unified `ways` binary.
+Matching is additive-OR — the semantic and keyword lanes are independent, and a way can carry both a `pattern:` and `description:` + `vocabulary:`. The semantic lane fires when the calibrated relevance probability `g(s)` clears `τ_s` (`semantic_fire_probability`, 0.5); the keyword lane is **floor-gated** — a `pattern:` hit fires only when `g(s)` also clears the lower floor `τ_k` (`keyword_floor_probability`, 0.15), so a bare keyword can't drag in an unrelated prompt. The keyword lane fails open (fires unconditionally) when there's no calibrated signal, and `pattern_strict: true` bypasses the gate by design. See [engine-reference.md](engine-reference.md) for the exact fire rule. Semantic matching uses embeddings (`ways embed`) — a subcommand of the unified `ways` binary.
 
 ### Writing effective guidance
 

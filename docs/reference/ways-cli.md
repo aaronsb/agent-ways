@@ -89,7 +89,7 @@ ways rethink --json                   # dump most recent session as JSON
 ways rethink --session <id> --json    # dump a specific session as JSON
 ```
 
-**`--json` output:** a single object with `session`, `project`, `context_window_k`, a `summary` (epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, trigger breakdown, top ways), the full `frames` timeline (each with epoch, timestamp, token position, active ways, and what newly fired that turn), and `near_misses` (ways that scored close to their threshold but didn't fire — each with its EN/multilingual scores, thresholds, and margin). Unlike the animation, the dump runs without the `tui` feature and surfaces near-misses, which the TUI omits. Slice large sessions with `jq` — a multi-day session can run to thousands of frames.
+**`--json` output:** a single object with `session`, `project`, `context_window_k`, a `summary` (epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, trigger breakdown, top ways), the full `frames` timeline (each with epoch, timestamp, token position, active ways, and what newly fired that turn), and `near_misses` (ways whose calibrated probability came within `near_miss_margin` of the semantic firing threshold but didn't fire — each with its EN/multilingual relevance probabilities (`prob_en` / `prob_multi`), the global semantic threshold `tau_s`, and the `margin` below it). Unlike the animation, the dump runs without the `tui` feature and surfaces near-misses, which the TUI omits. Slice large sessions with `jq` — a multi-day session can run to thousands of frames.
 
 ---
 
@@ -120,7 +120,7 @@ ways scan prompt --query "git commit" --session dummy --project ~/my-project
 
 **Run from:** Anywhere.
 
-**Tells you:** A ranked table of all ways with their EN and multilingual cosine similarity scores for the query. Higher = closer match. The firing threshold is typically ~0.4–0.5 depending on the way's configuration.
+**Tells you:** A ranked table of all ways with their EN and multilingual cosine similarity scores for the query. Higher = closer match. These raw cosines are not the firing signal: firing maps each cosine through the calibrated logistic `g(s)` and fires globally when `g(s) ≥ τ_s` (default 0.5) — there is no per-way threshold. See `../hooks-and-ways/engine-reference.md`.
 
 ```
 ways match "how do I test if a way is working"
