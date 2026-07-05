@@ -31,9 +31,13 @@ There is **no** `embed_threshold` frontmatter field and **no** per-way threshold
   `a ≤ 0` slope (L73) — never ships a curve mapping higher cosine to lower probability.
 - AUC is computed on the fitted predictor `a·x+b` (L79); a near-flat fit scores ≈ 0.5
   and fails the ship-gate.
-- Ship-gate: `const AUC_FLOOR: f64 = 0.70` (`corpus.rs:766`). A fit below 0.70 is not
+- Ship-gate: `const AUC_FLOOR: f64 = 0.70` (`ways-cli/src/cmd/corpus.rs:766` — note: the
+  corpus/fit driver lives in the CLI crate, not `ways-core`). A fit below 0.70 is not
   written; scan then degrades (keyword fails open, semantic silent) rather than trust it.
-- Fit runs at corpus generation (`corpus.rs:191`), stored in `embed-manifest.json`.
+- Fit runs at corpus generation from the committed probe corpus
+  (`ways-cli/src/cmd/corpus.rs:191` `fit_calibration`; probes are `include_str!`-baked from
+  `calibration_probes.jsonl` at `corpus.rs:765` — never from runtime telemetry), stored in
+  `embed-manifest.json`.
   Deployed values: EN `a≈26.7 b≈−7.8 AUC≈0.955`; multi `AUC≈0.941`.
 
 ## Fire rule — `tools/ways-cli/src/cmd/scan/`
@@ -44,7 +48,8 @@ Two models: EN (`minilm-l6-v2`, 384-dim) and multilingual (768-dim, localized mo
 
 Per way, per prompt (`scan/mod.rs` `match_prompt`, ~583–623):
 
-- **Semantic lane** fires if `prob_en ≥ τ_s ∨ prob_multi ≥ τ_s` (mod.rs:621–623), where
+- **Semantic lane** fires if `prob_en ≥ τ_s ∨ prob_multi ≥ τ_s` (mod.rs:623 for the EN
+  branch, mod.rs:630 for the multi branch), where
   τ_s is `EffectiveThresholds.semantic` (see parent-boost).
 - **Keyword lane**: a `pattern:` regex match fires **only if** `prob_en ≥ τ_k ∨
   prob_multi ≥ τ_k` (mod.rs:598–600) — the floor gate. **But** if `pattern_strict` is

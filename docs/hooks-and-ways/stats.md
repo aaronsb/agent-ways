@@ -4,13 +4,13 @@ You can't manage what you can't see. The ways system logs every firing event and
 
 ## What Gets Logged
 
-Every time a way fires, `log-event.sh` appends a line to `~/.claude/stats/events.jsonl`:
+Every time a way fires, `log-event.sh` appends a line to `$XDG_STATE/agent-ways/events.jsonl`:
 
 ```json
 {"ts":"2026-02-05T19:00:34Z","event":"way_fired","way":"softwaredev/delivery/commits","domain":"softwaredev","trigger":"semantic:embedding:en","scope":"agent","project":"/home/you/myproject","session":"abc-123","token_position":"1204","fire_score":"0.6220"}
 ```
 
-The `fire_score` field is the calibrated relevance probability `g(s)` that cleared the semantic fire threshold τ_s — not a raw cosine. The fire rule and the calibration that produces `g(s)` live in [engine-reference.md](engine-reference.md); this doc only records what the telemetry carries. `fire_score` is recorded on first-fires only (not redisclosures), because threshold tuning is about what gates a way's *entry* to a session; the calibration fit and the auto-tuning passes (ADR-134/156) draw on this stream.
+The `fire_score` field is the calibrated relevance probability `g(s)` that cleared the semantic fire threshold τ_s — not a raw cosine. The fire rule and the calibration that produces `g(s)` live in [engine-reference.md](engine-reference.md); this doc only records what the telemetry carries. `fire_score` is recorded on first-fires only (not redisclosures), because tuning is about what gates a way's *entry* to a session. This stream feeds the **deferred** ADR-134 auto-tune; the `g(s)` calibration itself is fit at corpus-generation from the committed `calibration_probes.jsonl`, **not** from this telemetry.
 
 Session start events are also logged. For teammates, the team name is included:
 
@@ -153,7 +153,7 @@ The width of the near-miss band these tools consume is set by the `near_miss_mar
 
 | File | Purpose |
 |------|---------|
-| `~/.claude/stats/events.jsonl` | Event log (tail-compacted at ~32 MiB to ~24 MiB) |
+| `$XDG_STATE/agent-ways/events.jsonl` | Event log (tail-compacted at ~32 MiB to ~24 MiB) |
 | `/tmp/.claude-config-update-state-{uid}` | Update check cache (hourly) |
 | `{SESSIONS_ROOT}/{session}/ways/{way_path}/.marker` | Way firing markers (per-session) |
 | `{SESSIONS_ROOT}/{session}/teammate` | Teammate scope marker (contains team name) |
