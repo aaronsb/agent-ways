@@ -267,7 +267,7 @@ fn read_token_usage(content: &str) -> (u64, String) {
 /// Find a transcript by session id, searching every project dir under
 /// `~/.claude/projects/`. Session ids are globally unique, so we don't
 /// need to know which project the session is rooted in.
-fn find_transcript_by_session(session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_transcript_by_session(session_id: &str) -> Option<PathBuf> {
     let projects_root = home_dir().join(".claude/projects");
     let filename = format!("{session_id}.jsonl");
     for entry in std::fs::read_dir(&projects_root).ok()? {
