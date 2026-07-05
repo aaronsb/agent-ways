@@ -59,8 +59,14 @@ Per way, per prompt (`scan/mod.rs` `match_prompt`, ~583–623):
   semantic fire — the gated verdict is held and the semantic lane is checked first.
 - `pattern_strict: true` also bypasses the URL / code-fence mask (mod.rs:145).
 
-Keyword matching is **case-sensitive** against the original-case (masked) prompt — only
-code fences and URLs are stripped, no lowercasing (mod.rs:145, `mask_nonlinguistic`).
+Keyword matching is **case-insensitive** (ADR-157): every trigger regex — `pattern:`,
+`cmds:`, `files:` — is compiled with `RegexBuilder::case_insensitive(true)`
+(`compile_trigger`, shared by `regex_matches`/`regex_span`), so a lowercase pattern
+matches the uppercase acronyms users type (`\bssh\b` → `SSH`, `\bpr\b` → `PR`). The
+*text* is left in its original case — only code fences and URLs are stripped, no
+lowercasing (`mask_nonlinguistic`) — so the flag lives on the pattern, not the input, and
+`SKILL\.md` still matches. A pattern may opt back into case-sensitivity with an inline
+`(?-i)` scope. Authoring rule: **write patterns in lowercase and mean the concept.**
 
 ## Parent-boost — `tools/ways-cli/src/cmd/scan/mod.rs` `effective_thresholds` (753–782)
 
