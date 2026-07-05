@@ -15,6 +15,9 @@
 //!   `per_file`.
 //! - [`pattern`] runs the ADR-155 §5 pattern-hygiene rules over the
 //!   `pattern:` regex (common words, short unanchored tokens, unbounded `.*`).
+//! - [`positive_prose`] runs the ADR-160 §6 rule over the embedded alias
+//!   (`description` + `vocabulary`): a contrast construction naming a sibling
+//!   corpus item pulls the embedding toward the negated topic.
 //! - [`locale_stubs`] validates `*.locales.jsonl` per-language overrides
 //!   against the `locale_stub:` schema block.
 //! - [`requires`] is the ADR-116 scan-macro-to-permissions machinery.
@@ -27,6 +30,7 @@ mod helpers;
 mod locale_stubs;
 mod pattern;
 mod per_file;
+mod positive_prose;
 mod provenance;
 mod requires;
 mod scanning;

@@ -1,5 +1,5 @@
 ---
-description: writing ways that describe patterns and intentions rather than referencing specific tool names, MCP servers, or CLI commands
+description: writing portable ways that describe patterns and intentions — vendor-neutral, durable phrasing that binds to whatever tools a session actually has
 vocabulary: tool agnostic vendor neutral portable abstract intention pattern mcp cli specific
 files: \.claude/(hooks/)?ways/.*way\.md$
 scope: agent, subagent

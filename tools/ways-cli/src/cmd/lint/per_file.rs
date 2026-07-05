@@ -209,6 +209,16 @@ pub(super) fn lint_file(
         super::pattern::check_pattern(&rel, &val, &keep, warnings);
     }
 
+    // Positive-prose hygiene (ADR-160 §6): the embedded alias (description +
+    // vocabulary) states only what the way is for, in positive terms — a
+    // contrast naming a sibling item pulls the embedding toward it. Each field
+    // is checked independently. Advisory WARNINGs, not errors.
+    for field in ["description", "vocabulary"] {
+        if let Some(val) = get_field_value(&fm_str, field) {
+            super::positive_prose::check_positive_prose(&rel, field, &val, warnings);
+        }
+    }
+
     // Scope enum
     if let Some(val) = get_field_value(&fm_str, "scope") {
         for part in val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
