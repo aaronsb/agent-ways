@@ -107,13 +107,17 @@ pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
     // Hand-format: `agent_fmt::Table` shrinks columns to the terminal width when
     // piped, ellipsizing the scores to `0.5…` — useless for a diagnostic. Fixed
     // columns keep full precision; only the won-chunk (last) column is bounded.
-    let share_gate = crate::cmd::scan::DIAG_SHARE_GATE;
-    let confirm_gate = crate::cmd::scan::DIAG_CONFIRM_GATE;
+    // Honor the same env overrides run_diagnostic uses, so a calibration sweep's
+    // header reflects the gates actually applied.
+    let env_gate = |v: &str, d: f64| std::env::var(v).ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(d);
+    let share_gate = env_gate("WAYS_LI_SHARE_GATE", crate::cmd::scan::DIAG_SHARE_GATE);
+    let peak_gate = env_gate("WAYS_LI_PEAK_GATE", crate::cmd::scan::DIAG_PEAK_GATE);
+    let confirm_gate = env_gate("WAYS_LI_CONFIRM_GATE", crate::cmd::scan::DIAG_CONFIRM_GATE);
     let fired_n = rows.iter().filter(|r| r.fired).count();
 
     println!();
     println!(
-        "late-interaction (ADR-160) · share gate ≥ {share_gate:.2} · confirm gate ≥ {confirm_gate:.2} · {fired_n} would fire"
+        "late-interaction (ADR-160) · admit: share ≥ {share_gate:.2} OR peak ≥ {peak_gate:.2} · confirm ≥ {confirm_gate:.2} · {fired_n} would fire"
     );
     println!("reduced surface: {reduced}");
     println!();
@@ -125,11 +129,13 @@ pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
             Some(c) => format!("{c:.3}"),
             None => "  —  ".to_string(), // below share gate → confirmation not run
         };
-        // Annotate why a candidate did not fire, so authoring is actionable.
+        // Annotate why a candidate did not fire, so authoring is actionable:
+        // not admitted by either gate, vs admitted (share or peak) but the body
+        // failed to corroborate the won chunk.
         let outcome = if r.fired {
             "fired ✓"
-        } else if r.share < share_gate {
-            "< share"
+        } else if !r.admitted {
+            "< gate"
         } else {
             "< confirm"
         };

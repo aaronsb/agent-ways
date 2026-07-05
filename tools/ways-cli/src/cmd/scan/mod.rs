@@ -217,7 +217,7 @@ pub fn prompt(
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
-pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_SHARE_GATE};
+pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DIAG_SHARE_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
 /// equivalent of the single-vector `ways match`. Reduces the query exactly as the
