@@ -16,7 +16,7 @@ An LLM session cannot internalize norms — no weight updates, no carried memory
 
 > **Current status:** Agent Ways ships with full support for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Support for additional CLI-based coding agents is in development.
 
-> ⚠️ **Breaking change in 1.0 — existing installs must migrate.** Before 1.0, the repo *was* your install (`~/.claude` was the clone). 1.0 turns `~/.claude` into a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways`. A pre-1.0 in-place clone moves over with one gated, backup-first command — `ways migrate --execute` — after upgrading (`cd ~/.claude && git pull && make update`). Your `projects/` and `settings.json` are preserved. The migrator is **transitional**: it ships through the 1.0.x line and is **removed in 1.1**, after which migrating means checking out a pre-1.1 release first. **See the [Migration Guide](docs/migration-1.0.md).**
+> ⚠️ **Breaking change in 1.0 — existing installs must migrate.** Before 1.0, the repo *was* your install (`~/.claude` was the clone). 1.0 turns `~/.claude` into a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways`. A pre-1.0 in-place clone moves over with one gated, backup-first command — `ways migrate --execute` — after upgrading (`cd ~/.claude && git pull && make update`). Your `projects/` and `settings.json` are preserved. The migrator is **transitional**: it ships through the 1.2.x line and is **removed in 1.3**, after which migrating means checking out a pre-1.3 release first. **See the [Migration Guide](docs/migration-1.0.md).**
 
 ```mermaid
 sequenceDiagram

@@ -42,7 +42,7 @@ ways migrate --what-if     # preview (read-only)
 ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
 ```
 
-See the [Migration Guide](migration-1.0.md) for the full walkthrough and the deprecation window (the migrator ships through 1.0.x and is removed at 1.1).
+See the [Migration Guide](migration-1.0.md) for the full walkthrough and the deprecation window (the migrator ships through 1.2.x and is removed at 1.3).
 
 ## Scenario: you want a fork
 
