@@ -92,6 +92,14 @@ jobs:
         run: cargo test --manifest-path tools/Cargo.toml -p ways
       - name: Run simulation tests
         run: cargo test --manifest-path tools/Cargo.toml -p ways --test session_sim -- --test-threads=1
+      - name: Lint way frontmatter
+        # Invokes the ways binary directly against the repo corpus. `ways lint`
+        # resolves its schema from hooks/ways/frontmatter-schema.yaml, so this
+        # needs no ~/.claude projection and no make target — a frontmatter error
+        # that would silently drop a way from matching fails the build here.
+        run: |
+          cargo build --manifest-path tools/Cargo.toml -p ways
+          tools/target/debug/ways lint --check hooks/ways
 
   collect:
     needs: [build, test]
