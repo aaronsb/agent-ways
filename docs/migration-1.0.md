@@ -117,16 +117,18 @@ did before 1.0.0 shipped.
 
 | Version | `ways migrate` |
 |---|---|
-| **1.0.0 → final 1.0.x** | Present. Migrate anytime in this window. |
-| **1.1.0 and later** | **Removed.** The binary no longer carries the migrator. |
+| **1.0.0 → 1.2.x** | Present. Migrate anytime in this window. |
+| **1.3.0 and later** | **Removed.** The binary no longer carries the migrator. |
 
-After 1.1, an un-migrated install can still migrate — but only by first checking out a
-**pre-1.1 release** that still ships the command (the last `ways-v1.0.x` tag), running
+(The removal was originally slated for 1.1 and **deferred to 1.3** to widen the migration window — the migrator is still present in 1.1.x and 1.2.x.)
+
+After 1.3, an un-migrated install can still migrate — but only by first checking out a
+**pre-1.3 release** that still ships the command (the last `ways-v1.2.x` tag), running
 `ways migrate --execute`, and *then* updating to current:
 
 ```bash
-# After 1.1, to migrate a still-legacy install:
-git checkout ways-v1.0.x   # the last release that carries `ways migrate`
+# After 1.3, to migrate a still-legacy install:
+git checkout ways-v1.2.x   # the last release that carries `ways migrate`
 make update
 ways migrate --execute
 # then update to the current release
