@@ -135,9 +135,8 @@ A few readings that turn raw fields into judgement:
   the turn landed just short of the global semantic bar `τ_s`. There is no per-way
   threshold to lower — firing is global `τ_s` / `τ_k` on the calibrated `g(s)`
   ([the engine reference](../../hooks-and-ways/engine-reference.md)) — so the remedy
-  is to strengthen the way's vocabulary or pattern and re-measure. `ways tune-curves`
-  (firing cadence, [[ADR-123]]) and `ways tune-precision` (a precision flag,
-  [[ADR-134]]) read the same event log, but they audit *how often* and *where* a way
+  is to strengthen the way's vocabulary or pattern and re-measure. `ways tune-precision`
+  (a precision flag, [[ADR-134]]) reads the event log to audit *where* a way
   fires, not relevance thresholds.
 - **`context_window_k`** anchors every token figure. The same way re-discloses far
   more often in a 200K window than a 1M one, because the token-gated cooldown is a

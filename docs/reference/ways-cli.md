@@ -262,22 +262,6 @@ ways tune --fidelity-threshold 0.7    # stricter fidelity requirement
 
 ---
 
-### `ways tune-curves`
-
-**When:** A way fires too often or not enough relative to how useful it actually is; recalibrating re-disclosure decay curves from real firing data.
-
-**Run from:** Anywhere. Requires at least 3 firing samples per way (configurable with `--min-fires`).
-
-**Tells you:** Suggested `refire:` curve updates for each way based on observed cadence. Dry run by default — add `--apply` to rewrite the frontmatter in place.
-
-```
-ways tune-curves                   # dry run
-ways tune-curves --apply           # rewrite frontmatter
-ways tune-curves --way "softwaredev/code"
-```
-
----
-
 ### `ways tune-precision`
 
 **When:** Auditing whether ways are landing in irrelevant sessions — e.g., a `softwaredev` way firing during a writing session. Requires session history.

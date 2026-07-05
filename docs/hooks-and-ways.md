@@ -250,14 +250,11 @@ Once a corpus has been firing for a while, two commands audit and calibrate the 
 ```bash
 # Audit fire relevance — flag ways landing in off-domain sessions
 ways tune-precision
-
-# Calibrate firing-dynamics curves from observed cadence
-ways tune-curves
 ```
 
 `ways tune-precision` is a report-only relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate plus a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session (remedy: narrow its vocabulary, tighten its `pattern:`, or change the trigger channel, then re-measure — there is no per-way threshold to move; a globally leaky keyword is tightened by raising `τ_k`); **cross-cutting** is a way that fires broadly by design, e.g. meta/tracking ways (remedy: scope by trigger — never auto-narrow vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
 
-`ways tune-curves` (ADR-123 Phase E) groups `way_fired`/`way_redisclosed` events by (way, session), computes token-position deltas between consecutive fires, and suggests a `half_life` ≈ the median delta. Dry-run by default; `--apply` rewrites the `curve:` block in place via line surgery. Vocabulary and matching metadata are never auto-applied — they stay authorial.
+Cadence has no tuning command: `ways tune-curves` was removed in ADR-159. It suggested a legacy ADR-123 `half_life` (a `curve:` block the schema no longer recognizes) — superseded by `refire:`, a fraction of the context window (ADR-126) authored directly on each way. Telemetry-driven cadence tuning is the deferred ADR-134 auto-tune, which targets `refire:`.
 
 ## State Triggers
 
@@ -435,7 +432,7 @@ sequenceDiagram
 
 ## Telemetry
 
-Firing activity is logged to `$XDG_STATE/agent-ways/events.jsonl` — one JSON object per line (legacy installs may still read `~/.claude/stats/events.jsonl`). Beyond the `way_fired`/`way_redisclosed` cadence events that `tune-curves` reads, two signals feed the precision and recall tuning above (ADR-134):
+Firing activity is logged to `$XDG_STATE/agent-ways/events.jsonl` — one JSON object per line (legacy installs may still read `~/.claude/stats/events.jsonl`). Beyond the `way_fired`/`way_redisclosed` cadence events, two signals feed the precision and recall tuning above (ADR-134):
 
 - **`fire_score`** — recorded on `way_fired` events for **first-fires only** (not redisclosures): the calibrated probability `g(s)` that cleared the threshold and admitted the way to the session. It is a recall/precision telemetry signal that feeds the **deferred** ADR-134 auto-tune — **not** the source of the `g(s)` calibration, which is fit at corpus-generation from the committed `calibration_probes.jsonl` (`ways-cli/src/cmd/corpus.rs`), never from this runtime stream.
 - **`way_nearmiss`** — emitted when a way scored within `near_miss_margin` *below* its effective semantic threshold `τ_s` but did **not** fire (`τ_s - margin ≤ p < τ_s`). Score fields: `prob_en`, `prob_multi`, `tau_s`, `margin`; plus `trigger`, `query_tokens`, and the `way_fired`-convention identity fields (`event`, `way`, `corpus_id`, `domain`, `scope`, `project`, `session`). This is a recall signal — it measures the likely false silences a `τ_s` drop would recover (`scan/mod.rs` `log_near_miss`).

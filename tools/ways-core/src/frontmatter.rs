@@ -118,32 +118,25 @@ pub struct Frontmatter {
     #[serde(default)]
     #[allow(dead_code)] // parsed for serde compat, accessed via scan's own scope field
     pub scope: Option<String>,
-    /// ADR-123 firing-dynamics curve. Required for ways that fire
-    /// predictively or reactively; optional during parse for static
-    /// consumers (tune/corpus/graph) that don't invoke the engine.
-    #[serde(default)]
-    pub curve: Option<Curve>,
-    /// ADR-126 window-relative refire. When present, takes precedence over
-    /// `curve:` at fire-evaluation time (via `resolved_curve`). Holds the
-    /// unresolved spec so config edits take effect mid-session — resolution
-    /// happens per fire against the then-current window and preset table.
+    /// ADR-126 window-relative refire. Holds the unresolved spec so config
+    /// edits take effect mid-session — resolution happens per fire against the
+    /// then-current window and preset table (via `resolved_curve`). The legacy
+    /// ADR-123 `curve:` field was retired in ADR-159; `refire:` is the sole
+    /// authored cadence field.
     #[serde(default)]
     pub refire: Option<RefireSpec>,
 }
 
 impl Frontmatter {
     /// Resolve the effective curve for fire evaluation, given the session's
-    /// current context window. Precedence (ADR-126): `refire:` wins over
-    /// `curve:` when both are present (lint warns about the duplication).
+    /// current context window. Resolves from `refire:` (ADR-126) — the sole
+    /// authored cadence field since ADR-159 retired legacy `curve:`.
     ///
-    /// Returns `None` when neither field is set — static consumers like
+    /// Returns `None` when `refire:` is unset — static consumers like
     /// `ways tune` and `ways corpus` that don't invoke the engine can still
-    /// parse a way file without requiring either.
+    /// parse a way file without requiring it.
     pub fn resolved_curve(&self, window: u64) -> Option<Curve> {
-        if let Some(spec) = &self.refire {
-            return Some(spec.to_curve(window));
-        }
-        self.curve.clone()
+        self.refire.as_ref().map(|spec| spec.to_curve(window))
     }
 }
 
@@ -377,99 +370,14 @@ mod tests {
     }
 
     #[test]
-    fn parses_curve_exponential() {
-        let fm = parse_yaml(
-            r#"
-description: test way
-curve:
-  type: Exponential
-  half_life: 50000
-"#,
-        );
-        match fm.curve {
-            Some(Curve::Exponential { half_life }) => assert_eq!(half_life, 50_000),
-            other => panic!("expected Exponential, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_curve_action_potential() {
-        let fm = parse_yaml(
-            r#"
-description: test way
-curve:
-  type: ActionPotential
-  burst_threshold: 3
-  peak_multiplier: 2.0
-  absolute_refractory: 5000
-  multiplier_half_life: 25000
-"#,
-        );
-        match fm.curve {
-            Some(Curve::ActionPotential {
-                burst_threshold,
-                peak_multiplier,
-                absolute_refractory,
-                multiplier_half_life,
-            }) => {
-                assert_eq!(burst_threshold, 3);
-                assert!((peak_multiplier - 2.0).abs() < 1e-9);
-                assert_eq!(absolute_refractory, 5_000);
-                assert_eq!(multiplier_half_life, 25_000);
-            }
-            other => panic!("expected ActionPotential, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_curve_progressive_staircase() {
-        let fm = parse_yaml(
-            r#"
-description: test way
-curve:
-  type: ProgressiveStaircase
-  steps:
-    - [0, 1.0]
-    - [15000, 0.5]
-    - [40000, 0.2]
-"#,
-        );
-        match fm.curve {
-            Some(Curve::ProgressiveStaircase { steps }) => {
-                assert_eq!(steps.len(), 3);
-                assert_eq!(steps[0], (0, 1.0));
-                assert_eq!(steps[1], (15_000, 0.5));
-                assert_eq!(steps[2], (40_000, 0.2));
-            }
-            other => panic!("expected ProgressiveStaircase, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_curve_flat() {
-        let fm = parse_yaml(
-            r#"
-description: test way
-curve:
-  type: Flat
-  suppression: 15000
-"#,
-        );
-        match fm.curve {
-            Some(Curve::Flat { suppression }) => assert_eq!(suppression, 15_000),
-            other => panic!("expected Flat, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn curve_field_is_optional_for_static_consumers() {
+    fn refire_is_optional_for_static_consumers() {
         // Static consumers like `ways tune` and `ways corpus` parse way
         // frontmatter but don't invoke the firing engine, so a missing
-        // curve: block must not error at parse time. The engine path in
+        // refire: field must not error at parse time. The engine path in
         // session.rs enforces presence at the fire site.
-        let fm = parse_yaml("description: no curve\n");
-        assert!(fm.curve.is_none());
+        let fm = parse_yaml("description: no refire\n");
         assert!(fm.refire.is_none());
+        assert!(fm.resolved_curve(200_000).is_none());
     }
 
     #[test]
@@ -533,21 +441,7 @@ curve:
     }
 
     #[test]
-    fn curve_fallback_when_no_refire() {
-        // Non-Exponential shapes still live in `curve:`. If `refire:` is
-        // absent, `resolved_curve` returns the raw curve untouched.
-        let fm = parse_yaml(
-            "description: test\n\
-             curve:\n  \
-             type: Flat\n  \
-             suppression: 15000\n",
-        );
-        let curve = fm.resolved_curve(1_000_000).expect("should resolve");
-        assert!(matches!(curve, Curve::Flat { suppression: 15_000 }));
-    }
-
-    #[test]
-    fn resolved_curve_is_none_when_neither_field_set() {
+    fn resolved_curve_is_none_when_refire_absent() {
         let fm = parse_yaml("description: static consumer only\n");
         assert!(fm.resolved_curve(1_000_000).is_none());
     }
