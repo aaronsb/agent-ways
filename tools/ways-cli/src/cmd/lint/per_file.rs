@@ -157,7 +157,6 @@ pub(super) fn lint_file(
     // are exempt — checks ride on their parent way's firing, and attend
     // handlers are triggered by signal name rather than the refire engine.
     let has_refire = has_field(&fm_str, "refire");
-    let has_curve = has_field(&fm_str, "curve");
     let is_fire_bearing =
         !is_check && !is_attend && crate::frontmatter::fires_on_something(&fm_str);
     if is_fire_bearing && !has_refire {
@@ -169,17 +168,9 @@ pub(super) fn lint_file(
         *warnings += 1;
     }
 
-    // ADR-126: refire: and curve: should not coexist. refire: wins at
-    // runtime (via Frontmatter::resolved_curve), but the duplication is
-    // almost always a migration mistake. Emit a specific warning distinct
-    // from the generic UNKNOWN-field warning for curve: alone.
-    if has_refire && has_curve {
-        eprintln!(
-            "  WARNING: {rel} — both `refire:` and legacy `curve:` present. \
-             `refire:` wins at runtime; remove the `curve:` block."
-        );
-        *warnings += 1;
-    }
+    // The legacy `curve:` field was retired (ADR-159); a stray `curve:` block
+    // now falls through to the generic UNKNOWN-field warning, which is the
+    // correct treatment for a field the schema no longer recognizes.
 
     // ADR-126: fail-closed preset/numeric validation. Lint is the primary
     // gate for typo detection; corpus-generation echoes this check. Fire

@@ -54,12 +54,12 @@ pub fn way_scored(
         return Ok(String::new());
     }
 
-    // Session firing gate (ADR-123): consult the engine with this way's
-    // resolved curve. First-fire always allowed; re-fire when the outward
-    // gate's salience has decayed below REFIRE_FLOOR; otherwise suppress.
+    // Session firing gate: consult the engine with this way's resolved curve.
+    // First-fire always allowed; re-fire when the outward gate's salience has
+    // decayed below REFIRE_FLOOR; otherwise suppress.
     //
-    // ADR-126: `refire:` (fraction of window) wins over `curve:` when both
-    // present. The session's current window is fetched from the active
+    // ADR-126: the cadence comes from `refire:` (fraction of window), resolved
+    // against the session's current window — fetched from the active
     // transcript; 200k is the conservative fallback when detection fails.
     let fm = frontmatter::parse(&way_file)?;
     let window = crate::cmd::context::get_context(Some(&project_dir))
@@ -67,7 +67,7 @@ pub fn way_scored(
         .unwrap_or(200_000);
     let curve = fm.resolved_curve(window).ok_or_else(|| {
         anyhow::anyhow!(
-            "way {} is missing both `refire:` and `curve:` in its frontmatter (ADR-123/126)",
+            "way {} is missing a `refire:` field in its frontmatter (ADR-126)",
             id
         )
     })?;
@@ -166,7 +166,7 @@ pub fn way_scored(
     // first-fire (way_fired), never a redisclosure: threshold tuning is about
     // what score gates a way's *entry* to a session, and a redisclosure's score
     // reflects the re-triggering prompt — a different population that would bias
-    // the derivation. (Redisclosure dynamics are cadence signal: tune-curves.)
+    // the derivation. (Redisclosure dynamics are a separate cadence signal.)
     // This also aligns with how tune-precision reads placement (way_fired only)
     // and makes the field self-documenting: its presence marks a placement event.
     if let (false, Some(score)) = (is_redisclosure, fire_score) {

@@ -308,10 +308,8 @@ flowchart LR
     WF --> EV[("~/.claude/stats/events.jsonl<br/>bounded ~24–32 MiB")]:::log
     NM --> EV
 
-    EV --> TC["ways tune-curves<br/>half_life ≈ median fire delta"]:::tune
     EV --> TP["ways tune-precision<br/>off-class irrelevance audit"]:::tune
 
-    TC -->|--apply| Curve["rewrite curve: block"]:::apply
     TP -->|report-only| Remedy["flag: mis-targeted / cross-cutting"]:::apply
 ```
 
@@ -328,7 +326,6 @@ The log grows faster with near-misses, so its growth is bounded. `log_event` tai
 
 ### Tuning commands
 
-- **`ways tune-curves`** (ADR-123 Phase E) — cadence calibration. Groups `way_fired` / `way_redisclosed` by `(way, session)`, computes token-position deltas between fires, and suggests `half_life ≈ median delta`. `--apply` rewrites the way's `curve:` block in place.
 - **`ways tune-precision`** (ADR-134 Decision 3) — a heuristic relevance audit of fire telemetry, report-only. For each way it estimates how often its fires landed *off-class*: in sessions whose activity — judged by the parent-family of the ways that co-fired — never touched the way's own domain. It reports an irrelevance rate and a flag: **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session; remedy: raise `embed_threshold`, narrow vocabulary, or change trigger channel) vs **cross-cutting** (a way that fires broadly by design, e.g. `meta/tracking`; remedy: scope by trigger — vocabulary is *never* auto-narrowed). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
 
 ADR-134 is **Accepted**. One slice — the `embed_threshold`-gated `--apply`, driven by accumulated `fire_score` data — is deferred and data-gated (GitHub issue #123).

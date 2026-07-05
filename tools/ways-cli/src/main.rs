@@ -368,21 +368,6 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Tune firing-dynamics curves from observed cadence (ADR-123 Phase E)
-    TuneCurves {
-        /// Rewrite each suggested curve block in place (default: dry run)
-        #[arg(long)]
-        apply: bool,
-        /// Minimum delta samples a way must have before it's suggested
-        #[arg(long, default_value = "3")]
-        min_fires: usize,
-        /// Filter to events whose project path contains this substring
-        #[arg(long)]
-        project: Option<String>,
-        /// Filter to ways whose id contains this substring
-        #[arg(long)]
-        way: Option<String>,
-    },
     /// Audit fire relevance — flag ways landing in off-domain sessions (ADR-134 Decision 3)
     TunePrecision {
         /// Minimum sessions a way must have fired in before it's flagged
@@ -878,9 +863,6 @@ fn run() -> Result<()> {
         Commands::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
         Commands::Tune { ways_dir, way, lang, fidelity_threshold, discrimination_threshold, json } => {
             cmd::tune::run(ways_dir, way, lang, fidelity_threshold, discrimination_threshold, json)
-        }
-        Commands::TuneCurves { apply, min_fires, project, way } => {
-            cmd::tune_curves::run(apply, min_fires, project, way)
         }
         Commands::TunePrecision { min_sessions, flag_threshold, project, way, json } => {
             cmd::tune_precision::run(min_sessions, flag_threshold, project, way, json)

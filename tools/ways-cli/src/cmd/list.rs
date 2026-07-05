@@ -22,7 +22,7 @@ struct FiredWay {
     parent: String,
     agent_id: String,
     /// Per-way re-fire distance in thousands of tokens, derived from
-    /// the way's frontmatter `curve:` block via
+    /// the way's frontmatter `refire:` field (resolved to a `Curve`) via
     /// [`sensor_trait::Curve::refire_delta`]. Falls back to 25% of the
     /// context window for ways whose frontmatter is missing or cannot
     /// be parsed (shouldn't happen post-C2 but keeps the renderer

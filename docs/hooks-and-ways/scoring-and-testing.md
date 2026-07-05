@@ -232,7 +232,6 @@ The `/ways-tests crowding` command distinguishes these cases. When it reports tw
 | `/ways-tests lint --all` | Validate all way frontmatter |
 | `ways tune` | Audit locale alias fidelity + discrimination (per-way, across all languages) |
 | `ways tune --way <path>` | Filter the audit to a single way or subtree |
-| `ways tune-curves` | Calibrate firing cadence: suggest `half_life` from observed fire deltas (`--apply` rewrites the `curve:` block) — ADR-123 Phase E |
 | `ways tune-precision` | Heuristic relevance audit: flag ways firing into off-domain sessions (`--min-sessions`, `--flag-threshold`, `--project`, `--way`, `--json`) — ADR-134 Decision 3 |
 | `ways siblings <path>` | Compute vocabulary overlap (Jaccard) between sibling ways |
 

@@ -141,11 +141,7 @@ Two report-only commands read the event log and turn it back on the ways that pr
 ways tune-precision
 ```
 
-`ways tune-curves` is the cadence companion (ADR-123 Phase E). It groups `way_fired`/`way_redisclosed` by `(way, session)`, computes the token-position deltas between firings, and suggests a `half_life` near the median delta. With `--apply` it rewrites each way's `curve:` block in place; without it, the run is a dry report. Flags: `--apply`, `--min-fires` (default 3), `--project`, `--way`. **Caveat:** `curve:` is the legacy ADR-123 cadence block — `refire:` (a fraction of the context window, ADR-126) is the current field, and `ways lint` now flags a written `curve:` block as unknown. So `tune-curves --apply` output currently needs manual migration to `refire:`; treat this command as legacy until reconciled.
-
-```bash
-ways tune-curves
-```
+There is no companion cadence-tuning command: `ways tune-curves` was removed in ADR-159. It suggested an absolute ADR-123 `half_life` (a legacy `curve:` block the schema no longer recognizes), a model superseded by `refire:` (a fraction of the context window, ADR-126). Cadence is now authored directly as `refire:` (numeric fraction or a preset like `normal`); telemetry-driven cadence tuning is the deferred ADR-134 auto-tune, which will target `refire:` rather than `half_life`.
 
 The width of the near-miss band these tools consume is set by the `near_miss_margin` config knob (default 0.05), parsed from the ways config alongside the fire thresholds `semantic_fire_probability` (τ_s, default 0.5) and `keyword_floor_probability` (τ_k, default 0.15). It's purely a logging knob — it never changes which ways fire, only how far below τ_s a silence has to land before it's worth recording.
 
