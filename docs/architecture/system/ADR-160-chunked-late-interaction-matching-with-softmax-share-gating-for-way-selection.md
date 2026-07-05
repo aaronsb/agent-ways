@@ -35,7 +35,9 @@ The pipeline takes deliberately opposite stances on breadth at its two ends: **p
 
 **Required primitive.** The pipeline embeds many chunks per surface, so the embedder must embed a **batch per model load**, and ideally **multiple batches per load** (all chunks across all surfaces a hook needs in one invocation). Per-chunk model reloads are not viable. This is a hard prerequisite, not an optimization.
 
-**Status is Proposed, not Accepted.** The pipeline's operating points — softmax temperature, the share gate, the confirmation threshold — are load-bearing and currently unmeasured; hand-set values work on individual cases but cannot be eyeballed at corpus scale. Adoption to Accepted is gated on (a) a **precision instrument** that makes the poorly-matched rate a measurable quantity, and (b) **calibration** of the operating points against it, in the discipline ADR-156 applied to `τ_s`. Until then the single-vector path (ADR-156) remains the shipped default, and the pipeline must fail safe to it when a surface is too sparse to chunk.
+**The machine is the semantic matcher, not an opt-in alternative.** It replaces the single-vector calibrated gate on the prompt and task surfaces; the single-vector path (ADR-156) is retained only as the **fail-safe fallback** for surfaces too sparse to chunk (fewer than two chunks) or when the embedder is unavailable — it is neither a user-selectable mode nor the default. There is deliberately no config flag to A/B the two: committing to one matcher is the non-clever choice.
+
+**Status is Proposed, not Accepted.** The pipeline's operating points — softmax temperature, the share gate, the confirmation threshold — are load-bearing and currently unmeasured; hand-set values work on individual cases but cannot be eyeballed at corpus scale. Because the machine *is* the matcher, uncalibrated gates degrade real matching (early trials over-prune: a legitimately-relevant single-topic way is diluted by the mean-of-max confirm over a multi-topic surface). So **merge to `main` is gated on** (a) a **precision instrument** that makes the poorly-matched rate a measurable quantity, and (b) **calibration** of the operating points against it, in the discipline ADR-156 applied to `τ_s`. This calibration is *tuning the matcher*, not deciding whether to adopt it — until it lands, the machine lives on its implementation branch, not on `main`.
 
 ## Consequences
 
@@ -59,7 +61,7 @@ The pipeline takes deliberately opposite stances on breadth at its two ends: **p
 
 ## Alternatives Considered
 
-- **Single-vector cosine threshold (status quo, ADR-156).** The problem this ADR addresses: an anisotropic floor thresholded with no attribution. Retained as the fail-safe fallback and the shipped default until this pipeline is calibrated.
+- **Single-vector cosine threshold (status quo, ADR-156).** The problem this ADR addresses: an anisotropic floor thresholded with no attribution. Retained only as the fail-safe fallback for surfaces too sparse to chunk — not as the default and not as an opt-in alternative to the machine.
 - **Generative LLM reranker (local or remote).** Rejected as the primary mechanism. A probe kept the very false positive it was meant to reject when given only the thin alias as evidence; it adds cost and nondeterminism, and the leverage proved to be *evidence quality*, not model capability. Retained only as a possible last resort for residual within-domain ambiguity, behind the deterministic stages.
 - **Resident model daemon.** Deferred. Unnecessary for the embedding tier — batched embedding suffices for the load. Relevant only if a larger reasoning model is later introduced as a reranker.
 - **Negated alias text ("not for X").** Rejected. Dense bi-encoders move *toward* a negated topic; measured directly. Exclusion must be structural.

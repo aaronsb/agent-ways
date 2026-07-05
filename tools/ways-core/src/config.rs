@@ -95,13 +95,6 @@ pub struct Config {
     /// re-opened by a user `allow`, so the escape hatch lives here, not in
     /// settings).
     pub secret_path_deny: bool,
-    /// Opt into the ADR-160 chunked matching machine for the semantic channel
-    /// (chunk → softmax-share gate → body-confirm), in place of the single-vector
-    /// calibrated gate. Default `false`: the single-vector path (ADR-156) stays
-    /// the shipped default until the machine's operating points are calibrated
-    /// (ADR-160 is Proposed until then). A trial/dogfooding switch, not a
-    /// per-way knob — the keyword gate is unaffected either way.
-    pub matching_machine: bool,
 }
 
 impl Config {
@@ -140,7 +133,6 @@ impl Default for Config {
             refire_presets,
             settings_schema_url: None,
             secret_path_deny: true,
-            matching_machine: false,
         }
     }
 }
@@ -289,9 +281,6 @@ impl Config {
         }
         if let Some(v) = doc.get("secret_path_deny").and_then(|v| v.as_bool()) {
             self.secret_path_deny = v;
-        }
-        if let Some(v) = doc.get("matching_machine").and_then(|v| v.as_bool()) {
-            self.matching_machine = v;
         }
     }
 

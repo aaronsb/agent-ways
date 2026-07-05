@@ -120,21 +120,14 @@ pub fn prompt(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
-    // ADR-160: when enabled, the chunked matching machine decides the semantic
-    // channel over the reduced surface (chunk → softmax-share → body-confirm),
-    // computed once here and consulted per way in match_prompt. It falls back to
-    // the single-vector gate (None) whenever it can't run. The keyword gate and
-    // near-miss telemetry keep using the single-vector batch scores either way.
-    let machine = if crate::config::global().matching_machine {
-        let bodies: std::collections::HashMap<String, PathBuf> = candidates
-            .iter()
-            .filter(|c| c.embeddable())
-            .map(|c| (c.corpus_id.clone(), c.path.clone()))
-            .collect();
-        machine::run(&reduced, &bodies)
-    } else {
-        None
-    };
+    // ADR-160: the chunked matching machine IS the semantic matcher. It decides
+    // the semantic channel over the reduced surface (chunk → softmax-share →
+    // body-confirm), computed once here and consulted per way in match_prompt.
+    // The single-vector calibrated gate is retained only as the fail-safe: when
+    // the machine can't run (surface too sparse to chunk, engine unavailable) it
+    // returns None and match_prompt uses the single-vector scores. The keyword
+    // gate and near-miss telemetry keep using the single-vector batch scores.
+    let machine = machine::run(&reduced, &machine_bodies(&candidates));
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -247,6 +240,9 @@ pub fn task(
     let reduced = reduce::reduce_for_embed(query, BUDGET_TASK);
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
+    // ADR-160: the machine is the semantic matcher on the task surface too;
+    // single-vector is the fail-safe when it can't chunk (see scan::prompt).
+    let machine = machine::run(&reduced, &machine_bodies(&candidates));
 
     let mut matched: Vec<(String, String)> = Vec::new(); // (way_id, channel)
 
@@ -282,7 +278,7 @@ pub fn task(
             &embed_matches,
             near_miss_margin,
             keyword_floor,
-            None, // ADR-160 machine is prompt-channel only for now
+            machine.as_ref(),
         ) {
             PromptMatch::Fired { channel, .. } => matched.push((way.id.clone(), channel)),
             PromptMatch::KeywordGated(kg) => {
@@ -582,6 +578,16 @@ struct NearMiss {
     /// Smallest `τ_s - probability` among the models within margin — how close
     /// the way came to firing on its best path.
     margin: f64,
+}
+
+/// Map each embeddable candidate's corpus id to its `.md` path, for the
+/// matching machine's body-confirmation stage (ADR-160).
+fn machine_bodies(candidates: &[WayCandidate]) -> std::collections::HashMap<String, PathBuf> {
+    candidates
+        .iter()
+        .filter(|c| c.embeddable())
+        .map(|c| (c.corpus_id.clone(), c.path.clone()))
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
