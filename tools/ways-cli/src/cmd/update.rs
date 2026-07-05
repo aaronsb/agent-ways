@@ -239,11 +239,27 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     //    own matcher is what gets installed. Optional: semantic matching degrades
     //    to regex without it.
     eprintln!("==> build way-embed from source");
-    if let Err(e) = run_step(
+    match run_step(
         Command::new("make").args(["-C", "tools/way-embed"]).current_dir(app),
         "way-embed source build",
     ) {
-        eprintln!("  ⚠ way-embed not rebuilt ({e}); semantic matching degrades to regex.");
+        Ok(()) => {
+            // The engine's find_way_embed() resolves the cache copy
+            // ($XDG_CACHE/agent-ways/user/way-embed) BEFORE the projected
+            // ~/.claude/bin symlink. A prior release install leaves a cache copy
+            // that would shadow this fresh source build — which lands in bin/ and
+            // is relinked into ~/.claude/bin, not the cache — so the ref's
+            // way-embed would build but never actually run. Remove the shadowing
+            // copy; it is regenerable cache (a later `ways update` re-downloads it).
+            let cached = crate::paths::corpus_dir().join(exe("way-embed"));
+            if cached.exists() {
+                match std::fs::remove_file(&cached) {
+                    Ok(()) => eprintln!("     cleared shadowing cache binary {}", cached.display()),
+                    Err(e) => eprintln!("  ⚠ could not clear cache binary {} ({e})", cached.display()),
+                }
+            }
+        }
+        Err(e) => eprintln!("  ⚠ way-embed not rebuilt ({e}); semantic matching degrades to regex."),
     }
 
     // 5. Ensure every suite binary is linked onto PATH.
