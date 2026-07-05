@@ -5,6 +5,7 @@
 
 pub(crate) mod candidates;
 mod late_interaction;
+mod lookbehind;
 mod reduce;
 mod scoring;
 mod state;
@@ -342,8 +343,15 @@ pub fn command(
     // "$(cat <<EOF…)"), curl -d JSON payloads, and similar argument-
     // body bash commands can run kilobytes long. The regex matchers
     // below see the full cmd; only the embed query is reduced.
+    // ADR-160 stage 1 (contextualize): a bare command is an action, not intent.
+    // Prepend the assistant's prose since the last human turn — the reasoning that
+    // led to this tool call — so the semantic lane matches on intent. Fail-safe:
+    // None → command + tool description only (unchanged). The reducer trims the
+    // combined surface to the command budget by sentence salience.
+    let lookbehind = lookbehind::intent(session_id);
     let query_for_embed = format!(
-        "{} {}",
+        "{} {} {}",
+        lookbehind.as_deref().unwrap_or(""),
         cmd,
         description.unwrap_or("")
     );
