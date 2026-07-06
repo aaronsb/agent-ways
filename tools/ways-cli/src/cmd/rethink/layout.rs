@@ -102,12 +102,17 @@ pub(super) fn render_frame(player: &mut Player) -> String {
     render_status_bar(&mut nav_buf, player);
     let nav: Vec<String> = nav_buf.lines().map(str::to_string).collect();
 
+    // Size the ways table to this frame's widest way id so the Way column tracks
+    // its content instead of absorbing all the leftover width; the same layout
+    // drives the header and every row so they stay aligned.
+    let frame = &player.frames[player.current];
+    let layout = render::Layout::for_rows(&frame.ways);
+
     // The Timeline's column header is the shared ways-table header (labels + rule).
     let mut th = String::new();
-    render::write_table_header(&mut th);
+    render::write_table_header_with(&mut th, &layout);
     let top = header_lines(player, th.lines().map(str::to_string).collect());
 
-    let frame = &player.frames[player.current];
     if frame.ways.is_empty() {
         let rows = vec!["  \x1b[2mNo ways triggered yet.\x1b[0m".to_string()];
         return compose_screen(top, rows, 0, Vec::new(), nav, drawable);
@@ -136,9 +141,9 @@ pub(super) fn render_frame(player: &mut Player) -> String {
             ("", "")
         };
         let mut block = String::new();
-        render::write_way_row(
+        render::write_way_row_with(
             &mut block, w, current_epoch, current_tokens_k,
-            &bar_positions, &unique_pos, i, prefix, suffix,
+            &bar_positions, &unique_pos, i, prefix, suffix, &layout,
         );
         rows.extend(block.lines().map(str::to_string));
     }
