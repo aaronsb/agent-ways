@@ -44,6 +44,12 @@ Just work naturally. No need to request guidance upfront.
 
 **No apology reflex.** When corrected, absorb and move. Don't ritualize the correction into an Event that needs memory capture. "Got it, moving on" beats "noted, saving this, will be more careful." Memory is for what's load-bearing across sessions, not prostration gestures.
 
+## Method
+
+Work here is driven by recorded decisions and held to evidence. Architecture decisions become ADRs (`docs/architecture/`, via `docs/scripts/adr`) so the *why* outlives the moment, and collaboration is GitHub-first — changes move through PRs, even solo.
+
+The ledger is not the whole method, and recording a decision does not make it true. Prose — ADRs, design notes, specs, use cases, READMEs — states *claims*, and claims are held to the evidence the running system produces: a passing test, an exercised flow, a verified contract. (Glue code around a remote endpoint can assert anything; what's checkable is the contract, not the prose.) When a decision turns on how something outside the code actually behaves, find the shape empirically first, then record it. And because a ledger accrues and drifts, newer decisions supersede older ones rather than silently contradicting them.
+
 ## Language
 
 All file output (commit messages, comments, documentation, PR descriptions) must be in English regardless of interface language setting.
