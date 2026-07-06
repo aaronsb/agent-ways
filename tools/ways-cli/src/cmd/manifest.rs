@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 const PROJECTED_TREES: &[&str] = &["skills", "agents", "commands", "hooks/ways"];
 
 /// Individual top-level hook files settings.json references (git-tracked).
-const PROJECTED_FILES: &[&str] = &["hooks/check-config-updates.sh", "hooks/refresh-claude-md.sh"];
+const PROJECTED_FILES: &[&str] = &["hooks/check-config-updates.sh"];
 
 /// Built binaries (NOT git-tracked) projected from `bin/`.
 const PROJECTED_BINS: &[&str] = &["ways", "attend", "attend-chat", "way-embed"];
