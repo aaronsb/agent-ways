@@ -99,12 +99,12 @@ project_tree commands
 # hooks/ top-level carries the two runtime hooks settings.json references.
 project_tree hooks/ways
 if [[ "$SYNC_MODE" == "copy" ]]; then
-  for h in check-config-updates.sh refresh-claude-md.sh; do
+  for h in check-config-updates.sh; do
     [[ -f "$SRC/hooks/$h" ]] && cp -f "$SRC/hooks/$h" "$DEST/hooks/$h"
   done
 else
   mkdir -p "$DEST/hooks"
-  for h in check-config-updates.sh refresh-claude-md.sh; do
+  for h in check-config-updates.sh; do
     if [[ -f "$SRC/hooks/$h" ]]; then
       [[ -L "$DEST/hooks/$h" && "$(readlink "$DEST/hooks/$h")" == "$SRC/hooks/$h" ]] && continue
       rm -f "$DEST/hooks/$h"; ln -s "$SRC/hooks/$h" "$DEST/hooks/$h"
@@ -146,7 +146,7 @@ build_manifest() {
   for t in skills agents commands hooks/ways; do
     [[ -d "$SRC/$t" ]] && ( cd "$SRC" && find "$t" -type f )
   done
-  for h in check-config-updates.sh refresh-claude-md.sh; do
+  for h in check-config-updates.sh; do
     [[ -f "$SRC/hooks/$h" ]] && echo "hooks/$h"
   done
   for b in ways attend attend-chat way-embed; do

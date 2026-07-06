@@ -20,7 +20,6 @@ pass() { printf 'ok: %s\n' "$*"; }
 SRC="$WORK/repo"
 mkdir -p "$SRC/hooks/ways/meta" "$SRC/skills/demo" "$SRC/agents" "$SRC/commands" "$SRC/bin"
 printf '#!/usr/bin/env bash\n' > "$SRC/hooks/check-config-updates.sh"
-printf '#!/usr/bin/env bash\n' > "$SRC/hooks/refresh-claude-md.sh"
 printf '# way\n' > "$SRC/hooks/ways/meta/note.md"
 printf 'skill\n' > "$SRC/skills/demo/SKILL.md"
 printf 'cmd\n' > "$SRC/commands/demo.md"
