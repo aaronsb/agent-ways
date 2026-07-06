@@ -56,8 +56,15 @@ const AGENT_W: usize = 12;
 const COL_GAP: usize = 2;
 const INDENT: usize = 2;
 
-/// Visible width of the fixed Epoch…Agent block that trails the Way column,
-/// inter-column gaps included.
+/// Nominal visible width of the fixed Epoch…Agent block that trails the Way
+/// column, inter-column gaps included. It's the reservation the ceiling clamp
+/// leaves for the trailing columns — *not* a hard bound: the Trigger and
+/// Re-disclosure cells pad but never truncate (`{:<}` / `pad_visible`), so a
+/// long trigger (`embed:bash:multi`) or a verbose re-disclosure string can
+/// overflow its column and push the block past this width. Header and rows stay
+/// mutually aligned for content that fits; over-width content drifts equally in
+/// both. (Pre-existing behaviour; documented here because the reservation reads
+/// like a guarantee otherwise.)
 const TRAILING_W: usize = COL_GAP + EPOCH_W + COL_GAP + DIST_W + COL_GAP + TRIG_W
     + COL_GAP + PIN_W + COL_GAP + RD_W + COL_GAP + AGENT_W;
 
@@ -96,13 +103,26 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// Reactive layout sized to `max_id_width` (the widest rendered way id): the
-    /// Way column snaps to a tab stop just past that id rather than absorbing
-    /// all leftover terminal width, so short names no longer leave a gulf before
-    /// the Epoch column. Floored at `WAY_MIN` and capped so the trailing columns
-    /// always fit the terminal.
+    /// Reactive layout sized to `max_id_width` (the widest rendered way id),
+    /// using the detected terminal width. See [`Layout::for_id_width_in`].
     pub fn for_id_width(max_id_width: usize) -> Self {
-        let term_w = agent_fmt::terminal_width();
+        Self::for_id_width_in(max_id_width, agent_fmt::terminal_width())
+    }
+
+    /// Reactive layout for an explicit `term_w`: the Way column snaps to a tab
+    /// stop just past `max_id_width` rather than absorbing all leftover width, so
+    /// short names no longer leave a gulf before the Epoch column. It is floored
+    /// at `WAY_MIN` and capped at a `ceiling` that reserves room for the trailing
+    /// columns.
+    ///
+    /// The tab-stop guarantee holds only while the snapped width fits under the
+    /// ceiling. On a terminal too narrow for a full-width id (`ceiling` binds),
+    /// `way_col == ceiling`, which need not land on a stop — the column stops
+    /// being "tabbed" and simply takes all the room there is. Header and rows
+    /// still agree (both read this one `way_col`), so alignment is preserved;
+    /// only the frame-to-frame stability degrades. Taking the width as a
+    /// parameter also keeps the layout tests independent of the ambient terminal.
+    pub fn for_id_width_in(max_id_width: usize, term_w: usize) -> Self {
         // Never let the Way column crowd the trailing columns off the terminal.
         let ceiling = term_w.saturating_sub(INDENT + TRAILING_W).max(WAY_MIN);
         let way_col = snap_up(max_id_width + 1, WAY_TAB).clamp(WAY_MIN, ceiling);
@@ -593,24 +613,38 @@ mod tests {
     #[test]
     fn way_col_is_tab_snapped_past_the_longest_id() {
         // A 25-char id snaps to the next stop above 25 (+1 gap) → 28, a multiple
-        // of WAY_TAB and strictly wider than the id, so there's always a gap.
-        let layout = Layout::for_id_width(25);
+        // of WAY_TAB and strictly wider than the id, so there's always a gap. Pin
+        // the terminal width so the ceiling clamp doesn't bind (see `for_id_width_in`).
+        let layout = Layout::for_id_width_in(25, 200);
         assert_eq!(layout.way_col % WAY_TAB, 0, "way_col lands on a tab stop");
         assert!(layout.way_col > 25, "column is wider than the longest id");
         assert!(layout.way_col <= 28, "but only snaps to the next stop, not beyond");
     }
 
     #[test]
+    fn narrow_terminal_clamps_way_col_to_the_ceiling() {
+        // When the terminal can't fit a full-width id, `way_col` clamps to the
+        // ceiling (which reserves room for the trailing columns) rather than
+        // snapping — the "tabbed" property yields to "use all the room there is".
+        let layout = Layout::for_id_width_in(50, 80);
+        let ceiling = 80 - (INDENT + TRAILING_W);
+        assert_eq!(layout.way_col, ceiling, "clamped to the ceiling, not the snap");
+        assert!(layout.way_col >= WAY_MIN, "still at least the floor");
+    }
+
+    #[test]
     fn way_col_never_collapses_below_the_floor() {
-        // An empty frame (max id 0) still renders a real column.
-        assert_eq!(Layout::for_id_width(0).way_col, WAY_MIN);
+        // An empty frame (max id 0) still renders a real column, even on a narrow
+        // terminal where the ceiling itself bottoms out at the floor.
+        assert_eq!(Layout::for_id_width_in(0, 200).way_col, WAY_MIN);
+        assert_eq!(Layout::for_id_width_in(0, 40).way_col, WAY_MIN);
     }
 
     #[test]
     fn header_and_row_columns_align() {
         // The Epoch column must begin at the same visible offset in the header and
         // in a data row — that's the guarantee the shared constants exist to keep.
-        let layout = Layout::for_id_width(20);
+        let layout = Layout::for_id_width_in(20, 200);
         let ways = [MockWay { id: "documentation/adr", depth: 0 }];
         let bar_positions = compute_bar_positions(&ways, 1000);
         let unique_pos = unique_positions(&bar_positions);
