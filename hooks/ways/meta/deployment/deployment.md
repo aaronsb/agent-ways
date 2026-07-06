@@ -61,7 +61,6 @@ model first, then give the command.
 
 ## See Also
 
-- localize(meta) — sibling adopter deployment-time choice (output language)
 - skills(meta) — skills are one of the projected roots
 - `docs/development.md` — the same projection model, from a contributor's seat (install vs dev checkout vs sandbox)
 - `docs/migration-1.0.md` — the `ways migrate` walkthrough and deprecation lifecycle

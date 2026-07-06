@@ -1,6 +1,6 @@
 ---
 name: ways-localize
-description: Localize agent-ways into the operator's language — translate every way's matching metadata against the English root, tune it clean, and switch ways (and Claude Code) into that language. Use when the operator asks to run ways in their language ("set up ways in Spanish", "localiza ways al español", "ways auf Deutsch"), or accepts the non-English nudge. Not for authoring or editing individual ways (that is the ways skill), not for English installs (already built), and not for changing Claude Code's language alone (that is a settings.json edit).
+description: Localize agent-ways into the operator's language — translate every way's matching metadata against the English root, tune it clean, and switch ways (and Claude Code) into that language. Use when the operator asks to run ways in their language ("set up ways in Spanish", "localiza ways al español", "ways auf Deutsch"). Not for authoring or editing individual ways (that is the ways skill), not for English installs (already built), and not for changing Claude Code's language alone (that is a settings.json edit).
 allowed-tools: Bash, Read, Write, Edit
 ---
 
@@ -22,7 +22,7 @@ ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 ## 1. Interview — which language
 
 Recognize the target from the operator's request, **in their own language** (the
-nudge fires when Claude Code is already responding in it). Resolve it to a ways
+operator is already reading and writing in it). Resolve it to a ways
 **code** and a Claude Code **name** from the registry, and confirm with the operator
 before proceeding:
 
@@ -100,8 +100,7 @@ jq --arg L "$NAME" '.language = $L' "$ROOT/settings.json" > "$ROOT/settings.json
 ## 8. Report — in the operator's language
 
 Summarize in the **target language**: how many ways localized, that `ways tune` is
-clean, and that Claude Code's language takes effect next session. The detection nudge
-self-silences now that the effective ways language matches.
+clean, and that Claude Code's language takes effect next session.
 
 ## Not for
 
