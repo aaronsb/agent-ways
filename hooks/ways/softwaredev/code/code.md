@@ -23,4 +23,6 @@ Children of this way cover specific aspects of writing and maintaining code:
 - code/quality(softwaredev) — measurable quality thresholds
 - code/security(softwaredev) — secure coding defaults
 - code/testing(softwaredev) — test structure and coverage
+- code/performance(softwaredev) — profiling and optimization
 - code/errors(softwaredev) — error handling boundaries
+- code/supplychain(softwaredev) — dependency and supply-chain integrity

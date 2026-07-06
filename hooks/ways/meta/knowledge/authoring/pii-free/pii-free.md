@@ -1,7 +1,7 @@
 ---
 description: stripping personal information from ways when decomposing personal skills or configurations into shared reusable guidance
 vocabulary: pii personal information names emails accounts strip anonymize decompose persona
-files: \.claude/(hooks/)?ways/.*way\.md$
+files: \.claude/(hooks/)?ways/.*\.md$
 scope: agent, subagent
 refire: 0.15
 ---
