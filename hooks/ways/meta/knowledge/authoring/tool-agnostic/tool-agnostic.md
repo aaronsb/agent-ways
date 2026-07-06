@@ -1,7 +1,7 @@
 ---
 description: writing portable ways that describe patterns and intentions — vendor-neutral, durable phrasing that binds to whatever tools a session actually has
 vocabulary: tool agnostic vendor neutral portable abstract intention pattern mcp cli specific
-files: \.claude/(hooks/)?ways/.*way\.md$
+files: \.claude/(hooks/)?ways/.*\.md$
 scope: agent, subagent
 refire: 0.15
 ---
