@@ -94,13 +94,20 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     run_step(Command::new("bash").arg("scripts/update.sh").current_dir(&app), "git pull")?;
     let head_after = git_head(&app);
 
-    let (cargo_changed, way_embed_changed) = match (head_before.as_deref(), head_after.as_deref()) {
+    let (committed_cargo, committed_embed) = match (head_before.as_deref(), head_after.as_deref()) {
         // Both HEADs resolved — classify the diff. If git can't produce it, refresh
         // to be safe (Some→unwrap_or). If either HEAD is unreadable (odd/detached
         // state), also refresh to be safe.
         (Some(a), Some(b)) => changed_build_groups(&app, a, b).unwrap_or((true, true)),
         _ => (true, true),
     };
+    // The diff above sees committed history only; also fold in any uncommitted
+    // binary-source edits so a dirty working tree isn't compiled out by a
+    // content-only pull. (The "installed binary matches source" guarantee this gate
+    // relies on is really "matches HEAD, assuming the prior build was clean.")
+    let (wt_cargo, wt_embed) = working_tree_build_groups(&app);
+    let cargo_changed = committed_cargo || wt_cargo;
+    let way_embed_changed = committed_embed || wt_embed;
 
     // Content-only update: nothing that feeds a binary changed. Skip the whole
     // download/build/relink dance and just reproject the pulled content (core.md,
@@ -108,6 +115,14 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // metadata pull must not trigger a cargo + cmake rebuild of the suite.
     if !cargo_changed && !way_embed_changed {
         eprintln!("==> binaries: no source change in this update — skipping suite rebuild");
+        // relink is idempotent and cheap; keep the prior behavior of self-healing a
+        // missing/broken suite PATH symlink on every update, not just rebuilds.
+        if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
+            eprintln!(
+                "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
+                app.display()
+            );
+        }
         reproject(&app, &ways_bin)?;
         println!("\nUpdate complete (content only — binaries unchanged). Restart Claude Code");
         println!("to pick up the refreshed ways, skills, and hooks.");
@@ -230,12 +245,23 @@ fn changed_build_groups(app: &Path, a: &str, b: &str) -> Option<(bool, bool)> {
     Some(classify_build_groups(text.lines()))
 }
 
+/// Repo-relative path prefixes for compile-time assets embedded into a cargo-suite
+/// binary via `include_str!`/`include_bytes!` that live OUTSIDE `tools/`. A change
+/// to one of these rebuilds the binary that embeds it, even though the path is not
+/// under `tools/`, so the classifier must treat it as cargo source. KEEP IN SYNC
+/// with the escaping includes in the tree — the `embedded_assets_outside_tools_are_classified`
+/// test walks the source and fails if a new escape isn't listed here.
+/// Currently: `hooks/memory-seed/` → embedded into `ways` (see memory_seed.rs).
+const EMBEDDED_ASSET_PREFIXES: &[&str] = &["hooks/memory-seed/"];
+
 /// Pure classifier: given changed repo-relative paths, decide which build groups
 /// they touch — `(cargo_suite, way_embed)`. Every binary source lives under
 /// `tools/`; way-embed (C++/cmake) is `tools/way-embed/`, and the cargo suite
 /// (`ways`, `ways-audit`, `attend`, `attend-chat`, and their shared crates) is the
 /// rest of `tools/`. The root `Makefile` drives both builds, so a change to it flags
-/// both. Anything else (docs, hooks, skills, `*.md`) feeds no binary.
+/// both. A few compile-time assets embedded into a binary live outside `tools/`
+/// (`EMBEDDED_ASSET_PREFIXES`) and count as cargo source. Anything else (docs,
+/// hooks, skills, `*.md`) feeds no binary.
 fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, bool) {
     let (mut cargo, mut embed) = (false, false);
     for p in paths.map(str::trim).filter(|p| !p.is_empty()) {
@@ -248,9 +274,31 @@ fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, boo
             } else {
                 cargo = true;
             }
+        } else if EMBEDDED_ASSET_PREFIXES.iter().any(|pre| p.starts_with(pre)) {
+            cargo = true;
         }
     }
     (cargo, embed)
+}
+
+/// Which build groups the working tree diverges from HEAD on — staged + unstaged
+/// tracked changes. The `changed_build_groups` diff keys on committed HEAD, so
+/// uncommitted edits to binary source (unusual on the release channel, but
+/// possible) are invisible to it and a content-only pull would skip compiling
+/// them. This closes that: `git diff --name-only HEAD` reuses the same classifier.
+/// (Untracked-only new files are excluded; a real new module needs a tracked `mod`
+/// line, which this catches.) `(false, false)` if git can't answer.
+fn working_tree_build_groups(app: &Path) -> (bool, bool) {
+    let Some(out) = Command::new("git")
+        .args(["diff", "--name-only", "HEAD"])
+        .current_dir(app)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+    else {
+        return (false, false);
+    };
+    classify_build_groups(String::from_utf8_lossy(&out.stdout).lines())
 }
 
 /// Regenerate the corpus (best-effort — it self-heals on the next session) and
@@ -859,6 +907,8 @@ mod tests {
         assert_eq!(c(["tools/attend/src/config.rs"].into_iter()), (true, false));
         // way-embed source → embed only.
         assert_eq!(c(["tools/way-embed/way-embed.cpp"].into_iter()), (false, true));
+        // Embedded asset outside tools/ (include_str! into ways) → cargo.
+        assert_eq!(c(["hooks/memory-seed/seed-v1.md"].into_iter()), (true, false));
         // Root Makefile drives both builds.
         assert_eq!(c(["Makefile"].into_iter()), (true, true));
         // Mixed change touches both.
@@ -868,5 +918,94 @@ mod tests {
         );
         // Blank/whitespace lines are ignored.
         assert_eq!(c(["", "  ", "CLAUDE.md"].into_iter()), (false, false));
+    }
+
+    // --- Durability guard for finding #1: an embedded asset that escapes `tools/`
+    // must be reflected in EMBEDDED_ASSET_PREFIXES, or a change to it silently skips
+    // the rebuild. Walk the source for include_str!/include_bytes! literals, resolve
+    // each relative to its file, and assert every one that lands outside `tools/` is
+    // covered. A future escaping include that isn't listed fails this test. ---
+
+    fn find_include_paths(contents: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for marker in ["include_str!(\"", "include_bytes!(\""] {
+            let mut rest = contents;
+            while let Some(i) = rest.find(marker) {
+                let after = &rest[i + marker.len()..];
+                if let Some(end) = after.find('"') {
+                    out.push(after[..end].to_string());
+                    rest = &after[end..];
+                } else {
+                    break;
+                }
+            }
+        }
+        out
+    }
+
+    fn normalize(p: &Path) -> std::path::PathBuf {
+        use std::path::Component;
+        let mut out = std::path::PathBuf::new();
+        for comp in p.components() {
+            match comp {
+                Component::ParentDir => {
+                    out.pop();
+                }
+                Component::CurDir => {}
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
+    }
+
+    fn visit_rs(dir: &Path, f: &mut dyn FnMut(&Path, &str)) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n == "target" || n == "llama.cpp") {
+                    continue;
+                }
+                visit_rs(&p, f);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                if let Ok(c) = std::fs::read_to_string(&p) {
+                    f(&p, &c);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn embedded_assets_outside_tools_are_classified() {
+        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR")); // tools/ways-cli
+        let tools = crate_root.parent().unwrap(); // tools/
+        let repo = tools.parent().unwrap(); // repo root
+        let mut escaping: Vec<String> = Vec::new();
+        visit_rs(tools, &mut |file, contents| {
+            for lit in find_include_paths(contents) {
+                let resolved = normalize(&file.parent().unwrap().join(&lit));
+                if !resolved.starts_with(tools) {
+                    let rel = resolved
+                        .strip_prefix(repo)
+                        .unwrap_or(&resolved)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    escaping.push(rel);
+                }
+            }
+        });
+        // Sanity: the known escape (memory-seed → ways) is found, so a broken walker
+        // can't pass this test vacuously.
+        assert!(
+            escaping.iter().any(|r| r.starts_with("hooks/memory-seed/")),
+            "expected to find the memory-seed include escape; found: {escaping:?}",
+        );
+        for rel in &escaping {
+            assert!(
+                EMBEDDED_ASSET_PREFIXES.iter().any(|pre| rel.starts_with(pre)),
+                "embedded asset `{rel}` escapes tools/ but isn't in EMBEDDED_ASSET_PREFIXES \
+                 — a change to it would skip the rebuild. Add its prefix.",
+            );
+        }
     }
 }
