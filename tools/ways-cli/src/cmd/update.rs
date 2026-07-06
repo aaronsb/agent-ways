@@ -71,43 +71,80 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     if dry_run {
         println!("ways update would, in {}:", app.display());
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
-        println!("  2. refresh ways               — download pre-built (guarded: never older than source), else build");
-        println!("  3. refresh way-embed          — download pre-built, else build (optional)");
-        println!("  4. refresh ways-audit/attend/attend-chat — download pre-built, else build");
+        println!("     (binary steps 2-5 run only if the pull changed their source — a");
+        println!("      content-only update skips straight to reproject)");
+        println!("  2. refresh ways               — if cargo source changed: download pre-built (guarded), else build");
+        println!("  3. refresh way-embed          — if tools/way-embed changed: download pre-built, else build (optional)");
+        println!("  4. refresh ways-audit/attend/attend-chat — if cargo source changed: download pre-built, else build");
         println!("  5. make relink                — ensure every suite binary is symlinked onto PATH");
         println!("  6. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
         return Ok(());
     }
 
-    // 1. Pull.
+    // 1. Pull. Capture HEAD before/after so we can tell what the pull actually
+    //    touched. Content lands far more often than a release is cut, so the common
+    //    update is docs/ways-only (e.g. a change to core.md). Rebuilding the suite for
+    //    that is pure churn: the pre-built binaries lag the source, so "refreshing"
+    //    downloads a binary that is behind, discards it under the ADR-150 guard, and
+    //    rebuilds from source — producing a binary identical to the one installed.
+    //    Gate each build group on whether its own source moved in this pull.
+    let head_before = git_head(&app);
     eprintln!("==> pull ({})", app.display());
     run_step(Command::new("bash").arg("scripts/update.sh").current_dir(&app), "git pull")?;
+    let head_after = git_head(&app);
+
+    let (cargo_changed, way_embed_changed) = match (head_before.as_deref(), head_after.as_deref()) {
+        // Both HEADs resolved — classify the diff. If git can't produce it, refresh
+        // to be safe (Some→unwrap_or). If either HEAD is unreadable (odd/detached
+        // state), also refresh to be safe.
+        (Some(a), Some(b)) => changed_build_groups(&app, a, b).unwrap_or((true, true)),
+        _ => (true, true),
+    };
+
+    // Content-only update: nothing that feeds a binary changed. Skip the whole
+    // download/build/relink dance and just reproject the pulled content (core.md,
+    // ways, skills, hooks). This is the fast path the churn report was about — a
+    // metadata pull must not trigger a cargo + cmake rebuild of the suite.
+    if !cargo_changed && !way_embed_changed {
+        eprintln!("==> binaries: no source change in this update — skipping suite rebuild");
+        reproject(&app, &ways_bin)?;
+        println!("\nUpdate complete (content only — binaries unchanged). Restart Claude Code");
+        println!("to pick up the refreshed ways, skills, and hooks.");
+        return Ok(());
+    }
 
     // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
     //    downgrade guard: a pre-built that is behind the pulled source is refused
     //    (built from source instead, or the previous binary kept) so the updater
     //    can never move backward. A failed refresh reverts and CONTINUES (we still
-    //    reproject the pulled source) rather than aborting mid-update.
-    eprintln!("==> refresh ways (pre-built first, downgrade-guarded)");
-    let ways_refreshed = match refresh_ways(&app, has_toolchain) {
-        Ok(()) => true,
-        Err(e) => {
-            eprintln!("  ⚠ ways binary NOT refreshed ({e}); keeping the previous binary.");
-            false
+    //    reproject the pulled source) rather than aborting mid-update. Skipped when
+    //    the cargo suite's source didn't move — the installed binary already matches.
+    let ways_refreshed = if cargo_changed {
+        eprintln!("==> refresh ways (pre-built first, downgrade-guarded)");
+        match refresh_ways(&app, has_toolchain) {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("  ⚠ ways binary NOT refreshed ({e}); keeping the previous binary.");
+                false
+            }
         }
+    } else {
+        true // ways source unchanged — the installed binary already matches the pull
     };
 
     // 3. Matcher — way-embed. Use its own force-refresh target: `rebuild-binary`
     //    owns way-embed's cache install path and is download-first, so the generic
     //    rename dance (which targets app/bin) doesn't apply here. Optional —
     //    semantic matching degrades to regex without it.
-    eprintln!("==> refresh way-embed (pre-built first)");
-    if let Err(e) = run_step(
-        Command::new("make").args(["-C", "tools/way-embed", "rebuild-binary"]).current_dir(&app),
-        "way-embed refresh",
-    ) {
-        eprintln!("  ⚠ way-embed not refreshed ({e}); semantic matching degrades to regex until next update.");
+    if way_embed_changed {
+        eprintln!("==> refresh way-embed (pre-built first)");
+        if let Err(e) = run_step(
+            Command::new("make").args(["-C", "tools/way-embed", "rebuild-binary"]).current_dir(&app),
+            "way-embed refresh",
+        ) {
+            eprintln!("  ⚠ way-embed not refreshed ({e}); semantic matching degrades to regex until next update.");
+        }
     }
 
     // 4. Awareness — attend/attend-chat. Now download-first (their `make` targets
@@ -119,10 +156,12 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // its own cache path) are refreshed above; everything else flows through the
     // same `refresh_component` path so the whole collection updates uniformly —
     // no separate lifecycle for any one tool.
-    eprintln!("==> refresh ways-audit/attend/attend-chat (pre-built first)");
-    for comp in ["ways-audit", "attend", "attend-chat"] {
-        if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
-            eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
+    if cargo_changed {
+        eprintln!("==> refresh ways-audit/attend/attend-chat (pre-built first)");
+        for comp in ["ways-audit", "attend", "attend-chat"] {
+            if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
+                eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
+            }
         }
     }
 
@@ -131,26 +170,22 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // that predates it) has no `$XDG_BIN` symlink from the original `make install`,
     // so without this it would sit in `bin/` unreachable. `make relink` is
     // idempotent and only links what exists.
-    eprintln!("==> relink suite binaries onto PATH");
-    if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
-        eprintln!(
-            "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
-            app.display()
-        );
+    // Relink only when a build group changed — a binary NEWLY ADDED to the suite
+    // needs its PATH symlink. `make relink` is idempotent and only links what exists.
+    if cargo_changed || way_embed_changed {
+        eprintln!("==> relink suite binaries onto PATH");
+        if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
+            eprintln!(
+                "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
+                app.display()
+            );
+        }
     }
 
-    // 5. Regenerate the corpus (best-effort — it self-heals on next session) and
-    //    reproject with whatever ways binary is now in place. Reconcile ALWAYS runs,
-    //    so a failed binary refresh doesn't leave the pulled source un-projected.
-    if !ways_bin.exists() {
-        bail!("no ways binary at {} after update — cannot reconcile. Re-run the installer.", ways_bin.display());
-    }
-    eprintln!("==> regenerate corpus");
-    if let Err(e) = run_step(Command::new(&ways_bin).args(["corpus", "--quiet"]).current_dir(&app), "ways corpus") {
-        eprintln!("  ⚠ corpus not regenerated now ({e}); it self-heals on the next session.");
-    }
-    eprintln!("==> reconcile projection");
-    run_step(Command::new(&ways_bin).arg("reconcile").current_dir(&app), "ways reconcile")?;
+    // 5. Regenerate the corpus + reproject with whatever ways binary is now in place.
+    //    Always runs, so a failed binary refresh doesn't leave the pulled source
+    //    un-projected.
+    reproject(&app, &ways_bin)?;
 
     if ways_refreshed {
         println!("\nUpdate complete. Restart Claude Code to pick up the new version");
@@ -161,6 +196,77 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("retry `ways update`, or `make update` with a toolchain, then restart Claude Code.");
     }
     Ok(())
+}
+
+/// Current HEAD sha of the app checkout, or None if git can't answer.
+fn git_head(app: &Path) -> Option<String> {
+    Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(app)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Which build groups the pull touched, by diffing `a..b` for changed paths.
+/// Returns `(cargo_suite_changed, way_embed_changed)`, or None if git can't produce
+/// the diff (caller then refreshes to be safe). Equal shas short-circuit to
+/// `(false, false)` — the pull was a no-op.
+fn changed_build_groups(app: &Path, a: &str, b: &str) -> Option<(bool, bool)> {
+    if a == b {
+        return Some((false, false));
+    }
+    let out = Command::new("git")
+        .args(["diff", "--name-only", a, b])
+        .current_dir(app)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Some(classify_build_groups(text.lines()))
+}
+
+/// Pure classifier: given changed repo-relative paths, decide which build groups
+/// they touch — `(cargo_suite, way_embed)`. Every binary source lives under
+/// `tools/`; way-embed (C++/cmake) is `tools/way-embed/`, and the cargo suite
+/// (`ways`, `ways-audit`, `attend`, `attend-chat`, and their shared crates) is the
+/// rest of `tools/`. The root `Makefile` drives both builds, so a change to it flags
+/// both. Anything else (docs, hooks, skills, `*.md`) feeds no binary.
+fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, bool) {
+    let (mut cargo, mut embed) = (false, false);
+    for p in paths.map(str::trim).filter(|p| !p.is_empty()) {
+        if p == "Makefile" {
+            cargo = true;
+            embed = true;
+        } else if let Some(rest) = p.strip_prefix("tools/") {
+            if rest.starts_with("way-embed/") {
+                embed = true;
+            } else {
+                cargo = true;
+            }
+        }
+    }
+    (cargo, embed)
+}
+
+/// Regenerate the corpus (best-effort — it self-heals on the next session) and
+/// reproject `~/.claude` with the installed ways binary. This is where the pulled
+/// content (ways, skills, hooks, core.md) reaches the projection, so it runs on
+/// every update path — including the content-only fast path.
+fn reproject(app: &Path, ways_bin: &Path) -> Result<()> {
+    if !ways_bin.exists() {
+        bail!("no ways binary at {} after update — cannot reconcile. Re-run the installer.", ways_bin.display());
+    }
+    eprintln!("==> regenerate corpus");
+    if let Err(e) = run_step(Command::new(ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
+        eprintln!("  ⚠ corpus not regenerated now ({e}); it self-heals on the next session.");
+    }
+    eprintln!("==> reconcile projection");
+    run_step(Command::new(ways_bin).arg("reconcile").current_dir(app), "ways reconcile")
 }
 
 /// `ways update --ref <ref>` — pin the install to a branch, tag, or commit and
@@ -736,5 +842,31 @@ mod tests {
         // an unverifiable binary still beats an empty slot.
         assert_eq!(guard_action(&Older, false, false), KeepDownload);
         assert_eq!(guard_action(&Unknown, false, false), KeepDownload);
+    }
+
+    #[test]
+    fn classify_build_groups_routes_changed_paths() {
+        use super::classify_build_groups as c;
+        // Docs/ways-only pull → no binary group (the churn-report case).
+        assert_eq!(
+            c(["CLAUDE.md", "hooks/ways/core.md", "docs/x.md", "skills/y/SKILL.md"].into_iter()),
+            (false, false)
+        );
+        // Cargo suite source → cargo only.
+        assert_eq!(c(["tools/ways-cli/src/main.rs"].into_iter()), (true, false));
+        assert_eq!(c(["tools/ways-core/src/lib.rs"].into_iter()), (true, false));
+        assert_eq!(c(["tools/Cargo.lock"].into_iter()), (true, false));
+        assert_eq!(c(["tools/attend/src/config.rs"].into_iter()), (true, false));
+        // way-embed source → embed only.
+        assert_eq!(c(["tools/way-embed/way-embed.cpp"].into_iter()), (false, true));
+        // Root Makefile drives both builds.
+        assert_eq!(c(["Makefile"].into_iter()), (true, true));
+        // Mixed change touches both.
+        assert_eq!(
+            c(["tools/way-embed/x.cpp", "tools/attend/src/lib.rs"].into_iter()),
+            (true, true)
+        );
+        // Blank/whitespace lines are ignored.
+        assert_eq!(c(["", "  ", "CLAUDE.md"].into_iter()), (false, false));
     }
 }
