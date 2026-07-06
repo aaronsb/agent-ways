@@ -19,6 +19,19 @@ use super::schema::{is_reserved_field, Schema};
 
 use crate::util::home_dir;
 
+/// Whether a way has at least one live firing path — the predicate behind the
+/// functional-activeness lint. A way fires via a frontmatter channel
+/// (`fires_on_something`: semantic, pattern, commands, files, trigger) or via an
+/// ADR-135 `postcheck.sh` sidecar in its directory (reactive PostToolUse
+/// dispatch, keyed off the file's existence rather than frontmatter). `way_dir`
+/// is the directory holding the way's `.md`; `None` skips the sidecar check.
+pub(super) fn has_firing_path(fm_str: &str, way_dir: Option<&Path>) -> bool {
+    crate::frontmatter::fires_on_something(fm_str)
+        || way_dir
+            .map(|d| d.join("postcheck.sh").is_file())
+            .unwrap_or(false)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lint_file(
     path: &Path,
@@ -148,6 +161,31 @@ pub(super) fn lint_file(
         } else {
             eprintln!("  INFO: {rel} — attend signal handler (matched by signal name, not semantic)");
         }
+    }
+
+    // Functional activeness (ground truth: scan/candidates.rs + check-post.sh).
+    // A way must have at least one live firing path, or it can never fire and is
+    // dead weight in the corpus (the localize case that motivated this rule).
+    // `fires_on_something` covers the frontmatter channels — semantic, pattern,
+    // commands, files, and `trigger:` (which is present for both the flat state
+    // trigger and the nested attend block). The one channel it can't see is the
+    // ADR-135 `postcheck.sh` sidecar: reactive PostToolUse dispatch keyed off the
+    // file's existence, not frontmatter, so check for it explicitly.
+    //
+    // Deliberately NOT checked: "fires but injects nothing" (empty body). It
+    // isn't mechanically decidable — a macro.sh or postcheck.sh emits its
+    // disclosure conditionally at runtime, so an empty .md body is legitimate.
+    // Top-level files (core.md) are base guidance injected unconditionally via
+    // `macro: prepend`, not matchable ways — the scanner skips them (their
+    // way-id is empty). Mirror that exclusion so the rule targets real ways only.
+    let is_top_level = relpath.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true);
+    if !is_check && !is_top_level && !has_firing_path(&fm_str, path.parent()) {
+        eprintln!(
+            "  WARNING: {rel} — no firing path: none of description+vocabulary, \
+             pattern, commands, files, trigger, or a postcheck.sh sidecar. \
+             This way can never fire (dead in the corpus)."
+        );
+        *warnings += 1;
     }
 
     // ADR-126: fire-bearing ways should carry a `refire:` field. Fire
@@ -369,4 +407,55 @@ pub(super) fn lint_file(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_firing_path;
+    use std::path::Path;
+
+    #[test]
+    fn firing_path_via_frontmatter_channels() {
+        // Semantic needs both fields; each keyword/bash/file/state channel fires alone.
+        assert!(has_firing_path("description: x\nvocabulary: y\n", None));
+        assert!(has_firing_path("pattern: '^foo'\n", None));
+        assert!(has_firing_path("commands: 'git .*'\n", None));
+        assert!(has_firing_path("files: '\\.rs$'\n", None));
+        assert!(has_firing_path("trigger: session-start\n", None));
+        // The nested attend block still presents a top-level `trigger:` line.
+        assert!(has_firing_path("trigger:\n  type: attend\n  signals:\n    - x\n", None));
+    }
+
+    #[test]
+    fn no_firing_path_on_modifier_only_frontmatter() {
+        // scope/refire are modifiers, not channels — a way with only these is dead
+        // unless a postcheck.sh sidecar rescues it (next test).
+        assert!(!has_firing_path("scope: agent\nrefire: 0.2\n", None));
+        assert!(!has_firing_path("description: x\n", None)); // half a semantic pair
+    }
+
+    #[test]
+    fn postcheck_sidecar_is_a_firing_path() {
+        let dir = std::env::temp_dir().join(format!("ways-fp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Modifier-only frontmatter is dead...
+        assert!(!has_firing_path("scope: agent\nrefire: 0.2\n", Some(&dir)));
+        // ...until a postcheck.sh sits alongside it (ADR-135, the overbuild case).
+        std::fs::write(dir.join("postcheck.sh"), "#!/usr/bin/env bash\nexit 0\n").unwrap();
+        assert!(has_firing_path("scope: agent\nrefire: 0.2\n", Some(&dir)));
+        // A different sidecar name does not count.
+        let dir2 = dir.join("other");
+        std::fs::create_dir_all(&dir2).unwrap();
+        std::fs::write(dir2.join("macro.sh"), "#!/usr/bin/env bash\n").unwrap();
+        assert!(!has_firing_path("scope: agent\n", Some(&dir2)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_way_dir_skips_the_sidecar_check() {
+        // `None` (no directory) must not panic and must not conjure a firing path.
+        assert!(!has_firing_path("scope: agent\n", Some(Path::new("/nonexistent/xyz"))));
+        assert!(!has_firing_path("scope: agent\n", None));
+    }
 }
