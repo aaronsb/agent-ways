@@ -7,6 +7,33 @@
 #   default. Linter flags absence as a warning (with --strict).
 # "optional" means absence is correct and never flagged.
 # "conditional" means required only when a paired field is present.
+#
+# ── Functional firing contract (ground truth from the fire-time code) ──
+# A way is *functionally active* only if it has at least one live firing path.
+# The fire-time parser (scan/candidates.rs → WayCandidate, via get_fm_field) is
+# a FLAT top-level `key: value` reader plus one bespoke `when:` block handler —
+# nested YAML is invisible to it. The live paths and who consumes them:
+#
+#   semantic  description AND vocabulary (both non-empty)  → corpus embed → late-interaction
+#   keyword   pattern (+ pattern_strict)                   → scan regex lane
+#   bash      commands                                     → scan bash surface
+#   file      files                                        → scan Edit/Write surface
+#   state     trigger: session-start|context-threshold|file-exists (flat)  → scan/state.rs
+#             (context-threshold also needs threshold; file-exists needs path)
+#   attend    trigger: { type: attend, signals: [...] } (NESTED)           → attend binary
+#             (read by extract_attend_signals, NOT by scan — flat parser sees trigger: as empty)
+#
+# Note the top-level `trigger:` key is dual-shaped: a flat string routes to the
+# state lane; a nested `type/signals` map routes to the attend lane. They are
+# documented below under `state:` and `attend:` respectively.
+#
+# Fields that are NOT firing paths — modifiers consumed by other subsystems:
+#   scope, when.*   preconditions/gates (scan)
+#   refire          re-fire cadence (ADR-126 marker subsystem, not candidate parsing)
+#   macro           runs macro.sh (shell hook), not read by the Rust fire path
+#   requires        ADR-116 permission audit only (ways lint / permissions), not fire-time
+#   pattern_keep    pattern-hygiene lint directive only (ADR-155 §5), not fire-time
+#   scan_exclude    macro.sh scan filter only, not read by the Rust fire path
 
 way:
   trigger:
@@ -86,12 +113,19 @@ way:
           required: optional
           role: Only fire in this project directory
 
+  # The attend lane is the NESTED shape of the top-level `trigger:` key:
+  #   trigger:
+  #     type: attend
+  #     signals: [context-pressure, build-complete]
+  # Read by extract_attend_signals (show/helpers.rs) and dispatched by the
+  # attend binary — invisible to the scan fire path (its flat parser reads
+  # `trigger:` as empty here). Not a scan/state trigger.
   attend:
     type:
       type: enum
       values: [attend]
       required: optional
-      role: Marks this way as a handler for attend signal types (ADR-114)
+      role: Under `trigger:`, marks this way as an attend signal handler (ADR-114)
     signals:
       type: array
       required: conditional  # required when type is attend
@@ -102,15 +136,14 @@ way:
       type: enum
       values: [context-threshold, file-exists, session-start]
       required: optional
-      role: State-based trigger type (instead of pattern/semantic)
+      role: >
+        Flat state-trigger value (the top-level `trigger:` key as a string,
+        instead of pattern/semantic). Routes to scan/state.rs. The nested
+        `trigger: { type: attend, … }` form is the *attend* lane, not this.
     threshold:
       type: number
       required: conditional  # required when trigger is context-threshold
       role: Percentage (0-100) of context-window fill that fires the way. Only read for trigger, context-threshold.
-    repeat:
-      type: boolean
-      required: optional
-      role: Keep firing until condition met
     path:
       type: glob
       required: optional
