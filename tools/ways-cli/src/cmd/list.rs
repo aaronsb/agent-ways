@@ -126,12 +126,13 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     let bar_positions = render::compute_bar_positions(&ways, context_window_k);
     let unique_pos = render::unique_positions(&bar_positions);
 
-    render::write_table_header(&mut out);
+    let layout = render::Layout::for_rows(&ways);
+    render::write_table_header_with(&mut out, &layout);
 
     for (i, w) in ways.iter().enumerate() {
-        render::write_way_row(
+        render::write_way_row_with(
             &mut out, w, current_epoch, current_tokens_k,
-            &bar_positions, &unique_pos, i, "", "",
+            &bar_positions, &unique_pos, i, "", "", &layout,
         );
     }
 

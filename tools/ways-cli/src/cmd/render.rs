@@ -42,6 +42,49 @@ pub const PIN_COLORS: [&str; 10] = [
 
 // ── Layout ───────────────────────────────────────────────────
 
+// Trailing table columns (everything right of the Way column) and the spacing
+// model. The header and row renderers both read these constants, so the two
+// format strings can never drift out of alignment.
+const EPOCH_W: usize = 5;
+const DIST_W: usize = 5;
+const TRIG_W: usize = 13;
+const PIN_W: usize = 1;
+const RD_W: usize = 13;
+const AGENT_W: usize = 12;
+/// Blank columns between every pair of table columns — the breathing room that
+/// keeps Epoch/Dist/Trigger/… from reading as one crowded block.
+const COL_GAP: usize = 2;
+const INDENT: usize = 2;
+
+/// Visible width of the fixed Epoch…Agent block that trails the Way column,
+/// inter-column gaps included.
+const TRAILING_W: usize = COL_GAP + EPOCH_W + COL_GAP + DIST_W + COL_GAP + TRIG_W
+    + COL_GAP + PIN_W + COL_GAP + RD_W + COL_GAP + AGENT_W;
+
+/// The Way column grows in fixed steps of this many columns: its width snaps up
+/// to the next stop past the longest id, so a name a few characters longer than
+/// its neighbours never reflows the whole table. The column changes width only
+/// when the longest id crosses a stop — "tabbed", and visually stable frame to
+/// frame.
+const WAY_TAB: usize = 4;
+/// Floor for the Way column so a frame of only short ids still reads as a column.
+const WAY_MIN: usize = 16;
+
+/// Round `n` up to the next multiple of `step` (the tab-stop snap).
+fn snap_up(n: usize, step: usize) -> usize {
+    if step == 0 {
+        return n;
+    }
+    n.div_ceil(step) * step
+}
+
+/// Visible width of a way's rendered id, including the depth-indent prefix
+/// (`  └ `) that `write_way_row_with` prepends for nested agents.
+fn display_id_width<W: WayRow>(w: &W) -> usize {
+    let prefix = if w.depth() > 0 { w.depth() as usize * 2 + 2 } else { 0 };
+    prefix + w.id().chars().count()
+}
+
 /// Computed layout dimensions derived from terminal width.
 pub struct Layout {
     /// Width of the Way ID column
@@ -53,16 +96,33 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn detect() -> Self {
+    /// Reactive layout sized to `max_id_width` (the widest rendered way id): the
+    /// Way column snaps to a tab stop just past that id rather than absorbing
+    /// all leftover terminal width, so short names no longer leave a gulf before
+    /// the Epoch column. Floored at `WAY_MIN` and capped so the trailing columns
+    /// always fit the terminal.
+    pub fn for_id_width(max_id_width: usize) -> Self {
         let term_w = agent_fmt::terminal_width();
-        // Fixed columns: epoch(6) + dist(6) + trigger(12) + pin(2) + redisclosure(14) + agent(14) + spaces(6) = 60
-        let fixed_cols = 60;
-        let indent = 2;
-        // Way column gets everything left after fixed columns
-        let way_col = term_w.saturating_sub(indent + fixed_cols).max(20);
-        let bar_width = term_w.saturating_sub(indent + 4).clamp(30, 200);
-        let separator = term_w.saturating_sub(indent + 2);
+        // Never let the Way column crowd the trailing columns off the terminal.
+        let ceiling = term_w.saturating_sub(INDENT + TRAILING_W).max(WAY_MIN);
+        let way_col = snap_up(max_id_width + 1, WAY_TAB).clamp(WAY_MIN, ceiling);
+        let bar_width = term_w.saturating_sub(INDENT + 4).clamp(30, 200);
+        let separator = term_w.saturating_sub(INDENT + 2);
         Layout { way_col, bar_width, separator }
+    }
+
+    /// Reactive layout sized to the widest way id in `ways` (depth-indent prefix
+    /// included). The common entry point for the table renderers.
+    pub fn for_rows<W: WayRow>(ways: &[W]) -> Self {
+        let max_id = ways.iter().map(display_id_width).max().unwrap_or(0);
+        Self::for_id_width(max_id)
+    }
+
+    /// Bar-only layout for callers that render the timeline bar but no table rows
+    /// (they read `bar_width`/`separator` only); the Way column falls back to its
+    /// floor since there is no content to measure.
+    pub fn detect() -> Self {
+        Self::for_id_width(0)
     }
 }
 
@@ -115,42 +175,21 @@ pub fn pin_str(cluster_idx: usize) -> String {
     )
 }
 
-/// Render table header.
-pub fn write_table_header(out: &mut String) {
-    let layout = Layout::detect();
-    write_table_header_with(out, &layout);
-}
-
-/// Render table header with explicit layout.
+/// Render table header against a content-sized layout (`Layout::for_rows`).
 pub fn write_table_header_with(out: &mut String, layout: &Layout) {
+    let g = " ".repeat(COL_GAP);
     let _ = writeln!(
         out,
-        "  \x1b[1m{:<w$} {:>5} {:>5} {:<11} \u{2316} {:<13} Agent\x1b[0m",
-        "Way", "Epoch", "Dist", "Trigger", "Re-disclosure",
-        w = layout.way_col
+        "  \x1b[1m{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{pin:^pin_w$}{g}{rd:<rd_w$}{g}Agent\x1b[0m",
+        way = "Way", ep = "Epoch", di = "Dist", tr = "Trigger",
+        pin = "\u{2316}", rd = "Re-disclosure",
+        way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W,
+        tr_w = TRIG_W, pin_w = PIN_W, rd_w = RD_W,
     );
     let _ = writeln!(out, "  \x1b[2m{}\x1b[0m", "─".repeat(layout.separator));
 }
 
-/// Render a single way row.
-#[allow(clippy::too_many_arguments)]
-pub fn write_way_row<W: WayRow>(
-    out: &mut String,
-    w: &W,
-    current_epoch: u64,
-    current_tokens_k: u64,
-    bar_positions: &[Option<usize>],
-    unique_pos: &[usize],
-    index: usize,
-    row_prefix: &str,
-    row_suffix: &str,
-) {
-    let layout = Layout::detect();
-    write_way_row_with(out, w, current_epoch, current_tokens_k,
-        bar_positions, unique_pos, index, row_prefix, row_suffix, &layout);
-}
-
-/// Render a single way row with explicit layout.
+/// Render a single way row against a content-sized layout (`Layout::for_rows`).
 #[allow(clippy::too_many_arguments)]
 pub fn write_way_row_with<W: WayRow>(
     out: &mut String,
@@ -197,20 +236,21 @@ pub fn write_way_row_with<W: WayRow>(
     };
 
     // Pad re-disclosure to fixed visible width (ANSI-aware)
-    let next_padded = crate::cmd::compositor::pad_visible(&next, 13);
+    let next_padded = crate::cmd::compositor::pad_visible(&next, RD_W);
 
+    let g = " ".repeat(COL_GAP);
     let _ = writeln!(
         out,
-        "  {row_prefix}{:<w$} {:>5} {}{:>5}\x1b[0m {:<11} {} {} {}{row_suffix}",
-        truncate(&display_id, layout.way_col),
-        w.epoch_fired(),
-        dist_color,
-        distance,
-        trigger_display,
-        pin,
-        next_padded,
-        agent_display,
-        w = layout.way_col
+        "  {row_prefix}{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}\x1b[0m{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}{row_suffix}",
+        way = truncate(&display_id, layout.way_col),
+        ep = w.epoch_fired(),
+        dc = dist_color,
+        di = distance,
+        tr = trigger_display,
+        pin = pin,
+        rd = next_padded,
+        agent = agent_display,
+        way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W, tr_w = TRIG_W,
     );
 
     if w.check_fires() > 0 {
@@ -514,3 +554,107 @@ pub fn truncate(s: &str, max: usize) -> String {
 
 // ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `cmd::compositor`
 // — the canonical home — so `render`, `rethink`, and the compositor share one copy.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockWay {
+        id: &'static str,
+        depth: u64,
+    }
+
+    impl WayRow for MockWay {
+        fn id(&self) -> &str { self.id }
+        fn epoch_fired(&self) -> u64 { 2 }
+        fn token_pos(&self) -> u64 { 0 }
+        fn trigger(&self) -> &str { "keyword" }
+        fn check_fires(&self) -> u64 { 0 }
+        fn depth(&self) -> u64 { self.depth }
+        fn refire_threshold_k(&self) -> u64 { 40 }
+    }
+
+    #[test]
+    fn snap_up_rounds_to_next_stop() {
+        assert_eq!(snap_up(1, 4), 4);
+        assert_eq!(snap_up(4, 4), 4);
+        assert_eq!(snap_up(5, 4), 8);
+        assert_eq!(snap_up(13, 4), 16);
+        assert_eq!(snap_up(7, 0), 7); // degenerate step is a no-op, not a panic
+    }
+
+    #[test]
+    fn display_id_width_counts_depth_prefix() {
+        assert_eq!(display_id_width(&MockWay { id: "adr", depth: 0 }), 3);
+        // depth 1 prepends "  └ " → 4 columns before the id.
+        assert_eq!(display_id_width(&MockWay { id: "adr", depth: 1 }), 7);
+    }
+
+    #[test]
+    fn way_col_is_tab_snapped_past_the_longest_id() {
+        // A 25-char id snaps to the next stop above 25 (+1 gap) → 28, a multiple
+        // of WAY_TAB and strictly wider than the id, so there's always a gap.
+        let layout = Layout::for_id_width(25);
+        assert_eq!(layout.way_col % WAY_TAB, 0, "way_col lands on a tab stop");
+        assert!(layout.way_col > 25, "column is wider than the longest id");
+        assert!(layout.way_col <= 28, "but only snaps to the next stop, not beyond");
+    }
+
+    #[test]
+    fn way_col_never_collapses_below_the_floor() {
+        // An empty frame (max id 0) still renders a real column.
+        assert_eq!(Layout::for_id_width(0).way_col, WAY_MIN);
+    }
+
+    #[test]
+    fn header_and_row_columns_align() {
+        // The Epoch column must begin at the same visible offset in the header and
+        // in a data row — that's the guarantee the shared constants exist to keep.
+        let layout = Layout::for_id_width(20);
+        let ways = [MockWay { id: "documentation/adr", depth: 0 }];
+        let bar_positions = compute_bar_positions(&ways, 1000);
+        let unique_pos = unique_positions(&bar_positions);
+
+        let mut header = String::new();
+        write_table_header_with(&mut header, &layout);
+        let header_line = header.lines().next().unwrap();
+
+        let mut row = String::new();
+        write_way_row_with(
+            &mut row, &ways[0], 2, 0, &bar_positions, &unique_pos, 0, "", "", &layout,
+        );
+        let row_line = row.lines().next().unwrap();
+
+        // The Epoch field spans the same visible columns in both lines: it starts
+        // `way_col + COL_GAP` columns in (after the 2-space indent) and is EPOCH_W
+        // wide. Header holds the left-aligned label; the row holds the right-
+        // aligned value — same span, which is exactly what alignment means.
+        let epoch_at = 2 + layout.way_col + COL_GAP;
+        assert_eq!(visible_substr(header_line, epoch_at, EPOCH_W), "Epoch");
+        assert_eq!(visible_substr(row_line, epoch_at, EPOCH_W).trim(), "2");
+
+        // The way names occupy the same left span, floored/padded to way_col.
+        assert_eq!(visible_substr(header_line, 2, 3), "Way");
+        assert_eq!(visible_substr(row_line, 2, 17), "documentation/adr");
+    }
+
+    /// The plain (ANSI-stripped) visible characters of `s` in `[start, start+len)`.
+    fn visible_substr(s: &str, start: usize, len: usize) -> String {
+        let mut out = String::new();
+        let mut visible = 0;
+        let mut in_escape = false;
+        for c in s.chars() {
+            if in_escape {
+                if c == 'm' { in_escape = false; }
+            } else if c == '\x1b' {
+                in_escape = true;
+            } else {
+                if visible >= start && visible < start + len {
+                    out.push(c);
+                }
+                visible += 1;
+            }
+        }
+        out
+    }
+}
