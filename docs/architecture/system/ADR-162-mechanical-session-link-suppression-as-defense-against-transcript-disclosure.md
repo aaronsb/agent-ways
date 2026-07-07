@@ -50,12 +50,20 @@ mechanical and must live in a layer we own.
 ## Decision
 
 Add a **PreToolUse hook on `Bash`** that inspects command invocations which author
-commits or pull requests — `git commit`, `gh pr create`, `gh pr edit` (and the
-`git commit -m` / heredoc / `--body` forms) — and prevents any `Claude-Session:`
-trailer or `claude.ai/code/session_…` URL from landing. Where the harness supports
-rewriting tool input, the hook strips the offending lines in place; otherwise it
-denies the call with a remediation message instructing removal. Either path
-guarantees the link does not reach git or GitHub.
+commits, PRs, or issues — `git commit`, `gh pr create|edit|comment`,
+`gh issue create|edit|comment` — and **denies** any that carry a `Claude-Session:`
+trailer or `claude.ai/code/session_…` URL, returning a remediation message that
+instructs the model to remove the link and re-issue. The clean re-issue passes
+through the normal permission flow. The link never reaches git or GitHub.
+
+The hook **denies rather than rewrites**. Rewriting a command in place (PreToolUse
+`updatedInput`) is honored *only* when the hook also sets `permissionDecision:
+allow` — `updatedInput` alone is ignored, and no pass-through value exists
+(upstream FR #381). Forcing `allow` would bypass the operator's own
+Deny/Allow/Ask rules for that call, including on outward-facing `gh pr create` /
+`gh issue create` — silently defeating a review gate the operator may rely on.
+Deny bypasses nothing: it costs one extra round-trip, after which the model
+re-issues cleanly (and adapts within the session to stop appending the link).
 
 The hook must operate at **user scope** — covering **every** repository the
 operator works in, independent of whether a repo carries local config — rather
@@ -90,13 +98,17 @@ already handled by `attribution.commit`/`.pr`).
 
 ### Negative
 
-- A PreToolUse hook adds a small latency and a failure surface to every `git`/`gh`
-  Bash call; it must fail open on parse it cannot understand rather than block
-  legitimate commits.
-- Interception is bounded by what the hook can see. Inline `-m` and heredoc bodies
-  are greppable in the command string; a body passed via `--body-file`/`-F <path>`
-  requires the hook to read and rewrite that file, which is a second code path to
-  maintain.
+- A PreToolUse hook adds a small latency to every `git`/`gh` Bash call. On its
+  no-op paths (no command, out of scope, no link) it fails **open**; once a link is
+  actually detected it fails **closed** (deny), so a hook error there blocks rather
+  than leaks.
+- Deny costs one extra round-trip each time the model appends a link — until it
+  adapts within the session. Benign but visible friction on the first commit/PR.
+- Detection is bounded by what the hook can see. Inline `-m` and heredoc bodies are
+  greppable in the command string; a link in a body passed via `--body-file`/`-F
+  <path>` lives in a file the hook cannot inspect from the command string, so it is
+  a coverage gap that would slip through. Inline/heredoc is how the model formats
+  these by default, so the common case is covered.
 - If Claude Code changes the link format, the hook's patterns need updating — a
   maintenance coupling to an undocumented upstream string.
 
@@ -108,16 +120,26 @@ already handled by `attribution.commit`/`.pr`).
   store — `ways settings project` deliberately skips the hooks/permissions slices,
   so a fragment-authored hook would silently never fire. Its cross-host distribution
   is owned by ADR-163.
-- The hook rewrites the command in place via PreToolUse `updatedInput`
-  (`permissionDecision: allow`), a confirmed Claude Code capability, so the commit
-  flow is never interrupted. The alternative — block-with-remediation (exit 2) — was
-  available but rejected as needless friction once silent rewrite was confirmed.
+- The hook enforces by **deny** (`permissionDecision: deny` with a
+  `permissionDecisionReason`, falling back to exit 2 + stderr). It deliberately does
+  *not* rewrite the command in place: see the Decision and the rejected silent-strip
+  alternative for why forcing `permissionDecision: allow` — the only way to make
+  `updatedInput` take effect — is unacceptable here.
 
 ## Alternatives Considered
 
 - **Rely on `attribution.sessionUrl: false` alone.** Rejected: undocumented and
   defeated by injection bug #18253, with no coverage for repos where the setting
   never reaches the model. Kept only as a secondary layer.
+- **Silently rewrite the command in place (PreToolUse `updatedInput`).** Rejected:
+  `updatedInput` is honored only alongside `permissionDecision: allow` — it is
+  ignored on its own, and no pass-through value exists (upstream FR #381). The
+  rewrite would therefore force-approve the command and bypass the operator's
+  Deny/Allow/Ask gates, including on outward-facing `gh pr create` / `gh issue
+  create`. Cleaner UX, but a real permission regression on exactly the commands
+  worth gating; deny preserves the gate for the price of one retry. (This was the
+  initially-ratified choice, reversed once the `updatedInput`→`allow` coupling was
+  confirmed.)
 - **A way / memory instruction telling the model to omit the link.** Rejected:
   soft, competes with the system-prompt instruction, and scoped per project. This
   is precisely what already failed — the leaking repo had no such note.
