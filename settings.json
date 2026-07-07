@@ -216,6 +216,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-bash-pre.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/strip-session-link-pre.sh"
           }
         ]
       },
