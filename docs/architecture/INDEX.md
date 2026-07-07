@@ -83,6 +83,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-160](./system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) | Chunked late-interaction matching with softmax-share gating for way selection | Accepted |
 | [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | Proposed |
 | [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Accepted |
+| [ADR-163](./system/ADR-163-config-separation-dotfiles-source-of-truth.md) | Config separation — dotfiles as source-of-truth feeding the settings fragment store | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
