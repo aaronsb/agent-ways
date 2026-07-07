@@ -57,23 +57,14 @@ pub fn pct_used_from_transcript(transcript: &str) -> Option<u64> {
 }
 
 fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Result<ContextInfo> {
-    let transcript = if let Some(sid) = session_id {
-        find_transcript_by_session(sid).ok_or_else(|| {
-            anyhow::anyhow!("No transcript found for session: {sid}")
-        })?
-    } else {
-        let project = project_dir
-            .map(|s| s.to_string())
-            .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
-            .or_else(detect_project_dir)
-            .unwrap_or_else(|| ".".to_string());
-
-        let project_slug = project.replace(['/', '.'], "-");
-        let conv_dir = home_dir().join(format!(".claude/projects/{project_slug}"));
-
-        find_newest_transcript(&conv_dir)
-            .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))?
-    };
+    let projects_root = home_dir().join(".claude/projects");
+    let env_session_id = std::env::var("CLAUDE_CODE_SESSION_ID").ok();
+    let transcript = resolve_transcript(
+        project_dir,
+        session_id,
+        env_session_id.as_deref(),
+        &projects_root,
+    )?;
 
     let session = transcript
         .file_stem()
@@ -108,6 +99,55 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
         method,
         session,
     })
+}
+
+/// Resolve which transcript file to read from the caller's inputs and the
+/// ambient session environment. Kept pure w.r.t. globals — the env session id
+/// and projects root are passed in — so the precedence below is unit-testable.
+///
+/// Precedence:
+///   1. an explicit `session_id` (e.g. `get_context_for_session`);
+///   2. otherwise, when no explicit `project_dir` was given, the *current*
+///      session id from the environment (`CLAUDE_CODE_SESSION_ID`). This is
+///      cwd-independent: it is what lets `ways context` report the live session
+///      even when the shell cwd has drifted from the project — the failure the
+///      `wrap` / `context-status` skills hit when they run the gauge from
+///      wherever the agent's shell happens to sit;
+///   3. finally, the `project_dir` / `CLAUDE_PROJECT_DIR` / cwd slug plus the
+///      newest transcript in that project (the original heuristic, preserved).
+fn resolve_transcript(
+    project_dir: Option<&str>,
+    session_id: Option<&str>,
+    env_session_id: Option<&str>,
+    projects_root: &Path,
+) -> Result<PathBuf> {
+    if let Some(sid) = session_id {
+        return find_transcript_by_session_in(projects_root, sid)
+            .ok_or_else(|| anyhow::anyhow!("No transcript found for session: {sid}"));
+    }
+
+    // No explicit --project: trust the environment's session id first. Only
+    // fall through to the cwd heuristic if it is absent or its transcript is
+    // missing, so behaviour outside a live session is unchanged.
+    if project_dir.is_none() {
+        if let Some(sid) = env_session_id.filter(|s| !s.is_empty()) {
+            if let Some(transcript) = find_transcript_by_session_in(projects_root, sid) {
+                return Ok(transcript);
+            }
+        }
+    }
+
+    let project = project_dir
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
+        .or_else(detect_project_dir)
+        .unwrap_or_else(|| ".".to_string());
+
+    let project_slug = project.replace(['/', '.'], "-");
+    let conv_dir = projects_root.join(project_slug);
+
+    find_newest_transcript(&conv_dir)
+        .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))
 }
 
 pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
@@ -159,10 +199,7 @@ pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
         }
     }
 
-    println!(
-        "  {bar_color}{bar}\x1b[0m {}%",
-        ctx.pct_used
-    );
+    println!("  {bar_color}{bar}\x1b[0m {}%", ctx.pct_used);
     println!();
     println!(
         "  \x1b[1m{used_k}K\x1b[0m / {total_k}K tokens used  \x1b[2m({remaining_k}K remaining)\x1b[0m"
@@ -268,9 +305,15 @@ fn read_token_usage(content: &str) -> (u64, String) {
 /// `~/.claude/projects/`. Session ids are globally unique, so we don't
 /// need to know which project the session is rooted in.
 pub(crate) fn find_transcript_by_session(session_id: &str) -> Option<PathBuf> {
-    let projects_root = home_dir().join(".claude/projects");
+    find_transcript_by_session_in(&home_dir().join(".claude/projects"), session_id)
+}
+
+/// Search `projects_root/*/<session_id>.jsonl`. Split out from
+/// `find_transcript_by_session` so the lookup is testable against a temp
+/// projects root instead of the real `~/.claude/projects`.
+fn find_transcript_by_session_in(projects_root: &Path, session_id: &str) -> Option<PathBuf> {
     let filename = format!("{session_id}.jsonl");
-    for entry in std::fs::read_dir(&projects_root).ok()? {
+    for entry in std::fs::read_dir(projects_root).ok()? {
         let entry = entry.ok()?;
         let candidate = entry.path().join(&filename);
         if candidate.is_file() {
@@ -317,8 +360,7 @@ mod tests {
         // tokens on a 1M (opus) window must read as 50% — the regression guard
         // for the context-threshold byte-heuristic bug: the gauge is token
         // counts ÷ model window, never transcript file size.
-        let path = std::env::temp_dir()
-            .join(format!("ways_pct_test_{}.jsonl", std::process::id()));
+        let path = std::env::temp_dir().join(format!("ways_pct_test_{}.jsonl", std::process::id()));
         let line = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"cache_read_input_tokens":500000,"cache_creation_input_tokens":0,"input_tokens":0}}}"#;
         {
             let mut f = std::fs::File::create(&path).unwrap();
@@ -327,5 +369,90 @@ mod tests {
         let pct = pct_used_from_transcript(path.to_str().unwrap());
         let _ = std::fs::remove_file(&path);
         assert_eq!(pct, Some(50));
+    }
+
+    /// Build a temp projects root with `<slug>/<sid>.jsonl` transcripts.
+    /// Unique per call site via `line!()` so parallel tests don't collide;
+    /// no env mutation, no `tempfile` dependency.
+    fn temp_projects_root(unique: u32, transcripts: &[(&str, &str)]) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("ways_ctx_test_{}_{}", std::process::id(), unique));
+        let _ = std::fs::remove_dir_all(&root);
+        for (slug, sid) in transcripts {
+            let dir = root.join(slug);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("{sid}.jsonl")), "{}\n").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn env_session_id_resolves_regardless_of_cwd() {
+        // The bug: `ways context` from a drifted cwd found nothing. With the
+        // session id from the environment, it locates the transcript by id in
+        // any project dir — no --project, no matching cwd needed.
+        let root = temp_projects_root(line!(), &[("-home-aaron-someproj", "sid-abc")]);
+        let got = resolve_transcript(None, None, Some("sid-abc"), &root).unwrap();
+        assert_eq!(got, root.join("-home-aaron-someproj/sid-abc.jsonl"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn explicit_session_id_takes_precedence_over_env() {
+        let root = temp_projects_root(line!(), &[("-p", "explicit-sid"), ("-q", "env-sid")]);
+        let got = resolve_transcript(None, Some("explicit-sid"), Some("env-sid"), &root).unwrap();
+        assert_eq!(got, root.join("-p/explicit-sid.jsonl"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn explicit_project_ignores_env_session_id() {
+        // A caller-supplied --project targets that project's newest transcript,
+        // not whatever session the environment names.
+        let root = temp_projects_root(
+            line!(),
+            &[
+                ("-home-aaron-target", "proj-sid"),
+                ("-elsewhere", "env-sid"),
+            ],
+        );
+        let got =
+            resolve_transcript(Some("/home/aaron/target"), None, Some("env-sid"), &root).unwrap();
+        assert_eq!(got, root.join("-home-aaron-target/proj-sid.jsonl"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn find_transcript_by_session_in_returns_none_when_missing() {
+        // Pins the not-found half of the id lookup the fall-through depends on.
+        let root = temp_projects_root(line!(), &[("-someproj", "present-sid")]);
+        assert!(find_transcript_by_session_in(&root, "absent-sid").is_none());
+        assert!(find_transcript_by_session_in(&root, "present-sid").is_some());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn env_session_id_with_missing_transcript_falls_through() {
+        // project_dir=None reaches the env branch; a non-empty env id whose
+        // transcript doesn't exist must fall through to the project heuristic,
+        // which errors here because the empty projects root has no match. (An
+        // empty root guarantees the fallback errors regardless of the ambient
+        // cwd/CLAUDE_PROJECT_DIR the heuristic reads.)
+        let root = temp_projects_root(line!(), &[]);
+        let err = resolve_transcript(None, None, Some("ghost-sid"), &root).unwrap_err();
+        assert!(err.to_string().contains("No active transcript"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn empty_env_session_id_does_not_short_circuit() {
+        // An empty CLAUDE_CODE_SESSION_ID with no --project must reach the
+        // is_none() branch, be dropped by the non-empty filter, and fall
+        // through to the heuristic (error against the empty projects root) —
+        // never a spurious scan for a `.jsonl` file with an empty stem.
+        let root = temp_projects_root(line!(), &[]);
+        let err = resolve_transcript(None, None, Some(""), &root).unwrap_err();
+        assert!(err.to_string().contains("No active transcript"));
+        std::fs::remove_dir_all(&root).ok();
     }
 }
