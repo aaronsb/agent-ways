@@ -81,7 +81,8 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-158](./system/ADR-158-calibration-boundary-quality-hard-negatives-and-fire-breadth-ship-gate.md) | Calibration boundary quality — hard negatives and a fire-breadth ship gate | Accepted |
 | [ADR-159](./system/ADR-159-remove-ways-tune-curves-and-the-legacy-curve-cadence-field.md) | Remove ways tune-curves and the legacy curve: cadence field | Accepted |
 | [ADR-160](./system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) | Chunked late-interaction matching with softmax-share gating for way selection | Accepted |
-| [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | Draft |
+| [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | Proposed |
+| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
