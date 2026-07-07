@@ -50,11 +50,16 @@ mechanical and must live in a layer we own.
 ## Decision
 
 Add a **PreToolUse hook on `Bash`** that inspects command invocations which author
-commits, PRs, or issues — `git commit`, `gh pr create|edit|comment`,
-`gh issue create|edit|comment` — and **denies** any that carry a `Claude-Session:`
-trailer or `claude.ai/code/session_…` URL, returning a remediation message that
-instructs the model to remove the link and re-issue. The clean re-issue passes
-through the normal permission flow. The link never reaches git or GitHub.
+commits, PRs, or issues — `git … commit`, `gh … pr create|edit|comment`,
+`gh … issue create|edit|comment`, matched on token presence (newline-collapsed) so
+intervening flags such as `git -C <path> commit` or `gh <global-flags> pr create`
+cannot evade the gate — and **denies** any that carry a `Claude-Session:` trailer or
+a bare `claude.ai/code/session_…` URL **in trailer/footer position** (line-leading),
+returning a remediation message that instructs the model to remove the link and
+re-issue. A session URL mentioned *inline in prose* is not a leak and passes, so a
+repo can still discuss `Claude-Session` as subject matter without a deny-loop. The
+clean re-issue passes through the normal permission flow. The link is blocked on the
+covered command forms (coverage gaps are listed in Consequences).
 
 The hook **denies rather than rewrites**. Rewriting a command in place (PreToolUse
 `updatedInput`) is honored *only* when the hook also sets `permissionDecision:
@@ -74,10 +79,13 @@ which carries this hook as the primitive it distributes. What matters here is th
 guarantee, not the delivery: suppression does not depend on the harness injecting
 the `attribution` setting, on the model obeying it, or on a per-project note.
 
-As belt-and-suspenders — cheap and correct in intent even while #18253 stands — we
-also set `attribution.sessionUrl: false` in the settings store. The existing
-report-only macro block is retained; it now reports the true effective state
-alongside a hook that actually enforces it.
+The `attribution.sessionUrl: false` key (undocumented, v2.1.183+) is the harness's
+own would-be control; **this change does not set it** — it is defeated by #18253
+today, and coupling to an undocumented key risks tripping settings validation for
+no working benefit. The hook is the load-bearing control. The existing report-only
+macro block is retained; it reports the effective `attribution` state alongside a
+hook that actually enforces suppression. An operator may set `sessionUrl: false`
+additionally once upstream honors it.
 
 Scope boundary: this ADR governs suppression of the **session link** specifically.
 It does not remove the Co-Authored-By footer (an independent operator preference
@@ -88,8 +96,9 @@ already handled by `attribution.commit`/`.pr`).
 ### Positive
 
 - Every repository is protected regardless of local config, the harness injection
-  bug, or model obedience. The unrelated-repo leak that motivated this ADR is
-  closed at the layer we control.
+  bug, or model obedience. The unrelated-repo leak that motivated this ADR — a
+  trailer/footer link on a commit or PR — is closed on the covered command forms at
+  the layer we control.
 - Enforcement is auditable and testable — a hook script with explicit patterns,
   not a soft instruction competing with the system prompt.
 - Defense-in-depth composes with ADR-152's secret-path deny baseline: 152 keeps
@@ -104,11 +113,17 @@ already handled by `attribution.commit`/`.pr`).
   than leaks.
 - Deny costs one extra round-trip each time the model appends a link — until it
   adapts within the session. Benign but visible friction on the first commit/PR.
-- Detection is bounded by what the hook can see. Inline `-m` and heredoc bodies are
-  greppable in the command string; a link in a body passed via `--body-file`/`-F
-  <path>` lives in a file the hook cannot inspect from the command string, so it is
-  a coverage gap that would slip through. Inline/heredoc is how the model formats
-  these by default, so the common case is covered.
+- Detection is bounded by what the hook can see in the command string, so the
+  control is **best-effort, not a guarantee**. Inline `-m` and heredoc bodies are
+  covered (this is how the model formats commits/PRs by default). Uncovered vectors,
+  each of which would slip a link through:
+  - a body/message passed via `--body-file`/`-F <path>` — the text lives in a file
+    the hook can't read from the command string;
+  - a bare `git commit` that opens `$EDITOR` — the message isn't in the command at
+    all;
+  - message-carrying siblings not in scope — `git tag -m`, `gh release create`,
+    `gh gist create`.
+  These are documented residual gaps, not silent ones.
 - If Claude Code changes the link format, the hook's patterns need updating — a
   maintenance coupling to an undocumented upstream string.
 
@@ -125,6 +140,10 @@ already handled by `attribution.commit`/`.pr`).
   *not* rewrite the command in place: see the Decision and the rejected silent-strip
   alternative for why forcing `permissionDecision: allow` — the only way to make
   `updatedInput` take effect — is unacceptable here.
+- The hook shares the `Bash` PreToolUse matcher with the disclosure gate
+  `check-bash-pre.sh`. Multiple matching hooks all run and the most-restrictive
+  result wins (`deny > defer > ask > allow`), independent of array order, so the
+  deny takes effect regardless of position — no ordering dependency.
 
 ## Alternatives Considered
 
