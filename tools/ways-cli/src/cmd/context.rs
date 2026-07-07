@@ -423,11 +423,35 @@ mod tests {
     }
 
     #[test]
-    fn empty_env_session_id_falls_through() {
-        // An empty CLAUDE_CODE_SESSION_ID must not short-circuit; it falls
-        // through to the project heuristic (here: no match -> error).
+    fn find_transcript_by_session_in_returns_none_when_missing() {
+        // Pins the not-found half of the id lookup the fall-through depends on.
+        let root = temp_projects_root(line!(), &[("-someproj", "present-sid")]);
+        assert!(find_transcript_by_session_in(&root, "absent-sid").is_none());
+        assert!(find_transcript_by_session_in(&root, "present-sid").is_some());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn env_session_id_with_missing_transcript_falls_through() {
+        // project_dir=None reaches the env branch; a non-empty env id whose
+        // transcript doesn't exist must fall through to the project heuristic,
+        // which errors here because the empty projects root has no match. (An
+        // empty root guarantees the fallback errors regardless of the ambient
+        // cwd/CLAUDE_PROJECT_DIR the heuristic reads.)
         let root = temp_projects_root(line!(), &[]);
-        let err = resolve_transcript(Some("/nope"), None, Some(""), &root).unwrap_err();
+        let err = resolve_transcript(None, None, Some("ghost-sid"), &root).unwrap_err();
+        assert!(err.to_string().contains("No active transcript"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn empty_env_session_id_does_not_short_circuit() {
+        // An empty CLAUDE_CODE_SESSION_ID with no --project must reach the
+        // is_none() branch, be dropped by the non-empty filter, and fall
+        // through to the heuristic (error against the empty projects root) —
+        // never a spurious scan for a `.jsonl` file with an empty stem.
+        let root = temp_projects_root(line!(), &[]);
+        let err = resolve_transcript(None, None, Some(""), &root).unwrap_err();
         assert!(err.to_string().contains("No active transcript"));
         std::fs::remove_dir_all(&root).ok();
     }
