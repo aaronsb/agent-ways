@@ -10,9 +10,9 @@ Close out a session at its end. This is the on-demand sibling of the
 `meta/compaction-checkpoint` way — the way fires automatically near the context limit;
 `/wrap` runs the same muscle whenever you decide the session is done.
 
-**Wrap is not ship.** Shipping is *iterative* — many ships happen across a session as
+**Wrap is not merge.** Landing is *iterative* — many merges happen across a session as
 each piece of work lands. Wrap is *terminal* — it runs once, at the end. By the time you
-wrap, the session's work should already be shipped. So `/wrap` does **not** ship; it
+wrap, the session's work should already be merged. So `/wrap` does **not** land work; it
 confirms nothing got stranded, then produces the artifacts that outlive the session.
 
 The deliverable is two things that survive a reset: a **TaskList that honestly mirrors
@@ -22,7 +22,7 @@ ready-to-run `/compact` line — it cannot run it for you (see Step 4).
 ## Arguments
 
 - `/wrap` — full flow: land work (offer), square the TaskList, write the handoff, hand off to `/compact`.
-- `/wrap stay` — wrapping mid-work on purpose: **skip** the land/merge step. Don't ship anything; just capture state accurately and produce the handoff. Use when the seam is "I'm pausing", not "I'm done".
+- `/wrap stay` — wrapping mid-work on purpose: **skip** the land/merge step. Don't land anything; just capture state accurately and produce the handoff. Use when the seam is "I'm pausing", not "I'm done".
 
 ## Step 0 — Read the context gauge first
 
@@ -51,9 +51,9 @@ Let this scale Steps 2–3: **how much detail the handoff needs is proportional 
 context is about to be lost.** A near-full window deserves a dense, complete prompt; an
 early wrap can be crisp. Knowing the *total* window (1M vs 200k) is what makes that call.
 
-## Step 1 — Loose-ends check (not a ship step)
+## Step 1 — Loose-ends check (not a merge step)
 
-Wrap assumes the session's work already shipped. This step only confirms that and catches
+Wrap assumes the session's work already merged. This step only confirms that and catches
 anything stranded — it is **not** the place to run a full delivery. Assess in parallel:
 
 ```bash
@@ -63,11 +63,11 @@ git log --oneline main..HEAD    # unmerged commits?
 ```
 
 - **Clean / already merged** → the expected state. Move on.
-- **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `ship` to land it, or leave it parked.
+- **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `merge` to land it, or leave it parked.
 - **Parked on purpose** (`/wrap stay`, or user chooses to leave it) → do **not** merge. Record *exactly* what's uncommitted, on which branch, and why it's parked — verbatim into Step 3 so post-reset-you can resume the partial work cold.
 
-The rule: wrap never silently drops stranded work, and never ships it behind your back.
-Either the user ships it (via `ship`), or it's described in the handoff.
+The rule: wrap never silently drops stranded work, and never lands it behind your back.
+Either the user lands it (via `merge`), or it's described in the handoff.
 
 ## Step 2 — TaskList honesty pass (load-bearing)
 
@@ -164,7 +164,7 @@ copyable. Do not claim the session is compacted — you've prepared it; the user
 
 ## See Also
 
-- `ship` — Step 1 delegates here to land work.
+- `merge` — Step 1 delegates here to land work.
 - `compaction-checkpoint` (meta way) — the automatic sibling that fires near the context limit.
 - `todos` (meta way) — the TaskList-at-compaction discipline this enforces on demand.
 - `context-status` — check how much room is left before you decide to wrap.
