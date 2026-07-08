@@ -55,4 +55,4 @@ artifacts are `delivery/release` and the `/release` skill, a separate, heavier a
 - delivery/commits(softwaredev) — the commit quality the PR is built from.
 - delivery/release(softwaredev) — the heavier sibling: publishing a versioned release.
 - develop(meta) — the loop whose stable tail this is.
-- code-review (skill) — the review `merge` borrows at the gate.
+- code-reviewer (subagent, `agents/code-reviewer.md`) — the reviewer `merge` spawns at the gate; the built-in `/code-review` is the operator's manual equivalent.

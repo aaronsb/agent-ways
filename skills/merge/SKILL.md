@@ -154,7 +154,7 @@ auto-publish. Publishing is a one-way door.
 
 ## See Also
 
-- `code-review` / `code-reviewer` — the review this borrows at the gate.
+- `code-reviewer` (subagent) — the reviewer this spawns at the gate; the built-in `/code-review` is the manual equivalent.
 - `release` — the heavier sibling: publishing a versioned release.
 - `wrap` — Step 1 of wrap delegates here to land stranded work.
 - `develop` — the loop whose stable tail this is.

@@ -73,8 +73,8 @@ Five load-bearing choices:
 
 3. **`/develop` is a borrowing-router, not an orchestrator.** It establishes the
    loop, selects the front order by where the uncertainty lives, lays the TaskList,
-   then delegates to the existing stage skills (`review`, `code-review`, `merge`,
-   `release`) and lets the existing stage ways disclose. It does not reimplement
+   then delegates to the reviewer (the `code-reviewer` subagent), `/merge`, and
+   `/release`, and lets the existing stage ways disclose. It does not reimplement
    what those already teach. (The monolithic-orchestrator reading was considered and
    rejected — see Alternatives.)
 
@@ -124,7 +124,8 @@ rename ripple through references to `ship`.
 
 ### Neutral
 
-- `/review` and `/code-review` are unchanged; they are borrowed, not replaced.
+- `/review` and `/code-review` (built-in review skills) are unchanged; the merge gate
+  borrows the `code-reviewer` subagent for its automated review.
 - Composes with `/goal`: the manual `/merge` gate is the single-shot form of what a
   goal loop automates, mirroring the `wrap` / `compaction-checkpoint` duality.
 

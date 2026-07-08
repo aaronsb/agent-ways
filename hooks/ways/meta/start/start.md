@@ -18,7 +18,10 @@ enforces the parts that are easy to skip when you eyeball it.
 `start` is the opening bookend to `wrap`. They are **inverse gauge-aware siblings**:
 both read the same instrument (`ways context`), but `wrap` confirms the session is
 near its *end* and scales the handoff down; `start` confirms the session is near its
-*beginning* — and if it isn't, it says so.
+*beginning* — and if it isn't, it says so. (The symmetry is at the skill layer;
+`start` additionally carries a macro that whispers the gauge on disclosure, because it
+needs a *proactive* nudge to dissuade a mid-session start — where `wrap` leans on the
+`compaction-checkpoint` way firing on its own near the limit.)
 
 ## Why the skill, not a freehand "where do we begin?"
 

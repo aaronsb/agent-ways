@@ -59,7 +59,7 @@ Substantial work should open the same way, whatever executes it:
    because setting the goal *was* the greenlight (see Gates).
 5. **Dispatch** to the substrate that fits (see Ladder).
 
-`/ship` is the first real instance: its ad-hoc review-gate pause and "merge or
+`/merge` (formerly `/ship`, split per ADR-165) is the first real instance: its ad-hoc review-gate pause and "merge or
 squash?" question are an embryonic alignment step bolted onto a substrate-first
 skill. Refactoring it means lifting those into this pattern.
 
@@ -150,4 +150,4 @@ clause parked it at an open PR instead of merging.
 - A **workflow way** + the **deliver workflow** (`develop→pr→review→remediate→merge`).
 - **Continuance** guidance: offering a handoff near compaction, reconsidering the
   checkpoint threshold for large (1M) windows, and `/goal`-enabled continuation.
-- Refactoring **`/ship`** into the first explicit instance of the initiation pattern.
+- Refactoring **`/merge`** (formerly `/ship`) into the first explicit instance of the initiation pattern.

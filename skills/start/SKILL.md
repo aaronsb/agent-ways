@@ -47,7 +47,8 @@ discipline here — check for existing tracking before beginning anything.
 
 - **Work in flight** (uncommitted changes, an open branch, live TaskList tasks) → this
   is a *resume*, not a cold start. Summarize where things stand and what the next
-  concrete step is. Reconcile the TaskList honestly before proposing work.
+  concrete step is. Read the TaskList to square your understanding before proposing
+  work — mutating it is the job of `/wrap` and `/develop`, not start.
 - **Clean `main`, prior history** → a fresh piece of work in an established project.
   Read `CLAUDE.md` and recent history for the project's shape; propose candidate
   directions grounded in what the repo is.
