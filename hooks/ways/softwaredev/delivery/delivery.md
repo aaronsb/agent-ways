@@ -14,7 +14,8 @@ Children of this way cover the journey from local changes to production:
 | Stage | Way |
 |-------|-----|
 | Commits, messages | `delivery/commits` |
-| PRs, review, merge | `delivery/github` |
+| PRs, issues, review, merge strategy | `delivery/github` |
+| Landing an increment — review gate → merge → cleanup | `delivery/merge` |
 | Releases, tagging, publishing | `delivery/release` |
 | Patch creation | `delivery/patches` |
 | Implementation planning | `delivery/implement` |
@@ -27,5 +28,6 @@ see `data/migrations`.
 
 - delivery/commits(softwaredev) — commit structure and messages
 - delivery/github(softwaredev) — PR workflow
+- delivery/merge(softwaredev) — the review gate and landing an increment
 - delivery/implement(softwaredev) — implementation planning
 - data/migrations(data) — schema migration discipline (moved out of delivery)

@@ -71,7 +71,7 @@ git -C "$APP" status --short --branch
 
 - **Clean tree, behind remote** → safe to proceed to step 2.
 - **Dirty tracked files** (common on a fork carrying custom ways) → tell the user
-  what's modified. Offer to commit (`/ship`) or `git -C "$APP" stash` before the
+  what's modified. Offer to commit (`/merge`) or `git -C "$APP" stash` before the
   update and `git stash pop` after. Do **not** stash or discard without asking.
 - **Diverged history** (local commits not on remote) → `--ff-only` will fail by
   design. Stop and explain; the user decides whether to push, rebase, or merge.

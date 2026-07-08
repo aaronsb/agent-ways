@@ -45,4 +45,5 @@ trigger: one is the smoke alarm, the other is choosing to leave.
 - wrap (skill) — the procedure this routes to.
 - compaction-checkpoint(meta) — the automatic, threshold-triggered sibling.
 - todos(meta) — the TaskList-at-compaction discipline the skill enforces on demand.
-- ship(softwaredev) — shipping is iterative (many per session); wrapping is terminal (once).
+- start(meta) — the opening bookend; same gauge (`ways context`), opposite pole.
+- merge(softwaredev) — landing an increment is iterative (many per session); wrapping is terminal (once).

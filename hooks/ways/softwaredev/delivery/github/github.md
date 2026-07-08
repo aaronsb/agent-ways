@@ -21,7 +21,7 @@ We use PRs for all changes, including solo projects. A PR without reviewers stil
 
 ## Code Review Before Merge
 
-After creating a PR, offer to spawn a `code-reviewer` subagent to review it before merging. This is the default workflow — don't wait for the user to request it.
+After creating a PR, review before merging — don't wait to be asked. But *how hard* to review, and *whether a human reads first*, is the four-square decision in `delivery/merge`, not a fixed "always spawn one reviewer." At minimum offer a `code-reviewer` subagent; scale to a swarm for complex, high-blast-radius changes, and gate on operator approval when the work sets direction.
 
 ## Merge Strategy — Prefer Regular Merge
 
@@ -88,4 +88,5 @@ The macro checks repository configuration (README, license, templates, branch pr
 ## See Also
 
 - delivery/commits(softwaredev) — PR quality depends on commit quality
+- delivery/merge(softwaredev) — the review-gate decision and landing an increment
 - adr(documentation) — reference ADRs in PR descriptions
