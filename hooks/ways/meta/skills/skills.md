@@ -29,7 +29,7 @@ These three overlap, and reaching for the wrong one is the most common mistake.
 | A capability the user (or Claude) invokes by name to *do* a task | **a skill** (`skills/…`) | Self-contained, can carry scripts and `allowed-tools`, runnable on demand |
 | A throwaway reusable prompt with no logic | a plain slash command | Lighter than a skill; no directory, no tools |
 
-Rule of thumb: **a way teaches Claude how to behave; a skill gives Claude something to run.** If the answer is "inject advice when X happens," it's a way — and most of *this repo's* value is ways, so default there and only reach for a skill when there's a concrete procedure to execute. (`ways-update`, `ways-tests`, `ship`, `attend` are skills because each *runs a procedure*; `meta/knowledge`, `softwaredev/code/quality` are ways because they *shape behavior*.)
+Rule of thumb: **a way teaches Claude how to behave; a skill gives Claude something to run.** If the answer is "inject advice when X happens," it's a way — and most of *this repo's* value is ways, so default there and only reach for a skill when there's a concrete procedure to execute. (`ways-update`, `ways-tests`, `merge`, `attend` are skills because each *runs a procedure*; `meta/knowledge`, `softwaredev/code/quality` are ways because they *shape behavior*.)
 
 ## The scope caveat — `skills/` here projects into personal scope
 
