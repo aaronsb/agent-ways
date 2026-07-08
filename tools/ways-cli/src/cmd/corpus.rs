@@ -458,6 +458,20 @@ fn scan_ways_dir(
     Ok(count)
 }
 
+/// Resolve the `way-embed` binary: prefer the engine dir, then the projected
+/// `~/.claude/bin`. `auto_embed` and `fit_calibration` both need it and must
+/// resolve it identically — on a projection install the binary lives in
+/// `~/.claude/bin`, not the engine/cache dir, so a resolver that only checks the
+/// engine dir silently no-ops (this is how per-model calibration went missing).
+fn resolve_embed_bin(engine_dir: &Path) -> Option<PathBuf> {
+    [
+        engine_dir.join("way-embed"),
+        home_dir().join(".claude/bin/way-embed"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
+}
+
 /// Shell out to way-embed generate for embedding vectors.
 /// Generates two corpus files: one with EN model embeddings, one with multilingual.
 ///
@@ -465,14 +479,7 @@ fn scan_ways_dir(
 /// cache) supplies the way-embed binary and GGUF models. The two differ only
 /// when `ways corpus --output <dir>` redirects an isolated build.
 fn auto_embed(out_dir: &Path, engine_dir: &Path, corpus: &Path, log: &dyn Fn(&str)) -> Result<()> {
-    let embed_bin = [
-        engine_dir.join("way-embed"),
-        home_dir().join(".claude/bin/way-embed"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file());
-
-    let bin = match embed_bin {
+    let bin = match resolve_embed_bin(engine_dir) {
         Some(b) => b,
         None => {
             log(&format!(
@@ -765,10 +772,10 @@ fn fit_calibration(
     const PROBES: &str = include_str!("calibration_probes.jsonl");
     const AUC_FLOOR: f64 = 0.70;
 
-    let bin = engine_dir.join("way-embed");
-    if !bin.is_file() {
-        return Calibration::default();
-    }
+    let bin = match resolve_embed_bin(engine_dir) {
+        Some(b) => b,
+        None => return Calibration::default(),
+    };
 
     let aliases = match load_aliases(&out_dir.join("ways-corpus-en.jsonl")) {
         Some(m) if !m.is_empty() => m,
