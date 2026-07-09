@@ -69,6 +69,12 @@ enum Commands {
         /// Suppress progress output
         #[arg(long, short)]
         quiet: bool,
+        /// Trace every phase (paths, per-project scans, embed passes, calibration
+        /// lanes) and stream way-embed's per-way progress. Overrides --quiet.
+        /// Reach for this when a build appears to hang: the last line printed
+        /// names the step it stalled in.
+        #[arg(long, short)]
+        verbose: bool,
         /// Only regenerate if corpus is stale (newer way files exist)
         #[arg(long)]
         if_stale: bool,
@@ -781,7 +787,7 @@ fn run() -> Result<()> {
     match command {
         Commands::Context { project, json } => cmd::context::run(project.as_deref(), json),
         Commands::Lint { path, schema, check, fix, global } => cmd::lint::run(path, schema, check, fix, global),
-        Commands::Corpus { ways_dir, output, quiet, if_stale } => cmd::corpus::run(ways_dir, output, quiet, if_stale),
+        Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
         Commands::Match { query, corpus, cosine, project } => {
             if cosine {
                 cmd::match_cmd::run(query, corpus)

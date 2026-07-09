@@ -326,7 +326,31 @@ ways tree softwaredev --jaccard
 ways corpus
 ways corpus --if-stale              # skip if current
 ways corpus --quiet                 # suppress progress output
+ways corpus --verbose               # trace every phase; diagnose a stalled build
 ```
+
+#### Diagnosing a build that appears to hang
+
+A quiet corpus build is silent for long stretches: it walks every project's ways,
+then shells out to `way-embed` three times, and the child's per-way progress is
+discarded. A slow pass and a wedged pass look identical.
+
+`--verbose` (which overrides `--quiet`) stamps each phase with elapsed time and
+prints it *before* the work starts, so the last line on screen names the step that
+stalled. It also streams `way-embed`'s own `[n/total] <way-id>` output, which
+pinpoints a hang to a single way, and echoes each child's argv so you can rerun that
+pass standalone:
+
+```
+ways corpus --verbose
+```
+
+Phases worth recognizing, in order: path resolution → user/core way scans →
+per-project resolution (each project named as it is resolved — a stalled network
+mount or a cloud-storage placeholder directory hangs here, under that project's
+name) → corpus write → the three `way-embed generate` passes (`en`, `multi`, then
+`combined`, which re-embeds everything the first two already did and so is the
+longest) → the two calibration lanes → manifest write.
 
 ---
 
