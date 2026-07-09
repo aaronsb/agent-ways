@@ -1026,11 +1026,15 @@ fn load_aliases(corpus: &Path) -> Option<HashMap<String, String>> {
 /// returning one cosine per pair (order preserved).
 fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -> Option<Vec<f64>> {
     use std::process::{Command, Stdio};
+    // Not `embed_stderr` — that carries a Windows-only NUL workaround this call
+    // site has never used. Quiet stays `null()` on every platform, as before;
+    // `--verbose` only adds the inherit case.
+    let stderr = if verbose { Stdio::inherit() } else { Stdio::null() };
     let mut child = Command::new(bin)
         .args(["similarity", "--model", model.to_str()?, "--batch"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(embed_stderr(verbose))
+        .stderr(stderr)
         .spawn()
         .ok()?;
     {
