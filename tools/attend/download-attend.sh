@@ -15,10 +15,8 @@ set -euo pipefail
 # degrade `ways update` to a from-source build.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)/prebuilt-lib.sh"
 
-# Platform detection
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m | sed 's/arm64/aarch64/')
-PLATFORM="${OS}-${ARCH}"
+# Platform detection — see detect_platform() in ../scripts/prebuilt-lib.sh
+PLATFORM="$(detect_platform)"
 
 GH_REPO="aaronsb/agent-ways"
 RELEASE_TAG="${ATTEND_RELEASE:-latest}"
