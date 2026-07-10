@@ -3,6 +3,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use walkdir::WalkDir;
 
 use crate::frontmatter;
@@ -11,8 +12,24 @@ pub fn run(
     ways_dir: Option<String>,
     output_dir: Option<String>,
     quiet: bool,
+    verbose: bool,
     if_stale: bool,
 ) -> Result<()> {
+    // --verbose outranks --quiet: the reason to reach for it is that a quiet
+    // build appeared to hang, and a diagnostic you have to un-silence twice is
+    // not a diagnostic.
+    let quiet = quiet && !verbose;
+
+    // Every trace line is stamped with elapsed-since-start and emitted *before*
+    // the step it announces. eprintln! is unbuffered, so when the process wedges
+    // the last line on screen names the step that wedged it.
+    let started = Instant::now();
+    let vlog = |msg: &str| {
+        if verbose {
+            eprintln!("[ways corpus +{:6.2}s] {msg}", started.elapsed().as_secs_f64());
+        }
+    };
+
     let global_dir = ways_dir
         .as_ref()
         .map(PathBuf::from)
@@ -37,15 +54,22 @@ pub fn run(
         eprintln!("  replacing global + all project ways. Pass --output <dir> for an isolated build.");
     }
 
+    vlog(&format!("core ways dir:   {}", global_dir.display()));
+    vlog(&format!("engine dir:      {}", engine_dir.display()));
+    vlog(&format!("output dir:      {}", out_dir.display()));
+
     // Staleness check: skip regen if corpus is fresh
     if if_stale {
         let manifest = out_dir.join("embed-manifest.json");
         let corpus = out_dir.join("ways-corpus.jsonl");
         if manifest.is_file() && corpus.is_file() {
             let project_dir = std::env::var("CLAUDE_PROJECT_DIR").unwrap_or_default();
+            vlog("staleness check (walks core + user + project ways)");
             if !is_stale(&manifest, &global_dir, &project_dir) {
+                vlog("corpus is fresh — nothing to do");
                 return Ok(());
             }
+            vlog("corpus is stale — rebuilding");
         }
         // Missing manifest/corpus → always regen
     }
@@ -71,25 +95,32 @@ pub fn run(
     // Its ids become the skip set for core, so a user way shadows a same-named
     // shipped way (precedence project > user > core).
     let user_dir = crate::paths::user_ways_root();
+    vlog(&format!("user ways dir:   {}", user_dir.display()));
     let mut user_sink: std::collections::HashSet<String> = std::collections::HashSet::new();
     let user_count = if user_dir.is_dir() {
+        vlog("scanning user ways");
         let c = scan_ways_dir(&user_dir, "", &excluded, &mut w, &empty_skip, &mut user_sink)?;
         if c > 0 {
             log(&format!("User ways: {c} ({})", user_dir.display()));
         }
         c
     } else {
+        vlog("no user ways dir — skipping");
         0
     };
+    vlog("hashing user ways");
     let user_hash = content_hash(&user_dir);
 
     // Scan CORE (shipped) ways, dropping any id a user way claimed. The shadow
     // set is ALL user way ids by directory (crate::cmd::scan::candidates::way_ids)
     // — incl. non-semantic ones — so it matches the predictive scanner's dedup
     // and a pattern-only user override still suppresses the core way.
+    vlog("collecting user way ids (shadow set)");
     let user_shadow = crate::cmd::scan::candidates::way_ids(&user_dir);
     let mut core_sink: std::collections::HashSet<String> = std::collections::HashSet::new();
+    vlog("scanning core ways");
     let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w, &user_shadow, &mut core_sink)?;
+    vlog("hashing core ways");
     let global_hash = content_hash(&global_dir);
     log(&format!(
         "Core ways: {global_count} (hash: {}...)",
@@ -108,6 +139,7 @@ pub fn run(
     // computes for the same directory (the fix for Bug B).
     if let Ok(cpd) = std::env::var("CLAUDE_PROJECT_DIR") {
         if !cpd.is_empty() {
+            vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
             let proj_root = PathBuf::from(&cpd);
             let ways_path = proj_root.join(".claude/ways");
             if ways_path.is_dir() {
@@ -132,6 +164,7 @@ pub fn run(
 
     let projects_dir = home_dir().join(".claude/projects");
     if projects_dir.is_dir() {
+        vlog(&format!("enumerating projects: {}", projects_dir.display()));
         for entry in std::fs::read_dir(&projects_dir)? {
             let entry = entry?;
             if !entry.file_type()?.is_dir() {
@@ -139,9 +172,16 @@ pub fn run(
             }
 
             let encoded = entry.file_name().to_string_lossy().to_string();
+            // Announce before resolving: resolve_project_path falls back to
+            // probing is_dir() across every candidate split of the encoded name,
+            // so an unreachable mount stalls here, under this project's name.
+            vlog(&format!("  resolving {encoded}"));
             let project_path = match resolve_project_path(&projects_dir, &encoded) {
                 Some(p) => p,
-                None => continue,
+                None => {
+                    vlog("    unresolved — skipped");
+                    continue;
+                }
             };
 
             // Walk up to find .claude/ways/ (project may be invoked from subdirectory)
@@ -149,6 +189,7 @@ pub fn run(
                 Some(p) => p,
                 None => continue,
             };
+            vlog(&format!("    ways: {}", ways_path.display()));
 
             // Dedup: multiple encoded dirs (and the current project above) may
             // resolve to the same .claude/ways/. Compare canonical paths.
@@ -176,6 +217,7 @@ pub fn run(
     drop(w);
 
     // Atomic move
+    vlog(&format!("writing corpus: {}", corpus_path.display()));
     std::fs::rename(&tmpfile, &corpus_path)?;
 
     let total = global_count + user_count + project_total;
@@ -185,10 +227,10 @@ pub fn run(
     ));
 
     // Auto-embed if way-embed binary and model are available
-    auto_embed(&out_dir, &engine_dir, &corpus_path, &log)?;
+    auto_embed(&out_dir, &engine_dir, &corpus_path, verbose, &vlog, &log)?;
 
     // Fit per-model calibration g(s)=σ(a·s+b) from the probe corpus (ADR-156).
-    let calibration = fit_calibration(&out_dir, &engine_dir, &log);
+    let calibration = fit_calibration(&out_dir, &engine_dir, verbose, &vlog, &log);
 
     // Write manifest
     let manifest = json!({
@@ -201,10 +243,83 @@ pub fn run(
         "calibration": calibration,
     });
     let manifest_path = out_dir.join("embed-manifest.json");
+    vlog("writing manifest");
     std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
     log(&format!("Manifest written: {}", manifest_path.display()));
+    vlog("done");
 
     Ok(())
+}
+
+/// Child stderr policy for a `way-embed` subprocess.
+///
+/// Quiet builds discard it. Under `--verbose` it is inherited, which is the
+/// whole point of the flag: `way-embed generate` already prints `[n/total] <id>`
+/// per way, and swallowing that is what turns a slow pass into an apparent hang.
+fn embed_stderr(verbose: bool) -> std::process::Stdio {
+    if verbose {
+        return std::process::Stdio::inherit();
+    }
+    // On Windows, Stdio::null() for the NUL device can cause MSVC C runtime
+    // to abort the child process. Use Stdio::inherit() on Windows instead.
+    #[cfg(windows)]
+    {
+        std::process::Stdio::inherit()
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Stdio::null()
+    }
+}
+
+/// Elapsed suffix, rendered only under `--verbose` so a quiet build's output is
+/// unchanged.
+fn elapsed_suffix(t: Instant, verbose: bool) -> String {
+    if verbose {
+        format!(" ({:.2}s)", t.elapsed().as_secs_f64())
+    } else {
+        String::new()
+    }
+}
+
+/// Run one `way-embed generate` pass, returning the elapsed time on success.
+///
+/// `what` names the pass in diagnostics. Under `--verbose` the exact argv is
+/// echoed, so a stalled pass can be rerun standalone outside the corpus build.
+fn run_generate(
+    bin: &Path,
+    corpus: &Path,
+    model: &Path,
+    what: &str,
+    verbose: bool,
+    vlog: &dyn Fn(&str),
+) -> Option<Instant> {
+    vlog(&format!(
+        "exec: {} generate --corpus {} --model {}",
+        bin.display(),
+        corpus.display(),
+        model.display()
+    ));
+    let t = Instant::now();
+    let status = std::process::Command::new(bin)
+        .args(["generate", "--corpus"])
+        .arg(corpus)
+        .args(["--model"])
+        .arg(model)
+        .stderr(embed_stderr(verbose))
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Some(t),
+        Ok(s) => {
+            eprintln!("WARNING: {what} embedding generation failed ({s})");
+            None
+        }
+        Err(e) => {
+            eprintln!("WARNING: {what} embedding generation could not start: {e}");
+            None
+        }
+    }
 }
 
 /// Embed one project's `.claude/ways/` under namespace `key`.
@@ -478,7 +593,14 @@ fn resolve_embed_bin(engine_dir: &Path) -> Option<PathBuf> {
 /// `out_dir` receives the split corpora; `engine_dir` (always the canonical XDG
 /// cache) supplies the way-embed binary and GGUF models. The two differ only
 /// when `ways corpus --output <dir>` redirects an isolated build.
-fn auto_embed(out_dir: &Path, engine_dir: &Path, corpus: &Path, log: &dyn Fn(&str)) -> Result<()> {
+fn auto_embed(
+    out_dir: &Path,
+    engine_dir: &Path,
+    corpus: &Path,
+    verbose: bool,
+    vlog: &dyn Fn(&str),
+    log: &dyn Fn(&str),
+) -> Result<()> {
     let bin = match resolve_embed_bin(engine_dir) {
         Some(b) => b,
         None => {
@@ -489,11 +611,23 @@ fn auto_embed(out_dir: &Path, engine_dir: &Path, corpus: &Path, log: &dyn Fn(&st
             return Ok(());
         }
     };
+    vlog(&format!("way-embed: {}", bin.display()));
 
     let en_model = engine_dir.join("minilm-l6-v2.gguf");
     let multi_model = engine_dir.join("multilingual-minilm-l12-v2-q8.gguf");
+    vlog(&format!(
+        "en model:    {} ({})",
+        en_model.display(),
+        if en_model.is_file() { "present" } else { "MISSING" }
+    ));
+    vlog(&format!(
+        "multi model: {} ({})",
+        multi_model.display(),
+        if multi_model.is_file() { "present" } else { "absent" }
+    ));
 
     // Split corpus into EN and multilingual entries
+    vlog("splitting corpus into en / multilingual lanes");
     let corpus_content = std::fs::read_to_string(corpus)?;
     let corpus_en = out_dir.join("ways-corpus-en.jsonl");
     let corpus_multi = out_dir.join("ways-corpus-multi.jsonl");
@@ -521,44 +655,27 @@ fn auto_embed(out_dir: &Path, engine_dir: &Path, corpus: &Path, log: &dyn Fn(&st
         }
     }
 
-    // On Windows, Stdio::null() for the NUL device can cause MSVC C runtime
-    // to abort the child process. Use Stdio::inherit() on Windows instead.
-    #[cfg(windows)]
-    let embed_stderr = || std::process::Stdio::inherit();
-    #[cfg(not(windows))]
-    let embed_stderr = || std::process::Stdio::null();
-
     // Embed EN corpus
     if en_model.is_file() && en_count > 0 {
         log(&format!("Embedding {en_count} ways with English model..."));
-        let status = std::process::Command::new(&bin)
-            .args(["generate", "--corpus"])
-            .arg(&corpus_en)
-            .args(["--model"])
-            .arg(&en_model)
-            .stderr(embed_stderr())
-            .status();
-
-        match status {
-            Ok(s) if s.success() => log(&format!("  EN embeddings: {}", corpus_en.display())),
-            _ => eprintln!("WARNING: EN embedding generation failed"),
+        if let Some(t) = run_generate(&bin, &corpus_en, &en_model, "EN", verbose, vlog) {
+            log(&format!(
+                "  EN embeddings: {}{}",
+                corpus_en.display(),
+                elapsed_suffix(t, verbose)
+            ));
         }
     }
 
     // Embed multilingual corpus
     if multi_model.is_file() && multi_count > 0 {
         log(&format!("Embedding {multi_count} ways with multilingual model..."));
-        let status = std::process::Command::new(&bin)
-            .args(["generate", "--corpus"])
-            .arg(&corpus_multi)
-            .args(["--model"])
-            .arg(&multi_model)
-            .stderr(embed_stderr())
-            .status();
-
-        match status {
-            Ok(s) if s.success() => log(&format!("  Multi embeddings: {}", corpus_multi.display())),
-            _ => eprintln!("WARNING: multilingual embedding generation failed"),
+        if let Some(t) = run_generate(&bin, &corpus_multi, &multi_model, "multilingual", verbose, vlog) {
+            log(&format!(
+                "  Multi embeddings: {}{}",
+                corpus_multi.display(),
+                elapsed_suffix(t, verbose)
+            ));
         }
     } else if multi_count > 0 && !multi_model.is_file() {
         log(&format!("  {multi_count} multilingual ways found but model not installed"));
@@ -567,19 +684,22 @@ fn auto_embed(out_dir: &Path, engine_dir: &Path, corpus: &Path, log: &dyn Fn(&st
 
     // Also generate combined corpus for backward compatibility
     // (the main ways-corpus.jsonl keeps EN embeddings as before)
+    //
+    // This re-embeds every entry the two passes above already embedded — the
+    // longest pass, and the last, which is why a silent build looks like it hung
+    // right here.
     if en_model.is_file() {
         log("Generating combined corpus with English embeddings...");
-        let status = std::process::Command::new(&bin)
-            .args(["generate", "--corpus"])
-            .arg(corpus)
-            .args(["--model"])
-            .arg(&en_model)
-            .stderr(embed_stderr())
-            .status();
-
-        match status {
-            Ok(s) if s.success() => log(&format!("Combined corpus: {}", corpus.display())),
-            _ => eprintln!("WARNING: combined embedding generation failed"),
+        vlog(&format!(
+            "re-embedding all {} entries (en {en_count} + multi {multi_count})",
+            en_count + multi_count
+        ));
+        if let Some(t) = run_generate(&bin, corpus, &en_model, "combined", verbose, vlog) {
+            log(&format!(
+                "Combined corpus: {}{}",
+                corpus.display(),
+                elapsed_suffix(t, verbose)
+            ));
         }
     }
 
@@ -766,20 +886,30 @@ fn is_newer_than(file: &Path, reference: &Path) -> bool {
 fn fit_calibration(
     out_dir: &Path,
     engine_dir: &Path,
+    verbose: bool,
+    vlog: &dyn Fn(&str),
     log: &dyn Fn(&str),
 ) -> ways_core::calibration::Calibration {
     use ways_core::calibration::Calibration;
     const PROBES: &str = include_str!("calibration_probes.jsonl");
     const AUC_FLOOR: f64 = 0.70;
 
+    vlog("fitting calibration (ADR-156)");
+
     let bin = match resolve_embed_bin(engine_dir) {
         Some(b) => b,
-        None => return Calibration::default(),
+        None => {
+            vlog("  no way-embed — left uncalibrated");
+            return Calibration::default();
+        }
     };
 
     let aliases = match load_aliases(&out_dir.join("ways-corpus-en.jsonl")) {
         Some(m) if !m.is_empty() => m,
-        _ => return Calibration::default(),
+        _ => {
+            vlog("  no en aliases — left uncalibrated");
+            return Calibration::default();
+        }
     };
 
     // Parse probes (skip `#` comments and blank lines).
@@ -822,12 +952,19 @@ fn fit_calibration(
         return Calibration::default();
     }
 
+    vlog(&format!("  {} usable probe pairs", pairs.len()));
+
     let fit_lane = |model_name: &str, label: &str| -> Option<ways_core::calibration::ModelCalibration> {
         let model = engine_dir.join(model_name);
         if !model.is_file() {
             return None;
         }
-        let cosines = batch_similarity(&bin, &model, &pairs)?;
+        vlog(&format!(
+            "  lane[{label}]: {} similarity pairs via {}",
+            pairs.len(),
+            model.display()
+        ));
+        let cosines = batch_similarity(&bin, &model, &pairs, verbose)?;
         if cosines.len() != labels.len() {
             log(&format!(
                 "  calibration[{label}]: score count {} != probe count {} — lane left uncalibrated",
@@ -887,13 +1024,17 @@ fn load_aliases(corpus: &Path) -> Option<HashMap<String, String>> {
 
 /// Run `way-embed similarity --batch` over `prompt\talias` pairs on stdin,
 /// returning one cosine per pair (order preserved).
-fn batch_similarity(bin: &Path, model: &Path, pairs: &[String]) -> Option<Vec<f64>> {
+fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -> Option<Vec<f64>> {
     use std::process::{Command, Stdio};
+    // Not `embed_stderr` — that carries a Windows-only NUL workaround this call
+    // site has never used. Quiet stays `null()` on every platform, as before;
+    // `--verbose` only adds the inherit case.
+    let stderr = if verbose { Stdio::inherit() } else { Stdio::null() };
     let mut child = Command::new(bin)
         .args(["similarity", "--model", model.to_str()?, "--batch"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .spawn()
         .ok()?;
     {
