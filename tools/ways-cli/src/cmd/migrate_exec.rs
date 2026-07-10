@@ -612,17 +612,32 @@ mod tests {
         c
     }
 
+    /// The set of files under `root` that the user's tree actually owns —
+    /// Spotlight's `.DS_Store` and friends excluded. `phase_backup` already
+    /// compares by this set rather than a raw count; the reason is the same here.
+    fn owned_files(root: &Path) -> std::collections::BTreeSet<String> {
+        relative_files(root)
+            .into_iter()
+            .filter(|p| !is_os_transient(p))
+            .collect()
+    }
+
     #[test]
     fn what_if_mutates_nothing() {
         let base = sandbox("whatif");
         let dest = base.join(".claude");
         fake_clone(&dest);
-        let before = count_files(&dest);
+        // Compare by set, not by count: on macOS, Spotlight can drop a `.DS_Store`
+        // into the tree between the two observations, which fails a raw count
+        // equality with a useless `43 != 44` and says nothing about what moved.
+        // A set diff names the offending path instead. Same `is_os_transient`
+        // exemption `phase_backup` carries, for the same reason.
+        let before = owned_files(&dest);
         let ctx = ctx_for(&dest, true, &base);
         for f in [phase_backup, phase_relocate, phase_lift_state, phase_lift_user, phase_projection, phase_cache, phase_bootstrap] {
             f(&ctx).unwrap();
         }
-        assert_eq!(count_files(&dest), before, "what-if must not change the tree");
+        assert_eq!(owned_files(&dest), before, "what-if must not change the tree");
         assert!(!ctx.data.exists(), "what-if must not create $XDG_DATA");
         let _ = std::fs::remove_dir_all(&base);
     }
