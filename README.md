@@ -45,13 +45,13 @@ sequenceDiagram
 
 **Why this works:** System prompt adherence decays as a power law over conversation turns — instructions at position zero lose influence as context grows. This is the forgetting curve (Ebbinghaus) operating over token distance instead of days, and the countermeasure is the one human learning already uses: spaced repetition. Ways inject small, relevant guidance near the attention cursor at the moment it matters and re-disclose it as its influence fades, maintaining steady-state adherence instead of a damped sawtooth. It's [progressive disclosure](docs/hooks-and-ways/context-decay.md) applied to the model itself.
 
-### Session replay with `ways rethink`
+### Session replay with `ways introspect replay`
 
-`ways rethink` replays a completed session's way-firing history as an interactive TUI animation. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
+`ways introspect replay` replays a completed session's way-firing history as an interactive TUI animation. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
 
-<video src="https://github.com/aaronsb/agent-ways/raw/main/docs/images/ways-rethink.mp4" controls muted loop width="800" title="ways rethink replaying a session — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills"></video>
+[<img src="docs/images/ways-introspect-poster.png" alt="ways introspect replay — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills. Click to play the recording." width="800" />](docs/images/ways-introspect.mp4)
 
-<sub>(If the player doesn't load, [watch the recording directly](docs/images/ways-rethink.mp4).)</sub>
+<sub>▶ [Play the recording](docs/images/ways-introspect.mp4) — the frame above is a still.</sub>
 
 Ways fire via the **embedding engine** (all-MiniLM-L6-v2, a ~21MB GGUF model), which achieves ~98% accuracy on the match fixture set. The embedding tier handles semantic similarity — "pin lockfile versions" matches the supply chain way even though those exact words don't appear in the way's vocabulary.
 
