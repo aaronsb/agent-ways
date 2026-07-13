@@ -562,18 +562,24 @@ impl PeerSensor {
         }
 
         let context_tokens = last_input + last_cache_read + last_cache_create;
-        // The window comes from the one resolver (ADR-166). This sensor used to
+        // The window comes from the one resolver (ADR-166) — this sensor used to
         // carry its own substring rules, which disagreed with the gauge's about
-        // sonnet-4 and never once matched the `[1m]` suffix they tested for —
-        // Claude Code writes the bare model id to the transcript.
+        // sonnet-4.
         //
-        // `-` is the no-model sentinel, not a model id: with no model there is no
-        // meaningful percentage, so the peer's fill is suppressed rather than
+        // `resolve_for_foreign_session`, not `resolve`: this window belongs to the
+        // *peer's* session, and `CLAUDE_CONTEXT_WINDOW` states the window of the
+        // process that set it. Applying the operator's override to a peer would
+        // compute that peer's fill against the observer's window — an operator who
+        // set it to 1M would see a haiku peer at 190K/200K (about to compact)
+        // rendered as 19% full, and miss the one peer that actually needs room.
+        //
+        // `-` is the no-model placeholder, not a model id: with no model there is
+        // no meaningful percentage, so the peer's fill is suppressed rather than
         // defaulted to a number that would look authoritative.
         let context_window: u64 = if model == "-" {
             0
         } else {
-            ways_core::context_window::resolve(Some(&model)).tokens
+            ways_core::context_window::resolve_for_foreign_session(Some(&model)).tokens
         };
         let context_percent = if context_window > 0 {
             (context_tokens as f64 / context_window as f64) * 100.0

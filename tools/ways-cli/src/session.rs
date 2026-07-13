@@ -326,10 +326,15 @@ fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
     ways_core::context_window::resolve(model_from_transcript(&content).as_deref()).tokens
 }
 
-/// The model id from the transcript's most recent assistant turn. `None` before
-/// the first assistant turn is written — the launch race a monitor hits when it
-/// starts seconds into a session. Live views must therefore re-resolve on refresh
-/// rather than cache a startup answer taken before the model had spoken.
+/// The model id from the transcript's most recent *real* assistant turn. `None`
+/// before the first assistant turn is written — the launch race a monitor hits
+/// when it starts seconds into a session. Live views must therefore re-resolve on
+/// refresh rather than cache a startup answer taken before the model had spoken.
+///
+/// Sentinel turns (`<synthetic>`, written for interrupts and API errors) are
+/// skipped rather than returned: an interrupted turn does not change which model
+/// the session is running, and treating the sentinel as the model would resolve a
+/// live 1M session to the 200K default.
 fn model_from_transcript(content: &str) -> Option<String> {
     for line in content.lines().rev() {
         // An unparseable line is skipped, not fatal — transcripts carry many
@@ -342,6 +347,7 @@ fn model_from_transcript(content: &str) -> Option<String> {
                 .get("message")
                 .and_then(|m| m.get("model"))
                 .and_then(|m| m.as_str())
+                .filter(|m| !ways_core::context_window::is_sentinel(m))
             {
                 return Some(model.to_string());
             }

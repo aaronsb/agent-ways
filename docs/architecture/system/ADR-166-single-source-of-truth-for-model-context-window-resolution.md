@@ -91,6 +91,35 @@ matching is what failed: `sonnet` swallowing `sonnet-5`, `opus-4` swallowing eve
 Opus 4.x regardless of window. Unknown models fall to the default and say so,
 which is a correctable, visible state — unlike a wrong match, which is not.
 
+Ids are matched as a **boundary-delimited component** of the model string rather
+than anchored at its start, because other harnesses wrap the same id in provider
+prefixes and version suffixes (`us.anthropic.claude-opus-4-8-v1:0`,
+`claude-opus-4-8@20260115`) and this repo supports those deployments. A rule
+anchored at byte 0 would regress every Bedrock and Vertex session to the default.
+The boundary requirement is what keeps this from degenerating back into substring
+matching: `claude-sonnet-5` is not found inside `claude-sonnet-55`, because the
+trailing `5` is alphanumeric and therefore a different id, not a qualified form of
+this one. Bare family aliases (`opus`, `sonnet`) are matched on **exact equality
+only** — an alias is a whole model reference, not a family stem, and prefix-matching
+one would resolve `claude-sonnet-4-5` to the current Sonnet's window and report it
+as a confident detection.
+
+**Sentinels are absences, not unknown models.** Claude Code writes
+`"model": "<synthetic>"` for interrupt and API-error turns; `sensor-peers` uses `-`
+as its no-model placeholder. A transcript whose newest assistant turn is an
+interrupt still has a real model behind it, so the scanners skip sentinel turns and
+keep walking back rather than resolving the sentinel to the default. Nine
+transcripts in local history end on a `<synthetic>` turn; under a naive scan each
+would have handed a live 1M session a 200K window.
+
+**A peer's window is resolved without the operator's override.** `sensor-peers`
+reads *other* sessions' transcripts, and `CLAUDE_CONTEXT_WINDOW` states the window
+of the process that set it. Applying it to a peer would compute that peer's fill
+against the observer's window — an operator with the override at 1M would see a
+Haiku peer at 190K/200K, genuinely about to compact, rendered as 19% full. Foreign
+sessions therefore resolve through the model table alone
+(`resolve_for_foreign_session`).
+
 The table is a hardcoded enumeration rather than a live Models API lookup
 (`GET /v1/models/{id}` exposes `max_input_tokens`). The resolver runs in
 `UserPromptSubmit` hooks on every turn; it must be synchronous, offline, and
@@ -124,9 +153,18 @@ model launch — made tractable by the fact that there is now exactly one of the
 
 - `sensor-peers` takes a dependency on `ways-core`. Both are already workspace
   members, so this is a manifest line, not a structural change.
-- The `[1m]` suffix handling in `sensor-peers` is removed as dead code. If Claude
-  Code later begins writing a window marker into the transcript, the resolver is
-  the one place that would learn to read it.
+- The `[1m]` suffix test in `sensor-peers` was dead code and is removed. The
+  marker appears in the *system prompt text* (and so, as prose, inside transcript
+  message content — 414 occurrences locally), but never as a `message.model` value:
+  across ~78,000 model records the field is always the bare id. Component matching
+  nonetheless tolerates a `claude-opus-4-8[1m]` id, so if Claude Code ever does
+  begin writing the marker, it resolves rather than silently defaulting.
+- Models absent from the table now resolve to the default where the old `opus-4`
+  substring gave them 1M — `claude-opus-4-5`, `claude-opus-4-1`, `claude-opus-4-0`.
+  This is a correction, not a regression: the 1M window arrived with the 4.6
+  generation, so calling Opus 4.1 a 1M model was exactly the over-broad match this
+  ADR removes. None appear in local transcript history. They can be pinned
+  explicitly once their true windows are confirmed.
 
 ## Alternatives Considered
 

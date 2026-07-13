@@ -223,6 +223,12 @@ pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
 
 // ── Internals ──────────────────────────────────────────────────
 
+/// The most recent *real* assistant model in the transcript.
+///
+/// Sentinel turns (`<synthetic>`, written for interrupts and API errors) are
+/// skipped, not returned: an interrupt does not change which model the session is
+/// running, and treating the sentinel as the model would resolve a live 1M session
+/// to the 200K default. Nine transcripts in local history end on one.
 fn detect_model(content: &str) -> String {
     // Scan from the end for the most recent assistant message with a model field
     for line in content.lines().rev() {
@@ -235,6 +241,7 @@ fn detect_model(content: &str) -> String {
                     .get("message")
                     .and_then(|m| m.get("model"))
                     .and_then(|m| m.as_str())
+                    .filter(|m| !context_window::is_sentinel(m))
                 {
                     return model.to_string();
                 }
