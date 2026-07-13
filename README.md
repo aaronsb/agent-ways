@@ -49,7 +49,9 @@ sequenceDiagram
 
 `ways rethink` replays a completed session's way-firing history as an interactive TUI animation. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
 
-<img src="docs/images/ways-rethink.gif" alt="ways rethink replaying a session — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills" width="400" />
+<video src="https://github.com/aaronsb/agent-ways/raw/main/docs/images/ways-rethink.mp4" controls muted loop width="800" title="ways rethink replaying a session — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills"></video>
+
+<sub>(If the player doesn't load, [watch the recording directly](docs/images/ways-rethink.mp4).)</sub>
 
 Ways fire via the **embedding engine** (all-MiniLM-L6-v2, a ~21MB GGUF model), which achieves ~98% accuracy on the match fixture set. The embedding tier handles semantic similarity — "pin lockfile versions" matches the supply chain way even though those exact words don't appear in the way's vocabulary.
 
