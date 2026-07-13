@@ -562,16 +562,18 @@ impl PeerSensor {
         }
 
         let context_tokens = last_input + last_cache_read + last_cache_create;
-        // Model string may include context window hint like "claude-opus-4-6[1m]"
-        // Default to 1M for opus/sonnet 4.x, 200K for older models
-        let context_window: u64 = if model.contains("[1m]") || model.contains("1m]")
-            || model.contains("opus-4") || model.contains("sonnet-4") {
-            1_000_000
-        } else if model == "-" {
-            // Unknown model — can't compute meaningful percentage
+        // The window comes from the one resolver (ADR-166). This sensor used to
+        // carry its own substring rules, which disagreed with the gauge's about
+        // sonnet-4 and never once matched the `[1m]` suffix they tested for —
+        // Claude Code writes the bare model id to the transcript.
+        //
+        // `-` is the no-model sentinel, not a model id: with no model there is no
+        // meaningful percentage, so the peer's fill is suppressed rather than
+        // defaulted to a number that would look authoritative.
+        let context_window: u64 = if model == "-" {
             0
         } else {
-            200_000
+            ways_core::context_window::resolve(Some(&model)).tokens
         };
         let context_percent = if context_window > 0 {
             (context_tokens as f64 / context_window as f64) * 100.0

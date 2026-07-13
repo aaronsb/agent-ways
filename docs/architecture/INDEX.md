@@ -86,6 +86,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-163](./system/ADR-163-config-separation-dotfiles-source-of-truth.md) | Config separation — dotfiles as source-of-truth feeding the settings fragment store | Accepted |
 | [ADR-164](./system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md) | File artifacts distributed across hosts must be carried by value not host-absolute reference | Accepted |
 | [ADR-165](./system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md) | Loop-control bookends: start, develop, merge, release, wrap | Accepted |
+| [ADR-166](./system/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_

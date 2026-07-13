@@ -314,36 +314,40 @@ pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
     context_window_from_transcript(&transcript)
 }
 
-/// Scan a transcript to detect model and return context window size in tokens.
-/// Honors `CLAUDE_CONTEXT_WINDOW` as an override — the same contract
-/// `cmd::context::get_context` uses, so window fallbacks stay consistent
-/// across all fire-evaluation paths (show, list, rethink).
+/// Scan a transcript to detect the model, and resolve its context window through
+/// the one resolver (ADR-166) — the same call `cmd::context` makes, so the gauge
+/// and every fire-evaluation path (show, list, rethink) agree on the window.
+///
+/// This is load-bearing beyond reporting: ADR-126 scales a way's refire half-life
+/// as a fraction of the window, so a wrong answer here rescales the disclosure
+/// curve for every way in the session.
 fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
-    let fallback = || {
-        std::env::var("CLAUDE_CONTEXT_WINDOW")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(200_000)
-    };
+    let content = std::fs::read_to_string(transcript).unwrap_or_default();
+    ways_core::context_window::resolve(model_from_transcript(&content).as_deref()).tokens
+}
 
-    let content = match std::fs::read_to_string(transcript) {
-        Ok(c) => c,
-        Err(_) => return fallback(),
-    };
-
+/// The model id from the transcript's most recent assistant turn. `None` before
+/// the first assistant turn is written — the launch race a monitor hits when it
+/// starts seconds into a session. Live views must therefore re-resolve on refresh
+/// rather than cache a startup answer taken before the model had spoken.
+fn model_from_transcript(content: &str) -> Option<String> {
     for line in content.lines().rev() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                if let Some(model) = val.get("message").and_then(|m| m.get("model")).and_then(|m| m.as_str()) {
-                    if model.contains("opus-4") {
-                        return 1_000_000;
-                    }
-                }
-                break;
+        // An unparseable line is skipped, not fatal — transcripts carry many
+        // shapes, and only assistant turns name a model.
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+            if let Some(model) = val
+                .get("message")
+                .and_then(|m| m.get("model"))
+                .and_then(|m| m.as_str())
+            {
+                return Some(model.to_string());
             }
         }
     }
-    fallback()
+    None
 }
 
 #[cfg(test)]
