@@ -10,7 +10,6 @@
     "allow": [
       "Edit(~/.claude/**)",
       "Read",
-      "Write(~/.claude/**)",
       "Bash(~/.claude/hooks/ways/list-triggered.sh:*)",
       "Bash(cat:*)",
       "Bash(head:*)",
