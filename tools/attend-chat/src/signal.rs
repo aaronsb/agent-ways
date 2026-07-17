@@ -133,7 +133,15 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let filename = format!("{}-{}.signal", sender_id.replace('/', "-"), ts);
+    // Normalize the sender id into the filename stem (== signal id that
+    // `re:<id>` replies reference). The TUI's sender is `$USER@<terminal>`,
+    // so the raw `@`/`.` would fail `is_valid_signal_id` and break
+    // `attend reply` auto-threading (issue #368). `from` keeps the raw id.
+    let filename = format!(
+        "{}-{}.signal",
+        agent_identity::sanitize_id_component(&sender_id),
+        ts
+    );
     let content = format!("{}|{}|{}|{}\n", from, project, cwd, message);
 
     let tmp = dest.join(format!("{}.tmp", filename));
