@@ -87,6 +87,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-164](./system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md) | File artifacts distributed across hosts must be carried by value not host-absolute reference | Accepted |
 | [ADR-165](./system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md) | Loop-control bookends: start, develop, merge, release, wrap | Accepted |
 | [ADR-167](./system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md) | Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop | Accepted |
+| [ADR-168](./system/ADR-168-instance-addressable-directed-messaging-for-same-cwd-attend-siblings.md) | Instance-addressable directed messaging for same-cwd attend siblings | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
