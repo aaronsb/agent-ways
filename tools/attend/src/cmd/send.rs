@@ -13,8 +13,9 @@ pub(crate) fn cmd_send(
 ) {
     // A signal id must match the same character class the parser uses to
     // disambiguate threaded records from legacy messages that happen to
-    // start with "re:". Signal filename stems are `<sender-id>-<ts>`, so
-    // `[A-Za-z0-9_-]+` comfortably covers the real shape and rejects
+    // start with "re:". Signal filename stems are
+    // `<sanitized-sender>-<nanos>-<seq>` (see `agent_identity::signal_filename`),
+    // so `[A-Za-z0-9_-]+` comfortably covers the real shape and rejects
     // anything that would break the wire format (pipes, whitespace,
     // control chars) or trip the ambiguity fence in parse_signal.
     if let Some(ref id) = reply_to {
@@ -163,22 +164,15 @@ pub(crate) fn cmd_send(
 
     let (sender_id, source_kind) = identify_sender();
     let project = cwd.rsplit('/').next().unwrap_or("?");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
 
     let from = format!("{}:{}", source_kind, sender_id);
-    // Normalize the sender id into the filename stem, which doubles as the
-    // signal id `re:<id>` replies reference. External senders are
-    // `$USER@<terminal>`; the raw `@`/`.` would fail `is_valid_signal_id`
-    // and break `attend reply`'s auto-threading (issue #368). The `from`
-    // field above keeps the un-normalized identity.
-    let filename = format!(
-        "{}-{}.signal",
-        agent_identity::sanitize_id_component(&sender_id),
-        ts
-    );
+    // Build the filename stem, which doubles as the signal id `re:<id>`
+    // replies reference. `signal_filename` normalizes the sender id
+    // (external senders are `$USER@<terminal>`; the raw `@`/`.` would fail
+    // `is_valid_signal_id` and break `attend reply` auto-threading —
+    // issue #368) and makes the name collision-proof. The `from` field
+    // above keeps the un-normalized identity.
+    let filename = agent_identity::signal_filename(&sender_id);
     // Wire format: `from|project|cwd|message` (legacy) or
     // `from|project|cwd|re:signal-id|message` (threaded reply). The `re:`
     // field is only emitted when --re was given; unthreaded sends stay
@@ -288,11 +282,13 @@ pub(crate) fn cmd_reply(
             eprintln!("  if you are starting a new topic, use `attend send` instead.");
             std::process::exit(1);
         }
-        // There *is* a prior inbound, but its recorded id is malformed
-        // (e.g. an older signal from an external `$USER@<terminal>` sender
-        // written before the id was sanitized — issue #368). The agent did
-        // nothing wrong and can't fix this, so don't punish it with the
-        // internal `send --re` validation error. Threading is cosmetic —
+        // There *is* a prior inbound, but its recorded id is not
+        // threadable. A standing guard, not a transition shim: whatever
+        // the source of a bad id (a stale pre-#368 record from an external
+        // `$USER@<terminal>` sender, a hand-edited state file, some future
+        // writer that skips `signal_filename`), the agent did nothing
+        // wrong and can't fix it, so we never punish it with the internal
+        // `send --re` validation error. Threading is cosmetic —
         // `parse_signal` drops the `re:` id and no peer renders it — so
         // degrading to an unthreaded send is lossless: the message still
         // lands. Note it on stderr and carry on.

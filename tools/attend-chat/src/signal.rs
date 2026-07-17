@@ -128,20 +128,14 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     let project = cwd.rsplit('/').next().unwrap_or("?").to_string();
-    let ts = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
 
-    // Normalize the sender id into the filename stem (== signal id that
-    // `re:<id>` replies reference). The TUI's sender is `$USER@<terminal>`,
-    // so the raw `@`/`.` would fail `is_valid_signal_id` and break
-    // `attend reply` auto-threading (issue #368). `from` keeps the raw id.
-    let filename = format!(
-        "{}-{}.signal",
-        agent_identity::sanitize_id_component(&sender_id),
-        ts
-    );
+    // Build the filename stem (== signal id that `re:<id>` replies
+    // reference). `signal_filename` normalizes the sender id — the TUI's
+    // sender is `$USER@<terminal>`, whose raw `@`/`.` would fail
+    // `is_valid_signal_id` and break `attend reply` auto-threading
+    // (issue #368) — and makes the name collision-proof. `from` keeps the
+    // raw id.
+    let filename = agent_identity::signal_filename(&sender_id);
     let content = format!("{}|{}|{}|{}\n", from, project, cwd, message);
 
     let tmp = dest.join(format!("{}.tmp", filename));
