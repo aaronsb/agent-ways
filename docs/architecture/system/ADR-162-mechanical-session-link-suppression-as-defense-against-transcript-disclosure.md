@@ -1,15 +1,39 @@
 ---
-status: Accepted
+status: Superseded
 date: 2026-07-06
+revised: 2026-07-16
 deciders:
   - aaronsb
   - claude
 related:
   - 152
   - 163
+  - 167
+superseded_by: ADR-167
 ---
 
 # ADR-162: Mechanical session-link suppression as defense against transcript disclosure
+
+## Status: Superseded by ADR-167
+
+**Superseded 2026-07-16.** The threat model below is correct and load-bearing: the
+session link resolves to the full transcript, and publishing it on a public repo is an
+accidental-disclosure surface. The **hook** this ADR designed also survives unchanged —
+deny rather than rewrite, at user scope, trailer/footer position only. Its *rationale*
+does not.
+
+This ADR's central claim — that no setting can govern the link, so suppression must be
+mechanical — was **false when written**. It rests on a mis-citation: `#18253` is the
+Co-Authored-By/footer bug ([CLOSED/COMPLETED]), not the session link; the issue meant
+was `#41873` ([CLOSED/NOT_PLANNED]). And `#41873` had already been superseded by
+`attribution.sessionUrl`, shipped in **v2.1.183 (2026-06-19)** — seventeen days before
+this ADR was dated. A controlled experiment on 2026-07-16 (same repo, same v2.1.212,
+only the key differing) confirms the setting governs the trailer.
+
+[[ADR-167]] carries the corrected decision: `attribution.sessionUrl: false` is the
+primary control, and the hook below is retained as a **backstop** rather than the sole
+defense. Read this ADR for the threat model and the hook's design; read ADR-167 for
+what actually defends against it.
 
 ## Context
 

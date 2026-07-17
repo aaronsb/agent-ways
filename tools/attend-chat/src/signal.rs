@@ -122,18 +122,15 @@ pub fn write_broadcast(message: &str) -> io::Result<String> {
 pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
     fs::create_dir_all(dest)?;
 
-    let (sender_id, kind) = identify_sender();
-    let from = format!("{}:{}", kind, sender_id);
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let project = cwd.rsplit('/').next().unwrap_or("?").to_string();
-    let ts = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let (sender_id, from, project, cwd) = sender_identity();
 
-    let filename = format!("{}-{}.signal", sender_id.replace('/', "-"), ts);
+    // Build the filename stem (== signal id that `re:<id>` replies
+    // reference). `signal_filename` normalizes the sender id — the TUI's
+    // sender is `$USER@<terminal>`, whose raw `@`/`.` would fail
+    // `is_valid_signal_id` and break `attend reply` auto-threading
+    // (issue #368) — and makes the name collision-proof. `from` keeps the
+    // raw id.
+    let filename = agent_identity::signal_filename(&sender_id);
     let content = format!("{}|{}|{}|{}\n", from, project, cwd, message);
 
     let tmp = dest.join(format!("{}.tmp", filename));
@@ -141,6 +138,61 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
     fs::write(&tmp, content)?;
     fs::rename(&tmp, &final_path)?;
     Ok(filename)
+}
+
+/// Compose the in-memory `Signal` for a message THIS session just sent,
+/// so the sender's own transcript can echo it.
+///
+/// Why this exists: a broadcast rides `_broadcast/`, which the sender's
+/// own watcher surfaces (`watcher::accept_path`), so it self-echoes for
+/// free. A directed (`@name`) send is written to the *recipient's* cwd
+/// inbox, which the sender does not watch — so without this it would
+/// vanish from the sender's view even though it was delivered. This
+/// builds the same identity fields the wire signal carries (`from`,
+/// `project`, `cwd`) so the echoed row renders with the sender's chip,
+/// identical to how their own broadcast already appears. It writes
+/// nothing — echo is a display concern, not a bus event.
+pub fn compose_self_echo(message: &str) -> Signal {
+    let (_sender_id, from, project, cwd) = sender_identity();
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Signal {
+        // Not a bus id — this row never came off disk. Marked so it is
+        // never mistaken for a real signal stem should that ever matter.
+        id: format!("local-echo-{ts}"),
+        from,
+        project,
+        cwd,
+        reply_to: None,
+        message: message.to_string(),
+        ts,
+    }
+}
+
+/// Derive this session's wire identity fields once: `(sender_id, from,
+/// project, cwd)`. Shared by `write_signal` (the delivered signal) and
+/// `compose_self_echo` (the local echo) so the echoed row's chip is
+/// always derived identically to the delivered signal's — if this logic
+/// changes, both move together instead of drifting.
+///
+/// `project` is the last non-empty cwd segment, or `"?"` when the cwd is
+/// empty (e.g. `current_dir()` failed). Note `"".rsplit('/').next()`
+/// yields `Some("")`, not `None`, so a naive `.next().unwrap_or("?")`
+/// would render a blank chip — `find(non-empty)` is deliberate.
+fn sender_identity() -> (String, String, String, String) {
+    let (sender_id, kind) = identify_sender();
+    let from = format!("{}:{}", kind, sender_id);
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let project = cwd
+        .rsplit('/')
+        .find(|seg| !seg.is_empty())
+        .unwrap_or("?")
+        .to_string();
+    (sender_id, from, project, cwd)
 }
 
 /// Identify the human at the keyboard. attend-chat is almost always
@@ -244,6 +296,22 @@ mod tests {
         assert_eq!(sig.message, "round-trip body");
         assert!(sig.from.starts_with("external:"));
         assert!(sig.reply_to.is_none());
+    }
+
+    #[test]
+    fn compose_self_echo_carries_message_and_self_identity() {
+        // The echo must render as coming from THIS session (so it shows
+        // the sender's own chip) and carry the message verbatim. It is a
+        // display object, never written to disk.
+        let echo = compose_self_echo("hello @peer");
+        assert_eq!(echo.message, "hello @peer");
+        assert!(
+            echo.from.starts_with("claude:") || echo.from.starts_with("external:"),
+            "echo.from should be a real sender identity, got {:?}",
+            echo.from
+        );
+        assert!(echo.reply_to.is_none());
+        assert!(echo.id.starts_with("local-echo-"), "echo id marks it non-bus");
     }
 
     #[test]

@@ -27,7 +27,7 @@ pub mod names;
 pub mod palette;
 
 pub use groups::{Group, GLYPHS};
-pub use identity::{cwd_basename, Identity};
+pub use identity::{cwd_basename, sanitize_id_component, signal_filename, Identity};
 pub use palette::{
     resolve, PaletteEntry, Resolved, Style, TermCaps, BASIC_PALETTE, RICH_PALETTE,
 };

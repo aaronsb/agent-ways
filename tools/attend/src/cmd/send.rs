@@ -13,8 +13,9 @@ pub(crate) fn cmd_send(
 ) {
     // A signal id must match the same character class the parser uses to
     // disambiguate threaded records from legacy messages that happen to
-    // start with "re:". Signal filename stems are `<sender-id>-<ts>`, so
-    // `[A-Za-z0-9_-]+` comfortably covers the real shape and rejects
+    // start with "re:". Signal filename stems are
+    // `<sanitized-sender>-<nanos>-<seq>` (see `agent_identity::signal_filename`),
+    // so `[A-Za-z0-9_-]+` comfortably covers the real shape and rejects
     // anything that would break the wire format (pipes, whitespace,
     // control chars) or trip the ambiguity fence in parse_signal.
     if let Some(ref id) = reply_to {
@@ -163,13 +164,15 @@ pub(crate) fn cmd_send(
 
     let (sender_id, source_kind) = identify_sender();
     let project = cwd.rsplit('/').next().unwrap_or("?");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
 
     let from = format!("{}:{}", source_kind, sender_id);
-    let filename = format!("{}-{}.signal", sender_id.replace('/', "-"), ts);
+    // Build the filename stem, which doubles as the signal id `re:<id>`
+    // replies reference. `signal_filename` normalizes the sender id
+    // (external senders are `$USER@<terminal>`; the raw `@`/`.` would fail
+    // `is_valid_signal_id` and break `attend reply` auto-threading —
+    // issue #368) and makes the name collision-proof. The `from` field
+    // above keeps the un-normalized identity.
+    let filename = agent_identity::signal_filename(&sender_id);
     // Wire format: `from|project|cwd|message` (legacy) or
     // `from|project|cwd|re:signal-id|message` (threaded reply). The `re:`
     // field is only emitted when --re was given; unthreaded sends stay
@@ -219,6 +222,31 @@ pub(crate) fn cmd_send(
     );
 }
 
+/// How `attend reply` should thread, given the recorded last-inbound id.
+/// Pure decision, split out from `cmd_reply` so the degradation rule
+/// (issue #368) is unit-testable without touching the filesystem or the
+/// process exit path.
+#[cfg(feature = "sensor-peers")]
+#[derive(Debug, PartialEq, Eq)]
+enum ReplyTarget {
+    /// No prior inbound at all — reply has nothing to thread against.
+    NoInbound,
+    /// A prior inbound exists but its id can't be threaded; degrade to an
+    /// unthreaded send rather than leak the `send --re` validation error.
+    Unthreaded,
+    /// A valid threadable id.
+    Threaded(String),
+}
+
+#[cfg(feature = "sensor-peers")]
+fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
+    match last_inbound {
+        None => ReplyTarget::NoInbound,
+        Some(id) if is_valid_signal_id(&id) => ReplyTarget::Threaded(id),
+        Some(_) => ReplyTarget::Unthreaded,
+    }
+}
+
 /// `attend reply <message>` — thin sugar over `attend send --re <last-inbound>`.
 ///
 /// Reads the most-recent inbound signal id from per-session state that
@@ -226,7 +254,9 @@ pub(crate) fn cmd_send(
 /// observation. If no prior inbound exists the command exits with a
 /// clear error rather than silently falling through to an unthreaded
 /// send — threaded-vs-unthreaded is a semantic distinction and
-/// guessing is the wrong default.
+/// guessing is the wrong default. If a prior inbound exists but its id
+/// is not threadable (issue #368), it degrades to an unthreaded send
+/// rather than leaking the internal `send --re` validation error.
 ///
 /// The entire point of this subcommand is to keep the 50-char signal
 /// uuid out of the agent's context window. A caller never sees the
@@ -243,19 +273,37 @@ pub(crate) fn cmd_reply(
 ) {
     let session_id =
         own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
-    let last_id = match sensor_peers::last_inbound::read(&session_id) {
-        Some(id) => id,
-        None => {
+    let reply_to = match classify_reply_target(sensor_peers::last_inbound::read(&session_id)) {
+        // Genuine "nothing to reply to" — the agent needs to do something
+        // different (start a new topic), so this stays a hard error.
+        ReplyTarget::NoInbound => {
             eprintln!("attend reply: no prior inbound signal to thread against.");
             eprintln!("  (reply is for responding to a peer message your sensor surfaced.)");
             eprintln!("  if you are starting a new topic, use `attend send` instead.");
             std::process::exit(1);
         }
+        // There *is* a prior inbound, but its recorded id is not
+        // threadable. A standing guard, not a transition shim: whatever
+        // the source of a bad id (a stale pre-#368 record from an external
+        // `$USER@<terminal>` sender, a hand-edited state file, some future
+        // writer that skips `signal_filename`), the agent did nothing
+        // wrong and can't fix it, so we never punish it with the internal
+        // `send --re` validation error. Threading is cosmetic —
+        // `parse_signal` drops the `re:` id and no peer renders it — so
+        // degrading to an unthreaded send is lossless: the message still
+        // lands. Note it on stderr and carry on.
+        ReplyTarget::Unthreaded => {
+            eprintln!(
+                "[attend] note: last inbound id is not threadable; sending unthreaded (message still delivered)."
+            );
+            None
+        }
+        ReplyTarget::Threaded(id) => Some(id),
     };
     // Inject the resolved signal id as `reply_to` and delegate to cmd_send.
     // All other routing flags (--focus, --to, --broadcast) flow through
     // untouched.
-    cmd_send(broadcast, target_dir, target_focus, Some(last_id), message);
+    cmd_send(broadcast, target_dir, target_focus, reply_to, message);
 }
 
 #[cfg(not(feature = "sensor-peers"))]
@@ -348,4 +396,37 @@ fn find_closest_peer<'a>(target: &str, peers: &[&'a str]) -> Option<&'a str> {
     }
 
     best.map(|(p, _)| p)
+}
+
+#[cfg(all(test, feature = "sensor-peers"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_inbound_is_a_hard_error_case() {
+        assert_eq!(classify_reply_target(None), ReplyTarget::NoInbound);
+    }
+
+    #[test]
+    fn valid_id_threads() {
+        assert_eq!(
+            classify_reply_target(Some("claude-2f2632d7-1712345".to_string())),
+            ReplyTarget::Threaded("claude-2f2632d7-1712345".to_string())
+        );
+    }
+
+    #[test]
+    fn external_at_bearing_id_degrades_to_unthreaded() {
+        // The regression from issue #368: a last-inbound id from an
+        // external `$USER@<terminal>` sender must NOT reach cmd_send's
+        // `--re` validation — it degrades to an unthreaded send instead.
+        assert_eq!(
+            classify_reply_target(Some("aaron@kitty-1712345".to_string())),
+            ReplyTarget::Unthreaded
+        );
+        assert_eq!(
+            classify_reply_target(Some("aaron@iterm.app-1712345".to_string())),
+            ReplyTarget::Unthreaded
+        );
+    }
 }
