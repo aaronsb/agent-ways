@@ -262,56 +262,145 @@ fi
 # ============================================================
 # SECTION 3: Attribution / session-link control surface
 # ============================================================
-# The `attribution` setting (settings.json) governs the text appended to
-# commits and PR bodies — including the `Claude-Session:` trailer and the
-# session URL. Empty string disables it; absent means default (trailer ON).
-# Reporting the effective value here gives that trailer a visible control
-# surface at commit/PR/ship time: you can see whether session links are on,
-# and which settings file decides it.
+# `attribution` governs what Claude Code appends to commits and PR bodies.
+# It is TWO INDEPENDENT CONTROLS, and conflating them is exactly the error
+# ADR-167 corrects:
 #
-# Precedence is an approximation of Claude Code's resolution order
-# (project-local > project > user-global, highest wins). It does not account
-# for managed/enterprise policy or command-line overrides.
+#   attribution.sessionUrl  (bool, default TRUE)  -> the `Claude-Session:`
+#       transcript link. This is the disclosure control — the link resolves to
+#       the full session transcript. Added upstream in v2.1.183; undocumented
+#       (upstream #69614), which is how it stayed unset here for a month.
+#   attribution.commit / .pr  (string, "" disables) -> the Co-Authored-By and
+#       "Generated with Claude Code" FOOTERS. These never governed the session
+#       link.
+#
+# This section previously reported "Session-link trailer" off commit/pr alone
+# and never read sessionUrl, so it printed "OFF ... no session trailer" in
+# every session — including sessions whose system prompt carried the trailer.
+# A surface that asserts a fact it never read is worse than no surface.
+#
+# Precedence approximates Claude Code's resolution order (project-local >
+# project > user-global, highest wins). Each sub-key resolves INDEPENDENTLY, on
+# the documented merge law that objects deep-merge key by key (ADR-147; mirrored
+# in tools/ways-cli/src/cmd/settings/compile.rs) — so a project file setting
+# .commit must not hide a user file setting .sessionUrl. NOTE: that law is
+# documented for settings merging generally; its application to `attribution`
+# ACROSS SCOPES is inferred, not verified. If Claude Code instead replaces the
+# whole object at the highest-precedence file, per-key resolution reports the
+# wrong source at that seam (the common single-file case is unaffected).
+# Managed/enterprise policy and command-line overrides are not accounted for.
 
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-ATTR_SRC=""
-COMMIT_RAW="__UNSET__"
-PR_RAW="__UNSET__"
-for f in \
-  "$PROJECT_ROOT/.claude/settings.local.json" \
-  "$PROJECT_ROOT/.claude/settings.json" \
-  "$HOME/.claude/settings.json"; do
+ATTR_FILES=(
+  "$PROJECT_ROOT/.claude/settings.local.json"
+  "$PROJECT_ROOT/.claude/settings.json"
+  "$HOME/.claude/settings.json"
+)
+
+# Settings files that exist but don't parse, and files whose `attribution` is
+# present but isn't an object. Both are reported, never silently skipped: such a
+# file may be the one meant to say `sessionUrl: false`, and staying quiet about
+# it is how a control surface lies. Valid JSON with a mistyped `attribution`
+# passes the parse-guard, so it needs its own check.
+ATTR_BAD=()
+ATTR_MISTYPED=()
+for f in "${ATTR_FILES[@]}"; do
   [[ -f "$f" ]] || continue
-  jq -e 'has("attribution")' "$f" >/dev/null 2>&1 || continue
-  COMMIT_RAW=$(jq -r 'if .attribution|has("commit") then .attribution.commit else "__UNSET__" end' "$f" 2>/dev/null)
-  PR_RAW=$(jq -r 'if .attribution|has("pr") then .attribution.pr else "__UNSET__" end' "$f" 2>/dev/null)
-  ATTR_SRC="$f"
-  break
+  if ! jq -e . "$f" >/dev/null 2>&1; then
+    ATTR_BAD+=("$f")
+  elif jq -e 'has("attribution") and ((.attribution | type) != "object")' "$f" >/dev/null 2>&1; then
+    ATTR_MISTYPED+=("$f")
+  fi
 done
 
-describe_attr() {
+# Resolve one attribution sub-key down the precedence chain, into the globals
+# ATTR_VAL (the value, JSON-ENCODED) and ATTR_SRC (the file that set it).
+# ATTR_VAL="" means no readable file defines the key.
+#
+# Three deliberate choices, each fixing a way this surface previously lied:
+#   * Globals, not a packed "value|source" string — a value may legitimately
+#     contain any delimiter (`attribution.commit: "Co-Authored-By: X | Y"`).
+#   * `jq -e .` parse-guard — jq on an empty file prints nothing and exits 0, so
+#     an empty settings.json would otherwise read as "key present, value empty"
+#     and mask every lower-precedence file. -e exits non-zero on empty/malformed.
+#   * `tojson`, not `tostring` — tostring erases the type, laundering the STRING
+#     "false" into a bool-looking `false` and reporting a confident OFF for a key
+#     Claude Code reads as a boolean (i.e. trailer still live). tojson keeps
+#     `false` and `"false"` distinct, and can never emit an empty string, which
+#     is what makes the ATTR_VAL="" absence test safe even though "" is itself a
+#     legitimate commit/pr value.
+resolve_attr_key() {
+  local key="$1" f raw
+  ATTR_VAL=""; ATTR_SRC=""
+  for f in "${ATTR_FILES[@]}"; do
+    [[ -f "$f" ]] || continue
+    jq -e . "$f" >/dev/null 2>&1 || continue
+    raw=$(jq -r --arg k "$key" '
+      if ((.attribution? | type) == "object") and (.attribution | has($k))
+      then (.attribution[$k] | tojson)
+      else empty end' "$f" 2>/dev/null) || continue
+    [[ -z "$raw" ]] && continue
+    ATTR_VAL="$raw"; ATTR_SRC="$f"
+    return
+  done
+}
+
+# Shorten $HOME to ~ for display. Don't use ${var/#$HOME/~}: bash
+# tilde-expands the replacement, turning ~ back into $HOME (a no-op).
+src_label() {
   case "$1" in
-    __UNSET__) echo "default (Claude attribution + session trailer ON)" ;;
-    "")        echo "OFF (empty — no attribution, no session trailer)" ;;
-    *)         echo "custom: \"$1\"" ;;
+    "") echo "not set in any settings file" ;;
+    "$HOME"/*) echo "~${1#"$HOME"}" ;;
+    *) echo "$1" ;;
   esac
 }
 
+# Decode a JSON-encoded scalar back to its display form.
+json_decode() { printf '%s' "$1" | jq -r . 2>/dev/null; }
+
 echo ""
-if [[ -z "$ATTR_SRC" ]]; then
-  echo "**Session-link trailer**: default (ON) — set \`attribution.commit\` / \`.pr\` to \`\"\"\` in settings.json to disable"
-else
-  # Shorten $HOME to ~ for display. Don't use ${var/#$HOME/~}: bash
-  # tilde-expands the replacement, turning ~ back into $HOME (a no-op).
-  case "$ATTR_SRC" in
-    "$HOME"/*) SRC_LABEL="~${ATTR_SRC#"$HOME"}" ;;
-    *)         SRC_LABEL="$ATTR_SRC" ;;
+
+# --- the session link (the disclosure control) ---
+# Fail-safe direction is ON: anything we cannot read as an explicit boolean
+# false is reported as live. A false OFF is the failure mode that matters.
+resolve_attr_key sessionUrl
+case "$ATTR_VAL" in
+  false)
+    echo "**Session-link trailer**: OFF — \`attribution.sessionUrl: false\` [$(src_label "$ATTR_SRC")]"
+    ;;
+  true)
+    echo "**Session-link trailer**: **ON** — \`attribution.sessionUrl: true\` [$(src_label "$ATTR_SRC")]. This publishes a link to the FULL session transcript; set it to \`false\` to suppress (ADR-167)."
+    ;;
+  "")
+    echo "**Session-link trailer**: **ON (default)** — \`attribution.sessionUrl\` is unset and defaults to true. This publishes a link to the FULL session transcript; set \`attribution.sessionUrl: false\` in settings.json to suppress (ADR-167)."
+    ;;
+  *)
+    echo "**Session-link trailer**: **ON** — \`attribution.sessionUrl\` is \`$ATTR_VAL\` [$(src_label "$ATTR_SRC")], which is not the boolean Claude Code expects, so the key does not take effect. Set \`attribution.sessionUrl: false\` (unquoted) to suppress (ADR-167)."
+    ;;
+esac
+
+# --- the attribution footers (a separate, cosmetic control) ---
+describe_footer() {
+  case "$1" in
+    "")     echo "default (ON)" ;;
+    '""')   echo "OFF (empty)" ;;
+    '"'*)   echo "custom: \"$(json_decode "$1")\"" ;;
+    *)      echo "unexpected non-string value \`$1\` (expected a string)" ;;
   esac
-  if [[ "$COMMIT_RAW" == "$PR_RAW" ]]; then
-    echo "**Session-link trailer**: $(describe_attr "$COMMIT_RAW") [$SRC_LABEL]"
-  else
-    echo "**Session-link trailer** [$SRC_LABEL]:"
-    echo "- commit: $(describe_attr "$COMMIT_RAW")"
-    echo "- pr: $(describe_attr "$PR_RAW")"
-  fi
+}
+resolve_attr_key commit; CM_VAL="$ATTR_VAL"; CM_SRC="$ATTR_SRC"
+resolve_attr_key pr;     PR_VAL="$ATTR_VAL"; PR_SRC="$ATTR_SRC"
+if [[ "$CM_VAL" == "$PR_VAL" && "$CM_SRC" == "$PR_SRC" ]]; then
+  echo "**Attribution footers** (Co-Authored-By / \"Generated with Claude Code\"): $(describe_footer "$CM_VAL") [$(src_label "$CM_SRC")]"
+else
+  echo "**Attribution footers** (Co-Authored-By / \"Generated with Claude Code\"):"
+  echo "- commit: $(describe_footer "$CM_VAL") [$(src_label "$CM_SRC")]"
+  echo "- pr: $(describe_footer "$PR_VAL") [$(src_label "$PR_SRC")]"
 fi
+
+for f in "${ATTR_BAD[@]}"; do
+  echo "- ⚠ \`$(src_label "$f")\` exists but is not valid JSON — it was skipped above, so the values reported may not be what Claude Code uses."
+done
+for f in "${ATTR_MISTYPED[@]}"; do
+  echo "- ⚠ \`$(src_label "$f")\` has an \`attribution\` that is not an object — it sets nothing and was skipped above."
+done
