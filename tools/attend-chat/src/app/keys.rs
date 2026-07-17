@@ -15,7 +15,10 @@ use crate::legend::{
     parse_addressed, Addressed, Sigil,
 };
 use crate::sessions::discover as discover_sessions;
-use crate::signal::{compose_self_echo, cwd_dir, write_broadcast, write_signal, Signal};
+use crate::signal::{
+    compose_self_echo, cwd_dir, encode_cwd, signals_base, write_broadcast, write_signal, Signal,
+};
+use crate::watcher::accept_path;
 use crate::slash;
 use crate::text_layout::split_at_char;
 
@@ -97,24 +100,50 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
             Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
         }
     } else {
-        // Directed sends go to each recipient's cwd inbox, which the
-        // sender does not watch — so echo the message once (regardless of
-        // recipient count) into the sender's own transcript. The "sent →
-        // @a @b" status line already reports where it went.
         let sent = resolve_recipients(&recipients, &agents).and_then(|dests| {
             for dir in &dests {
                 write_signal(dir, &msg)?;
             }
-            Ok(())
+            Ok(dests)
         });
         match sent {
-            Ok(()) => EnterAction::ClearWithStatusAndEcho {
-                status: format!("sent → {}", recipient_labels(&recipients).join(" ")),
-                echo: compose_self_echo(&msg),
-            },
+            Ok(dests) => {
+                let status = format!("sent → {}", recipient_labels(&recipients).join(" "));
+                // Echo only when the message reaches NO inbox the sender's
+                // own watcher already surfaces — otherwise it round-trips
+                // and a synthetic echo would double-render it. `#open`
+                // lands in `_broadcast/` and `#group` in `@group/` (both
+                // watched); an `@agent` in our *own* cwd lands in
+                // `own_encoded` (watched). Only `@agent` sends to *other*
+                // cwds are invisible without an echo.
+                if dests.iter().any(|d| sender_watches(d)) {
+                    EnterAction::ClearWithStatus(status)
+                } else {
+                    EnterAction::ClearWithStatusAndEcho {
+                        status,
+                        echo: compose_self_echo(&msg),
+                    }
+                }
+            }
             Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
         }
     }
+}
+
+/// Does the sender's own chat watcher already surface signals written to
+/// `dest`? Reuses [`accept_path`] — the single source of truth for what
+/// the transcript shows — so a directed send that round-trips (a
+/// `#group` / `#open` landing in a watched dir, or an `@agent` in our own
+/// cwd) is not *also* echoed synthetically and rendered twice.
+fn sender_watches(dest: &std::path::Path) -> bool {
+    let base = signals_base();
+    let own_cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let own_encoded = encode_cwd(&own_cwd);
+    // `accept_path` classifies by the first path component (the inbox dir
+    // name); hand it a probe file inside `dest` so it judges that dir.
+    accept_path(&base, &own_encoded, &dest.join("probe.signal"))
 }
 
 /// Render the addressed recipients back as their `@name` / `#group`
@@ -347,6 +376,27 @@ mod tests {
             EnterAction::None => {}
             _ => panic!("empty input should produce EnterAction::None"),
         }
+    }
+
+    #[test]
+    fn sender_watches_matches_the_watchers_accept_set() {
+        // Regression guard for the double-render bug: a directed send is
+        // echoed synthetically ONLY when it reaches no inbox the sender's
+        // own watcher surfaces. `sender_watches` must agree with
+        // `accept_path` about which destination dirs those are.
+        use crate::signal::{broadcast_dir, cwd_dir, signals_base};
+
+        // `#open` → _broadcast/ : watched (would round-trip, so NO echo).
+        assert!(sender_watches(&broadcast_dir()));
+        // `#group` → @group/ : watched.
+        assert!(sender_watches(&signals_base().join("@deploy")));
+        // `@agent` in our own cwd → own_encoded : watched.
+        let own = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        assert!(sender_watches(&cwd_dir(&own)));
+        // `@agent` in some other cwd : NOT watched (invisible → echo).
+        assert!(!sender_watches(&signals_base().join("some-other-cwd-abc123")));
     }
 
     #[test]

@@ -48,6 +48,20 @@ pub struct AppProps {
 /// per-append stays O(cap).
 const MAX_SIGNALS: usize = 5000;
 
+/// Append `sig` to the message buffer, dropping from the head if it would
+/// exceed [`MAX_SIGNALS`]. Both writers into `signals` — the async
+/// watcher drain and the directed-send echo — go through here so the
+/// cap/overflow policy has a single home and the two paths cannot desync.
+fn push_capped(signals: &mut State<Vec<Signal>>, sig: Signal) {
+    let mut v = signals.read().clone();
+    v.push(sig);
+    if v.len() > MAX_SIGNALS {
+        let drop_n = v.len() - MAX_SIGNALS;
+        v.drain(0..drop_n);
+    }
+    signals.set(v);
+}
+
 #[component]
 pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let mut system = hooks.use_context_mut::<SystemContext>();
@@ -85,13 +99,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     if let Some(rx) = props.receiver.clone() {
         hooks.use_future(async move {
             while let Ok(sig) = rx.recv().await {
-                let mut v = signals.read().clone();
-                v.push(sig);
-                if v.len() > MAX_SIGNALS {
-                    let drop_n = v.len() - MAX_SIGNALS;
-                    v.drain(0..drop_n);
-                }
-                signals.set(v);
+                push_capped(&mut signals, sig);
             }
         });
     }
@@ -142,17 +150,11 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             status.set(s);
                             input.set(String::new());
                             cursor.set(0);
-                            // Append the display-only echo, mirroring the
-                            // watcher drain (read/clone/push/cap/set) so a
+                            // Append the display-only echo through the same
+                            // capped path the watcher drain uses, so a
                             // directed send appears in the sender's own
                             // transcript just as a broadcast would.
-                            let mut v = signals.read().clone();
-                            v.push(echo);
-                            if v.len() > MAX_SIGNALS {
-                                let drop_n = v.len() - MAX_SIGNALS;
-                                v.drain(0..drop_n);
-                            }
-                            signals.set(v);
+                            push_capped(&mut signals, echo);
                         }
                         EnterAction::StatusOnly(s) => status.set(s),
                     }

@@ -122,12 +122,7 @@ pub fn write_broadcast(message: &str) -> io::Result<String> {
 pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
     fs::create_dir_all(dest)?;
 
-    let (sender_id, kind) = identify_sender();
-    let from = format!("{}:{}", kind, sender_id);
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let project = cwd.rsplit('/').next().unwrap_or("?").to_string();
+    let (sender_id, from, project, cwd) = sender_identity();
 
     // Build the filename stem (== signal id that `re:<id>` replies
     // reference). `signal_filename` normalizes the sender id — the TUI's
@@ -158,12 +153,7 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
 /// identical to how their own broadcast already appears. It writes
 /// nothing — echo is a display concern, not a bus event.
 pub fn compose_self_echo(message: &str) -> Signal {
-    let (sender_id, kind) = identify_sender();
-    let from = format!("{}:{}", kind, sender_id);
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let project = cwd.rsplit('/').next().unwrap_or("?").to_string();
+    let (_sender_id, from, project, cwd) = sender_identity();
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -179,6 +169,30 @@ pub fn compose_self_echo(message: &str) -> Signal {
         message: message.to_string(),
         ts,
     }
+}
+
+/// Derive this session's wire identity fields once: `(sender_id, from,
+/// project, cwd)`. Shared by `write_signal` (the delivered signal) and
+/// `compose_self_echo` (the local echo) so the echoed row's chip is
+/// always derived identically to the delivered signal's — if this logic
+/// changes, both move together instead of drifting.
+///
+/// `project` is the last non-empty cwd segment, or `"?"` when the cwd is
+/// empty (e.g. `current_dir()` failed). Note `"".rsplit('/').next()`
+/// yields `Some("")`, not `None`, so a naive `.next().unwrap_or("?")`
+/// would render a blank chip — `find(non-empty)` is deliberate.
+fn sender_identity() -> (String, String, String, String) {
+    let (sender_id, kind) = identify_sender();
+    let from = format!("{}:{}", kind, sender_id);
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let project = cwd
+        .rsplit('/')
+        .find(|seg| !seg.is_empty())
+        .unwrap_or("?")
+        .to_string();
+    (sender_id, from, project, cwd)
 }
 
 /// Identify the human at the keyboard. attend-chat is almost always
