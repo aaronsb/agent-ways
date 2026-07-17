@@ -5,6 +5,7 @@ deciders:
   - aaronsb
   - claude
 related:
+  - "[[ADR-104]]"
   - "[[ADR-147]]"
   - "[[ADR-162]]"
   - "[[ADR-163]]"
@@ -35,7 +36,7 @@ That conclusion was false when written, and it rested on two errors.
 — Co-Authored-By and PR footer added despite empty attribution config"
 ([CLOSED/COMPLETED]) — and concerns the **footers**, never the session link. The issue
 it meant is `#41873`, "attribution setting does not control session URL in commit
-messages" ([CLOSED/NOT_PLANNED], April 2026).
+messages" (filed April 2026, [CLOSED/NOT_PLANNED] 2026-05-22).
 
 **A superseded fact.** `#41873` was closed not-planned, and then upstream shipped the
 control anyway. Claude Code **v2.1.183** (2026-06-19) added `attribution.sessionUrl`:
@@ -69,7 +70,7 @@ no repository, therefore no commit instructions). Only the controlled pair is ev
 
 ### How the error persisted
 
-The mis-citation propagated into four artifacts, each of which made the next look
+The mis-citation propagated into five artifacts, each of which made the next look
 corroborated:
 
 1. **ADR-162** — the original wrong citation.
@@ -77,13 +78,23 @@ corroborated:
    setting does not reliably reach the model (upstream #18253)".
 3. **The operator's memory entry** — repeats "attribution setting doesn't govern it
    (#18253)".
-4. **The `softwaredev/delivery/github` macro** — reports `Session-link trailer: OFF`
+4. **[[ADR-163]]** — records the premise second-hand: "the `attribution.sessionUrl`
+   config key is broken upstream, so a mechanical hook that denies the publishing
+   command is the real fix". Its own decision does not rest on this, but an Accepted
+   ADR restating the claim lends it the weight of a second source.
+5. **The `softwaredev/delivery/github` macro** — reports `Session-link trailer: OFF`
    from `attribution.commit`/`.pr` alone, having never read `sessionUrl`.
 
 The macro is the sharp end. It rendered the wrong fact as a reassuring green light in
 every session, including sessions whose system prompt carried the trailer. In the
 control run above, the session had to reason around its own status line contradicting
 its system prompt.
+
+The count itself makes the point. This ADR's first draft listed **four** carriers and
+missed ADR-163 — a document it cites approvingly in its own Decision and lists in
+`related:`. A reviewer found it. An argument about how unchecked claims propagate is
+exactly the argument whose own citations go unchecked, and being the one making it
+confers no immunity.
 
 The lesson generalizes past this key: ADR-162 froze a **contingent upstream fact** as
 though it were a durable architectural truth. Upstream behavior is evidence with a
@@ -105,20 +116,32 @@ outward-facing `gh` commands), user scope rather than per-project, trailer/foote
 position only so inline prose mentions pass. What changes is its standing: it is no
 longer the sole defense.
 
-It is retained because the primary control is weaker than it looks:
+It is retained for two reasons, and two only:
 
 - **Undocumented** — absent from the official settings docs (`#69614`), so it cannot be
-  rediscovered from primary sources and may change without notice.
-- **Default-on** — a host that never receives the fragment leaks by default.
-- **Scope-qualified upstream** — the changelog scopes it to "web and Remote Control
-  sessions". This operator runs `remoteControlAtStartup: true`, which is the likely
-  reason the link reached commits at all; the boundary for other session types is not
-  characterized.
+  rediscovered from primary sources and may change without notice. A key we found by
+  reading a changelog is a key upstream never promised us.
+- **Default-on, and delivered by an independent path** — a host that never receives the
+  fragment leaks by default. This bites only because hook and fragment travel
+  *separately*: the hook rides reconcile-owned `hooks`, the fragment rides dotfiles →
+  fragment store → project. Were they one pipeline, the backstop would be absent exactly
+  when it was needed and would cover nothing. [[ADR-163]] records a real instance —
+  suppression held on one host and leaked on another.
+
+A third reason was considered and **rejected as circular**: that the changelog
+scope-qualifies the key to "web and Remote Control sessions". The qualifier cuts both
+ways. If Remote Control is the likely reason the link reached commits at all — and this
+operator runs `remoteControlAtStartup: true` — then the qualifier may describe *complete
+coverage*, not a gap. Reasoning "the boundary is uncharacterized, therefore keep the
+backstop" while also holding "the backstop stands, therefore the boundary needn't be
+characterized" is ADR-162's error inverted: an unexamined boundary dressed as a known
+risk. The boundary is genuinely uncharacterized. That is an open question, not evidence.
+The two reasons above carry the decision without it.
 
 The backstop costs nothing when the primary control works: the model never emits the
-link, so the hook never fires. It is insurance against the fragment not being
-projected, the key being renamed upstream, or a session type the setting does not
-cover.
+link, so the hook never fires. It is insurance against the fragment not being projected
+and against the key changing upstream — not against a session-type gap we have never
+observed.
 
 **Status surfaces must read the key that governs.** The `github` macro reports the
 session link off `attribution.sessionUrl` (absent means ON), and reports the
@@ -157,7 +180,10 @@ catches, macro reports. Each is independently insufficient.
 - ADR-162's hook code is untouched by this decision; only its header comment needs its
   rationale corrected.
 - The scope boundary of `sessionUrl` ("web and Remote Control sessions") is uncharted
-  for other session types. It is not worth characterizing while the backstop stands.
+  for other session types — it is not known whether such sessions receive the link at
+  all. Characterizing it is cheap (one controlled run with `remoteControlAtStartup`
+  off) and would either close the question or reveal a real gap. Left open
+  deliberately, and named here so the omission is visible rather than assumed away.
 
 ## Alternatives Considered
 
