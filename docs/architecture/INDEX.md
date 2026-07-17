@@ -82,10 +82,11 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-159](./system/ADR-159-remove-ways-tune-curves-and-the-legacy-curve-cadence-field.md) | Remove ways tune-curves and the legacy curve: cadence field | Accepted |
 | [ADR-160](./system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) | Chunked late-interaction matching with softmax-share gating for way selection | Accepted |
 | [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | Proposed |
-| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Accepted |
+| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Superseded |
 | [ADR-163](./system/ADR-163-config-separation-dotfiles-source-of-truth.md) | Config separation — dotfiles as source-of-truth feeding the settings fragment store | Accepted |
 | [ADR-164](./system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md) | File artifacts distributed across hosts must be carried by value not host-absolute reference | Accepted |
 | [ADR-165](./system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md) | Loop-control bookends: start, develop, merge, release, wrap | Accepted |
+| [ADR-167](./system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md) | Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
