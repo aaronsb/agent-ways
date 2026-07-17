@@ -85,6 +85,58 @@ pub fn cwd_basename(path: &str) -> String {
     trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
 
+/// Normalize a string into a signal-id component: every character
+/// outside `[A-Za-z0-9_-]` is replaced with `-`. Signal filenames are
+/// `<sender-id>-<ts>.signal`, and their stems double as the id that
+/// `re:<id>` threaded replies reference. External sender identities are
+/// `$USER@<terminal>` (e.g. `aaron@kitty`, `aaron@iterm.app`), so the raw
+/// id carries `@`/`.` — characters that fail the `is_valid_signal_id`
+/// fence in `attend`/`sensor-peers` and break `attend reply`'s auto-
+/// threading. Sanitizing here, at every write site, keeps ids valid
+/// regardless of sender.
+///
+/// **Lockstep invariant.** The accepted class MUST stay identical to the
+/// `is_valid_signal_id` validators (`attend::main`, `sensor-peers::lib`):
+/// sanitizer output must always pass those fences. If either side's char
+/// class changes, change both.
+pub fn sanitize_id_component(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect()
+}
+
+/// Monotonic per-process counter, appended to signal filenames so two
+/// writes that land in the same clock tick still get distinct names.
+static SIGNAL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Build a collision-resistant signal filename for `sender_id`. The stem
+/// (name without `.signal`) doubles as the signal id that `re:<id>`
+/// threaded replies and `attend reply`'s last-inbound record reference,
+/// so it is always `[A-Za-z0-9_-]+`.
+///
+/// Shape: `<sanitized-sender>-<unix-nanos>-<seq>.signal`. Uniqueness has
+/// two independent guards because a signal bus takes bursts:
+/// - **nanosecond timestamp** separates writers across processes (two
+///   processes hitting the same nanosecond is not realistic);
+/// - **process-local sequence** guarantees uniqueness *within* a process
+///   even if the platform clock is coarse enough to repeat a nanos read.
+///
+/// This closes the collision window the `sanitize_id_component` fix
+/// (issue #368) would otherwise widen — sanitizing can map distinct
+/// external identities (`iterm.app` vs `iterm-app`) to the same sender
+/// stem, and a second-granularity name let same-second writes silently
+/// overwrite each other on rename. Centralized here so both write sites
+/// (`attend send`, the attend-chat TUI) stay byte-identical — see the
+/// wire-format-mirror note in `attend::cmd::send`.
+pub fn signal_filename(sender_id: &str) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = SIGNAL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{}-{}.signal", sanitize_id_component(sender_id), nanos, seq)
+}
+
 /// FNV-1a 64-bit. Deterministic across runs and targets — this is the
 /// property we need, and why we don't use `std::hash::DefaultHasher`.
 /// Crate-internal (`pub(crate)`) so the groups module shares the exact
@@ -104,6 +156,46 @@ pub(crate) fn fnv1a_64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_id_component_normalizes_external_ids() {
+        // The exact shape that broke `attend reply`: `$USER@<terminal>`.
+        assert_eq!(sanitize_id_component("aaron@kitty"), "aaron-kitty");
+        assert_eq!(sanitize_id_component("aaron@iterm.app"), "aaron-iterm-app");
+        // Valid chars pass through untouched.
+        assert_eq!(
+            sanitize_id_component("2f2632d7-3f59_4c24"),
+            "2f2632d7-3f59_4c24"
+        );
+        // Output always satisfies the [A-Za-z0-9_-]+ fence.
+        for input in ["a@b.c/d e", "user+tag%1", "😀"] {
+            let out = sanitize_id_component(input);
+            assert!(
+                out.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "sanitized {input:?} -> {out:?} still contains invalid chars"
+            );
+        }
+    }
+
+    #[test]
+    fn signal_filename_is_valid_and_unique_under_burst() {
+        // Every name ends in `.signal` and its stem passes the
+        // `[A-Za-z0-9_-]+` fence, even for an external `@`-bearing sender.
+        let names: Vec<String> = (0..1000).map(|_| signal_filename("aaron@kitty")).collect();
+        for n in &names {
+            let stem = n.strip_suffix(".signal").expect("ends in .signal");
+            assert!(
+                stem.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "stem {stem:?} contains invalid chars"
+            );
+        }
+        // A tight burst from one sender must never collide — this is the
+        // silent-overwrite hazard the review flagged (findings #1/#2).
+        let unique: std::collections::HashSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "burst produced a colliding filename");
+    }
 
     #[test]
     fn same_cwd_same_identity() {
