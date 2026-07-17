@@ -315,15 +315,26 @@ pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
 }
 
 /// Scan a transcript to detect the model, and resolve its context window through
-/// the one resolver (ADR-166) — the same call `cmd::context` makes, so the gauge
-/// and every fire-evaluation path (show, list, rethink) agree on the window.
+/// the one resolver (ADR-166).
+///
+/// Uses `resolve_for_foreign_session`, **not** the env-honoring `resolve`: every
+/// caller here (`detect_context_window_for`) is a replay tool — `rethink`,
+/// `introspect`, `rethink_dump` — re-evaluating a *recorded* session identified by
+/// project + id, not the operator's live session. The window of a recorded session
+/// is a property of the model it ran, so the operator's `CLAUDE_CONTEXT_WINDOW`
+/// (which states *their current* session's window) must not rescale it — the same
+/// override-leak the peer sensor avoids. The live gauge (`cmd::context`) keeps
+/// honoring the override, because there the operator's window is the right answer.
 ///
 /// This is load-bearing beyond reporting: ADR-126 scales a way's refire half-life
 /// as a fraction of the window, so a wrong answer here rescales the disclosure
-/// curve for every way in the session.
+/// curve for every way in the replayed session.
 fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
     let content = std::fs::read_to_string(transcript).unwrap_or_default();
-    ways_core::context_window::resolve(model_from_transcript(&content).as_deref()).tokens
+    ways_core::context_window::resolve_for_foreign_session(
+        model_from_transcript(&content).as_deref(),
+    )
+    .tokens
 }
 
 /// The model id from the transcript's most recent *real* assistant turn. `None`
@@ -367,6 +378,8 @@ mod context_window_tests {
         let early = dir.join(format!("ways-ctx-early-{}.jsonl", std::process::id()));
 
         // A transcript with an opus-4 assistant turn resolves to the 1M window.
+        // This path resolves for a foreign/recorded session, so it never reads
+        // CLAUDE_CONTEXT_WINDOW — the assertion is env-independent by construction.
         std::fs::write(
             &opus,
             "{\"type\":\"user\"}\n{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\"}}\n",
@@ -376,21 +389,35 @@ mod context_window_tests {
 
         // The launch race: the monitor can start seconds into a session, before the
         // first assistant turn is written. With no model to read, detection returns
-        // the fallback — NOT 1M — which is why the live view must re-detect on refresh
-        // rather than cache this startup value for the whole session.
+        // the 200K default — NOT 1M — which is why the live view must re-detect on
+        // refresh rather than cache this startup value for the whole session. Again
+        // env-independent: the foreign-session resolver does not consult the override.
         std::fs::write(&early, "{\"type\":\"user\"}\n").unwrap();
-        assert_ne!(
-            context_window_from_transcript(&early),
-            1_000_000,
-            "no assistant turn yet → cannot detect the 1M window"
-        );
-        // Absent a CLAUDE_CONTEXT_WINDOW override, the fallback is the 200K default.
-        if std::env::var("CLAUDE_CONTEXT_WINDOW").is_err() {
-            assert_eq!(context_window_from_transcript(&early), 200_000);
-        }
+        assert_eq!(context_window_from_transcript(&early), 200_000);
 
         let _ = std::fs::remove_file(&opus);
         let _ = std::fs::remove_file(&early);
+    }
+
+    #[test]
+    fn walks_back_past_a_synthetic_newest_turn() {
+        // Regression for the sentinel-skip: a real opus turn followed by a
+        // `<synthetic>` interrupt must still resolve to opus's 1M window, not the
+        // 200K default the sentinel alone would yield.
+        let dir = std::env::temp_dir();
+        let f = dir.join(format!("ways-ctx-synth-{}.jsonl", std::process::id()));
+        std::fs::write(
+            &f,
+            "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\"}}\n\
+             {\"type\":\"assistant\",\"message\":{\"model\":\"<synthetic>\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            context_window_from_transcript(&f),
+            1_000_000,
+            "a synthetic newest turn must not mask the real model behind it"
+        );
+        let _ = std::fs::remove_file(&f);
     }
 }
 

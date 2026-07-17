@@ -546,9 +546,17 @@ impl PeerSensor {
             if !line.contains("\"assistant\"") {
                 continue;
             }
-            // Minimal JSON parsing — extract just the fields we need
+            // Minimal JSON parsing — extract just the fields we need.
+            // Skip sentinel turns (`<synthetic>` interrupts / API errors,
+            // empty) so `model` keeps the last *real* model rather than
+            // being overwritten to a placeholder — otherwise a peer whose
+            // newest turn is synthetic resolves to the default window and
+            // its fill is grossly overstated (ADR-166). This mirrors the
+            // walk-back `ways-cli::session::model_from_transcript` does.
             if let Some(m) = extract_json_string(line, "model") {
-                model = m;
+                if !ways_core::context_window::is_sentinel(&m) {
+                    model = m;
+                }
             }
             if let Some(inp) = extract_json_u64(line, "input_tokens") {
                 last_input = inp;
