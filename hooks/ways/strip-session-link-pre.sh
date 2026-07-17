@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash): deny commit / PR / issue authoring commands that carry a
-# Claude-Session transcript link in trailer/footer position. See ADR-162.
+# Claude-Session transcript link in trailer/footer position. See ADR-167
+# (supersedes ADR-162).
 #
 # The session link resolves to the FULL session transcript; publishing it in a
 # commit trailer or PR/issue body is a thin wall in front of accidental secret
-# disclosure. Claude Code ships no mechanical strip — the `attribution` setting
-# does not reliably reach the model (upstream #18253) and the system prompt keeps
-# instructing the link — so enforcement lives here, at user scope, for every repo.
+# disclosure.
+#
+# This hook is a BACKSTOP, not the primary control. `attribution.sessionUrl: false`
+# suppresses the link at the source — the model is never instructed to emit it, so
+# when that works this hook never fires. The key shipped in v2.1.183 and is
+# projected to ~/.claude/settings.json from the settings fragment store (ADR-147 /
+# ADR-163). A controlled experiment on 2026-07-16 (same repo, same v2.1.212, only
+# the key differing) confirms it governs the trailer.
+#
+# It is retained because that setting is undocumented (upstream #69614), defaults
+# to ON, and is scope-qualified upstream ("web and Remote Control sessions") — a
+# host that never receives the fragment leaks by default. ADR-162 previously
+# claimed no setting could govern the link at all, citing #18253; that was the
+# Co-Authored-By/footer bug, not the session link. See ADR-167 for the correction.
 #
 # Mechanism: DENY, not rewrite. Rewriting in place (PreToolUse `updatedInput`) is
 # honored only when the hook also forces `permissionDecision: allow`, which would

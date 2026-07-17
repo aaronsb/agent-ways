@@ -33,10 +33,12 @@ surfaced silent drift that no CI catches:
   credentials was present on north, **absent on slab** — a security drift.
 - Session-link (`Claude-Session:`) suppression worked on north **only because a per-host
   `~/.claude` memory told the agent to disobey the harness prompt** — slab lacked the
-  memory and leaked the URL into commits/PRs. (ADR-162 establishes why: the
-  `attribution.sessionUrl` config key is broken upstream, so a mechanical hook that
-  denies the publishing command is the real fix. *Distributing* that fix is this ADR's
-  concern.)
+  memory and leaked the URL into commits/PRs. (This ADR originally recorded ADR-162's
+  reason: that `attribution.sessionUrl` was *broken upstream*, leaving a mechanical deny
+  hook as the real fix. That premise was false — [[ADR-167]] proves the key governs the
+  link and supersedes ADR-162. The observation above is unaffected: the control, whatever
+  it is, only defends the hosts it reaches. *Distributing* it is this ADR's concern, and
+  the drift is the point.)
 
 Separately, the framework repo was **force-claiming a user-scoped key**: `statusLine` sat
 inert in the repo-tracked `settings.json` (reconcile co-owns only `hooks` +
