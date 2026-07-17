@@ -81,12 +81,14 @@ pub fn way_scored(
     // decayed below REFIRE_FLOOR; otherwise suppress.
     //
     // ADR-126: the cadence comes from `refire:` (fraction of window), resolved
-    // against the session's current window — fetched from the active
-    // transcript; 200k is the conservative fallback when detection fails.
+    // against the session's current window — fetched from the active transcript.
+    // When the transcript can't be read at all, fall back through the one resolver
+    // (ADR-166) rather than a second hardcoded constant, so the operator's
+    // CLAUDE_CONTEXT_WINDOW is still honored on this path.
     let fm = frontmatter::parse(&way_file)?;
     let window = crate::cmd::context::get_context(Some(&project_dir))
         .map(|c| c.tokens_total)
-        .unwrap_or(200_000);
+        .unwrap_or_else(|_| ways_core::context_window::resolve(None).tokens);
     let curve = fm.resolved_curve(window).ok_or_else(|| {
         anyhow::anyhow!(
             "way {} is missing a `refire:` field in its frontmatter (ADR-126)",

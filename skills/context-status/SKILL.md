@@ -22,7 +22,15 @@ echo '{"type":"hbar","data":{"Used (PCT%)":USED,"Free (RPCT%)":REMAINING},"title
 
 Replace `USED`, `REMAINING`, `TOTAL`, `PCT`, `RPCT`, and `MODEL` with actual values from the JSON output. Use `jq` to extract them.
 
-The command auto-detects the context window size from the model in the transcript (it varies by model). Override with `CLAUDE_CONTEXT_WINDOW` env var.
+The command resolves the context window from the model in the transcript (it varies by model), and reports how it got there in `window_source` (ADR-166):
+
+| `window_source` | Meaning |
+|---|---|
+| `model_table` | The model was recognized; `tokens_total` is its real window. |
+| `env_override` | `CLAUDE_CONTEXT_WINDOW` was set and took precedence over detection. |
+| `default` | **The model was not recognized** and a conservative 200K was assumed. |
+
+A `default` reading means the gauge is a guess, not a measurement — the model is missing from the table, and `tokens_total` is likely wrong. Say so rather than reporting the percentage as fact. Detection cannot see Claude Code's own 1M toggle (only the model id reaches the transcript), so `CLAUDE_CONTEXT_WINDOW` is the way to state the window explicitly; it overrides detection on every model.
 
 If the remaining percentage is below 20%, mention that compaction is approaching and suggest wrapping up or prioritizing remaining work.
 

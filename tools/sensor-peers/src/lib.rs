@@ -546,9 +546,17 @@ impl PeerSensor {
             if !line.contains("\"assistant\"") {
                 continue;
             }
-            // Minimal JSON parsing — extract just the fields we need
+            // Minimal JSON parsing — extract just the fields we need.
+            // Skip sentinel turns (`<synthetic>` interrupts / API errors,
+            // empty) so `model` keeps the last *real* model rather than
+            // being overwritten to a placeholder — otherwise a peer whose
+            // newest turn is synthetic resolves to the default window and
+            // its fill is grossly overstated (ADR-166). This mirrors the
+            // walk-back `ways-cli::session::model_from_transcript` does.
             if let Some(m) = extract_json_string(line, "model") {
-                model = m;
+                if !ways_core::context_window::is_sentinel(&m) {
+                    model = m;
+                }
             }
             if let Some(inp) = extract_json_u64(line, "input_tokens") {
                 last_input = inp;
@@ -562,16 +570,24 @@ impl PeerSensor {
         }
 
         let context_tokens = last_input + last_cache_read + last_cache_create;
-        // Model string may include context window hint like "claude-opus-4-6[1m]"
-        // Default to 1M for opus/sonnet 4.x, 200K for older models
-        let context_window: u64 = if model.contains("[1m]") || model.contains("1m]")
-            || model.contains("opus-4") || model.contains("sonnet-4") {
-            1_000_000
-        } else if model == "-" {
-            // Unknown model — can't compute meaningful percentage
+        // The window comes from the one resolver (ADR-166) — this sensor used to
+        // carry its own substring rules, which disagreed with the gauge's about
+        // sonnet-4.
+        //
+        // `resolve_for_foreign_session`, not `resolve`: this window belongs to the
+        // *peer's* session, and `CLAUDE_CONTEXT_WINDOW` states the window of the
+        // process that set it. Applying the operator's override to a peer would
+        // compute that peer's fill against the observer's window — an operator who
+        // set it to 1M would see a haiku peer at 190K/200K (about to compact)
+        // rendered as 19% full, and miss the one peer that actually needs room.
+        //
+        // `-` is the no-model placeholder, not a model id: with no model there is
+        // no meaningful percentage, so the peer's fill is suppressed rather than
+        // defaulted to a number that would look authoritative.
+        let context_window: u64 = if model == "-" {
             0
         } else {
-            200_000
+            ways_core::context_window::resolve_for_foreign_session(Some(&model)).tokens
         };
         let context_percent = if context_window > 0 {
             (context_tokens as f64 / context_window as f64) * 100.0

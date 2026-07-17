@@ -7,6 +7,7 @@
 use anyhow::Result;
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use ways_core::context_window::{self, WindowSource};
 
 pub struct ContextInfo {
     pub tokens_used: u64,
@@ -17,6 +18,10 @@ pub struct ContextInfo {
     pub model: String,
     pub method: String,
     pub session: String,
+    /// How `tokens_total` was arrived at (ADR-166). Carried so a defaulted window
+    /// is never mistaken for a detected one — the failure that let a 1M Fable
+    /// session report 106% of a 200k window.
+    pub window_source: WindowSource,
 }
 
 /// Get context info for the current session. Used by `ways context` and `ways list`.
@@ -41,14 +46,14 @@ pub fn get_context_for_session(session_id: &str) -> Result<ContextInfo> {
 ///
 /// Single source of truth shared with the `context-threshold` trigger in
 /// `scan/state.rs`: both read the same gauge — real API token counts
-/// (`read_token_usage`) divided by the model window (`model_to_window`) —
-/// never a transcript-byte heuristic. The transcript *file* is far larger
-/// than the live context (it holds full tool output, persisted-output blobs
-/// that aren't in context, and JSON envelope overhead), so byte-size badly
+/// (`read_token_usage`) divided by the model window (`context_window::resolve`,
+/// ADR-166) — never a transcript-byte heuristic. The transcript *file* is far
+/// larger than the live context (it holds full tool output, persisted-output
+/// blobs that aren't in context, and JSON envelope overhead), so byte-size badly
 /// over-counts and fires thresholds early.
 pub fn pct_used_from_transcript(transcript: &str) -> Option<u64> {
     let content = std::fs::read_to_string(transcript).ok()?;
-    let window = model_to_window(&detect_model(&content));
+    let window = resolve_window(&content).tokens;
     if window == 0 {
         return None;
     }
@@ -74,9 +79,10 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
 
     let content = std::fs::read_to_string(&transcript)?;
 
-    // Detect model from last assistant message
+    // Detect model from last assistant message, and resolve its window (ADR-166).
     let model = detect_model(&content);
-    let window_tokens = model_to_window(&model);
+    let window = resolve_window(&content);
+    let window_tokens = window.tokens;
 
     // Get token count from API usage data
     let (tokens_used, method) = read_token_usage(&content);
@@ -98,6 +104,7 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
         model,
         method,
         session,
+        window_source: window.source,
     })
 }
 
@@ -163,6 +170,7 @@ pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
             "model": ctx.model,
             "method": ctx.method,
             "session": ctx.session,
+            "window_source": ctx.window_source.as_str(),
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
@@ -215,6 +223,12 @@ pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
 
 // ── Internals ──────────────────────────────────────────────────
 
+/// The most recent *real* assistant model in the transcript.
+///
+/// Sentinel turns (`<synthetic>`, written for interrupts and API errors) are
+/// skipped, not returned: an interrupt does not change which model the session is
+/// running, and treating the sentinel as the model would resolve a live 1M session
+/// to the 200K default. Nine transcripts in local history end on one.
 fn detect_model(content: &str) -> String {
     // Scan from the end for the most recent assistant message with a model field
     for line in content.lines().rev() {
@@ -227,29 +241,27 @@ fn detect_model(content: &str) -> String {
                     .get("message")
                     .and_then(|m| m.get("model"))
                     .and_then(|m| m.as_str())
+                    .filter(|m| !context_window::is_sentinel(m))
                 {
                     return model.to_string();
                 }
             }
         }
     }
-    "unknown".to_string()
+    UNKNOWN_MODEL.to_string()
 }
 
-fn model_to_window(model: &str) -> u64 {
-    if model.contains("opus-4") {
-        1_000_000
-    } else if model.contains("sonnet") || model.contains("haiku") {
-        200_000
-    } else {
-        // Check env override
-        if let Ok(val) = std::env::var("CLAUDE_CONTEXT_WINDOW") {
-            if let Ok(n) = val.parse::<u64>() {
-                return n;
-            }
-        }
-        200_000 // safe default
-    }
+/// Sentinel `detect_model` returns when the transcript holds no assistant turn
+/// yet — the launch race. It is the *absence* of a model, not a model id.
+const UNKNOWN_MODEL: &str = "unknown";
+
+/// Resolve the window for a transcript's detected model through the one resolver
+/// (ADR-166). The `"unknown"` sentinel is an absent model, not a model named
+/// "unknown", so it is passed as `None`.
+fn resolve_window(content: &str) -> context_window::ContextWindow {
+    let model = detect_model(content);
+    let known = (model != UNKNOWN_MODEL).then_some(model.as_str());
+    context_window::resolve(known)
 }
 
 fn read_token_usage(content: &str) -> (u64, String) {

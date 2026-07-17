@@ -53,6 +53,8 @@ ways context
 ways context --json
 ```
 
+**`--json` output** carries `window_source` alongside `tokens_total` (ADR-166): `model_table` (the model was recognized), `env_override` (`CLAUDE_CONTEXT_WINDOW` was set and beat detection), or `default` (the model was **not** recognized and a conservative 200K was assumed — the percentage is then a guess, not a measurement). `CLAUDE_CONTEXT_WINDOW` overrides detection on every model.
+
 ---
 
 ### `ways stats`
