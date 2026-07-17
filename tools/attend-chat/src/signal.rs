@@ -145,6 +145,42 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
     Ok(filename)
 }
 
+/// Compose the in-memory `Signal` for a message THIS session just sent,
+/// so the sender's own transcript can echo it.
+///
+/// Why this exists: a broadcast rides `_broadcast/`, which the sender's
+/// own watcher surfaces (`watcher::accept_path`), so it self-echoes for
+/// free. A directed (`@name`) send is written to the *recipient's* cwd
+/// inbox, which the sender does not watch — so without this it would
+/// vanish from the sender's view even though it was delivered. This
+/// builds the same identity fields the wire signal carries (`from`,
+/// `project`, `cwd`) so the echoed row renders with the sender's chip,
+/// identical to how their own broadcast already appears. It writes
+/// nothing — echo is a display concern, not a bus event.
+pub fn compose_self_echo(message: &str) -> Signal {
+    let (sender_id, kind) = identify_sender();
+    let from = format!("{}:{}", kind, sender_id);
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let project = cwd.rsplit('/').next().unwrap_or("?").to_string();
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Signal {
+        // Not a bus id — this row never came off disk. Marked so it is
+        // never mistaken for a real signal stem should that ever matter.
+        id: format!("local-echo-{ts}"),
+        from,
+        project,
+        cwd,
+        reply_to: None,
+        message: message.to_string(),
+        ts,
+    }
+}
+
 /// Identify the human at the keyboard. attend-chat is almost always
 /// running outside a Claude session (it's the human's coordination
 /// surface), so we skip the Claude-session detection the CLI does and
@@ -246,6 +282,22 @@ mod tests {
         assert_eq!(sig.message, "round-trip body");
         assert!(sig.from.starts_with("external:"));
         assert!(sig.reply_to.is_none());
+    }
+
+    #[test]
+    fn compose_self_echo_carries_message_and_self_identity() {
+        // The echo must render as coming from THIS session (so it shows
+        // the sender's own chip) and carry the message verbatim. It is a
+        // display object, never written to disk.
+        let echo = compose_self_echo("hello @peer");
+        assert_eq!(echo.message, "hello @peer");
+        assert!(
+            echo.from.starts_with("claude:") || echo.from.starts_with("external:"),
+            "echo.from should be a real sender identity, got {:?}",
+            echo.from
+        );
+        assert!(echo.reply_to.is_none());
+        assert!(echo.id.starts_with("local-echo-"), "echo id marks it non-bus");
     }
 
     #[test]

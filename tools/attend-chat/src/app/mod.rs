@@ -120,18 +120,39 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 }
                 KeyCode::Enter => {
                     let v = input.read().clone();
-                    // Hold the read guard rather than clone — Rust
-                    // deref-coerces `&Ref<Vec<Signal>>` to `&[Signal]`,
-                    // so the handler sees a borrowed slice without
-                    // copying the (capped, but potentially 5000-entry)
-                    // signal buffer on every keypress.
-                    let sigs_guard = signals.read();
-                    match handle_enter(&v, &sigs_guard) {
+                    // Scope the read guard to the handler call only: the
+                    // echo arm below needs to `signals.set(...)`, which
+                    // cannot run while a read guard is live. Hold the guard
+                    // rather than clone for the call — Rust deref-coerces
+                    // `&Ref<Vec<Signal>>` to `&[Signal]`, so the handler
+                    // sees a borrowed slice without copying the (capped,
+                    // but potentially 5000-entry) buffer on every keypress.
+                    let action = {
+                        let sigs_guard = signals.read();
+                        handle_enter(&v, &sigs_guard)
+                    };
+                    match action {
                         EnterAction::None => {}
                         EnterAction::ClearWithStatus(s) => {
                             status.set(s);
                             input.set(String::new());
                             cursor.set(0);
+                        }
+                        EnterAction::ClearWithStatusAndEcho { status: s, echo } => {
+                            status.set(s);
+                            input.set(String::new());
+                            cursor.set(0);
+                            // Append the display-only echo, mirroring the
+                            // watcher drain (read/clone/push/cap/set) so a
+                            // directed send appears in the sender's own
+                            // transcript just as a broadcast would.
+                            let mut v = signals.read().clone();
+                            v.push(echo);
+                            if v.len() > MAX_SIGNALS {
+                                let drop_n = v.len() - MAX_SIGNALS;
+                                v.drain(0..drop_n);
+                            }
+                            signals.set(v);
                         }
                         EnterAction::StatusOnly(s) => status.set(s),
                     }

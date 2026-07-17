@@ -15,7 +15,7 @@ use crate::legend::{
     parse_addressed, Addressed, Sigil,
 };
 use crate::sessions::discover as discover_sessions;
-use crate::signal::{cwd_dir, write_broadcast, write_signal, Signal};
+use crate::signal::{compose_self_echo, cwd_dir, write_broadcast, write_signal, Signal};
 use crate::slash;
 use crate::text_layout::split_at_char;
 
@@ -44,6 +44,13 @@ pub enum EnterAction {
     None,
     /// Success path: set status, clear input + cursor.
     ClearWithStatus(String),
+    /// Directed-send success: like [`EnterAction::ClearWithStatus`], but
+    /// also append `echo` to the transcript. Directed (`@name`) sends
+    /// land in the recipient's cwd inbox, which the sender does not
+    /// watch, so — unlike broadcasts — they never round-trip back into
+    /// the sender's own view. The closure appends `echo` so the sender
+    /// sees their own message land.
+    ClearWithStatusAndEcho { status: String, echo: Signal },
     /// Failure path: set status, leave input + cursor intact so the
     /// user can edit and retry.
     StatusOnly(String),
@@ -81,19 +88,32 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
     // entire send if any address is bad, so one typo doesn't
     // half-deliver and the user can edit + retry the original line.
     let recipients = parse_addressed(&msg);
-    let result = if recipients.is_empty() {
-        write_broadcast(&msg).map(|n| format!("sent: {n}"))
+    if recipients.is_empty() {
+        // Broadcast rides `_broadcast/`, which the sender's own watcher
+        // surfaces — so it self-echoes through the normal signal path and
+        // needs no synthetic echo here.
+        match write_broadcast(&msg) {
+            Ok(n) => EnterAction::ClearWithStatus(format!("sent: {n}")),
+            Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
+        }
     } else {
-        resolve_recipients(&recipients, &agents).and_then(|dests| {
+        // Directed sends go to each recipient's cwd inbox, which the
+        // sender does not watch — so echo the message once (regardless of
+        // recipient count) into the sender's own transcript. The "sent →
+        // @a @b" status line already reports where it went.
+        let sent = resolve_recipients(&recipients, &agents).and_then(|dests| {
             for dir in &dests {
                 write_signal(dir, &msg)?;
             }
-            Ok(format!("sent → {}", recipient_labels(&recipients).join(" ")))
-        })
-    };
-    match result {
-        Ok(s) => EnterAction::ClearWithStatus(s),
-        Err(e) => EnterAction::StatusOnly(format!("send failed: {}", e)),
+            Ok(())
+        });
+        match sent {
+            Ok(()) => EnterAction::ClearWithStatusAndEcho {
+                status: format!("sent → {}", recipient_labels(&recipients).join(" ")),
+                echo: compose_self_echo(&msg),
+            },
+            Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
+        }
     }
 }
 
