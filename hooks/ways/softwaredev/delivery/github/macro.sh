@@ -262,56 +262,98 @@ fi
 # ============================================================
 # SECTION 3: Attribution / session-link control surface
 # ============================================================
-# The `attribution` setting (settings.json) governs the text appended to
-# commits and PR bodies — including the `Claude-Session:` trailer and the
-# session URL. Empty string disables it; absent means default (trailer ON).
-# Reporting the effective value here gives that trailer a visible control
-# surface at commit/PR/ship time: you can see whether session links are on,
-# and which settings file decides it.
+# `attribution` governs what Claude Code appends to commits and PR bodies.
+# It is TWO INDEPENDENT CONTROLS, and conflating them is exactly the error
+# ADR-167 corrects:
 #
-# Precedence is an approximation of Claude Code's resolution order
-# (project-local > project > user-global, highest wins). It does not account
-# for managed/enterprise policy or command-line overrides.
+#   attribution.sessionUrl  (bool, default TRUE)  -> the `Claude-Session:`
+#       transcript link. This is the disclosure control — the link resolves to
+#       the full session transcript. Added upstream in v2.1.183; undocumented
+#       (upstream #69614), which is how it stayed unset here for a month.
+#   attribution.commit / .pr  (string, "" disables) -> the Co-Authored-By and
+#       "Generated with Claude Code" FOOTERS. These never governed the session
+#       link.
+#
+# This section previously reported "Session-link trailer" off commit/pr alone
+# and never read sessionUrl, so it printed "OFF ... no session trailer" in
+# every session — including sessions whose system prompt carried the trailer.
+# A surface that asserts a fact it never read is worse than no surface.
+#
+# Precedence approximates Claude Code's resolution order (project-local >
+# project > user-global, highest wins). Each sub-key resolves INDEPENDENTLY
+# because Claude Code deep-merges objects: a project file setting .commit does
+# not hide a user file setting .sessionUrl. Managed/enterprise policy and
+# command-line overrides are not accounted for.
 
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-ATTR_SRC=""
-COMMIT_RAW="__UNSET__"
-PR_RAW="__UNSET__"
-for f in \
-  "$PROJECT_ROOT/.claude/settings.local.json" \
-  "$PROJECT_ROOT/.claude/settings.json" \
-  "$HOME/.claude/settings.json"; do
-  [[ -f "$f" ]] || continue
-  jq -e 'has("attribution")' "$f" >/dev/null 2>&1 || continue
-  COMMIT_RAW=$(jq -r 'if .attribution|has("commit") then .attribution.commit else "__UNSET__" end' "$f" 2>/dev/null)
-  PR_RAW=$(jq -r 'if .attribution|has("pr") then .attribution.pr else "__UNSET__" end' "$f" 2>/dev/null)
-  ATTR_SRC="$f"
-  break
-done
+ATTR_FILES=(
+  "$PROJECT_ROOT/.claude/settings.local.json"
+  "$PROJECT_ROOT/.claude/settings.json"
+  "$HOME/.claude/settings.json"
+)
 
-describe_attr() {
+# Resolve one attribution sub-key down the precedence chain.
+# Echoes "<value>|<source>", or "__UNSET__|" when no file defines it.
+# Note the __UNSET__ sentinel comes from jq, not from emptiness: "" is a
+# legitimate value for commit/pr and must not read as absent.
+resolve_attr_key() {
+  local key="$1" f v
+  for f in "${ATTR_FILES[@]}"; do
+    [[ -f "$f" ]] || continue
+    v=$(jq -r --arg k "$key" \
+      'if (.attribution? // {} | has($k)) then (.attribution[$k] | tostring) else "__UNSET__" end' \
+      "$f" 2>/dev/null) || continue
+    [[ "$v" == "__UNSET__" ]] && continue
+    printf '%s|%s\n' "$v" "$f"
+    return
+  done
+  printf '__UNSET__|\n'
+}
+
+# Shorten $HOME to ~ for display. Don't use ${var/#$HOME/~}: bash
+# tilde-expands the replacement, turning ~ back into $HOME (a no-op).
+src_label() {
   case "$1" in
-    __UNSET__) echo "default (Claude attribution + session trailer ON)" ;;
-    "")        echo "OFF (empty — no attribution, no session trailer)" ;;
-    *)         echo "custom: \"$1\"" ;;
+    "") echo "no settings file" ;;
+    "$HOME"/*) echo "~${1#"$HOME"}" ;;
+    *) echo "$1" ;;
   esac
 }
 
+SU_RAW="$(resolve_attr_key sessionUrl)"; SU_SRC="${SU_RAW#*|}"; SU_VAL="${SU_RAW%%|*}"
+CM_RAW="$(resolve_attr_key commit)";     CM_SRC="${CM_RAW#*|}"; CM_VAL="${CM_RAW%%|*}"
+PR_RAW="$(resolve_attr_key pr)";         PR_SRC="${PR_RAW#*|}"; PR_VAL="${PR_RAW%%|*}"
+
 echo ""
-if [[ -z "$ATTR_SRC" ]]; then
-  echo "**Session-link trailer**: default (ON) — set \`attribution.commit\` / \`.pr\` to \`\"\"\` in settings.json to disable"
-else
-  # Shorten $HOME to ~ for display. Don't use ${var/#$HOME/~}: bash
-  # tilde-expands the replacement, turning ~ back into $HOME (a no-op).
-  case "$ATTR_SRC" in
-    "$HOME"/*) SRC_LABEL="~${ATTR_SRC#"$HOME"}" ;;
-    *)         SRC_LABEL="$ATTR_SRC" ;;
+
+# --- the session link (the disclosure control) ---
+case "$SU_VAL" in
+  false)
+    echo "**Session-link trailer**: OFF — \`attribution.sessionUrl: false\` [$(src_label "$SU_SRC")]"
+    ;;
+  true)
+    echo "**Session-link trailer**: **ON** — \`attribution.sessionUrl: true\` [$(src_label "$SU_SRC")]. This publishes a link to the FULL session transcript; set it to \`false\` to suppress (ADR-167)."
+    ;;
+  __UNSET__)
+    echo "**Session-link trailer**: **ON (default)** — \`attribution.sessionUrl\` is unset and defaults to true. This publishes a link to the FULL session transcript; set \`attribution.sessionUrl: false\` in settings.json to suppress (ADR-167)."
+    ;;
+  *)
+    echo "**Session-link trailer**: unrecognized \`attribution.sessionUrl\` value \`$SU_VAL\` (expected true/false) [$(src_label "$SU_SRC")] — treat as ON."
+    ;;
+esac
+
+# --- the attribution footers (a separate, cosmetic control) ---
+describe_footer() {
+  case "$1" in
+    __UNSET__) echo "default (ON)" ;;
+    "")        echo "OFF (empty)" ;;
+    *)         echo "custom: \"$1\"" ;;
   esac
-  if [[ "$COMMIT_RAW" == "$PR_RAW" ]]; then
-    echo "**Session-link trailer**: $(describe_attr "$COMMIT_RAW") [$SRC_LABEL]"
-  else
-    echo "**Session-link trailer** [$SRC_LABEL]:"
-    echo "- commit: $(describe_attr "$COMMIT_RAW")"
-    echo "- pr: $(describe_attr "$PR_RAW")"
-  fi
+}
+if [[ "$CM_VAL" == "$PR_VAL" && "$CM_SRC" == "$PR_SRC" ]]; then
+  echo "**Attribution footers** (Co-Authored-By / \"Generated with Claude Code\"): $(describe_footer "$CM_VAL") [$(src_label "$CM_SRC")]"
+else
+  echo "**Attribution footers** (Co-Authored-By / \"Generated with Claude Code\"):"
+  echo "- commit: $(describe_footer "$CM_VAL") [$(src_label "$CM_SRC")]"
+  echo "- pr: $(describe_footer "$PR_VAL") [$(src_label "$PR_SRC")]"
 fi
