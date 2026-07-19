@@ -55,7 +55,9 @@ pub const WAYS_PERMS: &[&str] = &[
 /// A hard block on the agent's file tools reaching credential material — narrow
 /// and high-confidence (paths with essentially no legitimate agent read target).
 /// `.env.example` / `.env.sample` are intentionally NOT denied. Bash-path access
-/// is out of scope (see the ADR).
+/// is out of scope (see the ADR). No separate `Write(...)` entries: an
+/// `Edit(path)` deny also governs the Write and NotebookEdit tools, so
+/// `Edit(~/.ssh/**)` already blocks writes.
 pub const WAYS_DENY: &[&str] = &[
     "Read(~/.ssh/**)",
     "Edit(~/.ssh/**)",
@@ -636,6 +638,33 @@ mod tests {
         let deny = deny_list(&m.settings);
         assert!(deny.iter().any(|d| d == "Bash(rm:*)"), "user deny must survive");
         assert!(deny.iter().any(|d| d == "Read(~/.ssh/**)"), "ours added alongside");
+    }
+
+    #[test]
+    fn strips_previously_owned_redundant_ssh_write_deny() {
+        // Deny-side sibling of `strips_previously_owned_redundant_write_perm`: a
+        // prior reconcile recorded the old WAYS_DENY (which included the now-removed
+        // redundant `Write(~/.ssh/**)`; Edit already covers Write). On the next
+        // reconcile it must be cleaned up as deprecated-ours, while the user's own
+        // deny and the retained Read/Edit(~/.ssh/**) survive.
+        let live = json!({
+            "permissions": { "deny": ["Bash(rm:*)", "Read(~/.ssh/**)", "Edit(~/.ssh/**)", "Write(~/.ssh/**)"] }
+        });
+        let base = Owned {
+            deny: WAYS_DENY
+                .iter()
+                .map(|s| s.to_string())
+                .chain(std::iter::once("Write(~/.ssh/**)".to_string()))
+                .collect(),
+            ..Owned::default()
+        };
+        let m = merge(&live, &ours_hooks(), &base, true).unwrap();
+        let deny = deny_list(&m.settings);
+        assert!(!deny.iter().any(|d| d == "Write(~/.ssh/**)"), "deprecated ssh Write must be removed: {deny:?}");
+        assert!(deny.iter().any(|d| d == "Bash(rm:*)"), "user deny must survive");
+        assert!(deny.iter().any(|d| d == "Read(~/.ssh/**)"), "Read deny retained");
+        assert!(deny.iter().any(|d| d == "Edit(~/.ssh/**)"), "Edit deny retained");
+        assert!(!m.base.deny.iter().any(|d| d == "Write(~/.ssh/**)"), "new base drops it");
     }
 
     #[test]
