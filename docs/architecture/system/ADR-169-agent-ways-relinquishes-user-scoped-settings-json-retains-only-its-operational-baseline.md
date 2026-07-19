@@ -157,6 +157,23 @@ retains only its own operational and security baseline in `settings.json`.**
      never be declared as a managed fragment, or the tool would thrash against Claude
      Code on every run.
 
+8. **Relinquish protocol for the ownership handoff.** The steady-state disjoint
+   contract assumes ownership never moves. The retirement *moves* ownership of the
+   user-fragment keys (`statusLine`, `attribution`, `env`, …) from agent-ways'
+   projector to the dotfiles tool, and that transition has a hazard the contract does
+   not cover: if agent-ways' final act treated those keys as *deprecated-ours* (in its
+   base, absent from `ours`), its three-way merge would **remove** them from
+   `settings.json` — clobbering the value the dotfiles tool now asserts, order-
+   dependently. The retirement therefore **relinquishes** rather than deprecated-
+   removes: it clears agent-ways' fragment base for those keys and **leaves the live
+   values in place** as foreign keys for the dotfiles tool to adopt. In practice, because
+   the projector is *removed entirely* (not shipped in a deprecation mode), it simply
+   never runs deprecated-removal again — removal *is* the relinquish, **provided the
+   removal performs no final "cleanup" projector pass**. Adoption on the other side is
+   the ordinary "migrating" behavior: a live foreign value is asserted as `ours`, the
+   base is seeded from it, and the result is idempotent. Once agent-ways stops touching
+   the keys, steady-state disjointness is restored and run order no longer matters.
+
 **Open point pending ratification:** whether the retirement in (2) is total, or
 whether agent-ways keeps a *minimal* user-config affordance for operators who run
 agent-ways with no dotfiles. The recommendation of this ADR is total retirement

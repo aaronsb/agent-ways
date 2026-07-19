@@ -133,6 +133,30 @@ regardless of the order they run, and none can silently undo another's or the
 operator's edits. `/config` and the in-situ writers are just another "foreign"
 editor that every writer preserves.
 
+## Ownership handoff (relinquish / adopt)
+
+The coexistence contract above assumes ownership is *static*. When a key's owner
+changes — e.g. one tool is retired and another takes over `statusLine` — there is a
+transition hazard the steady-state contract does not cover: if the outgoing owner's
+last merge treats the key as **deprecated-ours** (in its base, absent from `ours`),
+it will **remove** the value from the file, clobbering the incoming owner's assertion
+in an order-dependent way.
+
+Hand off safely with **relinquish + adopt**:
+
+- **Relinquish (outgoing owner):** stop asserting the key *without* deprecated-
+  removing it. Clear the key from your last-applied base and leave the live value in
+  place as a foreign key. Do **not** run a "final cleanup" pass that would assert an
+  empty owned set and trigger deprecated-removal. (Deleting the tool entirely achieves
+  this for free — it never runs again, so it never removes anything; its stale base is
+  orphaned, not consumed.)
+- **Adopt (incoming owner):** treat the live value as a foreign key on first run —
+  assert `ours` = that value, seed your base from it. This is exactly the "migrating"
+  behavior (base seeded from live, self-audit passes). Idempotent thereafter.
+
+Once the outgoing owner has relinquished, steady-state disjointness is restored and
+run order no longer matters.
+
 ## Test vectors
 
 A port should reproduce these behaviors (names mirror the reference suite in
