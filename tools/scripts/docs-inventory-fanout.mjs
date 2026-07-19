@@ -63,7 +63,6 @@ const CLUSTERS = [
   ]},
   { name: 'ways-skills', priority: 'HIGH — user-flagged', files: [
     'skills/ways-tests/SKILL.md',
-    'skills/ways-settings/SKILL.md',
     'skills/ways-localize/SKILL.md',
     'skills/ways-update/SKILL.md',
     'skills/docs/SKILL.md',

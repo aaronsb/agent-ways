@@ -81,13 +81,6 @@ pub struct Config {
     /// resolves by looking up the preset here and multiplying by the
     /// operator's current context window.
     pub refire_presets: HashMap<String, f64>,
-    /// Override for where `ways settings` refreshes its Claude Code settings
-    /// schema from (ADR-147). `None` = the built-in default (community
-    /// SchemaStore). Resolution precedence is env > this > default; the resolver
-    /// lives in the `ways` binary's `cmd::settings::source`. A config surface so
-    /// an org can point at an internal mirror or a pinned version instead of the
-    /// public schema.
-    pub settings_schema_url: Option<String>,
     /// Whether `ways reconcile` projects the framework's secret-path
     /// `permissions.deny` baseline into `settings.json` (ADR-152). Default
     /// `true` — secure by default. Set `secret_path_deny: false` to suppress the
@@ -131,7 +124,6 @@ impl Default for Config {
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
             refire_presets,
-            settings_schema_url: None,
             secret_path_deny: true,
         }
     }
@@ -271,12 +263,6 @@ impl Config {
                 if let (Some(name), Some(fraction)) = (k.as_str(), v.as_f64()) {
                     self.refire_presets.insert(name.to_string(), fraction);
                 }
-            }
-        }
-        if let Some(v) = doc.get("settings_schema_url").and_then(|v| v.as_str()) {
-            let v = v.trim();
-            if !v.is_empty() {
-                self.settings_schema_url = Some(v.to_string());
             }
         }
         if let Some(v) = doc.get("secret_path_deny").and_then(|v| v.as_bool()) {
@@ -421,23 +407,6 @@ mod tests {
         cfg.apply_yaml("language: ja\nparent_threshold_multiplier: 0.7");
         assert_eq!(cfg.language, "ja");
         assert_eq!(cfg.parent_threshold_multiplier, 0.7);
-    }
-
-    #[test]
-    fn settings_schema_url_defaults_none_and_parses() {
-        let mut cfg = Config::default();
-        assert_eq!(cfg.settings_schema_url, None);
-        cfg.apply_yaml("settings_schema_url: https://mirror.example/cc.json");
-        assert_eq!(
-            cfg.settings_schema_url.as_deref(),
-            Some("https://mirror.example/cc.json")
-        );
-        // Blank is ignored (stays whatever it was).
-        cfg.apply_yaml("settings_schema_url: '   '");
-        assert_eq!(
-            cfg.settings_schema_url.as_deref(),
-            Some("https://mirror.example/cc.json")
-        );
     }
 
     #[test]

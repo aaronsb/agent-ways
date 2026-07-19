@@ -67,9 +67,9 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Accepted |
 | [ADR-145](./system/ADR-145-explicit-three-source-convergence-manifest.md) | Explicit three-source convergence manifest | Draft |
 | [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
-| [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Accepted |
+| [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Superseded |
 | [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
-| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Accepted |
+| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Superseded |
 | [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
 | [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Accepted |
 | [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
@@ -89,6 +89,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-166](./system/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | Draft |
 | [ADR-167](./system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md) | Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop | Accepted |
 | [ADR-168](./system/ADR-168-instance-addressable-directed-messaging-for-same-cwd-attend-siblings.md) | Instance-addressable directed messaging for same-cwd attend siblings | Draft |
+| [ADR-169](./system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md) | agent-ways relinquishes user-scoped settings.json; retains only its operational baseline | Proposed |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_

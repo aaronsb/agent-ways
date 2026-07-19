@@ -396,7 +396,18 @@ fn is_os_transient(rel: &str) -> bool {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("");
-    matches!(base, ".DS_Store" | "Thumbs.db" | "desktop.ini") || base.starts_with("._")
+    // OS scratch: Spotlight `.DS_Store`, Windows `Thumbs.db`/`desktop.ini`,
+    // macOS AppleDouble `._*`.
+    if matches!(base, ".DS_Store" | "Thumbs.db" | "desktop.ini") || base.starts_with("._") {
+        return true;
+    }
+    // VCS scratch: git's background-maintenance and lock files under `.git/`
+    // (`maintenance.lock`, `gc.pid`, any `*.lock`). git can create or drop these
+    // between two observations of the tree — the macOS CI runner reliably races
+    // `.git/objects/maintenance.lock` into the middle of a snapshot, which would
+    // otherwise make an unchanged tree read as mutated.
+    let in_git = rel == ".git" || rel.starts_with(".git/") || rel.contains("/.git/");
+    in_git && (base.ends_with(".lock") || base == "gc.pid")
 }
 
 fn git_run(dir: &Path, args: &[&str]) -> Result<()> {
