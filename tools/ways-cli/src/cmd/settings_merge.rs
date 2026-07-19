@@ -31,13 +31,23 @@ use serde_json::{Map, Value};
 use std::path::Path;
 
 /// The permission strings agent-ways owns in `permissions.allow`.
+///
+/// This is the framework's operational baseline (ADR-169): the *core binaries*
+/// agent-ways ships and needs the agent to invoke directly, plus `Edit(~/.claude/**)`.
+/// It is deliberately **minimal** — adjacent or optional tooling (mermaid, the ADR
+/// CLI, knowledge-graph / thinking-strategies MCP servers, etc.) is user-scoped and
+/// owned by the operator (or a dotfiles config tool), not claimed here. Keeping this
+/// set minimal is what lets a peer writer prove disjointness by set-subtraction.
+///
+/// `Edit(~/.claude/**)` covers the Write and NotebookEdit tools too (a single
+/// `Edit(path)` rule governs all three per the Claude Code tools reference) and also
+/// grants Read, so no separate `Write(~/.claude/**)` entry is needed — it was inert.
 pub const WAYS_PERMS: &[&str] = &[
     "Bash(ways:*)",
     "Bash(attend:*)",
     "Bash(attend-chat:*)",
     "Bash(way-embed:*)",
     "Edit(~/.claude/**)",
-    "Write(~/.claude/**)",
 ];
 
 /// The framework-default secret-path `permissions.deny` baseline (ADR-152).
@@ -49,7 +59,6 @@ pub const WAYS_PERMS: &[&str] = &[
 pub const WAYS_DENY: &[&str] = &[
     "Read(~/.ssh/**)",
     "Edit(~/.ssh/**)",
-    "Write(~/.ssh/**)",
     "Read(~/.aws/**)",
     "Read(~/.gnupg/**)",
     "Read(~/.config/gcloud/**)",
@@ -562,6 +571,37 @@ mod tests {
         assert_eq!(m.settings["theme"], "dark");
         // permissions.deny (user's) survives alongside our allow additions.
         assert_eq!(m.settings["permissions"]["deny"][0], "Bash(rm:*)");
+    }
+
+    #[test]
+    fn strips_previously_owned_redundant_write_perm() {
+        // Migration path (ADR-169): a prior reconcile wrote the old baseline, which
+        // included the now-removed redundant `Write(~/.claude/**)` (Edit already
+        // covers Write). Its base records that entry and the live file still carries
+        // it. On the next reconcile — ours no longer includes it — it must be cleaned
+        // up as a deprecated-ours entry, while the user's own allow survives.
+        let live = json!({
+            "permissions": { "allow": ["Bash(npm:*)", "Edit(~/.claude/**)", "Write(~/.claude/**)"] }
+        });
+        let base = Owned {
+            perms: WAYS_PERMS
+                .iter()
+                .map(|s| s.to_string())
+                .chain(std::iter::once("Write(~/.claude/**)".to_string()))
+                .collect(),
+            ..Owned::default()
+        };
+        let m = merge(&live, &ours_hooks(), &base, false).unwrap();
+        let allow: Vec<String> = m.settings["permissions"]["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        assert!(!allow.iter().any(|p| p == "Write(~/.claude/**)"), "deprecated Write must be removed: {allow:?}");
+        assert!(allow.iter().any(|p| p == "Bash(npm:*)"), "user perm must survive");
+        assert!(allow.iter().any(|p| p == "Edit(~/.claude/**)"), "current ours present");
+        assert!(!m.base.perms.iter().any(|p| p == "Write(~/.claude/**)"), "new base drops it");
     }
 
     fn deny_list(settings: &Value) -> Vec<String> {

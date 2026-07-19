@@ -136,6 +136,27 @@ retains only its own operational and security baseline in `settings.json`.**
    `settings.local.json` "escape hatch" layer; it does not exist at user scope and is
    dropped.
 
+7. **Authoritative key-set partition.** Every user-scope `settings.json` key falls
+   into exactly one of three buckets (mirrored in the dotfiles-side ADR-010 so the
+   partition is agreed on both sides and disjointness holds by set-subtraction, not
+   guesswork):
+
+   - **(A) agent-ways baseline** — `hooks` (its shipped entries) +
+     `permissions.allow` `{Bash(ways:*), Bash(attend:*), Bash(attend-chat:*),
+     Bash(way-embed:*), Edit(~/.claude/**)}` + `permissions.deny` (`WAYS_DENY`). This
+     is exactly the `WAYS_PERMS`/`WAYS_DENY` constants — the constant *is* the
+     boundary.
+   - **(B) user/dotfiles** — everything else user-authored, including the
+     agent-ways-*adjacent* tooling that agent-ways does **not** ship as a core binary
+     (`way-match`, `kg`, `mmaid`, `adr`/`adr-tool`, the knowledge-graph and
+     thinking-strategies MCP servers, shell/prompt tooling, generic `Bash(...)`,
+     `Read(~/**)`, …). Owned by the operator via the dotfiles config tool.
+   - **(C) Claude Code runtime** — keys Claude Code writes autonomously (`model` and
+     the `/config` toggles; `advisorModel`, `effortLevel`, and other in-situ writes).
+     **Neither tool owns these**; both must leave them to base-preservation. They must
+     never be declared as a managed fragment, or the tool would thrash against Claude
+     Code on every run.
+
 **Open point pending ratification:** whether the retirement in (2) is total, or
 whether agent-ways keeps a *minimal* user-config affordance for operators who run
 agent-ways with no dotfiles. The recommendation of this ADR is total retirement
