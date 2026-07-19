@@ -158,41 +158,6 @@ pub fn frontmatter_schema() -> PathBuf {
     core_ways_root().join("frontmatter-schema.yaml")
 }
 
-const SETTINGS_SCHEMA_FILE: &str = "claude-code-settings.schema.json";
-
-/// The durable user copy of the settings schema — `$XDG_CONFIG/agent-ways/…` —
-/// which is the `ways settings schema --refresh` write target and outranks the
-/// shipped copy. Durable: survives `make update`.
-pub fn settings_schema_user_copy() -> PathBuf {
-    normalize_path_sep(&config_root().join(SETTINGS_SCHEMA_FILE))
-}
-
-/// The Claude Code settings schema, read at runtime by `ways settings` (ADR-147).
-///
-/// Externalized rather than compiled into the binary: Claude Code's settings
-/// surface changes often, so this must update without a rebuild, and the
-/// every-turn binary shouldn't carry data only `ways settings` reads. Resolution:
-///   1. `$WAYS_SETTINGS_SCHEMA_FILE` — explicit override, returned unconditionally
-///      (so an error can name it, and tests can force absence)
-///   2. `$XDG_CONFIG/agent-ways/claude-code-settings.schema.json` — durable user
-///      copy (the `--refresh` target), if it exists
-///   3. `$XDG_DATA/agent-ways/share/claude-code-settings.schema.json` — the
-///      shipped copy (refreshed by `make update`); returned as the fallback even
-///      if absent, so the caller can name it
-pub fn settings_schema_file() -> PathBuf {
-    if let Ok(p) = std::env::var("WAYS_SETTINGS_SCHEMA_FILE") {
-        let p = p.trim();
-        if !p.is_empty() {
-            return normalize_path_sep(Path::new(p));
-        }
-    }
-    let user = settings_schema_user_copy();
-    if user.exists() {
-        return user;
-    }
-    normalize_path_sep(&data_root().join("share").join(SETTINGS_SCHEMA_FILE))
-}
-
 // --- user ($XDG_CONFIG) ---
 
 /// The operator's own ways root: `$XDG_CONFIG/agent-ways/ways` (the new "user"

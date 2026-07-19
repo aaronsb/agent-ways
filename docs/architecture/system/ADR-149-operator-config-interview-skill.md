@@ -1,10 +1,11 @@
 ---
-status: Accepted
+status: Superseded
 date: 2026-07-01
 deciders:
   - aaronsb
   - claude
 related:
+  - "[[ADR-169]]"
   - "[[ADR-147]]"
   - "[[ADR-134]]"
 ---

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 
 // The shared engine now lives in the `ways-core` library crate (ADR-151).
 // Re-export it at the crate root so existing `crate::util::…`, `crate::paths::…`,
@@ -420,11 +419,6 @@ enum Commands {
         #[arg(long = "ref", value_name = "REF")]
         git_ref: Option<String>,
     },
-    /// settings.json fragment store — author settings as composable YAML fragments (ADR-147)
-    Settings {
-        #[command(subcommand)]
-        command: SettingsCommand,
-    },
 }
 
 #[derive(Subcommand)]
@@ -662,80 +656,6 @@ enum PermissionsCommand {
     Audit,
 }
 
-#[derive(Subcommand)]
-enum SettingsCommand {
-    /// Lint a settings.json fragment store: schema-valid, scope-legal, duplicate-scalar
-    Lint {
-        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
-        path: Option<PathBuf>,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show or refresh the Claude Code settings schema and its (configurable) source
-    Schema {
-        /// Print only the resolved source URL (for scripts)
-        #[arg(long)]
-        source: bool,
-        /// Fetch the latest schema from the configured source into the durable user copy
-        #[arg(long)]
-        refresh: bool,
-    },
-    /// Scaffold a fragment for a settings key (fill-in-the-blank template from the schema)
-    New {
-        /// The settings.json key to scaffold (must exist in the schema)
-        key: String,
-        /// Scope [default: managed for managed-only keys, else user]
-        #[arg(long)]
-        scope: Option<String>,
-        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
-        #[arg(long)]
-        dir: Option<PathBuf>,
-    },
-    /// Show the fragment store: inventory (no key) or a manpage-style detail for one key
-    Show {
-        /// A settings key to detail; omit for the full inventory
-        key: Option<String>,
-        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-    /// Compile a fragment store into baked settings.json (+ provenance)
-    Compile {
-        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
-        path: Option<PathBuf>,
-        /// Only compile this scope
-        #[arg(long)]
-        scope: Option<String>,
-        /// Write <scope>.settings.json + provenance.json here (else print one scope to stdout)
-        #[arg(long)]
-        out: Option<PathBuf>,
-    },
-    /// Project a compiled store into the live settings.json (user/project); emits managed as a blob
-    Project {
-        /// Store directory (default: $XDG_CONFIG_HOME/agent-ways/settings)
-        path: Option<PathBuf>,
-        /// Only project this scope
-        #[arg(long)]
-        scope: Option<String>,
-        /// Preview changes without writing
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-/// Parse an optional `--scope` string into a settings scope.
-fn parse_settings_scope(scope: Option<String>) -> Result<Option<cmd::settings::fragment::Scope>> {
-    use cmd::settings::fragment::Scope;
-    match scope.as_deref() {
-        None => Ok(None),
-        Some("user") => Ok(Some(Scope::User)),
-        Some("project") => Ok(Some(Scope::Project)),
-        Some("managed") => Ok(Some(Scope::Managed)),
-        Some(other) => anyhow::bail!("invalid --scope `{other}` (want user|project|managed)"),
-    }
-}
-
 fn main() -> Result<()> {
     // Windows' default main-thread stack is 1 MB; Linux's is 8 MB. Some commands
     // (e.g. `corpus`, `scan`) use a large-enough startup frame to overflow 1 MB,
@@ -956,50 +876,5 @@ fn run() -> Result<()> {
             }
         }
         Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
-        Commands::Settings { command } => match command {
-            SettingsCommand::Lint { path, json } => {
-                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
-                let has_errors = cmd::settings::lint::run(&dir, json)?;
-                if has_errors {
-                    std::process::exit(1);
-                }
-                Ok(())
-            }
-            SettingsCommand::Schema { source, refresh } => {
-                if refresh {
-                    cmd::settings::schema_refresh()
-                } else {
-                    cmd::settings::schema_command(source);
-                    Ok(())
-                }
-            }
-            SettingsCommand::New { key, scope, dir } => {
-                let scope = parse_settings_scope(scope)?;
-                let dir = dir.unwrap_or_else(|| paths::config_root().join("settings"));
-                cmd::settings::scaffold::run(&key, scope, &dir)
-            }
-            SettingsCommand::Show { key, path } => {
-                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
-                cmd::settings::show::run(&dir, key)
-            }
-            SettingsCommand::Compile { path, scope, out } => {
-                let scope = parse_settings_scope(scope)?;
-                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
-                let had_error = cmd::settings::compile::run(&dir, scope, out.as_deref())?;
-                if had_error {
-                    std::process::exit(1);
-                }
-                Ok(())
-            }
-            SettingsCommand::Project { path, scope, dry_run } => {
-                let scope = parse_settings_scope(scope)?;
-                let dir = path.unwrap_or_else(|| paths::config_root().join("settings"));
-                let had_error = cmd::settings::project::run(&dir, scope, dry_run)?;
-                if had_error {
-                    std::process::exit(1);
-                }
-                Ok(())
-            }
-        },
     }
 }

@@ -1,15 +1,15 @@
 ---
-status: Draft
+status: Proposed
 date: 2026-07-18
 deciders:
   - aaronsb
   - claude
 related:
-  - ADR-142
-  - ADR-147
-  - ADR-149
-  - ADR-152
-  - ADR-163
+  - "[[ADR-142]]"
+  - "[[ADR-147]]"
+  - "[[ADR-149]]"
+  - "[[ADR-152]]"
+  - "[[ADR-163]]"
 ---
 
 # ADR-169: agent-ways relinquishes user-scoped settings.json; retains only its operational baseline
@@ -99,12 +99,20 @@ retains only its own operational and security baseline in `settings.json`.**
    change to an unmanaged field), and ships *with the application* so a fresh install
    is safe and usable with no dotfiles present.
 
-2. **Retire the user-config service.** Deprecate and remove agent-ways' fragment
-   store and interview apparatus — the `ways settings` CLI subcommands
-   (`settings/project.rs`, `settings/compile.rs`, and siblings) and the
-   `ways-settings` skill. This supersedes **ADR-147** and **ADR-149**. User-scoped
-   configuration (model, `statusLine`, `env`, user-authored permissions, prefs) is
-   no longer agent-ways' concern.
+2. **Hand the user-config service to dotfiles; keep only self-management.** What
+   `ways settings` *did* — author and project user-scoped configuration — did not
+   work cleanly and conflicted with the premise that dotfiles owns the user's own
+   config. That capability is handed to the dotfiles tool. agent-ways removes the
+   fragment store and interview apparatus outright: the `ways settings` CLI
+   subcommands (`settings/project.rs`, `settings/compile.rs`, and siblings), the
+   `ways-settings` skill, and the now-orphaned schema plumbing
+   (`settings_schema_*` in `paths.rs`, `settings_schema_url` in `config.rs`, the
+   `refresh-settings-schema.sh` script, and the vendored
+   `share/claude-code-settings.schema.json`). This supersedes **ADR-147** and
+   **ADR-149**. agent-ways keeps *only enough configuration capability to manage
+   itself* — the baseline in (1), possibly nothing more; it retains **no
+   user-config surface**. User-scoped configuration (model, `statusLine`, `env`,
+   user-authored permissions, prefs) is no longer agent-ways' concern.
 
 3. **User config moves to dotfiles.** The dotfiles-side tool owns the fragment store
    and authoring experience and carries **its own standalone three-way merger** — it
@@ -174,12 +182,14 @@ retains only its own operational and security baseline in `settings.json`.**
    base is seeded from it, and the result is idempotent. Once agent-ways stops touching
    the keys, steady-state disjointness is restored and run order no longer matters.
 
-**Open point pending ratification:** whether the retirement in (2) is total, or
-whether agent-ways keeps a *minimal* user-config affordance for operators who run
-agent-ways with no dotfiles. The recommendation of this ADR is total retirement
-(baseline + raw `/config`, with dotfiles as the path to managed user config), on the
-grounds that any retained user-config service reintroduces the over-reach this ADR
-removes. This ADR stays **Draft** until that point is ratified.
+**Ratification:** the "how minimal" question — total removal of the user-config
+service vs. keeping a minimal affordance for no-dotfiles operators — was ratified in
+favour of *self-management only*: agent-ways keeps the baseline in (1) and no
+user-config surface. An agent-ways-only operator uses the baseline plus raw
+`/config`; managed user config is a dotfiles-tool adoption away. Retaining any
+user-config service was rejected as reintroducing the over-reach this ADR removes. A
+minimal user surface, if ever wanted, is a purely *additive* future change and does
+not gate this decision.
 
 ## Consequences
 
