@@ -144,6 +144,7 @@ outcome:
 | `fresh_merge_adds_hooks_and_perms` | empty base, empty theirs | owned hooks present; all owned allow-perms present |
 | `merge_is_idempotent` | apply twice | second result == first |
 | `preserves_unrelated_user_keys` | theirs has `model`, `theme`, user `deny` | all survive untouched |
+| `strips_previously_owned_redundant_write_perm` | base recorded an allow entry no longer asserted; live still carries it | deprecated entry removed; user allow + current ours preserved |
 | `deny_baseline_added_when_enabled` | deny opt-in | every baseline deny entry present; base records them |
 | `deny_baseline_absent_when_opted_out` | deny opt-out | no `deny` key; base deny empty |
 | `deny_preserves_user_deny_entries` | user has own `deny` + opt-in | user entry **and** baseline both present |
