@@ -17,7 +17,9 @@ fn main() {
         println!("usage: attend-chat");
         println!();
         println!("  Esc                       exit");
-        println!("  Enter                     send to broadcast");
+        println!("  Enter                     send to the foreground channel");
+        println!("  Tab                       cycle tabs (empty input) / complete @name #channel");
+        println!("  Alt+1..9                  jump to tab (1 = merged, 2 = #open, ...)");
         println!("  Shift-Enter / Alt-Enter   insert newline");
         println!("  Left / Right / Home / End move cursor");
         println!("  Backspace / Delete        edit");

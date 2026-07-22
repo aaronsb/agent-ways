@@ -8,7 +8,7 @@
 
 pub(crate) mod cleanup;
 pub(crate) mod config_cmd;
-pub(crate) mod focus;
+pub(crate) mod channels;
 pub(crate) mod inbox;
 pub(crate) mod peers;
 pub(crate) mod permissions;

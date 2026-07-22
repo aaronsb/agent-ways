@@ -60,6 +60,10 @@ pub fn discover_in(dir: &std::path::Path) -> Vec<DiscoveredSession> {
         let Some(cwd) = extract_json_string(&content, "cwd") else {
             continue;
         };
+        // Identity root, not live cwd (#394): a session mid-worktree
+        // must seed the chip registry at the tray it actually scans,
+        // or @-completion routes a DM to a tray nobody reads.
+        let cwd = attend_session::normalize_origin(&cwd);
         let Some(session_id) = extract_json_string(&content, "sessionId") else {
             continue;
         };

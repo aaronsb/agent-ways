@@ -9,15 +9,17 @@
 use agent_identity::TermCaps;
 
 use crate::chip::{known_identities, resolve_nickname, KnownIdentity};
-use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir};
+use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir, BASE_CHANNEL_NAME};
 use crate::legend::{
     all_completions, all_group_completions, apply_completion, find_trailing_mention,
     parse_addressed, Addressed, Sigil,
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
-    compose_self_echo, cwd_dir, encode_cwd, signals_base, write_broadcast, write_signal, Signal,
+    compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
+    write_signal, Signal,
 };
+use crate::tabs::{self, Tab};
 use crate::watcher::accept_path;
 use crate::slash;
 use crate::text_layout::split_at_char;
@@ -60,12 +62,17 @@ pub enum EnterAction {
     /// `/clear` — empty the transcript buffer, clear input + cursor,
     /// show status.
     ClearTranscript,
+    /// Success path that also moves the foreground tab — `/dissolve`
+    /// closing the tab under the cursor advances focus (#393).
+    ClearWithStatusAndFocus { status: String, focus: Tab },
 }
 
 /// Plain-Enter dispatch. Slash command first; otherwise parse the
-/// `@`/`#` address sigil and write to the right inbox. Returns an
+/// `@`/`#` address sigil and write to the right inbox. `foreground`
+/// is the active tab (#393): unaddressed sends target its channel,
+/// and channel commands with no argument scope to it. Returns an
 /// `EnterAction` describing how the closure should update state.
-pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
+pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
     let msg = input_value.trim_end().to_string();
     if msg.is_empty() {
         return EnterAction::None;
@@ -80,12 +87,20 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
             slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
             slash::SlashOutcome::ClearTranscript => EnterAction::ClearTranscript,
             slash::SlashOutcome::Join(name) => run_join(&name),
-            slash::SlashOutcome::Leave(name) => run_leave(&name),
-            slash::SlashOutcome::Dissolve(name) => run_dissolve(&name),
+            slash::SlashOutcome::Leave(chan) => run_leave(chan, foreground),
+            slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground),
             slash::SlashOutcome::ListChannels => {
                 channels_status_in(&signals_base(), attend_groups::member_alive)
             }
-            slash::SlashOutcome::Purge(chan) => run_purge(chan.as_deref()),
+            slash::SlashOutcome::Purge(chan) => run_purge(chan, foreground),
+            slash::SlashOutcome::Peers => run_peers(),
+            slash::SlashOutcome::Whois(name) => run_whois(&name),
+            slash::SlashOutcome::Invite { member, channel } => {
+                run_invite(&member, channel, foreground)
+            }
+            slash::SlashOutcome::Kick { member, channel } => {
+                run_kick(&member, channel, foreground)
+            }
         };
     }
     let caps = TermCaps::detect();
@@ -98,46 +113,68 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
     let agents = known_identities(signals, &seeds, caps, &instance_cache);
     // A message can address several recipients at once
     // (`@Tamsin @Cleo …`). Parse the whole leading run; an empty run
-    // means broadcast. Resolve every recipient up front and reject the
-    // entire send if any address is bad, so one typo doesn't
-    // half-deliver and the user can edit + retry the original line.
+    // means "send to the foreground tab's channel" — `#open` from
+    // merged (today's broadcast behavior), the tab's own channel
+    // otherwise, with the destination flag (#392) showing the
+    // resolution before Enter is pressed.
     let recipients = parse_addressed(&msg);
     if recipients.is_empty() {
-        // Broadcast rides `_broadcast/`, which the sender's own watcher
-        // surfaces — so it self-echoes through the normal signal path and
-        // needs no synthetic echo here.
-        match write_broadcast(&msg) {
-            Ok(n) => EnterAction::ClearWithStatus(format!("sent: {n}")),
-            Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
+        let scope = tabs::send_scope(foreground);
+        if scope == BASE_CHANNEL_NAME {
+            // Broadcast rides `_broadcast/`, which the sender's own
+            // watcher surfaces — so it self-echoes through the normal
+            // signal path and needs no synthetic echo here.
+            match write_broadcast(&msg) {
+                Ok(n) => EnterAction::ClearWithStatus(format!("sent: {n}")),
+                Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
+            }
+        } else {
+            // Scoped send: same resolution + liveness gate as an
+            // explicit `#g` prefix — only the channel came from the
+            // tab instead of the message text. The body is unchanged
+            // (wire format carries no channel).
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents)
         }
     } else {
-        let sent = resolve_recipients(&recipients, &agents).and_then(|dests| {
-            for dir in &dests {
-                write_signal(dir, &msg)?;
-            }
-            Ok(dests)
-        });
-        match sent {
-            Ok(dests) => {
-                let status = format!("sent → {}", recipient_labels(&recipients).join(" "));
-                // Echo only when the message reaches NO inbox the sender's
-                // own watcher already surfaces — otherwise it round-trips
-                // and a synthetic echo would double-render it. `#open`
-                // lands in `_broadcast/` and `#group` in `@group/` (both
-                // watched); an `@agent` in our *own* cwd lands in
-                // `own_encoded` (watched). Only `@agent` sends to *other*
-                // cwds are invisible without an echo.
-                if dests.iter().any(|d| sender_watches(d)) {
-                    EnterAction::ClearWithStatus(status)
-                } else {
-                    EnterAction::ClearWithStatusAndEcho {
-                        status,
-                        echo: compose_self_echo(&msg),
-                    }
+        send_to_recipients(&msg, &recipients, &agents)
+    }
+}
+
+/// Addressed-send core shared by the explicit `@`/`#` prefix path and
+/// the foreground-tab scoped path. Resolves every recipient up front
+/// and rejects the entire send if any address is bad, so one typo
+/// doesn't half-deliver and the user can edit + retry the line.
+fn send_to_recipients(
+    msg: &str,
+    recipients: &[Addressed<'_>],
+    agents: &[KnownIdentity],
+) -> EnterAction {
+    let sent = resolve_recipients(recipients, agents).and_then(|dests| {
+        for dir in &dests {
+            write_signal(dir, msg)?;
+        }
+        Ok(dests)
+    });
+    match sent {
+        Ok(dests) => {
+            let status = format!("sent → {}", recipient_labels(recipients).join(" "));
+            // Echo only when the message reaches NO inbox the sender's
+            // own watcher already surfaces — otherwise it round-trips
+            // and a synthetic echo would double-render it. `#open`
+            // lands in `_broadcast/` and `#group` in `@group/` (both
+            // watched); an `@agent` in our *own* cwd lands in
+            // `own_encoded` (watched). Only `@agent` sends to *other*
+            // cwds are invisible without an echo.
+            if dests.iter().any(|d| sender_watches(d)) {
+                EnterAction::ClearWithStatus(status)
+            } else {
+                EnterAction::ClearWithStatusAndEcho {
+                    status,
+                    echo: compose_self_echo(msg),
                 }
             }
-            Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
         }
+        Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
     }
 }
 
@@ -152,9 +189,19 @@ fn run_join(name: &str) -> EnterAction {
     join_group_in(&signals_base(), &member, name)
 }
 
-/// Execute a validated `/leave` against the live signals base.
-fn run_leave(name: &str) -> EnterAction {
-    leave_group_in(&signals_base(), &crate::signal::human_member_id(), name)
+/// Execute a `/leave` against the live signals base. A missing
+/// argument scopes to the foreground tab (#393); if that resolves to
+/// the base channel, reject with the same message the explicit form
+/// gets in dispatch — the tab default must not open a path around
+/// the `#open` invariants.
+fn run_leave(channel: Option<String>, foreground: &Tab) -> EnterAction {
+    let name = tabs::command_scope(channel, foreground);
+    if name == BASE_CHANNEL_NAME {
+        return EnterAction::StatusOnly(
+            "#open is the base channel — you can't leave it".into(),
+        );
+    }
+    leave_group_in(&signals_base(), &crate::signal::human_member_id(), &name)
 }
 
 /// Filesystem-effect core of `/join`, parameterized on the base dir
@@ -186,9 +233,32 @@ fn leave_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterActi
     }
 }
 
-/// Execute a `/dissolve` against the live signals base.
-fn run_dissolve(name: &str) -> EnterAction {
-    dissolve_group_in(&signals_base(), name, attend_groups::member_alive)
+/// Execute a `/dissolve` against the live signals base. Scope
+/// resolution mirrors `/leave`; on success the dissolve also closes
+/// the tab — when the dissolved channel WAS the foreground, focus
+/// advances to the tab now occupying its slot (floor `#open`, #393).
+/// Other foregrounds keep their focus: dissolving a background tab
+/// must not yank the operator out of the channel they're reading.
+fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
+    let name = tabs::command_scope(channel, foreground);
+    if name == BASE_CHANNEL_NAME {
+        return EnterAction::StatusOnly(
+            "#open is the base channel — you can't dissolve it".into(),
+        );
+    }
+    let caps = TermCaps::detect();
+    let names_before = tabs::strip_names(&channels(caps));
+    match dissolve_group_in(&signals_base(), &name, attend_groups::member_alive) {
+        EnterAction::ClearWithStatus(status) => {
+            let focus = if *foreground == Tab::Channel(name.clone()) {
+                tabs::advance_after_dissolve(&name, &names_before)
+            } else {
+                foreground.clone()
+            };
+            EnterAction::ClearWithStatusAndFocus { status, focus }
+        }
+        other => other,
+    }
 }
 
 /// Filesystem-effect core of `/dissolve`, parameterized on the base
@@ -258,19 +328,169 @@ fn channels_status_in<F: Fn(&str) -> bool>(
     EnterAction::ClearWithStatus(format!("channels: {}", parts.join(" · ")))
 }
 
+/// `/peers` — the live-session roster as a transcript status block
+/// (ADR-173 Decision 5: operator discovery parity with agent-side
+/// `attend peers`). A block, not a status line: the roster carries a
+/// root path per row and the status row truncates on overflow.
+/// Roster enumeration is keyed by session id (issue #394), so one
+/// session record renders exactly one row whatever its cwd history.
+fn run_peers() -> EnterAction {
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    if roster.is_empty() {
+        return EnterAction::ClearWithStatus("no live peers".into());
+    }
+    let lines: Vec<String> = roster
+        .iter()
+        .map(|p| {
+            // Short session-id tail for the block; `/whois` has the
+            // full id for the row you actually care about.
+            let sid_short: String = p.session_id.chars().take(8).collect();
+            format!("@{}  {}  · session {}…", p.display, p.root, sid_short)
+        })
+        .collect();
+    let n = roster.len();
+    EnterAction::ClearWithStatusAndEcho {
+        status: format!("{n} live peer{}", if n == 1 { "" } else { "s" }),
+        echo: compose_status_block("peers", &lines.join("\n")),
+    }
+}
+
+/// `/whois @name` — resolve a display name to its session id + origin
+/// root. Exact-match only (see `peers::resolve_peer`); the send
+/// path's fuzzy fallback stays out of identity queries.
+fn run_whois(name: &str) -> EnterAction {
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    match crate::peers::resolve_peer(name, &roster) {
+        Ok(p) => EnterAction::ClearWithStatus(format!(
+            "@{} — session {} · root {}",
+            p.display, p.session_id, p.root
+        )),
+        Err(e) => EnterAction::StatusOnly(e),
+    }
+}
+
+/// `/invite @name [#channel]` — invitation, never force-add. The
+/// invitation is an ordinary directed signal to the peer's project
+/// tray telling them how to join; entry happens only through their
+/// own `attend join`, so the invitee's autonomy to decline (silence)
+/// is preserved (ADR-173 / #393 consent asymmetry).
+fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAction {
+    let g = tabs::command_scope(channel, foreground);
+    if g == BASE_CHANNEL_NAME {
+        return EnterAction::StatusOnly(
+            "#open is the base channel — everyone is already there".into(),
+        );
+    }
+    // Inviting into a channel that doesn't exist would hand the peer
+    // a join command that mints a brand-new group — more likely a
+    // typo than an intent. `/join` it first.
+    if resolve_group_dir(&g).is_none() {
+        return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
+    }
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    let peer = match crate::peers::resolve_peer(member, &roster) {
+        Ok(p) => p,
+        Err(e) => return EnterAction::StatusOnly(e),
+    };
+    let dest = cwd_dir(&peer.root);
+    let body = format!("you're invited to #{g} — join with: attend join {g}");
+    match write_signal(&dest, &body) {
+        Ok(_) => {
+            let status = format!("invited @{} to #{g}", peer.display);
+            // Same echo rule as directed sends: synthesize only when
+            // the destination isn't a dir our own watcher surfaces.
+            if sender_watches(&dest) {
+                EnterAction::ClearWithStatus(status)
+            } else {
+                EnterAction::ClearWithStatusAndEcho {
+                    status,
+                    echo: compose_self_echo(&body),
+                }
+            }
+        }
+        Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
+    }
+}
+
+/// `/kick @name [#channel]` — resolve the target, remove them, then
+/// tell them. The directed notice is not a courtesy flourish: the
+/// kicked session's routing changed without its participation, and
+/// silent drift between its focus state and reality is exactly what
+/// the notice prevents (#393). Best-effort like every signal write.
+fn run_kick(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAction {
+    let g = tabs::command_scope(channel, foreground);
+    if g == BASE_CHANNEL_NAME {
+        return EnterAction::StatusOnly(
+            "#open is the base channel — you can't kick from it".into(),
+        );
+    }
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    let peer = match crate::peers::resolve_peer(member, &roster) {
+        Ok(p) => p,
+        Err(e) => return EnterAction::StatusOnly(e),
+    };
+    let action = kick_member_in(&signals_base(), &g, &peer.session_id, &peer.display);
+    if matches!(action, EnterAction::ClearWithStatus(_)) {
+        let notice = format!(
+            "you were removed from #{g} by the operator — rejoin with: attend join {g}"
+        );
+        let _ = write_signal(&cwd_dir(&peer.root), &notice);
+    }
+    action
+}
+
+/// Filesystem-effect core of `/kick`, parameterized on the base dir
+/// so tests can drive it against a tempdir. `Groups::kick` owns the
+/// state change and its precise error strings (unknown group,
+/// non-member); the acting member id is irrelevant — kick targets
+/// someone else's entry. `label` is the target's display name for
+/// the status line (session ids don't belong in the status row).
+fn kick_member_in(
+    base: &std::path::Path,
+    name: &str,
+    member_id: &str,
+    label: &str,
+) -> EnterAction {
+    match attend_groups::Groups::new(base, "").kick(name, member_id) {
+        Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
+        Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
+    }
+}
+
 /// Execute a `/purge` against the live signals base. The keep-tail is
 /// the heartbeat grace window: anything younger may still be mid-scan
 /// by a peer's sensor, so it survives; anything older has been
 /// scannable for at least one full grace period by every live peer.
-fn run_purge(channel: Option<&str>) -> EnterAction {
+///
+/// Tab scoping (#393) changes ONLY which channel is selected: a bare
+/// `/purge` targets the foreground tab's channel (`#open` from
+/// merged, preserving the old default). The ADR-172 consumer consult
+/// and the age tail run identically for every resolution path.
+fn run_purge(channel: Option<String>, foreground: &Tab) -> EnterAction {
+    let resolved = tabs::command_scope(channel, foreground);
+    // `purge_channel_in` speaks the on-disk dialect: `None` is the
+    // base channel's `_broadcast/`.
+    let target = if resolved == BASE_CHANNEL_NAME {
+        None
+    } else {
+        Some(resolved.as_str())
+    };
     let base = signals_base();
     // ADR-172 Decision 5 co-ship: purge consults live consumers' seen
     // sets so it cannot shred a message a live agent session hasn't
     // consumed. The age tail alone was the interim guard (ADR-170's
     // planned tightening — planned exactly because no consumption
     // record existed to consult until the drain shipped one).
-    let consumers = crate::consumers::live_consumer_seen_sets(&base, channel);
-    purge_channel_in(&base, channel, attend_heartbeat::DEFAULT_GRACE, &consumers)
+    let consumers = crate::consumers::live_consumer_seen_sets(&base, target);
+    purge_channel_in(&base, target, attend_heartbeat::DEFAULT_GRACE, &consumers)
 }
 
 /// Filesystem-effect core of `/purge` — delete a channel's on-disk
@@ -341,6 +561,25 @@ fn purge_channel_in(
         "purged {removed} signal{} from #{label} ({kept} kept{unconsumed_note})",
         if removed == 1 { "" } else { "s" }
     ))
+}
+
+/// Resolved destination for the input box's lower-right flag (#392):
+/// where will this buffer go when Enter is pressed? Reuses the send
+/// path's own routing parse (`parse_addressed` + `recipient_labels`)
+/// so the flag cannot disagree with what `handle_enter` does —
+/// misrouted broadcast is the failure it exists to prevent. `None`
+/// while a slash command is being composed (commands don't send).
+/// `scope` is the channel an unaddressed message targets.
+pub fn destination_label(input: &str, scope: &str) -> Option<String> {
+    if slash::parse(input).is_some() || slash::find_slash_partial(input).is_some() {
+        return None;
+    }
+    let recipients = parse_addressed(input);
+    if recipients.is_empty() {
+        Some(format!("#{scope}"))
+    } else {
+        Some(recipient_labels(&recipients).join(" "))
+    }
 }
 
 /// Does the sender's own chat watcher already surface signals written to
@@ -590,9 +829,37 @@ mod tests {
 
     #[test]
     fn enter_empty_is_noop() {
-        match handle_enter("   ", &[]) {
+        match handle_enter("   ", &[], &Tab::Merged) {
             EnterAction::None => {}
             _ => panic!("empty input should produce EnterAction::None"),
+        }
+    }
+
+    #[test]
+    fn foreground_scoped_commands_respect_base_channel_invariants() {
+        // The tab default must not open a path around the `#open`
+        // rules the explicit forms enforce in dispatch: a bare
+        // /leave, /dissolve, /invite, or /kick whose foreground
+        // resolves to the base channel gets the same friendly
+        // rejection. Guards fire before any fs/roster IO.
+        let open_tab = Tab::Channel("open".into());
+        for tab in [&Tab::Merged, &open_tab] {
+            match run_leave(None, tab) {
+                EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
+                _ => panic!("scoped /leave on base channel must reject"),
+            }
+            match run_dissolve(None, tab) {
+                EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
+                _ => panic!("scoped /dissolve on base channel must reject"),
+            }
+            match run_invite("Cleo", None, tab) {
+                EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
+                _ => panic!("scoped /invite on base channel must reject"),
+            }
+            match run_kick("Cleo", None, tab) {
+                EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
+                _ => panic!("scoped /kick on base channel must reject"),
+            }
         }
     }
 
@@ -873,6 +1140,44 @@ mod tests {
     }
 
     #[test]
+    fn kick_removes_member_and_cleans_empty_unpinned_group() {
+        let base = tempdir_like();
+        attend_groups::Groups::new(&base, "sess-a")
+            .join("deploy", false)
+            .unwrap();
+        match kick_member_in(&base, "deploy", "sess-a", "Tamsin-alpha") {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("kicked @Tamsin-alpha from #deploy"), "got: {s}")
+            }
+            _ => panic!("successful kick should clear input with status"),
+        }
+        // Last member out of an unpinned group dissolves it — same
+        // cleanup rule as leave.
+        assert!(!base.join("@deploy").exists());
+    }
+
+    #[test]
+    fn kick_unknown_group_and_nonmember_surface_kick_errors() {
+        let base = tempdir_like();
+        // Unknown group: Groups::kick's own error string passes through.
+        match kick_member_in(&base, "ghost", "sess-a", "Cleo") {
+            EnterAction::StatusOnly(s) => assert!(s.contains("unknown group"), "got: {s}"),
+            _ => panic!("unknown group should keep input with status"),
+        }
+        // Group exists, target isn't in it.
+        attend_groups::Groups::new(&base, "someone-else")
+            .join("deploy", false)
+            .unwrap();
+        match kick_member_in(&base, "deploy", "sess-a", "Cleo") {
+            EnterAction::StatusOnly(s) => assert!(s.contains("not a member"), "got: {s}"),
+            _ => panic!("non-member kick should keep input with status"),
+        }
+        // The bystander's membership is untouched.
+        let members = attend_groups::Groups::new(&base, "x").members("deploy").unwrap();
+        assert_eq!(members, vec!["someone-else"]);
+    }
+
+    #[test]
     fn channels_status_lists_base_and_counts() {
         let base = tempdir_like();
         // One real group with a dead member, one orphan dir.
@@ -888,6 +1193,32 @@ mod tests {
             }
             _ => panic!("/channels should clear input with status"),
         }
+    }
+
+    #[test]
+    fn destination_label_tracks_routing_live() {
+        // Unaddressed → the scope channel.
+        assert_eq!(destination_label("", "open"), Some("#open".into()));
+        assert_eq!(destination_label("hello", "open"), Some("#open".into()));
+        assert_eq!(destination_label("hello", "deploy"), Some("#deploy".into()));
+        // Leading address run wins, exactly as `handle_enter` routes.
+        assert_eq!(destination_label("@Tamsin hi", "open"), Some("@Tamsin".into()));
+        assert_eq!(destination_label("#infra hi", "open"), Some("#infra".into()));
+        assert_eq!(
+            destination_label("@Tamsin @Cleo sync", "open"),
+            Some("@Tamsin @Cleo".into())
+        );
+        // A mid-message mention doesn't address — scope still shown.
+        assert_eq!(destination_label("hi @Tamsin", "open"), Some("#open".into()));
+    }
+
+    #[test]
+    fn destination_label_hides_while_composing_slash() {
+        assert_eq!(destination_label("/", "open"), None);
+        assert_eq!(destination_label("/jo", "open"), None);
+        assert_eq!(destination_label("/join #deploy", "open"), None);
+        // A mid-sentence slash is a literal slash — still a send.
+        assert_eq!(destination_label("a / b", "open"), Some("#open".into()));
     }
 
     #[test]

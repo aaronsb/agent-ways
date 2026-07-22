@@ -6,13 +6,16 @@
 //! via `#[path]`.
 
 pub mod app;
+pub mod attach;
 pub mod chip;
 pub mod consumers;
 pub mod groups;
 pub mod helper;
 pub mod legend;
+pub mod peers;
 pub mod sessions;
 pub mod signal;
 pub mod slash;
+pub mod tabs;
 pub mod text_layout;
 pub mod watcher;

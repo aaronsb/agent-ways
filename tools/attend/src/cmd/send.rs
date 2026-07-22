@@ -127,24 +127,24 @@ pub(crate) fn cmd_send(
                 .map(|(ids, sid)| ids.iter().any(|m| m == sid))
                 .unwrap_or(false);
             if members.is_none() {
-                eprintln!("error: no focus group named '{}'", name);
+                eprintln!("error: no channel named '{}'", name);
             } else if self_in_group {
-                eprintln!("error: no live peers in focus group '{}' (you are the only listener)", name);
+                eprintln!("error: no live peers in channel '{}' (you are the only listener)", name);
             } else {
-                eprintln!("error: no live peers in focus group '{}'", name);
+                eprintln!("error: no live peers in channel '{}'", name);
             }
             let groups = r.all_groups();
             if groups.is_empty() {
-                eprintln!("\nno active focus groups");
+                eprintln!("\nno active channels");
             } else {
-                eprintln!("\nactive focus groups (yaml count, live peers may be fewer):");
+                eprintln!("\nactive channels (yaml count, live peers may be fewer):");
                 for (gname, count, pinned) in &groups {
                     let pin = if *pinned { " (pinned)" } else { "" };
                     let suffix = if *count == 1 { "" } else { "s" };
                     eprintln!("  {} — {} member{}{}", gname, count, suffix, pin);
                 }
             }
-            eprintln!("\ndrop --focus to broadcast (reaches every peer):");
+            eprintln!("\ndrop --channel to broadcast (reaches every peer):");
             eprintln!("  attend send <message>");
             std::process::exit(1);
         }

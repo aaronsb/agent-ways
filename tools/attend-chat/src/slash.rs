@@ -16,12 +16,11 @@
 //! "Tab completes the partial you're typing" — the plumbing is
 //! distinct.
 //!
-//! **Scope.** Everything except `/whois` and `/peers` dispatches;
-//! those remain in [`REGISTRY`] as planned so autocomplete can
-//! surface them and `/help` can print the roadmap — dispatching them
-//! returns a "not implemented yet" status. When a planned command
-//! lands, flip its [`Status`] to [`Status::Implemented`] and add a
-//! handler arm in [`dispatch`].
+//! **Scope.** Every registered command dispatches (ADR-173 Decision 5
+//! graduated the last Planned rows, `/peers` and `/whois`). The
+//! [`Status::Planned`] machinery stays: a future roadmap entry gets
+//! autocomplete + `/help` visibility and a "not implemented yet"
+//! dispatch until its handler arm lands.
 //!
 //! Dispatch stays IO-free: commands with side effects return a
 //! [`SlashOutcome`] variant describing the effect (clear the
@@ -78,14 +77,14 @@ pub const REGISTRY: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "whois",
-        description: "Show a peer's identity + cwd",
-        status: Status::Planned,
+        description: "Show a peer's session id + origin root",
+        status: Status::Implemented,
         arg_kind: ArgKind::Agent,
     },
     SlashCommand {
         name: "peers",
-        description: "List active claudes + humans",
-        status: Status::Planned,
+        description: "List live peer sessions",
+        status: Status::Implemented,
         arg_kind: ArgKind::None,
     },
     SlashCommand {
@@ -111,6 +110,18 @@ pub const REGISTRY: &[SlashCommand] = &[
         description: "List channels with member counts",
         status: Status::Implemented,
         arg_kind: ArgKind::None,
+    },
+    SlashCommand {
+        name: "invite",
+        description: "Invite a peer to a channel (they join themselves)",
+        status: Status::Implemented,
+        arg_kind: ArgKind::Agent,
+    },
+    SlashCommand {
+        name: "kick",
+        description: "Remove a member from a channel",
+        status: Status::Implemented,
+        arg_kind: ArgKind::Agent,
     },
     SlashCommand {
         name: "purge",
@@ -217,14 +228,15 @@ pub enum SlashOutcome {
     /// (ADR-170). Name is already normalized (`#` stripped) and
     /// validated.
     Join(String),
-    /// `/leave` — leave the named focus group. Name normalized;
-    /// existence/membership are checked at execution time against
-    /// the live state.
-    Leave(String),
-    /// `/dissolve` — remove the named group entirely: yaml entry and
+    /// `/leave [#g]` — leave a focus group. Name normalized; `None`
+    /// scopes to the foreground tab (#393). Existence/membership are
+    /// checked at execution time against the live state.
+    Leave(Option<String>),
+    /// `/dissolve [#g]` — remove a group entirely: yaml entry and
     /// `@dir`, including orphan dirs the yaml doesn't know about
-    /// (ADR-170). The live-member guard runs at execution time.
-    Dissolve(String),
+    /// (ADR-170). `None` scopes to the foreground tab (#393); the
+    /// live-member guard runs at execution time.
+    Dissolve(Option<String>),
     /// `/channels` — render every channel with live/total member
     /// counts into the status row.
     ListChannels,
@@ -232,6 +244,39 @@ pub enum SlashOutcome {
     /// durability, deliberately overridden by explicit operator
     /// action). `None` targets the base channel's `_broadcast/`.
     Purge(Option<String>),
+    /// `/peers` — render the live-session roster as a transcript
+    /// status block (ADR-173 Decision 5: operator discovery parity).
+    Peers,
+    /// `/whois @name` — resolve a display name to its session id +
+    /// origin root. Name normalized (`@` stripped); resolution
+    /// happens at execution time against the live roster.
+    Whois(String),
+    /// `/invite @name [#channel]` — send a DIRECTED invitation to the
+    /// peer's project tray. Never a force-add: entry changes what
+    /// reaches a session, so it requires the invitee's own
+    /// `attend join`; silence declines (consent asymmetry, ADR-173 /
+    /// issue #393).
+    Invite {
+        member: String,
+        channel: Option<String>,
+    },
+    /// `/kick @name [#channel]` — remove a member from a channel.
+    /// Operator power tool, the membership sibling of `/purge`:
+    /// removal only *reduces* the target's routing reach, so it needs
+    /// no consent. The kicked member gets a directed notice so their
+    /// focus state doesn't drift silently; rejoin stays allowed.
+    Kick {
+        member: String,
+        channel: Option<String>,
+    },
+}
+
+/// Normalize an agent argument: first whitespace-separated token,
+/// leading `@` stripped (users copy the legend spelling). Returns
+/// `None` when no argument was given.
+fn agent_arg(args: &str) -> Option<&str> {
+    let first = args.split_whitespace().next()?;
+    Some(first.strip_prefix('@').unwrap_or(first))
 }
 
 /// Normalize a group argument: first whitespace-separated token,
@@ -264,29 +309,72 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
                     Err(e) => SlashOutcome::Err(format!("/join: {e}")),
                 },
             },
+            // Bare `/leave` and `/dissolve` scope to the foreground
+            // tab (#393) — the key handler owns tab state and also
+            // re-applies the base-channel rejection when the
+            // foreground resolves to `#open`.
             "leave" => match group_arg(args) {
-                None => SlashOutcome::Err("usage: /leave <group>".into()),
+                None => SlashOutcome::Leave(None),
                 Some("open") => SlashOutcome::Err(
                     "#open is the base channel — you can't leave it".into(),
                 ),
-                Some(g) => SlashOutcome::Leave(g.to_string()),
+                Some(g) => SlashOutcome::Leave(Some(g.to_string())),
             },
             // No name validation here — dissolve targets *existing*
             // state, and its main quarry is exactly the orphan dirs
             // whose names a strict validator might reject.
             "dissolve" => match group_arg(args) {
-                None => SlashOutcome::Err("usage: /dissolve <group>".into()),
+                None => SlashOutcome::Dissolve(None),
                 Some("open") => SlashOutcome::Err(
                     "#open is the base channel — you can't dissolve it".into(),
                 ),
-                Some(g) => SlashOutcome::Dissolve(g.to_string()),
+                Some(g) => SlashOutcome::Dissolve(Some(g.to_string())),
             },
             "channels" => SlashOutcome::ListChannels,
-            // Bare `/purge` and `/purge open` both mean the base
-            // channel — `#open` is where history piles up.
+            // Bare `/purge` = foreground-tab scope, resolved
+            // downstream. An explicit `/purge open` stays EXPLICIT:
+            // collapsing it into `None` here would reinterpret it as
+            // foreground scope and purge whatever tab the operator
+            // happens to be on (PR #395 blocking finding —
+            // destructive intent inversion). `run_purge` maps the
+            // resolved base name onto the on-disk `None` target.
             "purge" => match group_arg(args) {
-                None | Some("open") => SlashOutcome::Purge(None),
+                None => SlashOutcome::Purge(None),
                 Some(g) => SlashOutcome::Purge(Some(g.to_string())),
+            },
+            "peers" => SlashOutcome::Peers,
+            "whois" => match agent_arg(args) {
+                None => SlashOutcome::Err("usage: /whois <@name>".into()),
+                Some(name) => SlashOutcome::Whois(name.to_string()),
+            },
+            // Shared `@name [#channel]` grammar for the membership
+            // pair. A missing channel means "scope to the foreground
+            // tab" — resolved by the key handler, which owns tab
+            // state; dispatch stays context-free.
+            "invite" | "kick" => match agent_arg(args) {
+                None => SlashOutcome::Err(format!("usage: /{} <@name> [#channel]", cmd.name)),
+                Some(member) => {
+                    let channel = args
+                        .split_whitespace()
+                        .nth(1)
+                        .map(|c| c.strip_prefix('#').unwrap_or(c).to_string());
+                    match (cmd.name, channel.as_deref()) {
+                        ("invite", Some("open")) => SlashOutcome::Err(
+                            "#open is the base channel — everyone is already there".into(),
+                        ),
+                        ("kick", Some("open")) => SlashOutcome::Err(
+                            "#open is the base channel — you can't kick from it".into(),
+                        ),
+                        ("invite", _) => SlashOutcome::Invite {
+                            member: member.to_string(),
+                            channel,
+                        },
+                        _ => SlashOutcome::Kick {
+                            member: member.to_string(),
+                            channel,
+                        },
+                    }
+                }
             },
             // Keeps the match exhaustive — if a registry entry flips
             // to Implemented without a handler arm, this fires at
@@ -361,11 +449,15 @@ fn help_message() -> String {
             Status::Planned => planned.push(label),
         }
     }
-    format!(
-        "available: {} · planned: {}",
-        ready.join(" "),
-        planned.join(" ")
-    )
+    if planned.is_empty() {
+        format!("available: {}", ready.join(" "))
+    } else {
+        format!(
+            "available: {} · planned: {}",
+            ready.join(" "),
+            planned.join(" ")
+        )
+    }
 }
 
 #[cfg(test)]
@@ -485,8 +577,8 @@ mod tests {
             panic!("help should dispatch Ok")
         };
         assert!(s.contains("/help"));
-        // At least one planned command surfaces — roadmap visibility.
-        assert!(s.contains("planned"));
+        // With nothing planned, no empty "planned:" stub renders.
+        assert!(!s.contains("planned"));
     }
 
     #[test]
@@ -529,11 +621,12 @@ mod tests {
 
     #[test]
     fn dispatch_leave_normalizes() {
-        assert_eq!(dispatch("leave", "#deploy"), SlashOutcome::Leave("deploy".into()));
-        let SlashOutcome::Err(s) = dispatch("leave", "") else {
-            panic!("bare /leave should be a usage error")
-        };
-        assert!(s.contains("usage"));
+        assert_eq!(
+            dispatch("leave", "#deploy"),
+            SlashOutcome::Leave(Some("deploy".into()))
+        );
+        // Bare form scopes to the foreground tab (#393).
+        assert_eq!(dispatch("leave", ""), SlashOutcome::Leave(None));
         let SlashOutcome::Err(s) = dispatch("leave", "open") else {
             panic!("/leave open should be rejected")
         };
@@ -544,12 +637,10 @@ mod tests {
     fn dispatch_dissolve_normalizes() {
         assert_eq!(
             dispatch("dissolve", "#bg-test"),
-            SlashOutcome::Dissolve("bg-test".into())
+            SlashOutcome::Dissolve(Some("bg-test".into()))
         );
-        let SlashOutcome::Err(s) = dispatch("dissolve", "") else {
-            panic!("bare /dissolve should be a usage error")
-        };
-        assert!(s.contains("usage"));
+        // Bare form scopes to the foreground tab (#393).
+        assert_eq!(dispatch("dissolve", ""), SlashOutcome::Dissolve(None));
         let SlashOutcome::Err(s) = dispatch("dissolve", "open") else {
             panic!("/dissolve open should be rejected")
         };
@@ -563,9 +654,12 @@ mod tests {
 
     #[test]
     fn dispatch_purge_defaults_to_base_channel() {
+        // Bare /purge → foreground scope (None). Explicit "open" must
+        // NOT collapse to None: from a channel tab that would purge
+        // the foreground instead of the commons (PR #395 blocking).
         assert_eq!(dispatch("purge", ""), SlashOutcome::Purge(None));
-        assert_eq!(dispatch("purge", "open"), SlashOutcome::Purge(None));
-        assert_eq!(dispatch("purge", "#open"), SlashOutcome::Purge(None));
+        assert_eq!(dispatch("purge", "open"), SlashOutcome::Purge(Some("open".into())));
+        assert_eq!(dispatch("purge", "#open"), SlashOutcome::Purge(Some("open".into())));
         assert_eq!(
             dispatch("purge", "#deploy"),
             SlashOutcome::Purge(Some("deploy".into()))
@@ -573,17 +667,84 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_planned_returns_err_with_not_implemented() {
-        // Pick any Planned command from the registry — keeps the
-        // test valid as planned/implemented sets shift.
-        let planned = REGISTRY
-            .iter()
-            .find(|c| c.status == Status::Planned)
-            .expect("registry must contain at least one planned command while slash infra is new");
-        let SlashOutcome::Err(s) = dispatch(planned.name, "") else {
-            panic!("planned should dispatch Err")
+    fn dispatch_peers_returns_effect() {
+        assert_eq!(dispatch("peers", ""), SlashOutcome::Peers);
+    }
+
+    #[test]
+    fn dispatch_whois_normalizes() {
+        assert_eq!(
+            dispatch("whois", "@Tamsin-alpha"),
+            SlashOutcome::Whois("Tamsin-alpha".into())
+        );
+        // Bare-name spelling is accepted too.
+        assert_eq!(dispatch("whois", "Cleo"), SlashOutcome::Whois("Cleo".into()));
+        let SlashOutcome::Err(s) = dispatch("whois", "") else {
+            panic!("bare /whois should be a usage error")
         };
-        assert!(s.contains("not implemented"));
-        assert!(s.contains(planned.name));
+        assert!(s.contains("usage"));
+    }
+
+    #[test]
+    fn dispatch_invite_parses_member_and_optional_channel() {
+        assert_eq!(
+            dispatch("invite", "@Tamsin-alpha #deploy"),
+            SlashOutcome::Invite {
+                member: "Tamsin-alpha".into(),
+                channel: Some("deploy".into())
+            }
+        );
+        // No channel → foreground-tab scope, resolved by the caller.
+        assert_eq!(
+            dispatch("invite", "@Cleo"),
+            SlashOutcome::Invite {
+                member: "Cleo".into(),
+                channel: None
+            }
+        );
+        let SlashOutcome::Err(s) = dispatch("invite", "") else {
+            panic!("bare /invite should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        // Base channel: everyone is already there — nothing to invite to.
+        let SlashOutcome::Err(s) = dispatch("invite", "@Cleo #open") else {
+            panic!("/invite to open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+    }
+
+    #[test]
+    fn dispatch_kick_parses_member_and_optional_channel() {
+        assert_eq!(
+            dispatch("kick", "@Tamsin-alpha #deploy"),
+            SlashOutcome::Kick {
+                member: "Tamsin-alpha".into(),
+                channel: Some("deploy".into())
+            }
+        );
+        assert_eq!(
+            dispatch("kick", "Cleo"),
+            SlashOutcome::Kick {
+                member: "Cleo".into(),
+                channel: None
+            }
+        );
+        let SlashOutcome::Err(s) = dispatch("kick", "") else {
+            panic!("bare /kick should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        let SlashOutcome::Err(s) = dispatch("kick", "@Cleo open") else {
+            panic!("/kick from open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+    }
+
+    #[test]
+    fn registry_has_no_planned_commands_left() {
+        // ADR-173 Decision 5 closed the discovery gap — /peers and
+        // /whois were the last Planned rows. Every registered command
+        // now dispatches; a new Planned entry should be a deliberate
+        // roadmap choice, not a leftover.
+        assert!(REGISTRY.iter().all(|c| c.status == Status::Implemented));
     }
 }

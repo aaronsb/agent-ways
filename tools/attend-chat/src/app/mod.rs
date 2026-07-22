@@ -22,6 +22,7 @@ use agent_identity::TermCaps;
 use async_channel::Receiver;
 use iocraft::prelude::*;
 
+use crate::attach;
 use crate::chip::{chip_for, color_for, known_identities, CHIP_WIDTH};
 use crate::groups::channels;
 use crate::helper::{self, HelperMode};
@@ -29,11 +30,12 @@ use crate::legend::{find_trailing_mention, group_legend_row, legend_row, Sigil};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::slash;
+use crate::tabs::{self, Tab};
 use crate::text_layout::{render_cursor, visual_line_count};
 
 use keys::{
-    handle_backspace, handle_char_insert, handle_delete, handle_end, handle_enter, handle_home,
-    handle_newline_insert, handle_tab, EnterAction, TabCycle,
+    destination_label, handle_backspace, handle_char_insert, handle_delete, handle_end,
+    handle_enter, handle_home, handle_newline_insert, handle_tab, EnterAction, TabCycle,
 };
 
 #[derive(Default, Props)]
@@ -74,6 +76,10 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let mut should_exit = hooks.use_state(|| false);
     let mut status = hooks.use_state(String::new);
     let mut tab_cycle = hooks.use_state::<Option<TabCycle>, _>(|| None);
+    // Foreground tab (#393). Merged (slot zero) at launch — today's
+    // full-stream view stays the opening posture; per-channel focus
+    // is an explicit gesture (Tab / Alt+N).
+    let mut foreground = hooks.use_state(Tab::default);
 
     // Time-based refresh tick (ADR-129). Bumped every 5 seconds so the
     // render path re-runs `discover_sessions` + `known_identities` on a
@@ -143,9 +149,18 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     // `&Ref<Vec<Signal>>` to `&[Signal]`, so the handler
                     // sees a borrowed slice without copying the (capped,
                     // but potentially 5000-entry) buffer on every keypress.
+                    // Normalize against the live strip (PR #395
+                    // finding 6): after a peer dissolves the
+                    // foregrounded channel, the destination flag
+                    // degrades to #open — Enter must agree with the
+                    // flag rather than erroring on the ghost channel.
+                    let fg = tabs::normalize(
+                        foreground.read().clone(),
+                        &tabs::strip_names(&channels(TermCaps::detect())),
+                    );
                     let action = {
                         let sigs_guard = signals.read();
-                        handle_enter(&v, &sigs_guard)
+                        handle_enter(&v, &sigs_guard, &fg)
                     };
                     match action {
                         EnterAction::None => {}
@@ -165,6 +180,14 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             push_capped(&mut signals, echo);
                         }
                         EnterAction::StatusOnly(s) => status.set(s),
+                        EnterAction::ClearWithStatusAndFocus { status: s, focus } => {
+                            status.set(s);
+                            input.set(String::new());
+                            cursor.set(0);
+                            // `/dissolve` closed the foreground tab —
+                            // move focus where the handler advanced it.
+                            foreground.set(focus);
+                        }
                         EnterAction::ClearTranscript => {
                             // Display-only: the buffer empties but
                             // nothing on the bus is touched — signals
@@ -179,16 +202,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 }
                 KeyCode::Tab => {
                     let buf = input.read().clone();
-                    let cur = cursor.get();
-                    let cycle = tab_cycle.read().clone();
-                    // Same borrow-not-clone discipline as Enter — Tab
-                    // fires more often (every keystroke when cycling
-                    // completions), so the per-press cost matters.
-                    let sigs_guard = signals.read();
-                    let res = handle_tab(&buf, cur, cycle, &sigs_guard);
-                    input.set(res.new_buf);
-                    cursor.set(res.new_cursor);
-                    tab_cycle.set(res.new_cycle);
+                    if buf.is_empty() {
+                        // Empty compose line: Tab cycles the
+                        // foreground tab (#393). With content it
+                        // stays completion — the keybinding-collision
+                        // resolution from the issue thread.
+                        let names =
+                            tabs::strip_names(&channels(TermCaps::detect()));
+                        let cur =
+                            tabs::normalize(foreground.read().clone(), &names);
+                        foreground.set(tabs::cycle_next(&cur, &names));
+                    } else {
+                        let cur = cursor.get();
+                        let cycle = tab_cycle.read().clone();
+                        // Same borrow-not-clone discipline as Enter — Tab
+                        // fires more often (every keystroke when cycling
+                        // completions), so the per-press cost matters.
+                        let sigs_guard = signals.read();
+                        let res = handle_tab(&buf, cur, cycle, &sigs_guard);
+                        input.set(res.new_buf);
+                        cursor.set(res.new_cursor);
+                        tab_cycle.set(res.new_cycle);
+                    }
                 }
                 KeyCode::Backspace => {
                     let v = input.read().clone();
@@ -222,6 +257,20 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 KeyCode::End => {
                     let v = input.read().clone();
                     cursor.set(handle_end(&v, cursor.get()));
+                }
+                KeyCode::Char(c)
+                    if modifiers.contains(KeyModifiers::ALT) && c.is_ascii_digit() =>
+                {
+                    // Alt+1..9 jumps straight to a tab (IRC prior):
+                    // 1 = merged, 2 = #open, 3.. = named channels in
+                    // strip order. Empty slots are no-ops.
+                    if let Some(slot) = c.to_digit(10) {
+                        let names =
+                            tabs::strip_names(&channels(TermCaps::detect()));
+                        if let Some(tab) = tabs::jump(slot, &names) {
+                            foreground.set(tab);
+                        }
+                    }
                 }
                 KeyCode::Char(c)
                     if !modifiers
@@ -274,6 +323,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // commons chip (ADR-124 §1–§2). The base entry has empty
     // membership, so it's a no-op for `session_to_groups` below.
     let groups_known = channels(caps);
+    // Foreground tab, normalized against the current strip: a channel
+    // dissolved by a peer between renders degrades to the `#open`
+    // floor instead of leaving focus on a tab that no longer renders.
+    let fg_tab = tabs::normalize(
+        foreground.read().clone(),
+        &tabs::strip_names(&groups_known),
+    );
     // Pre-index session-id → groups once per render so the chip
     // loop is O(signals) instead of O(signals · groups · members).
     // At today's scale neither form matters, but the render path is
@@ -292,6 +348,10 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // binding so `find_trailing_mention`'s `&str` doesn't outlive
     // the temporary guard.
     let input_snapshot = input.read().clone();
+    // One wall-clock read per render pass shared by every cell's
+    // datetime — per-cell `now()` calls could straddle a minute
+    // boundary and render inconsistent times within one frame.
+    let now = std::time::SystemTime::now();
     // Trailing-mention context is still consumed by the top channel
     // bar so it can underline a matching `#partial` when the user is
     // picking a group; the agent-side partial now flows through
@@ -310,6 +370,9 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let rows: Vec<_> = signals
         .read()
         .iter()
+        // Per-tab transcript (#393): merged shows the full stream;
+        // a channel tab filters to its own traffic (+ local Info).
+        .filter(|s| tabs::visible_in(&s.channel, &fg_tab))
         .map(|s| {
             let chip = chip_for(&s.from, &s.project, &s.cwd, caps, &instance_cache);
             let weight = if chip.style.bold { Weight::Bold } else { Weight::Normal };
@@ -347,6 +410,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         .collect()
                 })
                 .unwrap_or_default();
+            // Cell datetime (#389): the identity block's third line
+            // pairs the charm glyphs with a tight timestamp. One
+            // shared format across every attend surface —
+            // `agent_fmt::compact_time` — so the TUI, `attend inbox`,
+            // and the drain cannot drift. `ts == 0` means the signal
+            // file's mtime was unreadable; render nothing rather
+            // than a wrong epoch date.
+            let when = if s.ts == 0 {
+                String::new()
+            } else {
+                agent_fmt::compact_time(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(s.ts),
+                    now,
+                )
+            };
+            // Attachment chips (#390): absolute-path tokens in the
+            // body that exist as files render as chips below the
+            // text. The body keeps the raw path (wire truth); a
+            // vanished file just loses its chip — a cell never
+            // errors on a stale path.
+            let cell_attachments =
+                attach::attachment_chips(&attach::existing_attachments(&s.message), caps);
             element! {
                 View(flex_direction: FlexDirection::Row, margin_bottom: 1) {
                     View(
@@ -368,6 +453,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         Text(color: Color::DarkGrey, content: chip.secondary, wrap: TextWrap::NoWrap)
                         View(flex_direction: FlexDirection::Row) {
                             #(group_chips)
+                            Text(color: Color::DarkGrey, content: when, wrap: TextWrap::NoWrap)
                         }
                     }
                     View(
@@ -375,8 +461,12 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         padding_left: 1,
                         padding_right: 1,
                         padding_top: 1,
+                        flex_direction: FlexDirection::Column,
                     ) {
                         Text(content: s.message.clone(), wrap: TextWrap::Wrap)
+                        View(flex_direction: FlexDirection::Row) {
+                            #(cell_attachments)
+                        }
                     }
                 }
             }
@@ -394,15 +484,44 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // or status row.
     let interior = (width as usize).saturating_sub(6).max(1);
     let visual = visual_line_count(&display_with_cursor, interior);
-    let input_height = (visual.clamp(1, 10) as u32) + 2;
+    // Attachment chips for the compose buffer (#390) — a dropped file
+    // shows as attached the moment its pasted path lands in the input.
+    let input_attachments = attach::existing_attachments(&input_snapshot);
+    let attach_rows = if input_attachments.is_empty() { 0 } else { 1 };
+    let input_attach_chips = attach::attachment_chips(&input_attachments, caps);
+    // +2 borders, +1 for the destination-flag row pinned at the
+    // bottom of the box (#392), +1 when an attachment row shows.
+    let input_height = (visual.clamp(1, 10) as u32) + 3 + attach_rows;
+    // Destination flag (#392): inverse-styled label in the input
+    // box's lower-right showing where Enter would send this buffer.
+    // Live: re-derived from the buffer every render, through the same
+    // routing parse the send path uses. Hidden while composing a
+    // slash command — nothing would be sent.
+    let dest_chip: Vec<AnyElement<'static>> =
+        destination_label(&input_snapshot, &tabs::send_scope(&fg_tab))
+        .map(|label| {
+            vec![element! {
+                View(background_color: Color::Blue) {
+                    Text(
+                        color: Color::Black,
+                        content: format!(" {label} "),
+                        wrap: TextWrap::NoWrap,
+                    )
+                }
+            }
+            .into_any()]
+        })
+        .unwrap_or_default();
 
     element! {
         View(flex_direction: FlexDirection::Column, width, height) {
-            // Group legend strip at the top — fixed one-row height.
-            // Each group renders `<glyph> #name` in its hashed color,
-            // so the user can see at a glance which focus groups
-            // exist and in what color they'll appear on agent chips.
-            #(group_legend_row(&groups_known, group_partial.as_deref()))
+            // Tab strip at the top (#393) — fixed one-row height:
+            // `[merged] [#open] [#g] …`, merged pinned at slot zero,
+            // the foreground tab inverse in its channel color. Doubles
+            // as the channel legend: each chip renders `<glyph> #name`
+            // in the group's hashed color, with the `#partial`
+            // completion underline the old channel bar had.
+            #(tabs::tab_strip_row(&groups_known, &fg_tab, group_partial.as_deref()))
             // `min_height: 0` + `overflow: Hidden` keep this pane
             // inside its flex-grown slot instead of expanding to the
             // intrinsic height of the message list — without them, a
@@ -430,15 +549,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 padding_right: 1,
                 height: input_height,
                 flex_shrink: 0.0,
+                flex_direction: FlexDirection::Column,
             ) {
-                View(width: 2, flex_shrink: 0.0) {
-                    Text(color: Color::Blue, content: "> ")
+                View(flex_direction: FlexDirection::Row, flex_grow: 1.0) {
+                    View(width: 2, flex_shrink: 0.0) {
+                        Text(color: Color::Blue, content: "> ")
+                    }
+                    View(flex_grow: 1.0) {
+                        Text(
+                            content: display_with_cursor,
+                            wrap: TextWrap::Wrap,
+                        )
+                    }
                 }
-                View(flex_grow: 1.0) {
-                    Text(
-                        content: display_with_cursor,
-                        wrap: TextWrap::Wrap,
-                    )
+                View(flex_direction: FlexDirection::Row, flex_shrink: 0.0) {
+                    #(input_attach_chips)
+                }
+                View(
+                    height: 1,
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::End,
+                ) {
+                    #(dest_chip)
                 }
             }
             #(match &helper_mode {

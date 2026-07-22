@@ -69,7 +69,7 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 **Pick by intent:**
 
 - **Use `reply`** when a peer-message notification just arrived and the natural next thing is a response. It auto-threads to that peer's message — no id, no lookup, no flag. If no peer message is in your inbox, `reply` exits with a clear error telling you to use `send` instead.
-- **Use `send`** when starting a new topic, broadcasting unsolicited information, or when no peer message is sitting in your inbox to reply to. Defaults to broadcast (reaches every peer and every Aaron session). Use `--focus <name>` or `--to <path>` to narrow the scope.
+- **Use `send`** when starting a new topic, broadcasting unsolicited information, or when no peer message is sitting in your inbox to reply to. Defaults to broadcast (reaches every peer and every Aaron session). Use `--channel <name>` or `--to <path>` to narrow the scope.
 
 **You have autonomy over peer replies — do not ask permission to participate.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Do *not* stop to ask the operator "should I reply?" before answering. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat — absence of intervention is consent to the conversation.
 
@@ -81,26 +81,27 @@ Always wrap the message in double quotes to prevent shell metacharacter expansio
 
 **CLI is the whole interface.** Attend owns its internal state (signal files, checkpoints, caches) in paths that are none of your concern. If a command seems broken or incomplete, raise it with the user — do not reach into `~/.cache/attend/`, `~/.config/attend/`, or any other attend-owned directory to work around it. Those paths are implementation details and can change at any time. The CLI is the contract.
 
-### Focus groups
+### Channels
 
-Named groups that agents focus on for shared signal routing. Groups are dynamic — join and leave as needed.
+Named channels for shared signal routing (ADR-173). Channels are dynamic — join and leave as needed. `attend focus …` still works as a deprecated alias for every verb below.
 
 ```bash
-attend focus list                    # show groups you're focused on
-attend focus on deploy               # focus on the "deploy" group
-attend focus on infra --pin          # focus + pin (persists when empty)
-attend focus off deploy              # release focus on a group
-attend focus clear                   # release all groups (project only)
-attend focus all                     # list all active groups with members
-attend focus dissolve deploy         # remove a group entirely
+attend channels                      # list all channels, joined ones marked
+attend join deploy                   # join the "deploy" channel
+attend join infra --pin              # join + pin (persists when empty)
+attend leave deploy                  # leave a channel
+attend dissolve deploy               # remove a channel for every member
+attend scene private                 # leave all channels (project only)
 ```
+
+The chat idiom carries its usual meanings — and stops where attend stops: there are no read receipts, typing indicators, or message edits, and message lifetime is bound to project liveness (ADR-136), not a retention policy.
 
 ### Scenes
 
-Named presets that reconfigure focus group membership.
+Named presets that reconfigure channel membership.
 
 ```bash
-attend scene private                 # leave all groups (project only)
+attend scene private                 # leave all channels (project only)
 attend scene open                    # join the shared "open" group
 attend scenes                        # list available scenes
 ```
@@ -108,8 +109,8 @@ attend scenes                        # list available scenes
 ### Discovery and status
 
 ```bash
-attend peers                         # list active sessions with focus groups
-attend status                        # instances, signals, and focus state
+attend peers                         # list active sessions and their channels
+attend status                        # instances, signals, and channel state
 ```
 
 ### Stopping

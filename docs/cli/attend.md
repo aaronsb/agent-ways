@@ -14,6 +14,10 @@ This document contains the help content for the `attend` command-line program.
 * [`attend send`↴](#attend-send)
 * [`attend reply`↴](#attend-reply)
 * [`attend chat`↴](#attend-chat)
+* [`attend join`↴](#attend-join)
+* [`attend leave`↴](#attend-leave)
+* [`attend channels`↴](#attend-channels)
+* [`attend dissolve`↴](#attend-dissolve)
 * [`attend focus`↴](#attend-focus)
 * [`attend focus on`↴](#attend-focus-on)
 * [`attend focus off`↴](#attend-focus-off)
@@ -44,16 +48,20 @@ Active awareness for Claude Code sessions
 ###### **Subcommands:**
 
 * `run` — Start the sensor loop (use with Monitor for async delivery)
-* `peers` — List active Claude Code sessions and focus groups
+* `peers` — List active Claude Code sessions and their channels
 * `inbox` — Read pending messages from peers
-* `status` — Show running instances, signals, and focus state
+* `status` — Show running instances, signals, and channel state
 * `whoami` — Print this session's canonical bus identity (issue #378)
 * `sensors` — List all sensors — built-in and config-defined script sensors
 * `send` — Send a signal to peer sessions (defaults to #open base channel)
 * `reply` — Reply to the most recent peer message (auto-threaded)
 * `chat` — Launch the interactive chat TUI (ADR-120)
-* `focus` — Manage attention groups (default: list joined groups)
-* `scene` — Activate a named scene (reconfigure focus groups)
+* `join` — Join a channel (creates it if absent)
+* `leave` — Leave a channel
+* `channels` — List channels — all available, with joined ones marked
+* `dissolve` — Dissolve a channel (removes it for every member)
+* `focus` — Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
+* `scene` — Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
 * `scenes` — List available scenes
 * `tune` — Survey session history and derive engagement config
 * `permissions` — Audit sensor permissions against settings.json (default: audit)
@@ -76,7 +84,7 @@ Start the sensor loop (use with Monitor for async delivery)
 
 ## `attend peers`
 
-List active Claude Code sessions and focus groups
+List active Claude Code sessions and their channels
 
 **Usage:** `attend peers`
 
@@ -101,12 +109,16 @@ Read pending messages from peers
 
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
+* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: no-op under an unresolved identity, and on a cold start (no seen-set) baselines the backlog without delivering
+* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable) or `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`)
+
+  Default value: `plain`
 
 
 
 ## `attend status`
 
-Show running instances, signals, and focus state
+Show running instances, signals, and channel state
 
 **Usage:** `attend status`
 
@@ -146,7 +158,7 @@ Send a signal to peer sessions (defaults to #open base channel)
 
 * `--broadcast` — Force broadcast (every peer + every Aaron session)
 * `--to <PATH>` — Scope send to a specific project path
-* `--focus <NAME>` — Scope send to a named focus group
+* `--channel <NAME>` — Scope send to a named channel (accepts `--focus` as a deprecated alias)
 
 
 
@@ -164,7 +176,7 @@ Reply to the most recent peer message (auto-threaded)
 
 * `--broadcast` — Force broadcast
 * `--to <PATH>` — Scope send to a specific project path
-* `--focus <NAME>` — Scope send to a named focus group
+* `--channel <NAME>` — Scope send to a named channel (accepts `--focus` as a deprecated alias)
 
 
 
@@ -180,9 +192,57 @@ Launch the interactive chat TUI (ADR-120)
 
 
 
+## `attend join`
+
+Join a channel (creates it if absent)
+
+**Usage:** `attend join [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+
+###### **Options:**
+
+* `--pin` — Pin so the channel persists across scene changes
+
+
+
+## `attend leave`
+
+Leave a channel
+
+**Usage:** `attend leave <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+
+
+
+## `attend channels`
+
+List channels — all available, with joined ones marked
+
+**Usage:** `attend channels`
+
+
+
+## `attend dissolve`
+
+Dissolve a channel (removes it for every member)
+
+**Usage:** `attend dissolve <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+
+
+
 ## `attend focus`
 
-Manage attention groups (default: list joined groups)
+Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
 
 **Usage:** `attend focus [COMMAND]`
 
@@ -289,7 +349,7 @@ List joined groups (default action)
 
 ## `attend scene`
 
-Activate a named scene (reconfigure focus groups)
+Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
 
 **Usage:** `attend scene <NAME>`
 

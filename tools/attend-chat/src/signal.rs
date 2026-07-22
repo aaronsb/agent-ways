@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // `id`/`cwd`/`reply_to`/`ts` land when the sidebar and
+#[allow(dead_code)] // `id`/`cwd`/`reply_to` land when the sidebar and
                    // threading UI ship in follow-up ADR-120 PRs.
 pub struct Signal {
     pub id: String,
@@ -22,6 +22,24 @@ pub struct Signal {
     pub reply_to: Option<String>,
     pub message: String,
     pub ts: u64,
+    /// Which channel this signal arrived on — derived from the inbox
+    /// dir it was read from, never from the body (wire format
+    /// unchanged). Drives the per-tab transcript filter (#393).
+    pub channel: Channel,
+}
+
+/// Provenance of a signal, at inbox-dir granularity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Channel {
+    /// `_broadcast/` — the base `#open` channel.
+    Open,
+    /// `@<name>/` — a named channel.
+    Group(String),
+    /// A cwd inbox (directed send) or a local self-echo.
+    Direct,
+    /// Local-only status blocks (`/peers` output) — never on the bus,
+    /// rendered in every tab so command feedback can't hide.
+    Info,
 }
 
 pub fn signals_base() -> PathBuf {
@@ -98,7 +116,26 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         reply_to,
         message,
         ts,
+        channel: channel_for_path(path),
     })
+}
+
+/// Classify a signal file's channel by the inbox dir it sits in —
+/// the same first-component logic `watcher::accept_path` admits by,
+/// so everything the watcher streams gets a definite channel.
+fn channel_for_path(path: &Path) -> Channel {
+    let dir = path
+        .parent()
+        .and_then(|d| d.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if dir == "_broadcast" {
+        Channel::Open
+    } else if let Some(g) = dir.strip_prefix('@') {
+        Channel::Group(g.to_string())
+    } else {
+        Channel::Direct
+    }
 }
 
 /// Write a broadcast signal to `_broadcast/` using the atomic
@@ -168,6 +205,32 @@ pub fn compose_self_echo(message: &str) -> Signal {
         reply_to: None,
         message: message.to_string(),
         ts,
+        // Echoes exist only for directed sends the watcher can't
+        // round-trip, so Direct is definitionally right.
+        channel: Channel::Direct,
+    }
+}
+
+/// Compose a local-only transcript status block (`/peers` output and
+/// kin). Rendered like any message cell but never written to the bus.
+/// `from` carries no wire prefix on purpose: `known_identities` skips
+/// unknown prefixes, so a status block can't pollute the legend or
+/// `@`-completion, and the chip falls through to the raw-value branch
+/// (`attend` / `<kind>`) — visually distinct from every real sender.
+pub fn compose_status_block(kind: &str, body: &str) -> Signal {
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Signal {
+        id: format!("local-status-{ts}"),
+        from: "attend".to_string(),
+        project: kind.to_string(),
+        cwd: String::new(),
+        reply_to: None,
+        message: body.to_string(),
+        ts,
+        channel: Channel::Info,
     }
 }
 
@@ -290,6 +353,26 @@ mod tests {
         let s = parse_file(&p).unwrap();
         assert_eq!(s.message, "a | b");
         assert!(s.reply_to.is_none());
+    }
+
+    #[test]
+    fn parse_classifies_channel_by_inbox_dir() {
+        // Provenance drives the per-tab filter (#393): broadcast →
+        // Open, `@g/` → Group, anything else (cwd inbox) → Direct.
+        let d = tempdir_like();
+        let bdir = d.join("_broadcast");
+        let gdir = d.join("@deploy");
+        let cdir = d.join("-home-me-proj");
+        for dir in [&bdir, &gdir, &cdir] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let body = "claude:abc|proj|/home/x|hi";
+        assert_eq!(parse_file(&tmp_signal(&bdir, "s", body)).unwrap().channel, Channel::Open);
+        assert_eq!(
+            parse_file(&tmp_signal(&gdir, "s", body)).unwrap().channel,
+            Channel::Group("deploy".into())
+        );
+        assert_eq!(parse_file(&tmp_signal(&cdir, "s", body)).unwrap().channel, Channel::Direct);
     }
 
     #[test]
