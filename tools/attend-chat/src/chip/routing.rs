@@ -118,6 +118,7 @@ mod tests {
             reply_to: None,
             message: "msg".into(),
             ts: 0,
+            channel: crate::signal::Channel::Open,
         }
     }
 

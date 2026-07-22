@@ -228,14 +228,15 @@ pub enum SlashOutcome {
     /// (ADR-170). Name is already normalized (`#` stripped) and
     /// validated.
     Join(String),
-    /// `/leave` — leave the named focus group. Name normalized;
-    /// existence/membership are checked at execution time against
-    /// the live state.
-    Leave(String),
-    /// `/dissolve` — remove the named group entirely: yaml entry and
+    /// `/leave [#g]` — leave a focus group. Name normalized; `None`
+    /// scopes to the foreground tab (#393). Existence/membership are
+    /// checked at execution time against the live state.
+    Leave(Option<String>),
+    /// `/dissolve [#g]` — remove a group entirely: yaml entry and
     /// `@dir`, including orphan dirs the yaml doesn't know about
-    /// (ADR-170). The live-member guard runs at execution time.
-    Dissolve(String),
+    /// (ADR-170). `None` scopes to the foreground tab (#393); the
+    /// live-member guard runs at execution time.
+    Dissolve(Option<String>),
     /// `/channels` — render every channel with live/total member
     /// counts into the status row.
     ListChannels,
@@ -308,22 +309,26 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
                     Err(e) => SlashOutcome::Err(format!("/join: {e}")),
                 },
             },
+            // Bare `/leave` and `/dissolve` scope to the foreground
+            // tab (#393) — the key handler owns tab state and also
+            // re-applies the base-channel rejection when the
+            // foreground resolves to `#open`.
             "leave" => match group_arg(args) {
-                None => SlashOutcome::Err("usage: /leave <group>".into()),
+                None => SlashOutcome::Leave(None),
                 Some("open") => SlashOutcome::Err(
                     "#open is the base channel — you can't leave it".into(),
                 ),
-                Some(g) => SlashOutcome::Leave(g.to_string()),
+                Some(g) => SlashOutcome::Leave(Some(g.to_string())),
             },
             // No name validation here — dissolve targets *existing*
             // state, and its main quarry is exactly the orphan dirs
             // whose names a strict validator might reject.
             "dissolve" => match group_arg(args) {
-                None => SlashOutcome::Err("usage: /dissolve <group>".into()),
+                None => SlashOutcome::Dissolve(None),
                 Some("open") => SlashOutcome::Err(
                     "#open is the base channel — you can't dissolve it".into(),
                 ),
-                Some(g) => SlashOutcome::Dissolve(g.to_string()),
+                Some(g) => SlashOutcome::Dissolve(Some(g.to_string())),
             },
             "channels" => SlashOutcome::ListChannels,
             // Bare `/purge` and `/purge open` both mean the base
@@ -611,11 +616,12 @@ mod tests {
 
     #[test]
     fn dispatch_leave_normalizes() {
-        assert_eq!(dispatch("leave", "#deploy"), SlashOutcome::Leave("deploy".into()));
-        let SlashOutcome::Err(s) = dispatch("leave", "") else {
-            panic!("bare /leave should be a usage error")
-        };
-        assert!(s.contains("usage"));
+        assert_eq!(
+            dispatch("leave", "#deploy"),
+            SlashOutcome::Leave(Some("deploy".into()))
+        );
+        // Bare form scopes to the foreground tab (#393).
+        assert_eq!(dispatch("leave", ""), SlashOutcome::Leave(None));
         let SlashOutcome::Err(s) = dispatch("leave", "open") else {
             panic!("/leave open should be rejected")
         };
@@ -626,12 +632,10 @@ mod tests {
     fn dispatch_dissolve_normalizes() {
         assert_eq!(
             dispatch("dissolve", "#bg-test"),
-            SlashOutcome::Dissolve("bg-test".into())
+            SlashOutcome::Dissolve(Some("bg-test".into()))
         );
-        let SlashOutcome::Err(s) = dispatch("dissolve", "") else {
-            panic!("bare /dissolve should be a usage error")
-        };
-        assert!(s.contains("usage"));
+        // Bare form scopes to the foreground tab (#393).
+        assert_eq!(dispatch("dissolve", ""), SlashOutcome::Dissolve(None));
         let SlashOutcome::Err(s) = dispatch("dissolve", "open") else {
             panic!("/dissolve open should be rejected")
         };

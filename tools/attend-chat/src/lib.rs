@@ -15,5 +15,6 @@ pub mod peers;
 pub mod sessions;
 pub mod signal;
 pub mod slash;
+pub mod tabs;
 pub mod text_layout;
 pub mod watcher;

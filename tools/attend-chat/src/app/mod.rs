@@ -29,6 +29,7 @@ use crate::legend::{find_trailing_mention, group_legend_row, legend_row, Sigil};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::slash;
+use crate::tabs::{self, Tab};
 use crate::text_layout::{render_cursor, visual_line_count};
 
 use keys::{
@@ -74,6 +75,10 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let mut should_exit = hooks.use_state(|| false);
     let mut status = hooks.use_state(String::new);
     let mut tab_cycle = hooks.use_state::<Option<TabCycle>, _>(|| None);
+    // Foreground tab (#393). Merged (slot zero) at launch — today's
+    // full-stream view stays the opening posture; per-channel focus
+    // is an explicit gesture (Tab / Alt+N).
+    let mut foreground = hooks.use_state(Tab::default);
 
     // Time-based refresh tick (ADR-129). Bumped every 5 seconds so the
     // render path re-runs `discover_sessions` + `known_identities` on a
@@ -143,9 +148,10 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     // `&Ref<Vec<Signal>>` to `&[Signal]`, so the handler
                     // sees a borrowed slice without copying the (capped,
                     // but potentially 5000-entry) buffer on every keypress.
+                    let fg = foreground.read().clone();
                     let action = {
                         let sigs_guard = signals.read();
-                        handle_enter(&v, &sigs_guard)
+                        handle_enter(&v, &sigs_guard, &fg)
                     };
                     match action {
                         EnterAction::None => {}
@@ -165,6 +171,14 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             push_capped(&mut signals, echo);
                         }
                         EnterAction::StatusOnly(s) => status.set(s),
+                        EnterAction::ClearWithStatusAndFocus { status: s, focus } => {
+                            status.set(s);
+                            input.set(String::new());
+                            cursor.set(0);
+                            // `/dissolve` closed the foreground tab —
+                            // move focus where the handler advanced it.
+                            foreground.set(focus);
+                        }
                         EnterAction::ClearTranscript => {
                             // Display-only: the buffer empties but
                             // nothing on the bus is touched — signals
@@ -179,16 +193,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 }
                 KeyCode::Tab => {
                     let buf = input.read().clone();
-                    let cur = cursor.get();
-                    let cycle = tab_cycle.read().clone();
-                    // Same borrow-not-clone discipline as Enter — Tab
-                    // fires more often (every keystroke when cycling
-                    // completions), so the per-press cost matters.
-                    let sigs_guard = signals.read();
-                    let res = handle_tab(&buf, cur, cycle, &sigs_guard);
-                    input.set(res.new_buf);
-                    cursor.set(res.new_cursor);
-                    tab_cycle.set(res.new_cycle);
+                    if buf.is_empty() {
+                        // Empty compose line: Tab cycles the
+                        // foreground tab (#393). With content it
+                        // stays completion — the keybinding-collision
+                        // resolution from the issue thread.
+                        let names =
+                            tabs::strip_names(&channels(TermCaps::detect()));
+                        let cur =
+                            tabs::normalize(foreground.read().clone(), &names);
+                        foreground.set(tabs::cycle_next(&cur, &names));
+                    } else {
+                        let cur = cursor.get();
+                        let cycle = tab_cycle.read().clone();
+                        // Same borrow-not-clone discipline as Enter — Tab
+                        // fires more often (every keystroke when cycling
+                        // completions), so the per-press cost matters.
+                        let sigs_guard = signals.read();
+                        let res = handle_tab(&buf, cur, cycle, &sigs_guard);
+                        input.set(res.new_buf);
+                        cursor.set(res.new_cursor);
+                        tab_cycle.set(res.new_cycle);
+                    }
                 }
                 KeyCode::Backspace => {
                     let v = input.read().clone();
@@ -222,6 +248,20 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 KeyCode::End => {
                     let v = input.read().clone();
                     cursor.set(handle_end(&v, cursor.get()));
+                }
+                KeyCode::Char(c)
+                    if modifiers.contains(KeyModifiers::ALT) && c.is_ascii_digit() =>
+                {
+                    // Alt+1..9 jumps straight to a tab (IRC prior):
+                    // 1 = merged, 2 = #open, 3.. = named channels in
+                    // strip order. Empty slots are no-ops.
+                    if let Some(slot) = c.to_digit(10) {
+                        let names =
+                            tabs::strip_names(&channels(TermCaps::detect()));
+                        if let Some(tab) = tabs::jump(slot, &names) {
+                            foreground.set(tab);
+                        }
+                    }
                 }
                 KeyCode::Char(c)
                     if !modifiers
@@ -274,6 +314,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // commons chip (ADR-124 §1–§2). The base entry has empty
     // membership, so it's a no-op for `session_to_groups` below.
     let groups_known = channels(caps);
+    // Foreground tab, normalized against the current strip: a channel
+    // dissolved by a peer between renders degrades to the `#open`
+    // floor instead of leaving focus on a tab that no longer renders.
+    let fg_tab = tabs::normalize(
+        foreground.read().clone(),
+        &tabs::strip_names(&groups_known),
+    );
     // Pre-index session-id → groups once per render so the chip
     // loop is O(signals) instead of O(signals · groups · members).
     // At today's scale neither form matters, but the render path is
@@ -314,6 +361,9 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let rows: Vec<_> = signals
         .read()
         .iter()
+        // Per-tab transcript (#393): merged shows the full stream;
+        // a channel tab filters to its own traffic (+ local Info).
+        .filter(|s| tabs::visible_in(&s.channel, &fg_tab))
         .map(|s| {
             let chip = chip_for(&s.from, &s.project, &s.cwd, caps, &instance_cache);
             let weight = if chip.style.bold { Weight::Bold } else { Weight::Normal };
@@ -422,7 +472,8 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // Live: re-derived from the buffer every render, through the same
     // routing parse the send path uses. Hidden while composing a
     // slash command — nothing would be sent.
-    let dest_chip: Vec<AnyElement<'static>> = destination_label(&input_snapshot, "open")
+    let dest_chip: Vec<AnyElement<'static>> =
+        destination_label(&input_snapshot, &tabs::send_scope(&fg_tab))
         .map(|label| {
             vec![element! {
                 View(background_color: Color::Blue) {
@@ -439,11 +490,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
 
     element! {
         View(flex_direction: FlexDirection::Column, width, height) {
-            // Group legend strip at the top — fixed one-row height.
-            // Each group renders `<glyph> #name` in its hashed color,
-            // so the user can see at a glance which focus groups
-            // exist and in what color they'll appear on agent chips.
-            #(group_legend_row(&groups_known, group_partial.as_deref()))
+            // Tab strip at the top (#393) — fixed one-row height:
+            // `[merged] [#open] [#g] …`, merged pinned at slot zero,
+            // the foreground tab inverse in its channel color. Doubles
+            // as the channel legend: each chip renders `<glyph> #name`
+            // in the group's hashed color, with the `#partial`
+            // completion underline the old channel bar had.
+            #(tabs::tab_strip_row(&groups_known, &fg_tab, group_partial.as_deref()))
             // `min_height: 0` + `overflow: Hidden` keep this pane
             // inside its flex-grown slot instead of expanding to the
             // intrinsic height of the message list — without them, a
