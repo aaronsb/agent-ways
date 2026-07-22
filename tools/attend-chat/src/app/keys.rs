@@ -9,7 +9,7 @@
 use agent_identity::TermCaps;
 
 use crate::chip::{known_identities, resolve_nickname, KnownIdentity};
-use crate::groups::{channels, live_peer_count, resolve_group_dir};
+use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir};
 use crate::legend::{
     all_completions, all_group_completions, apply_completion, find_trailing_mention,
     parse_addressed, Addressed, Sigil,
@@ -57,6 +57,9 @@ pub enum EnterAction {
     /// Failure path: set status, leave input + cursor intact so the
     /// user can edit and retry.
     StatusOnly(String),
+    /// `/clear` — empty the transcript buffer, clear input + cursor,
+    /// show status.
+    ClearTranscript,
 }
 
 /// Plain-Enter dispatch. Slash command first; otherwise parse the
@@ -75,6 +78,14 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
         return match slash::dispatch(cmd, args) {
             slash::SlashOutcome::Ok(s) => EnterAction::ClearWithStatus(s),
             slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
+            slash::SlashOutcome::ClearTranscript => EnterAction::ClearTranscript,
+            slash::SlashOutcome::Join(name) => run_join(&name),
+            slash::SlashOutcome::Leave(name) => run_leave(&name),
+            slash::SlashOutcome::Dissolve(name) => run_dissolve(&name),
+            slash::SlashOutcome::ListChannels => {
+                channels_status_in(&signals_base(), attend_groups::member_alive)
+            }
+            slash::SlashOutcome::Purge(chan) => run_purge(chan.as_deref()),
         };
     }
     let caps = TermCaps::detect();
@@ -130,6 +141,183 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
     }
 }
 
+/// Execute a validated `/join` against the live signals base as the
+/// human member (ADR-170). Touches the username heartbeat first so
+/// the join is immediately live — `live_peer_count` judges members by
+/// heartbeat freshness, and waiting for the next 5s render tick would
+/// leave a just-joined group looking dead to peer sends.
+fn run_join(name: &str) -> EnterAction {
+    let member = crate::signal::human_member_id();
+    let _ = attend_heartbeat::touch(&member);
+    join_group_in(&signals_base(), &member, name)
+}
+
+/// Execute a validated `/leave` against the live signals base.
+fn run_leave(name: &str) -> EnterAction {
+    leave_group_in(&signals_base(), &crate::signal::human_member_id(), name)
+}
+
+/// Filesystem-effect core of `/join`, parameterized on the base dir
+/// so tests can drive it against a tempdir. Group-name validation
+/// already happened in `slash::dispatch`; `Groups::join` re-validates
+/// as defense in depth.
+fn join_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterAction {
+    match attend_groups::Groups::new(base, member).join(name, false) {
+        Ok(()) => EnterAction::ClearWithStatus(format!("joined #{name}")),
+        Err(e) => EnterAction::StatusOnly(format!("/join failed: {e}")),
+    }
+}
+
+/// Filesystem-effect core of `/leave`. Checks existence + membership
+/// before writing so the user gets a precise status instead of a
+/// silent no-op — `Groups::leave` itself succeeds on a group you were
+/// never in.
+fn leave_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterAction {
+    let groups = attend_groups::Groups::new(base, member);
+    match groups.members(name) {
+        None => EnterAction::StatusOnly(format!("#{name}: unknown group")),
+        Some(members) if !members.iter().any(|m| m == member) => {
+            EnterAction::StatusOnly(format!("#{name}: not a member"))
+        }
+        Some(_) => match groups.leave(name) {
+            Ok(()) => EnterAction::ClearWithStatus(format!("left #{name}")),
+            Err(e) => EnterAction::StatusOnly(format!("/leave failed: {e}")),
+        },
+    }
+}
+
+/// Execute a `/dissolve` against the live signals base.
+fn run_dissolve(name: &str) -> EnterAction {
+    dissolve_group_in(&signals_base(), name, attend_groups::member_alive)
+}
+
+/// Filesystem-effect core of `/dissolve`, parameterized on the base
+/// dir and a liveness predicate so tests can drive both without a
+/// real heartbeat sidecar.
+///
+/// The live-member guard is chat-side policy the CLI's
+/// `attend focus dissolve` doesn't have: from the TUI this is a
+/// channel-hygiene action, and yanking a group out from under peers
+/// actively working in it shouldn't be one Enter away. A group whose
+/// members are all heartbeat-stale — or an orphan `@dir` the yaml
+/// has no entry for — dissolves freely; that's the clutter this
+/// command exists to clear.
+fn dissolve_group_in<F: Fn(&str) -> bool>(
+    base: &std::path::Path,
+    name: &str,
+    is_live: F,
+) -> EnterAction {
+    // Member id is irrelevant for dissolve — it acts on the group,
+    // not on this member's entry.
+    let groups = attend_groups::Groups::new(base, "");
+    let members = groups.members(name);
+    let dir_exists = groups.group_dir(name).is_dir();
+    if members.is_none() && !dir_exists {
+        return EnterAction::StatusOnly(format!("#{name}: unknown group"));
+    }
+    let live = members
+        .iter()
+        .flatten()
+        .filter(|m| is_live(m))
+        .count();
+    if live > 0 {
+        return EnterAction::StatusOnly(format!(
+            "#{name}: {live} live member{} — not dissolving",
+            if live == 1 { "" } else { "s" }
+        ));
+    }
+    groups.dissolve(name);
+    EnterAction::ClearWithStatus(format!("dissolved #{name}"))
+}
+
+/// `/channels` — one status line listing every channel with
+/// live/total member counts, IRC `/list` shaped. Rides the same
+/// discovery the channel bar uses (`channels_in`), so orphan dirs
+/// show up here too — with `0/0 live`, which is the tell that
+/// they're `/dissolve` fodder. Single-line on purpose: the status
+/// row truncates on overflow rather than wrapping, and a channel
+/// list long enough to truncate is a hygiene problem before it's a
+/// rendering one.
+fn channels_status_in<F: Fn(&str) -> bool>(
+    base: &std::path::Path,
+    is_live: F,
+) -> EnterAction {
+    let caps = TermCaps::detect();
+    let parts: Vec<String> = channels_in(base, caps)
+        .iter()
+        .map(|kg| {
+            if kg.is_base {
+                return format!("#{} (base)", kg.group.name);
+            }
+            let total = kg.membership.members.len();
+            let live = kg.membership.members.iter().filter(|m| is_live(m)).count();
+            let pin = if kg.membership.pinned { " pinned" } else { "" };
+            format!("#{} {live}/{total} live{pin}", kg.group.name)
+        })
+        .collect();
+    EnterAction::ClearWithStatus(format!("channels: {}", parts.join(" · ")))
+}
+
+/// Execute a `/purge` against the live signals base. The keep-tail is
+/// the heartbeat grace window: anything younger may still be mid-scan
+/// by a peer's sensor, so it survives; anything older has been
+/// scannable for at least one full grace period by every live peer.
+fn run_purge(channel: Option<&str>) -> EnterAction {
+    purge_channel_in(&signals_base(), channel, attend_heartbeat::DEFAULT_GRACE)
+}
+
+/// Filesystem-effect core of `/purge` — delete a channel's on-disk
+/// signal history, keeping files younger than `keep`.
+///
+/// This is the deliberate human override of ADR-136's durability
+/// default (messages are never age-reaped automatically; they wait
+/// for their recipient or their author-project's deletion). A purge
+/// is an explicit operator action, scoped to one channel: `None`
+/// purges the base channel's `_broadcast/`; a named group purges its
+/// `@dir` history without touching the group itself — membership and
+/// the channel survive, unlike `/dissolve`.
+fn purge_channel_in(
+    base: &std::path::Path,
+    channel: Option<&str>,
+    keep: std::time::Duration,
+) -> EnterAction {
+    let (label, dir) = match channel {
+        None => ("open".to_string(), base.join("_broadcast")),
+        Some(g) => {
+            let dir = base.join(format!("@{g}"));
+            if !dir.is_dir() && !attend_groups::load_groups(base).contains_key(g) {
+                return EnterAction::StatusOnly(format!("#{g}: unknown group"));
+            }
+            (g.to_string(), dir)
+        }
+    };
+    let mut removed = 0usize;
+    let mut kept = 0usize;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let path = e.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("signal") {
+                continue;
+            }
+            let old_enough = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+                .is_some_and(|age| age > keep);
+            if old_enough && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+            } else {
+                kept += 1;
+            }
+        }
+    }
+    EnterAction::ClearWithStatus(format!(
+        "purged {removed} signal{} from #{label} ({kept} recent kept)",
+        if removed == 1 { "" } else { "s" }
+    ))
+}
+
 /// Does the sender's own chat watcher already surface signals written to
 /// `dest`? Reuses [`accept_path`] — the single source of truth for what
 /// the transcript shows — so a directed send that round-trips (a
@@ -176,6 +364,11 @@ fn resolve_recipients(
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut dests = Vec::with_capacity(recipients.len());
     let mut seen = std::collections::HashSet::new();
+    // Self-exclusion for the liveness gate: since ADR-170 the human
+    // is a heartbeating member, so without this a human alone in a
+    // group would count themselves as the live listener — reopening
+    // the silent-routing trap the gate exists to close.
+    let self_member = crate::signal::human_member_id();
     for r in recipients {
         let dir = match r {
             Addressed::Agent(name) => resolve_nickname(name, agents)
@@ -187,7 +380,7 @@ fn resolve_recipients(
                     )
                 })?,
             Addressed::Group(name) => match resolve_group_dir(name) {
-                Some(dir) if live_peer_count(name) > 0 => dir,
+                Some(dir) if live_peer_count(name, &self_member) > 0 => dir,
                 Some(_) => {
                     return Err(std::io::Error::other(format!(
                         "#{name}: no live peers — message would not be read. \
@@ -456,6 +649,184 @@ mod tests {
         assert_eq!(handle_end("ab\ncd", 3), 5);
         // No trailing newline → end of buffer.
         assert_eq!(handle_end("abc", 1), 3);
+    }
+
+    fn tempdir_like() -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "attend-chat-keys-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn join_group_creates_membership_and_clears_input() {
+        let base = tempdir_like();
+        match join_group_in(&base, "aaron", "deploy") {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("joined #deploy")),
+            _ => panic!("successful join should clear input with status"),
+        }
+        assert!(base.join("@deploy").is_dir());
+        let members = attend_groups::Groups::new(&base, "aaron")
+            .members("deploy")
+            .unwrap();
+        assert_eq!(members, vec!["aaron"]);
+    }
+
+    #[test]
+    fn leave_group_unknown_and_nonmember_are_precise() {
+        let base = tempdir_like();
+        // Unknown group: no yaml entry at all.
+        match leave_group_in(&base, "aaron", "ghost") {
+            EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
+            _ => panic!("unknown group should keep input with status"),
+        }
+        // Group exists, but we're not in it.
+        attend_groups::Groups::new(&base, "someone-else")
+            .join("deploy", false)
+            .unwrap();
+        match leave_group_in(&base, "aaron", "deploy") {
+            EnterAction::StatusOnly(s) => assert!(s.contains("not a member")),
+            _ => panic!("non-member leave should keep input with status"),
+        }
+    }
+
+    #[test]
+    fn join_then_leave_roundtrip_dissolves_unpinned() {
+        let base = tempdir_like();
+        join_group_in(&base, "aaron", "temp");
+        match leave_group_in(&base, "aaron", "temp") {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("left #temp")),
+            _ => panic!("member leave should clear input with status"),
+        }
+        // Last member out of an unpinned group dissolves it.
+        assert!(!base.join("@temp").exists());
+    }
+
+    #[test]
+    fn dissolve_unknown_group_is_precise() {
+        let base = tempdir_like();
+        match dissolve_group_in(&base, "ghost", |_| false) {
+            EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
+            _ => panic!("unknown group should keep input with status"),
+        }
+    }
+
+    #[test]
+    fn dissolve_removes_orphan_dir_without_yaml_entry() {
+        // The main quarry: a `@dir` on disk with no yaml entry —
+        // invisible to member cleanup, rendered forever in the
+        // channel bar until dissolved.
+        let base = tempdir_like();
+        std::fs::create_dir_all(base.join("@bg-test")).unwrap();
+        match dissolve_group_in(&base, "bg-test", |_| false) {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #bg-test")),
+            _ => panic!("orphan dissolve should clear input with status"),
+        }
+        assert!(!base.join("@bg-test").exists());
+    }
+
+    #[test]
+    fn dissolve_removes_group_with_only_stale_members() {
+        let base = tempdir_like();
+        attend_groups::Groups::new(&base, "dead-session")
+            .join("temp", false)
+            .unwrap();
+        match dissolve_group_in(&base, "temp", |_| false) {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #temp")),
+            _ => panic!("stale-member dissolve should clear input with status"),
+        }
+        assert!(!base.join("@temp").exists());
+        assert!(attend_groups::Groups::new(&base, "x").members("temp").is_none());
+    }
+
+    #[test]
+    fn dissolve_refuses_group_with_live_members() {
+        let base = tempdir_like();
+        attend_groups::Groups::new(&base, "live-session")
+            .join("deploy", false)
+            .unwrap();
+        match dissolve_group_in(&base, "deploy", |_| true) {
+            EnterAction::StatusOnly(s) => assert!(s.contains("1 live member")),
+            _ => panic!("live-member dissolve should refuse with status"),
+        }
+        // Nothing was touched.
+        assert!(base.join("@deploy").is_dir());
+    }
+
+    #[test]
+    fn purge_removes_aged_signals_and_keeps_recent() {
+        let base = tempdir_like();
+        let bdir = base.join("_broadcast");
+        std::fs::create_dir_all(&bdir).unwrap();
+        std::fs::write(bdir.join("old.signal"), "from|p|/x|old\n").unwrap();
+        std::fs::write(bdir.join("notes.txt"), "not a signal").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        // Zero keep-tail: everything with positive age purges.
+        match purge_channel_in(&base, None, std::time::Duration::ZERO) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("purged 1 signal"), "got: {s}")
+            }
+            _ => panic!("purge should clear input with status"),
+        }
+        assert!(!bdir.join("old.signal").exists());
+        // Non-signal files are untouched.
+        assert!(bdir.join("notes.txt").exists());
+
+        // Real grace window: a fresh signal survives.
+        std::fs::write(bdir.join("fresh.signal"), "from|p|/x|hi\n").unwrap();
+        match purge_channel_in(&base, None, attend_heartbeat::DEFAULT_GRACE) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("purged 0 signals from #open (1 recent kept)"), "got: {s}")
+            }
+            _ => panic!("purge should clear input with status"),
+        }
+        assert!(bdir.join("fresh.signal").exists());
+    }
+
+    #[test]
+    fn purge_scopes_to_named_group_and_rejects_unknown() {
+        let base = tempdir_like();
+        std::fs::create_dir_all(base.join("@deploy")).unwrap();
+        std::fs::create_dir_all(base.join("_broadcast")).unwrap();
+        std::fs::write(base.join("@deploy").join("a.signal"), "f|p|/x|a\n").unwrap();
+        std::fs::write(base.join("_broadcast").join("b.signal"), "f|p|/x|b\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        match purge_channel_in(&base, Some("deploy"), std::time::Duration::ZERO) {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("#deploy"), "got: {s}"),
+            _ => panic!("scoped purge should clear input with status"),
+        }
+        assert!(!base.join("@deploy").join("a.signal").exists());
+        // Broadcast untouched by a scoped purge.
+        assert!(base.join("_broadcast").join("b.signal").exists());
+
+        match purge_channel_in(&base, Some("ghost"), std::time::Duration::ZERO) {
+            EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
+            _ => panic!("unknown group should keep input with status"),
+        }
+    }
+
+    #[test]
+    fn channels_status_lists_base_and_counts() {
+        let base = tempdir_like();
+        // One real group with a dead member, one orphan dir.
+        attend_groups::Groups::new(&base, "dead-sess")
+            .join("deploy", false)
+            .unwrap();
+        std::fs::create_dir_all(base.join("@bg-test")).unwrap();
+        match channels_status_in(&base, |_| false) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("#open (base)"), "got: {s}");
+                assert!(s.contains("#deploy 0/1 live"), "got: {s}");
+                assert!(s.contains("#bg-test 0/0 live"), "got: {s}");
+            }
+            _ => panic!("/channels should clear input with status"),
+        }
     }
 
     #[test]

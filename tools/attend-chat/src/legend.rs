@@ -498,10 +498,10 @@ mod tests {
     #[test]
     fn all_group_completions_returns_every_prefix_match() {
         use agent_identity::Group;
-        use crate::groups::{GroupMembership, KnownGroup};
+        use crate::groups::KnownGroup;
         let mk = |name: &str| KnownGroup {
             group: Group::for_name(name, TermCaps::Rich),
-            membership: GroupMembership::default(),
+            membership: attend_groups::GroupEntry::default(),
             is_base: false,
         };
         let known = vec![mk("deploy"), mk("deploy-prod"), mk("infra")];

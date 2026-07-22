@@ -223,6 +223,7 @@ version = "0.8.1"
 dependencies = [
  "agent-fmt",
  "agent-identity",
+ "attend-groups",
  "attend-heartbeat",
  "attend-instances",
  "clap",
@@ -241,11 +242,19 @@ version = "0.2.0"
 dependencies = [
  "agent-identity",
  "async-channel",
+ "attend-groups",
  "attend-heartbeat",
  "attend-instances",
  "iocraft",
  "notify",
  "smol",
+]
+
+[[package]]
+name = "attend-groups"
+version = "0.1.0"
+dependencies = [
+ "attend-heartbeat",
 ]
 
 [[package]]
