@@ -292,6 +292,10 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // binding so `find_trailing_mention`'s `&str` doesn't outlive
     // the temporary guard.
     let input_snapshot = input.read().clone();
+    // One wall-clock read per render pass shared by every cell's
+    // datetime — per-cell `now()` calls could straddle a minute
+    // boundary and render inconsistent times within one frame.
+    let now = std::time::SystemTime::now();
     // Trailing-mention context is still consumed by the top channel
     // bar so it can underline a matching `#partial` when the user is
     // picking a group; the agent-side partial now flows through
@@ -347,6 +351,21 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         .collect()
                 })
                 .unwrap_or_default();
+            // Cell datetime (#389): the identity block's third line
+            // pairs the charm glyphs with a tight timestamp. One
+            // shared format across every attend surface —
+            // `agent_fmt::compact_time` — so the TUI, `attend inbox`,
+            // and the drain cannot drift. `ts == 0` means the signal
+            // file's mtime was unreadable; render nothing rather
+            // than a wrong epoch date.
+            let when = if s.ts == 0 {
+                String::new()
+            } else {
+                agent_fmt::compact_time(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(s.ts),
+                    now,
+                )
+            };
             element! {
                 View(flex_direction: FlexDirection::Row, margin_bottom: 1) {
                     View(
@@ -368,6 +387,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         Text(color: Color::DarkGrey, content: chip.secondary, wrap: TextWrap::NoWrap)
                         View(flex_direction: FlexDirection::Row) {
                             #(group_chips)
+                            Text(color: Color::DarkGrey, content: when, wrap: TextWrap::NoWrap)
                         }
                     }
                     View(
