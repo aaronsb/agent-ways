@@ -218,6 +218,24 @@ impl StateStore {
         self.write_merged(&snap, true);
     }
 
+    /// Record a cold-start baseline. Unlike [`mark_seen`], this ALWAYS
+    /// writes, even with no keys: the state file's existence is what
+    /// "warm" means, so an empty baseline that skipped the write would
+    /// leave the next drain cold and make it baseline again — silently
+    /// swallowing whatever arrived in between (PR #385 review,
+    /// blocking finding).
+    pub fn baseline<I, S>(&self, keys: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let snap = StateSnapshot {
+            seen_signals: keys.into_iter().map(Into::into).collect(),
+            ..Default::default()
+        };
+        self.write_merged(&snap, true);
+    }
+
     /// Shared read-union-prune-write cycle under the advisory lock.
     /// `fields_from_disk` selects which side's non-seen fields survive.
     fn write_merged(&self, mem: &StateSnapshot, fields_from_disk: bool) {
@@ -268,7 +286,9 @@ impl StateStore {
             .cloned()
             .collect();
 
-        let tmp = path.with_extension("tmp");
+        // Per-writer tmp name: two writers that both fell through the
+        // lock timeout must not interleave on one tmp file.
+        let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
         if fs::write(&tmp, merged.serialize()).is_ok() {
             fs::rename(&tmp, &path).ok();
         }
@@ -318,14 +338,23 @@ impl LockGuard {
             match fs::OpenOptions::new().write(true).create_new(true).open(path) {
                 Ok(_) => return Self { path: Some(path.to_path_buf()) },
                 Err(_) => {
-                    // Steal locks left by a crashed writer.
+                    // Steal locks left by a crashed writer — by RENAME,
+                    // not remove: two stealers both removing and then
+                    // both creating would double-grant. Rename is the
+                    // arbiter (exactly one succeeds); both then race
+                    // create_new fairly on the next iteration.
                     let stale = fs::metadata(path)
                         .and_then(|m| m.modified())
                         .ok()
                         .and_then(|t| t.elapsed().ok())
                         .is_some_and(|age| age > LOCK_STALE);
                     if stale {
-                        fs::remove_file(path).ok();
+                        let grave = path.with_extension(
+                            format!("lock.stale.{}", std::process::id()),
+                        );
+                        if fs::rename(path, &grave).is_ok() {
+                            fs::remove_file(&grave).ok();
+                        }
                         continue;
                     }
                     if std::time::Instant::now() >= deadline {

@@ -307,6 +307,8 @@ fn print_inbox_footer(page: usize, total: usize, shown: usize, older: usize, cur
 // ---------------------------------------------------------------------------
 // `attend inbox --drain` — the ADR-172 turn-boundary consumption path.
 // ---------------------------------------------------------------------------
+// `attend inbox --drain` — the ADR-172 turn-boundary consumption path.
+// ---------------------------------------------------------------------------
 
 /// Consecutive drain-fired continuations allowed before the drain defers
 /// to the Monitor conduit (ADR-172 Decision 6). Two actively conversing
@@ -320,14 +322,131 @@ const MAX_DRAIN_ROUNDS: u32 = 5;
 /// burst from flooding a single turn injection.
 const DRAIN_RENDER_MAX: usize = 10;
 
+/// On a cold start (no seen-set on disk) the drain baselines the durable
+/// backlog without delivering — but only messages older than this
+/// window. A younger message is live conversation, not backlog:
+/// baselining it would mark it consumed with no conduit ever delivering
+/// it (the sensor imports the mark and stays silent too — loss, the
+/// PR #385 blocking finding). The window comfortably exceeds the
+/// sensor's checkpoint cadence so the first-checkpoint race can't
+/// reclassify a live message as backlog.
+const BASELINE_FRESH_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// One scanned pending message. Module scope (not fn-local) so the scan
+/// core is testable without the identity/HOME plumbing around it.
+struct Drained {
+    mtime: std::time::SystemTime,
+    sender: String,
+    scope: String,
+    id: String,
+    body: String,
+    source_cwd: String,
+}
+impl DrainedView for Drained {
+    fn sender(&self) -> &str { &self.sender }
+    fn scope(&self) -> &str { &self.scope }
+    fn id(&self) -> &str { &self.id }
+    fn body(&self) -> &str { &self.body }
+}
+
+/// Scan core: walk `scan_dirs` (paired with their scope labels) and
+/// split unseen signals into (deliverable, keys-to-mark). Pure with
+/// respect to identity and config — the caller supplies the seen-set,
+/// the session id, and the baselining decision, so tests drive it with
+/// temp dirs (PR #385 review, finding 6).
+///
+/// Marking rules: own messages mark without delivering (dedup
+/// bookkeeping); under `baselining`, messages older than `fresh_window`
+/// mark without delivering (backlog flood-guard) while younger ones
+/// deliver normally (live conversation, not backlog).
+fn scan_pending(
+    scan_dirs: &[(std::path::PathBuf, String)],
+    seen: &std::collections::HashSet<String>,
+    own_session_id: &str,
+    baselining: bool,
+    fresh_window: std::time::Duration,
+) -> (Vec<Drained>, Vec<String>) {
+    let mut delivered: Vec<Drained> = Vec::new();
+    let mut mark: Vec<String> = Vec::new();
+
+    for (dir, scope) in scan_dirs {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let filename = match path.file_name().and_then(|f| f.to_str()) {
+                Some(f) if f.ends_with(".signal") => f.to_string(),
+                _ => continue,
+            };
+            // Same collision-proof key the peers sensor uses.
+            let key = format!("{}:{}", dir.display(), filename);
+            if seen.contains(&key) {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let sig = match parse_signal(content.trim()) {
+                Some(s) => s,
+                None => continue,
+            };
+            // Own messages: mark (dedup bookkeeping) but never deliver.
+            if let Some((_, identity)) = sig.from.split_once(':') {
+                if identity == own_session_id {
+                    mark.push(key);
+                    continue;
+                }
+            }
+            let mtime = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            if baselining {
+                let old = mtime
+                    .elapsed()
+                    .map(|age| age > fresh_window)
+                    .unwrap_or(true);
+                if old {
+                    mark.push(key);
+                    continue;
+                }
+            }
+            // Always Mono: the drain's output is hook-injection text (or
+            // a pipe), never a styled terminal — env-probed detection
+            // would leak raw ANSI codes into the turn (live-test find).
+            delivered.push(Drained {
+                mtime,
+                sender: render_sender_label(sig.from, sig.cwd, TermCaps::Mono),
+                scope: scope.clone(),
+                id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+                body: sig.message.to_string(),
+                source_cwd: sig.cwd.to_string(),
+            });
+            mark.push(key);
+        }
+    }
+    (delivered, mark)
+}
+
 /// Drain pending authored messages for this session: deliver the unseen,
 /// record their consumption in the shared seen-set, and (in `hook`
 /// format) emit the Stop-hook block JSON that injects them into the
 /// ending turn. Every guard degrades to "deliver nothing, mark nothing":
-/// unresolved identity, cold start, and the re-entry ceiling all leave
-/// the tray for the Monitor conduit rather than risking the seen-set.
+/// unresolved identity and the re-entry ceiling leave the tray for the
+/// Monitor conduit; a cold start marks only the stale backlog and always
+/// persists the state file so it happens exactly once.
 pub(crate) fn cmd_inbox_drain(format: &str) {
-    let hook_mode = format == "hook";
+    let hook_mode = match format {
+        "hook" => true,
+        "plain" => false,
+        other => {
+            eprintln!("unknown --format '{other}' for --drain (expected plain|hook)");
+            std::process::exit(2);
+        }
+    };
 
     // Resolved-gate (ADR-172 Decision 4): marking consumption under a
     // pid-fallback identity would alias sessions and corrupt the shared
@@ -341,9 +460,17 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     }
     let session_id = ident.session_id.clone();
 
+    // Liveness: a drain-only session (no Monitor running) must still
+    // look alive to /purge's consumer consult, or the Decision 5
+    // protection this PR co-ships would skip exactly the sessions that
+    // depend on it (PR #385 review, finding 4).
+    attend_heartbeat::touch(&session_id).ok();
+
     // Re-entry guard (Decision 6). Only the hook path carries the
     // harness's stop_hook_active signal on stdin; a manual plain-mode
-    // drain counts as a fresh boundary.
+    // drain counts as a fresh boundary. The counter resets on every
+    // empty drain (below), so continuations forced by OTHER Stop hooks
+    // cannot inflate it across turns.
     let stop_active = hook_mode && stdin_stop_hook_active();
     let rounds = bump_drain_rounds(&session_id, stop_active);
     if rounds > MAX_DRAIN_ROUNDS {
@@ -353,134 +480,58 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 
     let store = attend_state::StateStore::new(Some(session_id.clone()));
 
-    // Cold start (no seen-set on disk): baseline the whole backlog as
-    // seen WITHOUT delivering — the same flood guard the peers sensor
-    // applies on a checkpoint-less first scan. Detail stays available
-    // via `attend inbox`.
-    let baselining = store.load().is_none();
+    // Cold start = no state file. Load once; existence decides the
+    // baselining branch and the same snapshot supplies the seen-set.
+    let snapshot = store.load();
+    let baselining = snapshot.is_none();
+    let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let own_encoded = encode_project(&cwd);
     let r = get_groups();
-    let mut scan_dirs = vec![base.join(&own_encoded), base.join("_broadcast")];
+    let mut scan_dirs = vec![
+        (base.join(&own_encoded), "project".to_string()),
+        (base.join("_broadcast"), "#open".to_string()),
+    ];
     for name in r.joined_group_names() {
-        scan_dirs.push(r.group_dir(&name));
+        // "@group" reads naturally as the channel name.
+        let label = format!("@{name}");
+        scan_dirs.push((r.group_dir(&name), label));
     }
 
-    let seen = store.load().map(|s| s.seen_signals).unwrap_or_default();
-
-    struct Drained {
-        mtime: std::time::SystemTime,
-        sender: String,
-        scope: String,
-        id: String,
-        body: String,
-        source_cwd: String,
-    }
-    impl DrainedView for Drained {
-        fn sender(&self) -> &str { &self.sender }
-        fn scope(&self) -> &str { &self.scope }
-        fn id(&self) -> &str { &self.id }
-        fn body(&self) -> &str { &self.body }
-    }
-    let mut delivered: Vec<Drained> = Vec::new();
-    let mut mark: Vec<String> = Vec::new();
-
-    for dir in &scan_dirs {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-        let scope = if dir_name == "_broadcast" {
-            "#open"
-        } else if dir_name == own_encoded {
-            "project"
-        } else {
-            dir_name // "@group" reads naturally as the channel name
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let filename = match path.file_name().and_then(|f| f.to_str()) {
-                Some(f) if f.ends_with(".signal") => f.to_string(),
-                _ => continue,
-            };
-            // Same collision-proof key the peers sensor uses.
-            let key = format!("{}:{}", dir.display(), filename);
-            if seen.contains(&key) {
-                continue;
-            }
-            if baselining {
-                mark.push(key);
-                continue;
-            }
-            let content = match std::fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            let sig = match parse_signal(content.trim()) {
-                Some(s) => s,
-                None => continue,
-            };
-            // Own messages: mark (dedup bookkeeping) but never deliver.
-            if let Some((_, identity)) = sig.from.split_once(':') {
-                if identity == session_id {
-                    mark.push(key);
-                    continue;
-                }
-            }
-            let mtime = std::fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            // Always Mono: the drain's output is hook-injection text (or
-            // a pipe), never a styled terminal — env-probed detection
-            // would leak raw ANSI codes into the turn (live-test find).
-            delivered.push(Drained {
-                mtime,
-                sender: render_sender_label(sig.from, sig.cwd, TermCaps::Mono),
-                scope: scope.to_string(),
-                id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
-                body: sig.message.to_string(),
-                source_cwd: sig.cwd.to_string(),
-            });
-            mark.push(key);
-        }
-    }
-
+    let (mut delivered, mark) =
+        scan_pending(&scan_dirs, &seen, &session_id, baselining, BASELINE_FRESH_WINDOW);
     delivered.sort_by_key(|d| d.mtime);
 
-    // Consumption is recorded for everything we are about to deliver
-    // (plus own-message bookkeeping) — the atomic "return AND record"
-    // contract. Recording before printing means a crash between the two
-    // loses a delivery to this conduit, not deliver-once: the message
-    // file itself is untouched and `attend inbox` still lists it.
-    store.mark_seen(mark);
-
-    // `attend reply` should target what the drain delivered, exactly as
-    // it targets what the sensor surfaced.
-    #[cfg(feature = "sensor-peers")]
-    if let Some(newest) = delivered.iter().rev().find(|d| d.source_cwd != cwd) {
-        sensor_peers::last_inbound::record(&session_id, &newest.id);
-    }
-
-    if baselining {
-        if !hook_mode {
-            eprintln!("(cold start — baselined the existing backlog without delivering; see attend inbox)");
-        }
-        return;
-    }
     if delivered.is_empty() {
-        // Empty drain: say nothing in hook mode so the turn ends —
+        // Empty drain: reset the re-entry counter (this boundary chain
+        // is ending) and say nothing in hook mode so the turn ends —
         // the termination property the re-entry design leans on.
+        reset_drain_rounds(&session_id);
+        // A cold start must still persist the (possibly empty) baseline,
+        // or the next drain re-baselines and swallows what arrived in
+        // between (PR #385 review, blocking finding).
+        if baselining {
+            store.baseline(mark);
+        } else {
+            store.mark_seen(mark);
+        }
         if !hook_mode {
-            println!("no pending messages");
+            if baselining {
+                eprintln!("(cold start — baselined the stale backlog without delivering; see attend inbox)");
+            } else {
+                println!("no pending messages");
+            }
         }
         return;
     }
 
+    // Deliver, THEN record: a crash between the two re-delivers at the
+    // next boundary (the seen-set never got the marks), which dedup
+    // tolerates — at-least-once. The reverse order would mark messages
+    // consumed with no conduit having shown them: loss on BOTH conduits,
+    // since the sensor imports drain marks (PR #385 review, finding 2).
     if hook_mode {
         let reason = render_drain_reason(&delivered);
         println!(
@@ -496,6 +547,21 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         }
         println!("{} message(s) drained and marked consumed", delivered.len());
     }
+
+    if baselining {
+        store.baseline(mark);
+    } else {
+        store.mark_seen(mark);
+    }
+
+    // `attend reply` should target what the drain delivered, exactly as
+    // it targets what the sensor surfaced.
+    #[cfg(feature = "sensor-peers")]
+    if let Some(newest) = delivered.iter().rev().find(|d| d.source_cwd != cwd) {
+        sensor_peers::last_inbound::record(&session_id, &newest.id);
+    }
+    #[cfg(not(feature = "sensor-peers"))]
+    let _ = cwd;
 }
 
 /// The injected turn-continuation text. Sober and contract-preserving:
@@ -564,14 +630,20 @@ fn parse_stop_hook_active(payload: &str) -> bool {
 /// state file. A fresh boundary (stop_hook_active=false) resets to 1;
 /// each hook-forced continuation increments. The file is tiny and
 /// self-healing — an unreadable count is treated as a fresh boundary.
-fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
+fn drain_rounds_path(session_id: &str) -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let dir = std::path::PathBuf::from(home)
+    std::path::PathBuf::from(home)
         .join(".cache")
         .join("attend")
-        .join("state");
-    std::fs::create_dir_all(&dir).ok();
-    let path = dir.join(format!("{session_id}.drain-rounds"));
+        .join("state")
+        .join(format!("{session_id}.drain-rounds"))
+}
+
+fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
+    let path = drain_rounds_path(session_id);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
     let rounds = if stop_active {
         std::fs::read_to_string(&path)
             .ok()
@@ -581,8 +653,19 @@ fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
     } else {
         1
     };
-    std::fs::write(&path, rounds.to_string()).ok();
+    // tmp + rename: a torn write that parses as garbage would read as
+    // "fresh boundary" forever and quietly disable the ceiling.
+    let tmp = path.with_extension(format!("drain-rounds.tmp.{}", std::process::id()));
+    if std::fs::write(&tmp, rounds.to_string()).is_ok() {
+        std::fs::rename(&tmp, &path).ok();
+    }
     rounds
+}
+
+/// An empty drain ends the boundary chain: remove the counter (also the
+/// sidecar's cleanup — no stale `.drain-rounds` files accumulate).
+fn reset_drain_rounds(session_id: &str) {
+    std::fs::remove_file(drain_rounds_path(session_id)).ok();
 }
 
 /// Minimal JSON string escaping for the hook `reason` field.
@@ -645,8 +728,11 @@ mod drain_tests {
         assert!(!parse_stop_hook_active(r#"{"stop_hook_active":false}"#));
         assert!(!parse_stop_hook_active(r#"{"other": true}"#));
         assert!(!parse_stop_hook_active(""));
-        // A string VALUE mentioning the field must not trip the scan's
-        // simple tokenizer into a false positive for `: true`.
+        // The quoted-key pattern keeps bare prose mentions from matching.
+        // Known accepted limit: a JSON string VALUE embedding the exact
+        // quoted `"stop_hook_active": true` token would still false-
+        // positive — the harness controls this payload, so a real parser
+        // is not worth the dependency.
         assert!(!parse_stop_hook_active(
             r#"{"note": "stop_hook_active is unrelated here", "stop_hook_active": false}"#
         ));
@@ -660,6 +746,92 @@ mod drain_tests {
         assert!(reason.contains("peer-1 (#open, id id-1):"));
         assert!(reason.contains("body 2"));
         assert!(reason.contains("silence is a valid reply"));
+    }
+
+    // --- scan_pending core (PR #385 review, finding 6) ---
+
+    fn scan_fixture(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "attend-drain-scan-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Write a signal file; returns its seen-set key.
+    fn write_signal(dir: &std::path::Path, name: &str, from: &str, msg: &str) -> String {
+        let file = format!("{name}.signal");
+        std::fs::write(dir.join(&file), format!("{from}|proj|/src/cwd|{msg}\n")).unwrap();
+        format!("{}:{}", dir.display(), file)
+    }
+
+    const HOUR: std::time::Duration = std::time::Duration::from_secs(3600);
+
+    #[test]
+    fn scan_delivers_unseen_and_filters_seen() {
+        let dir = scan_fixture("seen");
+        let k1 = write_signal(&dir, "peer-1", "claude:other-session", "already seen");
+        let k2 = write_signal(&dir, "peer-2", "claude:other-session", "new message");
+        let seen: std::collections::HashSet<String> = [k1].into_iter().collect();
+        let dirs = vec![(dir.clone(), "#open".to_string())];
+
+        let (delivered, mark) = scan_pending(&dirs, &seen, "my-session", false, HOUR);
+        assert_eq!(delivered.len(), 1);
+        assert_eq!(delivered[0].body, "new message");
+        assert_eq!(delivered[0].scope, "#open");
+        assert_eq!(mark, vec![k2]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scan_marks_own_messages_without_delivering() {
+        let dir = scan_fixture("own");
+        let k = write_signal(&dir, "self-1", "claude:my-session", "my own send");
+        let dirs = vec![(dir.clone(), "#open".to_string())];
+
+        let (delivered, mark) =
+            scan_pending(&dirs, &Default::default(), "my-session", false, HOUR);
+        assert!(delivered.is_empty(), "own message must not deliver");
+        assert_eq!(mark, vec![k], "own message must still be marked (dedup bookkeeping)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regression for the PR #385 blocking finding: under a cold-start
+    /// baseline, a FRESH message (live conversation racing the first
+    /// checkpoint) must deliver, not be silently marked consumed.
+    #[test]
+    fn baseline_delivers_fresh_messages() {
+        let dir = scan_fixture("baseline-fresh");
+        let k = write_signal(&dir, "peer-1", "claude:other-session", "arrived just now");
+        let dirs = vec![(dir.clone(), "#open".to_string())];
+
+        let (delivered, mark) =
+            scan_pending(&dirs, &Default::default(), "my-session", true, HOUR);
+        assert_eq!(delivered.len(), 1, "fresh message must survive the baseline");
+        assert_eq!(mark, vec![k]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The flip side: genuinely stale backlog baselines quietly (a zero
+    /// fresh-window makes every just-written file count as old).
+    #[test]
+    fn baseline_marks_stale_backlog_without_delivering() {
+        let dir = scan_fixture("baseline-stale");
+        let k = write_signal(&dir, "peer-1", "claude:other-session", "durable backlog");
+        let dirs = vec![(dir.clone(), "#open".to_string())];
+
+        let (delivered, mark) = scan_pending(
+            &dirs,
+            &Default::default(),
+            "my-session",
+            true,
+            std::time::Duration::ZERO,
+        );
+        assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
+        assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

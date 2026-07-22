@@ -35,6 +35,10 @@ pub(super) struct TickState<'a> {
     /// event lane keeps `governor`; messages must not be starved by it.
     pub(super) msg_governor: &'a mut DisclosureGovernor,
     pub(super) last_checkpoint: &'a mut Instant,
+    /// Whether the peers sensor has checkpointed at least once this
+    /// process — the first poll persists its cold-start baseline even
+    /// when nothing changed (ADR-172; PR #385 review).
+    pub(super) peers_checkpointed_once: &'a mut bool,
     pub(super) last_instance_touch: &'a mut Instant,
     /// Roster gate (ADR-171): false for fallback identities, which
     /// must never allocate registry slots — see the startup gate in
@@ -257,10 +261,15 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         // Checkpoint immediately on any peers change so on-disk
         // consumption keeps pace with both writers. Union semantics
         // make the extra write safe; message traffic makes it rare.
-        if is_message_lane && changed {
+        // The first peers poll checkpoints even when quiet: it may have
+        // just baselined the cold-start backlog in memory, and until
+        // that reaches disk the drain would treat the session as cold
+        // and baseline again (PR #385 review, blocking finding).
+        if is_message_lane && (changed || !*s.peers_checkpointed_once) {
             let snapshot = collect_snapshot(s.slots);
             s.state_store.checkpoint(&snapshot);
             *s.last_checkpoint = Instant::now();
+            *s.peers_checkpointed_once = true;
         }
 
         if (is_message_lane && s.slots[i].accumulator.magnitude > 0.0)

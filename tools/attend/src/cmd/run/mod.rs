@@ -167,7 +167,11 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // `ident` (not a fresh resolution) is load-bearing: a re-derivation
     // that raced claude startup could disagree with the identity the
     // registry and heartbeat use, freezing a mixed persona (PR #380
-    // review, finding 1).
+    // review, finding 1). Gating on `session_resolved` alone (not the
+    // drain's stricter `resolved()`, which also requires the origin
+    // path) is deliberate and safe-direction: with a session id but no
+    // origin, the sensor persists under the same id the drain would
+    // use once resolved, and an id-less session persists nothing.
     let state_store = state::StateStore::new(
         ident.session_resolved.then(|| ident.session_id.clone()),
     );
@@ -225,6 +229,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     }
 
     let mut last_checkpoint = Instant::now();
+    let mut peers_checkpointed_once = false;
     let mut last_instance_touch = Instant::now();
     // Cleanup sweep — fire a first sweep on startup so long-running
     // instances don't wait a full interval before the first prune.
@@ -297,6 +302,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             governor: &mut governor,
             msg_governor: &mut msg_governor,
             last_checkpoint: &mut last_checkpoint,
+            peers_checkpointed_once: &mut peers_checkpointed_once,
             last_instance_touch: &mut last_instance_touch,
             register_instances: ident.resolved(),
             last_cleanup: &mut last_cleanup,

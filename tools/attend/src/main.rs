@@ -61,7 +61,11 @@ fn main() {
         Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
         Commands::Peers => cmd::peers::cmd_peers(),
         Commands::Inbox { msg_id, limit, page, before, drain, format } => match (drain, msg_id) {
-            (true, _) => cmd::inbox::cmd_inbox_drain(&format),
+            (true, Some(_)) => {
+                eprintln!("--drain drains everything pending; it cannot be combined with a message id");
+                std::process::exit(2);
+            }
+            (true, None) => cmd::inbox::cmd_inbox_drain(&format),
             (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id),
             (false, None) => cmd::inbox::cmd_inbox(limit, page, before),
         },
