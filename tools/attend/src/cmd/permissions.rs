@@ -7,7 +7,11 @@ use crate::sensors::Focus;
 pub(crate) fn cmd_permissions_audit() {
     use agent_fmt::permissions;
 
-    let focus = Focus::default_focus();
+    // Same config scope as the running loop (issue #378 / PR #380
+    // review finding 4): resolve the project from the session record
+    // so this report describes the config `attend run` actually uses.
+    let mut focus = Focus::default_focus();
+    focus.working_dir = crate::util::own_origin_cwd();
     let cfg = config::Config::load(&focus.working_dir);
 
     // Load settings.json grants

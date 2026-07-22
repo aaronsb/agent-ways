@@ -36,6 +36,10 @@ pub(super) struct TickState<'a> {
     pub(super) msg_governor: &'a mut DisclosureGovernor,
     pub(super) last_checkpoint: &'a mut Instant,
     pub(super) last_instance_touch: &'a mut Instant,
+    /// Roster gate (ADR-171): false for fallback identities, which
+    /// must never allocate registry slots — see the startup gate in
+    /// `cmd_run_with_catchup`.
+    pub(super) register_instances: bool,
     pub(super) last_cleanup: &'a mut Option<Instant>,
     pub(super) state_store: &'a state::StateStore,
     pub(super) instance_registry: &'a attend_instances::Registry,
@@ -286,7 +290,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // ("bare @Hana"). `register` is idempotent — an existing entry is
     // refreshed and keeps its slot; a missing one is re-allocated —
     // so the roster self-heals within one interval.
-    if s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
+    if s.register_instances && s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
         s.instance_registry
             .register(&s.focus.working_dir, s.heartbeat_id)
             .ok();
