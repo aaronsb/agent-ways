@@ -1234,6 +1234,35 @@ mod tests {
         assert_eq!(members, vec!["someone-else"]);
     }
 
+    /// #406: the agent→human kick guard lives in the shared crate
+    /// (`Groups::kick` refuses when the ACTING id is agent-shaped and
+    /// the target is human). The TUI acts with an empty member id,
+    /// which classifies as human — so the guard can never fire here
+    /// and operator kicks of human members keep working. If the
+    /// acting identity ever changes to an agent shape, this test
+    /// fails before the regression ships; and if the guard did fire,
+    /// `kick_member_in`'s Err arm surfaces its message through the
+    /// #400 status path rather than swallowing it.
+    #[test]
+    fn tui_kick_acts_as_operator_and_can_remove_human_members() {
+        let base = tempdir_like();
+        assert!(
+            !attend_groups::is_agent_member(""),
+            "TUI acting id must classify as human (operator power)"
+        );
+        // A human member (username shape, ADR-170) is kickable from
+        // the TUI — the one-way power the guard preserves.
+        attend_groups::Groups::new(&base, "somebody")
+            .join("ops", false)
+            .unwrap();
+        match kick_member_in(&base, "ops", "somebody", "somebody") {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("kicked @somebody from #ops"), "got: {s}")
+            }
+            _ => panic!("operator kick of a human member must succeed"),
+        }
+    }
+
     #[test]
     fn channels_status_lists_base_and_counts() {
         let base = tempdir_like();
