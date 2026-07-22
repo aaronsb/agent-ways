@@ -203,11 +203,16 @@ impl Registry {
         let cutoff = now.saturating_sub(gc_age.as_secs());
         map.retain(|sid, entry| sid == session_id || entry.last_seen >= cutoff);
 
-        // Reclaim path: existing entry → refresh + return.
+        // Reclaim path: existing entry → refresh + return. The
+        // migration sweep runs here too (PR #395 finding 4): every
+        // register after the first takes this branch, and skipping
+        // the sweep would leave stale siblings until 7-day GC.
         if let Some(entry) = map.get_mut(session_id) {
             entry.last_seen = now;
             let instance = entry.instance.clone();
             write_registry(&path, &map)?;
+            drop(lock_file);
+            self.evict_elsewhere(cwd, session_id);
             return Ok(instance);
         }
 

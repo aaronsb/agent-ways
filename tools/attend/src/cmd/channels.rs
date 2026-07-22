@@ -9,6 +9,7 @@
 use crate::util::get_groups;
 
 pub(crate) fn cmd_join(name: &str, pin: bool) {
+    let name = name.trim_start_matches('#');
     let r = get_groups();
     match r.join(name, pin) {
         Ok(()) => {
@@ -23,7 +24,12 @@ pub(crate) fn cmd_join(name: &str, pin: bool) {
 }
 
 pub(crate) fn cmd_leave(name: &str) {
+    let name = name.trim_start_matches('#');
     let r = get_groups();
+    if !r.my_groups().iter().any(|(n, _)| n == name) {
+        println!("[attend] not in #{name} — nothing to leave");
+        return;
+    }
     r.leave(name).ok();
     println!("[attend] left #{name}");
 }
@@ -37,18 +43,28 @@ pub(crate) fn cmd_leave_all() {
 }
 
 pub(crate) fn cmd_pin(name: &str) {
+    let name = name.trim_start_matches('#');
     let r = get_groups();
     r.pin(name);
     println!("[attend] pinned #{name}");
 }
 
 pub(crate) fn cmd_unpin(name: &str) {
+    let name = name.trim_start_matches('#');
     let r = get_groups();
     r.unpin(name);
     println!("[attend] unpinned #{name}");
 }
 
 pub(crate) fn cmd_dissolve(name: &str) {
+    let name = name.trim_start_matches('#');
+    // Mirror the TUI's guard (PR #395 finding 2): the base channel is
+    // structural — dissolving it would rip out the reserved `@open/`
+    // migration dir and report false success.
+    if name == "open" {
+        eprintln!("[attend] dissolve: #open is the base channel — it cannot be dissolved");
+        std::process::exit(1);
+    }
     let r = get_groups();
     let members = r.dissolve(name);
     if members.is_empty() {

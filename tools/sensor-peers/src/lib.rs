@@ -804,7 +804,9 @@ fn encode_cwd(cwd: &str) -> String {
 /// Avoids pulling in serde_json — these files are small and stable.
 fn parse_session_file(content: &str) -> Option<SessionFile> {
     let pid = extract_json_u64(content, "pid")? as u32;
-    let cwd = extract_json_string(content, "cwd")?;
+    // Identity root, not live cwd (#394) — keeps peer-presence labels
+    // in agreement with the normalized identity everywhere else.
+    let cwd = attend_session::normalize_origin(&extract_json_string(content, "cwd")?);
     let session_id = extract_json_string(content, "sessionId")?;
     Some(SessionFile { pid, cwd, session_id })
 }

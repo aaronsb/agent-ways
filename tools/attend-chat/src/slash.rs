@@ -331,10 +331,15 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
                 Some(g) => SlashOutcome::Dissolve(Some(g.to_string())),
             },
             "channels" => SlashOutcome::ListChannels,
-            // Bare `/purge` and `/purge open` both mean the base
-            // channel — `#open` is where history piles up.
+            // Bare `/purge` = foreground-tab scope, resolved
+            // downstream. An explicit `/purge open` stays EXPLICIT:
+            // collapsing it into `None` here would reinterpret it as
+            // foreground scope and purge whatever tab the operator
+            // happens to be on (PR #395 blocking finding —
+            // destructive intent inversion). `run_purge` maps the
+            // resolved base name onto the on-disk `None` target.
             "purge" => match group_arg(args) {
-                None | Some("open") => SlashOutcome::Purge(None),
+                None => SlashOutcome::Purge(None),
                 Some(g) => SlashOutcome::Purge(Some(g.to_string())),
             },
             "peers" => SlashOutcome::Peers,
@@ -649,9 +654,12 @@ mod tests {
 
     #[test]
     fn dispatch_purge_defaults_to_base_channel() {
+        // Bare /purge → foreground scope (None). Explicit "open" must
+        // NOT collapse to None: from a channel tab that would purge
+        // the foreground instead of the commons (PR #395 blocking).
         assert_eq!(dispatch("purge", ""), SlashOutcome::Purge(None));
-        assert_eq!(dispatch("purge", "open"), SlashOutcome::Purge(None));
-        assert_eq!(dispatch("purge", "#open"), SlashOutcome::Purge(None));
+        assert_eq!(dispatch("purge", "open"), SlashOutcome::Purge(Some("open".into())));
+        assert_eq!(dispatch("purge", "#open"), SlashOutcome::Purge(Some("open".into())));
         assert_eq!(
             dispatch("purge", "#deploy"),
             SlashOutcome::Purge(Some("deploy".into()))

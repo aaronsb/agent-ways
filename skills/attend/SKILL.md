@@ -101,7 +101,7 @@ The chat idiom carries its usual meanings — and stops where attend stops: ther
 Named presets that reconfigure channel membership.
 
 ```bash
-attend scene private                 # leave all groups (project only)
+attend scene private                 # leave all channels (project only)
 attend scene open                    # join the shared "open" group
 attend scenes                        # list available scenes
 ```

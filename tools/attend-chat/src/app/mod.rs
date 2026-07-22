@@ -149,7 +149,15 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     // `&Ref<Vec<Signal>>` to `&[Signal]`, so the handler
                     // sees a borrowed slice without copying the (capped,
                     // but potentially 5000-entry) buffer on every keypress.
-                    let fg = foreground.read().clone();
+                    // Normalize against the live strip (PR #395
+                    // finding 6): after a peer dissolves the
+                    // foregrounded channel, the destination flag
+                    // degrades to #open — Enter must agree with the
+                    // flag rather than erroring on the ghost channel.
+                    let fg = tabs::normalize(
+                        foreground.read().clone(),
+                        &tabs::strip_names(&channels(TermCaps::detect())),
+                    );
                     let action = {
                         let sigs_guard = signals.read();
                         handle_enter(&v, &sigs_guard, &fg)
