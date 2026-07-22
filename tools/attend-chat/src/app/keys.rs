@@ -16,7 +16,8 @@ use crate::legend::{
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
-    compose_self_echo, cwd_dir, encode_cwd, signals_base, write_broadcast, write_signal, Signal,
+    compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
+    write_signal, Signal,
 };
 use crate::watcher::accept_path;
 use crate::slash;
@@ -86,6 +87,8 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
                 channels_status_in(&signals_base(), attend_groups::member_alive)
             }
             slash::SlashOutcome::Purge(chan) => run_purge(chan.as_deref()),
+            slash::SlashOutcome::Peers => run_peers(),
+            slash::SlashOutcome::Whois(name) => run_whois(&name),
         };
     }
     let caps = TermCaps::detect();
@@ -256,6 +259,51 @@ fn channels_status_in<F: Fn(&str) -> bool>(
         })
         .collect();
     EnterAction::ClearWithStatus(format!("channels: {}", parts.join(" · ")))
+}
+
+/// `/peers` — the live-session roster as a transcript status block
+/// (ADR-173 Decision 5: operator discovery parity with agent-side
+/// `attend peers`). A block, not a status line: the roster carries a
+/// root path per row and the status row truncates on overflow.
+/// Roster enumeration is keyed by session id (issue #394), so one
+/// session record renders exactly one row whatever its cwd history.
+fn run_peers() -> EnterAction {
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    if roster.is_empty() {
+        return EnterAction::ClearWithStatus("no live peers".into());
+    }
+    let lines: Vec<String> = roster
+        .iter()
+        .map(|p| {
+            // Short session-id tail for the block; `/whois` has the
+            // full id for the row you actually care about.
+            let sid_short: String = p.session_id.chars().take(8).collect();
+            format!("@{}  {}  · session {}…", p.display, p.root, sid_short)
+        })
+        .collect();
+    let n = roster.len();
+    EnterAction::ClearWithStatusAndEcho {
+        status: format!("{n} live peer{}", if n == 1 { "" } else { "s" }),
+        echo: compose_status_block("peers", &lines.join("\n")),
+    }
+}
+
+/// `/whois @name` — resolve a display name to its session id + origin
+/// root. Exact-match only (see `peers::resolve_peer`); the send
+/// path's fuzzy fallback stays out of identity queries.
+fn run_whois(name: &str) -> EnterAction {
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    match crate::peers::resolve_peer(name, &roster) {
+        Ok(p) => EnterAction::ClearWithStatus(format!(
+            "@{} — session {} · root {}",
+            p.display, p.session_id, p.root
+        )),
+        Err(e) => EnterAction::StatusOnly(e),
+    }
 }
 
 /// Execute a `/purge` against the live signals base. The keep-tail is

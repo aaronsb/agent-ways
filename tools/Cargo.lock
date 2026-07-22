@@ -248,6 +248,7 @@ dependencies = [
  "attend-groups",
  "attend-heartbeat",
  "attend-instances",
+ "attend-session",
  "attend-state",
  "iocraft",
  "notify",

@@ -16,12 +16,11 @@
 //! "Tab completes the partial you're typing" — the plumbing is
 //! distinct.
 //!
-//! **Scope.** Everything except `/whois` and `/peers` dispatches;
-//! those remain in [`REGISTRY`] as planned so autocomplete can
-//! surface them and `/help` can print the roadmap — dispatching them
-//! returns a "not implemented yet" status. When a planned command
-//! lands, flip its [`Status`] to [`Status::Implemented`] and add a
-//! handler arm in [`dispatch`].
+//! **Scope.** Every registered command dispatches (ADR-173 Decision 5
+//! graduated the last Planned rows, `/peers` and `/whois`). The
+//! [`Status::Planned`] machinery stays: a future roadmap entry gets
+//! autocomplete + `/help` visibility and a "not implemented yet"
+//! dispatch until its handler arm lands.
 //!
 //! Dispatch stays IO-free: commands with side effects return a
 //! [`SlashOutcome`] variant describing the effect (clear the
@@ -78,14 +77,14 @@ pub const REGISTRY: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "whois",
-        description: "Show a peer's identity + cwd",
-        status: Status::Planned,
+        description: "Show a peer's session id + origin root",
+        status: Status::Implemented,
         arg_kind: ArgKind::Agent,
     },
     SlashCommand {
         name: "peers",
-        description: "List active claudes + humans",
-        status: Status::Planned,
+        description: "List live peer sessions",
+        status: Status::Implemented,
         arg_kind: ArgKind::None,
     },
     SlashCommand {
@@ -232,6 +231,21 @@ pub enum SlashOutcome {
     /// durability, deliberately overridden by explicit operator
     /// action). `None` targets the base channel's `_broadcast/`.
     Purge(Option<String>),
+    /// `/peers` — render the live-session roster as a transcript
+    /// status block (ADR-173 Decision 5: operator discovery parity).
+    Peers,
+    /// `/whois @name` — resolve a display name to its session id +
+    /// origin root. Name normalized (`@` stripped); resolution
+    /// happens at execution time against the live roster.
+    Whois(String),
+}
+
+/// Normalize an agent argument: first whitespace-separated token,
+/// leading `@` stripped (users copy the legend spelling). Returns
+/// `None` when no argument was given.
+fn agent_arg(args: &str) -> Option<&str> {
+    let first = args.split_whitespace().next()?;
+    Some(first.strip_prefix('@').unwrap_or(first))
 }
 
 /// Normalize a group argument: first whitespace-separated token,
@@ -287,6 +301,11 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
             "purge" => match group_arg(args) {
                 None | Some("open") => SlashOutcome::Purge(None),
                 Some(g) => SlashOutcome::Purge(Some(g.to_string())),
+            },
+            "peers" => SlashOutcome::Peers,
+            "whois" => match agent_arg(args) {
+                None => SlashOutcome::Err("usage: /whois <@name>".into()),
+                Some(name) => SlashOutcome::Whois(name.to_string()),
             },
             // Keeps the match exhaustive — if a registry entry flips
             // to Implemented without a handler arm, this fires at
@@ -361,11 +380,15 @@ fn help_message() -> String {
             Status::Planned => planned.push(label),
         }
     }
-    format!(
-        "available: {} · planned: {}",
-        ready.join(" "),
-        planned.join(" ")
-    )
+    if planned.is_empty() {
+        format!("available: {}", ready.join(" "))
+    } else {
+        format!(
+            "available: {} · planned: {}",
+            ready.join(" "),
+            planned.join(" ")
+        )
+    }
 }
 
 #[cfg(test)]
@@ -485,8 +508,8 @@ mod tests {
             panic!("help should dispatch Ok")
         };
         assert!(s.contains("/help"));
-        // At least one planned command surfaces — roadmap visibility.
-        assert!(s.contains("planned"));
+        // With nothing planned, no empty "planned:" stub renders.
+        assert!(!s.contains("planned"));
     }
 
     #[test]
@@ -573,17 +596,30 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_planned_returns_err_with_not_implemented() {
-        // Pick any Planned command from the registry — keeps the
-        // test valid as planned/implemented sets shift.
-        let planned = REGISTRY
-            .iter()
-            .find(|c| c.status == Status::Planned)
-            .expect("registry must contain at least one planned command while slash infra is new");
-        let SlashOutcome::Err(s) = dispatch(planned.name, "") else {
-            panic!("planned should dispatch Err")
+    fn dispatch_peers_returns_effect() {
+        assert_eq!(dispatch("peers", ""), SlashOutcome::Peers);
+    }
+
+    #[test]
+    fn dispatch_whois_normalizes() {
+        assert_eq!(
+            dispatch("whois", "@Tamsin-alpha"),
+            SlashOutcome::Whois("Tamsin-alpha".into())
+        );
+        // Bare-name spelling is accepted too.
+        assert_eq!(dispatch("whois", "Cleo"), SlashOutcome::Whois("Cleo".into()));
+        let SlashOutcome::Err(s) = dispatch("whois", "") else {
+            panic!("bare /whois should be a usage error")
         };
-        assert!(s.contains("not implemented"));
-        assert!(s.contains(planned.name));
+        assert!(s.contains("usage"));
+    }
+
+    #[test]
+    fn registry_has_no_planned_commands_left() {
+        // ADR-173 Decision 5 closed the discovery gap — /peers and
+        // /whois were the last Planned rows. Every registered command
+        // now dispatches; a new Planned entry should be a deliberate
+        // roadmap choice, not a leftover.
+        assert!(REGISTRY.iter().all(|c| c.status == Status::Implemented));
     }
 }

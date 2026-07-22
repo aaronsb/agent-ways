@@ -171,6 +171,28 @@ pub fn compose_self_echo(message: &str) -> Signal {
     }
 }
 
+/// Compose a local-only transcript status block (`/peers` output and
+/// kin). Rendered like any message cell but never written to the bus.
+/// `from` carries no wire prefix on purpose: `known_identities` skips
+/// unknown prefixes, so a status block can't pollute the legend or
+/// `@`-completion, and the chip falls through to the raw-value branch
+/// (`attend` / `<kind>`) — visually distinct from every real sender.
+pub fn compose_status_block(kind: &str, body: &str) -> Signal {
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Signal {
+        id: format!("local-status-{ts}"),
+        from: "attend".to_string(),
+        project: kind.to_string(),
+        cwd: String::new(),
+        reply_to: None,
+        message: body.to_string(),
+        ts,
+    }
+}
+
 /// Derive this session's wire identity fields once: `(sender_id, from,
 /// project, cwd)`. Shared by `write_signal` (the delivered signal) and
 /// `compose_self_echo` (the local echo) so the echoed row's chip is

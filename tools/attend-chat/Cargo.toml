@@ -24,3 +24,4 @@ attend-groups = { path = "../attend-groups" }
 attend-heartbeat = { path = "../attend-heartbeat" }
 attend-state = { path = "../attend-state" }
 attend-instances = { path = "../attend-instances" }
+attend-session = { path = "../attend-session" }
