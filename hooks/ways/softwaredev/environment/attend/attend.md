@@ -55,28 +55,29 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 
 Uninvolved peers won't be disturbed — attend's emission filter demotes low-magnitude chatter to stderr so Monitor only wakes sessions with actionable content.
 
-## Focus Groups (escape hatch)
+## Channels (escape hatch)
 
-For long-running coordinated work where you want a private channel, focus groups still exist:
+For long-running coordinated work where you want a private channel (ADR-173; `focus` remains a deprecated alias):
 
 ```bash
-attend focus on deploy                     # join a named group
-attend send --focus deploy "message"       # scope a send to that group only
-attend focus off deploy                    # leave
+attend join deploy                         # join a named channel
+attend send --channel deploy "message"     # scope a send to that channel only
+attend leave deploy                        # leave
 ```
 
-You almost never need this. Default broadcast + attention filtering handles normal cases.
+You almost never need this. Default broadcast + attention filtering handles normal cases. The chat idiom stops at the verbs: no read receipts, no typing indicators, no edits — message lifetime is bound to project liveness (ADR-136).
 
 ## Scenes
 
 ```bash
-attend scene private                       # leave all groups
-attend scene open                          # join shared "open" group
+attend scene private                       # leave all channels
+attend scene open                          # join shared "open" channel
 ```
 
 ## Discovery
 
 ```bash
-attend peers                               # sessions with focus groups
-attend status                              # instances, signals, focus state
+attend peers                               # sessions and their channels
+attend channels                            # all channels, joined ones marked
+attend status                              # instances, signals, channel state
 ```
