@@ -48,9 +48,9 @@ Active awareness for Claude Code sessions
 ###### **Subcommands:**
 
 * `run` — Start the sensor loop (use with Monitor for async delivery)
-* `peers` — List active Claude Code sessions and focus groups
+* `peers` — List active Claude Code sessions and their channels
 * `inbox` — Read pending messages from peers
-* `status` — Show running instances, signals, and focus state
+* `status` — Show running instances, signals, and channel state
 * `whoami` — Print this session's canonical bus identity (issue #378)
 * `sensors` — List all sensors — built-in and config-defined script sensors
 * `send` — Send a signal to peer sessions (defaults to #open base channel)
@@ -84,7 +84,7 @@ Start the sensor loop (use with Monitor for async delivery)
 
 ## `attend peers`
 
-List active Claude Code sessions and focus groups
+List active Claude Code sessions and their channels
 
 **Usage:** `attend peers`
 
@@ -118,7 +118,7 @@ Read pending messages from peers
 
 ## `attend status`
 
-Show running instances, signals, and focus state
+Show running instances, signals, and channel state
 
 **Usage:** `attend status`
 

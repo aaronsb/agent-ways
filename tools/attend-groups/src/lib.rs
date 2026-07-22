@@ -116,6 +116,34 @@ impl Groups {
         Ok(())
     }
 
+    /// Remove an arbitrary member from a group — the operator's
+    /// `/kick` (ADR-173 / issue #393). Removal is unilateral by
+    /// design: it only *reduces* the target's routing reach, unlike
+    /// entry, which requires the member's own `join` (invite-consent
+    /// asymmetry). Same empty-group cleanup as [`leave`]. Errors on
+    /// an unknown group or a non-member so the TUI can report
+    /// precisely.
+    pub fn kick(&self, name: &str, member: &str) -> Result<(), String> {
+        let mut state = self.load_state();
+        let Some(entry) = state.get_mut(name) else {
+            return Err(format!("#{name}: unknown group"));
+        };
+        let before = entry.members.len();
+        entry.members.retain(|m| m != member);
+        if entry.members.len() == before {
+            return Err(format!("{member} is not a member of #{name}"));
+        }
+        if state.get(name).is_some_and(|e| e.members.is_empty() && !e.pinned) {
+            let dir = self.group_dir(name);
+            if dir.is_dir() {
+                fs::remove_dir_all(&dir).ok();
+            }
+            state.remove(name);
+        }
+        self.save_state(&state);
+        Ok(())
+    }
+
     /// Pin a group so it persists when empty.
     pub fn pin(&self, name: &str) {
         let mut state = self.load_state();
@@ -728,5 +756,53 @@ mod tests {
     #[test]
     fn test_encode_project() {
         assert_eq!(encode_project("/home/aaron/.claude"), "-home-aaron--claude");
+    }
+}
+
+#[cfg(test)]
+mod kick_tests {
+    use super::*;
+
+    fn base(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("attend-groups-kick-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn kick_removes_target_and_keeps_others() {
+        let b = base("basic");
+        Groups::new(&b, "agent-1").join("deploy", false).unwrap();
+        Groups::new(&b, "agent-2").join("deploy", false).unwrap();
+
+        let op = Groups::new(&b, "operator");
+        op.kick("deploy", "agent-1").unwrap();
+
+        let members = op.members("deploy").expect("group survives");
+        assert!(!members.contains(&"agent-1".to_string()));
+        assert!(members.contains(&"agent-2".to_string()));
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn kick_reports_unknown_group_and_non_member() {
+        let b = base("errors");
+        Groups::new(&b, "agent-1").join("deploy", false).unwrap();
+        let op = Groups::new(&b, "operator");
+        assert!(op.kick("ghost", "agent-1").unwrap_err().contains("unknown group"));
+        assert!(op.kick("deploy", "stranger").unwrap_err().contains("not a member"));
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn kicking_last_member_cleans_up_unpinned_group() {
+        let b = base("cleanup");
+        Groups::new(&b, "agent-1").join("temp", false).unwrap();
+        let op = Groups::new(&b, "operator");
+        op.kick("temp", "agent-1").unwrap();
+        assert!(op.members("temp").is_none(), "empty unpinned group is removed");
+        assert!(!b.join("@temp").exists());
+        fs::remove_dir_all(&b).ok();
     }
 }

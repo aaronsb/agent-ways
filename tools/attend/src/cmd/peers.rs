@@ -1,4 +1,4 @@
-//! `attend peers` — list active Claude Code sessions and focus groups.
+//! `attend peers` — list active Claude Code sessions and their channels.
 
 use crate::util::{get_groups, own_session_id};
 use agent_identity::{ansi, Identity, TermCaps};
@@ -89,7 +89,7 @@ pub(crate) fn cmd_peers() {
     // row as if it were a focus group, which inflated the count and
     // suggested a phantom "project" group existed.
     println!(
-        "  {} agent(s), {} focus group(s)",
+        "  {} agent(s), {} channel(s)",
         peer_count + 1,
         focus_count
     );

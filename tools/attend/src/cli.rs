@@ -33,7 +33,7 @@ pub(crate) enum Commands {
         catchup: bool,
     },
 
-    /// List active Claude Code sessions and focus groups
+    /// List active Claude Code sessions and their channels
     Peers,
 
     /// Read pending messages from peers
@@ -67,7 +67,7 @@ pub(crate) enum Commands {
         format: String,
     },
 
-    /// Show running instances, signals, and focus state
+    /// Show running instances, signals, and channel state
     Status,
 
     /// Print this session's canonical bus identity (issue #378)
