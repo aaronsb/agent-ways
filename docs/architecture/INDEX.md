@@ -91,6 +91,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-168](./system/ADR-168-instance-addressable-directed-messaging-for-same-cwd-attend-siblings.md) | Instance-addressable directed messaging for same-cwd attend siblings | Draft |
 | [ADR-169](./system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md) | agent-ways relinquishes user-scoped settings.json; retains only its operational baseline | Proposed |
 | [ADR-170](./system/ADR-170-human-focus-group-membership-via-username-identity-and-a-shared-attend-groups-crate.md) | Human focus-group membership via username identity and a shared attend-groups crate | Accepted |
+| [ADR-171](./system/ADR-171-stable-session-identity-the-roster-enumerates-addressable-coordinating-units.md) | Stable session identity — the roster enumerates addressable coordinating units | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
