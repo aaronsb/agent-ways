@@ -40,7 +40,10 @@ use std::process::Command;
 pub struct SessionIdentity {
     /// Claude Code session UID, or `pid-<pid>` when unresolved.
     pub session_id: String,
-    /// The session record's cwd, or the process cwd when unresolved.
+    /// The session's ROOT path — the record's cwd normalized through
+    /// [`normalize_origin`] (managed-worktree hops stripped), or the
+    /// process cwd when unresolved. One session record = one persona
+    /// at one root (issue #394).
     pub origin_path: String,
     /// True iff `session_id` came from a real session record.
     pub session_resolved: bool,
@@ -182,10 +185,26 @@ pub fn origin_path_in(dir: &Path, session_id: &str) -> Option<String> {
             continue;
         };
         if extract_json_string(&content, "sessionId").as_deref() == Some(session_id) {
-            return extract_json_string(&content, "cwd");
+            return extract_json_string(&content, "cwd")
+                .map(|c| normalize_origin(&c));
         }
     }
     None
+}
+
+/// A session's ROOT path — the identity anchor (ADR-171, issue #394).
+/// The session record's `cwd` field follows the session into managed
+/// worktrees (`<root>/.claude/worktrees/<name>`), but a hop must not
+/// change the session's persona: the phantom-agent bug was precisely
+/// a hop minting sibling roster entries. Strip the managed-worktree
+/// suffix; every other cwd passes through unchanged.
+pub fn normalize_origin(cwd: &str) -> String {
+    match cwd.find("/.claude/worktrees/") {
+        // idx == 0 would leave an empty root — a pathological cwd like
+        // "/.claude/worktrees/x" is passed through rather than emptied.
+        Some(idx) if idx > 0 => cwd[..idx].to_string(),
+        _ => cwd.to_string(),
+    }
 }
 
 fn sessions_dir() -> PathBuf {
@@ -385,5 +404,57 @@ mod tests {
         assert_eq!(extract_json_u64(r#"{"pid":12345,"x":"y"}"#, "pid"), Some(12345));
         assert_eq!(extract_json_u64(r#"{"pid": 99}"#, "pid"), Some(99));
         assert_eq!(extract_json_u64(r#"{"nope":1}"#, "pid"), None);
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    #[test]
+    fn normalize_strips_managed_worktree_suffix() {
+        assert_eq!(
+            normalize_origin("/home/a/proj/.claude/worktrees/feature-x"),
+            "/home/a/proj"
+        );
+        assert_eq!(
+            normalize_origin("/home/a/proj/.claude/worktrees/x/nested/dir"),
+            "/home/a/proj"
+        );
+    }
+
+    #[test]
+    fn normalize_passes_ordinary_paths_through() {
+        assert_eq!(normalize_origin("/home/a/proj"), "/home/a/proj");
+        assert_eq!(normalize_origin("/home/a/.claude"), "/home/a/.claude");
+        // Pathological root-level worktree path stays untouched rather
+        // than normalizing to the empty string.
+        assert_eq!(
+            normalize_origin("/.claude/worktrees/x"),
+            "/.claude/worktrees/x"
+        );
+    }
+
+    /// Issue #394 regression: a session record whose cwd sits inside a
+    /// managed worktree must resolve to the project ROOT — a hop never
+    /// changes the persona.
+    #[test]
+    fn origin_path_resolves_worktree_cwd_to_root() {
+        let dir = std::env::temp_dir().join(format!(
+            "attend-session-394-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("1234.json"),
+            r#"{"pid":1234,"sessionId":"uuid-1","cwd":"/home/a/proj/.claude/worktrees/adr-x"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            origin_path_in(&dir, "uuid-1").as_deref(),
+            Some("/home/a/proj")
+        );
+        fs::remove_dir_all(&dir).ok();
     }
 }

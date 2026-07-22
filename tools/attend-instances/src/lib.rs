@@ -224,7 +224,60 @@ impl Registry {
             },
         );
         write_registry(&path, &map)?;
+        drop(lock_file);
+
+        // Migration, not minting (issue #394): one session record is
+        // one persona, so an origin change (a worktree hop before
+        // origins were normalized, or any future legitimate move)
+        // must not leave a sibling entry rendering as a phantom agent
+        // in the old cwd's registry until GC. Best-effort by design —
+        // a failed eviction is exactly the pre-existing GC-bounded
+        // staleness, never worse.
+        self.evict_elsewhere(cwd, session_id);
         Ok(instance)
+    }
+
+    /// Remove `session_id` from every registry file other than
+    /// `keep_cwd`'s. Each file is edited under its own sentinel lock,
+    /// mirroring `register`/`touch` discipline.
+    fn evict_elsewhere(&self, keep_cwd: &str, session_id: &str) {
+        let keep = self.path_for(keep_cwd);
+        let Ok(entries) = fs::read_dir(&self.base_dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path == keep
+                || path.extension().and_then(|e| e.to_str()) != Some("yaml")
+            {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if !content.contains(session_id) {
+                continue;
+            }
+            let lock_path = path.with_extension("yaml.lock");
+            let Ok(lock_file) = fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&lock_path)
+            else {
+                continue;
+            };
+            if acquire_exclusive(&lock_file).is_err() {
+                continue;
+            }
+            // Re-read under the lock; the pre-check above was only a
+            // cheap filter.
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            let mut map = parse_registry(&content);
+            if map.remove(session_id).is_some() {
+                write_registry(&path, &map).ok();
+            }
+        }
     }
 
     /// Refresh `last_seen` for an existing session without allocating
@@ -832,6 +885,39 @@ sess-a:
         let snap = reg.snapshot("/concurrent");
         assert_eq!(snap.len(), THREADS, "registry yaml lost entries: {snap:?}");
 
+        fs::remove_dir_all(&base).ok();
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    /// Issue #394 regression: registering at a new cwd evicts the same
+    /// session's entry from every other cwd's registry — an origin
+    /// move migrates the persona instead of minting a phantom sibling.
+    #[test]
+    fn register_evicts_same_session_from_other_cwds() {
+        let base = std::env::temp_dir().join(format!(
+            "attend-instances-394-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let reg = Registry::with_base(base.clone());
+
+        reg.register("/proj/.claude/worktrees/x", "sess-1").unwrap();
+        reg.register("/proj/.claude/worktrees/x", "sess-other").unwrap();
+        reg.register("/proj", "sess-1").unwrap();
+
+        // sess-1 migrated: present at the new cwd, gone from the old.
+        assert!(reg.lookup("/proj", "sess-1").is_some());
+        assert!(
+            reg.lookup("/proj/.claude/worktrees/x", "sess-1").is_none(),
+            "old-cwd entry must be evicted on migration"
+        );
+        // Unrelated sessions in the old cwd are untouched.
+        assert!(reg.lookup("/proj/.claude/worktrees/x", "sess-other").is_some());
         fs::remove_dir_all(&base).ok();
     }
 }

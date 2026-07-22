@@ -79,6 +79,15 @@ fn main() {
             cmd::send::cmd_reply(broadcast, to, focus, message);
         }
         Commands::Chat { passthrough } => exec_chat(passthrough),
+        // Chat-idiom primary verbs (ADR-173). The `#` prefix is
+        // tolerated so `attend join "#deploy"` works; bare names stay
+        // primary because an unquoted `#` starts a shell comment.
+        Commands::Join { name, pin } => cmd::channels::cmd_join(name.trim_start_matches('#'), pin),
+        Commands::Leave { name } => cmd::channels::cmd_leave(name.trim_start_matches('#')),
+        Commands::Channels => cmd::channels::cmd_channels(),
+        Commands::Dissolve { name } => {
+            cmd::channels::cmd_dissolve(name.trim_start_matches('#'));
+        }
         Commands::Focus { sub } => dispatch_focus(sub.unwrap_or(FocusCmd::List)),
         Commands::Scene { name } => cmd::scene::cmd_scene(&name),
         Commands::Scenes => cmd::scene::cmd_scenes(),
@@ -133,16 +142,23 @@ fn exec_chat(passthrough: Vec<String>) -> ! {
     }
 }
 
+/// Deprecated alias path (ADR-173): every `focus` spelling keeps
+/// working under CLI-is-contract, dispatching onto the channel
+/// handlers with a one-line note steering toward the primary verbs.
 fn dispatch_focus(sub: FocusCmd) {
+    eprintln!(
+        "(note: `attend focus` is deprecated — use join/leave/channels/dissolve, \
+         or `scene private` to leave all; ADR-173)"
+    );
     match sub {
-        FocusCmd::On { name, pin } => cmd::focus::cmd_focus_on(&name, pin),
-        FocusCmd::Off { name } => cmd::focus::cmd_focus_off(&name),
-        FocusCmd::Clear => cmd::focus::cmd_focus_clear(),
-        FocusCmd::Pin { name } => cmd::focus::cmd_focus_pin(&name),
-        FocusCmd::Unpin { name } => cmd::focus::cmd_focus_unpin(&name),
-        FocusCmd::Dissolve { name } => cmd::focus::cmd_focus_dissolve(&name),
-        FocusCmd::All => cmd::focus::cmd_focus_all(),
-        FocusCmd::List => cmd::focus::cmd_focus_list(),
+        FocusCmd::On { name, pin } => cmd::channels::cmd_join(&name, pin),
+        FocusCmd::Off { name } => cmd::channels::cmd_leave(&name),
+        FocusCmd::Clear => cmd::channels::cmd_leave_all(),
+        FocusCmd::Pin { name } => cmd::channels::cmd_pin(&name),
+        FocusCmd::Unpin { name } => cmd::channels::cmd_unpin(&name),
+        FocusCmd::Dissolve { name } => cmd::channels::cmd_dissolve(&name),
+        FocusCmd::All => cmd::channels::cmd_channels(),
+        FocusCmd::List => cmd::channels::cmd_joined(),
     }
 }
 

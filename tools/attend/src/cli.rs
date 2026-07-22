@@ -93,8 +93,8 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "PATH")]
         to: Option<String>,
 
-        /// Scope send to a named focus group
-        #[arg(long, value_name = "NAME")]
+        /// Scope send to a named channel (accepts `--focus` as a deprecated alias)
+        #[arg(long = "channel", alias = "focus", value_name = "NAME")]
         focus: Option<String>,
 
         /// Thread reply to a specific signal id (use `attend reply` instead — it auto-threads)
@@ -116,8 +116,8 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "PATH")]
         to: Option<String>,
 
-        /// Scope send to a named focus group
-        #[arg(long, value_name = "NAME")]
+        /// Scope send to a named channel (accepts `--focus` as a deprecated alias)
+        #[arg(long = "channel", alias = "focus", value_name = "NAME")]
         focus: Option<String>,
 
         /// Message body (must follow all flags)
@@ -132,13 +132,37 @@ pub(crate) enum Commands {
         passthrough: Vec<String>,
     },
 
-    /// Manage attention groups (default: list joined groups)
+    /// Join a channel (creates it if absent)
+    Join {
+        /// Channel name (with or without the # prefix)
+        name: String,
+        /// Pin so the channel persists across scene changes
+        #[arg(long)]
+        pin: bool,
+    },
+
+    /// Leave a channel
+    Leave {
+        /// Channel name (with or without the # prefix)
+        name: String,
+    },
+
+    /// List channels — all available, with joined ones marked
+    Channels,
+
+    /// Dissolve a channel (removes it for every member)
+    Dissolve {
+        /// Channel name (with or without the # prefix)
+        name: String,
+    },
+
+    /// Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
     Focus {
         #[command(subcommand)]
         sub: Option<FocusCmd>,
     },
 
-    /// Activate a named scene (reconfigure focus groups)
+    /// Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
     Scene {
         /// Scene name (try `attend scenes` to list)
         name: String,

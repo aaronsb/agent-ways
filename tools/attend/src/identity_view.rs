@@ -45,6 +45,31 @@ pub(crate) fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> Stri
     }
 }
 
+/// Escape-free sender label for machine-carried text — the ADR-172
+/// drain injection and piped (non-TTY) output. Same derivation as
+/// [`render_sender_label`], zero ANSI: `TermCaps::Mono` is NOT enough
+/// for these paths because Mono still emits style bits (dim/reset) by
+/// design — that leak is issue #388.
+pub(crate) fn render_sender_label_plain(from: &str, cwd: &str) -> String {
+    // Caps only steer styling, which this path discards; Mono keeps
+    // the identity derivation on its cheapest branch.
+    let caps = TermCaps::Mono;
+    if let Some(sid) = from.strip_prefix("claude:") {
+        let id = Identity::for_cwd(cwd, caps);
+        let primary = with_instance(id.nickname, cwd, sid);
+        format!("{primary} ({})", id.cwd_basename)
+    } else if let Some(rest) = from.strip_prefix("external:") {
+        let username = rest.split('@').next().unwrap_or(rest);
+        let scope = agent_identity::cwd_basename(cwd);
+        let id = Identity::for_user(username, &scope, caps);
+        format!("{username} ({})", id.cwd_basename)
+    } else {
+        let scope = agent_identity::cwd_basename(cwd);
+        let id = Identity::for_user(from, &scope, caps);
+        format!("{from} ({})", id.cwd_basename)
+    }
+}
+
 /// Compose `<nickname>-<instance>` for a claude session. Falls back to
 /// the bare nickname when the registry has no entry — only happens
 /// transiently before the session has registered, or when the

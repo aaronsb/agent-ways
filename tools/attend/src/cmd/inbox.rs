@@ -6,7 +6,7 @@
 //! the right direction of dependency: the parser owns what a valid id
 //! looks like, senders consult it.
 
-use crate::identity_view::render_sender_label;
+use crate::identity_view::{render_sender_label, render_sender_label_plain};
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 use agent_identity::TermCaps;
 
@@ -104,8 +104,13 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
                 return;
             }
         };
-        let caps = TermCaps::detect();
-        let sender = render_sender_label(sig.from, sig.cwd, caps);
+        // Piped output must be escape-free (#388).
+        use std::io::IsTerminal;
+        let sender = if std::io::stdout().is_terminal() {
+            render_sender_label(sig.from, sig.cwd, TermCaps::detect())
+        } else {
+            render_sender_label_plain(sig.from, sig.cwd)
+        };
         println!("From: {sender}");
         println!("ID:   {msg_id}");
         if let Some(re_id) = sig.reply_to {
@@ -196,8 +201,14 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
                 }
             }
 
-            let caps = TermCaps::detect();
-            let sender = render_sender_label(sig.from, sig.cwd, caps);
+            // Piped output must be escape-free (#388): env-probed caps
+            // would style a pipe. TTY keeps the identity colors.
+            use std::io::IsTerminal;
+            let sender = if std::io::stdout().is_terminal() {
+                render_sender_label(sig.from, sig.cwd, TermCaps::detect())
+            } else {
+                render_sender_label_plain(sig.from, sig.cwd)
+            };
 
             let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
 
@@ -253,13 +264,15 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     // output when it detects a pipe.
     use std::io::IsTerminal;
     if std::io::stdout().is_terminal() {
-        let mut t = agent_fmt::Table::new(&["Scope", "From", "ID", "Re", "Message", "Source"]);
-        t.max_width(0, 10);
-        t.max_width(1, 24);
-        t.max_width(2, 20);
+        let now = std::time::SystemTime::now();
+        let mut t = agent_fmt::Table::new(&["When", "Scope", "From", "ID", "Re", "Message", "Source"]);
+        t.max_width(1, 10);
+        t.max_width(2, 24);
         t.max_width(3, 20);
+        t.max_width(4, 20);
         for entry in page_entries {
             t.add(vec![
+                &agent_fmt::compact_time(entry.mtime, now),
                 &entry.scope,
                 &entry.sender,
                 &entry.id,
@@ -272,8 +285,10 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
         print_inbox_footer(page, total, page_entries.len(), older, cursor_ts);
     } else {
         // Non-TTY: one block per message, full-width fields.
+        let now = std::time::SystemTime::now();
         for entry in page_entries {
             println!("[{}] {}", entry.scope, entry.sender);
+            println!("  when:    {}", agent_fmt::compact_time(entry.mtime, now));
             println!("  id:      {}", entry.id);
             if !entry.re.is_empty() {
                 println!("  re:      {}", entry.re);
@@ -336,6 +351,7 @@ const BASELINE_FRESH_WINDOW: std::time::Duration = std::time::Duration::from_sec
 /// core is testable without the identity/HOME plumbing around it.
 struct Drained {
     mtime: std::time::SystemTime,
+    when: String,
     sender: String,
     scope: String,
     id: String,
@@ -343,6 +359,7 @@ struct Drained {
     source_cwd: String,
 }
 impl DrainedView for Drained {
+    fn when(&self) -> &str { &self.when }
     fn sender(&self) -> &str { &self.sender }
     fn scope(&self) -> &str { &self.scope }
     fn id(&self) -> &str { &self.id }
@@ -414,12 +431,13 @@ fn scan_pending(
                     continue;
                 }
             }
-            // Always Mono: the drain's output is hook-injection text (or
-            // a pipe), never a styled terminal — env-probed detection
-            // would leak raw ANSI codes into the turn (live-test find).
+            // Escape-free by construction: the drain's output is
+            // hook-injection text (or a pipe), never a styled terminal.
+            // Mono was not enough — it still emits style bits (#388).
             delivered.push(Drained {
+                when: agent_fmt::compact_time(mtime, std::time::SystemTime::now()),
                 mtime,
-                sender: render_sender_label(sig.from, sig.cwd, TermCaps::Mono),
+                sender: render_sender_label_plain(sig.from, sig.cwd),
                 scope: scope.clone(),
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 body: sig.message.to_string(),
@@ -541,6 +559,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     } else {
         for d in &delivered {
             println!("[{}] {}", d.scope, d.sender);
+            println!("  when:    {}", d.when);
             println!("  id:      {}", d.id);
             println!("  message: {}", d.body);
             println!();
@@ -575,7 +594,8 @@ fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
     );
     for d in delivered.iter().take(DRAIN_RENDER_MAX) {
         out.push_str(&format!(
-            "\n{} ({}, id {}):\n{}\n",
+            "\n[{}] {} ({}, id {}):\n{}\n",
+            d.when(),
             d.sender(),
             d.scope(),
             d.id(),
@@ -599,6 +619,7 @@ fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
 /// View trait so `render_drain_reason` is testable without the
 /// filesystem-shaped `Drained` struct.
 trait DrainedView {
+    fn when(&self) -> &str;
     fn sender(&self) -> &str;
     fn scope(&self) -> &str;
     fn id(&self) -> &str;
@@ -690,12 +711,14 @@ mod drain_tests {
     use super::*;
 
     struct FakeMsg {
+        when: String,
         sender: String,
         scope: String,
         id: String,
         body: String,
     }
     impl DrainedView for FakeMsg {
+        fn when(&self) -> &str { &self.when }
         fn sender(&self) -> &str { &self.sender }
         fn scope(&self) -> &str { &self.scope }
         fn id(&self) -> &str { &self.id }
@@ -703,6 +726,7 @@ mod drain_tests {
     }
     fn msg(n: usize) -> FakeMsg {
         FakeMsg {
+            when: "11:4{}".replace("{}", &(n % 10).to_string()),
             sender: format!("peer-{n}"),
             scope: "#open".into(),
             id: format!("id-{n}"),
