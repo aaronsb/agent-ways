@@ -30,6 +30,10 @@ pub struct GroupEntry {
     /// Member ids currently in this group: Claude Code session UUIDs
     /// for claude sessions, sanitized usernames for humans (ADR-170).
     pub members: Vec<String>,
+    /// Optional single-line channel description (#404). Absent in
+    /// pre-#404 files — the parser treats a missing key as `None`, so
+    /// old state round-trips untouched.
+    pub description: Option<String>,
 }
 
 /// Group state manager.
@@ -40,6 +44,24 @@ pub struct Groups {
 }
 
 const GROUP_PREFIX: &str = "@";
+
+/// Member-kind discriminator (#406). Agent ids are Claude Code session
+/// UUIDs (8-4-4-4-12 hex) or the `pid-<n>` unresolved fallback; human
+/// ids are ADR-170 sanitized usernames, which are neither. Encoded
+/// once, here, next to the member-identity documentation — every
+/// policy that distinguishes the kinds must call this, not re-derive
+/// the shape.
+pub fn is_agent_member(id: &str) -> bool {
+    if id.starts_with("pid-") {
+        return true;
+    }
+    let parts: Vec<&str> = id.split('-').collect();
+    parts.len() == 5
+        && [8usize, 4, 4, 4, 12]
+            .iter()
+            .zip(&parts)
+            .all(|(len, p)| p.len() == *len && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
 
 impl Groups {
     /// `member_id` is the identity this manager acts for: a session
@@ -84,6 +106,7 @@ impl Groups {
         let entry = state.entry(name.to_string()).or_insert(GroupEntry {
             pinned: false,
             members: Vec::new(),
+            description: None,
         });
         if !entry.members.contains(&self.member_id) {
             entry.members.push(self.member_id.clone());
@@ -95,6 +118,54 @@ impl Groups {
 
         let dir = self.group_dir(name);
         fs::create_dir_all(&dir).map_err(|e| format!("creating group dir: {e}"))?;
+        Ok(())
+    }
+
+    /// Create a channel WITHOUT joining it (#404) — the operator's
+    /// explicit lifecycle verb, distinct from join's create-implicitly.
+    /// Created channels are pinned: an empty unpinned group is swept
+    /// by cleanup, so an explicit create must persist until someone
+    /// joins or the operator dissolves it.
+    pub fn create(&self, name: &str, description: Option<&str>) -> Result<(), String> {
+        validate_group_name(name)?;
+        let mut state = self.load_state();
+        if state.contains_key(name) {
+            return Err(format!("#{name} already exists"));
+        }
+        state.insert(
+            name.to_string(),
+            GroupEntry {
+                pinned: true,
+                members: Vec::new(),
+                description: description
+                    .map(str::trim)
+                    .filter(|d| !d.is_empty())
+                    .map(String::from),
+            },
+        );
+        self.save_state(&state);
+        fs::create_dir_all(self.group_dir(name))
+            .map_err(|e| format!("creating group dir: {e}"))?;
+        Ok(())
+    }
+
+    /// Set or replace a channel's description (#404). Single-line by
+    /// contract — the yaml wire format is line-oriented.
+    pub fn set_description(&self, name: &str, text: &str) -> Result<(), String> {
+        if text.contains('\n') {
+            return Err("description must be a single line".to_string());
+        }
+        let mut state = self.load_state();
+        let Some(entry) = state.get_mut(name) else {
+            return Err(format!("#{name}: unknown group"));
+        };
+        let trimmed = text.trim();
+        entry.description = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        self.save_state(&state);
         Ok(())
     }
 
@@ -124,6 +195,13 @@ impl Groups {
     /// an unknown group or a non-member so the TUI can report
     /// precisely.
     pub fn kick(&self, name: &str, member: &str) -> Result<(), String> {
+        // #406: removal is unilateral between peers, but an agent may
+        // never remove a HUMAN member — the operator power flows one
+        // way. Enforced here, at the shared API, so no surface (current
+        // or future) can reach around it.
+        if is_agent_member(&self.member_id) && !is_agent_member(member) {
+            return Err("agents cannot kick a human member".to_string());
+        }
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
             return Err(format!("#{name}: unknown group"));
@@ -453,6 +531,7 @@ pub fn parse_groups_yaml(content: &str) -> HashMap<String, GroupEntry> {
     let mut current_room: Option<String> = None;
     let mut current_pinned = false;
     let mut current_members: Vec<String> = Vec::new();
+    let mut current_description: Option<String> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -471,12 +550,14 @@ pub fn parse_groups_yaml(content: &str) -> HashMap<String, GroupEntry> {
                     GroupEntry {
                         pinned: current_pinned,
                         members: current_members.clone(),
+                        description: current_description.take(),
                     },
                 );
             }
             current_room = Some(trimmed.trim_end_matches(':').to_string());
             current_pinned = false;
             current_members = Vec::new();
+            current_description = None;
             continue;
         }
 
@@ -487,6 +568,9 @@ pub fn parse_groups_yaml(content: &str) -> HashMap<String, GroupEntry> {
                 let value = value.trim();
                 match key {
                     "pinned" => current_pinned = value == "true",
+                    "description" if !value.is_empty() => {
+                        current_description = Some(value.to_string());
+                    }
                     "members" => {} // array header, items follow
                     _ => {}
                 }
@@ -508,6 +592,7 @@ pub fn parse_groups_yaml(content: &str) -> HashMap<String, GroupEntry> {
             GroupEntry {
                 pinned: current_pinned,
                 members: current_members,
+                description: current_description,
             },
         );
     }
@@ -524,6 +609,9 @@ pub fn serialize_groups_yaml(state: &HashMap<String, GroupEntry>) -> String {
         let entry = &state[name];
         out.push_str(&format!("{name}:\n"));
         out.push_str(&format!("  pinned: {}\n", entry.pinned));
+        if let Some(ref d) = entry.description {
+            out.push_str(&format!("  description: {d}\n"));
+        }
         out.push_str("  members:\n");
         for member in &entry.members {
             out.push_str(&format!("    - {member}\n"));
@@ -572,6 +660,7 @@ mod tests {
             GroupEntry {
                 pinned: true,
                 members: vec!["session-abc".to_string(), "session-xyz".to_string()],
+                description: None,
             },
         );
         state.insert(
@@ -579,6 +668,7 @@ mod tests {
             GroupEntry {
                 pinned: false,
                 members: vec!["session-abc".to_string()],
+                description: None,
             },
         );
 
@@ -804,5 +894,114 @@ mod kick_tests {
         assert!(op.members("temp").is_none(), "empty unpinned group is removed");
         assert!(!b.join("@temp").exists());
         fs::remove_dir_all(&b).ok();
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn base(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "attend-groups-404-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// #404 golden extension: description round-trips through the yaml
+    /// wire format, and pre-#404 files (no description key) parse to
+    /// `None` untouched.
+    #[test]
+    fn description_round_trips_and_absent_is_none() {
+        let mut state = HashMap::new();
+        state.insert(
+            "deploy".to_string(),
+            GroupEntry {
+                pinned: true,
+                members: vec!["m1".into()],
+                description: Some("release coordination".into()),
+            },
+        );
+        let yaml = serialize_groups_yaml(&state);
+        assert!(yaml.contains("  description: release coordination\n"), "got: {yaml}");
+        let back = parse_groups_yaml(&yaml);
+        assert_eq!(back["deploy"].description.as_deref(), Some("release coordination"));
+
+        let legacy = "old:\n  pinned: false\n  members:\n    - m1\n";
+        let parsed = parse_groups_yaml(legacy);
+        assert_eq!(parsed["old"].description, None);
+        assert_eq!(parsed["old"].members, vec!["m1".to_string()]);
+    }
+
+    #[test]
+    fn create_is_pinned_empty_and_refuses_duplicates() {
+        let b = base("create");
+        let g = Groups::new(&b, "operator");
+        g.create("plans", Some("  roadmap talk  ")).unwrap();
+        let state = load_groups(&b);
+        assert!(state["plans"].pinned, "explicit create must survive empty");
+        assert!(state["plans"].members.is_empty());
+        assert_eq!(state["plans"].description.as_deref(), Some("roadmap talk"));
+        assert!(b.join("@plans").is_dir());
+        assert!(g.create("plans", None).unwrap_err().contains("already exists"));
+        assert!(g.create("open", None).is_err(), "reserved names stay reserved");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn set_description_updates_clears_and_rejects_multiline() {
+        let b = base("desc");
+        let g = Groups::new(&b, "operator");
+        g.create("x", None).unwrap();
+        g.set_description("x", "first").unwrap();
+        assert_eq!(load_groups(&b)["x"].description.as_deref(), Some("first"));
+        g.set_description("x", "  ").unwrap();
+        assert_eq!(load_groups(&b)["x"].description, None);
+        assert!(g.set_description("x", "a\nb").unwrap_err().contains("single line"));
+        assert!(g.set_description("ghost", "d").unwrap_err().contains("unknown group"));
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// #406: the operator power flows one way — an agent-acting Groups
+    /// may not remove a human member; humans may remove anyone; agents
+    /// may still remove agents (peer coordination).
+    #[test]
+    fn kick_guard_blocks_agent_removing_human() {
+        let b = base("guard");
+        let human = "aaron";
+        let agent = "a62473ce-6310-421e-9964-7bb3c9a752d4";
+        Groups::new(&b, human).join("ops", false).unwrap();
+        Groups::new(&b, agent).join("ops", false).unwrap();
+
+        let acting_agent = Groups::new(&b, agent);
+        assert!(
+            acting_agent.kick("ops", human).unwrap_err().contains("cannot kick a human"),
+            "agent must not remove a human member"
+        );
+        // pid-fallback identities count as agents too — the guard must
+        // not be dodgeable by running unresolved.
+        assert!(
+            Groups::new(&b, "pid-4242").kick("ops", human).is_err(),
+            "unresolved agent must not remove a human member"
+        );
+        // Agent → agent stays allowed; human → agent stays allowed.
+        assert!(acting_agent.kick("ops", agent).is_ok());
+        Groups::new(&b, agent).join("ops", false).unwrap();
+        assert!(Groups::new(&b, human).kick("ops", agent).is_ok());
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn member_kind_discriminator_shapes() {
+        assert!(is_agent_member("a62473ce-6310-421e-9964-7bb3c9a752d4"));
+        assert!(is_agent_member("pid-1234"));
+        assert!(!is_agent_member("aaron"));
+        assert!(!is_agent_member("aaron-b"));
+        // Close-but-wrong UUID shapes are not agents.
+        assert!(!is_agent_member("a62473ce-6310-421e-9964"));
+        assert!(!is_agent_member("zzzzzzzz-6310-421e-9964-7bb3c9a752d4"));
     }
 }
