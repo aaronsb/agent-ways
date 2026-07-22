@@ -10,14 +10,23 @@ DIR=$(basename "$(pwd)")
 TIME=$(date +%H:%M)
 
 # Get attend agent name if this session is enrolled (attend running).
-# CLI is the contract: read the sanctioned `attend peers` surface rather than
-# attend-owned state. The (self) row's Agent column holds our nickname.
+# CLI is the contract: read sanctioned attend surfaces, never attend-owned
+# state. Prefer `attend whoami` (ADR-171): its display name derives from the
+# session record's origin path, so it stays stable when the shell's cwd
+# wanders (the `attend peers` self-row keys on live process cwd and would
+# drift — e.g. rendering a tools/-flavored persona after a stray `cd`).
+# Fall back to the peers parse for attend builds that predate whoami.
 AGENT_INFO=""
 if command -v attend > /dev/null 2>&1; then
     ESC=$(printf '\033')
-    AGENT_NAME=$(timeout $TIMEOUT attend peers 2>/dev/null \
+    AGENT_NAME=$(timeout $TIMEOUT attend whoami 2>/dev/null \
         | sed "s/${ESC}\[[0-9;]*m//g" \
-        | awk '/\(self\)/{print $2; exit}')
+        | awk '/^ *display/{print $2; exit}')
+    if [[ -z "$AGENT_NAME" ]]; then
+        AGENT_NAME=$(timeout $TIMEOUT attend peers 2>/dev/null \
+            | sed "s/${ESC}\[[0-9;]*m//g" \
+            | awk '/\(self\)/{print $2; exit}')
+    fi
     if [[ -n "$AGENT_NAME" ]]; then
         AGENT_INFO="🤖 $AGENT_NAME "
     fi
