@@ -43,6 +43,15 @@ pub struct AppProps {
     pub receiver: Option<Receiver<Signal>>,
 }
 
+/// How long a freshly executed command's result asserts itself OVER
+/// the single-match slash help in the status slot (#400) — the window
+/// in which "why did nothing happen" is answered before the display
+/// yields back to the help. A named top-level constant by operator
+/// requirement: the tuning knob must not be buried in render code.
+/// Effective ceiling is this window plus one repaint (the 5s presence
+/// tick or the next keypress), whichever lands first.
+const STATUS_ASSERT: std::time::Duration = std::time::Duration::from_secs(6);
+
 /// Upper bound on the in-memory message buffer. At typical chat rates
 /// this is unreachable; the cap only matters for runaway conditions
 /// (overnight runs, a misbehaving peer, a loop). When we hit it, drop
@@ -75,6 +84,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let mut cursor = hooks.use_state(|| 0usize);
     let mut should_exit = hooks.use_state(|| false);
     let mut status = hooks.use_state(String::new);
+    // #400: when the status last changed, and whether it was a failure
+    // (EnterAction::StatusOnly is the leave-input-intact failure path;
+    // the ClearWithStatus* variants are successes). Drives the timed
+    // assert-over-help window and the error styling — provenance from
+    // the action variant, never sniffed from the text.
+    let mut status_set_at = hooks.use_state(|| None::<std::time::Instant>);
+    let mut status_is_error = hooks.use_state(|| false);
     let mut tab_cycle = hooks.use_state::<Option<TabCycle>, _>(|| None);
     // Foreground tab (#393). Merged (slot zero) at launch — today's
     // full-stream view stays the opening posture; per-channel focus
@@ -166,11 +182,15 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         EnterAction::None => {}
                         EnterAction::ClearWithStatus(s) => {
                             status.set(s);
+                            status_set_at.set(Some(std::time::Instant::now()));
+                            status_is_error.set(false);
                             input.set(String::new());
                             cursor.set(0);
                         }
                         EnterAction::ClearWithStatusAndEcho { status: s, echo } => {
                             status.set(s);
+                            status_set_at.set(Some(std::time::Instant::now()));
+                            status_is_error.set(false);
                             input.set(String::new());
                             cursor.set(0);
                             // Append the display-only echo through the same
@@ -179,9 +199,15 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             // transcript just as a broadcast would.
                             push_capped(&mut signals, echo);
                         }
-                        EnterAction::StatusOnly(s) => status.set(s),
+                        EnterAction::StatusOnly(s) => {
+                            status.set(s);
+                            status_set_at.set(Some(std::time::Instant::now()));
+                            status_is_error.set(true);
+                        }
                         EnterAction::ClearWithStatusAndFocus { status: s, focus } => {
                             status.set(s);
+                            status_set_at.set(Some(std::time::Instant::now()));
+                            status_is_error.set(false);
                             input.set(String::new());
                             cursor.set(0);
                             // `/dissolve` closed the foreground tab —
@@ -195,6 +221,8 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             // fresh traffic streams back in.
                             signals.set(Vec::new());
                             status.set("transcript cleared".into());
+                            status_set_at.set(Some(std::time::Instant::now()));
+                            status_is_error.set(false);
                             input.set(String::new());
                             cursor.set(0);
                         }
@@ -367,17 +395,19 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // is past its name, the registry's `ArgKind` routes the helper
     // (`/whois ` → agents, `/join ` → channels).
     let helper_mode = helper::derive(&input_snapshot);
-    // #398: while the typed slash command is unambiguous, the status
-    // slot shows that command's inline help — documentation at the
-    // point of intent. The swap is display-time only: the stored
-    // result string is never overwritten, so backspacing to an empty
-    // prompt restores it for free.
-    let status_line = match &helper_mode {
-        helper::HelperMode::Slash(Some(p)) => {
-            slash::single_match_help(p).unwrap_or_else(|| status.to_string())
-        }
-        _ => status.to_string(),
+    // #398 + #400 priority rule: a fresh result (inside the assert
+    // window) beats the help; the help beats the stored result while a
+    // command uniquely matches; the stored result is never mutated, so
+    // backspacing to empty restores it for free.
+    let fresh = status_set_at
+        .get()
+        .is_some_and(|t| t.elapsed() < STATUS_ASSERT);
+    let help = match &helper_mode {
+        helper::HelperMode::Slash(Some(p)) => slash::single_match_help(p),
+        _ => None,
     };
+    let (status_line, status_color) =
+        status_slot(fresh, status_is_error.get(), help, &status.to_string());
     let rows: Vec<_> = signals
         .read()
         .iter()
@@ -590,8 +620,58 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 HelperMode::Slash(p) => slash::slash_legend_row(p.as_deref()),
             })
             View(height: 1, padding_left: 1) {
-                Text(color: Color::DarkGrey, content: status_line, wrap: TextWrap::NoWrap)
+                Text(color: status_color, content: status_line, wrap: TextWrap::NoWrap)
             }
         }
+    }
+}
+
+/// The status-slot content and color under the #398/#400 priority
+/// rule: fresh result (error red / success white) > single-match help
+/// (dark grey) > stored result (dark grey).
+fn status_slot(
+    fresh: bool,
+    is_error: bool,
+    help: Option<String>,
+    stored: &str,
+) -> (String, Color) {
+    if fresh {
+        let color = if is_error { Color::Red } else { Color::White };
+        return (stored.to_string(), color);
+    }
+    match help {
+        Some(h) => (h, Color::DarkGrey),
+        None => (stored.to_string(), Color::DarkGrey),
+    }
+}
+
+#[cfg(test)]
+mod status_slot_tests {
+    use super::*;
+
+    #[test]
+    fn fresh_error_asserts_over_help_in_red() {
+        let (text, color) =
+            status_slot(true, true, Some("/dissolve — help".into()), "1 live member — not dissolving");
+        assert_eq!(text, "1 live member — not dissolving");
+        assert_eq!(color, Color::Red);
+    }
+
+    #[test]
+    fn fresh_success_asserts_in_white() {
+        let (text, color) = status_slot(true, false, Some("help".into()), "joined #x");
+        assert_eq!(text, "joined #x");
+        assert_eq!(color, Color::White);
+    }
+
+    #[test]
+    fn expired_window_yields_to_help_then_stored() {
+        // Window over, command text still matches → help wins.
+        let (text, color) = status_slot(false, true, Some("/dissolve — help".into()), "err");
+        assert_eq!(text, "/dissolve — help");
+        assert_eq!(color, Color::DarkGrey);
+        // Input cleared (no help) → stored result returns.
+        let (text, _) = status_slot(false, true, None, "err");
+        assert_eq!(text, "err");
     }
 }
