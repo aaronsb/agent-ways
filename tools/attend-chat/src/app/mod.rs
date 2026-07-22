@@ -32,8 +32,8 @@ use crate::slash;
 use crate::text_layout::{render_cursor, visual_line_count};
 
 use keys::{
-    handle_backspace, handle_char_insert, handle_delete, handle_end, handle_enter, handle_home,
-    handle_newline_insert, handle_tab, EnterAction, TabCycle,
+    destination_label, handle_backspace, handle_char_insert, handle_delete, handle_end,
+    handle_enter, handle_home, handle_newline_insert, handle_tab, EnterAction, TabCycle,
 };
 
 #[derive(Default, Props)]
@@ -414,7 +414,28 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // or status row.
     let interior = (width as usize).saturating_sub(6).max(1);
     let visual = visual_line_count(&display_with_cursor, interior);
-    let input_height = (visual.clamp(1, 10) as u32) + 2;
+    // +2 borders, +1 for the destination-flag row pinned at the
+    // bottom of the box (#392).
+    let input_height = (visual.clamp(1, 10) as u32) + 3;
+    // Destination flag (#392): inverse-styled label in the input
+    // box's lower-right showing where Enter would send this buffer.
+    // Live: re-derived from the buffer every render, through the same
+    // routing parse the send path uses. Hidden while composing a
+    // slash command — nothing would be sent.
+    let dest_chip: Vec<AnyElement<'static>> = destination_label(&input_snapshot, "open")
+        .map(|label| {
+            vec![element! {
+                View(background_color: Color::Blue) {
+                    Text(
+                        color: Color::Black,
+                        content: format!(" {label} "),
+                        wrap: TextWrap::NoWrap,
+                    )
+                }
+            }
+            .into_any()]
+        })
+        .unwrap_or_default();
 
     element! {
         View(flex_direction: FlexDirection::Column, width, height) {
@@ -450,15 +471,25 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 padding_right: 1,
                 height: input_height,
                 flex_shrink: 0.0,
+                flex_direction: FlexDirection::Column,
             ) {
-                View(width: 2, flex_shrink: 0.0) {
-                    Text(color: Color::Blue, content: "> ")
+                View(flex_direction: FlexDirection::Row, flex_grow: 1.0) {
+                    View(width: 2, flex_shrink: 0.0) {
+                        Text(color: Color::Blue, content: "> ")
+                    }
+                    View(flex_grow: 1.0) {
+                        Text(
+                            content: display_with_cursor,
+                            wrap: TextWrap::Wrap,
+                        )
+                    }
                 }
-                View(flex_grow: 1.0) {
-                    Text(
-                        content: display_with_cursor,
-                        wrap: TextWrap::Wrap,
-                    )
+                View(
+                    height: 1,
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::End,
+                ) {
+                    #(dest_chip)
                 }
             }
             #(match &helper_mode {

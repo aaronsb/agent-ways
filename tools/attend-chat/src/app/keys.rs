@@ -483,6 +483,25 @@ fn purge_channel_in(
     ))
 }
 
+/// Resolved destination for the input box's lower-right flag (#392):
+/// where will this buffer go when Enter is pressed? Reuses the send
+/// path's own routing parse (`parse_addressed` + `recipient_labels`)
+/// so the flag cannot disagree with what `handle_enter` does —
+/// misrouted broadcast is the failure it exists to prevent. `None`
+/// while a slash command is being composed (commands don't send).
+/// `scope` is the channel an unaddressed message targets.
+pub fn destination_label(input: &str, scope: &str) -> Option<String> {
+    if slash::parse(input).is_some() || slash::find_slash_partial(input).is_some() {
+        return None;
+    }
+    let recipients = parse_addressed(input);
+    if recipients.is_empty() {
+        Some(format!("#{scope}"))
+    } else {
+        Some(recipient_labels(&recipients).join(" "))
+    }
+}
+
 /// Does the sender's own chat watcher already surface signals written to
 /// `dest`? Reuses [`accept_path`] — the single source of truth for what
 /// the transcript shows — so a directed send that round-trips (a
@@ -1066,6 +1085,32 @@ mod tests {
             }
             _ => panic!("/channels should clear input with status"),
         }
+    }
+
+    #[test]
+    fn destination_label_tracks_routing_live() {
+        // Unaddressed → the scope channel.
+        assert_eq!(destination_label("", "open"), Some("#open".into()));
+        assert_eq!(destination_label("hello", "open"), Some("#open".into()));
+        assert_eq!(destination_label("hello", "deploy"), Some("#deploy".into()));
+        // Leading address run wins, exactly as `handle_enter` routes.
+        assert_eq!(destination_label("@Tamsin hi", "open"), Some("@Tamsin".into()));
+        assert_eq!(destination_label("#infra hi", "open"), Some("#infra".into()));
+        assert_eq!(
+            destination_label("@Tamsin @Cleo sync", "open"),
+            Some("@Tamsin @Cleo".into())
+        );
+        // A mid-message mention doesn't address — scope still shown.
+        assert_eq!(destination_label("hi @Tamsin", "open"), Some("#open".into()));
+    }
+
+    #[test]
+    fn destination_label_hides_while_composing_slash() {
+        assert_eq!(destination_label("/", "open"), None);
+        assert_eq!(destination_label("/jo", "open"), None);
+        assert_eq!(destination_label("/join #deploy", "open"), None);
+        // A mid-sentence slash is a literal slash — still a send.
+        assert_eq!(destination_label("a / b", "open"), Some("#open".into()));
     }
 
     #[test]
