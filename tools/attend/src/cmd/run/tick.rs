@@ -249,6 +249,20 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         // message governor downstream. The event lane keeps the
         // refractory gate unchanged.
         let is_message_lane = s.slots[i].name() == "peers";
+
+        // ADR-172 Decision 3, the other direction: the sensor marks
+        // scanned signals seen in memory, but the drain reads the FILE
+        // at the next turn boundary — an interval-deferred checkpoint
+        // would let the drain re-deliver what the poller just surfaced.
+        // Checkpoint immediately on any peers change so on-disk
+        // consumption keeps pace with both writers. Union semantics
+        // make the extra write safe; message traffic makes it rare.
+        if is_message_lane && changed {
+            let snapshot = collect_snapshot(s.slots);
+            s.state_store.checkpoint(&snapshot);
+            *s.last_checkpoint = Instant::now();
+        }
+
         if (is_message_lane && s.slots[i].accumulator.magnitude > 0.0)
             || s.slots[i].ready_to_disclose()
         {
