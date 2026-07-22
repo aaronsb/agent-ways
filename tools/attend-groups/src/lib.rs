@@ -45,6 +45,18 @@ pub struct Groups {
 
 const GROUP_PREFIX: &str = "@";
 
+/// The single-line description contract, shared by every write path
+/// (create, set_description). Control characters — newlines above
+/// all — are rejected, not folded: a folded payload still surprises,
+/// and the yaml wire format is line-oriented (PR #407 review).
+fn normalize_description(text: &str) -> Result<Option<String>, String> {
+    if text.chars().any(|c| c.is_control()) {
+        return Err("description must be a single line of printable text".to_string());
+    }
+    let t = text.trim();
+    Ok((!t.is_empty()).then(|| t.to_string()))
+}
+
 /// Member-kind discriminator (#406). Agent ids are Claude Code session
 /// UUIDs (8-4-4-4-12 hex) or the `pid-<n>` unresolved fallback; human
 /// ids are ADR-170 sanitized usernames, which are neither. Encoded
@@ -128,6 +140,15 @@ impl Groups {
     /// joins or the operator dissolves it.
     pub fn create(&self, name: &str, description: Option<&str>) -> Result<(), String> {
         validate_group_name(name)?;
+        // Same single-line contract as set_description — enforced HERE,
+        // not per-surface: a newline in the description is a yaml
+        // injection that mints fabricated groups/members (PR #407
+        // review, blocking finding — reproduced against the built
+        // crate).
+        let description = match description {
+            Some(d) => normalize_description(d)?,
+            None => None,
+        };
         let mut state = self.load_state();
         if state.contains_key(name) {
             return Err(format!("#{name} already exists"));
@@ -137,10 +158,7 @@ impl Groups {
             GroupEntry {
                 pinned: true,
                 members: Vec::new(),
-                description: description
-                    .map(str::trim)
-                    .filter(|d| !d.is_empty())
-                    .map(String::from),
+                description,
             },
         );
         self.save_state(&state);
@@ -152,19 +170,12 @@ impl Groups {
     /// Set or replace a channel's description (#404). Single-line by
     /// contract — the yaml wire format is line-oriented.
     pub fn set_description(&self, name: &str, text: &str) -> Result<(), String> {
-        if text.contains('\n') {
-            return Err("description must be a single line".to_string());
-        }
+        let normalized = normalize_description(text)?;
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
             return Err(format!("#{name}: unknown group"));
         };
-        let trimmed = text.trim();
-        entry.description = if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        };
+        entry.description = normalized;
         self.save_state(&state);
         Ok(())
     }
@@ -490,6 +501,12 @@ pub fn validate_group_name(name: &str) -> Result<(), String> {
     }
     if name.contains('/') || name.contains(' ') {
         return Err("group name cannot contain / or spaces".to_string());
+    }
+    // '#' would survive a single sigil-strip and mint a phantom whose
+    // yaml header parses as a comment; ':' is the yaml key terminator.
+    // Both are wire hazards, not names (PR #407 review).
+    if name.contains('#') || name.contains(':') {
+        return Err("group name cannot contain # or :".to_string());
     }
     // `broadcast` backs `_broadcast/`; `open` is the display name of
     // the base channel (ADR-124) — both would alias the commons if
@@ -1003,5 +1020,44 @@ mod lifecycle_tests {
         // Close-but-wrong UUID shapes are not agents.
         assert!(!is_agent_member("a62473ce-6310-421e-9964"));
         assert!(!is_agent_member("zzzzzzzz-6310-421e-9964-7bb3c9a752d4"));
+    }
+}
+
+#[cfg(test)]
+mod injection_tests {
+    use super::*;
+
+    fn base(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("attend-groups-407-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// PR #407 blocking regression: a newline-bearing description must
+    /// be rejected by EVERY write path — the reviewer reproduced a
+    /// yaml injection minting a fabricated pinned group with an
+    /// arbitrary member through `create`.
+    #[test]
+    fn create_and_describe_reject_yaml_injection() {
+        let b = base("inject");
+        let g = Groups::new(&b, "operator");
+        let evil = "x\nevil:\n  pinned: true\n  members:\n    - fake-member";
+        assert!(g.create("foo", Some(evil)).unwrap_err().contains("single line"));
+        assert!(load_groups(&b).is_empty(), "nothing may be written on rejection");
+
+        g.create("foo", None).unwrap();
+        assert!(g.set_description("foo", evil).unwrap_err().contains("single line"));
+        let state = load_groups(&b);
+        assert!(!state.contains_key("evil"), "no fabricated group");
+        assert_eq!(state["foo"].description, None);
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn group_names_reject_wire_hazard_characters() {
+        assert!(validate_group_name("#x").unwrap_err().contains("# or :"));
+        assert!(validate_group_name("a:b").unwrap_err().contains("# or :"));
+        assert!(validate_group_name("plain-name").is_ok());
     }
 }

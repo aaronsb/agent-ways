@@ -219,7 +219,7 @@ pub(crate) enum ChannelsCmd {
         /// Channel name (with or without the # prefix)
         name: String,
         /// Optional single-line description (all trailing words)
-        #[arg(trailing_var_arg = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         description: Vec<String>,
     },
 

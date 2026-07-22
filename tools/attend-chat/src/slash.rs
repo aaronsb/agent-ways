@@ -670,7 +670,13 @@ pub fn complete_subcommand(input: &str) -> Option<(String, usize)> {
         // choice; but "/channels" with no space is still the NAME
         // being typed — `parse` accepts it, so gate on the space
         // ourselves and leave it to the top-level completion path.
-        None if input.ends_with(char::is_whitespace) => String::new(),
+        // The descent must also be CLEAN: after an unknown completed
+        // token ("/channels bogus "), walk still reports the Sub level
+        // with no partial, and completing there would graft "list"
+        // onto garbage (PR #407 review).
+        None if input.ends_with(char::is_whitespace) && args.trim().is_empty() => {
+            String::new()
+        }
         None => return None,
     };
     let lc = p.to_ascii_lowercase();

@@ -121,8 +121,12 @@ pub(crate) fn cmd_channels() {
     r.cleanup_stale();
     let joined: std::collections::HashSet<String> =
         r.my_groups().into_iter().map(|(n, _)| n).collect();
-    let all = r.all_groups();
-    let descriptions = attend_groups::load_groups(&crate::util::signals_base());
+    // Single read of the whole file (PR #407 nit): a second read for
+    // descriptions could misalign the column against a concurrent
+    // write. Members/pinned/description all come from this one snapshot.
+    let state = attend_groups::load_groups(&crate::util::signals_base());
+    let mut names: Vec<&String> = state.keys().collect();
+    names.sort();
     let mut t =
         agent_fmt::Table::new(&["Channel", "Members", "Joined", "Pinned", "Description"]);
     t.align(1, agent_fmt::Align::Right);
@@ -130,17 +134,15 @@ pub(crate) fn cmd_channels() {
     // leftmost rule. `(all)` captures the fact that every peer is
     // implicitly subscribed.
     t.add(vec!["#open", "(all)", "(always)", "(base)", "the commons"]);
-    for (name, count, pinned) in &all {
+    for name in names {
+        let entry = &state[name];
         let label = format!("#{name}");
-        let desc = descriptions
-            .get(name)
-            .and_then(|e| e.description.clone())
-            .unwrap_or_default();
+        let desc = entry.description.clone().unwrap_or_default();
         t.add(vec![
             &label,
-            &count.to_string(),
+            &entry.members.len().to_string(),
             if joined.contains(name) { "yes" } else { "" },
-            if *pinned { "yes" } else { "no" },
+            if entry.pinned { "yes" } else { "no" },
             &desc,
         ]);
     }
