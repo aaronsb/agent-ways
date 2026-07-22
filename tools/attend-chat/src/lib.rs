@@ -7,6 +7,7 @@
 
 pub mod app;
 pub mod chip;
+pub mod consumers;
 pub mod groups;
 pub mod helper;
 pub mod legend;

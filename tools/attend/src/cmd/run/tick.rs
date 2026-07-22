@@ -203,6 +203,25 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         let scheduled = s.queue.pop().unwrap();
         let i = scheduled.index;
 
+        // ADR-172 Decision 3: the drain is a second writer to the shared
+        // seen-set. Re-import drain-recorded consumption from disk before
+        // the peers sensor scans, so a message already delivered at a
+        // turn boundary is not re-emitted by the poller. The remaining
+        // race (a drain landing between this read and the scan) costs at
+        // worst a duplicate notification — at-least-once, never loss.
+        if s.slots[i].name() == "peers" {
+            if let Some(snap) = s.state_store.load() {
+                let marks: Vec<(String, String)> = snap
+                    .seen_signals
+                    .into_iter()
+                    .map(|k| ("seen_signal".to_string(), k))
+                    .collect();
+                if !marks.is_empty() {
+                    s.slots[i].import_state(&marks);
+                }
+            }
+        }
+
         let changed = s.slots[i].poll(s.focus);
 
         // Only log when something changed — quiet polls are silent.

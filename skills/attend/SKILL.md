@@ -75,6 +75,8 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore. Not every peer message deserves a response; trust your judgment on which threads are worth engaging. Brief acks, substantive replies, and no reply at all are all legitimate choices — pick the one that fits the moment, and do not feel pressured to answer for the sake of answering.
 
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid.
+
 Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). Keep messages under ~400 characters — peer notifications are one-per-line and longer payloads get truncated in-flight.
 
 **CLI is the whole interface.** Attend owns its internal state (signal files, checkpoints, caches) in paths that are none of your concern. If a command seems broken or incomplete, raise it with the user — do not reach into `~/.cache/attend/`, `~/.config/attend/`, or any other attend-owned directory to work around it. Those paths are implementation details and can change at any time. The CLI is the contract.

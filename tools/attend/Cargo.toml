@@ -24,6 +24,7 @@ attend-groups = { path = "../attend-groups" }
 attend-heartbeat = { path = "../attend-heartbeat" }
 attend-instances = { path = "../attend-instances" }
 attend-session = { path = "../attend-session" }
+attend-state = { path = "../attend-state" }
 sensor-trait = { path = "../sensor-trait" }
 # CLI parsing — matches ADR-111's choice for `ways-cli`. Doc comments on
 # the `Cli`/`Commands` types in `cli.rs` are the single source of truth
