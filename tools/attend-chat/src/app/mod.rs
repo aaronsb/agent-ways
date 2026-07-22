@@ -22,6 +22,7 @@ use agent_identity::TermCaps;
 use async_channel::Receiver;
 use iocraft::prelude::*;
 
+use crate::attach;
 use crate::chip::{chip_for, color_for, known_identities, CHIP_WIDTH};
 use crate::groups::channels;
 use crate::helper::{self, HelperMode};
@@ -416,6 +417,13 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     now,
                 )
             };
+            // Attachment chips (#390): absolute-path tokens in the
+            // body that exist as files render as chips below the
+            // text. The body keeps the raw path (wire truth); a
+            // vanished file just loses its chip — a cell never
+            // errors on a stale path.
+            let cell_attachments =
+                attach::attachment_chips(&attach::existing_attachments(&s.message), caps);
             element! {
                 View(flex_direction: FlexDirection::Row, margin_bottom: 1) {
                     View(
@@ -445,8 +453,12 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         padding_left: 1,
                         padding_right: 1,
                         padding_top: 1,
+                        flex_direction: FlexDirection::Column,
                     ) {
                         Text(content: s.message.clone(), wrap: TextWrap::Wrap)
+                        View(flex_direction: FlexDirection::Row) {
+                            #(cell_attachments)
+                        }
                     }
                 }
             }
@@ -464,9 +476,14 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // or status row.
     let interior = (width as usize).saturating_sub(6).max(1);
     let visual = visual_line_count(&display_with_cursor, interior);
+    // Attachment chips for the compose buffer (#390) — a dropped file
+    // shows as attached the moment its pasted path lands in the input.
+    let input_attachments = attach::existing_attachments(&input_snapshot);
+    let attach_rows = if input_attachments.is_empty() { 0 } else { 1 };
+    let input_attach_chips = attach::attachment_chips(&input_attachments, caps);
     // +2 borders, +1 for the destination-flag row pinned at the
-    // bottom of the box (#392).
-    let input_height = (visual.clamp(1, 10) as u32) + 3;
+    // bottom of the box (#392), +1 when an attachment row shows.
+    let input_height = (visual.clamp(1, 10) as u32) + 3 + attach_rows;
     // Destination flag (#392): inverse-styled label in the input
     // box's lower-right showing where Enter would send this buffer.
     // Live: re-derived from the buffer every render, through the same
@@ -536,6 +553,9 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             wrap: TextWrap::Wrap,
                         )
                     }
+                }
+                View(flex_direction: FlexDirection::Row, flex_shrink: 0.0) {
+                    #(input_attach_chips)
                 }
                 View(
                     height: 1,

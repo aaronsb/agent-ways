@@ -6,6 +6,7 @@
 //! via `#[path]`.
 
 pub mod app;
+pub mod attach;
 pub mod chip;
 pub mod consumers;
 pub mod groups;
