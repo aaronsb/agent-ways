@@ -435,10 +435,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
-            let caps = TermCaps::detect();
+            // Always Mono: the drain's output is hook-injection text (or
+            // a pipe), never a styled terminal — env-probed detection
+            // would leak raw ANSI codes into the turn (live-test find).
             delivered.push(Drained {
                 mtime,
-                sender: render_sender_label(sig.from, sig.cwd, caps),
+                sender: render_sender_label(sig.from, sig.cwd, TermCaps::Mono),
                 scope: scope.to_string(),
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 body: sig.message.to_string(),
