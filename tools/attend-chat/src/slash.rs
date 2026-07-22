@@ -112,6 +112,18 @@ pub const REGISTRY: &[SlashCommand] = &[
         arg_kind: ArgKind::None,
     },
     SlashCommand {
+        name: "invite",
+        description: "Invite a peer to a channel (they join themselves)",
+        status: Status::Implemented,
+        arg_kind: ArgKind::Agent,
+    },
+    SlashCommand {
+        name: "kick",
+        description: "Remove a member from a channel",
+        status: Status::Implemented,
+        arg_kind: ArgKind::Agent,
+    },
+    SlashCommand {
         name: "purge",
         description: "Delete a channel's on-disk history",
         status: Status::Implemented,
@@ -238,6 +250,24 @@ pub enum SlashOutcome {
     /// origin root. Name normalized (`@` stripped); resolution
     /// happens at execution time against the live roster.
     Whois(String),
+    /// `/invite @name [#channel]` — send a DIRECTED invitation to the
+    /// peer's project tray. Never a force-add: entry changes what
+    /// reaches a session, so it requires the invitee's own
+    /// `attend join`; silence declines (consent asymmetry, ADR-173 /
+    /// issue #393).
+    Invite {
+        member: String,
+        channel: Option<String>,
+    },
+    /// `/kick @name [#channel]` — remove a member from a channel.
+    /// Operator power tool, the membership sibling of `/purge`:
+    /// removal only *reduces* the target's routing reach, so it needs
+    /// no consent. The kicked member gets a directed notice so their
+    /// focus state doesn't drift silently; rejoin stays allowed.
+    Kick {
+        member: String,
+        channel: Option<String>,
+    },
 }
 
 /// Normalize an agent argument: first whitespace-separated token,
@@ -306,6 +336,35 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
             "whois" => match agent_arg(args) {
                 None => SlashOutcome::Err("usage: /whois <@name>".into()),
                 Some(name) => SlashOutcome::Whois(name.to_string()),
+            },
+            // Shared `@name [#channel]` grammar for the membership
+            // pair. A missing channel means "scope to the foreground
+            // tab" — resolved by the key handler, which owns tab
+            // state; dispatch stays context-free.
+            "invite" | "kick" => match agent_arg(args) {
+                None => SlashOutcome::Err(format!("usage: /{} <@name> [#channel]", cmd.name)),
+                Some(member) => {
+                    let channel = args
+                        .split_whitespace()
+                        .nth(1)
+                        .map(|c| c.strip_prefix('#').unwrap_or(c).to_string());
+                    match (cmd.name, channel.as_deref()) {
+                        ("invite", Some("open")) => SlashOutcome::Err(
+                            "#open is the base channel — everyone is already there".into(),
+                        ),
+                        ("kick", Some("open")) => SlashOutcome::Err(
+                            "#open is the base channel — you can't kick from it".into(),
+                        ),
+                        ("invite", _) => SlashOutcome::Invite {
+                            member: member.to_string(),
+                            channel,
+                        },
+                        _ => SlashOutcome::Kick {
+                            member: member.to_string(),
+                            channel,
+                        },
+                    }
+                }
             },
             // Keeps the match exhaustive — if a registry entry flips
             // to Implemented without a handler arm, this fires at
@@ -612,6 +671,60 @@ mod tests {
             panic!("bare /whois should be a usage error")
         };
         assert!(s.contains("usage"));
+    }
+
+    #[test]
+    fn dispatch_invite_parses_member_and_optional_channel() {
+        assert_eq!(
+            dispatch("invite", "@Tamsin-alpha #deploy"),
+            SlashOutcome::Invite {
+                member: "Tamsin-alpha".into(),
+                channel: Some("deploy".into())
+            }
+        );
+        // No channel → foreground-tab scope, resolved by the caller.
+        assert_eq!(
+            dispatch("invite", "@Cleo"),
+            SlashOutcome::Invite {
+                member: "Cleo".into(),
+                channel: None
+            }
+        );
+        let SlashOutcome::Err(s) = dispatch("invite", "") else {
+            panic!("bare /invite should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        // Base channel: everyone is already there — nothing to invite to.
+        let SlashOutcome::Err(s) = dispatch("invite", "@Cleo #open") else {
+            panic!("/invite to open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+    }
+
+    #[test]
+    fn dispatch_kick_parses_member_and_optional_channel() {
+        assert_eq!(
+            dispatch("kick", "@Tamsin-alpha #deploy"),
+            SlashOutcome::Kick {
+                member: "Tamsin-alpha".into(),
+                channel: Some("deploy".into())
+            }
+        );
+        assert_eq!(
+            dispatch("kick", "Cleo"),
+            SlashOutcome::Kick {
+                member: "Cleo".into(),
+                channel: None
+            }
+        );
+        let SlashOutcome::Err(s) = dispatch("kick", "") else {
+            panic!("bare /kick should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        let SlashOutcome::Err(s) = dispatch("kick", "@Cleo open") else {
+            panic!("/kick from open should be rejected")
+        };
+        assert!(s.contains("base channel"));
     }
 
     #[test]

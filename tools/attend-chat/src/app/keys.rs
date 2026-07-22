@@ -89,6 +89,12 @@ pub fn handle_enter(input_value: &str, signals: &[Signal]) -> EnterAction {
             slash::SlashOutcome::Purge(chan) => run_purge(chan.as_deref()),
             slash::SlashOutcome::Peers => run_peers(),
             slash::SlashOutcome::Whois(name) => run_whois(&name),
+            slash::SlashOutcome::Invite { member, channel } => {
+                run_invite(&member, channel.as_deref())
+            }
+            slash::SlashOutcome::Kick { member, channel } => {
+                run_kick(&member, channel.as_deref())
+            }
         };
     }
     let caps = TermCaps::detect();
@@ -303,6 +309,92 @@ fn run_whois(name: &str) -> EnterAction {
             p.display, p.session_id, p.root
         )),
         Err(e) => EnterAction::StatusOnly(e),
+    }
+}
+
+/// `/invite @name [#channel]` — invitation, never force-add. The
+/// invitation is an ordinary directed signal to the peer's project
+/// tray telling them how to join; entry happens only through their
+/// own `attend join`, so the invitee's autonomy to decline (silence)
+/// is preserved (ADR-173 / #393 consent asymmetry).
+fn run_invite(member: &str, channel: Option<&str>) -> EnterAction {
+    let Some(g) = channel else {
+        return EnterAction::StatusOnly("usage: /invite <@name> <#channel>".into());
+    };
+    // Inviting into a channel that doesn't exist would hand the peer
+    // a join command that mints a brand-new group — more likely a
+    // typo than an intent. `/join` it first.
+    if resolve_group_dir(g).is_none() {
+        return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
+    }
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    let peer = match crate::peers::resolve_peer(member, &roster) {
+        Ok(p) => p,
+        Err(e) => return EnterAction::StatusOnly(e),
+    };
+    let dest = cwd_dir(&peer.root);
+    let body = format!("you're invited to #{g} — join with: attend join {g}");
+    match write_signal(&dest, &body) {
+        Ok(_) => {
+            let status = format!("invited @{} to #{g}", peer.display);
+            // Same echo rule as directed sends: synthesize only when
+            // the destination isn't a dir our own watcher surfaces.
+            if sender_watches(&dest) {
+                EnterAction::ClearWithStatus(status)
+            } else {
+                EnterAction::ClearWithStatusAndEcho {
+                    status,
+                    echo: compose_self_echo(&body),
+                }
+            }
+        }
+        Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
+    }
+}
+
+/// `/kick @name [#channel]` — resolve the target, remove them, then
+/// tell them. The directed notice is not a courtesy flourish: the
+/// kicked session's routing changed without its participation, and
+/// silent drift between its focus state and reality is exactly what
+/// the notice prevents (#393). Best-effort like every signal write.
+fn run_kick(member: &str, channel: Option<&str>) -> EnterAction {
+    let Some(g) = channel else {
+        return EnterAction::StatusOnly("usage: /kick <@name> <#channel>".into());
+    };
+    let caps = TermCaps::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    let peer = match crate::peers::resolve_peer(member, &roster) {
+        Ok(p) => p,
+        Err(e) => return EnterAction::StatusOnly(e),
+    };
+    let action = kick_member_in(&signals_base(), g, &peer.session_id, &peer.display);
+    if matches!(action, EnterAction::ClearWithStatus(_)) {
+        let notice = format!(
+            "you were removed from #{g} by the operator — rejoin with: attend join {g}"
+        );
+        let _ = write_signal(&cwd_dir(&peer.root), &notice);
+    }
+    action
+}
+
+/// Filesystem-effect core of `/kick`, parameterized on the base dir
+/// so tests can drive it against a tempdir. `Groups::kick` owns the
+/// state change and its precise error strings (unknown group,
+/// non-member); the acting member id is irrelevant — kick targets
+/// someone else's entry. `label` is the target's display name for
+/// the status line (session ids don't belong in the status row).
+fn kick_member_in(
+    base: &std::path::Path,
+    name: &str,
+    member_id: &str,
+    label: &str,
+) -> EnterAction {
+    match attend_groups::Groups::new(base, "").kick(name, member_id) {
+        Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
+        Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
 }
 
@@ -918,6 +1010,44 @@ mod tests {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
             _ => panic!("unknown group should keep input with status"),
         }
+    }
+
+    #[test]
+    fn kick_removes_member_and_cleans_empty_unpinned_group() {
+        let base = tempdir_like();
+        attend_groups::Groups::new(&base, "sess-a")
+            .join("deploy", false)
+            .unwrap();
+        match kick_member_in(&base, "deploy", "sess-a", "Tamsin-alpha") {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("kicked @Tamsin-alpha from #deploy"), "got: {s}")
+            }
+            _ => panic!("successful kick should clear input with status"),
+        }
+        // Last member out of an unpinned group dissolves it — same
+        // cleanup rule as leave.
+        assert!(!base.join("@deploy").exists());
+    }
+
+    #[test]
+    fn kick_unknown_group_and_nonmember_surface_kick_errors() {
+        let base = tempdir_like();
+        // Unknown group: Groups::kick's own error string passes through.
+        match kick_member_in(&base, "ghost", "sess-a", "Cleo") {
+            EnterAction::StatusOnly(s) => assert!(s.contains("unknown group"), "got: {s}"),
+            _ => panic!("unknown group should keep input with status"),
+        }
+        // Group exists, target isn't in it.
+        attend_groups::Groups::new(&base, "someone-else")
+            .join("deploy", false)
+            .unwrap();
+        match kick_member_in(&base, "deploy", "sess-a", "Cleo") {
+            EnterAction::StatusOnly(s) => assert!(s.contains("not a member"), "got: {s}"),
+            _ => panic!("non-member kick should keep input with status"),
+        }
+        // The bystander's membership is untouched.
+        let members = attend_groups::Groups::new(&base, "x").members("deploy").unwrap();
+        assert_eq!(members, vec!["someone-else"]);
     }
 
     #[test]
