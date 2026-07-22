@@ -60,6 +60,7 @@ fn main() {
             None => cmd::inbox::cmd_inbox(limit, page, before),
         },
         Commands::Status => cmd::status::cmd_status(),
+        Commands::Whoami { machine } => cmd::whoami::cmd_whoami(machine),
         Commands::Sensors => cmd::sensors::cmd_sensors(),
         Commands::Send { broadcast, to, focus, re, message } => {
             cmd::send::cmd_send(broadcast, to, focus, re, message);
@@ -151,9 +152,7 @@ fn dispatch_config(sub: ConfigCmd) {
                 format!("{}/.config", std::env::var("HOME").unwrap_or_default())
             });
             println!("user:    {}/attend/config.yaml", home);
-            let cwd = std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
+            let cwd = util::own_origin_cwd();
             println!("project: {}/.claude/attend.yaml", cwd);
         }
         ConfigCmd::Lint { fix, check } => {

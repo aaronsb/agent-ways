@@ -68,9 +68,7 @@ pub(crate) fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
 
 pub(crate) fn cmd_inbox_read(msg_id: &str) {
     let base = signals_base();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let cwd = crate::util::own_origin_cwd();
     let own_encoded = encode_project(&cwd);
     let r = get_groups();
     let mut scan_dirs = vec![
@@ -124,9 +122,7 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
 
 pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     let base = signals_base();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let cwd = crate::util::own_origin_cwd();
     let own_session_id = own_session_id().unwrap_or_default();
 
     // Scan same dirs as the peer sensor: own project + broadcast + focus group

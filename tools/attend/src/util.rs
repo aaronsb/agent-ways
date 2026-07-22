@@ -8,8 +8,6 @@
 //! reaching into `main`.
 
 use crate::groups;
-#[cfg(feature = "sensor-peers")]
-use crate::sensors;
 
 pub(crate) fn signals_base() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
@@ -41,16 +39,22 @@ pub(crate) fn encode_project(path: &str) -> String {
         .collect()
 }
 
-/// Delegate to the shared implementation in the peer sensor module.
+/// Delegate to the canonical identity derivation (issue #378). No
+/// longer gated on the sensor-peers feature — a minimal attend build
+/// used to degrade own-identity to `pid-<pid>`, which polluted
+/// `_groups.yaml` member ids.
 pub(crate) fn own_session_id() -> Option<String> {
-    #[cfg(feature = "sensor-peers")]
-    {
-        sensors::find_own_session_id(std::process::id())
-    }
-    #[cfg(not(feature = "sensor-peers"))]
-    {
-        None
-    }
+    attend_session::find_own_session_id(std::process::id())
+}
+
+/// The cwd this session is *about* — the session record's origin path
+/// (issue #378), falling back to the process cwd only when no Claude
+/// session owns this process. Every subcommand that means "my
+/// project" (send identity, tray scan, status, registration) resolves
+/// through here, so a stray shell `cd` can no longer put the session
+/// on the bus as a different persona.
+pub(crate) fn own_origin_cwd() -> String {
+    attend_session::identity().origin_path
 }
 
 pub(crate) fn count_signals(dir: &std::path::Path) -> usize {

@@ -18,3 +18,4 @@ pub(crate) mod send;
 pub(crate) mod sensors;
 pub(crate) mod status;
 pub(crate) mod tune;
+pub(crate) mod whoami;

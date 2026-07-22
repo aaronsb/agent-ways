@@ -17,7 +17,7 @@ pub use sensor_git::GitSensor;
 pub use sensor_context::ContextSensor;
 
 #[cfg(feature = "sensor-peers")]
-pub use sensor_peers::{PeerSensor, find_own_session_id};
+pub use sensor_peers::PeerSensor;
 
 #[cfg(feature = "sensor-processes")]
 pub use sensor_processes::ProcessSensor;

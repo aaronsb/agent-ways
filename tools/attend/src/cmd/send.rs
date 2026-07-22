@@ -46,9 +46,9 @@ pub(crate) fn cmd_send(
     }
 
     let base = signals_base();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    // Wire identity rides this cwd (issue #378): the session record's
+    // origin path, so a stray shell `cd` can't relabel our sends.
+    let cwd = crate::util::own_origin_cwd();
 
     // Validate --to path against active peers
     if let Some(ref path) = target_dir {

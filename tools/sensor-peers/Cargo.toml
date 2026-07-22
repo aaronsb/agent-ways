@@ -6,6 +6,7 @@ description = "discovers Claude Code sessions and reads peer signals"
 license = "MIT"
 
 [dependencies]
+attend-session = { path = "../attend-session" }
 sensor-trait = { path = "../sensor-trait" }
 ways-core = { path = "../ways-core" }
 serde_json = "1"

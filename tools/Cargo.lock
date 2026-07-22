@@ -226,6 +226,7 @@ dependencies = [
  "attend-groups",
  "attend-heartbeat",
  "attend-instances",
+ "attend-session",
  "clap",
  "clap-markdown",
  "sensor-context",
@@ -270,6 +271,10 @@ version = "0.1.0"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "attend-session"
+version = "0.1.0"
 
 [[package]]
 name = "autocfg"
@@ -1212,6 +1217,7 @@ dependencies = [
 name = "sensor-peers"
 version = "0.6.0"
 dependencies = [
+ "attend-session",
  "sensor-trait",
  "serde_json",
  "ways-core",

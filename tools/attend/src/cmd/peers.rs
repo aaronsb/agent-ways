@@ -21,11 +21,10 @@ pub(crate) fn cmd_peers() {
     let mut t = agent_fmt::Table::new(&["Focus", "Agent", "Status", "Context"]);
     t.max_width(1, 28);
 
-    // Self row: derive identity from our cwd so the nickname matches
-    // what peers see when they render a signal from us.
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    // Self row: derive identity from our origin path (issue #378) so
+    // the nickname matches what peers see when they render a signal
+    // from us — including when the shell's cwd has drifted.
+    let cwd = crate::util::own_origin_cwd();
     let self_id = Identity::for_cwd(&cwd, caps);
     // Look up our own instance suffix (ADR-129). Falls back to the
     // bare nickname when the registry is unreadable or our session

@@ -278,12 +278,17 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         *s.last_checkpoint = Instant::now();
     }
 
-    // Periodic instance-registry touch — refresh `last_seen` so the
-    // GC clock cannot expire an active session. Cheap when we already
-    // know we have an entry; no-op when registration failed at startup.
+    // Periodic instance-registry upsert — refresh `last_seen` so the
+    // GC clock cannot expire an active session, and *re-register* if
+    // our entry is missing (issue #378). `touch` was a silent no-op
+    // for unregistered sessions, which left a session whose entry was
+    // GC'd or never written rendering as the bare nickname forever
+    // ("bare @Hana"). `register` is idempotent — an existing entry is
+    // refreshed and keeps its slot; a missing one is re-allocated —
+    // so the roster self-heals within one interval.
     if s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
         s.instance_registry
-            .touch(&s.focus.working_dir, s.heartbeat_id)
+            .register(&s.focus.working_dir, s.heartbeat_id)
             .ok();
         *s.last_instance_touch = Instant::now();
     }

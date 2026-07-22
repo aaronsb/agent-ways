@@ -916,39 +916,11 @@ fn extract_json_string(json: &str, key: &str) -> Option<String> {
 /// every subcommand invocation. Probing the pid index directly avoids that
 /// trap and works for both kinds of session.
 pub fn find_own_session_id(own_pid: u32) -> Option<String> {
-    let sessions_dir = home_dir().join(".claude").join("sessions");
-    let mut pid_to_session: std::collections::HashMap<u32, String> =
-        std::collections::HashMap::new();
-    if let Ok(entries) = fs::read_dir(&sessions_dir) {
-        for entry in entries.flatten() {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                if let (Some(pid), Some(sid)) = (
-                    extract_json_u64(&content, "pid"),
-                    extract_json_string(&content, "sessionId"),
-                ) {
-                    pid_to_session.insert(pid as u32, sid);
-                }
-            }
-        }
-    }
-    if pid_to_session.is_empty() {
-        return None;
-    }
-
-    let mut pid = own_pid;
-    for _ in 0..15 {
-        if let Some(sid) = pid_to_session.get(&pid) {
-            return Some(sid.clone());
-        }
-        if pid <= 1 {
-            break;
-        }
-        match get_parent_pid(pid) {
-            Some(ppid) if ppid != pid => pid = ppid,
-            _ => break,
-        }
-    }
-    None
+    // Canonicalized in the attend-session crate (issue #378) — one
+    // resolution shared by attend, this sensor, and any future
+    // consumer, so "who am I" can never drift between them. This
+    // wrapper survives for API stability.
+    attend_session::find_own_session_id(own_pid)
 }
 
 // ── Message chunking ────────────────────────────────────────────

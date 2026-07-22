@@ -57,6 +57,16 @@ pub(crate) enum Commands {
     /// Show running instances, signals, and focus state
     Status,
 
+    /// Print this session's canonical bus identity (issue #378)
+    Whoami {
+        /// Emit the stable key as `key=value` lines for scripts/hooks
+        /// (session_id, origin_path, resolved) instead of the
+        /// human-readable table. Downstream state must key on these
+        /// fields — the display name is presentation, never a key.
+        #[arg(long)]
+        machine: bool,
+    },
+
     /// List all sensors — built-in and config-defined script sensors
     Sensors,
 

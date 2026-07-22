@@ -30,14 +30,25 @@ const RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     emit::log("starting attend");
 
-    let focus = Focus::default_focus();
+    // Canonical identity (issue #378): session id + the session
+    // record's origin path, resolved once and used for everything —
+    // config scope, sensor scoping, tray naming, instance
+    // registration, group membership. Overriding the Focus default's
+    // process cwd here is what keeps a stray shell `cd` at launch
+    // (e.g. a Monitor inheriting a build directory) from putting this
+    // session on the bus as a different persona.
+    let ident = attend_session::identity();
+    let mut focus = Focus::default_focus();
+    if ident.resolved {
+        focus.working_dir = ident.origin_path.clone();
+    }
     emit::log(&format!("focus: {} ({})", focus.description, focus.working_dir));
 
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
 
     // Initialize rooms for signal routing (ADR-118)
-    let session_id = own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
+    let session_id = ident.session_id.clone();
 
     // Duplicate-attend guard (ADR-129). Acquire an exclusive flock on
     // our heartbeat file so a second attend process cannot start for
