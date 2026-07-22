@@ -36,6 +36,10 @@ pub(super) struct TickState<'a> {
     pub(super) msg_governor: &'a mut DisclosureGovernor,
     pub(super) last_checkpoint: &'a mut Instant,
     pub(super) last_instance_touch: &'a mut Instant,
+    /// Roster gate (ADR-171): false for fallback identities, which
+    /// must never allocate registry slots — see the startup gate in
+    /// `cmd_run_with_catchup`.
+    pub(super) register_instances: bool,
     pub(super) last_cleanup: &'a mut Option<Instant>,
     pub(super) state_store: &'a state::StateStore,
     pub(super) instance_registry: &'a attend_instances::Registry,
@@ -278,12 +282,17 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         *s.last_checkpoint = Instant::now();
     }
 
-    // Periodic instance-registry touch — refresh `last_seen` so the
-    // GC clock cannot expire an active session. Cheap when we already
-    // know we have an entry; no-op when registration failed at startup.
-    if s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
+    // Periodic instance-registry upsert — refresh `last_seen` so the
+    // GC clock cannot expire an active session, and *re-register* if
+    // our entry is missing (issue #378). `touch` was a silent no-op
+    // for unregistered sessions, which left a session whose entry was
+    // GC'd or never written rendering as the bare nickname forever
+    // ("bare @Hana"). `register` is idempotent — an existing entry is
+    // refreshed and keeps its slot; a missing one is re-allocated —
+    // so the roster self-heals within one interval.
+    if s.register_instances && s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
         s.instance_registry
-            .touch(&s.focus.working_dir, s.heartbeat_id)
+            .register(&s.focus.working_dir, s.heartbeat_id)
             .ok();
         *s.last_instance_touch = Instant::now();
     }

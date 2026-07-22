@@ -114,7 +114,7 @@ fn user_config_path() -> PathBuf {
 }
 
 fn project_config_path() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd = PathBuf::from(crate::util::own_origin_cwd());
     cwd.join(".claude").join("attend.yaml")
 }
 

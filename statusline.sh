@@ -9,6 +9,20 @@ DIR=$(basename "$(pwd)")
 # Get current time
 TIME=$(date +%H:%M)
 
+# Get attend agent name if this session is enrolled (attend running).
+# CLI is the contract: read the sanctioned `attend peers` surface rather than
+# attend-owned state. The (self) row's Agent column holds our nickname.
+AGENT_INFO=""
+if command -v attend > /dev/null 2>&1; then
+    ESC=$(printf '\033')
+    AGENT_NAME=$(timeout $TIMEOUT attend peers 2>/dev/null \
+        | sed "s/${ESC}\[[0-9;]*m//g" \
+        | awk '/\(self\)/{print $2; exit}')
+    if [[ -n "$AGENT_NAME" ]]; then
+        AGENT_INFO="🤖 $AGENT_NAME "
+    fi
+fi
+
 # Get git branch and remote if in a git repo
 GIT_INFO=""
 REMOTE_INFO=""
@@ -31,4 +45,4 @@ if timeout $TIMEOUT git rev-parse --git-dir > /dev/null 2>&1; then
 fi
 
 # Combine all elements
-echo "📁 $DIR$GIT_INFO$REMOTE_INFO | 🕐 $TIME"
+echo "${AGENT_INFO}📁 $DIR$GIT_INFO$REMOTE_INFO | 🕐 $TIME"

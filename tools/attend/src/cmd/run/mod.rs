@@ -22,7 +22,7 @@ use governor::{DisclosureGovernor, ScheduledSensor};
 use tick::{build_engagement, maybe_self_reload, tick_iteration, TickState};
 
 use crate::sensors::Focus;
-use crate::util::{own_session_id, signals_base};
+use crate::util::signals_base;
 use crate::{config, emit, groups, sensors, state};
 
 const RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(10);
@@ -30,14 +30,25 @@ const RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     emit::log("starting attend");
 
-    let focus = Focus::default_focus();
+    // Canonical identity (issue #378): session id + the session
+    // record's origin path, resolved once and used for everything —
+    // config scope, sensor scoping, tray naming, instance
+    // registration, group membership. Overriding the Focus default's
+    // process cwd here is what keeps a stray shell `cd` at launch
+    // (e.g. a Monitor inheriting a build directory) from putting this
+    // session on the bus as a different persona.
+    let ident = attend_session::identity();
+    let mut focus = Focus::default_focus();
+    if ident.resolved() {
+        focus.working_dir = ident.origin_path.clone();
+    }
     emit::log(&format!("focus: {} ({})", focus.description, focus.working_dir));
 
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
 
     // Initialize rooms for signal routing (ADR-118)
-    let session_id = own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
+    let session_id = ident.session_id.clone();
 
     // Duplicate-attend guard (ADR-129). Acquire an exclusive flock on
     // our heartbeat file so a second attend process cannot start for
@@ -99,17 +110,26 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // attend will fail similarly. Log and continue with no
     // discriminator so renders fall back to the bare nickname.
     let instance_registry = attend_instances::Registry::new();
-    let my_instance = match instance_registry.register(&focus.working_dir, &session_id) {
-        Ok(s) => {
-            emit::log(&format!("instance: {s} (cwd: {})", focus.working_dir));
-            Some(s)
+    // Roster gate (ADR-171): only a fully resolved session registers.
+    // The roster enumerates addressable coordinating units; a
+    // `pid-<pid>` fallback runner is not one, and registering it
+    // would allocate a Greek slot to a persona nobody can address.
+    let my_instance = if ident.resolved() {
+        match instance_registry.register(&focus.working_dir, &session_id) {
+            Ok(s) => {
+                emit::log(&format!("instance: {s} (cwd: {})", focus.working_dir));
+                Some(s)
+            }
+            Err(e) => {
+                emit::log(&format!(
+                    "instance registry unavailable ({e}); rendering without suffix"
+                ));
+                None
+            }
         }
-        Err(e) => {
-            emit::log(&format!(
-                "instance registry unavailable ({e}); rendering without suffix"
-            ));
-            None
-        }
+    } else {
+        emit::log("identity unresolved (no session record); skipping roster registration");
+        None
     };
     let _ = &my_instance; // consumed by render layer once the suffix is wired in
 
@@ -142,9 +162,15 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         slot.engagement = sensor_trait::EngagementState::new(engagement_curve.clone());
     }
 
-    // State persistence
-    let session_id = own_session_id();
-    let state_store = state::StateStore::new(session_id);
+    // State persistence — same canonical identity, Option-shaped for
+    // the store's "no session, no persistence" behavior. Deriving from
+    // `ident` (not a fresh resolution) is load-bearing: a re-derivation
+    // that raced claude startup could disagree with the identity the
+    // registry and heartbeat use, freezing a mixed persona (PR #380
+    // review, finding 1).
+    let state_store = state::StateStore::new(
+        ident.session_resolved.then(|| ident.session_id.clone()),
+    );
 
     // Try to restore state from previous run
     if let Some(snapshot) = state_store.restore() {
@@ -229,13 +255,12 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     let initial_hash = tick::initial_self_hash(self_exe.as_deref());
     let mut last_reload_check = Instant::now();
 
-    // Heartbeat identifier (ADR-129). Real session id when resolvable,
-    // otherwise a pid-based fallback so a heartbeat exists even when
-    // session resolution is racing claude's startup. Re-derived here
-    // because the canonical `session_id` was shadowed by `state_store`'s
-    // Option<String> form.
-    let heartbeat_id =
-        own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
+    // Heartbeat identifier (ADR-129) — the same canonical identity as
+    // everything else in this run. `session_id` already carries the
+    // `pid-<pid>` fallback when unresolved, so a heartbeat always
+    // exists; what matters is that it can never *disagree* with the
+    // id the registry and groups saw (PR #380 review, finding 1).
+    let heartbeat_id = session_id.clone();
 
     loop {
         // Heartbeat — touched at the top of every tick so a single
@@ -273,6 +298,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             msg_governor: &mut msg_governor,
             last_checkpoint: &mut last_checkpoint,
             last_instance_touch: &mut last_instance_touch,
+            register_instances: ident.resolved(),
             last_cleanup: &mut last_cleanup,
             state_store: &state_store,
             instance_registry: &instance_registry,

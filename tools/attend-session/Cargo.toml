@@ -1,0 +1,10 @@
+[package]
+name = "attend-session"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical session self-identity for the attend mesh: (sessionId ∩ origin_path) — issue #378"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "attend_session"
+path = "src/lib.rs"

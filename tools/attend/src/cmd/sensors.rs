@@ -10,7 +10,11 @@ use crate::sensors::{enumerate_sensors, Focus, SensorEntry, SensorState};
 use std::time::Duration;
 
 pub(crate) fn cmd_sensors() {
-    let focus = Focus::default_focus();
+    // Same config scope as the running loop (issue #378 / PR #380
+    // review finding 4): a sensors listing must describe the sensor
+    // set `attend run` would actually start.
+    let mut focus = Focus::default_focus();
+    focus.working_dir = crate::util::own_origin_cwd();
     let cfg = Config::load(&focus.working_dir);
     let entries = enumerate_sensors(&cfg, &focus);
 

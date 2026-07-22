@@ -33,9 +33,7 @@ pub(crate) fn cmd_status() {
 
     // Gather all data before building a single unified table
     let base = signals_base();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let cwd = crate::util::own_origin_cwd();
     let own_dir = base.join(encode_project(&cwd));
     let broadcast_dir = base.join("_broadcast");
     let own_count = count_signals(&own_dir);

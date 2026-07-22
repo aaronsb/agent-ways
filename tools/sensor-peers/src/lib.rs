@@ -839,55 +839,13 @@ fn pid_is_claude(pid: u32) -> bool {
     }
 }
 
-/// Return the parent PID of `pid`, or `None` if it cannot be determined.
-#[cfg(not(windows))]
-fn get_parent_pid(pid: u32) -> Option<u32> {
-    let output = Command::new("ps")
-        .args(["--no-headers", "-p", &pid.to_string(), "-o", "ppid"])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout);
-        s.trim().parse::<u32>().ok().filter(|&p| p > 0)
-    } else {
-        None
-    }
-}
-
-#[cfg(windows)]
-fn get_parent_pid(pid: u32) -> Option<u32> {
-    let script = format!(
-        "(Get-CimInstance Win32_Process -Filter 'ProcessId={}').ParentProcessId",
-        pid
-    );
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout);
-        s.trim().parse::<u32>().ok().filter(|&p| p > 0)
-    } else {
-        None
-    }
-}
-
-/// Check if a session PID is an ancestor of our own PID (i.e., our session).
+/// Check if a session PID is an ancestor of our own PID (i.e., our
+/// session). Delegates to the canonical ancestry walk in
+/// attend-session (issue #378) so hop limits and parent-pid
+/// resolution cannot drift between the identity derivation and this
+/// sensor's own-session filter.
 fn is_own_session(session_pid: u32, own_pid: u32) -> bool {
-    let mut pid = own_pid;
-    for _ in 0..10 {
-        if pid == session_pid {
-            return true;
-        }
-        if pid <= 1 {
-            break;
-        }
-        match get_parent_pid(pid) {
-            Some(ppid) if ppid != pid => pid = ppid,
-            _ => break,
-        }
-    }
-    false
+    attend_session::pid_has_ancestor(own_pid, session_pid)
 }
 
 /// Quick-and-dirty JSON string extraction without serde.
@@ -916,39 +874,11 @@ fn extract_json_string(json: &str, key: &str) -> Option<String> {
 /// every subcommand invocation. Probing the pid index directly avoids that
 /// trap and works for both kinds of session.
 pub fn find_own_session_id(own_pid: u32) -> Option<String> {
-    let sessions_dir = home_dir().join(".claude").join("sessions");
-    let mut pid_to_session: std::collections::HashMap<u32, String> =
-        std::collections::HashMap::new();
-    if let Ok(entries) = fs::read_dir(&sessions_dir) {
-        for entry in entries.flatten() {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                if let (Some(pid), Some(sid)) = (
-                    extract_json_u64(&content, "pid"),
-                    extract_json_string(&content, "sessionId"),
-                ) {
-                    pid_to_session.insert(pid as u32, sid);
-                }
-            }
-        }
-    }
-    if pid_to_session.is_empty() {
-        return None;
-    }
-
-    let mut pid = own_pid;
-    for _ in 0..15 {
-        if let Some(sid) = pid_to_session.get(&pid) {
-            return Some(sid.clone());
-        }
-        if pid <= 1 {
-            break;
-        }
-        match get_parent_pid(pid) {
-            Some(ppid) if ppid != pid => pid = ppid,
-            _ => break,
-        }
-    }
-    None
+    // Canonicalized in the attend-session crate (issue #378) — one
+    // resolution shared by attend, this sensor, and any future
+    // consumer, so "who am I" can never drift between them. This
+    // wrapper survives for API stability.
+    attend_session::find_own_session_id(own_pid)
 }
 
 // ── Message chunking ────────────────────────────────────────────
