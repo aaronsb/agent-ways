@@ -1,6 +1,6 @@
 [package]
 name = "attend-chat"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Interactive chat TUI for attend — human seat at the signal bus (ADR-120)"
 license = "MIT OR Apache-2.0"
