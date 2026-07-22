@@ -17,6 +17,9 @@ This document contains the help content for the `attend` command-line program.
 * [`attend join`↴](#attend-join)
 * [`attend leave`↴](#attend-leave)
 * [`attend channels`↴](#attend-channels)
+* [`attend channels list`↴](#attend-channels-list)
+* [`attend channels create`↴](#attend-channels-create)
+* [`attend channels describe`↴](#attend-channels-describe)
 * [`attend dissolve`↴](#attend-dissolve)
 * [`attend focus`↴](#attend-focus)
 * [`attend focus on`↴](#attend-focus-on)
@@ -58,7 +61,7 @@ Active awareness for Claude Code sessions
 * `chat` — Launch the interactive chat TUI (ADR-120)
 * `join` — Join a channel (creates it if absent)
 * `leave` — Leave a channel
-* `channels` — List channels — all available, with joined ones marked
+* `channels` — Channel lifecycle (default: list all, joined ones marked)
 * `dissolve` — Dissolve a channel (removes it for every member)
 * `focus` — Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
 * `scene` — Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
@@ -222,9 +225,49 @@ Leave a channel
 
 ## `attend channels`
 
-List channels — all available, with joined ones marked
+Channel lifecycle (default: list all, joined ones marked)
 
-**Usage:** `attend channels`
+**Usage:** `attend channels [COMMAND]`
+
+###### **Subcommands:**
+
+* `list` — List all channels with joined marks (default)
+* `create` — Create a channel without joining it (pinned so it persists empty)
+* `describe` — Set or replace a channel's single-line description
+
+
+
+## `attend channels list`
+
+List all channels with joined marks (default)
+
+**Usage:** `attend channels list`
+
+
+
+## `attend channels create`
+
+Create a channel without joining it (pinned so it persists empty)
+
+**Usage:** `attend channels create <NAME> [DESCRIPTION]...`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+* `<DESCRIPTION>` — Optional single-line description (all trailing words)
+
+
+
+## `attend channels describe`
+
+Set or replace a channel's single-line description
+
+**Usage:** `attend channels describe <NAME> [DESCRIPTION]...`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+* `<DESCRIPTION>` — The description text (all trailing words; empty clears)
 
 
 

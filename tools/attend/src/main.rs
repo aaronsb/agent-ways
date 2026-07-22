@@ -84,7 +84,15 @@ fn main() {
         // primary because an unquoted `#` starts a shell comment.
         Commands::Join { name, pin } => cmd::channels::cmd_join(name.trim_start_matches('#'), pin),
         Commands::Leave { name } => cmd::channels::cmd_leave(name.trim_start_matches('#')),
-        Commands::Channels => cmd::channels::cmd_channels(),
+        Commands::Channels { sub } => match sub {
+            None | Some(cli::ChannelsCmd::List) => cmd::channels::cmd_channels(),
+            Some(cli::ChannelsCmd::Create { name, description }) => {
+                cmd::channels::cmd_create(name.trim_start_matches('#'), &description.join(" "));
+            }
+            Some(cli::ChannelsCmd::Describe { name, description }) => {
+                cmd::channels::cmd_describe(name.trim_start_matches('#'), &description.join(" "));
+            }
+        },
         Commands::Dissolve { name } => {
             cmd::channels::cmd_dissolve(name.trim_start_matches('#'));
         }

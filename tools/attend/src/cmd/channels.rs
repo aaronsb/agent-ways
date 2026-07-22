@@ -77,6 +77,41 @@ pub(crate) fn cmd_dissolve(name: &str) {
     }
 }
 
+/// Create a channel without joining it (#404): explicit lifecycle,
+/// pinned by the shared crate so it survives empty.
+pub(crate) fn cmd_create(name: &str, description: &str) {
+    let r = get_groups();
+    let desc = (!description.trim().is_empty()).then_some(description.trim());
+    match r.create(name, desc) {
+        Ok(()) => match desc {
+            Some(d) => println!("[attend] created #{name} — {d}"),
+            None => println!("[attend] created #{name}"),
+        },
+        Err(e) => {
+            eprintln!("[attend] create: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Set or replace a channel's description (#404). Empty text clears.
+pub(crate) fn cmd_describe(name: &str, description: &str) {
+    let r = get_groups();
+    match r.set_description(name, description) {
+        Ok(()) => {
+            if description.trim().is_empty() {
+                println!("[attend] cleared #{name} description");
+            } else {
+                println!("[attend] #{name} — {}", description.trim());
+            }
+        }
+        Err(e) => {
+            eprintln!("[attend] describe: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// All channels with membership marks — the agent-side mirror of the
 /// TUI's `/channels`. Supersedes the old joined/all split (`focus
 /// list` / `focus all`), which stays reachable via the deprecated
@@ -86,20 +121,29 @@ pub(crate) fn cmd_channels() {
     r.cleanup_stale();
     let joined: std::collections::HashSet<String> =
         r.my_groups().into_iter().map(|(n, _)| n).collect();
-    let all = r.all_groups();
-    let mut t = agent_fmt::Table::new(&["Channel", "Members", "Joined", "Pinned"]);
+    // Single read of the whole file (PR #407 nit): a second read for
+    // descriptions could misalign the column against a concurrent
+    // write. Members/pinned/description all come from this one snapshot.
+    let state = attend_groups::load_groups(&crate::util::signals_base());
+    let mut names: Vec<&String> = state.keys().collect();
+    names.sort();
+    let mut t =
+        agent_fmt::Table::new(&["Channel", "Members", "Joined", "Pinned", "Description"]);
     t.align(1, agent_fmt::Align::Right);
     // ADR-124 §I.4: base channel leads the list, mirrors the TUI's
     // leftmost rule. `(all)` captures the fact that every peer is
     // implicitly subscribed.
-    t.add(vec!["#open", "(all)", "(always)", "(base)"]);
-    for (name, count, pinned) in &all {
+    t.add(vec!["#open", "(all)", "(always)", "(base)", "the commons"]);
+    for name in names {
+        let entry = &state[name];
         let label = format!("#{name}");
+        let desc = entry.description.clone().unwrap_or_default();
         t.add(vec![
             &label,
-            &count.to_string(),
+            &entry.members.len().to_string(),
             if joined.contains(name) { "yes" } else { "" },
-            if *pinned { "yes" } else { "no" },
+            if entry.pinned { "yes" } else { "no" },
+            &desc,
         ]);
     }
     t.print();

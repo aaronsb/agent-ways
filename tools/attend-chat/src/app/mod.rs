@@ -391,21 +391,20 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
         .map(|m| m.partial.to_string());
     // Helper-row mode is a pure function of the input buffer. The
     // state machine lives in `helper::derive` — see that module's
-    // docs + tests for the full rule table. Once a slash command
-    // is past its name, the registry's `ArgKind` routes the helper
-    // (`/whois ` → agents, `/join ` → channels).
+    // docs + tests for the full rule table. Once a slash command is
+    // past its name, the registry grammar walk routes the helper
+    // level by level (#405): `/whois ` → agents, `/channels ` → the
+    // subcommand choices, `/channels create ` → the name hint.
     let helper_mode = helper::derive(&input_snapshot);
     // #398 + #400 priority rule: a fresh result (inside the assert
     // window) beats the help; the help beats the stored result while a
-    // command uniquely matches; the stored result is never mutated, so
-    // backspacing to empty restores it for free.
+    // grammar node is unambiguous; the stored result is never mutated,
+    // so backspacing to empty restores it for free. The help follows
+    // the grammar recursion — deepest unambiguous node wins (#405).
     let fresh = status_set_at
         .get()
         .is_some_and(|t| t.elapsed() < STATUS_ASSERT);
-    let help = match &helper_mode {
-        helper::HelperMode::Slash(Some(p)) => slash::single_match_help(p),
-        _ => None,
-    };
+    let help = slash::contextual_help(&input_snapshot);
     let (status_line, status_color) =
         status_slot(fresh, status_is_error.get(), help, &status.to_string());
     let rows: Vec<_> = signals
@@ -618,6 +617,9 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 HelperMode::Agents(p) => legend_row(&known, p.as_deref()),
                 HelperMode::Groups(p) => group_legend_row(&groups_known, p.as_deref()),
                 HelperMode::Slash(p) => slash::slash_legend_row(p.as_deref()),
+                HelperMode::SubCommands { choices, partial } =>
+                    slash::subcommand_legend_row(choices, partial.as_deref()),
+                HelperMode::FreeText(hint) => slash::hint_row(hint),
             })
             View(height: 1, padding_left: 1) {
                 Text(color: status_color, content: status_line, wrap: TextWrap::NoWrap)

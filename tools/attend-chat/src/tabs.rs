@@ -205,6 +205,31 @@ pub fn tab_strip_row(
         });
     }
 
+    // Foreground channel's description, dimmed after the strip
+    // (#404): the one-line "what is this channel for" sits where the
+    // eye already is when a tab is focused. Merged has no channel and
+    // `#open` carries no stored description, so the strip stays bare
+    // for both; overflow: Hidden on the row truncates gracefully on
+    // narrow terminals.
+    if let Tab::Channel(g) = foreground {
+        if let Some(desc) = known
+            .iter()
+            .find(|k| k.group.name == *g)
+            .and_then(|k| k.membership.description.as_deref())
+        {
+            chips.push(
+                element! {
+                    Text(
+                        color: Color::DarkGrey,
+                        content: format!(" — {desc}"),
+                        wrap: TextWrap::NoWrap,
+                    )
+                }
+                .into_any(),
+            );
+        }
+    }
+
     vec![element! {
         View(
             flex_direction: FlexDirection::Row,

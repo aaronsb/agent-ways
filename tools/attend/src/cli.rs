@@ -147,8 +147,11 @@ pub(crate) enum Commands {
         name: String,
     },
 
-    /// List channels — all available, with joined ones marked
-    Channels,
+    /// Channel lifecycle (default: list all, joined ones marked)
+    Channels {
+        #[command(subcommand)]
+        sub: Option<ChannelsCmd>,
+    },
 
     /// Dissolve a channel (removes it for every member)
     Dissolve {
@@ -201,6 +204,32 @@ pub(crate) enum Commands {
     Config {
         #[command(subcommand)]
         sub: Option<ConfigCmd>,
+    },
+}
+
+/// Subcommands for `attend channels`. With no subcommand, defaults to
+/// `list` — the plain listing agents already know.
+#[derive(Subcommand)]
+pub(crate) enum ChannelsCmd {
+    /// List all channels with joined marks (default)
+    List,
+
+    /// Create a channel without joining it (pinned so it persists empty)
+    Create {
+        /// Channel name (with or without the # prefix)
+        name: String,
+        /// Optional single-line description (all trailing words)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        description: Vec<String>,
+    },
+
+    /// Set or replace a channel's single-line description
+    Describe {
+        /// Channel name (with or without the # prefix)
+        name: String,
+        /// The description text (all trailing words; empty clears)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        description: Vec<String>,
     },
 }
 

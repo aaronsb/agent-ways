@@ -9,6 +9,7 @@ pub mod app;
 pub mod attach;
 pub mod chip;
 pub mod consumers;
+pub mod grammar;
 pub mod groups;
 pub mod helper;
 pub mod legend;

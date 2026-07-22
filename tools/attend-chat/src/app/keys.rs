@@ -92,6 +92,12 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> 
             slash::SlashOutcome::ListChannels => {
                 channels_status_in(&signals_base(), attend_groups::member_alive)
             }
+            slash::SlashOutcome::CreateChannel { name, description } => {
+                create_channel_in(&signals_base(), &name, description.as_deref())
+            }
+            slash::SlashOutcome::DescribeChannel { name, description } => {
+                describe_channel_in(&signals_base(), &name, &description)
+            }
             slash::SlashOutcome::Purge(chan) => run_purge(chan, foreground),
             slash::SlashOutcome::Peers => run_peers(),
             slash::SlashOutcome::Whois(name) => run_whois(&name),
@@ -300,6 +306,39 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
     EnterAction::ClearWithStatus(format!("dissolved #{name}"))
 }
 
+/// Filesystem-effect core of `/channels create` (#404), parameterized
+/// on the base dir so tests can drive it against a tempdir. The
+/// acting member id is irrelevant — create is a lifecycle verb, not a
+/// membership change; `Groups::create` pins the channel so it
+/// survives empty until joined or dissolved. Duplicate/reserved
+/// errors pass through to the status row (#400).
+fn create_channel_in(
+    base: &std::path::Path,
+    name: &str,
+    description: Option<&str>,
+) -> EnterAction {
+    match attend_groups::Groups::new(base, "").create(name, description) {
+        Ok(()) => EnterAction::ClearWithStatus(match description {
+            Some(d) => format!("created #{name} — {d}"),
+            None => format!("created #{name}"),
+        }),
+        Err(e) => EnterAction::StatusOnly(format!("/channels create: {e}")),
+    }
+}
+
+/// Filesystem-effect core of `/channels describe` (#404). Empty text
+/// clears the description — same contract as the CLI's `describe`.
+/// `set_description` owns existence checking and its error strings.
+fn describe_channel_in(base: &std::path::Path, name: &str, text: &str) -> EnterAction {
+    match attend_groups::Groups::new(base, "").set_description(name, text) {
+        Ok(()) if text.trim().is_empty() => {
+            EnterAction::ClearWithStatus(format!("cleared #{name} description"))
+        }
+        Ok(()) => EnterAction::ClearWithStatus(format!("#{name} — {}", text.trim())),
+        Err(e) => EnterAction::StatusOnly(format!("/channels describe: {e}")),
+    }
+}
+
 /// `/channels` — one status line listing every channel with
 /// live/total member counts, IRC `/list` shaped. Rides the same
 /// discovery the channel bar uses (`channels_in`), so orphan dirs
@@ -322,7 +361,16 @@ fn channels_status_in<F: Fn(&str) -> bool>(
             let total = kg.membership.members.len();
             let live = kg.membership.members.iter().filter(|m| is_live(m)).count();
             let pin = if kg.membership.pinned { " pinned" } else { "" };
-            format!("#{} {live}/{total} live{pin}", kg.group.name)
+            // Description rides the same line (#404) — the listing is
+            // the discovery surface, so "what is this channel for"
+            // belongs next to "who's in it".
+            let desc = kg
+                .membership
+                .description
+                .as_deref()
+                .map(|d| format!(" — {d}"))
+                .unwrap_or_default();
+            format!("#{} {live}/{total} live{pin}{desc}", kg.group.name)
         })
         .collect();
     EnterAction::ClearWithStatus(format!("channels: {}", parts.join(" · ")))
@@ -707,6 +755,15 @@ pub fn handle_tab(
         // Slash and `@`/`#` share the cycle slot; resetting prevents
         // a stale agent cycle from carrying across a slash insertion.
         return unchanged;
+    }
+
+    // Subcommand completion (#405): past the name, at a grammar
+    // subcommand choice, Tab completes the level's partial exactly
+    // like the top level completes the name. Silent fall-through
+    // otherwise — deeper levels (`@`/`#` tokens) keep the mention
+    // completion below.
+    if let Some((next, new_cursor)) = slash::complete_subcommand(buf) {
+        return TabResult { new_buf: next, new_cursor, new_cycle: None };
     }
 
     // Cycling: if we have a stored cycle and the buffer still ends
@@ -1177,6 +1234,35 @@ mod tests {
         assert_eq!(members, vec!["someone-else"]);
     }
 
+    /// #406: the agent→human kick guard lives in the shared crate
+    /// (`Groups::kick` refuses when the ACTING id is agent-shaped and
+    /// the target is human). The TUI acts with an empty member id,
+    /// which classifies as human — so the guard can never fire here
+    /// and operator kicks of human members keep working. If the
+    /// acting identity ever changes to an agent shape, this test
+    /// fails before the regression ships; and if the guard did fire,
+    /// `kick_member_in`'s Err arm surfaces its message through the
+    /// #400 status path rather than swallowing it.
+    #[test]
+    fn tui_kick_acts_as_operator_and_can_remove_human_members() {
+        let base = tempdir_like();
+        assert!(
+            !attend_groups::is_agent_member(""),
+            "TUI acting id must classify as human (operator power)"
+        );
+        // A human member (username shape, ADR-170) is kickable from
+        // the TUI — the one-way power the guard preserves.
+        attend_groups::Groups::new(&base, "somebody")
+            .join("ops", false)
+            .unwrap();
+        match kick_member_in(&base, "ops", "somebody", "somebody") {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("kicked @somebody from #ops"), "got: {s}")
+            }
+            _ => panic!("operator kick of a human member must succeed"),
+        }
+    }
+
     #[test]
     fn channels_status_lists_base_and_counts() {
         let base = tempdir_like();
@@ -1192,6 +1278,73 @@ mod tests {
                 assert!(s.contains("#bg-test 0/0 live"), "got: {s}");
             }
             _ => panic!("/channels should clear input with status"),
+        }
+    }
+
+    #[test]
+    fn channels_status_shows_descriptions() {
+        let base = tempdir_like();
+        create_channel_in(&base, "plans", Some("roadmap talk"));
+        match channels_status_in(&base, |_| false) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("#plans 0/0 live pinned — roadmap talk"), "got: {s}");
+            }
+            _ => panic!("/channels should clear input with status"),
+        }
+    }
+
+    #[test]
+    fn create_channel_pins_and_reports_duplicates() {
+        let base = tempdir_like();
+        match create_channel_in(&base, "plans", Some("roadmap talk")) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("created #plans — roadmap talk"), "got: {s}")
+            }
+            _ => panic!("successful create should clear input with status"),
+        }
+        // Pinned, empty, dir present — the explicit-lifecycle contract.
+        let entry = &attend_groups::load_groups(&base)["plans"];
+        assert!(entry.pinned, "explicit create must survive empty");
+        assert!(entry.members.is_empty());
+        assert!(base.join("@plans").is_dir());
+        // Duplicate: Groups::create's error passes through the #400
+        // error path (input kept for retry).
+        match create_channel_in(&base, "plans", None) {
+            EnterAction::StatusOnly(s) => {
+                assert!(s.contains("already exists"), "got: {s}")
+            }
+            _ => panic!("duplicate create should keep input with status"),
+        }
+    }
+
+    #[test]
+    fn describe_channel_sets_clears_and_rejects_unknown() {
+        let base = tempdir_like();
+        create_channel_in(&base, "plans", None);
+        match describe_channel_in(&base, "plans", "roadmap talk") {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("#plans — roadmap talk"), "got: {s}")
+            }
+            _ => panic!("successful describe should clear input with status"),
+        }
+        assert_eq!(
+            attend_groups::load_groups(&base)["plans"].description.as_deref(),
+            Some("roadmap talk")
+        );
+        // Empty text clears — CLI parity.
+        match describe_channel_in(&base, "plans", "") {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("cleared #plans description"), "got: {s}")
+            }
+            _ => panic!("clearing describe should clear input with status"),
+        }
+        assert_eq!(attend_groups::load_groups(&base)["plans"].description, None);
+        // Unknown channel: set_description's error passes through.
+        match describe_channel_in(&base, "ghost", "d") {
+            EnterAction::StatusOnly(s) => {
+                assert!(s.contains("unknown group"), "got: {s}")
+            }
+            _ => panic!("unknown channel should keep input with status"),
         }
     }
 

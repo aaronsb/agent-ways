@@ -1,8 +1,9 @@
 //! Helper-row state machine.
 //!
-//! The row below the input box shows one of three registries — agents,
-//! groups, or slash commands — depending on what the user is typing.
-//! This module is the single source of truth for that decision.
+//! The row below the input box shows one of the registries — agents,
+//! groups, slash commands, a subcommand level, or a free-token hint —
+//! depending on what the user is typing. This module is the single
+//! source of truth for that decision.
 //!
 //! [`derive`] is a pure function of the input buffer. Given any
 //! string, it returns the [`HelperMode`] the render path should use.
@@ -13,23 +14,27 @@
 //!
 //! ## States
 //!
-//! | State        | Entered when …                                | Partial underlined |
-//! |--------------|-----------------------------------------------|--------------------|
-//! | `Slash`      | buffer starts with `/`, still typing the name | yes, on command    |
-//! | `Agents`     | trailing `@partial`, OR default               | yes, on agent      |
-//! | `Groups`     | trailing `#partial`                           | yes, on group      |
-//! | `Agents/None`| past a slash command whose arg is [`ArgKind::Agent`] | no, until `@` typed |
-//! | `Groups/None`| past a slash command whose arg is [`ArgKind::Group`] | no, until `#` typed |
-//! | `Agents`     | past a slash command with [`ArgKind::None`]   | —                  |
+//! | State         | Entered when …                                | Partial underlined |
+//! |---------------|-----------------------------------------------|--------------------|
+//! | `Slash`       | buffer starts with `/`, still typing the name | yes, on command    |
+//! | `Agents`      | trailing `@partial`, OR default               | yes, on agent      |
+//! | `Groups`      | trailing `#partial`                           | yes, on group      |
+//! | `SubCommands` | grammar walk sits at a subcommand choice      | yes, on subcommand |
+//! | `FreeText`    | grammar walk sits at a free token             | — (hint only)      |
+//! | `Agents`/`Groups` | grammar walk sits at an `@`/`#` token     | once typing starts |
+//! | `Agents`      | grammar satisfied (past the end)              | —                  |
 //!
 //! ## Extending
 //!
 //! Adding a new slash command that routes the helper: add a row to
-//! [`crate::slash::REGISTRY`] with the right [`ArgKind`]. No changes
-//! here — [`derive`] inspects the registry dynamically.
+//! [`crate::slash::REGISTRY`] with the right grammar. No changes
+//! here — [`derive`] walks the registry's grammars dynamically
+//! (#405); state ascends/descends purely by re-deriving from the
+//! string, so backspace unwinds levels with no hidden mode.
 
+use crate::grammar::{self, SubCommand};
 use crate::legend::{find_trailing_mention, Sigil};
-use crate::slash::{self, ArgKind};
+use crate::slash;
 
 /// Which registry the helper row should render right now. The
 /// `Option<String>` carries the current partial (what the user has
@@ -41,6 +46,16 @@ pub enum HelperMode {
     Agents(Option<String>),
     Groups(Option<String>),
     Slash(Option<String>),
+    /// Grammar walk sits at a subcommand choice (#405) — render that
+    /// level's candidates through the same chip row as the top-level
+    /// slash list.
+    SubCommands {
+        choices: &'static [SubCommand],
+        partial: Option<String>,
+    },
+    /// Grammar walk sits at a free token — render its hint dimmed
+    /// (`<name>`, `[description…]`).
+    FreeText(&'static str),
 }
 
 /// Derive the helper mode from the current input buffer.
@@ -49,8 +64,10 @@ pub enum HelperMode {
 ///
 /// 1. **Slash active.** Input starts with `/`:
 ///    - still typing the name → [`HelperMode::Slash`] with partial.
-///    - past the name, argument phase → inspect the command's
-///      [`ArgKind`] and switch to the matching registry.
+///    - past the name → walk the command's grammar (#405): the
+///      position picks the registry (agents / groups / subcommand
+///      level / free-token hint), descending one level per completed
+///      token + space.
 ///    - past the name, unknown command → stay on slash registry so
 ///      the user can see valid options.
 /// 2. **Trailing mention.** A trailing `@partial` or `#partial`
@@ -79,18 +96,21 @@ fn derive_slash(input: &str) -> Option<HelperMode> {
     if let Some(partial) = slash::find_slash_partial(input) {
         return Some(HelperMode::Slash(Some(partial.partial.to_string())));
     }
-    // Phase 2: past the name, in the argument(s). Inspect the
-    // command's ArgKind to pick the right registry.
+    // Phase 2: past the name — the grammar walk owns the rest. Its
+    // position maps 1:1 onto a helper mode; `Done` falls back to the
+    // default agents glance (nothing left to help with).
     let (name, args) = slash::parse(input)?;
     let Some(cmd) = slash::lookup(name) else {
         // Unknown command — keep the slash registry visible so the
         // user can see what they might have meant.
         return Some(HelperMode::Slash(None));
     };
-    Some(match cmd.arg_kind {
-        ArgKind::None => HelperMode::Agents(None),
-        ArgKind::Agent => HelperMode::Agents(trailing_partial(args, Sigil::Agent)),
-        ArgKind::Group => HelperMode::Groups(trailing_partial(args, Sigil::Group)),
+    Some(match grammar::walk(cmd.grammar, args) {
+        grammar::Pos::Done => HelperMode::Agents(None),
+        grammar::Pos::Sub { choices, partial } => HelperMode::SubCommands { choices, partial },
+        grammar::Pos::Agent(p) => HelperMode::Agents(p),
+        grammar::Pos::Group(p) => HelperMode::Groups(p),
+        grammar::Pos::Free(hint) => HelperMode::FreeText(hint),
     })
 }
 
@@ -100,14 +120,6 @@ fn derive_mention(input: &str) -> Option<HelperMode> {
         Sigil::Agent => HelperMode::Agents(Some(ctx.partial.to_string())),
         Sigil::Group => HelperMode::Groups(Some(ctx.partial.to_string())),
     })
-}
-
-/// Extract a trailing `@partial` or `#partial` from `input`, returning
-/// the partial text only if its sigil matches `expect`.
-fn trailing_partial(input: &str, expect: Sigil) -> Option<String> {
-    find_trailing_mention(input)
-        .filter(|m| m.sigil == expect)
-        .map(|m| m.partial.to_string())
 }
 
 #[cfg(test)]
@@ -153,23 +165,23 @@ mod tests {
         assert_eq!(derive("/he"), HelperMode::Slash(Some("he".into())));
     }
 
-    // ── Slash: past the name, ArgKind routing ──────────────────
+    // ── Slash: past the name, grammar routing ──────────────────
 
     #[test]
     fn slash_help_space_stays_on_agents_as_default() {
-        // ArgKind::None → default registry (agents), no partial.
+        // Empty grammar → satisfied → default registry (agents).
         assert_eq!(derive("/help "), HelperMode::Agents(None));
     }
 
     #[test]
     fn slash_whois_space_switches_to_agents_waiting_for_at() {
-        // ArgKind::Agent, no @ typed yet — Agents with no partial.
+        // Agent token, no @ typed yet — Agents with no partial.
         assert_eq!(derive("/whois "), HelperMode::Agents(None));
     }
 
     #[test]
     fn slash_whois_with_at_partial_underlines_agent() {
-        // ArgKind::Agent, user is now typing @Ur — underline "Ur".
+        // Agent token, user is now typing @Ur — underline "Ur".
         assert_eq!(
             derive("/whois @Ur"),
             HelperMode::Agents(Some("Ur".into()))
@@ -178,7 +190,7 @@ mod tests {
 
     #[test]
     fn slash_join_space_switches_to_groups() {
-        // ArgKind::Group, no # typed yet — Groups with no partial.
+        // Group token, no # typed yet — Groups with no partial.
         assert_eq!(derive("/join "), HelperMode::Groups(None));
     }
 
@@ -192,7 +204,7 @@ mod tests {
 
     #[test]
     fn slash_leave_space_switches_to_groups() {
-        // Second Group-arg command — confirms ArgKind routing isn't
+        // Second Group-token command — confirms grammar routing isn't
         // tied to a single command name.
         assert_eq!(derive("/leave "), HelperMode::Groups(None));
     }
@@ -212,7 +224,7 @@ mod tests {
     fn slash_precedes_trailing_mention() {
         // `/help @Tam` — even though there's a trailing @, the
         // buffer starts with `/` and we're past the command name.
-        // ArgKind::None returns Agents(None), which tests the
+        // the satisfied grammar returns Agents(None), which tests the
         // state machine's "slash wins" invariant.
         assert_eq!(derive("/help @Tam"), HelperMode::Agents(None));
     }
@@ -232,7 +244,7 @@ mod tests {
     fn slash_with_leading_space_routes_arg_kind() {
         // Past-the-name routing must also tolerate leading
         // whitespace — otherwise `" /whois "` silently shows agents
-        // (the default) instead of agents-because-ArgKind.
+        // (the default) instead of agents-because-grammar.
         // The observable state is the same, but the reasoning path
         // differs; we want the state machine to take the Slash
         // branch for consistency with Enter / Tab.
@@ -244,7 +256,7 @@ mod tests {
 
     #[test]
     fn agent_cmd_with_wrong_sigil_falls_back_to_default_agents() {
-        // `/whois #dep` — ArgKind::Agent but user typed `#`. The
+        // `/whois #dep` — Agent token but user typed `#`. The
         // trailing-# doesn't satisfy the Agent filter, so the state
         // is "agents waiting for @" (no partial) rather than
         // hijacking to groups.
@@ -266,5 +278,109 @@ mod tests {
         // mode — the tolerance is surgical, not blanket.
         assert_eq!(derive(" hello"), HelperMode::Agents(None));
         assert_eq!(derive("   "), HelperMode::Agents(None));
+    }
+
+    // ── Hierarchical narrowing (#405) ──────────────────────────
+
+    #[test]
+    fn channels_space_descends_to_subcommand_level() {
+        // Completed name + space: the choice level's full candidate
+        // list, no narrowing yet.
+        assert_eq!(
+            derive("/channels "),
+            HelperMode::SubCommands {
+                choices: slash::CHANNELS_SUBS,
+                partial: None
+            }
+        );
+    }
+
+    #[test]
+    fn subcommand_partial_narrows_at_its_level() {
+        assert_eq!(
+            derive("/channels cr"),
+            HelperMode::SubCommands {
+                choices: slash::CHANNELS_SUBS,
+                partial: Some("cr".into())
+            }
+        );
+    }
+
+    #[test]
+    fn completed_subcommand_descends_to_its_first_token() {
+        // create → free-word name hint; describe → channel legend.
+        assert_eq!(derive("/channels create "), HelperMode::FreeText("<name>"));
+        assert_eq!(derive("/channels describe "), HelperMode::Groups(None));
+        assert_eq!(
+            derive("/channels describe #pla"),
+            HelperMode::Groups(Some("pla".into()))
+        );
+        // list's branch grammar is empty — immediately satisfied.
+        assert_eq!(derive("/channels list "), HelperMode::Agents(None));
+    }
+
+    #[test]
+    fn free_text_tail_holds_its_hint() {
+        assert_eq!(
+            derive("/channels create plans "),
+            HelperMode::FreeText("[description…]")
+        );
+        assert_eq!(
+            derive("/channels create plans roadmap talk for"),
+            HelperMode::FreeText("[description…]")
+        );
+        assert_eq!(
+            derive("/channels describe #plans road"),
+            HelperMode::FreeText("[description…]")
+        );
+    }
+
+    #[test]
+    fn unknown_subcommand_keeps_the_level_unnarrowed() {
+        // Same posture as an unknown top-level command: show the
+        // valid options rather than guessing.
+        assert_eq!(
+            derive("/channels bogus "),
+            HelperMode::SubCommands {
+                choices: slash::CHANNELS_SUBS,
+                partial: None
+            }
+        );
+    }
+
+    #[test]
+    fn membership_pair_walks_agent_then_channel() {
+        // invite/kick: <@agent> [#channel] — the second level opens
+        // once the first token completes.
+        assert_eq!(derive("/invite "), HelperMode::Agents(None));
+        assert_eq!(derive("/invite @Cl"), HelperMode::Agents(Some("Cl".into())));
+        assert_eq!(derive("/invite @Cleo "), HelperMode::Groups(None));
+        assert_eq!(
+            derive("/kick @Cleo #dep"),
+            HelperMode::Groups(Some("dep".into()))
+        );
+        // Grammar satisfied → default glance.
+        assert_eq!(derive("/kick @Cleo #deploy "), HelperMode::Agents(None));
+    }
+
+    #[test]
+    fn backspacing_ascends_because_state_is_derived() {
+        // The exact reverse of the descend sequence — no mode state
+        // to unwind, just re-derivation from shorter strings.
+        assert_eq!(
+            derive("/channels create plans "),
+            HelperMode::FreeText("[description…]")
+        );
+        assert_eq!(derive("/channels create plans"), HelperMode::FreeText("<name>"));
+        assert_eq!(derive("/channels create "), HelperMode::FreeText("<name>"));
+        assert_eq!(
+            derive("/channels create"),
+            HelperMode::SubCommands {
+                choices: slash::CHANNELS_SUBS,
+                partial: Some("create".into())
+            }
+        );
+        assert_eq!(derive("/channels"), HelperMode::Slash(Some("channels".into())));
+        assert_eq!(derive("/"), HelperMode::Slash(Some("".into())));
     }
 }
