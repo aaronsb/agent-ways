@@ -30,6 +30,8 @@
 
 use iocraft::prelude::*;
 
+use crate::grammar::{self, SubCommand, Token};
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Status {
     /// Wired into [`dispatch`]. Runs when invoked.
@@ -39,31 +41,44 @@ pub enum Status {
     Planned,
 }
 
-/// What registry the helper row should switch to once the user is
-/// past a command's name and typing its argument. The app-side
-/// state machine in `crate::helper` reads this to pick the right
-/// chip source — keeping the "which commands expect which kind of
-/// argument" data next to the command definition itself, so adding
-/// a command means adding one row here and nothing elsewhere.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ArgKind {
-    /// Command takes no argument. Helper stays on the default
-    /// (agents) once the name is complete.
-    None,
-    /// Expects an `@Agent`. Helper switches to the agent legend.
-    Agent,
-    /// Expects a `#group`. Helper switches to the channel legend.
-    Group,
-}
-
-/// One row of the slash-command registry.
+/// One row of the slash-command registry. `grammar` (#405) is the
+/// command's full token sequence — the app-side state machine in
+/// `crate::helper` walks it to steer the helper row level by level,
+/// keeping "what does this command expect" next to the command
+/// definition itself, so adding a command means adding one row here
+/// and nothing elsewhere.
 #[derive(Copy, Clone, Debug)]
 pub struct SlashCommand {
     pub name: &'static str,
     pub description: &'static str,
     pub status: Status,
-    pub arg_kind: ArgKind,
+    pub grammar: &'static [Token],
 }
+
+// Grammar shorthands for the registry rows below.
+const AGENT: Token = Token::Agent { required: true };
+const GROUP_OPT: Token = Token::Group { required: false };
+
+/// The `/channels` subcommand family (#404): `list` (default),
+/// `create`, `describe`. `dispatch` and the helper walk both read
+/// this — the branch grammars ARE the parse contract.
+pub const CHANNELS_SUBS: &[SubCommand] = &[
+    SubCommand {
+        name: "list",
+        description: "List channels with member counts (default)",
+        grammar: &[],
+    },
+    SubCommand {
+        name: "create",
+        description: "Create a channel without joining it",
+        grammar: &[Token::Word("<name>"), Token::Rest("[description…]")],
+    },
+    SubCommand {
+        name: "describe",
+        description: "Set a channel's description (empty clears)",
+        grammar: &[Token::Group { required: true }, Token::Rest("[description…]")],
+    },
+];
 
 /// Every slash command the TUI knows about. Implemented ones
 /// dispatch; planned ones autocomplete and show up in `/help` so
@@ -73,72 +88,72 @@ pub const REGISTRY: &[SlashCommand] = &[
         name: "help",
         description: "List available commands",
         status: Status::Implemented,
-        arg_kind: ArgKind::None,
+        grammar: &[],
     },
     SlashCommand {
         name: "whois",
         description: "Show a peer's session id + origin root",
         status: Status::Implemented,
-        arg_kind: ArgKind::Agent,
+        grammar: &[AGENT],
     },
     SlashCommand {
         name: "peers",
         description: "List live peer sessions",
         status: Status::Implemented,
-        arg_kind: ArgKind::None,
+        grammar: &[],
     },
     SlashCommand {
         name: "join",
         description: "Join a focus group",
         status: Status::Implemented,
-        arg_kind: ArgKind::Group,
+        grammar: &[Token::Group { required: true }],
     },
     SlashCommand {
         name: "leave",
         description: "Leave a focus group",
         status: Status::Implemented,
-        arg_kind: ArgKind::Group,
+        grammar: &[GROUP_OPT],
     },
     SlashCommand {
         name: "dissolve",
         description: "Remove a group with no live members",
         status: Status::Implemented,
-        arg_kind: ArgKind::Group,
+        grammar: &[GROUP_OPT],
     },
     SlashCommand {
         name: "channels",
         description: "List · create · describe channels",
         status: Status::Implemented,
-        arg_kind: ArgKind::None,
+        grammar: &[Token::Subcommands(CHANNELS_SUBS)],
     },
     SlashCommand {
         name: "invite",
         description: "Invite a peer to a channel (they join themselves)",
         status: Status::Implemented,
-        arg_kind: ArgKind::Agent,
+        grammar: &[AGENT, GROUP_OPT],
     },
     SlashCommand {
         name: "kick",
         description: "Remove a member from a channel",
         status: Status::Implemented,
-        arg_kind: ArgKind::Agent,
+        grammar: &[AGENT, GROUP_OPT],
     },
     SlashCommand {
         name: "purge",
         description: "Delete a channel's on-disk history",
         status: Status::Implemented,
-        arg_kind: ArgKind::Group,
+        grammar: &[GROUP_OPT],
     },
     SlashCommand {
         name: "clear",
         description: "Clear the message buffer",
         status: Status::Implemented,
-        arg_kind: ArgKind::None,
+        grammar: &[],
     },
 ];
 
 /// Look up a registered command by name (exact match, case-sensitive).
-/// The helper state machine uses this to inspect `arg_kind` once the
+/// The helper state machine uses this to walk `grammar` once the
 /// user is past the name; callers that need prefix matching use
 /// [`best_slash_completion`] instead.
 pub fn lookup(name: &str) -> Option<&'static SlashCommand> {
@@ -180,29 +195,70 @@ pub struct SlashPartial<'a> {
     pub partial: &'a str,
 }
 
-/// Inline help for the status slot while composing (#398): when
-/// exactly one registry command has `partial` as a prefix, return its
-/// one-line help; otherwise `None` and the caller keeps showing the
-/// last executed result. An empty partial matches everything, so the
-/// bare `/` menu keeps the result visible beneath the full list.
-pub fn single_match_help(partial: &str) -> Option<String> {
-    let mut matches = REGISTRY.iter().filter(|c| c.name.starts_with(partial));
-    match (matches.next(), matches.next()) {
-        (Some(cmd), None) => {
-            let arg = match cmd.arg_kind {
-                ArgKind::None => "",
-                ArgKind::Agent => " <@name>",
-                ArgKind::Group => " <#channel>",
-            };
-            let planned = if cmd.status == Status::Planned {
-                " (planned)"
-            } else {
-                ""
-            };
-            Some(format!("/{}{} — {}{}", cmd.name, arg, cmd.description, planned))
-        }
-        _ => None,
+/// Inline help for the status slot while composing (#398, recursion
+/// per #405): help text for the DEEPEST unambiguous grammar node the
+/// input has reached.
+///
+/// - Typing the name: exactly one prefix match → that command's help
+///   (signature derived from its grammar). An empty partial matches
+///   everything, so the bare `/` menu keeps the result visible.
+/// - Past the name: the command itself is committed, hence
+///   unambiguous — its help shows; a subcommand token (completed or
+///   uniquely prefixed) deepens to the branch's help. An ambiguous or
+///   unknown subcommand token falls back to the family help.
+///
+/// Takes the full input (not a pre-split partial) because depth
+/// requires the whole line. Returns `None` for non-slash input and
+/// the caller keeps showing the last executed result.
+pub fn contextual_help(input: &str) -> Option<String> {
+    if let Some(p) = find_slash_partial(input) {
+        let mut matches = REGISTRY.iter().filter(|c| c.name.starts_with(p.partial));
+        return match (matches.next(), matches.next()) {
+            (Some(cmd), None) => Some(top_help(cmd)),
+            _ => None,
+        };
     }
+    let (name, args) = parse(input)?;
+    let cmd = lookup(name)?;
+    // Only a leading subcommand choice deepens the node — every other
+    // token shape keeps the command's own help (its signature already
+    // describes the remaining levels).
+    let Some(Token::Subcommands(subs)) = cmd.grammar.first() else {
+        return Some(top_help(cmd));
+    };
+    // The first args token narrows whether completed or mid-typing —
+    // same rule as the top level, one level down.
+    match args.split_whitespace().next() {
+        None => Some(top_help(cmd)),
+        Some(t) => {
+            let mut hits = subs.iter().filter(|s| s.name.starts_with(t));
+            match (hits.next(), hits.next()) {
+                (Some(sub), None) => Some(format!(
+                    "/{} {}{} — {}",
+                    cmd.name,
+                    sub.name,
+                    grammar::signature(sub.grammar),
+                    sub.description
+                )),
+                _ => Some(top_help(cmd)),
+            }
+        }
+    }
+}
+
+fn top_help(cmd: &SlashCommand) -> String {
+    let planned = if cmd.status == Status::Planned {
+        " (planned)"
+    } else {
+        ""
+    };
+    format!(
+        "/{}{} — {}{}",
+        cmd.name,
+        grammar::signature(cmd.grammar),
+        cmd.description,
+        planned
+    )
 }
 
 pub fn find_slash_partial(input: &str) -> Option<SlashPartial<'_>> {
@@ -492,36 +548,30 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
     }
 }
 
-/// Render the slash-command legend row — one chip per registered
-/// command. Implemented entries render in a full-weight foreground
-/// color; planned entries dim so the roadmap is visible without
-/// looking equally available. Matching names underline when the
-/// caller passes the current partial (Tab-target affordance, same
-/// idiom as the agent / group legends).
-pub fn slash_legend_row(current_partial: Option<&str>) -> Vec<AnyElement<'static>> {
-    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
-    let chips: Vec<AnyElement<'static>> = REGISTRY
-        .iter()
-        .map(|cmd| {
-            let matches = lc_partial
-                .as_ref()
-                .map(|p| !p.is_empty() && cmd.name.to_ascii_lowercase().starts_with(p))
-                .unwrap_or(false);
-            // Slash commands aren't identities, so they don't carry
-            // palette hashing — a uniform Cyan for ready, DarkGrey
-            // for planned keeps the bar readable without adding new
-            // visual dimensions the user has to learn.
-            let color = match cmd.status {
-                Status::Implemented => Color::Cyan,
-                Status::Planned => Color::DarkGrey,
-            };
+/// Does `name` prefix-match the partial being typed? The shared
+/// highlight rule for every command-chip level: non-empty partial,
+/// case-insensitive.
+fn chip_matches(name: &str, lc_partial: Option<&String>) -> bool {
+    lc_partial
+        .map(|p| !p.is_empty() && name.to_ascii_lowercase().starts_with(p.as_str()))
+        .unwrap_or(false)
+}
+
+/// One-row chip strip shared by every command level (#405): the
+/// top-level slash list and each subcommand level render through the
+/// same function, so descending a level cannot drift visually.
+/// `chips` is `(label, color, matches)` — matching chips bold +
+/// underline (the Tab-target affordance the legends use).
+fn command_chip_row(chips: Vec<(String, Color, bool)>) -> Vec<AnyElement<'static>> {
+    let chips: Vec<AnyElement<'static>> = chips
+        .into_iter()
+        .map(|(content, color, matches)| {
             let weight = if matches { Weight::Bold } else { Weight::Normal };
             let decoration = if matches {
                 TextDecoration::Underline
             } else {
                 TextDecoration::None
             };
-            let content = format!("/{} ", cmd.name);
             element! {
                 Text(color, weight, decoration, content, wrap: TextWrap::NoWrap)
             }
@@ -541,6 +591,99 @@ pub fn slash_legend_row(current_partial: Option<&str>) -> Vec<AnyElement<'static
         }
     }
     .into_any()]
+}
+
+/// Render the slash-command legend row — one chip per registered
+/// command. Implemented entries render in a full-weight foreground
+/// color; planned entries dim so the roadmap is visible without
+/// looking equally available. Matching names underline when the
+/// caller passes the current partial (Tab-target affordance, same
+/// idiom as the agent / group legends).
+pub fn slash_legend_row(current_partial: Option<&str>) -> Vec<AnyElement<'static>> {
+    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
+    command_chip_row(
+        REGISTRY
+            .iter()
+            .map(|cmd| {
+                // Slash commands aren't identities, so they don't carry
+                // palette hashing — a uniform Cyan for ready, DarkGrey
+                // for planned keeps the bar readable without adding new
+                // visual dimensions the user has to learn.
+                let color = match cmd.status {
+                    Status::Implemented => Color::Cyan,
+                    Status::Planned => Color::DarkGrey,
+                };
+                (
+                    format!("/{} ", cmd.name),
+                    color,
+                    chip_matches(cmd.name, lc_partial.as_ref()),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Subcommand-level legend row (#405): the current choice level's
+/// candidates, prefix-narrowed exactly like the top-level slash list
+/// — same chips, one level down, no leading slash (they're not
+/// commands, they steer one).
+pub fn subcommand_legend_row(
+    choices: &'static [SubCommand],
+    current_partial: Option<&str>,
+) -> Vec<AnyElement<'static>> {
+    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
+    command_chip_row(
+        choices
+            .iter()
+            .map(|sub| {
+                (
+                    format!("{} ", sub.name),
+                    Color::Cyan,
+                    chip_matches(sub.name, lc_partial.as_ref()),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Free-token hint row (#405): the grammar has descended to a token
+/// no legend can offer (`<name>`, `[description…]`) — show the hint
+/// dimmed where the candidates would be.
+pub fn hint_row(hint: &str) -> Vec<AnyElement<'static>> {
+    command_chip_row(vec![(hint.to_string(), Color::DarkGrey, false)])
+}
+
+/// Tab completion one level down (#405): when the caret sits at a
+/// subcommand choice, complete the partial (or, on a bare descent,
+/// insert the first choice — mirroring bare `/` + Tab at the top
+/// level). Returns the new buffer + char cursor, or `None` when the
+/// input isn't at a subcommand level.
+pub fn complete_subcommand(input: &str) -> Option<(String, usize)> {
+    let (name, args) = parse(input)?;
+    let cmd = lookup(name)?;
+    let grammar::Pos::Sub { choices, partial } = grammar::walk(cmd.grammar, args) else {
+        return None;
+    };
+    let p = match partial {
+        Some(p) => p,
+        // A bare descent ("/channels ") completes to the first
+        // choice; but "/channels" with no space is still the NAME
+        // being typed — `parse` accepts it, so gate on the space
+        // ourselves and leave it to the top-level completion path.
+        None if input.ends_with(char::is_whitespace) => String::new(),
+        None => return None,
+    };
+    let lc = p.to_ascii_lowercase();
+    let hit = choices
+        .iter()
+        .find(|s| s.name.to_ascii_lowercase().starts_with(&lc))?;
+    // The partial — when present — is the input's literal tail (walk
+    // only yields `Some` for the final unterminated token), so a
+    // byte-suffix splice is safe.
+    let head = &input[..input.len() - p.len()];
+    let out = format!("{}{} ", head, hit.name);
+    let cursor = out.chars().count();
+    Some((out, cursor))
 }
 
 fn help_message() -> String {
@@ -933,28 +1076,103 @@ mod tests {
 }
 
 #[cfg(test)]
-mod single_match_tests {
+mod contextual_help_tests {
+    //! #398's single-match rule, following the grammar recursion
+    //! (#405): the deepest unambiguous node's help wins.
+
     use super::*;
 
     #[test]
-    fn unique_prefix_yields_help_with_arg_hint() {
-        // "/w" → only whois. Help carries the @name hint.
-        let h = single_match_help("w").expect("whois is the only w-command");
+    fn unique_prefix_yields_help_with_grammar_signature() {
+        // "/w" → only whois. Signature derives from the grammar.
+        let h = contextual_help("/w").expect("whois is the only w-command");
         assert!(h.starts_with("/whois <@name> — "), "got: {h}");
+        // Optional tokens render bracketed.
+        let h = contextual_help("/inv").expect("invite is the only inv-command");
+        assert!(h.starts_with("/invite <@name> [#channel] — "), "got: {h}");
     }
 
     #[test]
     fn ambiguous_and_empty_prefixes_yield_none() {
         // Empty matches everything → the bare / menu keeps the last
         // result visible (#398 step 2).
-        assert!(single_match_help("").is_none());
+        assert!(contextual_help("/").is_none());
         // "p" is ambiguous (peers, purge).
-        assert!(single_match_help("p").is_none());
+        assert!(contextual_help("/p").is_none());
+        // Non-slash input never has help.
+        assert!(contextual_help("hello").is_none());
+        assert!(contextual_help("").is_none());
     }
 
     #[test]
     fn full_name_and_unknown_behave() {
-        assert!(single_match_help("peers").is_some());
-        assert!(single_match_help("zzz").is_none());
+        assert!(contextual_help("/peers").is_some());
+        assert!(contextual_help("/zzz").is_none());
+        assert!(contextual_help("/zzz args").is_none());
+    }
+
+    #[test]
+    fn committed_command_keeps_its_help_through_the_args() {
+        // Past the name the command is unambiguous — help persists
+        // while its arguments are typed (the recursion's base case).
+        let h = contextual_help("/whois ").expect("committed command has help");
+        assert!(h.starts_with("/whois <@name> — "), "got: {h}");
+        let h = contextual_help("/whois @Ur").expect("still committed");
+        assert!(h.starts_with("/whois <@name> — "), "got: {h}");
+    }
+
+    #[test]
+    fn subcommand_family_shows_family_then_branch_help() {
+        // At the choice level with nothing typed: the family node.
+        let h = contextual_help("/channels ").expect("family help");
+        assert!(h.starts_with("/channels [list|create|describe] — "), "got: {h}");
+        // A unique subcommand prefix deepens to the branch node.
+        let h = contextual_help("/channels c").expect("create is the only c-sub");
+        assert_eq!(
+            h,
+            "/channels create <name> [description…] — Create a channel without joining it"
+        );
+        // Help follows all the way down the branch's own tokens.
+        let h = contextual_help("/channels create plans road").expect("deep in create");
+        assert!(h.starts_with("/channels create <name> [description…] — "), "got: {h}");
+        let h = contextual_help("/channels describe #plans ").expect("describe branch");
+        assert!(h.starts_with("/channels describe <#channel> [description…] — "), "got: {h}");
+        // Unknown subcommand token: fall back to the family node.
+        let h = contextual_help("/channels zz").expect("family fallback");
+        assert!(h.starts_with("/channels [list|create|describe] — "), "got: {h}");
+    }
+}
+
+#[cfg(test)]
+mod subcommand_completion_tests {
+    use super::*;
+
+    #[test]
+    fn completes_partial_subcommand_with_trailing_space() {
+        let (buf, cursor) = complete_subcommand("/channels cr").expect("cr → create");
+        assert_eq!(buf, "/channels create ");
+        assert_eq!(cursor, buf.chars().count());
+        // Case-insensitive, like top-level completion.
+        let (buf, _) = complete_subcommand("/channels DE").expect("DE → describe");
+        assert_eq!(buf, "/channels describe ");
+    }
+
+    #[test]
+    fn bare_descent_completes_to_first_choice() {
+        // Mirrors bare `/` + Tab picking the first registry entry.
+        let (buf, _) = complete_subcommand("/channels ").expect("first choice");
+        assert_eq!(buf, "/channels list ");
+    }
+
+    #[test]
+    fn none_when_not_at_a_subcommand_level() {
+        // Below the choice (free token) and on grammar-less commands.
+        assert!(complete_subcommand("/channels create pl").is_none());
+        assert!(complete_subcommand("/whois @Ur").is_none());
+        assert!(complete_subcommand("/help ").is_none());
+        // No prefix hit → no completion.
+        assert!(complete_subcommand("/channels zz").is_none());
+        // Still typing the command name → the top-level path owns it.
+        assert!(complete_subcommand("/channels").is_none());
     }
 }

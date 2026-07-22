@@ -757,6 +757,15 @@ pub fn handle_tab(
         return unchanged;
     }
 
+    // Subcommand completion (#405): past the name, at a grammar
+    // subcommand choice, Tab completes the level's partial exactly
+    // like the top level completes the name. Silent fall-through
+    // otherwise — deeper levels (`@`/`#` tokens) keep the mention
+    // completion below.
+    if let Some((next, new_cursor)) = slash::complete_subcommand(buf) {
+        return TabResult { new_buf: next, new_cursor, new_cycle: None };
+    }
+
     // Cycling: if we have a stored cycle and the buffer still ends
     // with the candidate we just inserted (sigil + name + trailing
     // space, the exact form `apply_completion` produces), advance
