@@ -17,6 +17,7 @@ members = [
     "attend-heartbeat",
     "attend-instances",
     "attend-session",
+    "attend-state",
 ]
 resolver = "2"
 

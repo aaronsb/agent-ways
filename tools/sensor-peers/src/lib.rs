@@ -61,6 +61,10 @@ pub struct PeerSensor {
     /// no seen-set, so the first scan baselines the existing backlog
     /// instead of dumping it — see `read_signals`.
     checkpoint_loaded: bool,
+    /// Whether import_state has run at least once — gates the restore
+    /// banner and `checkpoint_loaded` to the startup import, since the
+    /// ADR-172 drain-mark refresh re-imports every peers poll.
+    state_imported: bool,
     /// Set true after the first `read_signals`. Gates the one-time
     /// cold-start message baseline.
     message_baseline_done: bool,
@@ -141,6 +145,7 @@ impl PeerSensor {
             peer_activity: HashMap::new(),
             peer_activity_window: Duration::from_secs(900),
             checkpoint_loaded: false,
+            state_imported: false,
             message_baseline_done: false,
         }
     }
@@ -739,8 +744,15 @@ impl Sensor for PeerSensor {
     fn import_state(&mut self, state: &[(String, String)]) {
         // Any persisted rows mean this is a warm restart: the seen-set is
         // being restored, so the cold-start backlog baseline is skipped and
-        // down-gap messages surface as unseen.
-        self.checkpoint_loaded = !state.is_empty();
+        // down-gap messages surface as unseen. Guarded to the FIRST import:
+        // ADR-172's per-poll drain-mark refresh also lands here, and it must
+        // neither re-log the restore banner every poll nor retroactively
+        // flip `checkpoint_loaded` mid-run.
+        let first_import = !self.state_imported;
+        self.state_imported = true;
+        if first_import {
+            self.checkpoint_loaded = !state.is_empty();
+        }
         for (key, value) in state {
             match key.as_str() {
                 "seen_signal" => { self.seen_signals.insert(value.clone()); }
@@ -750,7 +762,7 @@ impl Sensor for PeerSensor {
                 _ => {}
             }
         }
-        if !self.seen_signals.is_empty() {
+        if first_import && !self.seen_signals.is_empty() {
             eprintln!("[attend] peers: restored {} seen signals from checkpoint",
                 self.seen_signals.len());
         }

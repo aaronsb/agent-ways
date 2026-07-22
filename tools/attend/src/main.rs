@@ -21,8 +21,13 @@ mod groups;
 mod identity_view;
 mod scenes;
 mod sensors;
-mod state;
 mod util;
+
+/// Seen-set/state persistence now lives in the shared `attend-state`
+/// crate (ADR-172): the drain verb, the sensor loop, and attend-chat's
+/// purge consult all speak its wire format. The alias keeps every
+/// existing `state::` call site unchanged.
+use attend_state as state;
 
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, FocusCmd, PermissionsCmd};
@@ -55,9 +60,14 @@ fn main() {
     match command {
         Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
         Commands::Peers => cmd::peers::cmd_peers(),
-        Commands::Inbox { msg_id, limit, page, before } => match msg_id {
-            Some(id) => cmd::inbox::cmd_inbox_read(&id),
-            None => cmd::inbox::cmd_inbox(limit, page, before),
+        Commands::Inbox { msg_id, limit, page, before, drain, format } => match (drain, msg_id) {
+            (true, Some(_)) => {
+                eprintln!("--drain drains everything pending; it cannot be combined with a message id");
+                std::process::exit(2);
+            }
+            (true, None) => cmd::inbox::cmd_inbox_drain(&format),
+            (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id),
+            (false, None) => cmd::inbox::cmd_inbox(limit, page, before),
         },
         Commands::Status => cmd::status::cmd_status(),
         Commands::Whoami { machine } => cmd::whoami::cmd_whoami(machine),

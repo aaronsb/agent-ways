@@ -1,0 +1,8 @@
+[package]
+name = "attend-state"
+version = "0.1.0"
+edition = "2021"
+description = "Shared per-session sensor state — the seen-set wire format and its merge/append persistence (ADR-172)"
+license = "MIT"
+
+[dependencies]

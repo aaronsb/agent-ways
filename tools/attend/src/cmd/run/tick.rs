@@ -35,6 +35,10 @@ pub(super) struct TickState<'a> {
     /// event lane keeps `governor`; messages must not be starved by it.
     pub(super) msg_governor: &'a mut DisclosureGovernor,
     pub(super) last_checkpoint: &'a mut Instant,
+    /// Whether the peers sensor has checkpointed at least once this
+    /// process — the first poll persists its cold-start baseline even
+    /// when nothing changed (ADR-172; PR #385 review).
+    pub(super) peers_checkpointed_once: &'a mut bool,
     pub(super) last_instance_touch: &'a mut Instant,
     /// Roster gate (ADR-171): false for fallback identities, which
     /// must never allocate registry slots — see the startup gate in
@@ -203,6 +207,25 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         let scheduled = s.queue.pop().unwrap();
         let i = scheduled.index;
 
+        // ADR-172 Decision 3: the drain is a second writer to the shared
+        // seen-set. Re-import drain-recorded consumption from disk before
+        // the peers sensor scans, so a message already delivered at a
+        // turn boundary is not re-emitted by the poller. The remaining
+        // race (a drain landing between this read and the scan) costs at
+        // worst a duplicate notification — at-least-once, never loss.
+        if s.slots[i].name() == "peers" {
+            if let Some(snap) = s.state_store.load() {
+                let marks: Vec<(String, String)> = snap
+                    .seen_signals
+                    .into_iter()
+                    .map(|k| ("seen_signal".to_string(), k))
+                    .collect();
+                if !marks.is_empty() {
+                    s.slots[i].import_state(&marks);
+                }
+            }
+        }
+
         let changed = s.slots[i].poll(s.focus);
 
         // Only log when something changed — quiet polls are silent.
@@ -230,6 +253,25 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         // message governor downstream. The event lane keeps the
         // refractory gate unchanged.
         let is_message_lane = s.slots[i].name() == "peers";
+
+        // ADR-172 Decision 3, the other direction: the sensor marks
+        // scanned signals seen in memory, but the drain reads the FILE
+        // at the next turn boundary — an interval-deferred checkpoint
+        // would let the drain re-deliver what the poller just surfaced.
+        // Checkpoint immediately on any peers change so on-disk
+        // consumption keeps pace with both writers. Union semantics
+        // make the extra write safe; message traffic makes it rare.
+        // The first peers poll checkpoints even when quiet: it may have
+        // just baselined the cold-start backlog in memory, and until
+        // that reaches disk the drain would treat the session as cold
+        // and baseline again (PR #385 review, blocking finding).
+        if is_message_lane && (changed || !*s.peers_checkpointed_once) {
+            let snapshot = collect_snapshot(s.slots);
+            s.state_store.checkpoint(&snapshot);
+            *s.last_checkpoint = Instant::now();
+            *s.peers_checkpointed_once = true;
+        }
+
         if (is_message_lane && s.slots[i].accumulator.magnitude > 0.0)
             || s.slots[i].ready_to_disclose()
         {

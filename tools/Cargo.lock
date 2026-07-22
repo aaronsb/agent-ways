@@ -227,6 +227,7 @@ dependencies = [
  "attend-heartbeat",
  "attend-instances",
  "attend-session",
+ "attend-state",
  "clap",
  "clap-markdown",
  "sensor-context",
@@ -246,6 +247,7 @@ dependencies = [
  "attend-groups",
  "attend-heartbeat",
  "attend-instances",
+ "attend-state",
  "iocraft",
  "notify",
  "smol",
@@ -274,6 +276,10 @@ dependencies = [
 
 [[package]]
 name = "attend-session"
+version = "0.1.0"
+
+[[package]]
+name = "attend-state"
 version = "0.1.0"
 
 [[package]]

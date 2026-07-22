@@ -297,6 +297,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-response.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/attend-drain-stop.sh"
           }
         ]
       }

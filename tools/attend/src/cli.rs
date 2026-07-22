@@ -52,6 +52,19 @@ pub(crate) enum Commands {
         /// Cursor: only show messages older than this unix timestamp
         #[arg(long, value_name = "TS")]
         before: Option<u64>,
+
+        /// Atomically deliver pending messages and record their
+        /// consumption (ADR-172). The Stop-hook fast path: no-op under
+        /// an unresolved identity, and on a cold start (no seen-set)
+        /// baselines the backlog without delivering.
+        #[arg(long)]
+        drain: bool,
+
+        /// Output format for --drain: `plain` (human/agent readable) or
+        /// `hook` (Claude Code Stop-hook JSON; reads the hook's stdin
+        /// payload for `stop_hook_active`)
+        #[arg(long, default_value = "plain", value_name = "FMT")]
+        format: String,
     },
 
     /// Show running instances, signals, and focus state

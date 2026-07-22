@@ -263,7 +263,14 @@ fn channels_status_in<F: Fn(&str) -> bool>(
 /// by a peer's sensor, so it survives; anything older has been
 /// scannable for at least one full grace period by every live peer.
 fn run_purge(channel: Option<&str>) -> EnterAction {
-    purge_channel_in(&signals_base(), channel, attend_heartbeat::DEFAULT_GRACE)
+    let base = signals_base();
+    // ADR-172 Decision 5 co-ship: purge consults live consumers' seen
+    // sets so it cannot shred a message a live agent session hasn't
+    // consumed. The age tail alone was the interim guard (ADR-170's
+    // planned tightening — planned exactly because no consumption
+    // record existed to consult until the drain shipped one).
+    let consumers = crate::consumers::live_consumer_seen_sets(&base, channel);
+    purge_channel_in(&base, channel, attend_heartbeat::DEFAULT_GRACE, &consumers)
 }
 
 /// Filesystem-effect core of `/purge` — delete a channel's on-disk
@@ -280,6 +287,7 @@ fn purge_channel_in(
     base: &std::path::Path,
     channel: Option<&str>,
     keep: std::time::Duration,
+    consumers: &[std::collections::HashSet<String>],
 ) -> EnterAction {
     let (label, dir) = match channel {
         None => ("open".to_string(), base.join("_broadcast")),
@@ -293,6 +301,7 @@ fn purge_channel_in(
     };
     let mut removed = 0usize;
     let mut kept = 0usize;
+    let mut kept_unconsumed = 0usize;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
             let path = e.path();
@@ -305,15 +314,31 @@ fn purge_channel_in(
                 .ok()
                 .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
                 .is_some_and(|age| age > keep);
-            if old_enough && std::fs::remove_file(&path).is_ok() {
+            // Seen-set consult (ADR-172 Decision 5): every live
+            // consumer of this channel must have consumed the message
+            // before purge may delete it. The key mirrors the sensor's
+            // and the drain's collision-proof `<dir>:<filename>` form.
+            let consumed_by_all = e.file_name().to_str().is_some_and(|f| {
+                let key = format!("{}:{}", dir.display(), f);
+                consumers.iter().all(|seen| seen.contains(&key))
+            });
+            if old_enough && consumed_by_all && std::fs::remove_file(&path).is_ok() {
                 removed += 1;
             } else {
+                if old_enough && !consumed_by_all {
+                    kept_unconsumed += 1;
+                }
                 kept += 1;
             }
         }
     }
+    let unconsumed_note = if kept_unconsumed > 0 {
+        format!(", {kept_unconsumed} unconsumed by live sessions")
+    } else {
+        String::new()
+    };
     EnterAction::ClearWithStatus(format!(
-        "purged {removed} signal{} from #{label} ({kept} recent kept)",
+        "purged {removed} signal{} from #{label} ({kept} kept{unconsumed_note})",
         if removed == 1 { "" } else { "s" }
     ))
 }
@@ -768,7 +793,7 @@ mod tests {
         std::fs::write(bdir.join("notes.txt"), "not a signal").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
         // Zero keep-tail: everything with positive age purges.
-        match purge_channel_in(&base, None, std::time::Duration::ZERO) {
+        match purge_channel_in(&base, None, std::time::Duration::ZERO, &[]) {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("purged 1 signal"), "got: {s}")
             }
@@ -780,13 +805,49 @@ mod tests {
 
         // Real grace window: a fresh signal survives.
         std::fs::write(bdir.join("fresh.signal"), "from|p|/x|hi\n").unwrap();
-        match purge_channel_in(&base, None, attend_heartbeat::DEFAULT_GRACE) {
+        match purge_channel_in(&base, None, attend_heartbeat::DEFAULT_GRACE, &[]) {
             EnterAction::ClearWithStatus(s) => {
-                assert!(s.contains("purged 0 signals from #open (1 recent kept)"), "got: {s}")
+                assert!(s.contains("purged 0 signals from #open (1 kept)"), "got: {s}")
             }
             _ => panic!("purge should clear input with status"),
         }
         assert!(bdir.join("fresh.signal").exists());
+    }
+
+    /// ADR-172 Decision 5: an aged message a live consumer has NOT
+    /// consumed survives the purge; once every consumer's seen-set
+    /// contains it, it purges. `/purge` and the drain agree through
+    /// the same `<dir>:<filename>` key.
+    #[test]
+    fn purge_keeps_aged_signal_a_live_consumer_has_not_consumed() {
+        let base = tempdir_like();
+        let bdir = base.join("_broadcast");
+        std::fs::create_dir_all(&bdir).unwrap();
+        std::fs::write(bdir.join("unread.signal"), "f|p|/x|msg\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let key = format!("{}:unread.signal", bdir.display());
+        let empty: std::collections::HashSet<String> = Default::default();
+        let seen: std::collections::HashSet<String> = [key].into_iter().collect();
+
+        // One live consumer that has consumed nothing → kept, reported.
+        match purge_channel_in(&base, None, std::time::Duration::ZERO, &[empty]) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("purged 0 signals"), "got: {s}");
+                assert!(s.contains("1 unconsumed by live sessions"), "got: {s}");
+            }
+            _ => panic!("purge should clear input with status"),
+        }
+        assert!(bdir.join("unread.signal").exists());
+
+        // The same consumer with the message in its seen-set → purged.
+        match purge_channel_in(&base, None, std::time::Duration::ZERO, &[seen]) {
+            EnterAction::ClearWithStatus(s) => {
+                assert!(s.contains("purged 1 signal"), "got: {s}")
+            }
+            _ => panic!("purge should clear input with status"),
+        }
+        assert!(!bdir.join("unread.signal").exists());
     }
 
     #[test]
@@ -797,7 +858,7 @@ mod tests {
         std::fs::write(base.join("@deploy").join("a.signal"), "f|p|/x|a\n").unwrap();
         std::fs::write(base.join("_broadcast").join("b.signal"), "f|p|/x|b\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
-        match purge_channel_in(&base, Some("deploy"), std::time::Duration::ZERO) {
+        match purge_channel_in(&base, Some("deploy"), std::time::Duration::ZERO, &[]) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("#deploy"), "got: {s}"),
             _ => panic!("scoped purge should clear input with status"),
         }
@@ -805,7 +866,7 @@ mod tests {
         // Broadcast untouched by a scoped purge.
         assert!(base.join("_broadcast").join("b.signal").exists());
 
-        match purge_channel_in(&base, Some("ghost"), std::time::Duration::ZERO) {
+        match purge_channel_in(&base, Some("ghost"), std::time::Duration::ZERO, &[]) {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
             _ => panic!("unknown group should keep input with status"),
         }

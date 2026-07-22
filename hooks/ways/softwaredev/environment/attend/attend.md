@@ -49,6 +49,8 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging.
 
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid.
+
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 
 Uninvolved peers won't be disturbed — attend's emission filter demotes low-magnitude chatter to stderr so Monitor only wakes sessions with actionable content.
