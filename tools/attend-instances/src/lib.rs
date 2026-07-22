@@ -679,11 +679,11 @@ mod tests {
         with_registry(|r| {
             // Register 25 sessions; the 25th must overflow Greek and
             // land on the "25" numeric suffix.
-            for i in 0..GREEK.len() {
+            for (i, expected) in GREEK.iter().enumerate() {
                 let assigned = r
                     .register("/x", &format!("sess-{i}"))
                     .unwrap();
-                assert_eq!(assigned, GREEK[i]);
+                assert_eq!(assigned, *expected);
             }
             let overflow = r.register("/x", "sess-overflow").unwrap();
             assert_eq!(overflow, "25");
