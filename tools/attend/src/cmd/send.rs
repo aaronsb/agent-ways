@@ -103,11 +103,18 @@ pub(crate) fn cmd_send(
         #[cfg(not(feature = "sensor-peers"))]
         let live_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // A member is live if it's a running claude session OR its
+        // heartbeat is fresh. The heartbeat arm covers human members
+        // (ADR-170): attend-chat heartbeats the username while open,
+        // and a human never appears in the claude-process scan — so
+        // without it, a human-only group would reject agent sends
+        // with a phantom "no live peers".
         let live_peer_count: usize = match &members {
             Some(ids) => ids
                 .iter()
                 .filter(|sid| {
-                    live_ids.contains(*sid)
+                    (live_ids.contains(*sid)
+                        || attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE))
                         && self_id.as_ref().map(|s| s != *sid).unwrap_or(true)
                 })
                 .count(),

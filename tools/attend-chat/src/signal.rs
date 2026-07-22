@@ -195,6 +195,19 @@ fn sender_identity() -> (String, String, String, String) {
     (sender_id, from, project, cwd)
 }
 
+/// Focus-group membership identity for the human at the keyboard
+/// (ADR-170): the sanitized username alone, no terminal suffix. One
+/// entry per human regardless of terminal or cwd — the same dedupe
+/// rule the chip registry applies to external senders. This is the
+/// member id written into `_groups.yaml` by `/join` and the heartbeat
+/// key the TUI touches while running.
+pub fn human_member_id() -> String {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_else(|_| "unknown".to_string());
+    agent_identity::sanitize_id_component(&user)
+}
+
 /// Identify the human at the keyboard. attend-chat is almost always
 /// running outside a Claude session (it's the human's coordination
 /// surface), so we skip the Claude-session detection the CLI does and

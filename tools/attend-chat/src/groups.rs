@@ -1,42 +1,27 @@
 //! Focus-group discovery and membership reads for the TUI.
 //!
-//! Read-only mirror of the data model owned by `attend::groups`. We
-//! enumerate `@*/` subdirectories under the signals base (the source
-//! of truth for "a group exists") and parse `_groups.yaml` for
-//! membership (the source of truth for "who's in it").
+//! We enumerate `@*/` subdirectories under the signals base (the
+//! source of truth for "a group exists") and read `_groups.yaml` for
+//! membership (the source of truth for "who's in it") through the
+//! shared `attend-groups` crate — the single owner of the wire format
+//! since ADR-170. The pre-ADR-170 byte-mirror parser (and its golden
+//! drift tests) lived here; both now reside in `attend-groups`.
 //!
-//! **Format mirror.** `_groups.yaml` is written by
-//! `tools/attend/src/groups.rs::serialize_groups_yaml`. Our parser
-//! mirrors its shape one-to-one — two-space indent, list items at
-//! four-space indent, no comments emitted — so any format change
-//! here requires the same change there. We re-parse rather than
-//! share because this crate only *reads* the file today; a shared
-//! I/O layer lands with PR 4's `/join` write path.
-//!
-//! Everything in this module is pure file reads. Callers re-invoke
-//! `scan` each render; it's cheap (one `read_dir` + one
-//! `read_to_string`) and always sees the current state without
-//! invalidation bookkeeping.
+//! Discovery (`scan`/`channels`) is pure file reads, re-invoked each
+//! render: one `read_dir` + one `read_to_string`, always current
+//! without invalidation bookkeeping. The write path (`/join`,
+//! `/leave`) goes through `attend_groups::Groups` from the key
+//! handlers in `crate::app::keys`.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use agent_identity::{Group, TermCaps};
+use attend_groups::GroupEntry;
 
 use crate::signal::signals_base;
 
 const GROUP_PREFIX: &str = "@";
-const STATE_FILE: &str = "_groups.yaml";
-
-/// Membership entry for one group.
-#[derive(Debug, Clone, Default)]
-pub struct GroupMembership {
-    pub pinned: bool,
-    /// Session IDs currently in this group. For claude sessions these
-    /// are UUIDs; for future human entries they'll be derived hashes.
-    pub members: Vec<String>,
-}
 
 /// One discovered group with its display identity baked in.
 ///
@@ -47,7 +32,7 @@ pub struct GroupMembership {
 #[derive(Debug, Clone)]
 pub struct KnownGroup {
     pub group: Group,
-    pub membership: GroupMembership,
+    pub membership: GroupEntry,
     pub is_base: bool,
 }
 
@@ -69,7 +54,7 @@ pub fn scan(caps: TermCaps) -> Vec<KnownGroup> {
 /// Scan under an arbitrary base. Exists so tests can drive the scan
 /// against a scratch directory without touching `$HOME`.
 pub fn scan_in(base: &Path, caps: TermCaps) -> Vec<KnownGroup> {
-    let memberships = load_memberships(base);
+    let memberships = attend_groups::load_groups(base);
     let Ok(entries) = fs::read_dir(base) else {
         return Vec::new();
     };
@@ -119,7 +104,7 @@ pub fn channels_in(base: &Path, caps: TermCaps) -> Vec<KnownGroup> {
     let mut out = Vec::with_capacity(8);
     out.push(KnownGroup {
         group: Group::for_name(BASE_CHANNEL_NAME, caps),
-        membership: GroupMembership::default(),
+        membership: GroupEntry::default(),
         is_base: true,
     });
     out.extend(
@@ -130,104 +115,53 @@ pub fn channels_in(base: &Path, caps: TermCaps) -> Vec<KnownGroup> {
     out
 }
 
-/// Return the set of group names a given session (by its ID) is in.
-/// Pure map lookup over the parsed yaml.
+/// Return the set of group names a given member (session UUID for
+/// claudes, username for humans — ADR-170) is in. Pure filter over
+/// the scanned groups.
 pub fn groups_for_session<'a>(
-    session_id: &str,
+    member_id: &str,
     known: &'a [KnownGroup],
 ) -> Vec<&'a KnownGroup> {
     known
         .iter()
-        .filter(|k| k.membership.members.iter().any(|m| m == session_id))
+        .filter(|k| k.membership.members.iter().any(|m| m == member_id))
         .collect()
-}
-
-fn load_memberships(base: &Path) -> HashMap<String, GroupMembership> {
-    let path = base.join(STATE_FILE);
-    let Ok(content) = fs::read_to_string(&path) else {
-        return HashMap::new();
-    };
-    parse_groups_yaml(&content)
-}
-
-/// Parse the narrowly-shaped `_groups.yaml` attend writes.
-///
-/// Mirrors `attend::groups::parse_groups_yaml` exactly. We could pull
-/// in a YAML crate, but the schema is two levels deep and a full
-/// parser would burn compile time and binary size for nothing.
-fn parse_groups_yaml(content: &str) -> HashMap<String, GroupMembership> {
-    let mut out: HashMap<String, GroupMembership> = HashMap::new();
-    let mut current: Option<String> = None;
-    let mut pinned = false;
-    let mut members: Vec<String> = Vec::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-
-        if indent == 0 && trimmed.ends_with(':') {
-            if let Some(name) = current.take() {
-                out.insert(
-                    name,
-                    GroupMembership {
-                        pinned,
-                        members: std::mem::take(&mut members),
-                    },
-                );
-            }
-            current = Some(trimmed.trim_end_matches(':').to_string());
-            pinned = false;
-            continue;
-        }
-
-        if indent == 2 {
-            if let Some((key, value)) = trimmed.split_once(':') {
-                if key.trim() == "pinned" {
-                    pinned = value.trim() == "true";
-                }
-                // `members:` is an array header — items follow at
-                // indent=4. Other keys we silently ignore so future
-                // fields don't make old readers panic.
-            }
-        }
-
-        if indent == 4 {
-            if let Some(m) = trimmed.strip_prefix("- ") {
-                members.push(m.to_string());
-            }
-        }
-    }
-
-    if let Some(name) = current {
-        out.insert(name, GroupMembership { pinned, members });
-    }
-    out
 }
 
 /// Resolve a `#name` addressed send to the group's signal directory.
 ///
-/// Returns `None` if the named group has no on-disk dir (i.e. the
-/// user typed an unknown group name). The special name `"open"`
-/// resolves to `_broadcast/` — that's the base channel's
-/// on-disk home (ADR-124 §2); there is no `@open/` directory.
+/// Returns `None` if the group is unknown — no on-disk dir *and* no
+/// `_groups.yaml` entry. The yaml fallback is the self-heal for the
+/// orphan-sweep race (ADR-170): a join whose dir got swept between
+/// the sweep's yaml re-read and its `remove_dir_all` leaves an entry
+/// with no dir, and `write_signal` re-creates the dir on the next
+/// send — so a yaml-listed group is addressable even dir-less. The
+/// special name `"open"` resolves to `_broadcast/` — the base
+/// channel's on-disk home (ADR-124 §2); there is no `@open/` dir.
 pub fn resolve_group_dir(name: &str) -> Option<PathBuf> {
+    resolve_group_dir_in(&signals_base(), name)
+}
+
+/// Test-seam counterpart to [`resolve_group_dir`] — same logic
+/// against an arbitrary base, immune to `$HOME` races in parallel
+/// tests.
+pub fn resolve_group_dir_in(base: &Path, name: &str) -> Option<PathBuf> {
     if name == BASE_CHANNEL_NAME {
-        return Some(crate::signal::broadcast_dir());
+        return Some(base.join("_broadcast"));
     }
-    let dir = signals_base().join(format!("{GROUP_PREFIX}{name}"));
-    if dir.is_dir() {
+    let dir = base.join(format!("{GROUP_PREFIX}{name}"));
+    if dir.is_dir() || attend_groups::load_groups(base).contains_key(name) {
         Some(dir)
     } else {
         None
     }
 }
 
-/// Count of live (heartbeat-fresh) members of a focus group, derived
-/// from `_groups.yaml` membership intersected with the heartbeat
-/// liveness gate (ADR-129).
+/// Count of live (heartbeat-fresh) members of a focus group *other
+/// than the sender*, derived from `_groups.yaml` membership
+/// intersected with the heartbeat liveness gate (ADR-129). Human
+/// members (ADR-170) heartbeat their username while a chat is open,
+/// so they count the same way.
 ///
 /// Mirrors the discipline `attend send --focus` enforces in
 /// `tools/attend/src/cmd/send.rs` — closes the same silent-routing
@@ -236,33 +170,50 @@ pub fn resolve_group_dir(name: &str) -> Option<PathBuf> {
 /// `@<name>/` until cleanup, with the sender seeing a confirmation
 /// while no peer ever scans the file.
 ///
+/// `exclude_member` is the sender's own membership key — since
+/// ADR-170 the human is a heartbeating member, so without the
+/// exclusion a human alone in a group would count *themselves* as
+/// the live listener and the trap this gate closes would silently
+/// reopen (the agent side excludes itself identically).
+///
 /// The base channel `#open` always returns a non-zero count — it
 /// rides `_broadcast/`, which every attend scans, so liveness
 /// validation is both unnecessary and would block legitimate
 /// broadcasts when no other peers are present (a human typing in
 /// chat is a valid send-only scenario).
-pub fn live_peer_count(name: &str) -> usize {
-    live_peer_count_in(&signals_base(), name)
+pub fn live_peer_count(name: &str, exclude_member: &str) -> usize {
+    live_peer_count_in(&signals_base(), name, exclude_member)
 }
 
 /// Test-seam counterpart to [`live_peer_count`] — same logic against
 /// an arbitrary base directory. Tests can populate `_groups.yaml`
 /// + heartbeats under a tempdir without touching `$HOME`.
-pub fn live_peer_count_in(base: &Path, name: &str) -> usize {
+pub fn live_peer_count_in(base: &Path, name: &str, exclude_member: &str) -> usize {
+    live_peer_count_with(base, name, exclude_member, |sid| {
+        attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE)
+    })
+}
+
+/// Innermost seam with an injectable freshness predicate, so the
+/// self-exclusion rule is testable without a heartbeat sidecar.
+fn live_peer_count_with<F: Fn(&str) -> bool>(
+    base: &Path,
+    name: &str,
+    exclude_member: &str,
+    is_fresh: F,
+) -> usize {
     if name == BASE_CHANNEL_NAME {
         // Base channel is always reachable; bypass the check.
         return usize::MAX;
     }
-    let memberships = load_memberships(base);
+    let memberships = attend_groups::load_groups(base);
     let Some(membership) = memberships.get(name) else {
         return 0;
     };
     membership
         .members
         .iter()
-        .filter(|sid| {
-            attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE)
-        })
+        .filter(|sid| sid.as_str() != exclude_member && is_fresh(sid))
         .count()
 }
 
@@ -334,7 +285,7 @@ mod tests {
     fn live_peer_count_zero_for_unknown_group() {
         let base = tempdir_like();
         // No yaml, no entry → 0.
-        assert_eq!(live_peer_count_in(&base, "ghost"), 0);
+        assert_eq!(live_peer_count_in(&base, "ghost", ""), 0);
     }
 
     #[test]
@@ -348,7 +299,40 @@ mod tests {
             &base,
             "temp:\n  pinned: false\n  members:\n    - dead-session-id\n",
         );
-        assert_eq!(live_peer_count_in(&base, "temp"), 0);
+        assert_eq!(live_peer_count_in(&base, "temp", ""), 0);
+    }
+
+    #[test]
+    fn live_peer_count_excludes_the_sender() {
+        // ADR-170 regression guard: the human is now a heartbeating
+        // member, so a group where the sender is the only fresh
+        // member must count zero live *peers* — otherwise a solo
+        // `/join` + `#group send` self-validates and the message
+        // sits unread (the silent-routing trap, PR #75).
+        let base = tempdir_like();
+        write_yaml(
+            &base,
+            "solo:\n  pinned: false\n  members:\n    - aaron\n",
+        );
+        assert_eq!(live_peer_count_with(&base, "solo", "aaron", |_| true), 0);
+        // A different sender sees aaron as a live peer.
+        assert_eq!(live_peer_count_with(&base, "solo", "someone-else", |_| true), 1);
+    }
+
+    #[test]
+    fn resolve_group_dir_falls_back_to_yaml_entry() {
+        // Orphan-sweep race self-heal: yaml entry present, dir
+        // missing → still addressable (write_signal re-creates the
+        // dir on send).
+        let base = tempdir_like();
+        write_yaml(
+            &base,
+            "phantom:\n  pinned: false\n  members:\n    - aaron\n",
+        );
+        let dir = resolve_group_dir_in(&base, "phantom")
+            .expect("yaml-listed group must resolve");
+        assert_eq!(dir, base.join("@phantom"));
+        assert!(resolve_group_dir_in(&base, "never-existed").is_none());
     }
 
     #[test]
@@ -357,7 +341,7 @@ mod tests {
         // human typing `#open hello` is never blocked by the
         // "no live peers" check — broadcasts are always reachable.
         let base = tempdir_like();
-        assert!(live_peer_count_in(&base, BASE_CHANNEL_NAME) > 0);
+        assert!(live_peer_count_in(&base, BASE_CHANNEL_NAME, "") > 0);
     }
 
     #[test]
@@ -417,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_for_session_filters_by_uuid() {
+    fn groups_for_session_filters_by_member_id() {
         let base = tempdir_like();
         fs::create_dir_all(base.join("@deploy")).unwrap();
         fs::create_dir_all(base.join("@infra")).unwrap();
@@ -432,68 +416,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_yaml_handles_blank_lines_and_comments() {
-        let yaml = "\n# a comment\ndeploy:\n  pinned: true\n  members:\n    - sess-a\n\n# another comment\ninfra:\n  pinned: false\n  members: []\n";
-        let parsed = parse_groups_yaml(yaml);
-        assert_eq!(parsed.len(), 2);
-        assert!(parsed["deploy"].pinned);
-        assert_eq!(parsed["deploy"].members, vec!["sess-a"]);
-        assert!(parsed["infra"].members.is_empty());
-    }
-
-    #[test]
-    fn parse_yaml_unknown_keys_ignored() {
-        // Forward compatibility: if attend adds a field, we shouldn't
-        // panic — just skip it.
-        let yaml = "deploy:\n  pinned: false\n  magic_flag: true\n  members:\n    - sess-a\n";
-        let parsed = parse_groups_yaml(yaml);
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed["deploy"].members, vec!["sess-a"]);
-    }
-
-    #[test]
-    fn empty_name_dir_ignored() {
+    fn groups_for_session_matches_human_usernames() {
+        // ADR-170: membership lists mix session UUIDs and usernames;
+        // the filter must match a human's username key the same way.
         let base = tempdir_like();
-        fs::create_dir_all(base.join("@")).unwrap();
+        fs::create_dir_all(base.join("@deploy")).unwrap();
+        write_yaml(
+            &base,
+            "deploy:\n  pinned: false\n  members:\n    - sess-a\n    - aaron\n",
+        );
         let groups = scan_in(&base, TermCaps::Rich);
-        assert!(groups.is_empty());
-    }
-
-    /// Mirror of `tools/attend/src/groups.rs::tests::GROUPS_YAML_GOLDEN`.
-    /// Any edit here requires the matching edit there — both parsers
-    /// must agree on the identical byte sequence. Drift-detection via
-    /// `golden_matches_mirror_parser` below.
-    const GROUPS_YAML_GOLDEN: &str = concat!(
-        "\n",
-        "# leading comment\n",
-        "deploy:\n",
-        "  pinned: true\n",
-        "  members:\n",
-        "    - sess-a\n",
-        "    - sess-b\n",
-        "\n",
-        "infra:\n",
-        "  pinned: false\n",
-        "  members: []\n",
-        "collab:\n",
-        "  pinned: false\n",
-        "  members:\n",
-        "    - sess-c\n",
-    );
-
-    #[test]
-    fn golden_matches_mirror_parser() {
-        // Wire-format drift guard. `tools/attend/src/groups.rs` has
-        // an identical test with the same golden string — if either
-        // parser stops producing this exact HashMap, the mirror
-        // contract is broken and one side has drifted.
-        let parsed = parse_groups_yaml(GROUPS_YAML_GOLDEN);
-        assert_eq!(parsed.len(), 3);
-        assert!(parsed["deploy"].pinned);
-        assert_eq!(parsed["deploy"].members, vec!["sess-a", "sess-b"]);
-        assert!(!parsed["infra"].pinned);
-        assert!(parsed["infra"].members.is_empty());
-        assert!(!parsed["collab"].pinned);
-        assert_eq!(parsed["collab"].members, vec!["sess-c"]);
+        let mine = groups_for_session("aaron", &groups);
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].group.name, "deploy");
     }
 }

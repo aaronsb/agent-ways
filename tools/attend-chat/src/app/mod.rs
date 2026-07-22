@@ -89,6 +89,14 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     let mut tick = hooks.use_state(|| 0u64);
     hooks.use_future(async move {
         loop {
+            // Human presence heartbeat (ADR-170): while the chat is
+            // open, keep `heartbeat/<username>` fresh so this human
+            // counts as a live focus-group member — to our own
+            // `live_peer_count`, to attend's `cleanup_stale`, and to
+            // agent-side `send --focus` validation. Touched before
+            // the first sleep so presence starts at launch, not one
+            // tick later. Best-effort like every heartbeat write.
+            let _ = attend_heartbeat::touch(&crate::signal::human_member_id());
             smol::Timer::after(std::time::Duration::from_secs(5)).await;
             let next = tick.get().wrapping_add(1);
             tick.set(next);
@@ -157,6 +165,16 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                             push_capped(&mut signals, echo);
                         }
                         EnterAction::StatusOnly(s) => status.set(s),
+                        EnterAction::ClearTranscript => {
+                            // Display-only: the buffer empties but
+                            // nothing on the bus is touched — signals
+                            // on disk stay for other readers, and
+                            // fresh traffic streams back in.
+                            signals.set(Vec::new());
+                            status.set("transcript cleared".into());
+                            input.set(String::new());
+                            cursor.set(0);
+                        }
                     }
                 }
                 KeyCode::Tab => {
@@ -297,14 +315,21 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             let weight = if chip.style.bold { Weight::Bold } else { Weight::Normal };
             let color = color_for(chip.palette, caps);
             // Group glyphs for this chip: cross-reference the
-            // sender's session UUID against _groups.yaml membership.
-            // Humans have no session_id yet, so their chips stay
-            // glyph-less until PR 4 derives a membership key for
-            // them.
-            let group_chips: Vec<AnyElement<'static>> = chip
-                .session_id
+            // sender's membership key against _groups.yaml. Claudes
+            // key by session UUID; humans key by their sanitized
+            // username (ADR-170) — the same id `/join` writes, so a
+            // joined human's chip carries the group glyph exactly
+            // like a claude's.
+            let membership_key: Option<String> = chip.session_id.clone().or_else(|| {
+                s.from.strip_prefix("external:").map(|rest| {
+                    agent_identity::sanitize_id_component(
+                        rest.split('@').next().unwrap_or(rest),
+                    )
+                })
+            });
+            let group_chips: Vec<AnyElement<'static>> = membership_key
                 .as_deref()
-                .and_then(|uuid| session_to_groups.get(uuid))
+                .and_then(|key| session_to_groups.get(key))
                 .map(|groups| {
                     groups
                         .iter()

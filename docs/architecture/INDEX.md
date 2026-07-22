@@ -90,6 +90,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-167](./system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md) | Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop | Accepted |
 | [ADR-168](./system/ADR-168-instance-addressable-directed-messaging-for-same-cwd-attend-siblings.md) | Instance-addressable directed messaging for same-cwd attend siblings | Draft |
 | [ADR-169](./system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md) | agent-ways relinquishes user-scoped settings.json; retains only its operational baseline | Proposed |
+| [ADR-170](./system/ADR-170-human-focus-group-membership-via-username-identity-and-a-shared-attend-groups-crate.md) | Human focus-group membership via username identity and a shared attend-groups crate | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_

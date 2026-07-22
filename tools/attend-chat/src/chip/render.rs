@@ -24,9 +24,9 @@ pub struct ChipInfo {
     pub style: Style,
     /// Session UUID for claude senders, `None` for humans or
     /// unknown prefixes. The chip's group-glyph decoration cross-
-    /// references this against `_groups.yaml` membership. Humans
-    /// will get their own derivable key in PR 4 once the CRUD
-    /// path needs to address them.
+    /// references this against `_groups.yaml` membership; for
+    /// humans the render call site derives a username membership
+    /// key from the wire `from` instead (ADR-170).
     pub session_id: Option<String>,
 }
 

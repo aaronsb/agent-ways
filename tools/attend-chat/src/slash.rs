@@ -16,12 +16,18 @@
 //! "Tab completes the partial you're typing" — the plumbing is
 //! distinct.
 //!
-//! **Scope.** Today `/help` is the only dispatched command. Other
-//! names in [`REGISTRY`] are advertised as planned so autocomplete
-//! can surface them and `/help` can print the roadmap; dispatching
-//! them returns a "not implemented yet" status. When a planned
-//! command lands, flip its [`Status`] to [`Status::Implemented`] and
-//! add a handler arm in [`dispatch`].
+//! **Scope.** Everything except `/whois` and `/peers` dispatches;
+//! those remain in [`REGISTRY`] as planned so autocomplete can
+//! surface them and `/help` can print the roadmap — dispatching them
+//! returns a "not implemented yet" status. When a planned command
+//! lands, flip its [`Status`] to [`Status::Implemented`] and add a
+//! handler arm in [`dispatch`].
+//!
+//! Dispatch stays IO-free: commands with side effects return a
+//! [`SlashOutcome`] variant describing the effect (clear the
+//! transcript, join/leave a group) and the key handler in
+//! `crate::app::keys` executes it. That keeps this module's parse +
+//! validate logic unit-testable without a filesystem.
 
 use iocraft::prelude::*;
 
@@ -85,19 +91,37 @@ pub const REGISTRY: &[SlashCommand] = &[
     SlashCommand {
         name: "join",
         description: "Join a focus group",
-        status: Status::Planned,
+        status: Status::Implemented,
         arg_kind: ArgKind::Group,
     },
     SlashCommand {
         name: "leave",
         description: "Leave a focus group",
-        status: Status::Planned,
+        status: Status::Implemented,
+        arg_kind: ArgKind::Group,
+    },
+    SlashCommand {
+        name: "dissolve",
+        description: "Remove a group with no live members",
+        status: Status::Implemented,
+        arg_kind: ArgKind::Group,
+    },
+    SlashCommand {
+        name: "channels",
+        description: "List channels with member counts",
+        status: Status::Implemented,
+        arg_kind: ArgKind::None,
+    },
+    SlashCommand {
+        name: "purge",
+        description: "Delete a channel's on-disk history",
+        status: Status::Implemented,
         arg_kind: ArgKind::Group,
     },
     SlashCommand {
         name: "clear",
         description: "Clear the message buffer",
-        status: Status::Planned,
+        status: Status::Implemented,
         arg_kind: ArgKind::None,
     },
 ];
@@ -175,6 +199,11 @@ pub fn apply_slash_completion(full_name: &str) -> (String, usize) {
 }
 
 /// Outcome of dispatching a parsed slash command.
+///
+/// `Ok`/`Err` carry a status string and end here; the effect variants
+/// describe work the key handler must perform — dispatch itself never
+/// touches the filesystem, so join/leave validation stays testable
+/// without a signals base on disk.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SlashOutcome {
     /// Status message to show; clear the input buffer.
@@ -182,16 +211,83 @@ pub enum SlashOutcome {
     /// Status message to show; *keep* the input so the user can
     /// edit + retry (typical for unknown / malformed commands).
     Err(String),
+    /// `/clear` — empty the transcript buffer.
+    ClearTranscript,
+    /// `/join` — join the named focus group as the human member
+    /// (ADR-170). Name is already normalized (`#` stripped) and
+    /// validated.
+    Join(String),
+    /// `/leave` — leave the named focus group. Name normalized;
+    /// existence/membership are checked at execution time against
+    /// the live state.
+    Leave(String),
+    /// `/dissolve` — remove the named group entirely: yaml entry and
+    /// `@dir`, including orphan dirs the yaml doesn't know about
+    /// (ADR-170). The live-member guard runs at execution time.
+    Dissolve(String),
+    /// `/channels` — render every channel with live/total member
+    /// counts into the status row.
+    ListChannels,
+    /// `/purge` — delete a channel's on-disk signal history (ADR-136
+    /// durability, deliberately overridden by explicit operator
+    /// action). `None` targets the base channel's `_broadcast/`.
+    Purge(Option<String>),
+}
+
+/// Normalize a group argument: first whitespace-separated token,
+/// leading `#` stripped (users copy the channel-bar spelling).
+/// Returns `None` when no argument was given.
+fn group_arg(args: &str) -> Option<&str> {
+    let first = args.split_whitespace().next()?;
+    Some(first.strip_prefix('#').unwrap_or(first))
 }
 
 /// Dispatch a parsed slash command.
-pub fn dispatch(name: &str, _args: &str) -> SlashOutcome {
+pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
     let Some(cmd) = REGISTRY.iter().find(|c| c.name == name) else {
         return SlashOutcome::Err(format!("unknown: /{name} (try /help)"));
     };
     match cmd.status {
         Status::Implemented => match cmd.name {
             "help" => SlashOutcome::Ok(help_message()),
+            "clear" => SlashOutcome::ClearTranscript,
+            "join" => match group_arg(args) {
+                None => SlashOutcome::Err("usage: /join <group>".into()),
+                // Friendlier than the generic "'open' is reserved":
+                // the base channel isn't joinable because everyone is
+                // already in it (ADR-124).
+                Some("open") => SlashOutcome::Err(
+                    "#open is the base channel — everyone is already there".into(),
+                ),
+                Some(g) => match attend_groups::validate_group_name(g) {
+                    Ok(()) => SlashOutcome::Join(g.to_string()),
+                    Err(e) => SlashOutcome::Err(format!("/join: {e}")),
+                },
+            },
+            "leave" => match group_arg(args) {
+                None => SlashOutcome::Err("usage: /leave <group>".into()),
+                Some("open") => SlashOutcome::Err(
+                    "#open is the base channel — you can't leave it".into(),
+                ),
+                Some(g) => SlashOutcome::Leave(g.to_string()),
+            },
+            // No name validation here — dissolve targets *existing*
+            // state, and its main quarry is exactly the orphan dirs
+            // whose names a strict validator might reject.
+            "dissolve" => match group_arg(args) {
+                None => SlashOutcome::Err("usage: /dissolve <group>".into()),
+                Some("open") => SlashOutcome::Err(
+                    "#open is the base channel — you can't dissolve it".into(),
+                ),
+                Some(g) => SlashOutcome::Dissolve(g.to_string()),
+            },
+            "channels" => SlashOutcome::ListChannels,
+            // Bare `/purge` and `/purge open` both mean the base
+            // channel — `#open` is where history piles up.
+            "purge" => match group_arg(args) {
+                None | Some("open") => SlashOutcome::Purge(None),
+                Some(g) => SlashOutcome::Purge(Some(g.to_string())),
+            },
             // Keeps the match exhaustive — if a registry entry flips
             // to Implemented without a handler arm, this fires at
             // runtime rather than silently treating it as planned.
@@ -400,6 +496,80 @@ mod tests {
         };
         assert!(s.contains("unknown"));
         assert!(s.contains("/bogus"));
+    }
+
+    #[test]
+    fn dispatch_clear_returns_effect() {
+        assert_eq!(dispatch("clear", ""), SlashOutcome::ClearTranscript);
+        // Stray args after /clear are ignored, not an error.
+        assert_eq!(dispatch("clear", "everything"), SlashOutcome::ClearTranscript);
+    }
+
+    #[test]
+    fn dispatch_join_normalizes_and_validates() {
+        assert_eq!(dispatch("join", "deploy"), SlashOutcome::Join("deploy".into()));
+        // The `#` spelling from the channel bar is accepted.
+        assert_eq!(dispatch("join", "#deploy"), SlashOutcome::Join("deploy".into()));
+        // Missing arg → usage, input kept for retry.
+        let SlashOutcome::Err(s) = dispatch("join", "") else {
+            panic!("bare /join should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        // Base channel is not joinable.
+        let SlashOutcome::Err(s) = dispatch("join", "open") else {
+            panic!("/join open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+        // Invalid names bounce with the shared validator's message.
+        let SlashOutcome::Err(s) = dispatch("join", "_internal") else {
+            panic!("invalid name should be rejected")
+        };
+        assert!(s.contains("/join"));
+    }
+
+    #[test]
+    fn dispatch_leave_normalizes() {
+        assert_eq!(dispatch("leave", "#deploy"), SlashOutcome::Leave("deploy".into()));
+        let SlashOutcome::Err(s) = dispatch("leave", "") else {
+            panic!("bare /leave should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        let SlashOutcome::Err(s) = dispatch("leave", "open") else {
+            panic!("/leave open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+    }
+
+    #[test]
+    fn dispatch_dissolve_normalizes() {
+        assert_eq!(
+            dispatch("dissolve", "#bg-test"),
+            SlashOutcome::Dissolve("bg-test".into())
+        );
+        let SlashOutcome::Err(s) = dispatch("dissolve", "") else {
+            panic!("bare /dissolve should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        let SlashOutcome::Err(s) = dispatch("dissolve", "open") else {
+            panic!("/dissolve open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+    }
+
+    #[test]
+    fn dispatch_channels_returns_effect() {
+        assert_eq!(dispatch("channels", ""), SlashOutcome::ListChannels);
+    }
+
+    #[test]
+    fn dispatch_purge_defaults_to_base_channel() {
+        assert_eq!(dispatch("purge", ""), SlashOutcome::Purge(None));
+        assert_eq!(dispatch("purge", "open"), SlashOutcome::Purge(None));
+        assert_eq!(dispatch("purge", "#open"), SlashOutcome::Purge(None));
+        assert_eq!(
+            dispatch("purge", "#deploy"),
+            SlashOutcome::Purge(Some("deploy".into()))
+        );
     }
 
     #[test]
