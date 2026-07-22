@@ -165,23 +165,23 @@ mod tests {
         assert_eq!(derive("/he"), HelperMode::Slash(Some("he".into())));
     }
 
-    // ── Slash: past the name, ArgKind routing ──────────────────
+    // ── Slash: past the name, grammar routing ──────────────────
 
     #[test]
     fn slash_help_space_stays_on_agents_as_default() {
-        // ArgKind::None → default registry (agents), no partial.
+        // Empty grammar → satisfied → default registry (agents).
         assert_eq!(derive("/help "), HelperMode::Agents(None));
     }
 
     #[test]
     fn slash_whois_space_switches_to_agents_waiting_for_at() {
-        // ArgKind::Agent, no @ typed yet — Agents with no partial.
+        // Agent token, no @ typed yet — Agents with no partial.
         assert_eq!(derive("/whois "), HelperMode::Agents(None));
     }
 
     #[test]
     fn slash_whois_with_at_partial_underlines_agent() {
-        // ArgKind::Agent, user is now typing @Ur — underline "Ur".
+        // Agent token, user is now typing @Ur — underline "Ur".
         assert_eq!(
             derive("/whois @Ur"),
             HelperMode::Agents(Some("Ur".into()))
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn slash_join_space_switches_to_groups() {
-        // ArgKind::Group, no # typed yet — Groups with no partial.
+        // Group token, no # typed yet — Groups with no partial.
         assert_eq!(derive("/join "), HelperMode::Groups(None));
     }
 
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn slash_leave_space_switches_to_groups() {
-        // Second Group-arg command — confirms ArgKind routing isn't
+        // Second Group-token command — confirms grammar routing isn't
         // tied to a single command name.
         assert_eq!(derive("/leave "), HelperMode::Groups(None));
     }
@@ -224,7 +224,7 @@ mod tests {
     fn slash_precedes_trailing_mention() {
         // `/help @Tam` — even though there's a trailing @, the
         // buffer starts with `/` and we're past the command name.
-        // ArgKind::None returns Agents(None), which tests the
+        // the satisfied grammar returns Agents(None), which tests the
         // state machine's "slash wins" invariant.
         assert_eq!(derive("/help @Tam"), HelperMode::Agents(None));
     }
@@ -244,7 +244,7 @@ mod tests {
     fn slash_with_leading_space_routes_arg_kind() {
         // Past-the-name routing must also tolerate leading
         // whitespace — otherwise `" /whois "` silently shows agents
-        // (the default) instead of agents-because-ArgKind.
+        // (the default) instead of agents-because-grammar.
         // The observable state is the same, but the reasoning path
         // differs; we want the state machine to take the Slash
         // branch for consistency with Enter / Tab.
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn agent_cmd_with_wrong_sigil_falls_back_to_default_agents() {
-        // `/whois #dep` — ArgKind::Agent but user typed `#`. The
+        // `/whois #dep` — Agent token but user typed `#`. The
         // trailing-# doesn't satisfy the Agent filter, so the state
         // is "agents waiting for @" (no partial) rather than
         // hijacking to groups.
