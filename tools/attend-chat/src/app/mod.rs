@@ -367,6 +367,17 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // is past its name, the registry's `ArgKind` routes the helper
     // (`/whois ` → agents, `/join ` → channels).
     let helper_mode = helper::derive(&input_snapshot);
+    // #398: while the typed slash command is unambiguous, the status
+    // slot shows that command's inline help — documentation at the
+    // point of intent. The swap is display-time only: the stored
+    // result string is never overwritten, so backspacing to an empty
+    // prompt restores it for free.
+    let status_line = match &helper_mode {
+        helper::HelperMode::Slash(Some(p)) => {
+            slash::single_match_help(p).unwrap_or_else(|| status.to_string())
+        }
+        _ => status.to_string(),
+    };
     let rows: Vec<_> = signals
         .read()
         .iter()
@@ -579,7 +590,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 HelperMode::Slash(p) => slash::slash_legend_row(p.as_deref()),
             })
             View(height: 1, padding_left: 1) {
-                Text(color: Color::DarkGrey, content: status.to_string(), wrap: TextWrap::NoWrap)
+                Text(color: Color::DarkGrey, content: status_line, wrap: TextWrap::NoWrap)
             }
         }
     }
