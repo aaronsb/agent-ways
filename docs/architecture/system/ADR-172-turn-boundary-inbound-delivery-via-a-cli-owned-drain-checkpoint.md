@@ -70,11 +70,20 @@ Concretely:
    reads attend-owned state. CLI remains the whole interface (ADR-124,
    ADR-136).
 
-3. **One seen-set, two consumers.** The drain and the `peers` sensor share the
-   single per-session seen-set ADR-136 already maintains — they do not keep
-   parallel dedup stores. A message consumed by either conduit is marked seen
-   once, so the two never double-deliver. ADR-136's deliver-once contract now
-   holds *across* the poll and the turn-boundary paths.
+3. **One seen-set, two consumers — under merge semantics.** The drain and the
+   `peers` sensor share the single per-session seen-set ADR-136 already
+   maintains — they do not keep parallel dedup stores. But the two have
+   different lifecycles: the drain is a one-shot process writing at turn
+   boundaries, while the sensor is long-running, holds the set *in memory*, and
+   checkpoints it via `StateStore`. A whole-set snapshot on either side forks
+   the "one" set into two — a stale sensor snapshot re-surfaces a message the
+   drain already marked (double delivery), or a sensor checkpoint overwrites
+   the drain's marks (a consumed message resurrects). So the contract requires
+   **merge/append consumption semantics** — union-on-checkpoint, or
+   per-message mark files — and the sensor must **observe drain-recorded
+   consumption before emitting**. Deliver-once across both conduits holds only
+   under these semantics; a whole-set overwrite is how the "one" seen-set
+   silently becomes two.
 
 4. **Consumption keys on the resolved tuple, and refuses to mark under an
    unresolved identity.** The seen-set (and every durable state ADR-171 names)
@@ -86,12 +95,25 @@ Concretely:
    unresolved identity, Monitor remains the delivery path — a graceful
    degradation.
 
-5. **Durability is preserved by construction.** The drain reaps nothing.
-   Removal stays owned by ADR-136 project-liveness reaping and the ADR-170
-   `/purge` human power tool. Because the drain's consumption record and
-   purge both key on the same tuple and the same seen-set, they agree without
-   coordinating: `/purge` cannot shred a message a live, resolved session has
-   not yet consumed.
+5. **Durability is preserved; the purge-agreement is a co-shipped deliverable,
+   not a present guarantee.** The drain reaps nothing — removal stays owned by
+   ADR-136 project-liveness reaping and the ADR-170 `/purge` human power tool.
+   The desired property — `/purge` cannot shred a message a live, resolved
+   session has not yet consumed — is *not* true as deployed today: purge
+   consults only the 90 s age tail (ADR-170 records the seen-set refusal as a
+   **planned tightening**, precisely because no consumption record existed to
+   consult). It becomes real only once purge's seen-set check ships **with** the
+   drain verb — an explicit deliverable of the implementation PR (below), not a
+   property this ADR can assert of the system as it stands.
+
+6. **Re-entry is bounded.** Inject-and-continue means the continued turn also
+   ends in a `Stop` hook, so the drain re-runs. Draining to empty terminates
+   for a single session; but two *actively conversing* sessions can each
+   injection-trigger the other's drain and keep both turns alive — sometimes
+   the desired liveliness, sometimes a livelock. The implementation carries the
+   standard Stop-hook re-entry guard plus a ceiling (drain-rounds-per-turn or a
+   quiet-period), so an empty drain always lets the turn end and a live
+   exchange cannot spin unbounded.
 
 ```mermaid
 flowchart TD
@@ -115,8 +137,13 @@ flowchart TD
 
 The on-disk form of the drain's consumption record (extend the existing
 seen-set store vs. a sibling ledger) is an implementation choice for the
-follow-up PR; the contract above — atomic drain, shared seen-set, tuple key,
-resolved-gate — is what this ADR fixes.
+follow-up PR. The contract above — atomic drain, shared seen-set, tuple key,
+resolved-gate, merge semantics — is what this ADR fixes. The implementation PR
+carries four coupled deliverables, none shippable alone: (a) the
+`attend inbox --drain` verb; (b) merge/append seen-set persistence
+(Decision 3); (c) purge's seen-set tightening (ADR-170), co-shipped so the
+durability property in Decision 5 becomes real; and (d) the Stop-hook re-entry
+guard (Decision 6).
 
 ## Consequences
 
@@ -129,9 +156,11 @@ resolved-gate — is what this ADR fixes.
   one tuple-keyed seen-set; there is no second dedup store to diverge.
 - CLI-is-contract holds: the hook is a thin invoker, and identity is obtained
   through `attend whoami` rather than by reaching into attend state.
-- `/purge` (ADR-170) and the drain agree by construction — same tuple, same
-  seen-set — so the human power tool cannot delete a message a live resolved
-  session has not consumed, without either side consulting the other.
+- `/purge` (ADR-170) and the drain agree — same tuple, same seen-set — so the
+  human power tool cannot delete a message a live resolved session has not
+  consumed. *This holds only once purge's planned seen-set tightening ships
+  with the drain verb (Decision 5); it is not a property of today's
+  age-tail-only purge.*
 - Keying on the machine tuple makes consumption immune to display-name churn
   (the presentation layer ADR-171 deliberately separated from the key).
 
@@ -140,9 +169,11 @@ resolved-gate — is what this ADR fixes.
 - A `Stop` hook runs at every turn end, so the drain must be cheap: one
   memoized-identity shell-out, O(pending) work, and a fast no-op when the tray
   is empty. A slow drain would tax every turn.
-- A second delivery conduit is more surface than one poller. The mitigation is
-  that both feed a single seen-set — one source of truth for "seen" — so the
-  cost is a second *reader*, not a second *bookkeeping*.
+- A second delivery conduit is more surface than one poller, and the drain is a
+  second *writer* to the seen-set — which is why the merge/append discipline
+  (Decision 3) is load-bearing, not optional. Both still feed one logical set,
+  so there is a single source of truth for "seen" — but only if neither side
+  overwrites the other's marks.
 - The turn-boundary path still cannot wake an idle session; the two-conduit
   split (poller for idle, hook for active) is inherent to a turn-gated loop,
   not complexity this ADR could design away.
@@ -153,7 +184,9 @@ resolved-gate — is what this ADR fixes.
   (list + read-by-id over the never-reaped ledger). The verb adds the first
   consumption-recording path to that surface.
 - Under unresolved identity the drain no-ops and Monitor delivers instead — a
-  degradation, not a failure; the session still receives its mail.
+  degradation, not a failure; the session still receives its mail. Note that
+  `StateStore` persistence is also absent when the session id is `None`, so the
+  Monitor path's dedup is process-lifetime only in that fallback.
 - The three synchronized messaging docs (`skills/attend/SKILL.md`,
   `tools/sensor-disclosure/src/disclosures/messaging.md`,
   `hooks/ways/softwaredev/environment/attend/attend.md`) move in lockstep if
