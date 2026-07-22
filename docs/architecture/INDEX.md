@@ -92,6 +92,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-169](./system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md) | agent-ways relinquishes user-scoped settings.json; retains only its operational baseline | Proposed |
 | [ADR-170](./system/ADR-170-human-focus-group-membership-via-username-identity-and-a-shared-attend-groups-crate.md) | Human focus-group membership via username identity and a shared attend-groups crate | Accepted |
 | [ADR-171](./system/ADR-171-stable-session-identity-the-roster-enumerates-addressable-coordinating-units.md) | Stable session identity — the roster enumerates addressable coordinating units | Accepted |
+| [ADR-172](./system/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md) | Turn-boundary inbound delivery via a CLI-owned drain checkpoint | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
