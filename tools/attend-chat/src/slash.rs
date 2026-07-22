@@ -107,7 +107,7 @@ pub const REGISTRY: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "channels",
-        description: "List channels with member counts",
+        description: "List · create · describe channels",
         status: Status::Implemented,
         arg_kind: ArgKind::None,
     },
@@ -262,9 +262,25 @@ pub enum SlashOutcome {
     /// (ADR-170). `None` scopes to the foreground tab (#393); the
     /// live-member guard runs at execution time.
     Dissolve(Option<String>),
-    /// `/channels` — render every channel with live/total member
-    /// counts into the status row.
+    /// `/channels` (or `/channels list`) — render every channel with
+    /// live/total member counts + description into the status row.
     ListChannels,
+    /// `/channels create <name> [description…]` — explicit lifecycle
+    /// verb: create a channel WITHOUT joining it (#404). Name
+    /// normalized (`#` stripped) and validated here; duplicate
+    /// detection lives in `Groups::create` at execution time, and
+    /// both error classes surface through the status path (#400).
+    CreateChannel {
+        name: String,
+        description: Option<String>,
+    },
+    /// `/channels describe <#channel> [description…]` — set or
+    /// replace a channel's one-line description; empty text clears
+    /// (#404). Name normalized; existence checked at execution time.
+    DescribeChannel {
+        name: String,
+        description: String,
+    },
     /// `/purge` — delete a channel's on-disk signal history (ADR-136
     /// durability, deliberately overridden by explicit operator
     /// action). `None` targets the base channel's `_broadcast/`.
@@ -302,6 +318,15 @@ pub enum SlashOutcome {
 fn agent_arg(args: &str) -> Option<&str> {
     let first = args.split_whitespace().next()?;
     Some(first.strip_prefix('@').unwrap_or(first))
+}
+
+/// Join remaining whitespace-separated tokens as free text — the
+/// `trailing_var_arg` shape the CLI's create/describe use, so both
+/// surfaces normalize descriptions identically (runs of whitespace,
+/// including compose-box newlines, collapse to single spaces —
+/// which also satisfies the wire format's single-line contract).
+fn rest_text<'a>(toks: impl Iterator<Item = &'a str>) -> String {
+    toks.collect::<Vec<_>>().join(" ")
 }
 
 /// Normalize a group argument: first whitespace-separated token,
@@ -355,7 +380,61 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
                 ),
                 Some(g) => SlashOutcome::Dissolve(Some(g.to_string())),
             },
-            "channels" => SlashOutcome::ListChannels,
+            // Subcommand family (#404): slash commands stay top-level,
+            // subcommands steer into them. Bare `/channels` keeps the
+            // pre-#404 listing default.
+            "channels" => {
+                let mut toks = args.split_whitespace();
+                match toks.next() {
+                    None | Some("list") => SlashOutcome::ListChannels,
+                    Some("create") => match toks.next() {
+                        None => SlashOutcome::Err(
+                            "usage: /channels create <name> [description…]".into(),
+                        ),
+                        Some(raw) => {
+                            let name = raw.strip_prefix('#').unwrap_or(raw);
+                            // Same validator `/join` consults — reserved
+                            // names (`open`, `broadcast`) and malformed
+                            // names bounce before any fs work.
+                            match attend_groups::validate_group_name(name) {
+                                Err(e) => {
+                                    SlashOutcome::Err(format!("/channels create: {e}"))
+                                }
+                                Ok(()) => {
+                                    let description = rest_text(toks);
+                                    SlashOutcome::CreateChannel {
+                                        name: name.to_string(),
+                                        description: (!description.is_empty())
+                                            .then_some(description),
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Some("describe") => match toks.next() {
+                        None => SlashOutcome::Err(
+                            "usage: /channels describe <#channel> [description…]".into(),
+                        ),
+                        Some(raw) => {
+                            let name = raw.strip_prefix('#').unwrap_or(raw);
+                            if name == "open" {
+                                SlashOutcome::Err(
+                                    "#open is the base channel — its description is fixed"
+                                        .into(),
+                                )
+                            } else {
+                                SlashOutcome::DescribeChannel {
+                                    name: name.to_string(),
+                                    description: rest_text(toks),
+                                }
+                            }
+                        }
+                    },
+                    Some(other) => SlashOutcome::Err(format!(
+                        "/channels {other}: unknown subcommand (list · create · describe)"
+                    )),
+                }
+            }
             // Bare `/purge` = foreground-tab scope, resolved
             // downstream. An explicit `/purge open` stays EXPLICIT:
             // collapsing it into `None` here would reinterpret it as
@@ -673,8 +752,87 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_channels_returns_effect() {
+    fn dispatch_channels_bare_and_list_return_listing() {
+        // Bare `/channels` keeps the pre-#404 default; `list` is the
+        // explicit spelling of the same thing.
         assert_eq!(dispatch("channels", ""), SlashOutcome::ListChannels);
+        assert_eq!(dispatch("channels", "list"), SlashOutcome::ListChannels);
+    }
+
+    #[test]
+    fn dispatch_channels_create_parses_name_and_description() {
+        assert_eq!(
+            dispatch("channels", "create plans roadmap talk"),
+            SlashOutcome::CreateChannel {
+                name: "plans".into(),
+                description: Some("roadmap talk".into())
+            }
+        );
+        // No description → None; `#` spelling tolerated.
+        assert_eq!(
+            dispatch("channels", "create #plans"),
+            SlashOutcome::CreateChannel {
+                name: "plans".into(),
+                description: None
+            }
+        );
+        let SlashOutcome::Err(s) = dispatch("channels", "create") else {
+            panic!("bare create should be a usage error")
+        };
+        assert!(s.contains("usage"));
+    }
+
+    #[test]
+    fn dispatch_channels_create_rejects_reserved_names() {
+        // The shared validator's reserved list applies before any fs
+        // work — `open` aliases the commons, `_x` is an internal
+        // prefix. Errors surface via the #400 status path.
+        let SlashOutcome::Err(s) = dispatch("channels", "create open") else {
+            panic!("reserved name should be rejected")
+        };
+        assert!(s.contains("/channels create"), "got: {s}");
+        assert!(s.contains("reserved"), "got: {s}");
+        let SlashOutcome::Err(s) = dispatch("channels", "create _internal") else {
+            panic!("underscore prefix should be rejected")
+        };
+        assert!(s.contains("/channels create"), "got: {s}");
+    }
+
+    #[test]
+    fn dispatch_channels_describe_parses_and_clears() {
+        assert_eq!(
+            dispatch("channels", "describe #plans roadmap talk"),
+            SlashOutcome::DescribeChannel {
+                name: "plans".into(),
+                description: "roadmap talk".into()
+            }
+        );
+        // No text → empty description → clears (CLI parity).
+        assert_eq!(
+            dispatch("channels", "describe plans"),
+            SlashOutcome::DescribeChannel {
+                name: "plans".into(),
+                description: String::new()
+            }
+        );
+        let SlashOutcome::Err(s) = dispatch("channels", "describe") else {
+            panic!("bare describe should be a usage error")
+        };
+        assert!(s.contains("usage"));
+        // The base channel's description is synthetic, not stored.
+        let SlashOutcome::Err(s) = dispatch("channels", "describe #open shiny") else {
+            panic!("describe open should be rejected")
+        };
+        assert!(s.contains("base channel"));
+    }
+
+    #[test]
+    fn dispatch_channels_unknown_subcommand_is_precise() {
+        let SlashOutcome::Err(s) = dispatch("channels", "bogus") else {
+            panic!("unknown subcommand should be an error")
+        };
+        assert!(s.contains("unknown subcommand"), "got: {s}");
+        assert!(s.contains("create"), "the error should teach the family: {s}");
     }
 
     #[test]
