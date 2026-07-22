@@ -180,6 +180,31 @@ pub struct SlashPartial<'a> {
     pub partial: &'a str,
 }
 
+/// Inline help for the status slot while composing (#398): when
+/// exactly one registry command has `partial` as a prefix, return its
+/// one-line help; otherwise `None` and the caller keeps showing the
+/// last executed result. An empty partial matches everything, so the
+/// bare `/` menu keeps the result visible beneath the full list.
+pub fn single_match_help(partial: &str) -> Option<String> {
+    let mut matches = REGISTRY.iter().filter(|c| c.name.starts_with(partial));
+    match (matches.next(), matches.next()) {
+        (Some(cmd), None) => {
+            let arg = match cmd.arg_kind {
+                ArgKind::None => "",
+                ArgKind::Agent => " <@name>",
+                ArgKind::Group => " <#channel>",
+            };
+            let planned = if cmd.status == Status::Planned {
+                " (planned)"
+            } else {
+                ""
+            };
+            Some(format!("/{}{} — {}{}", cmd.name, arg, cmd.description, planned))
+        }
+        _ => None,
+    }
+}
+
 pub fn find_slash_partial(input: &str) -> Option<SlashPartial<'_>> {
     // Mirror [`parse`]'s leading-whitespace tolerance so every caller
     // (Enter interceptor, Tab completion, helper-row state machine)
@@ -746,5 +771,32 @@ mod tests {
         // now dispatches; a new Planned entry should be a deliberate
         // roadmap choice, not a leftover.
         assert!(REGISTRY.iter().all(|c| c.status == Status::Implemented));
+    }
+}
+
+#[cfg(test)]
+mod single_match_tests {
+    use super::*;
+
+    #[test]
+    fn unique_prefix_yields_help_with_arg_hint() {
+        // "/w" → only whois. Help carries the @name hint.
+        let h = single_match_help("w").expect("whois is the only w-command");
+        assert!(h.starts_with("/whois <@name> — "), "got: {h}");
+    }
+
+    #[test]
+    fn ambiguous_and_empty_prefixes_yield_none() {
+        // Empty matches everything → the bare / menu keeps the last
+        // result visible (#398 step 2).
+        assert!(single_match_help("").is_none());
+        // "p" is ambiguous (peers, purge).
+        assert!(single_match_help("p").is_none());
+    }
+
+    #[test]
+    fn full_name_and_unknown_behave() {
+        assert!(single_match_help("peers").is_some());
+        assert!(single_match_help("zzz").is_none());
     }
 }
