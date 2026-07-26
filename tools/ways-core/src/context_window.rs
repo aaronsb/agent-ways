@@ -68,6 +68,7 @@ const MODEL_WINDOWS: &[(&str, u64)] = &[
     ("claude-fable-5", 1_000_000),
     ("claude-mythos-5", 1_000_000),
     ("claude-mythos-preview", 1_000_000),
+    ("claude-opus-5", 1_000_000),
     ("claude-opus-4-8", 1_000_000),
     ("claude-opus-4-7", 1_000_000),
     ("claude-opus-4-6", 1_000_000),
@@ -240,6 +241,7 @@ mod tests {
     /// exists to prevent was a model that matched no branch and silently defaulted.
     #[test]
     fn pins_every_model_seen_in_transcripts() {
+        assert_eq!(window_for_model("claude-opus-5"), Some(1_000_000));
         assert_eq!(window_for_model("claude-opus-4-8"), Some(1_000_000));
         assert_eq!(window_for_model("claude-fable-5"), Some(1_000_000));
         assert_eq!(window_for_model("claude-sonnet-4-6"), Some(1_000_000));
@@ -265,6 +267,20 @@ mod tests {
         let w = resolve(Some("claude-fable-5"));
         assert_eq!(w.tokens, 1_000_000);
         assert_eq!(w.source, WindowSource::ModelTable);
+    }
+
+    /// The failure ADR-166 predicted, arriving on schedule: Opus 5 shipped, the
+    /// table still ended at 4.8, and a live 1M session read `pct_used: 106` against
+    /// a 200K denominator — firing compaction pressure that was not there.
+    #[test]
+    fn opus_5_is_a_1m_model() {
+        let w = resolve(Some("claude-opus-5"));
+        assert_eq!(w.tokens, 1_000_000);
+        assert_eq!(w.source, WindowSource::ModelTable);
+
+        // The harness names this model `claude-opus-5[1m]` in the system prompt;
+        // component matching resolves that form too.
+        assert_eq!(window_for_model("claude-opus-5[1m]"), Some(1_000_000));
     }
 
     /// `sonnet` used to swallow `sonnet-5` and call it 200K. Substring matching is
