@@ -13,16 +13,20 @@ Usage:
     claude-projects stats              # aggregate statistics
     claude-projects cleanup --dry-run  # show empty projects that could be removed
     claude-projects cleanup            # remove empty project directories
+    claude-projects relocate OLD NEW   # preview moving session history to a new path
+    claude-projects relocate OLD NEW --execute
 
 Install:
-    ln -s ~/.claude/tools/claude-projects ~/.local/bin/claude-projects
+    Symlinked onto PATH by scripts/install.sh, alongside the ways binaries.
 """
 
 import argparse
 import json
 import os
 import re
+import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -654,6 +658,361 @@ def cmd_hygiene(args):
     print()
 
 
+# ── Relocate ────────────────────────────────────────────────────────────────
+
+# Claude encodes a project path into a directory name by collapsing every
+# non-alphanumeric character to "-". That is lossy and irreversible ("/a/b_c"
+# and "/a/b-c" both encode to "-a-b-c"), which is why relocate takes real paths
+# and why the true path is carried in sessions-index.json rather than decoded.
+_SLUG_RE = re.compile(r"[^a-zA-Z0-9]")
+
+CLAUDE_JSON = Path.home() / ".claude.json"
+HISTORY_FILE = Path.home() / ".claude" / "history.jsonl"
+
+# A transcript touched this recently probably belongs to a live session, which
+# appends to the file we are about to rewrite.
+LIVE_SESSION_WINDOW = 120  # seconds
+
+
+def encode_project_path(path):
+    """Forward of Claude's path encoding: every non-alphanumeric char → '-'."""
+    return _SLUG_RE.sub("-", path)
+
+
+def norm_path(p):
+    """Absolute, ~-expanded, no trailing slash."""
+    return os.path.abspath(os.path.expanduser(p)).rstrip("/") or "/"
+
+
+def remap(value, old, new):
+    """Remap `value` if it is `old` or lives under it. None if unaffected."""
+    if not isinstance(value, str):
+        return None
+    if value == old:
+        return new
+    if value.startswith(old + "/"):
+        return new + value[len(old):]
+    return None
+
+
+def backup_file(path):
+    """Timestamped sibling copy. Returns the backup path."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = path.with_name(f"{path.name}.bak-relocate-{stamp}")
+    shutil.copy2(path, dest)
+    return dest
+
+
+def rewrite_jsonl(path, field, old, new, apply):
+    """Remap a top-level string field across a JSONL file.
+
+    Lines that do not mention `old` are copied byte-for-byte, so only genuinely
+    affected records are ever re-serialized. Returns (changed, residual), where
+    residual counts lines that still mention the old path afterwards (message
+    text, file paths in tool results — content this command deliberately does
+    not touch).
+    """
+    changed = residual = 0
+    tmp = path.with_name(path.name + ".relocate-tmp")
+    out = tmp.open("w", encoding="utf-8", errors="surrogateescape") if apply else None
+    try:
+        with path.open("r", encoding="utf-8", errors="surrogateescape") as fh:
+            for line in fh:
+                if old not in line:
+                    if out:
+                        out.write(line)
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    obj = None
+                if isinstance(obj, dict):
+                    mapped = remap(obj.get(field), old, new)
+                else:
+                    mapped = None
+                if mapped is None:
+                    residual += 1
+                    if out:
+                        out.write(line)
+                    continue
+                obj[field] = mapped
+                changed += 1
+                rendered = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+                if old in rendered:
+                    residual += 1
+                if out:
+                    out.write(rendered + "\n")
+    except Exception:
+        if out:
+            out.close()
+        tmp.unlink(missing_ok=True)
+        raise
+    if out:
+        out.close()
+        # Keep mtime: project listings sort by it, and relocating is not activity.
+        shutil.copystat(path, tmp)
+        os.replace(tmp, path)
+    return changed, residual
+
+
+def rewrite_sessions_index(idx, old, new, old_dir, new_dir, apply):
+    """Remap projectPath / cwd / originalPath, plus fullPath (which embeds the slug)."""
+    try:
+        raw = idx.read_text()
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return 0
+
+    n = 0
+    mapped = remap(data.get("originalPath"), old, new)
+    if mapped is not None:
+        data["originalPath"] = mapped
+        n += 1
+    for entry in data.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        for key in ("projectPath", "cwd"):
+            mapped = remap(entry.get(key), old, new)
+            if mapped is not None:
+                entry[key] = mapped
+                n += 1
+        mapped = remap(entry.get("fullPath"), old_dir, new_dir)
+        if mapped is not None:
+            entry["fullPath"] = mapped
+            n += 1
+
+    if apply and n:
+        indent = 2 if "\n  " in raw else None
+        sep = None if indent else (",", ":")
+        idx.write_text(json.dumps(data, indent=indent, separators=sep, ensure_ascii=False))
+    return n
+
+
+def rewrite_claude_json(old, new, merge, apply):
+    """Rename the ~/.claude.json projects key, preserving key order.
+
+    Returns (status, note) where status is one of: missing, absent, conflict, ok.
+    """
+    if not CLAUDE_JSON.exists():
+        return "missing", None
+    try:
+        data = json.loads(CLAUDE_JSON.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        return "missing", str(e)
+
+    projects = data.get("projects")
+    if not isinstance(projects, dict) or old not in projects:
+        return "absent", None
+    if new in projects and not merge:
+        return "conflict", None
+
+    # Rebuild in place so the relocated project keeps its position in the file.
+    rebuilt = {}
+    for k, v in projects.items():
+        if k == old:
+            rebuilt[new] = v
+        elif k == new:
+            continue  # superseded by the relocated entry (--merge)
+        else:
+            rebuilt[k] = v
+    data["projects"] = rebuilt
+
+    if apply:
+        backup_file(CLAUDE_JSON)
+        tmp = CLAUDE_JSON.with_name(CLAUDE_JSON.name + ".relocate-tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        os.replace(tmp, CLAUDE_JSON)
+    return "ok", None
+
+
+def cmd_relocate(args):
+    """Move a project's session history from one working directory to another."""
+    apply = args.execute
+    old = norm_path(args.old_path)
+    new = norm_path(args.new_path)
+
+    if old == new:
+        print(f"  {red('error')} old and new paths are identical: {old}")
+        sys.exit(1)
+
+    old_slug = encode_project_path(old)
+    new_slug = encode_project_path(new)
+    old_dir = PROJECTS_DIR / old_slug
+    new_dir = PROJECTS_DIR / new_slug
+
+    if not old_dir.is_dir():
+        print(f"\n  {red('No session history for')} {old}")
+        print(f"  {dim('expected')} {old_dir}\n")
+        stem = old.rsplit("/", 1)[-1].lower()
+        near = [d.name for d in PROJECTS_DIR.iterdir()
+                if d.is_dir() and stem and stem[:6] in d.name.lower()] \
+            if PROJECTS_DIR.is_dir() else []
+        if near:
+            print(f"  {dim('Similar project directories:')}")
+            for n in near[:8]:
+                print(f"    {n}")
+            print()
+        sys.exit(1)
+
+    transcripts = sorted(old_dir.glob("*.jsonl"))
+
+    # ── Plan ────────────────────────────────────────────────────────────────
+    print(f"\n{bold('Relocate project')}")
+    print(f"  {dim('from')}  {cyan(old)}   {dim(old_slug)}")
+    print(f"  {dim('to')}    {green(new)}   {dim(new_slug)}")
+    print()
+
+    warnings = []
+    if os.path.exists(new) and not os.path.isdir(new):
+        print(f"  {red('error')} {new} exists but is not a directory")
+        sys.exit(1)
+    # There is nothing to resume into if the working directory is missing, so
+    # create it rather than leaving the relocation half-useful.
+    create_target = not os.path.isdir(new)
+
+    live = [t for t in transcripts
+            if time.time() - t.stat().st_mtime < LIVE_SESSION_WINDOW]
+    if live:
+        warnings.append(f"{len(live)} transcript(s) modified in the last "
+                        f"{LIVE_SESSION_WINDOW}s — a session may be live in this project")
+
+    merging = new_dir.exists() and new_slug != old_slug
+    if merging and not args.merge:
+        warnings.append(f"{new_dir.name} already exists — pass --merge to combine, "
+                        f"or relocate that project away first")
+
+    if create_target:
+        print(f"  {dim('workdir')}     create {new} {dim('(does not exist yet)')}")
+
+    # Directory move
+    if new_slug == old_slug:
+        print(f"  {dim('directory')}   unchanged {dim('(both paths encode to the same slug)')}")
+    elif merging:
+        print(f"  {dim('directory')}   {yellow('merge')} into existing {new_dir.name}")
+    else:
+        print(f"  {dim('directory')}   rename → {new_dir.name}")
+
+    # Transcripts
+    total_changed = total_residual = 0
+    if args.keep_transcript_cwd:
+        print(f"  {dim('transcripts')} {dim('skipped (--keep-transcript-cwd)')}")
+    else:
+        for t in transcripts:
+            ch, res = rewrite_jsonl(t, "cwd", old, new, apply=False)
+            total_changed += ch
+            total_residual += res
+        print(f"  {dim('transcripts')} {total_changed} cwd field(s) across "
+              f"{len(transcripts)} file(s)")
+
+    # sessions-index
+    idx = old_dir / "sessions-index.json"
+    idx_n = rewrite_sessions_index(idx, old, new, str(old_dir), str(new_dir), apply=False) \
+        if idx.exists() else 0
+    print(f"  {dim('index')}       {idx_n} field(s) in sessions-index.json"
+          if idx.exists() else f"  {dim('index')}       {dim('none')}")
+
+    # ~/.claude.json
+    cj_status, cj_note = rewrite_claude_json(old, new, args.merge, apply=False)
+    cj_label = {
+        "ok": "projects key renamed",
+        "absent": dim("no entry for this path"),
+        "conflict": yellow(f"entry for {new} already exists — pass --merge to supersede it"),
+        "missing": dim(f"unreadable ({cj_note})" if cj_note else "not found"),
+    }[cj_status]
+    print(f"  {dim('config')}      ~/.claude.json: {cj_label}")
+
+    # history.jsonl
+    hist_n = 0
+    if HISTORY_FILE.exists():
+        hist_n, _ = rewrite_jsonl(HISTORY_FILE, "project", old, new, apply=False)
+    print(f"  {dim('history')}     {hist_n} prompt(s) in history.jsonl")
+
+    if total_residual:
+        print(f"\n  {dim('note')} {total_residual} line(s) still mention the old path in "
+              f"message text or tool output.")
+        print(f"       {dim('Those are a record of what happened and are left as-is.')}")
+
+    for w in warnings:
+        print(f"\n  {yellow('warning')} {w}")
+
+    if not apply:
+        print(f"\n  {dim('Preview only — re-run with --execute to apply.')}\n")
+        return
+
+    if live and not args.force:
+        print(f"\n  {red('Refusing to rewrite transcripts while a session may be live.')}")
+        print(f"  {dim('Exit that session, or pass --force if you know it is idle.')}\n")
+        sys.exit(1)
+    if merging and not args.merge:
+        print(f"\n  {red('Refusing to overwrite an existing project directory.')}\n")
+        sys.exit(1)
+
+    # ── Execute ─────────────────────────────────────────────────────────────
+    # Move first: a rename is atomic and trivially reversible, so if it fails
+    # nothing else has been touched yet.
+    print()
+    if create_target:
+        try:
+            os.makedirs(new, exist_ok=True)
+            print(f"  {green('created')} {new}")
+        except OSError as e:
+            print(f"  {red('error')} could not create {new}: {e}\n")
+            sys.exit(1)
+
+    work_dir = old_dir
+    if new_slug != old_slug:
+        try:
+            if merging:
+                new_dir.mkdir(parents=True, exist_ok=True)
+                for item in list(old_dir.iterdir()):
+                    target = new_dir / item.name
+                    if target.exists():
+                        print(f"  {yellow('skip')} {item.name} (already in target)")
+                        continue
+                    shutil.move(str(item), str(target))
+                if not any(old_dir.iterdir()):
+                    old_dir.rmdir()
+            else:
+                old_dir.rename(new_dir)
+            work_dir = new_dir
+            print(f"  {green('moved')} {old_dir.name} → {new_dir.name}")
+        except OSError as e:
+            print(f"  {red('error')} could not move project directory: {e}\n")
+            sys.exit(1)
+
+    if not args.keep_transcript_cwd:
+        n = 0
+        for t in sorted(work_dir.glob("*.jsonl")):
+            try:
+                ch, _ = rewrite_jsonl(t, "cwd", old, new, apply=True)
+                n += ch
+            except OSError as e:
+                print(f"  {red('error')} {t.name}: {e}")
+        print(f"  {green('rewrote')} {n} cwd field(s) in transcripts")
+
+    idx = work_dir / "sessions-index.json"
+    if idx.exists():
+        n = rewrite_sessions_index(idx, old, new, str(old_dir), str(new_dir), apply=True)
+        print(f"  {green('rewrote')} {n} field(s) in sessions-index.json")
+
+    status, note = rewrite_claude_json(old, new, args.merge, apply=True)
+    if status == "ok":
+        print(f"  {green('renamed')} projects key in ~/.claude.json {dim('(backed up)')}")
+    elif status == "conflict":
+        print(f"  {yellow('skipped')} ~/.claude.json — an entry for {new} already exists")
+
+    if HISTORY_FILE.exists():
+        try:
+            backup_file(HISTORY_FILE)
+            n, _ = rewrite_jsonl(HISTORY_FILE, "project", old, new, apply=True)
+            print(f"  {green('rewrote')} {n} prompt(s) in history.jsonl {dim('(backed up)')}")
+        except OSError as e:
+            print(f"  {red('error')} history.jsonl: {e}")
+
+    print(f"\n  {bold('Done.')} Resume with:  {cyan(f'cd {new} && claude --resume')}")
+    print(f"  {dim('To reverse:')} {dim(f'claude-projects relocate {new} {old} --execute')}\n")
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -690,6 +1049,24 @@ def main():
     p_hyg = sub.add_parser("hygiene", help="Session hygiene: orphans, large files, disk usage")
     p_hyg.add_argument("--dry-run", action="store_true", help="Report only, don't remove")
 
+    # relocate
+    p_reloc = sub.add_parser(
+        "relocate", aliases=["mv", "move"],
+        help="Move a project's session history to a new working directory",
+        description="Relocate session history from one working directory to another, "
+                    "so sessions started in OLD_PATH resume in NEW_PATH. "
+                    "Previews by default; pass --execute to apply.",
+    )
+    p_reloc.add_argument("old_path", help="Current project directory (where the sessions were started)")
+    p_reloc.add_argument("new_path", help="New project directory (where you want to resume)")
+    p_reloc.add_argument("--execute", action="store_true", help="Apply the changes (default is preview)")
+    p_reloc.add_argument("--keep-transcript-cwd", action="store_true",
+                         help="Leave transcripts byte-identical; only move metadata")
+    p_reloc.add_argument("--merge", action="store_true",
+                         help="Allow merging into an existing project at NEW_PATH")
+    p_reloc.add_argument("--force", action="store_true",
+                         help="Proceed even if a session looks live in this project")
+
     args = parser.parse_args()
 
     if args.command in ("list", "ls", None):
@@ -710,6 +1087,8 @@ def main():
         cmd_cleanup(args)
     elif args.command == "hygiene":
         cmd_hygiene(args)
+    elif args.command in ("relocate", "mv", "move"):
+        cmd_relocate(args)
 
 
 if __name__ == "__main__":
