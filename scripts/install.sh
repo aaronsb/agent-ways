@@ -200,6 +200,13 @@ link_path_binaries() {
       ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
     fi
   done
+  # Script tools ship from tools/ rather than bin/ (nothing to compile), but are
+  # linked the same way so they're callable from any working directory.
+  for b in claude-projects; do
+    if [[ -e "$APP_DIR/tools/$b" ]]; then
+      ln -sf "$APP_DIR/tools/$b" "$XDG_BIN/$b"
+    fi
+  done
   return 0
 }
 
