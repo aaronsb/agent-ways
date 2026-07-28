@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import time
@@ -31,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
+CLAUDE_JSON = Path.home() / ".claude.json"
+HISTORY_FILE = Path.home() / ".claude" / "history.jsonl"
 HOME = str(Path.home())
 
 def term_width():
@@ -666,9 +669,6 @@ def cmd_hygiene(args):
 # and why the true path is carried in sessions-index.json rather than decoded.
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]")
 
-CLAUDE_JSON = Path.home() / ".claude.json"
-HISTORY_FILE = Path.home() / ".claude" / "history.jsonl"
-
 # A transcript touched this recently probably belongs to a live session, which
 # appends to the file we are about to rewrite.
 LIVE_SESSION_WINDOW = 120  # seconds
@@ -695,28 +695,77 @@ def remap(value, old, new):
     return None
 
 
+class ConcurrentModification(Exception):
+    """A file changed underneath us mid-rewrite; replacing it would drop records."""
+
+
 def backup_file(path):
     """Timestamped sibling copy. Returns the backup path."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     dest = path.with_name(f"{path.name}.bak-relocate-{stamp}")
+    n = 0
+    while dest.exists():  # same-second relocations must not clobber each other
+        n += 1
+        dest = path.with_name(f"{path.name}.bak-relocate-{stamp}.{n}")
     shutil.copy2(path, dest)
     return dest
 
 
-def rewrite_jsonl(path, field, old, new, apply):
+def replace_atomic(tmp, path):
+    """Swap `tmp` into `path`, preserving mtime. Never leaves a half-written file."""
+    if path.exists():
+        # Keep mtime: project listings sort by it, and relocating is not activity.
+        shutil.copystat(path, tmp)
+    os.replace(tmp, path)
+
+
+def path_matches(value, old):
+    return isinstance(value, str) and (value == old or value.startswith(old + "/"))
+
+
+def has_nested(obj, field, old, top=True):
+    """Does `field` hold a path at/under `old` anywhere *below* the top level?
+
+    Every cwd Claude writes today is top-level, which is what makes this command
+    a targeted remap rather than a find/replace. If that ever changes, the
+    records must be reported as unhandled rather than counted as history we
+    deliberately preserved.
+    """
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if not top and k == field and path_matches(v, old):
+                return True
+            if has_nested(v, field, old, False):
+                return True
+    elif isinstance(obj, list):
+        return any(has_nested(v, field, old, False) for v in obj)
+    return False
+
+
+def rewrite_jsonl(path, field, old, new, apply, guard_concurrent=False):
     """Remap a top-level string field across a JSONL file.
 
     Lines that do not mention `old` are copied byte-for-byte, so only genuinely
-    affected records are ever re-serialized. Returns (changed, residual), where
-    residual counts lines that still mention the old path afterwards (message
-    text, file paths in tool results — content this command deliberately does
-    not touch).
+    affected records are ever re-serialized. Returns (changed, residual, nested):
+
+      residual — lines still mentioning the old path afterwards (message text,
+                 tool output), which this command deliberately leaves as record.
+      nested   — records carrying `field` below the top level. This command does
+                 not remap those, and must not count them as preserved history.
+
+    `guard_concurrent` re-checks the file just before the swap and refuses if it
+    changed, so an append from another session is never silently dropped.
     """
-    changed = residual = 0
+    changed = residual = nested = 0
     tmp = path.with_name(path.name + ".relocate-tmp")
-    out = tmp.open("w", encoding="utf-8", errors="surrogateescape") if apply else None
+    before = path.stat() if guard_concurrent else None
+    out = None
     try:
-        with path.open("r", encoding="utf-8", errors="surrogateescape") as fh:
+        if apply:
+            out = tmp.open("w", encoding="utf-8", errors="surrogateescape", newline="")
+        # newline="" both ways: no translation, so untouched lines keep their
+        # exact bytes (including CRLF) rather than being silently normalized.
+        with path.open("r", encoding="utf-8", errors="surrogateescape", newline="") as fh:
             for line in fh:
                 if old not in line:
                     if out:
@@ -726,42 +775,105 @@ def rewrite_jsonl(path, field, old, new, apply):
                     obj = json.loads(line)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     obj = None
-                if isinstance(obj, dict):
-                    mapped = remap(obj.get(field), old, new)
-                else:
-                    mapped = None
+                mapped = remap(obj.get(field), old, new) if isinstance(obj, dict) else None
                 if mapped is None:
                     residual += 1
+                    if obj is not None and has_nested(obj, field, old):
+                        nested += 1
                     if out:
                         out.write(line)
                     continue
                 obj[field] = mapped
                 changed += 1
+                if has_nested(obj, field, old):
+                    nested += 1
+                term = "\r\n" if line.endswith("\r\n") else ("\n" if line.endswith("\n") else "")
                 rendered = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
                 if old in rendered:
                     residual += 1
                 if out:
-                    out.write(rendered + "\n")
-    except Exception:
+                    out.write(rendered + term)
+        if out:
+            # Durable before the swap: os.replace is atomic, but without fsync a
+            # crash can leave the new name pointing at unwritten blocks — and
+            # transcripts are the one thing here with no backup.
+            out.flush()
+            os.fsync(out.fileno())
+            out.close()
+            out = None
+            if not changed:
+                tmp.unlink(missing_ok=True)          # nothing to swap in
+            else:
+                if guard_concurrent:
+                    now = path.stat()
+                    if (now.st_size, now.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+                        raise ConcurrentModification(str(path))
+                replace_atomic(tmp, path)
+    except BaseException:
         if out:
             out.close()
         tmp.unlink(missing_ok=True)
         raise
-    if out:
-        out.close()
-        # Keep mtime: project listings sort by it, and relocating is not activity.
-        shutil.copystat(path, tmp)
-        os.replace(tmp, path)
-    return changed, residual
+    return changed, residual, nested
+
+
+def write_json_atomic(path, data, indent):
+    """Serialize to a temp sibling, fsync, then swap. Never truncates in place."""
+    tmp = path.with_name(path.name + ".relocate-tmp")
+    sep = None if indent else (",", ":")
+    try:
+        with tmp.open("w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=indent, separators=sep, ensure_ascii=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        replace_atomic(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def merge_sessions_index(src, dst):
+    """Union two indexes by sessionId, source winning.
+
+    A merge that moved transcripts but dropped their index entries would leave
+    them looking orphaned — and `hygiene` offers to delete transcripts missing
+    from a non-empty index.
+    """
+    def load(p):
+        try:
+            d = json.loads(p.read_text())
+            return d if isinstance(d, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    src_data, dst_data = load(src), load(dst)
+    by_id, ordered = {}, []
+    for entry in list(dst_data.get("entries", [])) + list(src_data.get("entries", [])):
+        if not isinstance(entry, dict):
+            continue
+        sid = entry.get("sessionId")
+        key = sid if sid else id(entry)
+        if key not in by_id:
+            ordered.append(key)
+        by_id[key] = entry          # source is applied second, so it wins
+    merged = dict(dst_data)
+    merged["entries"] = [by_id[k] for k in ordered]
+    raw = dst.read_text() if dst.exists() else ""
+    write_json_atomic(dst, merged, 2 if "\n  " in raw else None)
+    return len(merged["entries"])
 
 
 def rewrite_sessions_index(idx, old, new, old_dir, new_dir, apply):
-    """Remap projectPath / cwd / originalPath, plus fullPath (which embeds the slug)."""
+    """Remap projectPath / cwd / originalPath, plus fullPath (which embeds the slug).
+
+    Returns (status, n, note): status is "ok", "unreadable", or "failed" — an
+    index we could not read must not be reported as a successful rewrite.
+    """
     try:
         raw = idx.read_text()
         data = json.loads(raw)
-    except (OSError, json.JSONDecodeError):
-        return 0
+    except (OSError, json.JSONDecodeError) as e:
+        return "unreadable", 0, str(e)
 
     n = 0
     mapped = remap(data.get("originalPath"), old, new)
@@ -782,10 +894,12 @@ def rewrite_sessions_index(idx, old, new, old_dir, new_dir, apply):
             n += 1
 
     if apply and n:
-        indent = 2 if "\n  " in raw else None
-        sep = None if indent else (",", ":")
-        idx.write_text(json.dumps(data, indent=indent, separators=sep, ensure_ascii=False))
-    return n
+        try:
+            backup_file(idx)
+            write_json_atomic(idx, data, 2 if "\n  " in raw else None)
+        except OSError as e:
+            return "failed", n, str(e)
+    return "ok", n, None
 
 
 def rewrite_claude_json(old, new, merge, apply):
@@ -796,6 +910,8 @@ def rewrite_claude_json(old, new, merge, apply):
     if not CLAUDE_JSON.exists():
         return "missing", None
     try:
+        # Stat before the read so the concurrency check below brackets it.
+        before = CLAUDE_JSON.stat()
         data = json.loads(CLAUDE_JSON.read_text())
     except (OSError, json.JSONDecodeError) as e:
         return "missing", str(e)
@@ -818,10 +934,13 @@ def rewrite_claude_json(old, new, merge, apply):
     data["projects"] = rebuilt
 
     if apply:
+        # Shared file: another session may have rewritten it since we read it.
+        # Replacing then would silently drop that session's changes.
+        now = CLAUDE_JSON.stat()
+        if (now.st_size, now.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+            return "changed", None
         backup_file(CLAUDE_JSON)
-        tmp = CLAUDE_JSON.with_name(CLAUDE_JSON.name + ".relocate-tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-        os.replace(tmp, CLAUDE_JSON)
+        write_json_atomic(CLAUDE_JSON, data, 2)
     return "ok", None
 
 
@@ -893,23 +1012,32 @@ def cmd_relocate(args):
         print(f"  {dim('directory')}   rename → {new_dir.name}")
 
     # Transcripts
-    total_changed = total_residual = 0
+    total_changed = total_residual = total_nested = 0
     if args.keep_transcript_cwd:
         print(f"  {dim('transcripts')} {dim('skipped (--keep-transcript-cwd)')}")
     else:
         for t in transcripts:
-            ch, res = rewrite_jsonl(t, "cwd", old, new, apply=False)
+            ch, res, nst = rewrite_jsonl(t, "cwd", old, new, apply=False)
             total_changed += ch
             total_residual += res
+            total_nested += nst
         print(f"  {dim('transcripts')} {total_changed} cwd field(s) across "
               f"{len(transcripts)} file(s)")
 
     # sessions-index
     idx = old_dir / "sessions-index.json"
-    idx_n = rewrite_sessions_index(idx, old, new, str(old_dir), str(new_dir), apply=False) \
-        if idx.exists() else 0
-    print(f"  {dim('index')}       {idx_n} field(s) in sessions-index.json"
-          if idx.exists() else f"  {dim('index')}       {dim('none')}")
+    if idx.exists():
+        idx_status, idx_n, idx_note = rewrite_sessions_index(
+            idx, old, new, str(old_dir), str(new_dir), apply=False)
+        if idx_status == "ok":
+            print(f"  {dim('index')}       {idx_n} field(s) in sessions-index.json")
+        else:
+            warnings.append(f"sessions-index.json is unreadable ({idx_note}) — "
+                            f"it will be left alone; Claude Code rebuilds it")
+            print(f"  {dim('index')}       {yellow('unreadable')}")
+    else:
+        idx_status = "absent"
+        print(f"  {dim('index')}       {dim('none')}")
 
     # ~/.claude.json
     cj_status, cj_note = rewrite_claude_json(old, new, args.merge, apply=False)
@@ -924,13 +1052,18 @@ def cmd_relocate(args):
     # history.jsonl
     hist_n = 0
     if HISTORY_FILE.exists():
-        hist_n, _ = rewrite_jsonl(HISTORY_FILE, "project", old, new, apply=False)
+        hist_n, _, _ = rewrite_jsonl(HISTORY_FILE, "project", old, new, apply=False)
     print(f"  {dim('history')}     {hist_n} prompt(s) in history.jsonl")
 
     if total_residual:
         print(f"\n  {dim('note')} {total_residual} line(s) still mention the old path in "
               f"message text or tool output.")
         print(f"       {dim('Those are a record of what happened and are left as-is.')}")
+
+    if total_nested:
+        warnings.append(f"{total_nested} record(s) carry a nested cwd this command does not "
+                        f"remap — Claude's transcript format may have changed; "
+                        f"re-check before relying on the result")
 
     for w in warnings:
         print(f"\n  {yellow('warning')} {w}")
@@ -946,11 +1079,18 @@ def cmd_relocate(args):
     if merging and not args.merge:
         print(f"\n  {red('Refusing to overwrite an existing project directory.')}\n")
         sys.exit(1)
+    if cj_status == "conflict":
+        # Block like the directory conflict does. Proceeding would move the
+        # history while leaving the old ~/.claude.json key pointing at nothing.
+        print(f"\n  {red('Refusing:')} ~/.claude.json already has an entry for {new}.")
+        print(f"  {dim('Pass --merge to supersede it with the relocated project.')}\n")
+        sys.exit(1)
 
     # ── Execute ─────────────────────────────────────────────────────────────
     # Move first: a rename is atomic and trivially reversible, so if it fails
     # nothing else has been touched yet.
     print()
+    failures = []
     if create_target:
         try:
             os.makedirs(new, exist_ok=True)
@@ -964,12 +1104,20 @@ def cmd_relocate(args):
         try:
             if merging:
                 new_dir.mkdir(parents=True, exist_ok=True)
-                for item in list(old_dir.iterdir()):
+                pending_idx = None
+                for item in sorted(old_dir.iterdir()):
                     target = new_dir / item.name
+                    if item.name == "sessions-index.json" and target.exists():
+                        pending_idx = item   # unioned below, never dropped
+                        continue
                     if target.exists():
                         print(f"  {yellow('skip')} {item.name} (already in target)")
                         continue
                     shutil.move(str(item), str(target))
+                if pending_idx is not None:
+                    total = merge_sessions_index(pending_idx, new_dir / "sessions-index.json")
+                    pending_idx.unlink()
+                    print(f"  {green('merged')} sessions-index.json ({total} entries)")
                 if not any(old_dir.iterdir()):
                     old_dir.rmdir()
             else:
@@ -984,33 +1132,61 @@ def cmd_relocate(args):
         n = 0
         for t in sorted(work_dir.glob("*.jsonl")):
             try:
-                ch, _ = rewrite_jsonl(t, "cwd", old, new, apply=True)
+                ch, _, _ = rewrite_jsonl(t, "cwd", old, new, apply=True)
                 n += ch
-            except OSError as e:
+            except Exception as e:  # OSError, UnicodeEncodeError, ConcurrentModification
+                failures.append(f"{t.name}: {type(e).__name__}: {e}")
                 print(f"  {red('error')} {t.name}: {e}")
         print(f"  {green('rewrote')} {n} cwd field(s) in transcripts")
 
     idx = work_dir / "sessions-index.json"
     if idx.exists():
-        n = rewrite_sessions_index(idx, old, new, str(old_dir), str(new_dir), apply=True)
-        print(f"  {green('rewrote')} {n} field(s) in sessions-index.json")
+        status, n, note = rewrite_sessions_index(
+            idx, old, new, str(old_dir), str(new_dir), apply=True)
+        if status == "ok":
+            print(f"  {green('rewrote')} {n} field(s) in sessions-index.json")
+        else:
+            failures.append(f"sessions-index.json: {note}")
+            print(f"  {red('error')} sessions-index.json: {note}")
 
     status, note = rewrite_claude_json(old, new, args.merge, apply=True)
     if status == "ok":
         print(f"  {green('renamed')} projects key in ~/.claude.json {dim('(backed up)')}")
-    elif status == "conflict":
-        print(f"  {yellow('skipped')} ~/.claude.json — an entry for {new} already exists")
+    elif status == "changed":
+        failures.append("~/.claude.json changed while relocating — left untouched")
+        print(f"  {red('error')} ~/.claude.json changed underneath us — left untouched")
+    elif status == "missing" and note:
+        failures.append(f"~/.claude.json: {note}")
+        print(f"  {red('error')} ~/.claude.json: {note}")
 
     if HISTORY_FILE.exists():
         try:
             backup_file(HISTORY_FILE)
-            n, _ = rewrite_jsonl(HISTORY_FILE, "project", old, new, apply=True)
+            n, _, _ = rewrite_jsonl(HISTORY_FILE, "project", old, new,
+                                    apply=True, guard_concurrent=True)
             print(f"  {green('rewrote')} {n} prompt(s) in history.jsonl {dim('(backed up)')}")
-        except OSError as e:
+        except ConcurrentModification:
+            failures.append("history.jsonl was appended to while relocating — left untouched")
+            print(f"  {red('error')} history.jsonl changed underneath us — left untouched")
+        except Exception as e:
+            failures.append(f"history.jsonl: {type(e).__name__}: {e}")
             print(f"  {red('error')} history.jsonl: {e}")
 
-    print(f"\n  {bold('Done.')} Resume with:  {cyan(f'cd {new} && claude --resume')}")
-    print(f"  {dim('To reverse:')} {dim(f'claude-projects relocate {new} {old} --execute')}\n")
+    if failures:
+        print(f"\n  {red(bold('Relocation incomplete'))} — {len(failures)} step(s) failed:")
+        for f in failures:
+            print(f"    {red('·')} {f}")
+        print(f"\n  {dim('The project directory has already moved. Re-run the same command')}")
+        print(f"  {dim('to retry the remaining steps; completed steps are no-ops.')}\n")
+        sys.exit(1)
+
+    print(f"\n  {bold('Done.')} Resume with:  "
+          f"{cyan('cd ' + shlex.quote(new) + ' && claude --resume')}")
+    if merging:
+        print(f"  {dim('Merged into an existing project — reversing is not a single command.')}\n")
+    else:
+        print(f"  {dim('To reverse:')} "
+              f"{dim('claude-projects relocate ' + shlex.quote(new) + ' ' + shlex.quote(old) + ' --execute')}\n")
 
 
 # ── Main ────────────────────────────────────────────────────────────────────
