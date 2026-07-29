@@ -944,6 +944,118 @@ def rewrite_claude_json(old, new, merge, apply):
     return "ok", None
 
 
+# Records Claude writes to track session state rather than conversation. A file
+# holding nothing but these is a sidecar, not history.
+STATE_ONLY_TYPES = {
+    "last-prompt", "ai-title", "mode", "permission-mode",
+    "bridge-session", "agent-name", "summary",
+}
+
+
+def state_only(path):
+    """True only when every record is a recognized session-state record.
+
+    An allowlist, not a denylist: an unparseable line or an unfamiliar type
+    returns False, because the only caller uses this to decide a deletion. A
+    denylist ("does it contain user/assistant?") would call an unreadable file
+    safe to delete, which is exactly backwards.
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="surrogateescape") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    return False
+                if not isinstance(obj, dict) or obj.get("type") not in STATE_ONLY_TYPES:
+                    return False
+    except OSError:
+        return False
+    return True
+
+
+def superseded_remnant(src, dst):
+    """Is `src` a leftover whose real content now lives at `dst`?
+
+    Relocating while a session is live leaves one behind: the session writes its
+    state records (mode, ai-title, last-prompt…) after the move, recreating the
+    old path. Such a file is only safe to drop when its counterpart is strictly
+    larger *and* it holds nothing but session state — otherwise it is history.
+    """
+    try:
+        if not dst.is_file() or src.stat().st_size >= dst.stat().st_size:
+            return False
+    except OSError:
+        return False
+    return state_only(src)
+
+
+def remove_if_unchanged(path, size):
+    """Unlink only if the file is still exactly `size` bytes.
+
+    Re-checked immediately before unlinking rather than trusted from the earlier
+    scan, so a session that resumed writing in between keeps its transcript.
+    """
+    try:
+        if path.stat().st_size != size:
+            return "changed"
+        path.unlink()
+        return "removed"
+    except OSError as e:
+        return str(e)
+
+
+def verify_move(old_dir, work_dir, moved, failures):
+    """Confirm this relocation landed, and account for anything left behind.
+
+    Deliberately scoped to the files this command moved and the directory it
+    moved them from — it never scans other projects.
+    """
+    missing = [n for n in moved if not (work_dir / n).exists()]
+    if missing:
+        failures.append(f"{len(missing)} transcript(s) did not arrive: "
+                        + ", ".join(sorted(missing)[:3]))
+        print(f"  {red('error')} {len(missing)} transcript(s) missing from the target")
+
+    if not old_dir.exists() or old_dir == work_dir:
+        return
+
+    # The old directory outlived the move. Anything here is either a remnant a
+    # live session recreated, or something we never owned — report, don't guess.
+    swept, kept = 0, []
+    for item in sorted(old_dir.iterdir()):
+        if item.is_dir():
+            try:
+                item.rmdir()          # only succeeds when already empty
+            except OSError:
+                kept.append(item.name)
+            continue
+        if item.name in moved and superseded_remnant(item, work_dir / item.name):
+            result = remove_if_unchanged(item, item.stat().st_size)
+            if result == "removed":
+                swept += 1
+            else:
+                kept.append(f"{item.name} ({result})")
+        else:
+            kept.append(item.name)
+
+    if swept:
+        print(f"  {green('swept')} {swept} superseded remnant(s) from {old_dir.name}")
+    if kept:
+        print(f"  {yellow('left behind')} {len(kept)} item(s) in {old_dir.name}:")
+        for k in kept[:5]:
+            print(f"    {dim(k)}")
+        if len(kept) > 5:
+            print(f"    {dim(f'… and {len(kept) - 5} more')}")
+    try:
+        old_dir.rmdir()
+        print(f"  {green('removed')} empty {old_dir.name}")
+    except OSError:
+        pass
+
+
 def cmd_relocate(args):
     """Move a project's session history from one working directory to another."""
     apply = args.execute
@@ -1099,6 +1211,7 @@ def cmd_relocate(args):
             print(f"  {red('error')} could not create {new}: {e}\n")
             sys.exit(1)
 
+    moved = {t.name for t in transcripts}
     work_dir = old_dir
     if new_slug != old_slug:
         try:
@@ -1111,7 +1224,10 @@ def cmd_relocate(args):
                         pending_idx = item   # unioned below, never dropped
                         continue
                     if target.exists():
-                        print(f"  {yellow('skip')} {item.name} (already in target)")
+                        # A name collision is usually a remnant of an earlier
+                        # relocation of this same session; verify_move sweeps it.
+                        if not superseded_remnant(item, target):
+                            print(f"  {yellow('skip')} {item.name} (already in target)")
                         continue
                     shutil.move(str(item), str(target))
                 if pending_idx is not None:
@@ -1171,6 +1287,8 @@ def cmd_relocate(args):
         except Exception as e:
             failures.append(f"history.jsonl: {type(e).__name__}: {e}")
             print(f"  {red('error')} history.jsonl: {e}")
+
+    verify_move(old_dir, work_dir, moved, failures)
 
     if failures:
         print(f"\n  {red(bold('Relocation incomplete'))} — {len(failures)} step(s) failed:")
