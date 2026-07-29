@@ -944,11 +944,19 @@ def rewrite_claude_json(old, new, merge, apply):
     return "ok", None
 
 
-# Records Claude writes to track session state rather than conversation. A file
-# holding nothing but these is a sidecar, not history.
+# Records Claude writes to track session state rather than conversation, each
+# one regenerated on the next session. A file holding nothing but these is a
+# sidecar, not history.
+#
+# Every entry must be *regenerable*, because a remnant is a divergent tail, not
+# a duplicate: its records were written after the move, so none of them exist in
+# the counterpart. Sweeping always discards a fork, which is only acceptable
+# when nothing is lost. "summary" was in this set and is not regenerable — it
+# carries compaction prose and the leafUuid that --resume reads — and it occurs
+# zero times across this corpus, unlike the six below (74–8136 occurrences).
 STATE_ONLY_TYPES = {
     "last-prompt", "ai-title", "mode", "permission-mode",
-    "bridge-session", "agent-name", "summary",
+    "bridge-session", "agent-name",
 }
 
 
@@ -977,29 +985,39 @@ def state_only(path):
 
 
 def superseded_remnant(src, dst):
-    """Is `src` a leftover whose real content now lives at `dst`?
+    """Size of `src` if it is a leftover whose content now lives at `dst`, else None.
 
     Relocating while a session is live leaves one behind: the session writes its
     state records (mode, ai-title, last-prompt…) after the move, recreating the
     old path. Such a file is only safe to drop when its counterpart is strictly
-    larger *and* it holds nothing but session state — otherwise it is history.
+    larger *and* it holds nothing but regenerable session state.
+
+    Returns a (size, mtime_ns) stamp taken *before* the contents were read, so
+    the caller can tell whether the file changed while we were deciding. Size
+    alone would miss a same-length rewrite. Callers must test `is not None`.
     """
     try:
-        if not dst.is_file() or src.stat().st_size >= dst.stat().st_size:
-            return False
+        if src.is_symlink() or not dst.is_file():
+            return None
+        st = src.stat()                    # stamped before state_only reads it
+        if st.st_size >= dst.stat().st_size:
+            return None
     except OSError:
-        return False
-    return state_only(src)
+        return None
+    return (st.st_size, st.st_mtime_ns) if state_only(src) else None
 
 
-def remove_if_unchanged(path, size):
-    """Unlink only if the file is still exactly `size` bytes.
+def remove_if_unchanged(path, stamp):
+    """Unlink only if the file still matches `stamp` — its (size, mtime_ns).
 
-    Re-checked immediately before unlinking rather than trusted from the earlier
-    scan, so a session that resumed writing in between keeps its transcript.
+    `stamp` must be from *before* the content check that judged this file
+    removable, so that a session writing during that check is caught. A stamp
+    taken afterwards compares the post-race state to itself and protects
+    nothing.
     """
     try:
-        if path.stat().st_size != size:
+        st = path.stat()
+        if (st.st_size, st.st_mtime_ns) != stamp:
             return "changed"
         path.unlink()
         return "removed"
@@ -1024,22 +1042,25 @@ def verify_move(old_dir, work_dir, moved, failures):
 
     # The old directory outlived the move. Anything here is either a remnant a
     # live session recreated, or something we never owned — report, don't guess.
-    swept, kept = 0, []
+    swept, kept, stranded = 0, [], []
     for item in sorted(old_dir.iterdir()):
         if item.is_dir():
             try:
                 item.rmdir()          # only succeeds when already empty
             except OSError:
-                kept.append(item.name)
+                kept.append(item.name + "/")
             continue
-        if item.name in moved and superseded_remnant(item, work_dir / item.name):
-            result = remove_if_unchanged(item, item.stat().st_size)
+        stamp = superseded_remnant(item, work_dir / item.name) if item.name in moved else None
+        if stamp is not None:
+            result = remove_if_unchanged(item, stamp)
             if result == "removed":
                 swept += 1
-            else:
-                kept.append(f"{item.name} ({result})")
+                continue
+            kept.append(f"{item.name} ({result})")
         else:
             kept.append(item.name)
+        if item.suffix == ".jsonl":
+            stranded.append(item.name)
 
     if swept:
         print(f"  {green('swept')} {swept} superseded remnant(s) from {old_dir.name}")
@@ -1049,6 +1070,11 @@ def verify_move(old_dir, work_dir, moved, failures):
             print(f"    {dim(k)}")
         if len(kept) > 5:
             print(f"    {dim(f'… and {len(kept) - 5} more')}")
+    if stranded:
+        # A transcript still under the old slug did not relocate. That is a
+        # failed move, not a note — the run must not report success.
+        failures.append(f"{len(stranded)} transcript(s) stranded in {old_dir.name}: "
+                        + ", ".join(sorted(stranded)[:3]))
     try:
         old_dir.rmdir()
         print(f"  {green('removed')} empty {old_dir.name}")
@@ -1225,9 +1251,16 @@ def cmd_relocate(args):
                         continue
                     if target.exists():
                         # A name collision is usually a remnant of an earlier
-                        # relocation of this same session; verify_move sweeps it.
-                        if not superseded_remnant(item, target):
+                        # relocation of this same session. Decide it here rather
+                        # than deferring: the cwd rewrite below can shrink the
+                        # counterpart, so a later re-check could disagree.
+                        stamp = superseded_remnant(item, target)
+                        if stamp is None:
                             print(f"  {yellow('skip')} {item.name} (already in target)")
+                            continue
+                        result = remove_if_unchanged(item, stamp)
+                        if result != "removed":
+                            print(f"  {yellow('kept')} {item.name} ({result})")
                         continue
                     shutil.move(str(item), str(target))
                 if pending_idx is not None:
