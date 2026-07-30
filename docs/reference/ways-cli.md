@@ -202,15 +202,20 @@ ways template itops/alerts -d "alerting runbooks" --global
 
 **Run from:** Project directory to scan all project ways. Pass a specific file path to lint just one file. Add `--global` to lint global ways instead.
 
-**Tells you:** Validation errors and warnings per file against the frontmatter schema. `--fix` auto-corrects multi-line YAML and missing check sections. `--schema` prints the full frontmatter schema reference. `--check` exits non-zero for CI use.
+**Tells you:** Validation errors and warnings per file against the frontmatter schema. `--schema` prints the full frontmatter schema reference. `--check` exits non-zero for CI use.
+
+`--fix` auto-corrects what is fixable, and **takes its scope from `path`, not from the flag** — the same way `eslint --fix` does. Without a path it refuses rather than rewriting every way in the resolved corpus; pass `--all` when that is what you actually want. Each correction is disclosed on its own `FIXED:` line, and fixes are writes, so review them with `git diff`.
 
 ```
 ways lint                                          # scan project ways
 ways lint ~/.claude/hooks/ways/meta/knowledge/knowledge.md  # single file
-ways lint --fix                                    # auto-correct what's fixable
+ways lint <path> --fix                             # auto-correct within that path
+ways lint --fix --all                              # auto-correct the whole resolved corpus
 ways lint --check                                  # CI mode — non-zero exit on errors
 ways lint --schema                                 # show the frontmatter schema
 ```
+
+Exit codes: `0` clean, `1` errors found (with `--check`), `2` the invocation was wrong — kept distinct so a caller can tell "the corpus has problems" from "you used the flag wrong".
 
 ---
 

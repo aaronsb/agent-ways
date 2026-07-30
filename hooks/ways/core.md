@@ -54,6 +54,10 @@ The ledger is not the whole method, and recording a decision does not make it tr
 
 All file output (commit messages, comments, documentation, PR descriptions) must be in English regardless of interface language setting.
 
+## Line handling
+
+Write markdown prose one line per paragraph or list item. Don't hard-wrap to a column — a renderer reflows paragraphs, so wrapping buys nothing and costs edit-ability: an `Edit` then has to reproduce interior line breaks exactly, and a three-word change reflows the paragraph so the diff stops being semantic. Wide content (tables, long links, code) is allowed to be wide. This is about markdown; in plain text the wrap *is* the layout, and commit bodies keep the 72-column convention.
+
 ## Attribution
 
 Do NOT append the Claude Code attribution to commits.

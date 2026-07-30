@@ -203,6 +203,25 @@ A new `ways tune` subcommand mirrors `attend tune`. It surveys recent sessions v
 
 Tuning parameters come from real session distributions, not guesses — the same discipline ADR-119 used when it sized attend's parameters to "Claude's actual turn cadence, not biological neuron kinetics."
 
+## Amendment — 2026-07-29: postcheck state handoff to its own macro
+
+Decision 5 describes postcheck evaluation as "metric-predicate style — cheap, deterministic, side-effect-free." That clause bundles three properties, and one of them is narrowed here: a postcheck may write **session-scoped state for the sole purpose of handing a finding to its own way's `macro.sh`**. Cheap and deterministic are unchanged, and the reason they survive is spelled out in constraint 4 below.
+
+**Why the channel is needed at all.** `check-post.sh` invokes each postcheck with `>/dev/null 2>&1` and reads only the exit code — ADR-135's amendment already recorded the consequence: "a postcheck's stdout is discarded... the content injected on a fire is the way's own body." `macro.sh` cannot close the gap either: `show/helpers.rs` runs it with no stdin and no arguments, so it never sees the tool input. `show/mod.rs` applies no trigger condition to macro execution, so a macro *does* run on a postcheck-triggered fire — the ordering (postcheck, then gate, then macro) is guaranteed by `check-post.sh`. A session-scoped stash is therefore the only channel by which a reactive way can name the file it is reacting to. Without it, every reactive way is limited to a static body, which is adequate for a way whose finding *is* its body (over-build names a replacement) and inadequate for one whose finding is a location.
+
+**Constraints, so this does not become a general escape hatch:**
+
+1. **Session-scoped only**, under `sessions-root.sh`. Not project files, not global state, not anything a later session or another agent inherits.
+2. **Own-way only.** A postcheck writes state that its own way's macro consumes. Reading or writing another way's state is out of scope and would reintroduce the coupling Decision 5's separation was protecting.
+3. **Bounded.** State is a set with a cap and a TTL, not an append-only log — because the inward gate may deny the fire that would have consumed an entry, so unconsumed entries are the normal case rather than an error.
+4. **Never an input to the predicate.** The exit code stays a pure function of the observed post-state. State flows one way — postcheck writes, macro reads — so the *predicate* remains deterministic and re-runnable, which is the property the original clause was protecting. A postcheck that consulted its own prior state to decide whether to fire would be a genuine violation, not a narrowing.
+
+**A set, not a single slot.** `refire` keys on the way, not on the artifact the way is reacting to. With a single overwritten slot, a permissive cadence re-fires about a file the operator already declined to act on, and a gate denial leaves a stale path that a later, unrelated fire would name incorrectly. A seen-set addresses both: the macro names what has not yet been surfaced, and the way stays quiet about what has.
+
+Unchanged: reactive requests are not privileged over predictive matches, and both continue through the same inward gate.
+
+First application is the markdown line-handling way (#415), whose postcheck detects hard-wrapped prose in freshly written markdown and whose macro names the file and the remediation command.
+
 ## Consequences
 
 ### Positive
