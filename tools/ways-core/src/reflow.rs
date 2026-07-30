@@ -174,8 +174,46 @@ pub fn has_hard_break(line: &str) -> bool {
 const EXTENSION_DELIMITERS: &[&str] = &[":::", "!!!", "???", "{%", "%}", "+++", "<%", "%>"];
 
 fn is_extension_delimiter(line: &str) -> bool {
-    let t = line.trim_start();
-    EXTENSION_DELIMITERS.iter().any(|d| t.starts_with(d))
+    // Look through blockquote markers, as every other predicate here does
+    // (`is_mid_phrase_break`, and the list/label tests in `reflow`). Without
+    // this, `> :::note` reads as ordinary prose and gets welded — and neither
+    // check downstream can object, because a CommonMark parser sees a directive
+    // as paragraph text too. This guard is the only thing standing there.
+    // Strip repeatedly so nested quoting (`> > :::`) is covered.
+    let mut t = line.trim_start();
+    loop {
+        if EXTENSION_DELIMITERS.iter().any(|d| t.starts_with(d)) {
+            return true;
+        }
+        if !t.starts_with('>') {
+            return false;
+        }
+        t = quote_body(t).trim_start();
+    }
+}
+
+/// The parser options, in one place.
+///
+/// The classifier and the post-condition must agree about what the document
+/// *is*; if these drift apart, one decides a construct is opaque while the other
+/// does not, and the layering silently stops meaning anything. That is the one
+/// coupling in this design that must not break, so it has exactly one source.
+///
+/// `ENABLE_MATH` and `ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS` are here because
+/// `$$…$$` and `+++…+++` bodies are content where a line break carries meaning —
+/// joining LaTeX lines can move a `%` comment and swallow what follows. Their
+/// delimiters were already guarded by hand; telling the parser about them covers
+/// the bodies too, which is this module's whole thesis applied once more.
+fn md_options() -> pulldown_cmark::Options {
+    use pulldown_cmark::Options;
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    opts.insert(Options::ENABLE_MATH);
+    opts.insert(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS);
+    opts
 }
 
 /// Lines the parser says are inside a construct where breaks are structural or
@@ -199,6 +237,13 @@ fn parser_opaque_map(src: &str, line_count: usize) -> Vec<bool> {
     opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
 
     let mark = |range: std::ops::Range<usize>, opaque: &mut Vec<bool>| {
+        // GFM synthesizes zero-length events (empty trailing table cells occur
+        // in real files here). `lo..=hi` would be `n..=n-1`, which only happens
+        // to be safe because RangeInclusive degenerates it to empty. Skip
+        // explicitly rather than rely on that.
+        if range.is_empty() {
+            return;
+        }
         let lo = line_of(range.start);
         let hi = line_of(range.end.saturating_sub(1)).min(line_count.saturating_sub(1));
         for flag in &mut opaque[lo..=hi] {
@@ -206,7 +251,7 @@ fn parser_opaque_map(src: &str, line_count: usize) -> Vec<bool> {
         }
     };
 
-    for (ev, range) in Parser::new_ext(src, opts).into_offset_iter() {
+    for (ev, range) in Parser::new_ext(src, md_options()).into_offset_iter() {
         // Html and Rule are standalone events with no matching End — mark their
         // own range and leave `depth` alone, or everything after the first HTML
         // comment stays opaque for the rest of the document.
@@ -462,6 +507,12 @@ pub fn reflow_with_stats(lines: &[&str]) -> (Vec<String>, usize) {
             if block.last().is_some_and(|l| l.trim_end_matches(['\r', '\n']).ends_with("  ")) {
                 line.push_str("  ");
             }
+            // Likewise the `\r` of a CRLF file. Rewriting only the repaired
+            // paragraphs would otherwise leave mixed endings behind, and the
+            // next normalization churns the whole file.
+            if block.last().is_some_and(|l| l.ends_with('\r')) {
+                line.push('\r');
+            }
             out.push(line);
             block.clear();
         };
@@ -611,19 +662,13 @@ pub fn repair(lines: &[&str], max_passes: usize) -> RepairOutcome {
 /// same thing inside a paragraph. So any difference in this fingerprint means the
 /// transform altered the document's structure.
 fn structure_fingerprint(src: &str) -> Vec<String> {
-    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_TABLES);
-    opts.insert(Options::ENABLE_FOOTNOTES);
-    opts.insert(Options::ENABLE_STRIKETHROUGH);
-    opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
     let mut out: Vec<String> = Vec::new();
     let mut text = String::new();
     let mut in_code = false;
 
-    for ev in Parser::new_ext(src, opts) {
+    for ev in Parser::new_ext(src, md_options()) {
         if matches!(ev, Event::Start(Tag::CodeBlock(_))) {
             in_code = true;
         }
@@ -639,7 +684,22 @@ fn structure_fingerprint(src: &str) -> Vec<String> {
             }
         }
         match ev {
-            Event::Text(t) | Event::Code(t) => {
+            // Inline code is its own token, not prose. Folding it into the
+            // whitespace-collapsed text buffer would blind the post-condition to
+            // a span appearing, vanishing, or having its interior collapsed —
+            // and this layer's value is precisely that it does not depend on
+            // enumerating constructs correctly.
+            Event::Code(t) => {
+                if !text.trim().is_empty() {
+                    out.push(format!(
+                        "TEXT:{}",
+                        text.split_whitespace().collect::<Vec<_>>().join(" ")
+                    ));
+                    text.clear();
+                }
+                out.push(format!("SPAN:{t:?}"));
+            }
+            Event::Text(t) => {
                 text.push(' ');
                 text.push_str(&t);
             }
@@ -948,6 +1008,37 @@ and one more line so the window still clears the minimum run length here.";
     }
 
     #[test]
+    fn extension_delimiters_are_seen_through_blockquote_markers() {
+        // Review defect 1: the guard did not look through `>`, so `> :::note`
+        // read as prose and welded. Neither downstream check can object — a
+        // CommonMark parser sees a directive as paragraph text too — so this
+        // guard is the only protection this class has.
+        let src = "\
+> :::note
+> some directive body text long enough to sit inside the detect band ok
+> and continuing here mid-phrase so the mid-break count reaches its floor
+> and a third body line so the window reaches the minimum run length now
+> :::";
+        let out = round_trip(src);
+        assert_eq!(out.lines().next().unwrap(), "> :::note", "welded: {out:?}");
+        assert_eq!(out.lines().last().unwrap(), "> :::", "welded: {out:?}");
+    }
+
+    #[test]
+    fn crlf_line_endings_survive_a_repair() {
+        // Review defect 2: `trim()` stripped the `\r` off the last joined line,
+        // leaving a CRLF file with mixed endings — invisible to both the token
+        // and structural checks, and whole-file churn at the next normalization.
+        let src = "In 1.0 the projection is thin, not the app itself, and long enough to wrap\r\n\
+across lines here so that the detector actually fires on this paragraph ok\r\n\
+and a third line so the run reaches the minimum length that it requires.\r\n";
+        let out = round_trip(src);
+        for line in out.split('\n').filter(|l| !l.is_empty()) {
+            assert!(line.ends_with('\r'), "lost CRLF on: {line:?}");
+        }
+    }
+
+    #[test]
     fn extension_delimiters_are_not_joined() {
         // `:::` is a MkDocs/Docusaurus directive — invisible to CommonMark, so no
         // parser will protect it. This is the named residue the guard list covers.
@@ -1092,6 +1183,15 @@ everything else the app ships stays where it is.";
         let before = "In 1.0 the projection is thin, not the app\nitself, and source lives elsewhere.";
         let joined = "In 1.0 the projection is thin, not the app itself, and source lives elsewhere.";
         assert!(structure_preserved(before, joined));
+    }
+
+    #[test]
+    fn post_condition_sees_an_inline_code_span_change() {
+        // Advisory 1: folding Event::Code into the prose buffer made the check
+        // blind to a span appearing or vanishing. Latent rather than live, but
+        // this layer's value is not depending on enumeration being right.
+        assert!(!structure_preserved("a `b` c", "a b c"));
+        assert!(structure_preserved("a `b` c", "a  `b`   c"));
     }
 
     #[test]
