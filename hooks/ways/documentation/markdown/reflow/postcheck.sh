@@ -71,9 +71,18 @@ printf '%s\t%s\n' "$(date +%s)" "$path" >>"$PENDING"
 
 # Bound both files. Unconsumed entries are normal, not exceptional: the inward
 # gate may deny the fire this request is asking for.
+#
+# The temp name carries $$: parallel Edit or Task calls mean parallel PostToolUse
+# hooks, and a shared temp name let two trimmers truncate the same file and then
+# `mv` a partial result over the state — which emptied the seen-set outright, so
+# the way re-nagged about every file the operator had already declined. The
+# rename is atomic, so the worst case is now losing an append that lands between
+# the read and the rename: an entry that could re-fire once, not wiped state.
 for f in "$SEEN" "$PENDING"; do
   if [[ -f "$f" ]] && (( $(wc -l <"$f") > 200 )); then
-    tail -n 100 "$f" >"${f}.trim" && mv -f "${f}.trim" "$f"
+    tmp="${f}.trim.$$"
+    tail -n 100 "$f" >"$tmp" 2>/dev/null && mv -f "$tmp" "$f"
+    rm -f "$tmp"
   fi
 done
 

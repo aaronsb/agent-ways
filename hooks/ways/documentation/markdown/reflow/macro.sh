@@ -25,6 +25,12 @@ PENDING="${SESSIONS_ROOT}/${SESSION}/markdown-reflow/pending"
 NOW=$(date +%s)
 TTL=900   # 15 minutes
 
+# Claim the file by renaming it before reading. Reading and then deleting would
+# silently drop any entry a postcheck appended in between; rename is atomic, so a
+# concurrent append lands on a fresh file and is reported next fire instead.
+CLAIM="${PENDING}.consume.$$"
+mv -f "$PENDING" "$CLAIM" 2>/dev/null || exit 0
+
 # Consume unconditionally: a denied fire leaves entries behind, and naming a
 # file from twenty minutes ago is worse than naming none.
 FRESH=()
@@ -32,9 +38,9 @@ while IFS=$'\t' read -r stamp path; do
   [[ -n "${path:-}" ]] || continue
   [[ "$stamp" =~ ^[0-9]+$ ]] || continue
   (( NOW - stamp <= TTL )) && FRESH+=("$path")
-done <"$PENDING"
+done <"$CLAIM"
 
-rm -f "$PENDING"
+rm -f "$CLAIM"
 
 (( ${#FRESH[@]} )) || exit 0
 

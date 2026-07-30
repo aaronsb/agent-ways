@@ -90,13 +90,19 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
         std::process::exit(1);
     }
 
-    let repaired = reflow::reflow(&lines).join("\n");
+    let (repaired_lines, quote_joins) = reflow::reflow_with_stats(&lines);
+    let repaired = repaired_lines.join("\n");
 
     // The invariant is a cheap total check against dropped words. It is not
     // sufficient on its own — it cannot see a wrong join, and leading
     // whitespace is not a token — so a clean verdict is evidence, not proof,
     // and the backup below is what makes it reviewable.
-    let verdict = reflow::token_verdict(&text, &repaired);
+    //
+    // Use the *accounted* form: the number of dropped `>` markers has to equal
+    // the number of blockquote continuations the transform actually joined.
+    // Otherwise a bare `>` swallowed from between two quoted paragraphs reads as
+    // clean, since the difference is `>`-only either way.
+    let verdict = reflow::token_verdict_accounted(&text, &repaired, quote_joins);
     if let TokenVerdict::Mismatch { before, after } = verdict {
         anyhow::bail!(
             "refusing to write: token stream changed ({before} -> {after}). \
@@ -139,24 +145,41 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
 
 /// Copy the original into a fresh temp directory before overwriting.
 ///
-/// `mktemp -d` rather than a predictable path: a fixed `/tmp/<name>.bak` is a
-/// collision between two sessions and a symlink-attack surface on a shared
-/// machine. The basename is preserved inside so the path identifies itself when
-/// it is read back out of a log.
+/// Not a predictable path: a fixed `<tmp>/<name>.bak` is a collision between two
+/// sessions and a symlink-attack surface on a shared machine. `create_dir` (not
+/// `create_dir_all`) is what makes this safe — it fails if the directory already
+/// exists, so an attacker-planted symlink can't be followed. The basename is
+/// preserved inside so the path identifies itself when read back out of a log.
+///
+/// `std::env::temp_dir()` rather than shelling out to `mktemp`: it matches the
+/// rest of the Rust tree, drops a process spawn from the repair path, and has no
+/// PATH dependency — which a native Windows build would not satisfy.
 fn write_backup(path: &Path, original: &str) -> Result<PathBuf> {
     let name = path
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "document.md".to_string());
 
-    let out = std::process::Command::new("mktemp")
-        .args(["-d", "-t", "ways-reflow.XXXXXXXX"])
-        .output()
-        .context("creating a backup directory with mktemp")?;
-    if !out.status.success() {
-        anyhow::bail!("mktemp failed: {}", String::from_utf8_lossy(&out.stderr));
+    let base = std::env::temp_dir();
+    let pid = std::process::id();
+    let mut dir = PathBuf::new();
+    for attempt in 0..64u32 {
+        let candidate = base.join(format!("ways-reflow.{pid}.{attempt}"));
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => {
+                dir = candidate;
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(e).with_context(|| format!("creating {}", candidate.display()))
+            }
+        }
     }
-    let dir = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    if dir.as_os_str().is_empty() {
+        anyhow::bail!("could not create a backup directory under {}", base.display());
+    }
+
     let backup = dir.join(name);
     std::fs::write(&backup, original)
         .with_context(|| format!("writing backup {}", backup.display()))?;

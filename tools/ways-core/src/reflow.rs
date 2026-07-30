@@ -94,8 +94,19 @@ fn indent_of(line: &str) -> &str {
     &line[..line.len() - line.trim_start().len()]
 }
 
-fn leading_spaces(line: &str) -> usize {
-    line.chars().take_while(|c| *c == ' ').count()
+/// Leading indent in *columns*, counting a tab as four. CommonMark treats a tab
+/// as advancing to the next four-column stop, so counting only spaces would let
+/// a tab-indented code block through as prose.
+fn leading_columns(line: &str) -> usize {
+    let mut cols = 0;
+    for c in line.chars() {
+        match c {
+            ' ' => cols += 1,
+            '\t' => cols += 4 - (cols % 4),
+            _ => break,
+        }
+    }
+    cols
 }
 
 /// A list item: `- `, `* `, `+ `, `1. `, `2) `.
@@ -118,6 +129,14 @@ fn is_blockquote(line: &str) -> bool {
     line.trim_start().starts_with('>')
 }
 
+/// A blockquote line with no content — `>` alone. This is a *paragraph
+/// boundary* inside the quote, not a wrapped line, and joining across one welds
+/// two quoted paragraphs into one. The token-stream check cannot catch that: the
+/// only difference is a bare `>`, which the invariant is allowed to drop.
+fn is_empty_blockquote(line: &str) -> bool {
+    is_blockquote(line) && quote_body(line).trim().is_empty()
+}
+
 /// Strip one level of blockquote marker so the body can be inspected.
 fn quote_body(line: &str) -> &str {
     let t = line.trim_start();
@@ -128,7 +147,7 @@ fn quote_body(line: &str) -> &str {
 }
 
 fn is_heading(line: &str) -> bool {
-    if leading_spaces(line) > 3 {
+    if leading_columns(line) > 3 {
         return false;
     }
     let t = line.trim_start();
@@ -138,7 +157,7 @@ fn is_heading(line: &str) -> bool {
 
 /// A thematic break or a setext underline: `---`, `***`, `___`, `===`.
 fn is_rule_or_setext(line: &str) -> bool {
-    if leading_spaces(line) > 3 {
+    if leading_columns(line) > 3 {
         return false;
     }
     let t = line.trim();
@@ -151,7 +170,8 @@ fn is_rule_or_setext(line: &str) -> bool {
     }
     let count = t.chars().filter(|c| *c == first).count();
     let only = t.chars().all(|c| c == first || c == ' ');
-    only && count >= 3 || (only && matches!(first, '-' | '=') && count >= 1)
+    // `***`/`___` need three; a lone `-` or `=` is already a setext underline.
+    (only && count >= 3) || (only && matches!(first, '-' | '=') && count >= 1)
 }
 
 fn is_table_row(line: &str) -> bool {
@@ -162,25 +182,57 @@ fn is_html(line: &str) -> bool {
     line.trim_start().starts_with('<')
 }
 
-fn is_footnote_def(line: &str) -> bool {
+/// A link reference or footnote definition — `[label]: target`, `[^note]: text`.
+/// These are line-scoped syntax; joined into a paragraph they become literal
+/// text, and the token stream is identical either way.
+fn is_reference_def(line: &str) -> bool {
     let t = line.trim_start();
-    t.starts_with("[^") && t.contains("]:")
+    if !t.starts_with('[') {
+        return false;
+    }
+    match t.find("]:") {
+        Some(close) => !t[1..close].contains('['),
+        None => false,
+    }
+}
+
+/// HTML elements CommonMark treats as raw text — their bodies are literal, so
+/// every line until the closing tag is opaque, not just the opening one.
+const RAW_TEXT_TAGS: &[&str] = &["pre", "script", "style", "textarea"];
+
+/// The raw-text tag this line opens, if any and if it does not also close it.
+fn opens_raw_html(line: &str) -> Option<&'static str> {
+    let lower = line.trim_start().to_ascii_lowercase();
+    RAW_TEXT_TAGS.iter().copied().find(|tag| {
+        let open = format!("<{tag}");
+        lower.starts_with(&open) && !lower.contains(&format!("</{tag}>"))
+    })
 }
 
 /// Four-space indented block — a code block, not wrapped prose. List
 /// continuations are indented too, so this only claims lines indented four or
 /// more spaces that are *not* list items.
 fn is_indented_block(line: &str) -> bool {
-    leading_spaces(line) >= 4 && !line.trim().is_empty() && !is_list_item(line)
+    leading_columns(line) >= 4 && !line.trim().is_empty() && !is_list_item(line)
 }
 
-/// A bare label line like `Status:` — structure, not a wrapped sentence.
+/// A bare label line like `Status:` or `Next steps:` — structure, not prose.
+///
+/// Bounded by word count: without the cap, any prose sentence ending in a colon
+/// and containing no interior punctuation qualifies, which splits its paragraph
+/// and leaves the repair half-flat — the exact failure the enclosing-paragraph
+/// scope exists to avoid.
+const MAX_LABEL_WORDS: usize = 5;
+
 fn is_label_line(line: &str) -> bool {
     let t = line.trim();
     match t.strip_suffix(':') {
-        Some(head) if !head.is_empty() => head
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '/')),
+        Some(head) if !head.is_empty() => {
+            head.split_whitespace().count() <= MAX_LABEL_WORDS
+                && head
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '/'))
+        }
         _ => false,
     }
 }
@@ -198,6 +250,7 @@ pub fn classify(lines: &[&str]) -> Vec<LineKind> {
     let mut out = Vec::with_capacity(lines.len());
     let mut fence: Option<&str> = None;
     let mut in_frontmatter = false;
+    let mut raw_html: Option<&str> = None;
 
     for (i, raw) in lines.iter().enumerate() {
         let trimmed = raw.trim();
@@ -240,13 +293,31 @@ pub fn classify(lines: &[&str]) -> Vec<LineKind> {
             (None, None) => {}
         }
 
-        if trimmed.is_empty() {
+        // Raw-text HTML: the body is literal, so every line through the closing
+        // tag is opaque — not just the opening one.
+        if let Some(tag) = raw_html {
+            out.push(LineKind::Verbatim);
+            if trimmed.to_ascii_lowercase().contains(&format!("</{tag}>")) {
+                raw_html = None;
+            }
+            continue;
+        }
+        if let Some(tag) = opens_raw_html(raw) {
+            raw_html = Some(tag);
+            out.push(LineKind::Verbatim);
+            continue;
+        }
+
+        if trimmed.is_empty() || is_empty_blockquote(raw) {
+            // A bare `>` is a paragraph boundary inside the quote. Treating it as
+            // Blank both stops the weld and lets the paragraph after it be
+            // detected on its own.
             out.push(LineKind::Blank);
         } else if is_heading(raw)
             || is_rule_or_setext(raw)
             || is_table_row(raw)
             || is_html(raw)
-            || is_footnote_def(raw)
+            || is_reference_def(raw)
             || is_indented_block(raw)
             || is_label_line(raw)
         {
@@ -334,15 +405,32 @@ pub fn detect_with(lines: &[&str], cfg: DetectConfig) -> Vec<WrappedParagraph> {
         if n < cfg.min_run {
             continue;
         }
+        // Line lengths computed once per paragraph, not once per window.
+        let lens: Vec<usize> = lines[pstart..=pend]
+            .iter()
+            .map(|l| l.trim_end().chars().count())
+            .collect();
+
         'windows: for offset in 0..=(n - cfg.min_run) {
+            let mut lo = usize::MAX;
+            let mut hi = 0usize;
             for len in cfg.min_run..=(n - offset) {
-                let win = &lines[pstart + offset..pstart + offset + len];
-                let lens: Vec<usize> = win.iter().map(|l| l.trim_end().chars().count()).collect();
-                let lo = *lens.iter().min().unwrap();
-                let hi = *lens.iter().max().unwrap();
-                if lo < cfg.min_len || hi > cfg.max_len || hi - lo > cfg.band {
-                    continue;
+                // Extend the running min/max by the one newly included line.
+                let upto = if len == cfg.min_run { 0 } else { len - 1 };
+                for l in &lens[offset + upto..offset + len] {
+                    lo = lo.min(*l);
+                    hi = hi.max(*l);
                 }
+                // Each band predicate is monotone in window length: `lo` only
+                // falls and `hi` only rises as the window grows, so a failure
+                // here fails for every longer window at this offset. Breaking
+                // rather than continuing is what keeps this off O(n^3) — a long
+                // bullet list is one paragraph, and this runs on a hook that
+                // fires on every write.
+                if lo < cfg.min_len || hi > cfg.max_len || hi - lo > cfg.band {
+                    break;
+                }
+                let win = &lines[pstart + offset..pstart + offset + len];
                 let mids = win
                     .windows(2)
                     .filter(|p| is_mid_phrase_break(p[0], p[1]))
@@ -377,10 +465,23 @@ pub fn is_wrapped(lines: &[&str]) -> bool {
 /// explicit hard breaks — because joining across one of those changes the
 /// rendered structure while leaving the token stream untouched.
 pub fn reflow(lines: &[&str]) -> Vec<String> {
+    reflow_with_stats(lines).0
+}
+
+/// [`reflow`], plus the number of blockquote continuation markers the transform
+/// dropped.
+///
+/// The count is what lets [`token_verdict_accounted`] treat a missing `>` as an
+/// *accounted* loss rather than a blanket exemption. Without it, "any difference
+/// consisting only of `>` tokens is fine" cannot distinguish dropping the
+/// continuation markers of a joined quote from dropping the bare `>` that was a
+/// paragraph boundary.
+pub fn reflow_with_stats(lines: &[&str]) -> (Vec<String>, usize) {
     let hot = detect(lines);
     if hot.is_empty() {
-        return lines.iter().map(|s| s.to_string()).collect();
+        return (lines.iter().map(|s| s.to_string()).collect(), 0);
     }
+    let mut quote_joins = 0usize;
     let spans: std::collections::HashMap<usize, usize> =
         hot.iter().map(|w| (w.start, w.end)).collect();
 
@@ -394,7 +495,7 @@ pub fn reflow(lines: &[&str]) -> Vec<String> {
         };
 
         let mut block: Vec<&str> = Vec::new();
-        let flush = |block: &mut Vec<&str>, out: &mut Vec<String>| {
+        let flush = |block: &mut Vec<&str>, out: &mut Vec<String>, joins: &mut usize| {
             if block.is_empty() {
                 return;
             }
@@ -403,6 +504,9 @@ pub fn reflow(lines: &[&str]) -> Vec<String> {
             // markers would otherwise land mid-line as literal text. This is
             // the sole token the invariant is allowed to lose.
             let quoted = is_blockquote(block[0]);
+            if quoted {
+                *joins += block.iter().skip(1).filter(|l| is_blockquote(l)).count();
+            }
             let joined = block
                 .iter()
                 .enumerate()
@@ -428,17 +532,17 @@ pub fn reflow(lines: &[&str]) -> Vec<String> {
                 || (is_blockquote(line) && block.last().is_some_and(|p| !is_blockquote(p)))
                 || (!is_blockquote(line) && block.last().is_some_and(|p| is_blockquote(p)));
             if starts_block {
-                flush(&mut block, &mut out);
+                flush(&mut block, &mut out, &mut quote_joins);
             }
             block.push(line);
             if has_hard_break(line) {
-                flush(&mut block, &mut out);
+                flush(&mut block, &mut out, &mut quote_joins);
             }
         }
-        flush(&mut block, &mut out);
+        flush(&mut block, &mut out, &mut quote_joins);
         i = end + 1;
     }
-    out
+    (out, quote_joins)
 }
 
 /// Result of the token-stream invariant.
@@ -481,6 +585,25 @@ pub fn token_verdict(before: &str, after: &str) -> TokenVerdict {
         return TokenVerdict::Mismatch { before: b.len(), after: a.len() };
     }
     TokenVerdict::Mismatch { before: b.len(), after: a.len() }
+}
+
+/// [`token_verdict`], but the dropped `>` markers must match `expected` exactly.
+///
+/// This is the form callers that write files should use. `token_verdict` accepts
+/// *any* difference consisting solely of `>` tokens, which is an exemption rather
+/// than an invariant: on its own it cannot tell the continuation markers of a
+/// joined quote from the bare `>` that separated two quoted paragraphs. Pairing
+/// the check with the transform's own join count closes that gap.
+pub fn token_verdict_accounted(before: &str, after: &str, expected: usize) -> TokenVerdict {
+    match token_verdict(before, after) {
+        TokenVerdict::QuoteMarkersDropped { dropped } if dropped != expected => {
+            TokenVerdict::Mismatch {
+                before: before.split_whitespace().count(),
+                after: after.split_whitespace().count(),
+            }
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -649,6 +772,113 @@ Body.";
     fn reflow_is_idempotent() {
         let once = round_trip(WRAPPED);
         assert_eq!(round_trip(&once), once);
+    }
+
+    #[test]
+    fn a_bare_quote_marker_separates_two_quoted_paragraphs() {
+        // Review finding 1. Joining across a bare `>` welds two quoted
+        // paragraphs, and the token oracle calls it clean because the only
+        // difference is a `>`. Detection must see the boundary.
+        let src = "\
+> The first quoted paragraph runs long enough to sit inside the detect band
+> and it continues here mid-phrase so the mid-break count reaches its floor
+> and a third line keeps the window at the minimum run length it requires.
+>
+> A second quoted paragraph, which must remain a separate paragraph always.";
+        let out = round_trip(src);
+        assert!(
+            out.contains("\n>\n"),
+            "the bare `>` boundary was swallowed: {out:?}"
+        );
+        assert_eq!(out.lines().count(), 3, "{out:?}");
+        assert!(out.lines().last().unwrap().starts_with("> A second"));
+    }
+
+    #[test]
+    fn accounted_verdict_catches_an_unaccounted_marker_drop() {
+        // The exemption made an invariant: a `>`-only difference is only clean
+        // when the count matches the joins the transform actually performed.
+        let before = "> alpha beta\n>\n> gamma delta";
+        let welded = "> alpha beta gamma delta";
+        assert!(matches!(
+            token_verdict(before, welded),
+            TokenVerdict::QuoteMarkersDropped { .. }
+        ));
+        assert!(matches!(
+            token_verdict_accounted(before, welded, 1),
+            TokenVerdict::Mismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn raw_text_html_bodies_are_opaque() {
+        // Review finding 3. `is_html` matched only the opening line, so a <pre>
+        // body was joined — and preformatted text is precisely where the line
+        // break *is* the rendering.
+        let src = "\
+<pre>
+  some preformatted text line one that is long enough to be within band ok
+  more preformatted text line two continuing mid phrase to trigger detect
+  third preformatted line so the run length reaches the configured minimum
+</pre>";
+        assert!(detect(&split(src)).is_empty());
+        assert_eq!(round_trip(src), src);
+    }
+
+    #[test]
+    fn tab_indented_code_is_opaque() {
+        // A tab advances to the next four-column stop, so counting only spaces
+        // let a tab-indented code block through as prose.
+        let src = "\
+\tsome preformatted text line one that is long enough to be within the band
+\tmore preformatted text line two continuing mid phrase to trigger detection
+\tthird preformatted line so that the run length reaches the configured min";
+        assert!(detect(&split(src)).is_empty());
+        assert_eq!(round_trip(src), src);
+    }
+
+    #[test]
+    fn a_prose_sentence_ending_in_a_colon_is_not_a_label() {
+        // Review finding 4. The unbounded predicate split the paragraph and left
+        // the repair half-flat — the failure enclosing-paragraph scope avoids.
+        let long = "so we ended up considering the following three alternatives:";
+        assert!(!is_label_line(long));
+        assert!(is_label_line("Status:"));
+        assert!(is_label_line("Next steps:"));
+    }
+
+    #[test]
+    fn link_reference_definitions_survive() {
+        // Review finding 5. `[label]: target` is line-scoped syntax; joined into
+        // a paragraph it becomes literal text, token stream unchanged.
+        let src = "\
+Some wrapped prose here that is long enough to fall inside the detect band
+and continuing mid-phrase so that the mid-break count reaches its floor now
+and a third line so the window reaches the minimum run length it requires.
+[adr-142]: https://github.com/aaronsb/agent-ways/blob/main/docs/adr142.md";
+        let out = round_trip(src);
+        assert_eq!(
+            out.lines().last().unwrap(),
+            "[adr-142]: https://github.com/aaronsb/agent-ways/blob/main/docs/adr142.md"
+        );
+    }
+
+    #[test]
+    fn long_paragraph_detection_stays_fast() {
+        // Review finding 2: the band never closes on this input, so before the
+        // monotone break this was O(n^3) — 1600 lines took ~6s on a hook that
+        // runs on every write.
+        let body: Vec<String> = (0..1600)
+            .map(|i| format!("- item {i} with enough text to vary the length {}", "x".repeat(i % 90)))
+            .collect();
+        let refs: Vec<&str> = body.iter().map(|s| s.as_str()).collect();
+        let start = std::time::Instant::now();
+        let _ = detect(&refs);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_millis() < 500,
+            "detect took {elapsed:?} on 1600 lines — the monotone break regressed"
+        );
     }
 
     #[test]

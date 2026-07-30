@@ -1,6 +1,6 @@
 ---
 macro: prepend
-requires: ["Bash(date:*)", "Bash(id:*)", "Bash(rm:*)", "Bash(uname:*)"]
+requires: ["Bash(date:*)", "Bash(id:*)", "Bash(mv:*)", "Bash(rm:*)", "Bash(uname:*)"]
 refire: 0.1
 ---
 <!-- epistemic: convention -->
