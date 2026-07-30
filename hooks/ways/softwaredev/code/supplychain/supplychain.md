@@ -16,6 +16,7 @@ Work from fast and cheap to slow and thorough. Most repos only need the first tw
 
 | Tier | What | Time | When |
 |------|------|------|------|
+| 0. Maturity | Is the package what it presents itself as? | a minute | Before adopting anything found via search |
 | 1. Repo audit | Git history, size, leaked secrets | seconds | Any unfamiliar repo |
 | 2. Source audit | Dangerous code patterns | minutes | Before running anything |
 | 3. Dep scan | Known vulnerabilities in dependencies | minutes | Before installing |
@@ -25,6 +26,7 @@ Work from fast and cheap to slow and thorough. Most repos only need the first tw
 ## Principles
 
 - **Scan before you run.** `pip install` and `npm install` execute arbitrary code. Scan first.
+- **Check what a package is before checking whether it is safe.** A thin wrapper around a mature library is usually the wrong adoption even when it is perfectly safe.
 - **Containers aren't a security boundary.** A malicious setup.py in Docker still has network access.
 - **Match the tool to the project.** Manual `osv-scanner` for a hobby project. GitHub Actions for a team repo. Don't skip levels, don't overbuild.
 - **Responsible disclosure over silence.** If you find leaked secrets in someone else's repo, report it — masked values, remediation hints, not a public callout.
@@ -32,6 +34,7 @@ Work from fast and cheap to slow and thorough. Most repos only need the first tw
 ## See Also
 
 - code/security(softwaredev) — supply chain is a security concern
+- code/supplychain/maturity(softwaredev) — adoption versus presentation, before the safety tiers
 - code/supplychain/depscan(softwaredev) — scanning dependencies
 - code/supplychain/sourceaudit(softwaredev) — auditing source before execution
 - environment/deps(softwaredev) — dependency management workflow

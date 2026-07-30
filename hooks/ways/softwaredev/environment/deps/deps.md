@@ -21,6 +21,7 @@ Pause and check:
 | How big is it? | `npm pack --dry-run <pkg>` for size |
 | What's the license? | `npm info <pkg> license` |
 | Is it trivial? | Don't add packages for `is-odd`, `left-pad`, etc. |
+| Is it a wrapper? | Read its manifest — if one dependency does the real work, compare adoption and consider taking that directly. See code/supplychain/maturity(softwaredev). |
 
 ## When Updating
 
