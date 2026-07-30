@@ -14,5 +14,8 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = { version = "1", features = ["preserve_order"] }
 walkdir = "2"
+# Block-level markdown classification and the reflow post-condition (#415).
+# Default features off: we need the parser, not the HTML renderer.
+pulldown-cmark = { version = "0.13", default-features = false }
 anyhow = "1"
 sensor-trait = { path = "../sensor-trait" }

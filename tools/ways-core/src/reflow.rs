@@ -10,6 +10,22 @@
 //! the way's `postcheck.sh` predicate (via the thin binary, on freshly
 //! written text), and explicit remediation.
 //!
+//! # Three layers, because one is not enough
+//!
+//! - **Eligibility** comes from a real CommonMark parser ([`pulldown_cmark`]),
+//!   not from hand-rolled line matching. The hand-rolled version accumulated ten
+//!   distinct construct bugs — empty blockquote lines, raw HTML bodies, HTML
+//!   comments, tab indentation, reference definitions — each found one review at
+//!   a time. That is the signature of reimplementing a specification: the defects
+//!   are the parts of the spec you did not know to handle.
+//! - **Whether to touch** is [`detect`]'s heuristic, and it stays hand-written
+//!   because no parser can answer it. Joining two authored sentences produces an
+//!   identical document; only a heuristic can decline to do it.
+//! - **Whether the result is sound** is [`structure_preserved`], which reparses
+//!   and compares. This is the layer that does not depend on enumerating
+//!   constructs correctly — and it caught a live corruption (a multi-line HTML
+//!   comment in `attend.md`) that the token check passed.
+//!
 //! # Detection is a heuristic; the transform is not
 //!
 //! [`detect`] is deliberately conservative. It cannot *decide* whether a break
@@ -94,20 +110,6 @@ fn indent_of(line: &str) -> &str {
     &line[..line.len() - line.trim_start().len()]
 }
 
-/// Leading indent in *columns*, counting a tab as four. CommonMark treats a tab
-/// as advancing to the next four-column stop, so counting only spaces would let
-/// a tab-indented code block through as prose.
-fn leading_columns(line: &str) -> usize {
-    let mut cols = 0;
-    for c in line.chars() {
-        match c {
-            ' ' => cols += 1,
-            '\t' => cols += 4 - (cols % 4),
-            _ => break,
-        }
-    }
-    cols
-}
 
 /// A list item: `- `, `* `, `+ `, `1. `, `2) `.
 fn is_list_item(line: &str) -> bool {
@@ -146,96 +148,13 @@ fn quote_body(line: &str) -> &str {
     }
 }
 
-fn is_heading(line: &str) -> bool {
-    if leading_columns(line) > 3 {
-        return false;
-    }
-    let t = line.trim_start();
-    let hashes = t.chars().take_while(|c| *c == '#').count();
-    (1..=6).contains(&hashes) && t[hashes..].starts_with(' ')
-}
 
-/// A thematic break or a setext underline: `---`, `***`, `___`, `===`.
-fn is_rule_or_setext(line: &str) -> bool {
-    if leading_columns(line) > 3 {
-        return false;
-    }
-    let t = line.trim();
-    if t.is_empty() {
-        return false;
-    }
-    let first = t.chars().next().unwrap();
-    if !matches!(first, '-' | '*' | '_' | '=') {
-        return false;
-    }
-    let count = t.chars().filter(|c| *c == first).count();
-    let only = t.chars().all(|c| c == first || c == ' ');
-    // `***`/`___` need three; a lone `-` or `=` is already a setext underline.
-    (only && count >= 3) || (only && matches!(first, '-' | '=') && count >= 1)
-}
 
-fn is_table_row(line: &str) -> bool {
-    line.trim_start().starts_with('|')
-}
 
-fn is_html(line: &str) -> bool {
-    line.trim_start().starts_with('<')
-}
 
-/// A link reference or footnote definition — `[label]: target`, `[^note]: text`.
-/// These are line-scoped syntax; joined into a paragraph they become literal
-/// text, and the token stream is identical either way.
-fn is_reference_def(line: &str) -> bool {
-    let t = line.trim_start();
-    if !t.starts_with('[') {
-        return false;
-    }
-    match t.find("]:") {
-        Some(close) => !t[1..close].contains('['),
-        None => false,
-    }
-}
 
-/// HTML elements CommonMark treats as raw text — their bodies are literal, so
-/// every line until the closing tag is opaque, not just the opening one.
-const RAW_TEXT_TAGS: &[&str] = &["pre", "script", "style", "textarea"];
 
-/// The raw-text tag this line opens, if any and if it does not also close it.
-fn opens_raw_html(line: &str) -> Option<&'static str> {
-    let lower = line.trim_start().to_ascii_lowercase();
-    RAW_TEXT_TAGS.iter().copied().find(|tag| {
-        let open = format!("<{tag}");
-        lower.starts_with(&open) && !lower.contains(&format!("</{tag}>"))
-    })
-}
 
-/// Four-space indented block — a code block, not wrapped prose. List
-/// continuations are indented too, so this only claims lines indented four or
-/// more spaces that are *not* list items.
-fn is_indented_block(line: &str) -> bool {
-    leading_columns(line) >= 4 && !line.trim().is_empty() && !is_list_item(line)
-}
-
-/// A bare label line like `Status:` or `Next steps:` — structure, not prose.
-///
-/// Bounded by word count: without the cap, any prose sentence ending in a colon
-/// and containing no interior punctuation qualifies, which splits its paragraph
-/// and leaves the repair half-flat — the exact failure the enclosing-paragraph
-/// scope exists to avoid.
-const MAX_LABEL_WORDS: usize = 5;
-
-fn is_label_line(line: &str) -> bool {
-    let t = line.trim();
-    match t.strip_suffix(':') {
-        Some(head) if !head.is_empty() => {
-            head.split_whitespace().count() <= MAX_LABEL_WORDS
-                && head
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '/'))
-        }
-        _ => false,
-    }
-}
 
 /// True if the line ends in an explicit hard break — two trailing spaces or a
 /// trailing backslash. Joining across one would silently delete a `<br>`, and a
@@ -245,88 +164,112 @@ pub fn has_hard_break(line: &str) -> bool {
     no_nl.ends_with("  ") || no_nl.ends_with('\\')
 }
 
-/// Classify every line. Fenced code and leading YAML frontmatter are opaque.
-pub fn classify(lines: &[&str]) -> Vec<LineKind> {
-    let mut out = Vec::with_capacity(lines.len());
-    let mut fence: Option<&str> = None;
-    let mut in_frontmatter = false;
-    let mut raw_html: Option<&str> = None;
+/// Line-initial delimiters of common non-CommonMark block extensions.
+///
+/// A CommonMark parser cannot see these — to it, `:::note` is paragraph text —
+/// so joining across one silently destroys a directive that MkDocs, Docusaurus
+/// or Obsidian would have rendered. This list is the *named* residue left after
+/// adopting a parser, and it is short and enumerable, which is the whole reason
+/// the parser is worth having.
+const EXTENSION_DELIMITERS: &[&str] = &[":::", "!!!", "???", "{%", "%}", "+++", "<%", "%>"];
 
-    for (i, raw) in lines.iter().enumerate() {
-        let trimmed = raw.trim();
+fn is_extension_delimiter(line: &str) -> bool {
+    let t = line.trim_start();
+    EXTENSION_DELIMITERS.iter().any(|d| t.starts_with(d))
+}
 
-        if i == 0 && trimmed == "---" {
-            in_frontmatter = true;
-            out.push(LineKind::Verbatim);
+/// Lines the parser says are inside a construct where breaks are structural or
+/// literal: code blocks, tables, metadata blocks, footnote definitions, raw HTML
+/// (including multi-line comments), headings, and thematic breaks.
+fn parser_opaque_map(src: &str, line_count: usize) -> Vec<bool> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(src.char_indices().filter(|(_, c)| *c == '\n').map(|(i, _)| i + 1))
+        .collect();
+    let line_of = |off: usize| starts.partition_point(|&s| s <= off).saturating_sub(1);
+
+    let mut opaque = vec![false; line_count];
+    let mut depth = 0usize;
+
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+
+    let mark = |range: std::ops::Range<usize>, opaque: &mut Vec<bool>| {
+        let lo = line_of(range.start);
+        let hi = line_of(range.end.saturating_sub(1)).min(line_count.saturating_sub(1));
+        for flag in &mut opaque[lo..=hi] {
+            *flag = true;
+        }
+    };
+
+    for (ev, range) in Parser::new_ext(src, opts).into_offset_iter() {
+        // Html and Rule are standalone events with no matching End — mark their
+        // own range and leave `depth` alone, or everything after the first HTML
+        // comment stays opaque for the rest of the document.
+        if matches!(ev, Event::Html(_) | Event::Rule) {
+            mark(range, &mut opaque);
             continue;
         }
-        if in_frontmatter {
-            out.push(LineKind::Verbatim);
-            if trimmed == "---" {
-                in_frontmatter = false;
-            }
-            continue;
+        let opens = matches!(
+            ev,
+            Event::Start(Tag::CodeBlock(_))
+                | Event::Start(Tag::Table(_))
+                | Event::Start(Tag::MetadataBlock(_))
+                | Event::Start(Tag::FootnoteDefinition(_))
+                | Event::Start(Tag::Heading { .. })
+        );
+        let closes = matches!(
+            ev,
+            Event::End(TagEnd::CodeBlock)
+                | Event::End(TagEnd::Table)
+                | Event::End(TagEnd::MetadataBlock(_))
+                | Event::End(TagEnd::FootnoteDefinition)
+                | Event::End(TagEnd::Heading(_))
+        );
+        if opens {
+            depth += 1;
         }
-
-        let opener = if trimmed.starts_with("```") {
-            Some("```")
-        } else if trimmed.starts_with("~~~") {
-            Some("~~~")
-        } else {
-            None
-        };
-        match (fence, opener) {
-            (None, Some(tok)) => {
-                fence = Some(tok);
-                out.push(LineKind::Verbatim);
-                continue;
-            }
-            (Some(tok), Some(seen)) if seen == tok => {
-                fence = None;
-                out.push(LineKind::Verbatim);
-                continue;
-            }
-            (Some(_), _) => {
-                out.push(LineKind::Verbatim);
-                continue;
-            }
-            (None, None) => {}
+        if depth > 0 {
+            mark(range, &mut opaque);
         }
-
-        // Raw-text HTML: the body is literal, so every line through the closing
-        // tag is opaque — not just the opening one.
-        if let Some(tag) = raw_html {
-            out.push(LineKind::Verbatim);
-            if trimmed.to_ascii_lowercase().contains(&format!("</{tag}>")) {
-                raw_html = None;
-            }
-            continue;
-        }
-        if let Some(tag) = opens_raw_html(raw) {
-            raw_html = Some(tag);
-            out.push(LineKind::Verbatim);
-            continue;
-        }
-
-        if trimmed.is_empty() || is_empty_blockquote(raw) {
-            // A bare `>` is a paragraph boundary inside the quote. Treating it as
-            // Blank both stops the weld and lets the paragraph after it be
-            // detected on its own.
-            out.push(LineKind::Blank);
-        } else if is_heading(raw)
-            || is_rule_or_setext(raw)
-            || is_table_row(raw)
-            || is_html(raw)
-            || is_reference_def(raw)
-            || is_indented_block(raw)
-            || is_label_line(raw)
-        {
-            out.push(LineKind::Verbatim);
-        } else {
-            out.push(LineKind::Prose);
+        if closes {
+            depth = depth.saturating_sub(1);
         }
     }
-    out
+    opaque
+}
+
+/// Classify every line, using the parser for eligibility.
+///
+/// Replaces a hand-rolled matcher that had to know about fences, frontmatter,
+/// headings, rules, tables, HTML blocks, HTML comments, indented code, tabs, and
+/// reference definitions — and got several of them wrong. The parser knows all of
+/// them; this function only adds what the parser does not model: blank lines,
+/// empty blockquote lines, and non-CommonMark extension delimiters.
+pub fn classify(lines: &[&str]) -> Vec<LineKind> {
+    let src = lines.join("\n");
+    let opaque = parser_opaque_map(&src, lines.len());
+
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, raw)| {
+            if opaque.get(i).copied().unwrap_or(false) || is_extension_delimiter(raw) {
+                LineKind::Verbatim
+            } else if raw.trim().is_empty() || is_empty_blockquote(raw) {
+                // A bare `>` is a paragraph boundary inside the quote: joining
+                // across one welds two quoted paragraphs, and the token check
+                // cannot see it because the only difference is a `>`.
+                LineKind::Blank
+            } else {
+                LineKind::Prose
+            }
+        })
+        .collect()
 }
 
 /// Maximal spans of consecutive [`LineKind::Prose`] lines — the paragraphs.
@@ -606,6 +549,86 @@ pub fn token_verdict_accounted(before: &str, after: &str, expected: usize) -> To
     }
 }
 
+/// Structural fingerprint of a document: the parser's event stream, with inline
+/// prose whitespace collapsed and code-block content kept byte-exact.
+///
+/// Joining wrapped lines inside a paragraph is the *only* change a reflow should
+/// make, and it is invisible at this level — a soft break and a space are the
+/// same thing inside a paragraph. So any difference in this fingerprint means the
+/// transform altered the document's structure.
+fn structure_fingerprint(src: &str) -> Vec<String> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+
+    let mut out: Vec<String> = Vec::new();
+    let mut text = String::new();
+    let mut in_code = false;
+
+    for ev in Parser::new_ext(src, opts) {
+        if matches!(ev, Event::Start(Tag::CodeBlock(_))) {
+            in_code = true;
+        }
+        if matches!(ev, Event::End(TagEnd::CodeBlock)) {
+            in_code = false;
+        }
+        // Inside a code block whitespace *is* content, so a joined fence body
+        // must not be normalized away.
+        if in_code {
+            if let Event::Text(t) = &ev {
+                out.push(format!("CODE:{t:?}"));
+                continue;
+            }
+        }
+        match ev {
+            Event::Text(t) | Event::Code(t) => {
+                text.push(' ');
+                text.push_str(&t);
+            }
+            Event::SoftBreak => text.push(' '),
+            other => {
+                if !text.trim().is_empty() {
+                    out.push(format!(
+                        "TEXT:{}",
+                        text.split_whitespace().collect::<Vec<_>>().join(" ")
+                    ));
+                    text.clear();
+                }
+                out.push(format!("{other:?}"));
+            }
+        }
+    }
+    if !text.trim().is_empty() {
+        out.push(format!(
+            "TEXT:{}",
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        ));
+    }
+    out
+}
+
+/// Whether a reflow left the document structurally identical.
+///
+/// This is the post-condition worth trusting, because unlike the classifier it
+/// does not depend on having enumerated markdown's constructs correctly — it asks
+/// the parser what changed. It caught a live corruption the token check passed: a
+/// multi-line HTML comment in the shipped corpus whose body was being joined.
+///
+/// Two things it cannot see, both principled:
+///
+/// - **Welding authored line breaks.** Two sentences on separate lines and the
+///   same two joined are the *same* CommonMark document. No verifier can catch
+///   that; declining to do it is [`detect`]'s job.
+/// - **Non-CommonMark extensions.** A `:::note` directive is paragraph text to
+///   any CommonMark parser. That residue is covered by `EXTENSION_DELIMITERS`.
+pub fn structure_preserved(before: &str, after: &str) -> bool {
+    structure_fingerprint(before) == structure_fingerprint(after)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -838,29 +861,71 @@ Body.";
     }
 
     #[test]
-    fn a_prose_sentence_ending_in_a_colon_is_not_a_label() {
-        // Review finding 4. The unbounded predicate split the paragraph and left
-        // the repair half-flat — the failure enclosing-paragraph scope avoids.
-        let long = "so we ended up considering the following three alternatives:";
-        assert!(!is_label_line(long));
-        assert!(is_label_line("Status:"));
-        assert!(is_label_line("Next steps:"));
+    fn a_prose_sentence_ending_in_a_colon_does_not_split_its_paragraph() {
+        // Review finding 4. The hand-rolled label predicate marked any
+        // colon-terminated line as structure, splitting the paragraph and leaving
+        // the repair half-flat. The parser has no such notion — it is all one
+        // paragraph — so the predicate is gone and this asserts the behavior.
+        let src = "\
+Messaging guidance lives in three synchronized sources, so when you edit one
+of them you should update the other two so agents receive consistent output:
+and this trailing clause continues the very same paragraph without a break
+and one more line so the window still clears the minimum run length here.";
+        let out = round_trip(src);
+        assert_eq!(out.lines().count(), 1, "paragraph repaired half-flat: {out:?}");
     }
 
     #[test]
-    fn link_reference_definitions_survive() {
-        // Review finding 5. `[label]: target` is line-scoped syntax; joined into
-        // a paragraph it becomes literal text, token stream unchanged.
+    fn extension_delimiters_are_not_joined() {
+        // `:::` is a MkDocs/Docusaurus directive — invisible to CommonMark, so no
+        // parser will protect it. This is the named residue the guard list covers.
+        let src = "\
+:::note
+some directive body text that is long enough to sit inside the detect band
+and continuing here mid-phrase so that the mid-break count reaches a floor
+and a third body line so the window reaches the minimum run length needed
+:::";
+        let out = round_trip(src);
+        assert!(out.lines().next().unwrap() == ":::note", "directive welded: {out:?}");
+        assert!(out.lines().last().unwrap() == ":::", "closing delimiter welded: {out:?}");
+    }
+
+    #[test]
+    fn a_multi_line_html_comment_body_is_never_joined() {
+        // Found by the structural post-condition on the real corpus
+        // (attend.md), after the token check passed it. The hand-rolled
+        // classifier handled <pre>/<script>/<style>/<textarea> but not comments.
+        let src = "\
+<!--
+  Messaging guidance lives in three synchronized sources. When you edit
+  the peer-messaging section, the autonomy paragraph, the silence-is-valid
+  callout, or the CLI-is-the-contract note in this file, update the
+  other two so agents receive consistent guidance at every point.
+-->";
+        assert!(detect(&split(src)).is_empty(), "html comment treated as prose");
+        assert_eq!(round_trip(src), src);
+    }
+
+    #[test]
+    fn a_real_link_reference_definition_survives() {
+        // Review finding 5, corrected by the parser. CommonMark says a link
+        // reference definition *cannot interrupt a paragraph*, so a `[x]: url`
+        // line directly under prose is already paragraph text and joining it
+        // changes nothing. A definition after a blank line is a real definition,
+        // is its own block, and is never inside a detected paragraph. The
+        // hand-rolled predicate was protecting against the wrong case.
         let src = "\
 Some wrapped prose here that is long enough to fall inside the detect band
 and continuing mid-phrase so that the mid-break count reaches its floor now
 and a third line so the window reaches the minimum run length it requires.
+
 [adr-142]: https://github.com/aaronsb/agent-ways/blob/main/docs/adr142.md";
         let out = round_trip(src);
         assert_eq!(
             out.lines().last().unwrap(),
             "[adr-142]: https://github.com/aaronsb/agent-ways/blob/main/docs/adr142.md"
         );
+        assert!(structure_preserved(src, &out), "structure changed");
     }
 
     #[test]
@@ -896,5 +961,39 @@ and a third line so the window reaches the minimum run length it requires.
             token_verdict("alpha beta gamma", "alpha gamma"),
             TokenVerdict::Mismatch { .. }
         ));
+    }
+}
+
+#[cfg(test)]
+mod postcondition_tests {
+    use super::*;
+
+    #[test]
+    fn post_condition_rejects_a_structural_change() {
+        // A join that welds a paragraph onto a thematic break changes structure.
+        let before = "Some paragraph text here\n---";
+        let welded = "Some paragraph text here ---";
+        assert!(!structure_preserved(before, welded));
+    }
+
+    #[test]
+    fn post_condition_accepts_a_pure_line_join() {
+        let before = "In 1.0 the projection is thin, not the app\nitself, and source lives elsewhere.";
+        let joined = "In 1.0 the projection is thin, not the app itself, and source lives elsewhere.";
+        assert!(structure_preserved(before, joined));
+    }
+
+    #[test]
+    fn post_condition_sees_a_joined_code_fence_body() {
+        let before = "```\nline one here\nline two here\n```";
+        let welded = "```\nline one here line two here\n```";
+        assert!(!structure_preserved(before, welded));
+    }
+
+    #[test]
+    fn post_condition_sees_a_deindented_nested_list() {
+        let before = "1. Ask first:\n   - What is the intent?\n   - Any points to include?";
+        let flat = "1. Ask first:\n- What is the intent?\n- Any points to include?";
+        assert!(!structure_preserved(before, flat));
     }
 }

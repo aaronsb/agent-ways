@@ -1616,6 +1616,7 @@ name = "ways-core"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "pulldown-cmark",
  "sensor-trait",
  "serde",
  "serde_json",

@@ -48,7 +48,9 @@ The reasoning above depends on a renderer that reflows paragraphs. Where there i
 
 `ways reflow <file>` reports hard-wrapped paragraphs and exits non-zero when it finds any; `--fix` flattens them, backs the original up first, and prints the backup path.
 
-It repairs the *enclosing paragraph* of each detection and leaves everything else byte-identical, so it won't flatten authored one-clause-per-line prose elsewhere in the file. Read the diff anyway — the tool's token-stream check catches dropped words but cannot see a join that shouldn't have happened.
+It repairs the *enclosing paragraph* of each detection and leaves everything else byte-identical, so it won't flatten authored one-clause-per-line prose elsewhere in the file.
+
+Before writing, it reparses the result and compares the document's structure against the original. If anything moved beyond the line breaks inside a paragraph, it refuses to write and says so — a construct it misread becomes a refusal rather than a corrupted file. Read the diff anyway: two things that check cannot see are a join that erased an authored line break, and non-CommonMark syntax like `:::` directives.
 
 ## See Also
 

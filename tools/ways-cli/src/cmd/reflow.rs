@@ -110,6 +110,25 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
         );
     }
 
+    // The structural post-condition, and the one actually worth trusting: reparse
+    // and compare. Unlike the classifier it does not depend on having enumerated
+    // markdown's constructs correctly, so an enumeration gap becomes a refusal to
+    // write rather than a corrupted document. This is how a live corruption was
+    // caught that the token check above passed — a multi-line HTML comment whose
+    // body was being joined.
+    if !reflow::structure_preserved(&text, &repaired) {
+        anyhow::bail!(
+            "refusing to write {}: reflowing changed the document structure, not \
+             just its line breaks. Nothing was modified. This means the file \
+             contains a construct the classifier treated as ordinary prose — \
+             please report it with the file attached.",
+            match &source {
+                Source::File(p) => p.display().to_string(),
+                Source::Stdin => "<stdin>".to_string(),
+            }
+        );
+    }
+
     match source {
         Source::Stdin => {
             print!("{repaired}");
