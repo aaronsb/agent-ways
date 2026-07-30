@@ -55,6 +55,23 @@ enum Commands {
         #[arg(long)]
         global: bool,
     },
+    /// Detect (or repair) hard-wrapped markdown prose
+    ///
+    /// Exits 0 when clean and 1 when wrapped prose is found, matching lint
+    /// convention. Reads stdin when no path is given.
+    Reflow {
+        /// Markdown file to inspect (default: read stdin)
+        path: Option<String>,
+        /// Rewrite the file, backing the original up first
+        #[arg(long)]
+        fix: bool,
+        /// Emit findings as JSON
+        #[arg(long)]
+        json: bool,
+        /// Suppress human-readable output (exit code only)
+        #[arg(long)]
+        quiet: bool,
+    },
     /// Generate the ways corpus for matching engines
     Corpus {
         /// Ways root directory (default: ~/.claude/hooks/ways)
@@ -707,6 +724,7 @@ fn run() -> Result<()> {
     match command {
         Commands::Context { project, json } => cmd::context::run(project.as_deref(), json),
         Commands::Lint { path, schema, check, fix, global } => cmd::lint::run(path, schema, check, fix, global),
+        Commands::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
         Commands::Match { query, corpus, cosine, project } => {
             if cosine {

@@ -22,6 +22,7 @@ pub mod frontmatter;
 pub mod introspection;
 pub mod paths;
 pub mod provenance;
+pub mod reflow;
 pub mod scanner;
 pub mod transcript;
 pub mod util;

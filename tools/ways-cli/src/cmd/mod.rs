@@ -17,6 +17,7 @@ pub mod migrate;
 pub mod migrate_exec;
 pub mod permissions;
 pub mod reconcile;
+pub mod reflow;
 pub mod render;
 pub mod reset;
 pub mod rethink;
