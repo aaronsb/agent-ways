@@ -38,7 +38,6 @@ Write prose, not bullet points wearing a trenchcoat. Let ideas develop across se
 
 **Defaults (override per user preference):**
 - Prefer active voice. Use passive only when the actor is irrelevant or unknown.
-- Use em dashes sparingly — they lose force through overuse.
 - Avoid staccato sentence fragments for rhetorical impact. Let the substance carry the weight.
 - Lead with the conclusion when the audience is busy. Lead with context when the audience needs persuading.
 - Cut filler on revision. "In order to" → "To". "It should be noted that" → delete.
@@ -66,4 +65,5 @@ If the format doesn't fit the content (a slide deck for something that needs a d
 ## See Also
 
 - documentation(documentation) — code documentation is a specialized form of writing
+- trust/prose(meta) — decoration and self-explanation in your own prose
 - trust/voice(meta) — voice and tone in written communication
