@@ -203,7 +203,14 @@ fn is_extension_delimiter(line: &str) -> bool {
 /// `$$…$$` and `+++…+++` bodies are content where a line break carries meaning —
 /// joining LaTeX lines can move a `%` comment and swallow what follows. Their
 /// delimiters were already guarded by hand; telling the parser about them covers
-/// the bodies too, which is this module's whole thesis applied once more.
+/// the bodies too.
+///
+/// `ENABLE_MATH` is not free, though. `$$` is also PostgreSQL dollar-quoting and
+/// bash's PID, so prose containing either parses as a math block and everything
+/// to the next `$$` goes opaque — two files in this repo's own corpus hit that,
+/// and two paragraphs there are no longer repaired. That is coverage lost, not
+/// documents damaged, which is the direction to err in: a missed repair is a
+/// wrapped paragraph, a bad one is a broken document.
 fn md_options() -> pulldown_cmark::Options {
     use pulldown_cmark::Options;
     let mut opts = Options::empty();
