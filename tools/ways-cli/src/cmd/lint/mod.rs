@@ -41,7 +41,33 @@ use std::path::PathBuf;
 
 use crate::util::{detect_project_dir, home_dir};
 
-pub fn run(path: Option<String>, schema: bool, check: bool, fix: bool, global: bool) -> Result<()> {
+pub fn run(
+    path: Option<String>,
+    schema: bool,
+    check: bool,
+    fix: bool,
+    all: bool,
+    global: bool,
+) -> Result<()> {
+    // Blast radius is explicit, the way `eslint --fix` gets its scope from the
+    // paths you hand it rather than from the flag. `--fix` with no path would
+    // rewrite every way in the resolved corpus, which is a surprising amount of
+    // mutation for a flag that reads like "tidy this up" — so it refuses, and
+    // names both ways forward.
+    if fix && path.is_none() && !all {
+        eprintln!("`--fix` needs a target.");
+        eprintln!();
+        eprintln!("  Give it a file or directory:   ways lint <path> --fix");
+        eprintln!("  Or ask for the whole corpus:   ways lint --fix --all");
+        eprintln!();
+        eprintln!("Refusing rather than rewriting every way in the corpus by default.");
+        // Exit 2, not 1: this command already spends 1 on "lint found errors"
+        // (see the `--check` path below), and a caller cannot act correctly on a
+        // code that means both "your invocation was wrong" and "the corpus has
+        // problems." 2 is also what clap uses for its own argument errors.
+        std::process::exit(2);
+    }
+
     let home_ways_dir = home_dir().join(".claude/hooks/ways");
 
     // Determine the corpus to lint:
@@ -132,7 +158,9 @@ pub fn run(path: Option<String>, schema: bool, check: bool, fix: bool, global: b
     );
     eprintln!();
     if fixes > 0 {
-        eprintln!("Fixed: {fixes} issue(s)");
+        // The FIXED lines above name each change; this is the tally, not the
+        // disclosure. Point at the diff, since fixes are writes.
+        eprintln!("Fixed: {fixes} issue(s) — review with `git diff`");
     }
     eprintln!("Summary: {errors} errors, {warnings} warnings");
 

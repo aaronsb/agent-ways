@@ -48,9 +48,16 @@ enum Commands {
         /// Exit non-zero on errors (for CI)
         #[arg(long)]
         check: bool,
-        /// Auto-fix what can be fixed (multi-line YAML, missing check sections)
+        /// Auto-fix what can be fixed, in the file or directory given as `path`
+        ///
+        /// Scope comes from `path`, not from this flag. Without a path, `--fix`
+        /// refuses to run rather than rewriting the whole corpus by surprise;
+        /// pass `--all` to ask for that deliberately.
         #[arg(long)]
         fix: bool,
+        /// Allow `--fix` to write across the entire resolved corpus
+        #[arg(long)]
+        all: bool,
         /// Scan global ways (ignore CLAUDE_PROJECT_DIR)
         #[arg(long)]
         global: bool,
@@ -723,7 +730,7 @@ fn run() -> Result<()> {
 
     match command {
         Commands::Context { project, json } => cmd::context::run(project.as_deref(), json),
-        Commands::Lint { path, schema, check, fix, global } => cmd::lint::run(path, schema, check, fix, global),
+        Commands::Lint { path, schema, check, fix, all, global } => cmd::lint::run(path, schema, check, fix, all, global),
         Commands::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
         Commands::Match { query, corpus, cosine, project } => {
