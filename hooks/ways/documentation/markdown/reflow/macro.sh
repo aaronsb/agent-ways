@@ -34,10 +34,16 @@ mv -f "$PENDING" "$CLAIM" 2>/dev/null || exit 0
 # Consume unconditionally: a denied fire leaves entries behind, and naming a
 # file from twenty minutes ago is worse than naming none.
 FRESH=()
-while IFS=$'\t' read -r stamp path; do
+while IFS=$'\t' read -r stamp path ranges; do
   [[ -n "${path:-}" ]] || continue
   [[ "$stamp" =~ ^[0-9]+$ ]] || continue
-  (( NOW - stamp <= TTL )) && FRESH+=("$path")
+  if (( NOW - stamp <= TTL )); then
+    if [[ -n "${ranges:-}" ]]; then
+      FRESH+=("\`$path\` (lines $ranges)")
+    else
+      FRESH+=("\`$path\`")
+    fi
+  fi
 done <"$CLAIM"
 
 rm -f "$CLAIM"
@@ -45,8 +51,8 @@ rm -f "$CLAIM"
 (( ${#FRESH[@]} )) || exit 0
 
 if (( ${#FRESH[@]} == 1 )); then
-  printf '**Hard-wrapped markdown just written:** `%s`\n' "${FRESH[0]}"
+  printf '**Hard-wrapped markdown just written:** %s\n' "${FRESH[0]}"
 else
   printf '**Hard-wrapped markdown just written:**\n'
-  printf -- '- `%s`\n' "${FRESH[@]}"
+  printf -- '- %s\n' "${FRESH[@]}"
 fi

@@ -55,19 +55,30 @@ CONTENT=$(printf '%s' "$INPUT" \
            | map(select(. != null)) | join("\n")' 2>/dev/null || true)
 [[ -n "$CONTENT" ]] || exit 1
 
-# Lint convention: 0 = clean, 1 = wrapped prose found. Check for exactly 1 —
-# anything else is the binary failing (an install predating `ways reflow` exits
-# 2 on the unknown subcommand), and an error must read as "no finding" rather
-# than firing the way on every markdown write.
+# Lint convention: 0 = clean, 1 = wrapped prose found, 2 = error. Check for
+# exactly 1 — anything else is the binary failing (an install predating
+# `ways reflow` exits 2 on the unknown subcommand, an unreadable input also
+# exits 2), and an error must read as "no finding" rather than firing the way on
+# every markdown write.
 set +e
-printf '%s' "$CONTENT" | "$WAYS_BIN" reflow --quiet 2>/dev/null
+FINDINGS=$(printf '%s' "$CONTENT" | "$WAYS_BIN" reflow --json 2>/dev/null)
 verdict=$?
 set -e
 (( verdict == 1 )) || exit 1
 
+# Line numbers are only meaningful when the content IS the file. A Write carries
+# the whole document; an Edit carries a fragment, where line 3 of new_string is
+# not line 3 of anything. Reporting fragment offsets as file lines would send the
+# reader to the wrong place, so for an Edit we name the file and stop.
+RANGES=""
+if [[ "$tool" == "Write" ]]; then
+  RANGES=$(printf '%s' "$FINDINGS" \
+    | jq -r '[.paragraphs[]? | "\(.start)-\(.end)"] | join(", ")' 2>/dev/null || true)
+fi
+
 mkdir -p "$STATE_DIR"
 printf '%s\n' "$path" >>"$SEEN"
-printf '%s\t%s\n' "$(date +%s)" "$path" >>"$PENDING"
+printf '%s\t%s\t%s\n' "$(date +%s)" "$path" "$RANGES" >>"$PENDING"
 
 # Bound both files. Unconsumed entries are normal, not exceptional: the inward
 # gate may deny the fire this request is asking for.

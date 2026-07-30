@@ -3,17 +3,31 @@ macro: prepend
 requires: ["Bash(date:*)", "Bash(id:*)", "Bash(mv:*)", "Bash(rm:*)", "Bash(uname:*)"]
 refire: 0.1
 ---
-<!-- epistemic: convention -->
-# Hard-Wrapped Markdown Just Written
+<!-- epistemic: heuristic -->
+# Markdown You Just Wrote May Be Hard-Wrapped
 
-The file above was written with prose hard-wrapped to a column. Our convention is flat prose — one line per paragraph — because a wrapped paragraph makes the next `Edit` reproduce interior line breaks exactly, and turns a three-word change into a five-line diff.
+A check ran over the text you just wrote and found prose that looks wrapped to a column. Our convention is flat prose — one line per paragraph — because a wrapped paragraph makes the next `Edit` reproduce interior line breaks exactly, and turns a three-word change into a five-line diff.
 
-You just wrote it, so it's cheap to fix now and it only gets more expensive later.
+You wrote it moments ago, so it is cheap to fix now and only gets more expensive later.
+
+## Two ways to fix it, and the first is usually better
+
+**Fix it yourself.** The text is already in context. Rewriting the paragraph flat is an ordinary edit, and you can see what the prose is doing — whether a break was mechanical or meant.
+
+**Or hand it to the tool:**
 
 ```bash
-ways reflow --fix <file>     # flattens, backs the original up, prints the backup path
+ways reflow --fix <file>
 ```
 
-**Leave it as-is if the breaks are deliberate.** One-clause-per-line prose, a field list, and anything with an intentional `<br>` are all legitimate — the detector is a heuristic and this is advisory. If you meant the line breaks, ignore this.
+It copies the original aside first and prints that path, repairs only the paragraphs it detected, then reparses the result and compares. If anything moved beyond line breaks inside a paragraph, it writes nothing and reports what diverged.
 
-See markdown(documentation) for the full convention and the cases where a line break carries structure.
+## If you already fixed this file and it is still flagging
+
+**Trust your prose over the check.** The detector is a heuristic. It cannot tell column wrapping from one-clause-per-line prose broken on purpose, and that style is one this convention explicitly permits.
+
+A second flag on a file you have already looked at is therefore far more likely to be a false positive than a missed repair. Say so and move on. Don't rewrite prose you believe is correct in order to satisfy a check — that is how a heuristic starts degrading the thing it was meant to protect.
+
+## When to leave it alone entirely
+
+Line breaks that carry structure are correct and stay: list items, table rows, blockquote label lines (`**Status:**`), deliberate hard breaks (two trailing spaces), and parallel one-clause-per-line prose. See markdown(documentation) for the full convention.

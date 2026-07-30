@@ -549,6 +549,60 @@ pub fn token_verdict_accounted(before: &str, after: &str, expected: usize) -> To
     }
 }
 
+/// Outcome of a bounded repair: the result, and whether it settled.
+#[derive(Debug, Clone)]
+pub struct RepairOutcome {
+    /// The repaired lines.
+    pub lines: Vec<String>,
+    /// Blockquote continuation markers dropped, summed across passes.
+    pub quote_joins: usize,
+    /// Passes actually run.
+    pub passes: usize,
+    /// Whether the detector reports the result clean.
+    ///
+    /// `false` means the transform could not reconcile its own output — the
+    /// output would immediately re-trigger the detector, producing a file that
+    /// nags forever. Callers should treat that as a finding and decline to write,
+    /// not as something to paper over.
+    pub converged: bool,
+}
+
+/// Default pass ceiling for [`repair`]. One pass suffices on every file measured;
+/// the budget exists so a transform bug bails instead of spinning.
+pub const MAX_REPAIR_PASSES: usize = 3;
+
+/// Repair until the detector reports clean, or the pass budget runs out.
+///
+/// A single pass flattens each detected paragraph to one line, which is then too
+/// long to sit in the detection band — so convergence normally happens on the
+/// first pass and the second is just the confirming check. Running the detector
+/// against our own output is what turns "we think we fixed it" into evidence, and
+/// it is the same discipline the caller applies to structure: verify, then write.
+pub fn repair(lines: &[&str], max_passes: usize) -> RepairOutcome {
+    let mut current: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+    let mut quote_joins = 0usize;
+    let mut passes = 0usize;
+
+    for _ in 0..max_passes.max(1) {
+        let refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
+        if detect(&refs).is_empty() {
+            return RepairOutcome { lines: current, quote_joins, passes, converged: true };
+        }
+        let (next, joins) = reflow_with_stats(&refs);
+        passes += 1;
+        quote_joins += joins;
+        if next == current {
+            // A fixed point the detector still flags: another pass cannot help.
+            break;
+        }
+        current = next;
+    }
+
+    let refs: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
+    let converged = detect(&refs).is_empty();
+    RepairOutcome { lines: current, quote_joins, passes, converged }
+}
+
 /// Structural fingerprint of a document: the parser's event stream, with inline
 /// prose whitespace collapsed and code-block content kept byte-exact.
 ///
@@ -985,6 +1039,32 @@ and a third line so the window reaches the minimum run length it requires.
 #[cfg(test)]
 mod postcondition_tests {
     use super::*;
+
+    fn split(s: &str) -> Vec<&str> {
+        s.split('\n').collect()
+    }
+
+    const WRAPPED: &str = "\
+In 1.0, `~/.claude` is a thin projection of an XDG application, not the app
+itself (ADR-142). The source lives in `$XDG_DATA_HOME/agent-ways`; the home dir
+gets symlinks to the projected roots plus a three-way merge into settings, and
+everything else the app ships stays where it is.";
+
+    #[test]
+    fn repair_converges_in_one_pass_and_reports_it() {
+        let out = repair(&split(WRAPPED), MAX_REPAIR_PASSES);
+        assert!(out.converged);
+        assert_eq!(out.passes, 1, "expected a single pass, got {}", out.passes);
+        assert_eq!(out.lines.len(), 1);
+    }
+
+    #[test]
+    fn repair_of_clean_input_runs_no_passes() {
+        let src = "A single flat paragraph with nothing at all to repair here.";
+        let out = repair(&split(src), MAX_REPAIR_PASSES);
+        assert!(out.converged);
+        assert_eq!(out.passes, 0);
+    }
 
     #[test]
     fn structure_diff_names_the_diverging_event() {

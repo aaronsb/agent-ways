@@ -99,8 +99,36 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
         std::process::exit(1);
     }
 
-    let (repaired_lines, quote_joins) = reflow::reflow_with_stats(&lines);
-    let repaired = repaired_lines.join("\n");
+    // Repair, then run the detector against our own output. A result that still
+    // trips the detector would be written and then immediately re-flagged — a
+    // file that nags forever — so non-convergence is a finding, not a warning to
+    // write through. In practice this settles on the first pass.
+    let outcome = reflow::repair(&lines, reflow::MAX_REPAIR_PASSES);
+    let repaired = outcome.lines.join("\n");
+    let quote_joins = outcome.quote_joins;
+
+    if !outcome.converged {
+        let label = match &source {
+            Source::File(p) => p.display().to_string(),
+            Source::Stdin => "<stdin>".to_string(),
+        };
+        if json {
+            println!(
+                "{{\"wrapped\":true,\"repaired\":false,\"reason\":\"did-not-converge\",\"passes\":{}}}",
+                outcome.passes
+            );
+        } else if !quiet {
+            eprintln!();
+            eprintln!("NOT repaired: {label}");
+            eprintln!(
+                "  after {} pass(es) the result still reads as hard-wrapped, so the",
+                outcome.passes
+            );
+            eprintln!("  transform cannot reconcile its own output. The file was left");
+            eprintln!("  untouched — writing it would produce a file that flags forever.");
+        }
+        std::process::exit(1);
+    }
 
     // The invariant is a cheap total check against dropped words. It is not
     // sufficient on its own — it cannot see a wrong join, and leading
