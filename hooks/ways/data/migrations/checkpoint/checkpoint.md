@@ -8,16 +8,11 @@ refire: rare
 <!-- epistemic: heuristic -->
 # Migration Checkpoints
 
-When a history grows to dozens of files, every fresh install replays all of
-them. Periodically **collapse the resting state into one generated baseline** —
-but consolidation is a place to be careful: get it wrong and every future
-install starts from a subtly wrong schema.
+When a history grows to dozens of files, every fresh install replays all of them. Periodically **collapse the resting state into one generated baseline** — but consolidation is a place to be careful: get it wrong and every future install starts from a subtly wrong schema.
 
 ## Generate the baseline — never hand-merge
 
-Replay the old baseline **plus every migration** into a throwaway database, then
-dump the schema and seed data. That dump *is* the new baseline. Hand-merging
-migration files by eye drifts from what the migrations actually produce.
+Replay the old baseline **plus every migration** into a throwaway database, then dump the schema and seed data. That dump *is* the new baseline. Hand-merging migration files by eye drifts from what the migrations actually produce.
 
 ## Prove it faithful before retiring anything
 
@@ -33,16 +28,12 @@ They must match exactly. If they don't, the baseline is wrong — stop.
 
 ## Keep the old path working
 
-- **Retain the old files** (move to `archived/`, don't delete). A database created
-  before the checkpoint still needs them; the runner scans `archived/` first.
-- The baseline **records every consolidated version in the ledger**, so a fresh
-  install marks them applied and skips straight to the next real migration.
+- **Retain the old files** (move to `archived/`, don't delete). A database created before the checkpoint still needs them; the runner scans `archived/` first.
+- The baseline **records every consolidated version in the ledger**, so a fresh install marks them applied and skips straight to the next real migration.
 
 ## Observability
 
-A checkpoint apply has a fingerprint: every consolidated version shares one
-`applied_at` timestamp cluster (one baseline wrote them together), versus spread
-timestamps for an incremental replay. Query it to confirm which path a database took.
+A checkpoint apply has a fingerprint: every consolidated version shares one `applied_at` timestamp cluster (one baseline wrote them together), versus spread timestamps for an incremental replay. Query it to confirm which path a database took.
 
 ## See Also
 

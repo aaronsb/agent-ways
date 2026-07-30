@@ -41,13 +41,7 @@ deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
 
 ## Worked example: the deliver workflow
 
-`develop → pr → review → remediate → merge` is workflow-shaped: pipeline each unit
-of work through the stages independently; fan the *review* out across dimensions
-(bugs, security, reuse) and adversarially verify each finding; remediate per
-finding; **gate at merge** per the four-square (`delivery/merge`): the human gate
-applies when the work sets direction, and the irreversible one-way door is *release*,
-not the merge itself (see the autonomy design note). The payoff is wall-clock and
-rigor, not novelty.
+`develop → pr → review → remediate → merge` is workflow-shaped: pipeline each unit of work through the stages independently; fan the *review* out across dimensions (bugs, security, reuse) and adversarially verify each finding; remediate per finding; **gate at merge** per the four-square (`delivery/merge`): the human gate applies when the work sets direction, and the irreversible one-way door is *release*, not the merge itself (see the autonomy design note). The payoff is wall-clock and rigor, not novelty.
 
 ## See also
 

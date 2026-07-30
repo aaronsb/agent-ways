@@ -8,10 +8,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Idempotent Migrations
 
-A migration can fail partway, get retried, or be re-scanned by a runner that
-isn't sure whether it applied. **Write every migration so running it twice is a
-no-op on the second pass, not an error.** That's what makes an interrupted
-deploy recoverable instead of wedged.
+A migration can fail partway, get retried, or be re-scanned by a runner that isn't sure whether it applied. **Write every migration so running it twice is a no-op on the second pass, not an error.** That's what makes an interrupted deploy recoverable instead of wedged.
 
 ## Guard every object
 
@@ -25,10 +22,7 @@ deploy recoverable instead of wedged.
 
 ## Record the version last
 
-Insert the applied-version row into the ledger as the **final statement, inside
-the same transaction** as the changes. If the body fails, the row is never
-written and the migration is retried cleanly next run. Use `ON CONFLICT DO
-NOTHING` on that insert too, so a re-scan doesn't error.
+Insert the applied-version row into the ledger as the **final statement, inside the same transaction** as the changes. If the body fails, the row is never written and the migration is retried cleanly next run. Use `ON CONFLICT DO NOTHING` on that insert too, so a re-scan doesn't error.
 
 ## Verify
 

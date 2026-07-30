@@ -16,23 +16,13 @@ improvising a summary; the skill enforces the parts that are easy to skip when y
 
 Three things go wrong when an end-of-session wrap is done by feel:
 
-- **The TaskList lies.** Finished work sits marked pending; abandoned ideas linger as
-  tasks; real remaining work has no entry. Post-reset-you inherits that list with zero
-  memory of this conversation. The skill makes squaring it honestly the load-bearing step —
-  close done, retire stale, write what's real with enough detail to resume cold.
-- **The handoff is too thin to resume from.** The skill produces a dense, copy-paste
-  continuation prompt that survives even a hard reset (`/clear` + paste), not just compaction.
-- **Compaction is mis-timed.** Wrapping at 30% is not wrapping at 90%. The skill reads the
-  context gauge *first* (`ways context`) and lets early-vs-late shape how heavy the handoff
-  needs to be — and whether `/compact` is even worth it (early, it reclaims little and ends
-  the live thread).
+- **The TaskList lies.** Finished work sits marked pending; abandoned ideas linger as tasks; real remaining work has no entry. Post-reset-you inherits that list with zero memory of this conversation. The skill makes squaring it honestly the load-bearing step — close done, retire stale, write what's real with enough detail to resume cold.
+- **The handoff is too thin to resume from.** The skill produces a dense, copy-paste continuation prompt that survives even a hard reset (`/clear` + paste), not just compaction.
+- **Compaction is mis-timed.** Wrapping at 30% is not wrapping at 90%. The skill reads the context gauge *first* (`ways context`) and lets early-vs-late shape how heavy the handoff needs to be — and whether `/compact` is even worth it (early, it reclaims little and ends the live thread).
 
 ## The compaction caveat
 
-Neither a way nor a skill can trigger `/compact` — Claude Code forbids invoking `/` commands
-programmatically. So `/wrap` *prepares* everything and hands the user a ready-to-run
-`/compact <focus>` line. Don't claim the session was compacted; you set it up, the user pulls
-the trigger.
+Neither a way nor a skill can trigger `/compact` — Claude Code forbids invoking `/` commands programmatically. So `/wrap` *prepares* everything and hands the user a ready-to-run `/compact <focus>` line. Don't claim the session was compacted; you set it up, the user pulls the trigger.
 
 ## Relation to the automatic sibling
 

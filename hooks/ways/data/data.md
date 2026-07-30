@@ -8,11 +8,7 @@ refire: 0.15
 <!-- epistemic: premise -->
 # Data
 
-**Scope the data layer to the actual need before reaching for machinery.** The
-cost of a database is not the store — it's the discipline the store pulls in:
-migrations, schema docs, backups, review. That discipline is worth it when the
-data is shared and long-lived, and pure overhead when it isn't. Match the tool
-to the pressure, not to habit.
+**Scope the data layer to the actual need before reaching for machinery.** The cost of a database is not the store — it's the discipline the store pulls in: migrations, schema docs, backups, review. That discipline is worth it when the data is shared and long-lived, and pure overhead when it isn't. Match the tool to the pressure, not to habit.
 
 | The data is… | Reach for | Skip |
 |---|---|---|
@@ -21,10 +17,7 @@ to the pressure, not to habit.
 | Shared, evolving, multi-writer | a server RDBMS (Postgres/MySQL) with **versioned migrations** | — |
 | Densely interconnected, traversal-first | a graph store (or a graph extension) | forcing it into flat tables |
 
-The deeper children below are for the bottom two rows. If someone says "let's
-just use SQLite for this," they need *this* orientation — not a lecture on
-migration consolidation or ER-diagram generation. Don't pull the heavy guidance
-until the need is real.
+The deeper children below are for the bottom two rows. If someone says "let's just use SQLite for this," they need *this* orientation — not a lecture on migration consolidation or ER-diagram generation. Don't pull the heavy guidance until the need is real.
 
 ## Going deeper
 

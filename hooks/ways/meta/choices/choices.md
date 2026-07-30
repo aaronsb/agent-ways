@@ -12,10 +12,7 @@ When you hit a real branch point — distinct options whose answer changes what 
 do next — **present it as an explicit choice**, not a paragraph the human has to
 parse, and not a silent pick they only discover from the result.
 
-The harness has a tool for this (`AskUserQuestion`): structured options with short
-headers, a recommended default, and one-line tradeoffs. A clean choice surface
-respects the human's time far more than a wall of prose ending in "let me know how
-you'd like to proceed" — and far more than guessing and making them undo it.
+The harness has a tool for this (`AskUserQuestion`): structured options with short headers, a recommended default, and one-line tradeoffs. A clean choice surface respects the human's time far more than a wall of prose ending in "let me know how you'd like to proceed" — and far more than guessing and making them undo it.
 
 ## When to surface a choice
 
@@ -37,10 +34,7 @@ you'd like to proceed" — and far more than guessing and making them undo it.
   most. The goal is calibration, not a survey.
 - **Don't ask what you've been told.** If the human already decided, act on it.
 
-The bar is a *genuine* fork. Over-asking trains the human to rubber-stamp, which
-defeats the point — the same way a linter that nags on non-defects trains its
-reader to ignore it. Ask when their answer changes the work; otherwise decide,
-state it, and keep moving.
+The bar is a *genuine* fork. Over-asking trains the human to rubber-stamp, which defeats the point — the same way a linter that nags on non-defects trains its reader to ignore it. Ask when their answer changes the work; otherwise decide, state it, and keep moving.
 
 ## See Also
 

@@ -7,11 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Governance Citation
 
-When you recommend a practice — a commit convention, a security default, a quality
-threshold, a documentation rule — there is often a real regulatory control behind
-it. Citing it grounds the recommendation in an actual standard instead of general
-knowledge. The control data lives in a traceability system; the **governance-cite**
-skill is the *how* (the lookup commands). This way is the *when, and how to phrase*.
+When you recommend a practice — a commit convention, a security default, a quality threshold, a documentation rule — there is often a real regulatory control behind it. Citing it grounds the recommendation in an actual standard instead of general knowledge. The control data lives in a traceability system; the **governance-cite** skill is the *how* (the lookup commands). This way is the *when, and how to phrase*.
 
 ## When to cite
 
