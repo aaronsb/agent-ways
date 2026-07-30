@@ -94,6 +94,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-171](./system/ADR-171-stable-session-identity-the-roster-enumerates-addressable-coordinating-units.md) | Stable session identity — the roster enumerates addressable coordinating units | Accepted |
 | [ADR-172](./system/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md) | Turn-boundary inbound delivery via a CLI-owned drain checkpoint | Accepted |
 | [ADR-173](./system/ADR-173-chat-idiom-convergence-for-the-attend-command-surfaces.md) | Chat-idiom convergence for the attend command surfaces | Accepted |
+| [ADR-174](./system/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | Draft |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
