@@ -626,7 +626,25 @@ fn structure_fingerprint(src: &str) -> Vec<String> {
 /// - **Non-CommonMark extensions.** A `:::note` directive is paragraph text to
 ///   any CommonMark parser. That residue is covered by `EXTENSION_DELIMITERS`.
 pub fn structure_preserved(before: &str, after: &str) -> bool {
-    structure_fingerprint(before) == structure_fingerprint(after)
+    structure_diff(before, after).is_none()
+}
+
+/// Where a reflow changed the document's structure, if it did.
+///
+/// Returns the first diverging event as `(index, before, after)`. A tripped
+/// post-condition is the most informative output this module produces — it names
+/// a construct the classifier misreads — so callers should *report* it rather
+/// than discarding it. Refusing to write and saying nothing loses the finding.
+pub fn structure_diff(before: &str, after: &str) -> Option<(usize, String, String)> {
+    let (a, b) = (structure_fingerprint(before), structure_fingerprint(after));
+    if a == b {
+        return None;
+    }
+    let idx = a.iter().zip(b.iter()).position(|(x, y)| x != y).unwrap_or(a.len().min(b.len()));
+    let pick = |v: &Vec<String>, i: usize| {
+        v.get(i).cloned().unwrap_or_else(|| "<end of document>".to_string())
+    };
+    Some((idx, pick(&a, idx), pick(&b, idx)))
 }
 
 #[cfg(test)]
@@ -967,6 +985,19 @@ and a third line so the window reaches the minimum run length it requires.
 #[cfg(test)]
 mod postcondition_tests {
     use super::*;
+
+    #[test]
+    fn structure_diff_names_the_diverging_event() {
+        // A tripped post-condition must be reportable, not just true/false —
+        // the divergence is the finding, and discarding it loses the bug.
+        let before = "Some paragraph text here\n---";
+        let welded = "Some paragraph text here ---";
+        let d = structure_diff(before, welded);
+        assert!(d.is_some(), "structural change not detected");
+        let (_idx, b, a) = d.unwrap();
+        assert_ne!(b, a);
+        assert!(structure_diff(before, before).is_none());
+    }
 
     #[test]
     fn post_condition_rejects_a_structural_change() {

@@ -26,18 +26,27 @@ enum Source {
 }
 
 pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<()> {
+    // Exit 2 for genuine failures, explicitly. Propagating with `?` would surface
+    // as exit 1, which this command has already spent on "wrapped prose found" —
+    // and a caller that cannot tell an unreadable file from a real finding will
+    // act on the wrong one. `postcheck.sh` checks for exactly 1 for this reason.
     let (source, text) = match path {
         Some(p) => {
             let pb = PathBuf::from(&p);
-            let text = std::fs::read_to_string(&pb)
-                .with_context(|| format!("reading {}", pb.display()))?;
-            (Source::File(pb), text)
+            match std::fs::read_to_string(&pb) {
+                Ok(text) => (Source::File(pb), text),
+                Err(e) => {
+                    eprintln!("ways reflow: reading {}: {e}", pb.display());
+                    std::process::exit(2);
+                }
+            }
         }
         None => {
             let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .context("reading stdin")?;
+            if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+                eprintln!("ways reflow: reading stdin: {e}");
+                std::process::exit(2);
+            }
             (Source::Stdin, buf)
         }
     };
@@ -104,29 +113,57 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
     // clean, since the difference is `>`-only either way.
     let verdict = reflow::token_verdict_accounted(&text, &repaired, quote_joins);
     if let TokenVerdict::Mismatch { before, after } = verdict {
-        anyhow::bail!(
-            "refusing to write: token stream changed ({before} -> {after}). \
-             This is a bug in the reflow transform; nothing was modified."
-        );
+        // Same posture as the structural check below: a finding, not a crash.
+        // Words would have been lost, so the file is left alone and the wrapped
+        // prose stays flagged for every later caller.
+        if json {
+            println!(
+                "{{\"wrapped\":true,\"repaired\":false,\"reason\":\"tokens-changed\",\
+                 \"before\":{before},\"after\":{after}}}"
+            );
+        } else if !quiet {
+            eprintln!();
+            eprintln!("NOT repaired: token stream would change ({before} -> {after}).");
+            eprintln!("  Words would be lost. The file was left untouched — this is a bug");
+            eprintln!("  in the reflow transform and is worth reporting with the file.");
+        }
+        std::process::exit(1);
     }
 
     // The structural post-condition, and the one actually worth trusting: reparse
     // and compare. Unlike the classifier it does not depend on having enumerated
-    // markdown's constructs correctly, so an enumeration gap becomes a refusal to
-    // write rather than a corrupted document. This is how a live corruption was
-    // caught that the token check above passed — a multi-line HTML comment whose
-    // body was being joined.
-    if !reflow::structure_preserved(&text, &repaired) {
-        anyhow::bail!(
-            "refusing to write {}: reflowing changed the document structure, not \
-             just its line breaks. Nothing was modified. This means the file \
-             contains a construct the classifier treated as ordinary prose — \
-             please report it with the file attached.",
-            match &source {
-                Source::File(p) => p.display().to_string(),
-                Source::Stdin => "<stdin>".to_string(),
-            }
-        );
+    // markdown's constructs correctly.
+    //
+    // A trip does NOT abort. It is the most informative result this tool
+    // produces — it names a construct the classifier misreads — so it is
+    // reported, the file is left alone, and the exit code stays 1: the wrapped
+    // prose is still there, unrepaired, and every later caller (lint, CI, a
+    // sweep over the corpus) keeps flagging it. Refusing silently, or failing
+    // hard enough to stop a batch, would lose the finding instead of recording it.
+    if let Some((idx, before_ev, after_ev)) = reflow::structure_diff(&text, &repaired) {
+        let label = match &source {
+            Source::File(p) => p.display().to_string(),
+            Source::Stdin => "<stdin>".to_string(),
+        };
+        if json {
+            println!(
+                "{{\"wrapped\":true,\"repaired\":false,\"reason\":\"structure-changed\",\
+                 \"event\":{idx},\"before\":{},\"after\":{}}}",
+                json_str(&before_ev),
+                json_str(&after_ev)
+            );
+        } else if !quiet {
+            eprintln!();
+            eprintln!("NOT repaired: {label}");
+            eprintln!("  reflowing this file would change its structure, not just its line breaks,");
+            eprintln!("  so it was left untouched. This means it contains a construct the");
+            eprintln!("  classifier read as ordinary prose — that is a bug worth reporting.");
+            eprintln!("  first divergence at parse event {idx}:");
+            eprintln!("    before: {}", truncate(&before_ev));
+            eprintln!("    after:  {}", truncate(&after_ev));
+        }
+        // Still wrapped, still unfixed — the finding stands.
+        std::process::exit(1);
     }
 
     match source {
@@ -160,6 +197,29 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
             Ok(())
         }
     }
+}
+
+fn truncate(s: &str) -> String {
+    if s.chars().count() <= 90 {
+        return s.to_string();
+    }
+    format!("{}…", s.chars().take(90).collect::<String>())
+}
+
+fn json_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Copy the original into a fresh temp directory before overwriting.
