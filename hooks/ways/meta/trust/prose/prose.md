@@ -1,6 +1,8 @@
 ---
-description: How Claude's own prose reads — decoration and self-explanation in output, significance clauses, antithesis constructions, choppiness mistaken for directness, editing your own draft
-vocabulary: prose style voice tone register decoration significance clause hedge tic phrasing draft revise edit rewrite wording sentence paragraph readable admired flourish rhetorical wordy verbose padding
+description: Producing long-form prose — a thorough assessment, a detailed report, a written analysis, an in-depth explanation — and how that prose reads, including decoration, self-explanation, and editing your own draft
+vocabulary: write assessment report analysis review explanation summary document draft thorough detailed comprehensive in depth long form walkthrough writeup prose style tone register decoration significance clause phrasing revise edit rewrite wording paragraph readable verbose padding
+pattern: write (me |up )?(an?|the) (thorough|detailed|comprehensive|full|proper|honest|long) (assessment|analysis|review|report|write-?up|explanation|evaluation|breakdown|overview|summary|essay|memo|brief|proposal|comparison)|\b(thorough|detailed|comprehensive|in-depth|full) (assessment|analysis|review|report|write-?up|explanation|evaluation|breakdown|overview|summary|essay|memo|brief|proposal|comparison)\b|\baround \d{3,4}[- ]?words\b|\b\d{3,4}[- ]?words? (long|or so|minimum)\b
+pattern_strict: true
 scope: agent, subagent
 refire: 0.15
 ---

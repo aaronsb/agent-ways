@@ -69,6 +69,42 @@ Two supporting changes. The writing way loses "use em dashes sparingly" as unmea
 
 This ADR records the core re-disclosure gap as a **finding, not a fix**. Giving core a distance-based re-disclosure path is a separate decision with its own cost — core is roughly 900 words, and re-injecting it on a curve risks exactly the nagging the threshold discipline above avoids. The progressive-core pattern routes around the gap without deciding it.
 
+## First test: null result, and a trigger defect
+
+Tested 2026-07-30, same day, immediately after deploy. Two hosts, same two prompts, same model, fresh session each — a Kubernetes adoption assessment followed by a revision turn asking to expand one section. Arm A ran ways 1.6.0 without these changes; arm B ran 1.7.0 with them.
+
+| | words | significance | per 1k | em-dash | per 1k | antithesis |
+|---|---|---|---|---|---|---|
+| Arm A (control) | 4,477 | 4 | 0.9 | 46 | 10.3 | 0 |
+| Arm B (treatment) | 4,374 | 4 | 0.9 | 46 | 10.5 | 0 |
+
+Identical to one decimal, and identical in raw counts. The change produced no measurable difference.
+
+Three readings, in order of importance.
+
+**Tier 2 never fired, and could not have.** `ways list` on the treatment session showed one way triggered, and it was not this one. Measuring against the arm-B prompt with the EN calibration (`a=19.02`, `b=-6.05`, so `τ_s=0.5` is cosine 0.318 and `τ_k=0.15` is cosine 0.227):
+
+| alias | cosine | `g(s)` | outcome |
+|---|---|---|---|
+| as shipped in 1.7.0 | 0.188 | 0.078 | below `τ_k` — **gated out of both lanes** |
+| after vocabulary rewrite | 0.256 | 0.233 | clears `τ_k`; keyword lane only |
+
+The original way was unfirable on that prompt. The keyword lane is floor-gated, so a pattern hit would have been suppressed even if a pattern had existed. The null result was not the guidance failing to change behavior — the guidance never arrived.
+
+The deeper finding is structural. Measured across long-form prompts on varied topics, `g(s)` runs 0.02–0.24: a database migration analysis scores 0.022, an authentication write-up 0.039, the arm-B expansion turn 0.137. A prompt about writing scores 0.906. **The topic dominates the embedding**, so a way about how prose reads cannot reach a semantic bar on prompts about Kubernetes or MySQL. No vocabulary tuning bridges that distance.
+
+Two consequences. The way now carries `pattern_strict: true`, because the floor gate would otherwise suppress it on nearly every real long-form request. And the pattern had to be narrowed hard: a first attempt including expansion verbs (`expand the`, `go deeper`, `more detail`, `elaborate on`) produced 8 false positives out of 8 realistic coding prompts, since those are ordinary English in engineering chat. The shipped pattern is noun-gated — a depth adjective followed by an explicit document type — measuring 5/5 recall and 8/8 precision on a hand-built battery.
+
+**Tier 2 therefore fires only on an explicit long-form request, and not on the expansion turn.** The expansion turn is where expansion discipline fails, so the tier misses its highest-value moment. Closing that needs a trigger keyed to output volume, which no current trigger type provides for conversational output. This is a known, unfixed limitation rather than a tuning gap.
+
+**The condition could not discriminate.** 4,400 words in a fresh session is the short-output regime where the rules already held. `core.md` banned the antithesis construction before any of this, and both arms show zero. The failure this ADR addresses appeared at 11,500 words across a dozen turns.
+
+**Both arms were already at target.** 0.9 per 1k sits at the repository baseline. There was no decoration to remove, which means decoration is not a general property of the model's prose — it is specific to long multi-turn drafting.
+
+The near-zero between-arm variance is the one encouraging signal: two independent runs on different hosts produced identical counts, so the measurement has power. A real effect would show. The instrument is sound and was pointed at the wrong condition.
+
+Status of the central claim after this test: **unfalsified, not validated.** Nothing here supports asserting the change works.
+
 ## Consequences
 
 ### Positive
