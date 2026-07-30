@@ -11,17 +11,9 @@ refire: 0.15
 <!-- epistemic: premise -->
 # Documentation
 
-Documentation is **one typed graph**, not a pile of files. Each page and each
-decision record is a *node*; `related`/`supersedes` references are *edges*. The
-node's **type lives in frontmatter and is enforced by a linter** — not in its
-filename. The **filesystem is a serialization** of that graph for human readers:
-folders, names, and the rendered site are *views*, refactor-freely, never the
-source of truth.
+Documentation is **one typed graph**, not a pile of files. Each page and each decision record is a *node*; `related`/`supersedes` references are *edges*. The node's **type lives in frontmatter and is enforced by a linter** — not in its filename. The **filesystem is a serialization** of that graph for human readers: folders, names, and the rendered site are *views*, refactor-freely, never the source of truth.
 
-This is what lets the rigor scale: a typed graph that would take a human minutes
-to reason through, an agent and a linter sustain in one pass. Push the structure
-into frontmatter and lint where it is cheap to maintain; keep the filesystem
-friendly for the humans who still read it. (Decision: ADR-302.)
+This is what lets the rigor scale: a typed graph that would take a human minutes to reason through, an agent and a linter sustain in one pass. Push the structure into frontmatter and lint where it is cheap to maintain; keep the filesystem friendly for the humans who still read it. (Decision: ADR-302.)
 
 ## Two altitudes
 

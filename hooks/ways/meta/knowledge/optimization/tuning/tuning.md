@@ -7,17 +7,9 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Locale Alias Audit
 
-`ways tune` is the **acceptance gate** for adopter-run localization (ADR-139). It runs
-only in **localized mode** (a non-English `output_language`); in English mode there is
-nothing to audit and it returns clean. It measures embedding health against the
-multilingual model and does not write thresholds — there are no per-way thresholds to
-write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see
-engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
+`ways tune` is the **acceptance gate** for adopter-run localization (ADR-139). It runs only in **localized mode** (a non-English `output_language`); in English mode there is nothing to audit and it returns clean. It measures embedding health against the multilingual model and does not write thresholds — there are no per-way thresholds to write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
 
-English is the **source of truth.** Each way's English frontmatter is embedded into the
-multilingual corpus as the per-way **anchor**, and every localized alias is scored
-*against the root* — not against sibling translations. A cluster of mutually-agreeing
-bad translations cannot self-certify; each stands or falls by its alignment to English.
+English is the **source of truth.** Each way's English frontmatter is embedded into the multilingual corpus as the per-way **anchor**, and every localized alias is scored *against the root* — not against sibling translations. A cluster of mutually-agreeing bad translations cannot self-certify; each stands or falls by its alignment to English.
 
 ## Two measurements
 
@@ -29,9 +21,7 @@ language the alias's only same-way peer is the root, so `min_peer` *is* root-ali
 how well the translation tracks the source of truth. Low fidelity → the stub drifted
 from the English meaning.
 
-**Discrimination** — `min_peer − top_confuser.score`. The top confuser is the
-best-scoring alias on any *other* way. A negative gap means another way outranks this
-stub — it collides and will mis-route. Orthogonal to fidelity; both must hold.
+**Discrimination** — `min_peer − top_confuser.score`. The top confuser is the best-scoring alias on any *other* way. A negative gap means another way outranks this stub — it collides and will mis-route. Orthogonal to fidelity; both must hold.
 
 ## Workflow
 
@@ -51,10 +41,7 @@ re-author flagged stubs → repeat until clean. "Clean" (no flagged entries) is 
 
 ### 1. Low fidelity — drifted from the root
 
-The translation embeds far from the English original: a mistranslation, or a stub that
-misread the way's intent. **Fix:** re-author the offending locale against the English
-frontmatter (the root). Translate the *intent* and the objective match words in local
-form, not word-for-word.
+The translation embeds far from the English original: a mistranslation, or a stub that misread the way's intent. **Fix:** re-author the offending locale against the English frontmatter (the root). Translate the *intent* and the objective match words in local form, not word-for-word.
 
 ### 2. Negative discrimination — collides with another way
 

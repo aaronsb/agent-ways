@@ -7,12 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # ADR Migration
 
-> **Prefer the skill for greenfield scaffolding.** The `project-init` skill is the
-> canonical scaffolder — it installs this tooling *and* the surrounding GitHub
-> config, CODEOWNERS, and project ways in one pass. Reach for it first when setting
-> up a new repo. The manual steps below are the underlying contract: use them when
-> migrating an existing repo, when you only want the ADR/doc tooling, or to
-> understand what the skill automates.
+> **Prefer the skill for greenfield scaffolding.** The `project-init` skill is the canonical scaffolder — it installs this tooling *and* the surrounding GitHub config, CODEOWNERS, and project ways in one pass. Reach for it first when setting up a new repo. The manual steps below are the underlying contract: use them when migrating an existing repo, when you only want the ADR/doc tooling, or to understand what the skill automates.
 
 ## Identify Your Starting State
 

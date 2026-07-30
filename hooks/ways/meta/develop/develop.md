@@ -19,13 +19,9 @@ merge runs the same way almost every time. Its **front is variable** — design,
 prototype, and ADR reorder depending on the work, and forcing one order is the
 mistake:
 
-- **Prototype-first** when the load-bearing claim is *outside your repo* — an
-  external API's behavior, a latency budget, a payload size. Reasoning can't settle
-  it; probe the real system, then record what you measured. (`prototype`)
-- **Design-first** when the trade-offs are *open* — several plausible shapes, none
-  yet obviously right. Deliberate, converge, then commit. (`design`)
-- **ADR-first** when the point *is* the direction — you already know the shape and
-  need the decision on record before anyone builds on it. (`adr`)
+- **Prototype-first** when the load-bearing claim is *outside your repo* — an external API's behavior, a latency budget, a payload size. Reasoning can't settle it; probe the real system, then record what you measured. (`prototype`)
+- **Design-first** when the trade-offs are *open* — several plausible shapes, none yet obviously right. Deliberate, converge, then commit. (`design`)
+- **ADR-first** when the point *is* the direction — you already know the shape and need the decision on record before anyone builds on it. (`adr`)
 
 Pick the front order by **where the uncertainty lives** — the same uncertainty-
 location map `core.md` uses (in the artifacts, in the instructions, in the external
@@ -33,20 +29,11 @@ world). The stage that answers the load-bearing question goes first.
 
 ## ADR is part of the method, not the whole of it
 
-This loop is deliberately *not* "ADR-driven development." Prose — ADRs, design notes,
-specs — states **claims**; claims are held to the evidence the running system
-produces. An ADR accepted from reasoning alone about an external system is an
-aspiration wearing a decision's clothes. Record the decision, then earn it: a passing
-test, an exercised flow, a measured number. The ADR is one stage among several.
+This loop is deliberately *not* "ADR-driven development." Prose — ADRs, design notes, specs — states **claims**; claims are held to the evidence the running system produces. An ADR accepted from reasoning alone about an external system is an aspiration wearing a decision's clothes. Record the decision, then earn it: a passing test, an exercised flow, a measured number. The ADR is one stage among several.
 
 ## `develop` borrows; it does not re-teach
 
-`develop` establishes the loop, selects the front order, and lays the TaskList — then
-it **delegates**. Each stage already has its own way and, where it runs a procedure,
-its own skill: design, prototype, adr, implement/plan, code review, `merge`, `release`.
-`develop` calls those; it does not reimplement them. When you hit a stage, that
-stage's way discloses on its own. Keep `develop` thin — a router over the corpus you
-already have, not a monolith that swallows it.
+`develop` establishes the loop, selects the front order, and lays the TaskList — then it **delegates**. Each stage already has its own way and, where it runs a procedure, its own skill: design, prototype, adr, implement/plan, code review, `merge`, `release`. `develop` calls those; it does not reimplement them. When you hit a stage, that stage's way discloses on its own. Keep `develop` thin — a router over the corpus you already have, not a monolith that swallows it.
 
 ## See Also
 

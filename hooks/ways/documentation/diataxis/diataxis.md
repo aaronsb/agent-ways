@@ -34,14 +34,10 @@ Two questions place every page:
 | **Studying** (acquire) | **Tutorial** (`T`)       | **Explanation** (`E`)             |
 | **Working** (apply)    | **How-to** (`H`)         | **Reference** (`R`)               |
 
-- **Tutorial** — a guided lesson that takes a newcomer through doing something
-  successfully. Learning-oriented; you are the teacher, the reader trusts you.
-- **How-to** — a recipe to achieve a specific goal for someone who already knows
-  the basics. Task-oriented; assumes competence, omits the teaching.
-- **Reference** — a description of the machinery: APIs, flags, schemas, options.
-  Information-oriented; accurate, complete, consulted not read.
-- **Explanation** — illuminates a topic: why it works this way, the design
-  rationale, the trade-offs, the bigger picture. Understanding-oriented.
+- **Tutorial** — a guided lesson that takes a newcomer through doing something successfully. Learning-oriented; you are the teacher, the reader trusts you.
+- **How-to** — a recipe to achieve a specific goal for someone who already knows the basics. Task-oriented; assumes competence, omits the teaching.
+- **Reference** — a description of the machinery: APIs, flags, schemas, options. Information-oriented; accurate, complete, consulted not read.
+- **Explanation** — illuminates a topic: why it works this way, the design rationale, the trade-offs, the bigger picture. Understanding-oriented.
 
 ## Rules
 

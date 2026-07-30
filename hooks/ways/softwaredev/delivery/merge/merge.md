@@ -8,10 +8,7 @@ scope: agent
 <!-- epistemic: heuristic -->
 # Merging
 
-Landing an increment is the **stable tail** of the develop loop: review → fix →
-merge → clean up. The **`merge` skill** runs it. The judgement this way carries is
-that the *review gate is not one policy* — how hard to review, and whether a human
-reads before merge, depend on the work.
+Landing an increment is the **stable tail** of the develop loop: review → fix → merge → clean up. The **`merge` skill** runs it. The judgement this way carries is that the *review gate is not one policy* — how hard to review, and whether a human reads before merge, depend on the work.
 
 ## The four-square
 
@@ -36,11 +33,7 @@ one, ask.
 
 ## Remediate before you merge
 
-A review that finds nothing changes nothing; a review that finds something is only
-worth running if the findings get fixed. **Remediate per finding** before the merge
-gate — apply the fix, or record why a finding is declined. Don't carry known findings
-past the gate. This is the step the loop is easy to skip: "reviewed" is not "landed
-clean."
+A review that finds nothing changes nothing; a review that finds something is only worth running if the findings get fixed. **Remediate per finding** before the merge gate — apply the fix, or record why a finding is declined. Don't carry known findings past the gate. This is the step the loop is easy to skip: "reviewed" is not "landed clean."
 
 ## Then land it
 

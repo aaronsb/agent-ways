@@ -63,7 +63,10 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
         return Ok(());
     }
 
-    if json {
+    // Detection report. Under `--fix` this is not the outcome — the terminal
+    // object below is — and emitting both would put two JSON documents on one
+    // stream, where `jq` reads the first and silently ignores the rest.
+    if json && !fix {
         let items: Vec<String> = hits
             .iter()
             .map(|w| {
@@ -196,14 +199,38 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
 
     match source {
         Source::Stdin => {
-            print!("{repaired}");
+            // Repaired markdown is not JSON; keep it off that stream entirely.
+            if json {
+                println!("{{\"wrapped\":true,\"repaired\":true,\"passes\":{}}}", outcome.passes);
+            } else {
+                print!("{repaired}");
+            }
             Ok(())
         }
         Source::File(p) => {
-            let backup = write_backup(&p, &text)?;
-            std::fs::write(&p, &repaired)
-                .with_context(|| format!("writing {}", p.display()))?;
-            if !quiet {
+            // Exit 2, matching the read path above. Propagating with `?` lands on
+            // `main`'s Termination impl, which exits 1 — indistinguishable from
+            // "found wrapped prose and declined to repair it," which is the
+            // finding a batch caller actually needs to act on.
+            let backup = match write_backup(&p, &text) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("ways reflow: backing up {}: {e:#}", p.display());
+                    std::process::exit(2);
+                }
+            };
+            if let Err(e) = std::fs::write(&p, &repaired) {
+                eprintln!("ways reflow: writing {}: {e}", p.display());
+                eprintln!("  the original is preserved at {}", backup.display());
+                std::process::exit(2);
+            }
+            if json {
+                println!(
+                    "{{\"wrapped\":true,\"repaired\":true,\"passes\":{},\"backup\":{}}}",
+                    outcome.passes,
+                    json_str(&backup.display().to_string())
+                );
+            } else if !quiet {
                 eprintln!();
                 eprintln!("repaired {}", p.display());
                 eprintln!(
@@ -211,7 +238,7 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
                     match verdict {
                         TokenVerdict::Identical => "identical".to_string(),
                         TokenVerdict::QuoteMarkersDropped { dropped } =>
-                            format!("identical ({dropped} bare '>' marker(s) dropped)"),
+                            format!("identical ({dropped} blockquote continuation marker(s) dropped)"),
                         TokenVerdict::Mismatch { .. } => unreachable!("bailed above"),
                     }
                 );

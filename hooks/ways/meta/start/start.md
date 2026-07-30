@@ -15,44 +15,23 @@ not to be handed a cold blank slate. This is what the **`start` skill** is for. 
 it up (`Skill: start`) rather than improvising a "what should we do?" — the skill
 enforces the parts that are easy to skip when you eyeball it.
 
-`start` is the opening bookend to `wrap`. They are **inverse gauge-aware siblings**:
-both read the same instrument (`ways context`), but `wrap` confirms the session is
-near its *end* and scales the handoff down; `start` confirms the session is near its
-*beginning* — and if it isn't, it says so. (The symmetry is at the skill layer;
-`start` additionally carries a macro that whispers the gauge on disclosure, because it
-needs a *proactive* nudge to dissuade a mid-session start — where `wrap` leans on the
-`compaction-checkpoint` way firing on its own near the limit.)
+`start` is the opening bookend to `wrap`. They are **inverse gauge-aware siblings**: both read the same instrument (`ways context`), but `wrap` confirms the session is near its *end* and scales the handoff down; `start` confirms the session is near its *beginning* — and if it isn't, it says so. (The symmetry is at the skill layer; `start` additionally carries a macro that whispers the gauge on disclosure, because it needs a *proactive* nudge to dissuade a mid-session start — where `wrap` leans on the `compaction-checkpoint` way firing on its own near the limit.)
 
 ## Why the skill, not a freehand "where do we begin?"
 
 Three things go wrong when the open is done by feel:
 
-- **You start in the wrong place.** A repo with work in flight, a clean `main`, an
-  empty directory, and no repo at all each demand a different opening move. The skill
-  checks the actual state — tracking markers, git status, the TaskList, the CLAUDE.md
-  where it was invoked — before proposing anything, instead of guessing.
-- **Greenfield gets no interview.** With nothing to pick up, the temptation is to
-  invent a plausible-looking task. The skill runs a *structured interview* instead —
-  the referent of "let's start" is itself the uncertainty; name it, don't hunt for it.
-- **Planning starts cold.** The skill gathers state *first*, so when it recommends
-  planning the context is already warm — plan mode inherits an oriented situation, not
-  a blank page. That's the whole reason the order is start-then-plan.
+- **You start in the wrong place.** A repo with work in flight, a clean `main`, an empty directory, and no repo at all each demand a different opening move. The skill checks the actual state — tracking markers, git status, the TaskList, the CLAUDE.md where it was invoked — before proposing anything, instead of guessing.
+- **Greenfield gets no interview.** With nothing to pick up, the temptation is to invent a plausible-looking task. The skill runs a *structured interview* instead — the referent of "let's start" is itself the uncertainty; name it, don't hunt for it.
+- **Planning starts cold.** The skill gathers state *first*, so when it recommends planning the context is already warm — plan mode inherits an oriented situation, not a blank page. That's the whole reason the order is start-then-plan.
 
 ## The gauge guard
 
-Starting is a beginning-of-session act. If the context gauge shows the session is
-already half or three-quarters spent, `start` **dissuades** rather than pretends —
-opening fresh work deep into a used window strands it against the next compaction.
-The right move there is usually `wrap` (close and hand off) or `/clear` and a fresh
-window, not `start`.
+Starting is a beginning-of-session act. If the context gauge shows the session is already half or three-quarters spent, `start` **dissuades** rather than pretends — opening fresh work deep into a used window strands it against the next compaction. The right move there is usually `wrap` (close and hand off) or `/clear` and a fresh window, not `start`.
 
 ## The planning caveat
 
-Like `wrap` and `/compact`, `start` **cannot** invoke plan mode for you — Claude Code
-forbids skills and hooks from firing `/` commands. So `start` does the orienting work
-and then *recommends* planning (or runs a lightweight planning interview inline). It
-prepares the ground; the operator toggles plan mode. Don't claim to have entered a
-mode you can't.
+Like `wrap` and `/compact`, `start` **cannot** invoke plan mode for you — Claude Code forbids skills and hooks from firing `/` commands. So `start` does the orienting work and then *recommends* planning (or runs a lightweight planning interview inline). It prepares the ground; the operator toggles plan mode. Don't claim to have entered a mode you can't.
 
 ## See Also
 

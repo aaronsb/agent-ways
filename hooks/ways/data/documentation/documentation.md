@@ -27,11 +27,7 @@ from the DDL — the source of truth — so they can't lie.**
 
 ## Diagrams
 
-DBML is a useful portable intermediate: it renders to an interactive ER diagram
-and also pastes straight into dbdiagram.io. For a large schema, **color or group
-tables by logical schema and pack disconnected tables** so the layout stays
-compact instead of a tall strip. Keep a plain-text fallback (e.g. Mermaid) for
-places an interactive viewer won't render, like a repo file browser.
+DBML is a useful portable intermediate: it renders to an interactive ER diagram and also pastes straight into dbdiagram.io. For a large schema, **color or group tables by logical schema and pack disconnected tables** so the layout stays compact instead of a tall strip. Keep a plain-text fallback (e.g. Mermaid) for places an interactive viewer won't render, like a repo file browser.
 
 ## See Also
 

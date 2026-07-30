@@ -8,10 +8,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Skills Way
 
-This way is *our convention* for writing skills — not a SKILL.md tutorial. The
-mechanics (every frontmatter field, location precedence, progressive-disclosure
-layout, argument/shell substitution) live in the canonical reference and change
-faster than any copy here would. Read it for the "how":
+This way is *our convention* for writing skills — not a SKILL.md tutorial. The mechanics (every frontmatter field, location precedence, progressive-disclosure layout, argument/shell substitution) live in the canonical reference and change faster than any copy here would. Read it for the "how":
 
 > **Canonical mechanics:** https://code.claude.com/docs/en/skills.md
 
@@ -33,42 +30,23 @@ Rule of thumb: **a way teaches Claude how to behave; a skill gives Claude someth
 
 ## The scope caveat — `skills/` here projects into personal scope
 
-`skills/` in this repo is **projected into `~/.claude/skills/`** (ADR-142) — the
-live personal scope. Once a skill here reaches your install (via `ways reconcile` /
-update, or immediately if you're editing the symlinked projection), it is available
-in **every** project on this machine. Two consequences:
+`skills/` in this repo is **projected into `~/.claude/skills/`** (ADR-142) — the live personal scope. Once a skill here reaches your install (via `ways reconcile` / update, or immediately if you're editing the symlinked projection), it is available in **every** project on this machine. Two consequences:
 
-- **Triggers must be tight.** A loose `description` on a global skill hijacks
-  unrelated requests everywhere. Name the specific task and the words a user would
-  actually say, and say what it's *not* for. (`ways-update` ends its description
-  with "Not for editing or authoring individual ways… or upgrading project
-  dependencies" precisely to stay in its lane.)
-- **A global skill must be location-independent.** It can't assume cwd. Resolve the
-  target up front — e.g. `ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"` — and verify
-  it's the repo you expect before acting.
+- **Triggers must be tight.** A loose `description` on a global skill hijacks unrelated requests everywhere. Name the specific task and the words a user would actually say, and say what it's *not* for. (`ways-update` ends its description with "Not for editing or authoring individual ways… or upgrading project dependencies" precisely to stay in its lane.)
+- **A global skill must be location-independent.** It can't assume cwd. Resolve the target up front — e.g. `ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"` — and verify it's the repo you expect before acting.
 
 If a capability only makes sense inside one project, it belongs in *that* project's
 `.claude/skills/`, not here.
 
 ## House conventions
 
-- **Naming.** Lowercase, hyphenated, directory matches `name`. Group related skills
-  into a family prefix that already exists rather than inventing a sibling vocabulary:
-  `ways-*` (tests, update), `think-*`, `project-*`. A new `ways-foo` reads as kin to
-  `ways-tests`; a bare `foo` reads as orphaned.
-- **Self-contained and honest about side effects.** Skills here lean on real tooling
-  (`make`, `ways`, `gh`) rather than reimplementing it. If a skill mutates anything —
-  git state, the working tree, remote — make it ask before destructive moves, the same
-  bar the delivery ways hold.
-- **Defer, don't duplicate.** Point at the canonical doc for mechanics and at sibling
-  ways/skills for adjacent concerns; keep the skill about its one job.
+- **Naming.** Lowercase, hyphenated, directory matches `name`. Group related skills into a family prefix that already exists rather than inventing a sibling vocabulary: `ways-*` (tests, update), `think-*`, `project-*`. A new `ways-foo` reads as kin to `ways-tests`; a bare `foo` reads as orphaned.
+- **Self-contained and honest about side effects.** Skills here lean on real tooling (`make`, `ways`, `gh`) rather than reimplementing it. If a skill mutates anything — git state, the working tree, remote — make it ask before destructive moves, the same bar the delivery ways hold.
+- **Defer, don't duplicate.** Point at the canonical doc for mechanics and at sibling ways/skills for adjacent concerns; keep the skill about its one job.
 
 ## Worked example
 
-`skills/ways-update/SKILL.md` is the reference for the conventions above: a tight
-single-purpose description with an explicit "not for" clause, `CLAUDE_CONFIG_DIR`
-resolution so it runs from anywhere, real `make`/`ways` tooling instead of
-hand-rolled steps, and a pre-flight check before it touches git. Copy its shape.
+`skills/ways-update/SKILL.md` is the reference for the conventions above: a tight single-purpose description with an explicit "not for" clause, `CLAUDE_CONFIG_DIR` resolution so it runs from anywhere, real `make`/`ways` tooling instead of hand-rolled steps, and a pre-flight check before it touches git. Copy its shape.
 
 ## Validate before shipping
 
