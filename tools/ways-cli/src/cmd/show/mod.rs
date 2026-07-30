@@ -113,7 +113,7 @@ pub fn way_scored(
                 project_dir
             ))
         } else {
-            run_macro(&macro_file)
+            run_macro(&macro_file, session_id)
         }
     } else {
         None
@@ -336,7 +336,7 @@ pub fn core(session_id: &str) -> Result<String> {
     // Run the macro for the dynamic ways table
     let macro_file = ways_dir.join("macro.sh");
     if macro_file.is_file() {
-        if let Some(out) = run_macro(&macro_file) {
+        if let Some(out) = run_macro(&macro_file, session_id) {
             output.push_str(&out);
             output.push('\n');
         }

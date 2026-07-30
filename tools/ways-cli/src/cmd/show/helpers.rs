@@ -79,9 +79,16 @@ pub(crate) fn check_sections_text(content: &str, include_anchor: bool) -> String
 }
 
 /// Execute a macro shell script and return its stdout.
-pub(crate) fn run_macro(macro_file: &Path) -> Option<String> {
+///
+/// `CLAUDE_SESSION_ID` is exported into the child so a macro can find its own
+/// session state. Without it a macro has no way to identify the session it is
+/// running for — the hook payload never reaches it (no stdin, no args) — and
+/// guessing from directory mtimes picks the wrong session whenever more than one
+/// is active.
+pub(crate) fn run_macro(macro_file: &Path, session_id: &str) -> Option<String> {
     let output = Command::new("bash")
         .arg(macro_file)
+        .env("CLAUDE_SESSION_ID", session_id)
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;

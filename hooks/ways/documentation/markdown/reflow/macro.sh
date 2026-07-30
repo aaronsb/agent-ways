@@ -13,11 +13,10 @@ set -uo pipefail
 
 source "$(dirname "$0")/../../../sessions-root.sh"
 
+# `ways show way` exports this for every macro. No guessing fallback: inferring
+# the session from directory mtimes silently picks the wrong one whenever two
+# sessions are active, and naming the wrong file is worse than naming none.
 SESSION="${CLAUDE_SESSION_ID:-}"
-if [[ -z "$SESSION" ]]; then
-  # Fall back to the newest session dir — macros run without the hook payload.
-  SESSION=$(ls -1t "${SESSIONS_ROOT}" 2>/dev/null | head -n 1 || true)
-fi
 [[ -n "$SESSION" ]] || exit 0
 
 PENDING="${SESSIONS_ROOT}/${SESSION}/markdown-reflow/pending"
