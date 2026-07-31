@@ -69,6 +69,18 @@ fn engagement_path(way_id: &str, session_id: &str) -> PathBuf {
 /// Re-applying the caller's curve keeps the frontmatter the single source of
 /// truth for decay shape, and lets a mis-resolved window self-correct on the
 /// next fire. Fire history is preserved — only the curve is replaced.
+///
+/// This cuts both ways. When the window *narrows* mid-session — `/model` from a
+/// 1M model to a 200k one — every way's half-life drops at once, and any way
+/// whose last fire is further back than the new half-life falls below
+/// `REFIRE_FLOOR` and re-discloses on its next trigger. In a long session that
+/// is most of them. This is intended: the window really did shrink, so the
+/// cadence really should tighten. It is self-limiting, since each way re-records
+/// at the current tick under the new curve and normalizes immediately after.
+///
+/// One consequence for readers of the on-disk state: the `curve` field in
+/// `way-engagement/*.json` is still written but no longer read by this path.
+/// It is diagnostic only — the gating curve always comes from frontmatter.
 fn load_engagement(way_id: &str, session_id: &str, curve: &Curve) -> EngagementState {
     let path = engagement_path(way_id, session_id);
     match std::fs::read_to_string(&path)

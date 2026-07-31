@@ -54,8 +54,8 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
             }
             Err(NoSession::AllOrphaned) => {
                 println!(
-                    "Session markers found, but no matching transcript. Pass --session <id> to \
-                     inspect one directly."
+                    "Session markers found, but no matching transcript. List candidates with \
+                     `ways rethink list`, then pass --session <id> to inspect one directly."
                 );
                 return Ok(());
             }
@@ -268,12 +268,16 @@ fn detect_session() -> Result<String, NoSession> {
     detect_session_in(sessions_root, &projects_root)
 }
 
-/// Pure core of [`detect_session`]: roots passed in, so the precedence is
-/// testable against temp dirs instead of the live `~/.claude`.
+/// Core of [`detect_session`], with both roots passed in.
 ///
-/// Both roots are resolved once by the caller — `session_is_live_in` runs per
-/// candidate, and re-deriving `sessions_root()` inside the loop would shell out
-/// to `id -u` once per session on platforms without `XDG_RUNTIME_DIR`.
+/// Resolved once by the caller: `session_is_live_in` runs per candidate, and
+/// re-deriving `sessions_root()` inside the loop would shell out to `id -u`
+/// once per session on platforms without `XDG_RUNTIME_DIR`.
+///
+/// **Not yet fully injectable.** Enumeration and liveness both honor the passed
+/// roots, but `latest_session_for_project` still reads the global events log via
+/// `paths::events_log()`, so the project-scoped branch escapes them. Closing
+/// that is what stands between this and a temp-dir test of the full precedence.
 fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<String, NoSession> {
     let project = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
@@ -287,7 +291,7 @@ fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<Strin
         }
     }
 
-    let all = session::list_sessions();
+    let all = session::list_sessions_in(sessions_root);
     if all.is_empty() {
         return Err(NoSession::NoMarkers);
     }
