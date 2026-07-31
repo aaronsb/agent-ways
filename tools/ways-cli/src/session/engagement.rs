@@ -55,12 +55,32 @@ fn engagement_path(way_id: &str, session_id: &str) -> PathBuf {
         .join(format!("{}.json", way_id.replace('/', "__")))
 }
 
+/// Load a way's engagement state, with the caller's curve taking precedence
+/// over the persisted one.
+///
+/// `EngagementState` serializes its curve, so a state written at first fire
+/// carries the curve resolved *then*. Under ADR-126 the curve comes from
+/// `refire:` resolved against the session's context window — and that window is
+/// `DEFAULT_WINDOW` until the first assistant turn names a model. Honoring the
+/// persisted copy latched that launch-race default for the rest of the session:
+/// a 1M session whose first fire landed early kept `half_life = 0.15 × 200_000`
+/// and re-fired five times too often, permanently.
+///
+/// Re-applying the caller's curve keeps the frontmatter the single source of
+/// truth for decay shape, and lets a mis-resolved window self-correct on the
+/// next fire. Fire history is preserved — only the curve is replaced.
 fn load_engagement(way_id: &str, session_id: &str, curve: &Curve) -> EngagementState {
     let path = engagement_path(way_id, session_id);
-    std::fs::read_to_string(&path)
+    match std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str::<EngagementState>(&s).ok())
-        .unwrap_or_else(|| EngagementState::new(curve.clone()))
+    {
+        Some(mut state) => {
+            state.set_curve(curve.clone());
+            state
+        }
+        None => EngagementState::new(curve.clone()),
+    }
 }
 
 fn save_engagement(way_id: &str, session_id: &str, state: &EngagementState) {

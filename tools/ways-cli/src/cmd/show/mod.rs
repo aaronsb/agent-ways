@@ -19,6 +19,33 @@ pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
     way_scored(id, session_id, trigger, None, None, None)
 }
 
+/// Whether a resolved context actually detected its window, rather than falling
+/// back to `DEFAULT_WINDOW`. `EnvOverride` and `ModelTable` are detections;
+/// `Default` is the absence of one (ADR-166).
+fn window_detected(ctx: &crate::cmd::context::ContextInfo) -> bool {
+    ctx.window_source != ways_core::context_window::WindowSource::Default
+}
+
+/// Choose the window a firing way's `refire:` fraction resolves against.
+///
+/// Prefers the session-pinned lookup, but only when it detected a window —
+/// a transcript with no assistant turn yet returns `Ok` carrying a defaulted
+/// window, and accepting that would be worse than the project heuristic it
+/// replaced. `fallback` is lazy: the heuristic scans every project dir, and
+/// this runs on every way fire.
+fn resolve_firing_window(
+    pinned: Option<crate::cmd::context::ContextInfo>,
+    fallback: impl FnOnce() -> Option<crate::cmd::context::ContextInfo>,
+) -> u64 {
+    if let Some(ctx) = pinned.filter(window_detected) {
+        return ctx.tokens_total;
+    }
+    if let Some(ctx) = fallback().filter(window_detected) {
+        return ctx.tokens_total;
+    }
+    ways_core::context_window::resolve(None).tokens
+}
+
 /// Bound a matched surface to a single readable line for the `surface` telemetry
 /// field: collapse all whitespace to single spaces and truncate to ~200 chars on
 /// a char boundary (appending `…`). The snippet is a human read-side aid — a
@@ -93,17 +120,18 @@ pub fn way_scored(
     // other's windows, and a way firing in a 200k session against a 1M sibling's
     // transcript re-fires five times too slowly (or the reverse).
     //
-    // The curve itself is not persisted — `record_way_fire` stores tick and
-    // salience only, and every fire decision recomputes the curve from the
-    // window resolved here. So a window that is briefly wrong (the launch race,
-    // before the first assistant turn names a model) self-corrects on the next
-    // fire rather than sticking for the run. The project heuristic stays as the
-    // fallback for callers whose session has no transcript on disk.
+    // A *successful* lookup is not automatically a good one: a transcript that
+    // exists but has no assistant turn yet resolves to DEFAULT_WINDOW and still
+    // returns `Ok`. Accepting that would hand a launching subagent a defaulted
+    // window where the project heuristic would have found a real one, so both
+    // candidates are filtered on `window_source` — the field ADR-166 added so a
+    // default is never mistaken for a detection. `EnvOverride` counts as
+    // detected, keeping CLAUDE_CONTEXT_WINDOW authoritative on this path.
     let fm = frontmatter::parse(&way_file)?;
-    let window = crate::cmd::context::get_context_for_session(session_id)
-        .or_else(|_| crate::cmd::context::get_context(Some(&project_dir)))
-        .map(|c| c.tokens_total)
-        .unwrap_or_else(|_| ways_core::context_window::resolve(None).tokens);
+    let window = resolve_firing_window(
+        crate::cmd::context::get_context_for_session(session_id).ok(),
+        || crate::cmd::context::get_context(Some(&project_dir)).ok(),
+    );
     let curve = fm.resolved_curve(window).ok_or_else(|| {
         anyhow::anyhow!(
             "way {} is missing a `refire:` field in its frontmatter (ADR-126)",
@@ -471,6 +499,76 @@ fn normalize_way_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ways_core::context_window::WindowSource;
+
+    fn ctx(tokens_total: u64, window_source: WindowSource) -> crate::cmd::context::ContextInfo {
+        crate::cmd::context::ContextInfo {
+            tokens_used: 0,
+            tokens_total,
+            tokens_remaining: tokens_total,
+            pct_used: 0,
+            pct_remaining: 100,
+            model: "test".to_string(),
+            method: "test".to_string(),
+            session: "test".to_string(),
+            window_source,
+        }
+    }
+
+    #[test]
+    fn firing_window_prefers_the_pinned_session() {
+        // The fix: the firing session's own window wins over whatever the
+        // project heuristic's newest-transcript scan happens to land on.
+        let got = resolve_firing_window(Some(ctx(200_000, WindowSource::ModelTable)), || {
+            Some(ctx(1_000_000, WindowSource::ModelTable))
+        });
+        assert_eq!(got, 200_000);
+    }
+
+    #[test]
+    fn defaulted_pinned_window_yields_to_the_fallback() {
+        // The regression this guards: a subagent transcript exists but has no
+        // assistant turn yet, so the pinned lookup returns Ok carrying
+        // DEFAULT_WINDOW. Accepting it would latch a 200k curve on a 1M
+        // session; the project heuristic's real detection must win instead.
+        let got = resolve_firing_window(Some(ctx(200_000, WindowSource::Default)), || {
+            Some(ctx(1_000_000, WindowSource::ModelTable))
+        });
+        assert_eq!(got, 1_000_000);
+    }
+
+    #[test]
+    fn env_override_counts_as_detected() {
+        // ADR-166 keeps CLAUDE_CONTEXT_WINDOW authoritative, so an override on
+        // the pinned lookup must not be treated as a miss.
+        let got = resolve_firing_window(Some(ctx(500_000, WindowSource::EnvOverride)), || {
+            Some(ctx(1_000_000, WindowSource::ModelTable))
+        });
+        assert_eq!(got, 500_000);
+    }
+
+    #[test]
+    fn both_defaulted_falls_through_to_the_resolver() {
+        // Neither candidate detected anything: fall through to the single
+        // resolver rather than propagating either defaulted number.
+        let got = resolve_firing_window(Some(ctx(123, WindowSource::Default)), || {
+            Some(ctx(456, WindowSource::Default))
+        });
+        assert_eq!(got, ways_core::context_window::resolve(None).tokens);
+    }
+
+    #[test]
+    fn fallback_is_not_evaluated_when_pinned_is_detected() {
+        // The heuristic scans every project dir and this runs on every fire,
+        // so a usable pinned answer must short-circuit it.
+        let mut called = false;
+        let got = resolve_firing_window(Some(ctx(1_000_000, WindowSource::ModelTable)), || {
+            called = true;
+            None
+        });
+        assert_eq!(got, 1_000_000);
+        assert!(!called, "fallback ran despite a detected pinned window");
+    }
 
     #[test]
     fn surface_snippet_collapses_whitespace() {

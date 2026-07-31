@@ -333,8 +333,10 @@ pub(crate) fn find_transcript_by_session_in(
     session_id: &str,
 ) -> Option<PathBuf> {
     let filename = format!("{session_id}.jsonl");
-    for entry in std::fs::read_dir(projects_root).ok()? {
-        let entry = entry.ok()?;
+    // `flatten` rather than `?` on each entry: one unreadable directory must not
+    // abort the scan. This gates `session_is_live`, so a single I/O error while
+    // iterating ~/.claude/projects would otherwise make every session look dead.
+    for entry in std::fs::read_dir(projects_root).ok()?.flatten() {
         let candidate = entry.path().join(&filename);
         if candidate.is_file() {
             return Some(candidate);

@@ -5,6 +5,7 @@
 use anyhow::Result;
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::cmd::context;
 use crate::cmd::render::{self, WayRow};
@@ -46,9 +47,16 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     let session_id = match session {
         Some(s) => s.to_string(),
         None => match detect_session() {
-            Some(s) => s,
-            None => {
+            Ok(s) => s,
+            Err(NoSession::NoMarkers) => {
                 println!("No session markers found. Ways will appear after the first hook fires.");
+                return Ok(());
+            }
+            Err(NoSession::AllOrphaned) => {
+                println!(
+                    "Session markers found, but no matching transcript. Pass --session <id> to \
+                     inspect one directly."
+                );
                 return Ok(());
             }
         },
@@ -231,62 +239,80 @@ fn load_metrics(session_id: &str) -> HashMap<String, MetricEntry> {
 /// created. Downstream, `get_context_for_session` then fails and the caller
 /// silently drops to marker-derived token positions, so the render looks
 /// plausible while describing a session that is not this one.
-fn session_is_live(session_id: &str) -> bool {
-    session_is_live_in(
-        std::path::Path::new(&crate::session::sessions_root()),
-        &crate::cmd::context::projects_root(),
-        session_id,
-    )
-}
-
-/// Pure core of [`session_is_live`]: both roots passed in. Split out because
-/// `sessions_root()` reads `XDG_RUNTIME_DIR`, and env vars are process-global
-/// while Rust tests run in parallel — a test that set it would race every other
-/// test resolving a session.
+/// Pure core of the liveness check: both roots passed in. Split out because
+/// `sessions_root()` reads `XDG_RUNTIME_DIR` and can shell out to `id -u`,
+/// and env vars are process-global while Rust tests run in parallel — a test
+/// that set it would race every other test resolving a session.
 fn session_is_live_in(
-    sessions_root: &std::path::Path,
-    projects_root: &std::path::Path,
+    sessions_root: &Path,
+    projects_root: &Path,
     session_id: &str,
 ) -> bool {
     sessions_root.join(session_id).is_dir()
         && crate::cmd::context::find_transcript_by_session_in(projects_root, session_id).is_some()
 }
 
-fn detect_session() -> Option<String> {
+/// Why auto-detection found nothing, so the caller can say which of the two
+/// it was rather than always blaming missing markers.
+enum NoSession {
+    /// No state dirs at all — no way has fired yet anywhere.
+    NoMarkers,
+    /// State dirs exist, but none of them has a transcript still on disk.
+    AllOrphaned,
+}
+
+fn detect_session() -> Result<String, NoSession> {
+    let sessions_root = crate::session::sessions_root();
+    let sessions_root = Path::new(&sessions_root);
+    let projects_root = crate::cmd::context::projects_root();
+    detect_session_in(sessions_root, &projects_root)
+}
+
+/// Pure core of [`detect_session`]: roots passed in, so the precedence is
+/// testable against temp dirs instead of the live `~/.claude`.
+///
+/// Both roots are resolved once by the caller — `session_is_live_in` runs per
+/// candidate, and re-deriving `sessions_root()` inside the loop would shell out
+/// to `id -u` once per session on platforms without `XDG_RUNTIME_DIR`.
+fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<String, NoSession> {
     let project = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
         .or_else(detect_project_dir);
 
     if let Some(ref proj) = project {
         if let Some(sid) = latest_session_for_project(proj) {
-            if session_is_live(&sid) {
-                return Some(sid);
+            if session_is_live_in(sessions_root, projects_root, &sid) {
+                return Ok(sid);
             }
         }
     }
 
-    let sessions: Vec<String> = session::list_sessions()
+    let all = session::list_sessions();
+    if all.is_empty() {
+        return Err(NoSession::NoMarkers);
+    }
+
+    let sessions: Vec<String> = all
         .into_iter()
-        .filter(|sid| session_is_live(sid))
+        .filter(|sid| session_is_live_in(sessions_root, projects_root, sid))
         .collect();
     if sessions.is_empty() {
-        return None;
+        return Err(NoSession::AllOrphaned);
     }
     if sessions.len() == 1 {
-        return Some(sessions.into_iter().next().unwrap());
+        return Ok(sessions.into_iter().next().unwrap());
     }
 
     let mut newest: Option<(std::time::SystemTime, String)> = None;
     for sid in sessions {
-        let dir = format!("{}/{sid}", crate::session::sessions_root());
-        if let Ok(meta) = std::fs::metadata(&dir) {
+        if let Ok(meta) = std::fs::metadata(sessions_root.join(&sid)) {
             let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
             if newest.as_ref().is_none_or(|(t, _)| mtime > *t) {
                 newest = Some((mtime, sid));
             }
         }
     }
-    newest.map(|(_, s)| s)
+    newest.map(|(_, s)| s).ok_or(NoSession::AllOrphaned)
 }
 
 fn latest_session_for_project(project: &str) -> Option<String> {
@@ -388,9 +414,9 @@ mod tests {
 
     #[test]
     fn orphaned_state_dir_is_not_live() {
-        // The bug: auto-detect accepted a session on `is_dir()` alone. A state
-        // dir outlives its transcript, so an orphan won detection and the
-        // gauge silently fell back to marker-derived token positions.
+        // A state dir outlives its transcript. Pre-fix, `detect_session` took
+        // `is_dir()` as sufficient, so an orphan won detection and the gauge
+        // silently fell back to marker-derived token positions.
         let (sessions, projects) = temp_roots(line!(), &["orphan-sid"], &[]);
         assert!(!session_is_live_in(&sessions, &projects, "orphan-sid"));
         std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
