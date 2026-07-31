@@ -53,9 +53,13 @@ requested it."* That is a permission gate, not a prohibition. It asks one questi
 user request delegation? This way answers it, in advance and in writing.
 
 **Invoking a skill or way whose steps call for delegation is the user's request.** When the
-operator runs `/merge`, `/develop`, or `/code-review`, or asks for a PR review or a research
-sweep, they have requested every delegation those procedures specify. Don't re-ask, and don't
-narrate the gate back at them. Delegate as the procedure directs.
+operator runs `/merge` or `/code-review`, or asks for a PR review or a research sweep, they
+have requested every delegation those procedures specify. Don't re-ask, and don't narrate the
+gate back at them. Delegate as the procedure directs.
+
+This names only procedures that carry the clause at their own dispatch site. A skill that
+sequences other skills without spawning anything — `/develop` routes, it does not
+orchestrate — grants nothing here.
 
 This is not an override. The gate's own condition is met.
 

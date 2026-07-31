@@ -118,7 +118,10 @@ when the operator has said to work solo.
 ### Negative
 
 - Tier 2 duplicates a short clause across several files. Adding a new delegating skill
-  means remembering to carry the clause, and nothing enforces it.
+  means remembering to carry the clause, and nothing enforces it. The drift is fail-closed
+  — a site without a clause grants nothing, so the model asks, which is the pre-change
+  behaviour — but the tiers can still fall out of step, and Tier 1 must name only
+  procedures that carry a clause at their own dispatch site.
 - The change is unverifiable from inside the repository. Whether the model actually
   delegates without asking can only be observed in live sessions.
 - If upstream flips `tengu_fennel_godwit` or removes the section, Tier 1 becomes an
