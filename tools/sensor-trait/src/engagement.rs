@@ -126,6 +126,19 @@ impl EngagementState {
         &self.curve
     }
 
+    /// Replace the curve, preserving fire history.
+    ///
+    /// The curve is part of the serialized state, so a state reloaded from disk
+    /// carries whatever curve was current at first fire. When the curve is
+    /// derived from something that can change within a session — a `refire:`
+    /// fraction resolved against the context window, which is unknown until the
+    /// first assistant turn names a model — the persisted copy is stale and the
+    /// caller's freshly resolved one is authoritative. History stays: only the
+    /// decay shape is being corrected, not the record of what fired when.
+    pub fn set_curve(&mut self, curve: Curve) {
+        self.curve = curve;
+    }
+
     /// Whether any fire has been recorded. Useful for first-fire vs
     /// re-fire discrimination in the caller.
     pub fn has_fired(&self) -> bool {
@@ -174,6 +187,41 @@ impl EngagementState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_curve_replaces_decay_shape_and_keeps_history() {
+        // The curve is serialized with the state, so a state reloaded from disk
+        // carries whatever window was resolvable at first fire. Callers re-apply
+        // the current curve on load; that must not discard what already fired.
+        let mut state = EngagementState::new(Curve::Exponential { half_life: 30_000 });
+        state.record_fire(500, 1.0);
+
+        state.set_curve(Curve::Exponential { half_life: 150_000 });
+
+        assert!(matches!(
+            state.curve(),
+            Curve::Exponential {
+                half_life: 150_000
+            }
+        ));
+        assert!(state.has_fired(), "history dropped when the curve was swapped");
+        assert_eq!(state.last_fire_tick(), Some(500));
+    }
+
+    #[test]
+    fn a_widened_curve_suppresses_where_the_stale_one_would_refire() {
+        // Why the swap matters: at tick 40_000 a latched 30k half-life has
+        // decayed past REFIRE_FLOOR (0.5) and would re-disclose, while the
+        // correctly-resolved 150k curve has not.
+        let mut stale = EngagementState::new(Curve::Exponential { half_life: 30_000 });
+        stale.record_fire(0, 1.0);
+        assert!(stale.current_salience(40_000) < 0.5);
+
+        let mut fresh = EngagementState::new(Curve::Exponential { half_life: 30_000 });
+        fresh.record_fire(0, 1.0);
+        fresh.set_curve(Curve::Exponential { half_life: 150_000 });
+        assert!(fresh.current_salience(40_000) >= 0.5);
+    }
 
     fn ap_curve() -> Curve {
         Curve::ActionPotential {

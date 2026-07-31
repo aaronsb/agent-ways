@@ -5,6 +5,7 @@
 use anyhow::Result;
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::cmd::context;
 use crate::cmd::render::{self, WayRow};
@@ -46,9 +47,16 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     let session_id = match session {
         Some(s) => s.to_string(),
         None => match detect_session() {
-            Some(s) => s,
-            None => {
+            Ok(s) => s,
+            Err(NoSession::NoMarkers) => {
                 println!("No session markers found. Ways will appear after the first hook fires.");
+                return Ok(());
+            }
+            Err(NoSession::AllOrphaned) => {
+                println!(
+                    "Session markers found, but no matching transcript. List candidates with \
+                     `ways rethink list`, then pass --session <id> to inspect one directly."
+                );
                 return Ok(());
             }
         },
@@ -223,39 +231,92 @@ fn load_metrics(session_id: &str) -> HashMap<String, MetricEntry> {
     map
 }
 
-fn detect_session() -> Option<String> {
+/// A session id is only usable here if its transcript still exists.
+///
+/// The state dir under `sessions_root()` outlives the transcript it describes,
+/// so `is_dir()` alone happily returns an orphan — a session whose markers were
+/// written once and whose transcript has since been removed or was never
+/// created. Downstream, `get_context_for_session` then fails and the caller
+/// silently drops to marker-derived token positions, so the render looks
+/// plausible while describing a session that is not this one.
+/// Pure core of the liveness check: both roots passed in. Split out because
+/// `sessions_root()` reads `XDG_RUNTIME_DIR` and can shell out to `id -u`,
+/// and env vars are process-global while Rust tests run in parallel — a test
+/// that set it would race every other test resolving a session.
+fn session_is_live_in(
+    sessions_root: &Path,
+    projects_root: &Path,
+    session_id: &str,
+) -> bool {
+    sessions_root.join(session_id).is_dir()
+        && crate::cmd::context::find_transcript_by_session_in(projects_root, session_id).is_some()
+}
+
+/// Why auto-detection found nothing, so the caller can say which of the two
+/// it was rather than always blaming missing markers.
+enum NoSession {
+    /// No state dirs at all — no way has fired yet anywhere.
+    NoMarkers,
+    /// State dirs exist, but none of them has a transcript still on disk.
+    AllOrphaned,
+}
+
+fn detect_session() -> Result<String, NoSession> {
+    let sessions_root = crate::session::sessions_root();
+    let sessions_root = Path::new(&sessions_root);
+    let projects_root = crate::cmd::context::projects_root();
+    detect_session_in(sessions_root, &projects_root)
+}
+
+/// Core of [`detect_session`], with both roots passed in.
+///
+/// Resolved once by the caller: `session_is_live_in` runs per candidate, and
+/// re-deriving `sessions_root()` inside the loop would shell out to `id -u`
+/// once per session on platforms without `XDG_RUNTIME_DIR`.
+///
+/// **Not yet fully injectable.** Enumeration and liveness both honor the passed
+/// roots, but `latest_session_for_project` still reads the global events log via
+/// `paths::events_log()`, so the project-scoped branch escapes them. Closing
+/// that is what stands between this and a temp-dir test of the full precedence.
+fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<String, NoSession> {
     let project = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
         .or_else(detect_project_dir);
 
     if let Some(ref proj) = project {
         if let Some(sid) = latest_session_for_project(proj) {
-            let dir = format!("{}/{sid}", crate::session::sessions_root());
-            if std::path::Path::new(&dir).is_dir() {
-                return Some(sid);
+            if session_is_live_in(sessions_root, projects_root, &sid) {
+                return Ok(sid);
             }
         }
     }
 
-    let sessions = session::list_sessions();
+    let all = session::list_sessions_in(sessions_root);
+    if all.is_empty() {
+        return Err(NoSession::NoMarkers);
+    }
+
+    let sessions: Vec<String> = all
+        .into_iter()
+        .filter(|sid| session_is_live_in(sessions_root, projects_root, sid))
+        .collect();
     if sessions.is_empty() {
-        return None;
+        return Err(NoSession::AllOrphaned);
     }
     if sessions.len() == 1 {
-        return Some(sessions.into_iter().next().unwrap());
+        return Ok(sessions.into_iter().next().unwrap());
     }
 
     let mut newest: Option<(std::time::SystemTime, String)> = None;
     for sid in sessions {
-        let dir = format!("{}/{sid}", crate::session::sessions_root());
-        if let Ok(meta) = std::fs::metadata(&dir) {
+        if let Ok(meta) = std::fs::metadata(sessions_root.join(&sid)) {
             let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
             if newest.as_ref().is_none_or(|(t, _)| mtime > *t) {
                 newest = Some((mtime, sid));
             }
         }
     }
-    newest.map(|(_, s)| s)
+    newest.map(|(_, s)| s).ok_or(NoSession::AllOrphaned)
 }
 
 fn latest_session_for_project(project: &str) -> Option<String> {
@@ -322,4 +383,66 @@ fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, cont
     });
 
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_is_live_in;
+    use std::path::PathBuf;
+
+    /// Build a sessions root holding a state dir per id, and a projects root
+    /// holding a transcript per (slug, id). Passing an id to one and not the
+    /// other is how a half-present session is staged.
+    fn temp_roots(
+        unique: u32,
+        state_dirs: &[&str],
+        transcripts: &[(&str, &str)],
+    ) -> (PathBuf, PathBuf) {
+        let base =
+            std::env::temp_dir().join(format!("ways_list_test_{}_{}", std::process::id(), unique));
+        let _ = std::fs::remove_dir_all(&base);
+        let sessions_root = base.join("sessions");
+        let projects_root = base.join("projects");
+        std::fs::create_dir_all(&sessions_root).unwrap();
+        std::fs::create_dir_all(&projects_root).unwrap();
+        for sid in state_dirs {
+            std::fs::create_dir_all(sessions_root.join(sid)).unwrap();
+        }
+        for (slug, sid) in transcripts {
+            let dir = projects_root.join(slug);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("{sid}.jsonl")), "{}\n").unwrap();
+        }
+        (sessions_root, projects_root)
+    }
+
+    #[test]
+    fn orphaned_state_dir_is_not_live() {
+        // A state dir outlives its transcript. Pre-fix, `detect_session` took
+        // `is_dir()` as sufficient, so an orphan won detection and the gauge
+        // silently fell back to marker-derived token positions.
+        let (sessions, projects) = temp_roots(line!(), &["orphan-sid"], &[]);
+        assert!(!session_is_live_in(&sessions, &projects, "orphan-sid"));
+        std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn state_dir_plus_transcript_is_live() {
+        // The positive case must still resolve, in any project dir — session
+        // ids are globally unique, so the slug is irrelevant.
+        let (sessions, projects) =
+            temp_roots(line!(), &["real-sid"], &[("-home-aaron-someproj", "real-sid")]);
+        assert!(session_is_live_in(&sessions, &projects, "real-sid"));
+        std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn transcript_without_state_dir_is_not_live() {
+        // The other half-present shape: a transcript exists but the session
+        // never wrote markers, so there is no fired-way state to render.
+        let (sessions, projects) =
+            temp_roots(line!(), &[], &[("-home-aaron-someproj", "no-state-sid")]);
+        assert!(!session_is_live_in(&sessions, &projects, "no-state-sid"));
+        std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
+    }
 }

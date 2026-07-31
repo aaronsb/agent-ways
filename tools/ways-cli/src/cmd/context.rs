@@ -313,20 +313,30 @@ fn read_token_usage(content: &str) -> (u64, String) {
     (estimated, "bytes".to_string())
 }
 
+/// The root every session transcript lives under, one directory per project.
+pub(crate) fn projects_root() -> PathBuf {
+    home_dir().join(".claude/projects")
+}
+
 /// Find a transcript by session id, searching every project dir under
 /// `~/.claude/projects/`. Session ids are globally unique, so we don't
 /// need to know which project the session is rooted in.
 pub(crate) fn find_transcript_by_session(session_id: &str) -> Option<PathBuf> {
-    find_transcript_by_session_in(&home_dir().join(".claude/projects"), session_id)
+    find_transcript_by_session_in(&projects_root(), session_id)
 }
 
 /// Search `projects_root/*/<session_id>.jsonl`. Split out from
 /// `find_transcript_by_session` so the lookup is testable against a temp
 /// projects root instead of the real `~/.claude/projects`.
-fn find_transcript_by_session_in(projects_root: &Path, session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_transcript_by_session_in(
+    projects_root: &Path,
+    session_id: &str,
+) -> Option<PathBuf> {
     let filename = format!("{session_id}.jsonl");
-    for entry in std::fs::read_dir(projects_root).ok()? {
-        let entry = entry.ok()?;
+    // `flatten` rather than `?` on each entry: one unreadable directory must not
+    // abort the scan. This gates `session_is_live`, so a single I/O error while
+    // iterating ~/.claude/projects would otherwise make every session look dead.
+    for entry in std::fs::read_dir(projects_root).ok()?.flatten() {
         let candidate = entry.path().join(&filename);
         if candidate.is_file() {
             return Some(candidate);

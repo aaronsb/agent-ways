@@ -728,12 +728,20 @@ fn find_check_in_dir(dir: &Path) -> Option<PathBuf> {
 
 /// List all session IDs that have state directories.
 pub fn list_sessions() -> Vec<String> {
-    let root = PathBuf::from(sessions_root());
+    list_sessions_in(Path::new(&sessions_root()))
+}
+
+/// List session IDs under an explicit state root. Split out from
+/// [`list_sessions`] so callers that already resolved a root enumerate and
+/// test against *that* root — enumerating the real `~/.claude` while checking
+/// liveness against an injected one is internally inconsistent, and silently
+/// makes every injected root look empty.
+pub fn list_sessions_in(root: &Path) -> Vec<String> {
     if !root.is_dir() {
         return Vec::new();
     }
     let mut sessions = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&root) {
+    if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
                 if let Some(name) = entry.file_name().to_str() {

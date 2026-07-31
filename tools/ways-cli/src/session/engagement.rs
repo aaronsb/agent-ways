@@ -55,12 +55,44 @@ fn engagement_path(way_id: &str, session_id: &str) -> PathBuf {
         .join(format!("{}.json", way_id.replace('/', "__")))
 }
 
+/// Load a way's engagement state, with the caller's curve taking precedence
+/// over the persisted one.
+///
+/// `EngagementState` serializes its curve, so a state written at first fire
+/// carries the curve resolved *then*. Under ADR-126 the curve comes from
+/// `refire:` resolved against the session's context window — and that window is
+/// `DEFAULT_WINDOW` until the first assistant turn names a model. Honoring the
+/// persisted copy latched that launch-race default for the rest of the session:
+/// a 1M session whose first fire landed early kept `half_life = 0.15 × 200_000`
+/// and re-fired five times too often, permanently.
+///
+/// Re-applying the caller's curve keeps the frontmatter the single source of
+/// truth for decay shape, and lets a mis-resolved window self-correct on the
+/// next fire. Fire history is preserved — only the curve is replaced.
+///
+/// This cuts both ways. When the window *narrows* mid-session — `/model` from a
+/// 1M model to a 200k one — every way's half-life drops at once, and any way
+/// whose last fire is further back than the new half-life falls below
+/// `REFIRE_FLOOR` and re-discloses on its next trigger. In a long session that
+/// is most of them. This is intended: the window really did shrink, so the
+/// cadence really should tighten. It is self-limiting, since each way re-records
+/// at the current tick under the new curve and normalizes immediately after.
+///
+/// One consequence for readers of the on-disk state: the `curve` field in
+/// `way-engagement/*.json` is still written but no longer read by this path.
+/// It is diagnostic only — the gating curve always comes from frontmatter.
 fn load_engagement(way_id: &str, session_id: &str, curve: &Curve) -> EngagementState {
     let path = engagement_path(way_id, session_id);
-    std::fs::read_to_string(&path)
+    match std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str::<EngagementState>(&s).ok())
-        .unwrap_or_else(|| EngagementState::new(curve.clone()))
+    {
+        Some(mut state) => {
+            state.set_curve(curve.clone());
+            state
+        }
+        None => EngagementState::new(curve.clone()),
+    }
 }
 
 fn save_engagement(way_id: &str, session_id: &str, state: &EngagementState) {
