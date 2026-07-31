@@ -16,7 +16,7 @@ Before searching, state what you're trying to learn and why. A vague "research X
 ## Investigation Structure
 
 1. **Scope** — What's in bounds? What would be a tangent?
-2. **Gather** — Use tools (WebSearch, WebFetch, Grep, Read) to collect information. Prefer primary sources over summaries of summaries.
+2. **Gather** — Use tools (WebSearch, WebFetch, Grep, Read) to collect information. Prefer primary sources over summaries of summaries. When the question spans several independent sources, asking for the research is asking for the sweep: fan `Explore` or `general-purpose` agents across them rather than pausing to request permission, and say why in a clause ("six independent sources; agents return conclusions, not page dumps"). Deep-research and `Workflow` are not covered by that — propose those and discuss. See ADR-175.
 3. **Evaluate** — Not all sources are equal. Official docs > blog posts > forum answers > LLM-generated content. Flag confidence levels.
 4. **Synthesize** — Compress findings into a structure the user can act on. Don't dump raw results.
 5. **Present** — Lead with the answer, then the evidence. The user wants the conclusion first.

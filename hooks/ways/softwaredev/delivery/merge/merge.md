@@ -31,6 +31,11 @@ When the classification is ambiguous, **surface the call** rather than silently
 picking a corner. Inside a `/goal` loop, bias toward the autonomous corners; outside
 one, ask.
 
+Whichever corner you land in, asking to merge is asking for the review this gate
+specifies — dispatch the reviewer rather than re-requesting permission to, and name the
+payoff in a clause as you do. The ambiguity worth surfacing is *which corner*, never
+*whether to review*. See ADR-175.
+
 ## Remediate before you merge
 
 A review that finds nothing changes nothing; a review that finds something is only worth running if the findings get fixed. **Remediate per finding** before the merge gate — apply the fix, or record why a finding is declined. Don't carry known findings past the gate. This is the step the loop is easy to skip: "reviewed" is not "landed clean."

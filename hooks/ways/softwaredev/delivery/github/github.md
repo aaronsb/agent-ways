@@ -21,7 +21,9 @@ We use PRs for all changes, including solo projects. A PR without reviewers stil
 
 ## Code Review Before Merge
 
-After creating a PR, review before merging — don't wait to be asked. But *how hard* to review, and *whether a human reads first*, is the four-square decision in `delivery/merge`, not a fixed "always spawn one reviewer." At minimum offer a `code-reviewer` subagent; scale to a swarm for complex, high-blast-radius changes, and gate on operator approval when the work sets direction.
+After creating a PR, review before merging — don't wait to be asked. But *how hard* to review, and *whether a human reads first*, is the four-square decision in `delivery/merge`, not a fixed "always spawn one reviewer." At minimum dispatch a `code-reviewer` subagent; scale to a swarm for complex, high-blast-radius changes, and gate on operator approval when the work sets direction.
+
+Asking to merge is asking for that review, so dispatch it rather than asking permission to (ADR-175). The four-square decides review *depth* and whether a human reads first — never whether a review happens. Merge *strategy* is a separate question and still gets asked, below.
 
 ## Merge Strategy — Prefer Regular Merge
 
