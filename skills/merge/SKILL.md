@@ -97,6 +97,10 @@ them and for direction-setting changes — say why.
 
 **Running a single review:**
 
+Invoking `/merge` is the request for this review — dispatch the reviewer, don't stop to ask
+permission for it. Say why in a clause as you go ("review needs a reader who hasn't seen my
+reasoning"). See ADR-175.
+
 ```
 Agent(subagent_type="code-reviewer", prompt="Review PR #<number> in this repo.
 Run gh pr diff <number> to see the changes. Post findings as a gh pr comment.")
