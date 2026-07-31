@@ -85,8 +85,23 @@ pub fn way_scored(
     // When the transcript can't be read at all, fall back through the one resolver
     // (ADR-166) rather than a second hardcoded constant, so the operator's
     // CLAUDE_CONTEXT_WINDOW is still honored on this path.
+    //
+    // Pin the lookup to the *firing* session. Resolving by `project_dir` alone
+    // sends `resolve_transcript` down its newest-transcript-in-project branch,
+    // which reads whichever session in that project wrote last — not necessarily
+    // this one. Concurrent sessions under one project therefore resolve each
+    // other's windows, and a way firing in a 200k session against a 1M sibling's
+    // transcript re-fires five times too slowly (or the reverse).
+    //
+    // The curve itself is not persisted — `record_way_fire` stores tick and
+    // salience only, and every fire decision recomputes the curve from the
+    // window resolved here. So a window that is briefly wrong (the launch race,
+    // before the first assistant turn names a model) self-corrects on the next
+    // fire rather than sticking for the run. The project heuristic stays as the
+    // fallback for callers whose session has no transcript on disk.
     let fm = frontmatter::parse(&way_file)?;
-    let window = crate::cmd::context::get_context(Some(&project_dir))
+    let window = crate::cmd::context::get_context_for_session(session_id)
+        .or_else(|_| crate::cmd::context::get_context(Some(&project_dir)))
         .map(|c| c.tokens_total)
         .unwrap_or_else(|_| ways_core::context_window::resolve(None).tokens);
     let curve = fm.resolved_curve(window).ok_or_else(|| {

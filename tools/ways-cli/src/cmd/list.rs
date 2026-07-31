@@ -223,6 +223,35 @@ fn load_metrics(session_id: &str) -> HashMap<String, MetricEntry> {
     map
 }
 
+/// A session id is only usable here if its transcript still exists.
+///
+/// The state dir under `sessions_root()` outlives the transcript it describes,
+/// so `is_dir()` alone happily returns an orphan — a session whose markers were
+/// written once and whose transcript has since been removed or was never
+/// created. Downstream, `get_context_for_session` then fails and the caller
+/// silently drops to marker-derived token positions, so the render looks
+/// plausible while describing a session that is not this one.
+fn session_is_live(session_id: &str) -> bool {
+    session_is_live_in(
+        std::path::Path::new(&crate::session::sessions_root()),
+        &crate::cmd::context::projects_root(),
+        session_id,
+    )
+}
+
+/// Pure core of [`session_is_live`]: both roots passed in. Split out because
+/// `sessions_root()` reads `XDG_RUNTIME_DIR`, and env vars are process-global
+/// while Rust tests run in parallel — a test that set it would race every other
+/// test resolving a session.
+fn session_is_live_in(
+    sessions_root: &std::path::Path,
+    projects_root: &std::path::Path,
+    session_id: &str,
+) -> bool {
+    sessions_root.join(session_id).is_dir()
+        && crate::cmd::context::find_transcript_by_session_in(projects_root, session_id).is_some()
+}
+
 fn detect_session() -> Option<String> {
     let project = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
@@ -230,14 +259,16 @@ fn detect_session() -> Option<String> {
 
     if let Some(ref proj) = project {
         if let Some(sid) = latest_session_for_project(proj) {
-            let dir = format!("{}/{sid}", crate::session::sessions_root());
-            if std::path::Path::new(&dir).is_dir() {
+            if session_is_live(&sid) {
                 return Some(sid);
             }
         }
     }
 
-    let sessions = session::list_sessions();
+    let sessions: Vec<String> = session::list_sessions()
+        .into_iter()
+        .filter(|sid| session_is_live(sid))
+        .collect();
     if sessions.is_empty() {
         return None;
     }
@@ -322,4 +353,66 @@ fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, cont
     });
 
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_is_live_in;
+    use std::path::PathBuf;
+
+    /// Build a sessions root holding a state dir per id, and a projects root
+    /// holding a transcript per (slug, id). Passing an id to one and not the
+    /// other is how a half-present session is staged.
+    fn temp_roots(
+        unique: u32,
+        state_dirs: &[&str],
+        transcripts: &[(&str, &str)],
+    ) -> (PathBuf, PathBuf) {
+        let base =
+            std::env::temp_dir().join(format!("ways_list_test_{}_{}", std::process::id(), unique));
+        let _ = std::fs::remove_dir_all(&base);
+        let sessions_root = base.join("sessions");
+        let projects_root = base.join("projects");
+        std::fs::create_dir_all(&sessions_root).unwrap();
+        std::fs::create_dir_all(&projects_root).unwrap();
+        for sid in state_dirs {
+            std::fs::create_dir_all(sessions_root.join(sid)).unwrap();
+        }
+        for (slug, sid) in transcripts {
+            let dir = projects_root.join(slug);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("{sid}.jsonl")), "{}\n").unwrap();
+        }
+        (sessions_root, projects_root)
+    }
+
+    #[test]
+    fn orphaned_state_dir_is_not_live() {
+        // The bug: auto-detect accepted a session on `is_dir()` alone. A state
+        // dir outlives its transcript, so an orphan won detection and the
+        // gauge silently fell back to marker-derived token positions.
+        let (sessions, projects) = temp_roots(line!(), &["orphan-sid"], &[]);
+        assert!(!session_is_live_in(&sessions, &projects, "orphan-sid"));
+        std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn state_dir_plus_transcript_is_live() {
+        // The positive case must still resolve, in any project dir — session
+        // ids are globally unique, so the slug is irrelevant.
+        let (sessions, projects) =
+            temp_roots(line!(), &["real-sid"], &[("-home-aaron-someproj", "real-sid")]);
+        assert!(session_is_live_in(&sessions, &projects, "real-sid"));
+        std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn transcript_without_state_dir_is_not_live() {
+        // The other half-present shape: a transcript exists but the session
+        // never wrote markers, so there is no fired-way state to render.
+        let (sessions, projects) =
+            temp_roots(line!(), &[], &[("-home-aaron-someproj", "no-state-sid")]);
+        assert!(!session_is_live_in(&sessions, &projects, "no-state-sid"));
+        std::fs::remove_dir_all(sessions.parent().unwrap()).ok();
+    }
 }
