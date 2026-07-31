@@ -95,11 +95,12 @@ rather than silently picking a corner. Inside a `/goal` loop, bias to the autono
 corners; outside one, ask. Team repos always gate; `/merge full-sail` is rejected for
 them and for direction-setting changes — say why.
 
-**Running a single review:**
+Invoking `/merge` is the request for the review this gate specifies, in whichever corner you
+landed — dispatch the reviewers, don't stop to ask permission for them. Say why in a clause as
+you go ("review needs a reader who hasn't seen my reasoning"). For a swarm, state the number
+before spawning it. See ADR-175.
 
-Invoking `/merge` is the request for this review — dispatch the reviewer, don't stop to ask
-permission for it. Say why in a clause as you go ("review needs a reader who hasn't seen my
-reasoning"). See ADR-175.
+**Running a single review:**
 
 ```
 Agent(subagent_type="code-reviewer", prompt="Review PR #<number> in this repo.

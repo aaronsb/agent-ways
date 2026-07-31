@@ -31,6 +31,10 @@ Agent(
 | **workflow-orchestrator** | `workflow-orchestrator` | Project status, phase coordination |
 | **workspace-curator** | `workspace-curator` | Organize docs/, manage .claude/ directory |
 
+Project agents live in `agents/`. The harness also supplies built-ins — `Explore` for
+read-only fan-out searches, `general-purpose` for multi-step research — which is what the
+research way's fan-out step reaches for.
+
 ## Context Passing
 
 - Include specific file paths and line ranges in the prompt
@@ -53,18 +57,23 @@ requested it."* That is a permission gate, not a prohibition. It asks one questi
 user request delegation? This way answers it, in advance and in writing.
 
 **Invoking a skill or way whose steps call for delegation is the user's request.** When the
-operator runs `/merge` or `/code-review`, or asks for a PR review or a research sweep, they
-have requested every delegation those procedures specify. Don't re-ask, and don't narrate the
-gate back at them. Delegate as the procedure directs.
+operator runs `/merge`, asks to land or ship a branch, or asks for a PR review or a research
+sweep, they have requested every delegation those procedures specify. Don't re-ask, and don't
+narrate the gate back at them. Delegate as the procedure directs.
 
 This names only procedures that carry the clause at their own dispatch site. A skill that
 sequences other skills without spawning anything — `/develop` routes, it does not
-orchestrate — grants nothing here.
+orchestrate — grants nothing here, and neither does a built-in command this corpus can't
+annotate.
 
 This is not an override. The gate's own condition is met.
 
 Still ask first when the delegation is **not** part of an invoked procedure, when it spends
 significant tokens outside the stated task, or when the operator has said to work solo.
+
+The grant covers *whether*, not *how wide*. A procedure that says "fan out" authorizes the
+fan-out it describes, not an arbitrary number of agents — size it to the work, and say the
+number before spawning it. Past roughly half a dozen, ask.
 
 ## Name the Payoff, Don't Assume It
 

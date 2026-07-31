@@ -72,8 +72,17 @@ delegation — the moment at which the gate is already satisfied and the text is
 The cases that need it most (*"let's merge this"*, *"research X"*) do not match at all.
 Correct text on a surface that never fires changes nothing.
 
-Widening the pattern to reach those moments would require common-word alternations
-(`merge`, `review`), which is precisely the noise ADR-155's keyword gate exists to veto.
+Widening the pattern only partly helps, and is partly blocked. `review` is in the linter's
+`COMMON_WORDS` and is flagged regardless of anchoring, so the review half is unavailable.
+`merge` is not on that list, and `delivery/merge` already ships a lint-clean phrase pattern
+(`merge (this|it|the pr)`) that matches *"let's merge this"* today — so reach was never the
+whole problem.
+
+The binding constraint is different. A way has to *win* a match to disclose, and measurement
+during this work put `meta/subagents` fifth at 0.3 on *"delegate the code review to a
+subagent"* — below a project-local way — even though that query names delegation outright.
+A clause that must win a ranking to appear is a clause that sometimes doesn't. Sites don't
+rank; they are read when the procedure is read.
 
 ## Decision
 
@@ -102,6 +111,17 @@ The authorization is not unconditional. Delegation still requires asking when it
 part of an invoked procedure, when it spends significant tokens outside the stated task, or
 when the operator has said to work solo.
 
+It also grants *whether*, not *how wide*. A procedure that says "fan out" authorizes the
+fan-out it describes, not an unbounded agent count; the width is stated before spawning and
+asked for past roughly half a dozen. Without that bound the permission gate is answered and
+the cost gate quietly isn't.
+
+Tier 2 carries a corollary: a way that instructs the *opposite* verb at the same moment
+re-opens the recency contest this decision declines to enter. `delivery/github` said to
+"offer" a reviewer on the same trigger where `delivery/merge` now says to dispatch one.
+Aligning both was part of the change, and any future way covering a delegation moment has
+to be checked the same way.
+
 ## Consequences
 
 ### Positive
@@ -129,16 +149,22 @@ when the operator has said to work solo.
 
 ### Neutral
 
-- `subagents.md` needed a correctness pass regardless: it documents the tool as `Task`
-  (now `Agent`) and its agent roster omits several agents that exist. Done alongside.
+- `subagents.md` needed a correctness pass regardless, done alongside: it documented the
+  tool as `Task` (the model-facing name is `Agent`; the `Task` matchers in `settings.json`
+  are the harness event namespace and stay), and its roster listed only the `agents/`
+  directory, omitting the harness built-ins `Explore` and `general-purpose` that the
+  research way's fan-out step now names.
 - `counter_steer` remains untested. Confirming its presence requires a sample from a
   different account, not another session on this one.
 
 ## Alternatives Considered
 
-- **Widen `subagents.md`'s `pattern` to reach the moment-of-use vocabulary.** Rejected:
-  requires common-word alternations that ADR-155 §5 exists to prevent, and would make a
-  frequently-firing way out of one that should fire narrowly.
+- **Widen `subagents.md`'s `pattern` to reach the moment-of-use vocabulary.** Rejected, but
+  not because it is impossible: `review` is in the linter's `COMMON_WORDS` and unavailable,
+  while `merge` is clean and already used in phrase form elsewhere. Rejected because reach
+  is not the constraint — the way still has to win a match to disclose, and it ranked fifth
+  on a query that named delegation explicitly. It would also make a frequently-firing way
+  out of one that should fire narrowly.
 - **Flip the `tengu_fennel_godwit` killswitch.** Rejected: all-or-nothing across the
   `opus_5_prompt_bundle` capability, which would also drop `delivering_work_max` and
   `overcorrection`.
