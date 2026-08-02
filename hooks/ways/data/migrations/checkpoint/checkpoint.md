@@ -16,13 +16,11 @@ Replay the old baseline **plus every migration** into a throwaway database, then
 
 ## Prove it faithful before retiring anything
 
-Build a second throwaway database from the **candidate baseline alone** and diff
-it against the replayed original:
+Build a second throwaway database from the **candidate baseline alone** and diff it against the replayed original:
 
 - full schema dump (tables, columns, types, constraints, indexes)
 - per-table row counts, and normalized seed data
-- for graph/extension stores, anything a plain dump misses (e.g. an AGE label
-  catalog) — carried into the baseline verbatim, since it can't round-trip
+- for graph/extension stores, anything a plain dump misses (e.g. an AGE label catalog) — carried into the baseline verbatim, since it can't round-trip
 
 They must match exactly. If they don't, the baseline is wrong — stop.
 

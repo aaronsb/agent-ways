@@ -10,8 +10,7 @@ scope: agent, subagent
 
 In 1.0, `~/.claude` is a **thin projection** of an XDG application, not the app itself (ADR-142). The source lives in `$XDG_DATA_HOME/agent-ways`; `~/.claude` gets symlinks to the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) plus a three-way merge into `settings.json`. Everything else the app ships — `scripts/`, `tools/`, `docs/`, `governance/` — **stays in `$XDG_DATA`** and is deliberately *not* projected. So `~/.claude` remains the user's own directory (their sessions, credentials, and settings survive); agent-ways just adds its links.
 
-This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That
-"in-place" topology (and the `sync-to-home` subdirectory variant, ADR-140) is now
+This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "in-place" topology (and the `sync-to-home` subdirectory variant, ADR-140) is now
 **legacy**: an install still on it needs to **migrate**, not update in place.
 
 ## How install and update work now

@@ -13,13 +13,9 @@ English is the **source of truth.** Each way's English frontmatter is embedded i
 
 ## Two measurements
 
-The tool runs each locale's `description + vocabulary` as a query against the
-multilingual corpus, scoped to the active (or `--lang`) language, and reports:
+The tool runs each locale's `description + vocabulary` as a query against the multilingual corpus, scoped to the active (or `--lang`) language, and reports:
 
-**Fidelity** — cosine alignment to the **English root anchor**. For a single localized
-language the alias's only same-way peer is the root, so `min_peer` *is* root-alignment:
-how well the translation tracks the source of truth. Low fidelity → the stub drifted
-from the English meaning.
+**Fidelity** — cosine alignment to the **English root anchor**. For a single localized language the alias's only same-way peer is the root, so `min_peer` *is* root-alignment: how well the translation tracks the source of truth. Low fidelity → the stub drifted from the English meaning.
 
 **Discrimination** — `min_peer − top_confuser.score`. The top confuser is the best-scoring alias on any *other* way. A negative gap means another way outranks this stub — it collides and will mis-route. Orthogonal to fidelity; both must hold.
 
@@ -33,9 +29,7 @@ ways tune --fidelity-threshold 0.55 --discrimination-threshold 0.05
 ways tune --json
 ```
 
-`ways tune` is the loop the **ways-localize** skill drives: translate → corpus → tune →
-re-author flagged stubs → repeat until clean. "Clean" (no flagged entries) is the
-*evidence* a localization is done — not an assertion.
+`ways tune` is the loop the **ways-localize** skill drives: translate → corpus → tune → re-author flagged stubs → repeat until clean. "Clean" (no flagged entries) is the *evidence* a localization is done — not an assertion.
 
 ## Two failure modes
 
@@ -45,18 +39,14 @@ The translation embeds far from the English original: a mistranslation, or a stu
 
 ### 2. Negative discrimination — collides with another way
 
-The stub embeds closer to a *different* way than its own anchor. **Fix** by what the
-confuser is:
+The stub embeds closer to a *different* way than its own anchor. **Fix** by what the confuser is:
 - **Sibling way** (e.g. `delivery/commits` vs `delivery/branching`) — genuine neighbors;
   sharpen both so each holds a distinct region.
-- **Parent/ancestor** (e.g. `delivery/commits` vs `delivery`) — some overlap is
-  expected; add child-specific terminology.
+- **Parent/ancestor** (e.g. `delivery/commits` vs `delivery`) — some overlap is expected; add child-specific terminology.
 - **Unrelated** (e.g. outranked by `code/quality`) — accidental vocabulary overlap,
   often a generic term doing too much work. Remove or specialize it.
 
-A broad-vocabulary way that keeps appearing as the confuser across many stubs is a
-signal to trim *its* vocabulary so it stops hoovering traffic meant for specialized
-children.
+A broad-vocabulary way that keeps appearing as the confuser across many stubs is a signal to trim *its* vocabulary so it stops hoovering traffic meant for specialized children.
 
 ## Output signal, not verdict
 

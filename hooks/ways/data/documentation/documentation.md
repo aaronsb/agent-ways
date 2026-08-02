@@ -15,15 +15,9 @@ from the DDL — the source of truth — so they can't lie.**
 
 - **Derive from the schema, not from memory.** Parse the DDL (`CREATE TABLE`,
   `COMMENT ON`, constraints) or introspect a dump. Never transcribe a schema by hand.
-- **Parse textually, no live database.** A generator that reads the `.sql` rather
-  than connecting runs in CI with nothing but the interpreter — deterministic,
-  reviewable, no credentials.
-- **Emit two things:** a *reference* (tables, columns, types, constraints,
-  comments) and a *diagram*. They serve different readers — one is looked up, one
-  is scanned for shape.
-- **Regenerate on every deploy.** Wire it into the docs build so the page and the
-  diagram are rebuilt from the current schema — a generated artifact nobody
-  regenerates is just a slower kind of stale.
+- **Parse textually, no live database.** A generator that reads the `.sql` rather than connecting runs in CI with nothing but the interpreter — deterministic, reviewable, no credentials.
+- **Emit two things:** a *reference* (tables, columns, types, constraints, comments) and a *diagram*. They serve different readers — one is looked up, one is scanned for shape.
+- **Regenerate on every deploy.** Wire it into the docs build so the page and the diagram are rebuilt from the current schema — a generated artifact nobody regenerates is just a slower kind of stale.
 
 ## Diagrams
 

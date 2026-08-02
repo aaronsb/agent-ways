@@ -8,12 +8,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Workflows
 
-A workflow is **deterministic orchestration**: a script that fans agents out,
-pipelines them through stages, verifies, and synthesizes — control flow you
-*encode* (loops, conditionals, fan-out) rather than improvise turn by turn. Per
-ADR-138 it's the third *how*-carrier: a skill is one procedure, a macro is one
-injected command, a workflow is many agents coordinated. This way is *when* to
-reach for one.
+A workflow is **deterministic orchestration**: a script that fans agents out, pipelines them through stages, verifies, and synthesizes — control flow you *encode* (loops, conditionals, fan-out) rather than improvise turn by turn. Per ADR-138 it's the third *how*-carrier: a skill is one procedure, a macro is one injected command, a workflow is many agents coordinated. This way is *when* to reach for one.
 
 ## The substrate ladder
 
@@ -27,17 +22,12 @@ Most work doesn't need a workflow. Climb only as far as the task demands:
 | **Workflow** | many items × stages, needs deterministic fan-out / verify / synthesis, or scale beyond one context |
 
 Reach for a workflow to be **comprehensive** (decompose and cover in parallel),
-**confident** (independent perspectives + adversarial verification before
-committing), or to take on **scale one context can't hold** (migrations, audits,
-broad sweeps).
+**confident** (independent perspectives + adversarial verification before committing), or to take on **scale one context can't hold** (migrations, audits, broad sweeps).
 
 ## The opt-in cost
 
 A workflow can spawn dozens of agents and burn a large amount of tokens, so it is
-**explicit opt-in** — never inferred from a task that merely *would* benefit.
-Scout inline first to discover the work-list (list the files, scope the diff),
-*then* fan out over it. Match the fan-out to the real scale, and **log what you
-deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
+**explicit opt-in** — never inferred from a task that merely *would* benefit. Scout inline first to discover the work-list (list the files, scope the diff), *then* fan out over it. Match the fan-out to the real scale, and **log what you deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
 
 ## Worked example: the deliver workflow
 

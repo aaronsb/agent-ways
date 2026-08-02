@@ -24,8 +24,7 @@ docs/scripts/doc lint                            # the page is lint-clean by con
 
 Two questions place every page:
 
-1. **Is the reader _studying_ or _working_?** Building understanding for later, or
-   solving a task right now?
+1. **Is the reader _studying_ or _working_?** Building understanding for later, or solving a task right now?
 2. **Is the content _practical steps_ or _theoretical knowledge_?** Things to *do*,
    or things that *are* / *why*?
 
@@ -42,9 +41,7 @@ Two questions place every page:
 ## Rules
 
 - **There is no fifth mode.** If a page won't fit one quadrant, it is two pages.
-- **One mode per page.** The classic failure is a tutorial that keeps stopping to
-  explain, or a reference padded with how-to steps — each interrupts the other's
-  job. Split them and `related:`-link across.
+- **One mode per page.** The classic failure is a tutorial that keeps stopping to explain, or a reference padded with how-to steps — each interrupts the other's job. Split them and `related:`-link across.
 - **The mode is a promise to the reader** about what kind of help they're getting.
   Keep the page faithful to its quadrant; if it drifts, reclassify or split.
 

@@ -20,9 +20,7 @@ The briefing skill can gather with parallel scout subagents or directly. Use the
 
 ## Surface, don't act
 
-A briefing ends in *suggestions* — a ranked action list and proposed task mutations
-the user approves, modifies, or dismisses. It never sends, schedules, or mutates on
-its own. Acting is a separate, approved step.
+A briefing ends in *suggestions* — a ranked action list and proposed task mutations the user approves, modifies, or dismisses. It never sends, schedules, or mutates on its own. Acting is a separate, approved step.
 
 ## See also
 

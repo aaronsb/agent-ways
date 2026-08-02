@@ -8,24 +8,17 @@ scope: agent
 <!-- epistemic: convention -->
 # Developing
 
-This is the core loop — the working self between `start` (open the session) and
-`wrap` (close it). The **`develop` skill** carries a piece of work through the loop;
-this way is *when and why* to reach for it, and the one idea it turns on.
+This is the core loop — the working self between `start` (open the session) and `wrap` (close it). The **`develop` skill** carries a piece of work through the loop; this way is *when and why* to reach for it, and the one idea it turns on.
 
 ## Variable front, stable tail
 
-The loop is not one fixed order. Its **tail is stable** — build → review → fix →
-merge runs the same way almost every time. Its **front is variable** — design,
-prototype, and ADR reorder depending on the work, and forcing one order is the
-mistake:
+The loop is not one fixed order. Its **tail is stable** — build → review → fix → merge runs the same way almost every time. Its **front is variable** — design, prototype, and ADR reorder depending on the work, and forcing one order is the mistake:
 
 - **Prototype-first** when the load-bearing claim is *outside your repo* — an external API's behavior, a latency budget, a payload size. Reasoning can't settle it; probe the real system, then record what you measured. (`prototype`)
 - **Design-first** when the trade-offs are *open* — several plausible shapes, none yet obviously right. Deliberate, converge, then commit. (`design`)
 - **ADR-first** when the point *is* the direction — you already know the shape and need the decision on record before anyone builds on it. (`adr`)
 
-Pick the front order by **where the uncertainty lives** — the same uncertainty-
-location map `core.md` uses (in the artifacts, in the instructions, in the external
-world). The stage that answers the load-bearing question goes first.
+Pick the front order by **where the uncertainty lives** — the same uncertainty-location map `core.md` uses (in the artifacts, in the instructions, in the external world). The stage that answers the load-bearing question goes first.
 
 ## ADR is part of the method, not the whole of it
 

@@ -60,9 +60,7 @@ git remote add upstream https://github.com/aaronsb/agent-ways
 ./scripts/install.sh
 ```
 
-Running the installer from inside the app dir is what links the suite binaries
-(`ways`, `ways-audit`, `attend`, `attend-chat`) onto your `PATH`; `make setup`
-alone builds them but does not. Pull upstream improvements later:
+Running the installer from inside the app dir is what links the suite binaries (`ways`, `ways-audit`, `attend`, `attend-chat`) onto your `PATH`; `make setup` alone builds them but does not. Pull upstream improvements later:
 
 ```bash
 cd "$XDG_DATA_HOME/agent-ways"

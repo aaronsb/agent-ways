@@ -8,9 +8,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Migration Numbering
 
-A migration's **number is its identity**. The rules that keep a history sane are
-about never disturbing a number once it exists, because downstream databases
-have already recorded it.
+A migration's **number is its identity**. The rules that keep a history sane are about never disturbing a number once it exists, because downstream databases have already recorded it.
 
 ## The rules
 

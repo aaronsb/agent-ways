@@ -14,8 +14,7 @@ Children of this way cover structural thinking about software:
 | System design | `architecture/design` |
 | Threat modeling | `architecture/threat-modeling` |
 
-Architecture *decisions* are recorded as ADRs, which now live in the documentation
-graph as a node type — see `adr(documentation)`.
+Architecture *decisions* are recorded as ADRs, which now live in the documentation graph as a node type — see `adr(documentation)`.
 
 ## See Also
 

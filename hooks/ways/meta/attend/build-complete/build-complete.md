@@ -15,5 +15,4 @@ A background build has finished. Consider:
 3. **Note warnings** worth investigating — new warnings from your changes are signal
 4. **Resume blocked work** — if you were waiting on this build, pick up where you left off
 
-Only engage if the build is relevant to current work. The user may already be
-aware via terminal output.
+Only engage if the build is relevant to current work. The user may already be aware via terminal output.
