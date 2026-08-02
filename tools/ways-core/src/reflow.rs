@@ -51,8 +51,11 @@
 //! - Flattening the **enclosing paragraph of a detected window** touched all 24
 //!   detected files and none of the other 114.
 //!
-//! So detection is per-window, repair is per-paragraph, and a paragraph with no
-//! detected window is never touched.
+//! So detection is per-window, repair is per-paragraph, and a paragraph with
+//! no detected window is never touched. Both sides now work on the same *unit*
+//! — a paragraph split further at the boundaries the repair refuses to join
+//! across (list items, labels, quote transitions, hard breaks) — so the span
+//! detection flags is exactly the span a repair would flatten.
 
 /// How a line participates in wrap detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +85,14 @@ pub struct WrappedParagraph {
 
 /// Tuning for [`detect`]. The defaults are the measured ones; they are exposed
 /// so tests can probe the boundaries, not so callers can invent policies.
+///
+/// Two floor rules soften these bounds where wrapping actually terminates. A
+/// unit's final line is exempt from `min_len` and the band — the tail of a
+/// wrap is short by construction, and requiring it to sit near the fill
+/// column made every two-wrap paragraph with a short last sentence invisible.
+/// And a window is only asked for as many mid-phrase breaks as it has line
+/// breaks — `min_mid_breaks` is a cap, not a flat requirement — so a two-line
+/// window qualifies on its single break.
 #[derive(Debug, Clone, Copy)]
 pub struct DetectConfig {
     /// Minimum line length to count as "near a fill column".
@@ -92,13 +103,13 @@ pub struct DetectConfig {
     pub band: usize,
     /// Minimum lines in a window.
     pub min_run: usize,
-    /// Minimum mid-phrase breaks in a window.
+    /// Minimum mid-phrase breaks in a window, capped at the breaks it contains.
     pub min_mid_breaks: usize,
 }
 
 impl Default for DetectConfig {
     fn default() -> Self {
-        Self { min_len: 55, max_len: 100, band: 12, min_run: 3, min_mid_breaks: 2 }
+        Self { min_len: 55, max_len: 100, band: 12, min_run: 2, min_mid_breaks: 2 }
     }
 }
 
@@ -324,27 +335,52 @@ pub fn classify(lines: &[&str]) -> Vec<LineKind> {
         .collect()
 }
 
-/// Maximal spans of consecutive [`LineKind::Prose`] lines — the paragraphs.
-fn paragraphs(kinds: &[LineKind]) -> Vec<(usize, usize)> {
+/// True if `line` opens a new join block relative to `prev` — the boundaries
+/// [`reflow`]'s flush loop refuses to join across: list items, bold label
+/// lines, blockquote transitions, and the line after an explicit hard break.
+///
+/// [`units`] splits on the same predicate so that what [`detect`] measures is
+/// exactly what a repair would join. Before they shared it, a run of list items
+/// was one "paragraph" to the detector — a wrapped item's short continuation
+/// sat mid-run where the tail exemption could not see it.
+fn starts_join_block(line: &str, prev: &str) -> bool {
+    let body = quote_body(line);
+    is_list_item(line)
+        || is_list_item(body)
+        || body.trim_start().starts_with("**")
+        || is_blockquote(line) != is_blockquote(prev)
+        || has_hard_break(prev)
+}
+
+/// Maximal spans of consecutive [`LineKind::Prose`] lines that a repair would
+/// join as one block — paragraphs, split further at [`starts_join_block`]
+/// boundaries. Single-line spans are dropped: nothing to join, nothing wrapped.
+fn units(kinds: &[LineKind], lines: &[&str]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
+    let close = |s: usize, e: usize, out: &mut Vec<(usize, usize)>| {
+        if e > s {
+            out.push((s, e));
+        }
+    };
     for (i, k) in kinds.iter().enumerate() {
         match (k, start) {
             (LineKind::Prose, None) => start = Some(i),
-            (LineKind::Prose, Some(_)) => {}
-            (_, Some(s)) => {
-                if i - s > 1 {
-                    out.push((s, i - 1));
+            (LineKind::Prose, Some(s)) => {
+                if starts_join_block(lines[i], lines[i - 1]) {
+                    close(s, i - 1, &mut out);
+                    start = Some(i);
                 }
+            }
+            (_, Some(s)) => {
+                close(s, i - 1, &mut out);
                 start = None;
             }
             (_, None) => {}
         }
     }
     if let Some(s) = start {
-        if kinds.len() - s > 1 {
-            out.push((s, kinds.len() - 1));
-        }
+        close(s, kinds.len() - 1, &mut out);
     }
     out
 }
@@ -395,16 +431,23 @@ pub fn detect_with(lines: &[&str], cfg: DetectConfig) -> Vec<WrappedParagraph> {
     let kinds = classify(lines);
     let mut found = Vec::new();
 
-    for (pstart, pend) in paragraphs(&kinds) {
+    for (pstart, pend) in units(&kinds, lines) {
         let n = pend - pstart + 1;
         if n < cfg.min_run {
             continue;
         }
-        // Line lengths computed once per paragraph, not once per window.
+        // Line lengths computed once per unit, not once per window.
         let lens: Vec<usize> = lines[pstart..=pend]
             .iter()
             .map(|l| l.trim_end().chars().count())
             .collect();
+
+        // The unit's final line is exempt from the band when short: a wrap
+        // tail is whatever was left of the sentence, so demanding it sit near
+        // the fill column hid every wrap whose remainder was short (the old floor). A
+        // window never consists of exempt lines alone — the exemption names
+        // one line, and every window has at least two.
+        let exempt = |i: usize| i == n - 1 && lens[i] < cfg.min_len;
 
         'windows: for offset in 0..=(n - cfg.min_run) {
             let mut lo = usize::MAX;
@@ -412,9 +455,17 @@ pub fn detect_with(lines: &[&str], cfg: DetectConfig) -> Vec<WrappedParagraph> {
             for len in cfg.min_run..=(n - offset) {
                 // Extend the running min/max by the one newly included line.
                 let upto = if len == cfg.min_run { 0 } else { len - 1 };
-                for l in &lens[offset + upto..offset + len] {
+                for (i, l) in lens.iter().enumerate().take(offset + len).skip(offset + upto) {
+                    if exempt(i) {
+                        continue;
+                    }
                     lo = lo.min(*l);
                     hi = hi.max(*l);
+                }
+                // A window of only the exempt tail (reachable when a config
+                // sets min_run to 1) has no banded lines yet — extend it.
+                if lo > hi {
+                    continue;
                 }
                 // Each band predicate is monotone in window length: `lo` only
                 // falls and `hi` only rises as the window grows, so a failure
@@ -430,7 +481,7 @@ pub fn detect_with(lines: &[&str], cfg: DetectConfig) -> Vec<WrappedParagraph> {
                     .windows(2)
                     .filter(|p| is_mid_phrase_break(p[0], p[1]))
                     .count();
-                if mids >= cfg.min_mid_breaks {
+                if mids >= cfg.min_mid_breaks.min(len - 1) {
                     found.push(WrappedParagraph {
                         start: pstart,
                         end: pend,
@@ -526,13 +577,13 @@ pub fn reflow_with_stats(lines: &[&str]) -> (Vec<String>, usize) {
 
         for line in &lines[i..=end] {
             let line = *line;
-            let body = quote_body(line);
-            let starts_block = is_list_item(line)
-                || is_list_item(body)
-                || body.trim_start().starts_with("**")
-                || (is_blockquote(line) && block.last().is_some_and(|p| !is_blockquote(p)))
-                || (!is_blockquote(line) && block.last().is_some_and(|p| is_blockquote(p)));
-            if starts_block {
+            // The same boundary predicate `units` splits on, so detection scope
+            // and join scope cannot drift apart. With an empty block there is
+            // nothing to flush, so the prev-dependent clauses need no special
+            // case beyond picking the line itself as its own predecessor.
+            if block.last().is_some_and(|p| starts_join_block(line, p))
+                || (block.is_empty() && starts_join_block(line, line))
+            {
                 flush(&mut block, &mut out, &mut quote_joins);
             }
             block.push(line);
@@ -805,6 +856,73 @@ everything else the app ships stays where it is.";
     #[test]
     fn token_stream_survives_a_reflow() {
         assert_eq!(token_verdict(WRAPPED, &round_trip(WRAPPED)), TokenVerdict::Identical);
+    }
+
+    #[test]
+    fn detects_a_two_line_wrap_with_a_short_tail() {
+        // The most common wrap shape: one break at the fill column, the
+        // remainder short. The old floor (3-line windows, tail inside the
+        // band) could not see it — this was the live gap that let wrapped
+        // markdown ship while the postcheck stayed silent.
+        let src = "\
+The most common wrap shape is a paragraph broken exactly once at the
+fill column.";
+        let hits = detect(&split(src));
+        assert_eq!(hits.len(), 1);
+        assert_eq!(round_trip(src).lines().count(), 1);
+    }
+
+    #[test]
+    fn detects_a_three_line_wrap_with_a_short_tail() {
+        // Two breaks, then the sentence ends short. The tail sat inside every
+        // candidate window, and its length failed the band for all of them.
+        let src = "\
+A slightly longer paragraph that the model wrapped twice while it
+was writing, so there are two interior breaks before the sentence
+finally ends here.";
+        let hits = detect(&split(src));
+        assert_eq!(hits.len(), 1);
+        assert_eq!(round_trip(src).lines().count(), 1);
+    }
+
+    #[test]
+    fn detects_a_wrapped_list_item_between_flat_siblings() {
+        // A wrapped bullet mid-list. Before units, the whole list was one
+        // "paragraph": breaks at item boundaries are never mid-phrase, so the
+        // count could not reach its floor, and the wrapped item's short
+        // continuation failed the band besides.
+        let src = "\
+- first item stays short
+- A list item whose text the model wrapped onto a continuation line
+  past the fill column
+- another short item";
+        let out = round_trip(src);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 3, "expected the wrapped item joined: {out:?}");
+        assert_eq!(lines[0], "- first item stays short");
+        assert!(lines[1].ends_with("past the fill column"));
+        assert_eq!(lines[2], "- another short item");
+    }
+
+    #[test]
+    fn leaves_an_authored_two_line_break_alone() {
+        // A two-line paragraph whose break lands at a clause boundary — the
+        // comma says the author paused there. The single-break rule must not
+        // sweep this in.
+        let src = "\
+When the sentence pauses at a natural boundary like a comma or colon,
+the continuation is judged authored and the paragraph stays untouched.";
+        assert!(detect(&split(src)).is_empty());
+        assert_eq!(round_trip(src), src);
+    }
+
+    #[test]
+    fn a_capitalized_second_line_is_not_a_wrap() {
+        let src = "\
+A first line that is long enough to sit inside the detection band here
+But the next line starts a new sentence with a capital letter after it.";
+        assert!(detect(&split(src)).is_empty());
+        assert_eq!(round_trip(src), src);
     }
 
     #[test]
