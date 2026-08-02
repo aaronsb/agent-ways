@@ -38,7 +38,7 @@
 //! Missing a wrapped paragraph is acceptable. Firing on deliberate structure is
 //! not — a check that nags trains its reader to ignore it.
 //!
-//! # Why the transform is scoped to the enclosing paragraph
+//! # Why the transform is scoped to the enclosing unit
 //!
 //! Measured against the 138-file `hooks/ways` corpus, three scopes behave very
 //! differently:
@@ -68,12 +68,12 @@ pub enum LineKind {
     Prose,
 }
 
-/// A paragraph containing at least one detected hard-wrap window.
+/// A unit containing at least one detected hard-wrap window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrappedParagraph {
-    /// First line index of the enclosing paragraph (0-based).
+    /// First line index of the enclosing unit (0-based).
     pub start: usize,
-    /// Last line index of the enclosing paragraph, inclusive.
+    /// Last line index of the enclosing unit, inclusive.
     pub end: usize,
     /// First line index of the window that triggered detection.
     pub trigger_start: usize,
@@ -115,7 +115,17 @@ impl Default for DetectConfig {
 
 /// Characters that end a line at a natural boundary. A line ending on one of
 /// these was plausibly broken on purpose, so it is not evidence of wrapping.
-const BOUNDARY_END: &[char] = &['.', '!', '?', ':', ';', '"', ')', '`', '*', '|', '>', ','];
+///
+/// With the lowered floor a single break can fire a two-line window, so this
+/// list carries the whole false-positive burden there — it must cover every
+/// character an author plausibly pauses on, not just the ASCII ones. The cost
+/// of each entry is bounded and points the right way: a genuine wrap whose one
+/// break lands exactly after such a character goes unrepaired, and a missed
+/// repair is a wrapped paragraph while a false fire welds authored structure.
+const BOUNDARY_END: &[char] = &[
+    '.', '!', '?', ':', ';', '"', ')', '`', '*', '|', '>', ',', '_', ']', '\'', '\u{2014}',
+    '\u{2013}', '\u{201d}', '\u{2019}',
+];
 
 fn indent_of(line: &str) -> &str {
     &line[..line.len() - line.trim_start().len()]
@@ -579,11 +589,9 @@ pub fn reflow_with_stats(lines: &[&str]) -> (Vec<String>, usize) {
             let line = *line;
             // The same boundary predicate `units` splits on, so detection scope
             // and join scope cannot drift apart. With an empty block there is
-            // nothing to flush, so the prev-dependent clauses need no special
-            // case beyond picking the line itself as its own predecessor.
-            if block.last().is_some_and(|p| starts_join_block(line, p))
-                || (block.is_empty() && starts_join_block(line, line))
-            {
+            // nothing to flush, so the predicate only matters against a
+            // predecessor.
+            if block.last().is_some_and(|p| starts_join_block(line, p)) {
                 flush(&mut block, &mut out, &mut quote_joins);
             }
             block.push(line);
@@ -902,6 +910,25 @@ finally ends here.";
         assert_eq!(lines[0], "- first item stays short");
         assert!(lines[1].ends_with("past the fill column"));
         assert_eq!(lines[2], "- another short item");
+    }
+
+    #[test]
+    fn authored_pause_characters_are_boundaries() {
+        // Review finding on the lowered floor: with a single break able to
+        // fire a two-line window, BOUNDARY_END carries the whole
+        // false-positive burden, and it covered `)` and `"` but not their
+        // typographic and inline-markup siblings. Each pair here is an
+        // authored pause that must stay two lines.
+        let cases = [
+            "A line of authored prose that pauses on a deliberate em-dash here \u{2014}\nand picks the thought back up on the next line with fresh intent.",
+            "He closed the ledger and said the season was finished, \u{201c}so be it\u{201d}\nthe others repeated, one after another, around the fire that night.",
+            "The rule is spelled out in the manual's own section on line handling_\nunderscored emphasis closing right at the break, as an author might set.",
+            "The findings are collected in the appendix under [wrapped paragraphs]\nalongside the tables that summarize each corpus sweep by way and file.",
+        ];
+        for src in cases {
+            assert!(detect(&split(src)).is_empty(), "false fire on: {src:?}");
+            assert_eq!(round_trip(src), src);
+        }
     }
 
     #[test]
