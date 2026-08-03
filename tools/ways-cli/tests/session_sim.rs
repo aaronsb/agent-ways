@@ -577,26 +577,25 @@ fn scenario_10_state_triggers() {
     let s = Session::new("s10");
 
     // Turn 1: state scan should fire session-start trigger
-    // (state scan doesn't bump epoch — it runs alongside prompt scan)
-    let output = s.scan_state();
+    // (state scan doesn't bump epoch — it runs alongside prompt scan).
+    // Pass --hook-event explicitly — this is what check-state.sh actually
+    // sends; the fallback path is scenario 11's job.
+    let (output, _) = s.scan_state_full(Some("SessionStart"));
     assert_marker_exists("testdomain/state-trigger", &s.id);
     assert!(
         output.contains("State Trigger Test Way"),
         "Expected state trigger content in output"
     );
-    // Envelope guard: SessionStart is the explicit legacy branch in
-    // emit_hook_context — it must emit `{"additionalContext": "..."}` at
-    // top level, not the canonical `hookSpecificOutput` wrapper. Locks in
-    // the legacy tolerance after the canonical-by-default discriminator
-    // flip; the inverse guard for the canonical default lives in
-    // scenario_1's scan_prompt assertion.
+    // Envelope guard: SessionStart must emit the canonical
+    // `hookSpecificOutput` wrapper. The bare top-level `additionalContext`
+    // this test previously locked in was believed to be a harness-accepted
+    // legacy shape; session transcripts showed the harness never delivered
+    // it — the SessionStart payload (ways catalog + core posture) reached
+    // zero sessions. Undocumented shapes are dropped silently, so this
+    // guard now points the other way.
     assert!(
-        output.contains("additionalContext"),
-        "scan_state on SessionStart must emit legacy additionalContext envelope; got: {output:?}"
-    );
-    assert!(
-        !output.contains("hookSpecificOutput"),
-        "scan_state on SessionStart must NOT use canonical hookSpecificOutput envelope; got: {output:?}"
+        output.contains("hookSpecificOutput"),
+        "scan_state on SessionStart must emit the canonical hookSpecificOutput envelope; got: {output:?}"
     );
 
     // Turn 2: second state scan — idempotent, marker prevents re-fire
@@ -614,9 +613,10 @@ fn scenario_11_hook_event_misroute_warning() {
     // `ways scan state` invoked without `--hook-event` falls back to
     // SessionStart, which is also the shell's jq fallback in
     // `check-state.sh` — two layers of the same default mean a misrouted
-    // hook would silently emit the wrong envelope shape. The fallback
-    // itself is preserved (behavior unchanged) but a defensive stderr
-    // trace surfaces the misroute in hook-execution logs.
+    // hook would silently record the wrong hookEventName (the envelope
+    // shape itself is canonical for every event). The fallback itself is
+    // preserved (behavior unchanged) but a defensive stderr trace surfaces
+    // the misroute in hook-execution logs.
     let s = Session::new("s11");
 
     // Without --hook-event: stderr trace must surface, stdout must still

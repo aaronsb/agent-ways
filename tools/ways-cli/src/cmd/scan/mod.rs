@@ -75,11 +75,10 @@ impl WayCandidate {
 /// Match user prompt against ways and emit matched bodies for the agent.
 ///
 /// Wired only from the `UserPromptSubmit` hook (`check-prompt.sh`), so the
-/// envelope event name is hardcoded. The call routes through the canonical
-/// `hookSpecificOutput` default branch of `emit_hook_context`. If this is
-/// ever reused from another hook event, just pass that event's name —
-/// `SessionStart` and `PreToolUse` are the only events that take the
-/// legacy top-level `additionalContext` envelope.
+/// envelope event name is hardcoded. The call routes through
+/// `emit_hook_context`, which emits the canonical `hookSpecificOutput`
+/// envelope for every event. If this is ever reused from another hook
+/// event, just pass that event's name.
 ///
 /// `response_context` (ADR-155 §3) is Claude's last response, stored raw by
 /// the Stop hook. It feeds ONLY the embed input — never the regex lane — so
@@ -1036,26 +1035,25 @@ fn regex_span(pattern: &str, text: &str) -> Option<String> {
     })
 }
 
-/// Emit accumulated context using the envelope shape required by the
-/// invoking hook event. The Claude Code hook contract treats
-/// `hookSpecificOutput` as canonical for all events; the simpler top-level
-/// `additionalContext` is a legacy tolerance accepted only on
-/// `SessionStart` and `PreToolUse` (where it surfaces as a visible
-/// attachment). Defaulting to canonical means new event wirings
-/// (`Stop`, `PreCompact`, ...) get the right shape automatically rather
-/// than silently re-hitting the bug PR #80 fixed.
+/// Emit accumulated context in the canonical `hookSpecificOutput` envelope —
+/// the only JSON shape the current hooks reference documents, for any event.
+///
+/// A bare top-level `additionalContext` was emitted for `SessionStart` here
+/// until session transcripts proved the harness never delivered it: the
+/// stdout landed in `hook_success` bookkeeping, no context attachment was
+/// created, and the payload (the ways catalog and the core posture) reached
+/// zero sessions on record. Undocumented JSON stdout is dropped silently, so
+/// nothing but the canonical envelope belongs here. The PreToolUse emitters
+/// in [`command`] and [`file`] build their `decision`-bearing shape inline
+/// and never route through this function; whether their `additionalContext`
+/// is delivered is tracked separately.
 pub(super) fn emit_hook_context(hook_event: &str, context: &str) {
-    let payload = match hook_event {
-        "SessionStart" | "PreToolUse" => {
-            serde_json::json!({ "additionalContext": context })
+    let payload = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": hook_event,
+            "additionalContext": context,
         }
-        _ => serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": hook_event,
-                "additionalContext": context,
-            }
-        }),
-    };
+    });
     println!("{payload}");
 }
 
