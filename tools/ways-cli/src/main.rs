@@ -608,14 +608,13 @@ enum ScanCommand {
         /// Transcript path (for context-threshold)
         #[arg(long)]
         transcript: Option<String>,
-        /// Hook event that invoked this scan (drives output envelope shape).
-        /// `hookSpecificOutput` is canonical for all events; `PreToolUse`
-        /// is the only event still taking the legacy top-level
-        /// `additionalContext` shape. When omitted, falls back to
+        /// Hook event that invoked this scan (recorded as the envelope's
+        /// `hookEventName`; the `hookSpecificOutput` shape itself is
+        /// canonical for every event). When omitted, falls back to
         /// `SessionStart` and emits a stderr trace — `check-state.sh` already
         /// applies the same fallback via jq, so a missing value here means
-        /// neither layer received `hook_event_name` and the envelope shape
-        /// may be wrong for the actual invoking event.
+        /// neither layer received `hook_event_name` and the recorded event
+        /// name may be wrong for the actual invoking event.
         #[arg(long)]
         hook_event: Option<String>,
     },
@@ -814,8 +813,8 @@ fn run() -> Result<()> {
                 let event = hook_event.unwrap_or_else(|| {
                     eprintln!(
                         "[ways] scan state invoked without --hook-event; defaulting to SessionStart. \
-                         If the invoking hook is not SessionStart/PreToolUse, the output envelope \
-                         shape will be wrong and the agent will silently receive nothing."
+                         The envelope shape is canonical for every event, but the recorded \
+                         hookEventName will be wrong if the invoking hook is a different event."
                     );
                     "SessionStart".to_string()
                 });

@@ -577,8 +577,10 @@ fn scenario_10_state_triggers() {
     let s = Session::new("s10");
 
     // Turn 1: state scan should fire session-start trigger
-    // (state scan doesn't bump epoch — it runs alongside prompt scan)
-    let output = s.scan_state();
+    // (state scan doesn't bump epoch — it runs alongside prompt scan).
+    // Pass --hook-event explicitly — this is what check-state.sh actually
+    // sends; the fallback path is scenario 11's job.
+    let (output, _) = s.scan_state_full(Some("SessionStart"));
     assert_marker_exists("testdomain/state-trigger", &s.id);
     assert!(
         output.contains("State Trigger Test Way"),
@@ -611,9 +613,10 @@ fn scenario_11_hook_event_misroute_warning() {
     // `ways scan state` invoked without `--hook-event` falls back to
     // SessionStart, which is also the shell's jq fallback in
     // `check-state.sh` — two layers of the same default mean a misrouted
-    // hook would silently emit the wrong envelope shape. The fallback
-    // itself is preserved (behavior unchanged) but a defensive stderr
-    // trace surfaces the misroute in hook-execution logs.
+    // hook would silently record the wrong hookEventName (the envelope
+    // shape itself is canonical for every event). The fallback itself is
+    // preserved (behavior unchanged) but a defensive stderr trace surfaces
+    // the misroute in hook-execution logs.
     let s = Session::new("s11");
 
     // Without --hook-event: stderr trace must surface, stdout must still
