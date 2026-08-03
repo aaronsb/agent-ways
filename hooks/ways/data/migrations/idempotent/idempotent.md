@@ -26,9 +26,7 @@ Insert the applied-version row into the ledger as the **final statement, inside 
 
 ## Verify
 
-Run the migration, then run it **again** against the same database. The second
-run must complete with no error and no change. If it throws, an object isn't
-guarded — fix it before the migration leaves your machine.
+Run the migration, then run it **again** against the same database. The second run must complete with no error and no change. If it throws, an object isn't guarded — fix it before the migration leaves your machine.
 
 ## See Also
 

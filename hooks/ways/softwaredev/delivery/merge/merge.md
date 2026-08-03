@@ -19,22 +19,14 @@ Classify the increment on two axes and pick the path:
 | **human gate: none** (routine, or already read) | **run it** — a quick `code-review` (or skip) → merge | **swarm-gate** — fan review across dimensions, adversarially verify → agent-gated merge |
 | **human gate: required** (sets direction, or unread one-way door) | **review + offer** — single-agent review → "want to read before I merge?" | **full gate** — swarm review **and** operator approval before merge |
 
-- **The X axis** is driven by **complexity and blast-radius**: diff size, number of
-  files, core-vs-leaf, test coverage, reversibility. A sprawling change to a core
-  path earns a swarm; a contained leaf edit earns a single pass.
-- **The Y axis** is driven by **whether the work sets direction** — an ADR that
-  steers architecture lands in the bottom row no matter how small the diff — and by
+- **The X axis** is driven by **complexity and blast-radius**: diff size, number of files, core-vs-leaf, test coverage, reversibility. A sprawling change to a core path earns a swarm; a contained leaf edit earns a single pass.
+- **The Y axis** is driven by **whether the work sets direction** — an ADR that steers architecture lands in the bottom row no matter how small the diff — and by
   **whether the operator has already read it**. If they wrote it or reviewed it live,
   the human gate is already satisfied.
 
-When the classification is ambiguous, **surface the call** rather than silently
-picking a corner. Inside a `/goal` loop, bias toward the autonomous corners; outside
-one, ask.
+When the classification is ambiguous, **surface the call** rather than silently picking a corner. Inside a `/goal` loop, bias toward the autonomous corners; outside one, ask.
 
-Whichever corner you land in, asking to merge is asking for the review this gate
-specifies — dispatch the reviewer rather than re-requesting permission to, and name the
-payoff in a clause as you do. The ambiguity worth surfacing is *which corner*, never
-*whether to review*. See ADR-175.
+Whichever corner you land in, asking to merge is asking for the review this gate specifies — dispatch the reviewer rather than re-requesting permission to, and name the payoff in a clause as you do. The ambiguity worth surfacing is *which corner*, never *whether to review*. See ADR-175.
 
 ## Remediate before you merge
 
@@ -42,10 +34,7 @@ A review that finds nothing changes nothing; a review that finds something is on
 
 ## Then land it
 
-Merge (regular merge commit, preserving the branch's narrative — see `delivery/github`),
-then run the full cleanup: back to `main`, pull, prune, delete the merged branch.
-Landing an increment is **not** cutting a release — versioning, changelogs, and
-artifacts are `delivery/release` and the `/release` skill, a separate, heavier act.
+Merge (regular merge commit, preserving the branch's narrative — see `delivery/github`), then run the full cleanup: back to `main`, pull, prune, delete the merged branch. Landing an increment is **not** cutting a release — versioning, changelogs, and artifacts are `delivery/release` and the `/release` skill, a separate, heavier act.
 
 ## See Also
 

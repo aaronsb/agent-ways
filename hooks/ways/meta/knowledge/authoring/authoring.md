@@ -132,9 +132,7 @@ ways template meta/newway \
 This creates:
 - `{wayname}/{wayname}.md` — frontmatter + body template with guidance placeholders
 
-Ways are authored **English-only** (ADR-139): localization is adopter-run, not
-authored per-way — there is no translation step here. Then: run `ways corpus` and
-`ways lint`.
+Ways are authored **English-only** (ADR-139): localization is adopter-run, not authored per-way — there is no translation step here. Then: run `ways corpus` and `ways lint`.
 
 **Manual creation** also works: create `{domain}/{wayname}/{wayname}.md` with frontmatter + guidance. No config files to update. Project ways override global ways with the same path. Ways can nest arbitrarily: `{domain}/{parent}/{child}/{child}.md`.
 

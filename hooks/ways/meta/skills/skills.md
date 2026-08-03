@@ -12,9 +12,7 @@ This way is *our convention* for writing skills — not a SKILL.md tutorial. The
 
 > **Canonical mechanics:** https://code.claude.com/docs/en/skills.md
 
-Don't restate that doc in a skill or a way. If you catch yourself writing a
-frontmatter-fields table, stop — link the doc instead. What follows is only the
-judgment the doc can't make for you in *this* repo.
+Don't restate that doc in a skill or a way. If you catch yourself writing a frontmatter-fields table, stop — link the doc instead. What follows is only the judgment the doc can't make for you in *this* repo.
 
 ## First decide: skill, way, or slash command?
 
@@ -35,8 +33,7 @@ Rule of thumb: **a way teaches Claude how to behave; a skill gives Claude someth
 - **Triggers must be tight.** A loose `description` on a global skill hijacks unrelated requests everywhere. Name the specific task and the words a user would actually say, and say what it's *not* for. (`ways-update` ends its description with "Not for editing or authoring individual ways… or upgrading project dependencies" precisely to stay in its lane.)
 - **A global skill must be location-independent.** It can't assume cwd. Resolve the target up front — e.g. `ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"` — and verify it's the repo you expect before acting.
 
-If a capability only makes sense inside one project, it belongs in *that* project's
-`.claude/skills/`, not here.
+If a capability only makes sense inside one project, it belongs in *that* project's `.claude/skills/`, not here.
 
 ## House conventions
 
@@ -50,13 +47,10 @@ If a capability only makes sense inside one project, it belongs in *that* projec
 
 ## Validate before shipping
 
-A skill is picked up at Claude Code startup — there's no corpus rebuild (that's
-ways). After adding or editing one:
+A skill is picked up at Claude Code startup — there's no corpus rebuild (that's ways). After adding or editing one:
 
 - Confirm `name` matches the directory and the frontmatter parses.
-- **Restart Claude Code**, then ask "what skills are available?" and trigger it with
-  a realistic phrasing to confirm the description fires when it should — and doesn't
-  fire on the near-miss requests you wrote it to avoid.
+- **Restart Claude Code**, then ask "what skills are available?" and trigger it with a realistic phrasing to confirm the description fires when it should — and doesn't fire on the near-miss requests you wrote it to avoid.
 
 ## See Also
 

@@ -55,12 +55,9 @@ This is the difference between controlled compaction (user-directed, synthesis-a
 
 ## If a Goal Is Active
 
-A `/goal` survives compaction — it's session-scoped, and compaction doesn't end the
-session, so the evaluator keeps driving toward the condition on the other side.
-When a goal is active:
+A `/goal` survives compaction — it's session-scoped, and compaction doesn't end the session, so the evaluator keeps driving toward the condition on the other side. When a goal is active:
 
-- **Restate the goal condition in the synthesis** — it's the anchor the
-  post-compaction turns will steer by.
+- **Restate the goal condition in the synthesis** — it's the anchor the post-compaction turns will steer by.
 - **Keep the checkpoint light** — the goal already carries the direction, so confirm
   it still holds rather than re-deriving priorities from scratch.
 - **Consider finishing first** — if the goal's work is nearly done, completing it

@@ -28,9 +28,7 @@ A concrete example from this corpus: renaming an ADR means editing its heading *
 
 ## Don't over-build
 
-The inverse failure is real: not every one-off needs a tool. If an operation runs
-once and never recurs, a manual sequence is fine — wrapping it is its own waste.
-The trigger is *repetition × risk*, not novelty. See `code/overbuild`.
+The inverse failure is real: not every one-off needs a tool. If an operation runs once and never recurs, a manual sequence is fine — wrapping it is its own waste. The trigger is *repetition × risk*, not novelty. See `code/overbuild`.
 
 ## See Also
 

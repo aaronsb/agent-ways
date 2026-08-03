@@ -8,9 +8,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Wrapping Up
 
-The user is signaling the session is ending — they want to close out, not keep building.
-This is exactly what the **`wrap` skill** is for. Pull it up (`Skill: wrap`) rather than
-improvising a summary; the skill enforces the parts that are easy to skip when you eyeball it.
+The user is signaling the session is ending — they want to close out, not keep building. This is exactly what the **`wrap` skill** is for. Pull it up (`Skill: wrap`) rather than improvising a summary; the skill enforces the parts that are easy to skip when you eyeball it.
 
 ## Why the skill, not a freehand summary
 
@@ -26,9 +24,7 @@ Neither a way nor a skill can trigger `/compact` — Claude Code forbids invokin
 
 ## Relation to the automatic sibling
 
-The `compaction-checkpoint` way fires **on its own** as context nears the limit. This way
-fires when the **user says so** — an early, deliberate close. Same destination, different
-trigger: one is the smoke alarm, the other is choosing to leave.
+The `compaction-checkpoint` way fires **on its own** as context nears the limit. This way fires when the **user says so** — an early, deliberate close. Same destination, different trigger: one is the smoke alarm, the other is choosing to leave.
 
 ## See Also
 

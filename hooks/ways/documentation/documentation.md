@@ -41,11 +41,8 @@ names the shape so the corpus has somewhere to grow into.
 
 - **Type once, serialize many** — one graph; many views (dev tree, published site,
   Obsidian graph, audience bundles). Audience drives the *view*, never the type.
-- **An invariant earns its place only if its violation is a real defect** — a
-  dangling edge, a supersede cycle, an id that disagrees with its mode. Rigor that
-  tracks nothing is just a tax.
-- **Progressive disclosure, task-orientation, currency** — overview before
-  detail; organize by reader job; an outdated page is a broken front door.
+- **An invariant earns its place only if its violation is a real defect** — a dangling edge, a supersede cycle, an id that disagrees with its mode. Rigor that tracks nothing is just a tax.
+- **Progressive disclosure, task-orientation, currency** — overview before detail; organize by reader job; an outdated page is a broken front door.
 
 ## See Also
 

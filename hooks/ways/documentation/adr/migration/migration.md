@@ -23,11 +23,7 @@ refire: 0.15
 
 No existing ADRs. Scaffold the full structure.
 
-1. **Vendor the tooling.** The install steps (copy-not-symlink, `adr.yaml` setup)
-   live in the **adr** skill — that's the canonical *how*. For the optional doc
-   catalog (prose + ADRs as one typed graph, ADR-302, sharing this `adr.yaml`),
-   use the **docs** skill. To scaffold tooling *and* the surrounding repo health
-   in one pass, prefer `project-init`.
+1. **Vendor the tooling.** The install steps (copy-not-symlink, `adr.yaml` setup) live in the **adr** skill — that's the canonical *how*. For the optional doc catalog (prose + ADRs as one typed graph, ADR-302, sharing this `adr.yaml`), use the **docs** skill. To scaffold tooling *and* the surrounding repo health in one pass, prefer `project-init`.
 
 2. Verify:
 ```bash
@@ -35,9 +31,7 @@ docs/scripts/adr domains    # Should show your configured domains
 docs/scripts/adr list       # Should show 0 ADRs
 ```
 
-The rest of this way is the migration-specific *why/when/what* the skill doesn't
-cover: which starting state you're in, and how to get existing decisions into the
-tooling without losing history.
+The rest of this way is the migration-specific *why/when/what* the skill doesn't cover: which starting state you're in, and how to get existing decisions into the tooling without losing history.
 
 ## Flat Directory Migration
 
