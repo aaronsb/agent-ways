@@ -584,19 +584,16 @@ fn scenario_10_state_triggers() {
         output.contains("State Trigger Test Way"),
         "Expected state trigger content in output"
     );
-    // Envelope guard: SessionStart is the explicit legacy branch in
-    // emit_hook_context — it must emit `{"additionalContext": "..."}` at
-    // top level, not the canonical `hookSpecificOutput` wrapper. Locks in
-    // the legacy tolerance after the canonical-by-default discriminator
-    // flip; the inverse guard for the canonical default lives in
-    // scenario_1's scan_prompt assertion.
+    // Envelope guard: SessionStart must emit the canonical
+    // `hookSpecificOutput` wrapper. The bare top-level `additionalContext`
+    // this test previously locked in was believed to be a harness-accepted
+    // legacy shape; session transcripts showed the harness never delivered
+    // it — the SessionStart payload (ways catalog + core posture) reached
+    // zero sessions. Undocumented shapes are dropped silently, so this
+    // guard now points the other way.
     assert!(
-        output.contains("additionalContext"),
-        "scan_state on SessionStart must emit legacy additionalContext envelope; got: {output:?}"
-    );
-    assert!(
-        !output.contains("hookSpecificOutput"),
-        "scan_state on SessionStart must NOT use canonical hookSpecificOutput envelope; got: {output:?}"
+        output.contains("hookSpecificOutput"),
+        "scan_state on SessionStart must emit the canonical hookSpecificOutput envelope; got: {output:?}"
     );
 
     // Turn 2: second state scan — idempotent, marker prevents re-fire

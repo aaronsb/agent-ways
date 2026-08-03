@@ -1038,15 +1038,23 @@ fn regex_span(pattern: &str, text: &str) -> Option<String> {
 
 /// Emit accumulated context using the envelope shape required by the
 /// invoking hook event. The Claude Code hook contract treats
-/// `hookSpecificOutput` as canonical for all events; the simpler top-level
-/// `additionalContext` is a legacy tolerance accepted only on
-/// `SessionStart` and `PreToolUse` (where it surfaces as a visible
-/// attachment). Defaulting to canonical means new event wirings
-/// (`Stop`, `PreCompact`, ...) get the right shape automatically rather
-/// than silently re-hitting the bug PR #80 fixed.
+/// `hookSpecificOutput` as canonical for all events, and the current hooks
+/// reference documents no other JSON shape. The bare top-level
+/// `additionalContext` this branch once emitted for `SessionStart` was
+/// believed to be a legacy tolerance — session transcripts proved otherwise:
+/// the harness records the stdout in its `hook_success` bookkeeping and
+/// creates no context attachment, so the payload (the ways catalog and the
+/// core posture) never reached the model in any session on record. Canonical
+/// everywhere is what the delivered paths (UserPromptSubmit, PostToolUse,
+/// SubagentStart in the shell emitters) already use.
+///
+/// `PreToolUse` keeps its `decision`-bearing shape for now: its envelope is
+/// entangled with permission semantics, and transcripts suggest its
+/// `additionalContext` may be dropped too — tracked separately rather than
+/// changed blind here.
 pub(super) fn emit_hook_context(hook_event: &str, context: &str) {
     let payload = match hook_event {
-        "SessionStart" | "PreToolUse" => {
+        "PreToolUse" => {
             serde_json::json!({ "additionalContext": context })
         }
         _ => serde_json::json!({

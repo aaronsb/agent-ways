@@ -609,9 +609,9 @@ enum ScanCommand {
         #[arg(long)]
         transcript: Option<String>,
         /// Hook event that invoked this scan (drives output envelope shape).
-        /// `hookSpecificOutput` is canonical for all events; `SessionStart`
-        /// and `PreToolUse` are the only events that take the legacy
-        /// top-level `additionalContext` shape. When omitted, falls back to
+        /// `hookSpecificOutput` is canonical for all events; `PreToolUse`
+        /// is the only event still taking the legacy top-level
+        /// `additionalContext` shape. When omitted, falls back to
         /// `SessionStart` and emits a stderr trace — `check-state.sh` already
         /// applies the same fallback via jq, so a missing value here means
         /// neither layer received `hook_event_name` and the envelope shape
