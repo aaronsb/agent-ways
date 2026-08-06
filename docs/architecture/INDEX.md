@@ -97,7 +97,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-174](./system/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | Draft |
 | [ADR-175](./system/ADR-175-standing-delegation-authorization-satisfies-the-harness-permission-gate-rather-than-overriding-it.md) | Standing delegation authorization satisfies the harness permission gate rather than overriding it | Draft |
 | [ADR-176](./system/ADR-176-contract-identification-as-the-develop-loop-front-gate.md) | Contract identification as the develop-loop front gate | Accepted |
-| [ADR-177](./system/ADR-177-version-stamped-vendored-tools-with-direction-aware-drift-detection.md) | Version-stamped vendored tools with direction-aware drift detection | Draft |
+| [ADR-177](./system/ADR-177-version-stamped-vendored-tools-with-direction-aware-drift-detection.md) | Version-stamped vendored tools with direction-aware drift detection | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
