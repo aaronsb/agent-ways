@@ -40,18 +40,21 @@ direction from it.**
 
 2. **Direction-aware macro disclosure** — a way macro that surfaces a vendored
    tool extracts `TOOL_VERSION` from both the repo copy and the installed
-   template (a `grep`, not an execution) and compares with `sort -V`. Four
+   template (a `grep`, not an execution) and compares with `sort -V`. Five
    states replace the direction-blind diff note:
 
-   | Local copy | Disclosure |
+   | Local copy vs installed | Disclosure |
    |---|---|
-   | no version marker | predates versioning — out of date; re-vendor |
+   | no version marker, installed stamped | predates versioning — out of date; re-vendor |
    | lower than installed | stale — re-vendor to pick up the newer tool |
    | equal, bytes differ (version line excluded) | customized — expected, say so |
    | higher than installed | repo is ahead — the agent-ways install is stale; update it |
+   | stamped, installed unversioned | same as above — the install is stale |
 
    The version line is excluded from the customization diff so the stamp
-   cannot trigger the very warning it exists to disambiguate.
+   cannot trigger the very warning it exists to disambiguate. The extracted
+   stamp is shape-restricted to a version string — a stamp that doesn't parse
+   as one is treated as unversioned, never echoed into disclosed context.
 
 3. **Re-vendoring is a documented move** — the skill that owns each tool's
    vendoring procedure (ADR-138) also documents the update: plain copy when
