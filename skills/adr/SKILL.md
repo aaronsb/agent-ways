@@ -95,6 +95,26 @@ For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run
 `/project-init` instead — it vendors this tool as one step of a larger setup. The
 **docs** skill is the catalog half and shares this `adr.yaml`.
 
+## Updating a vendored copy
+
+The tool carries a `TOOL_VERSION` stamp (`docs/scripts/adr --version`), and the
+`adr` way's macro compares it against the installed template — so a disclosure
+saying the copy is *out of date* means ways ships a newer tool (ADR-177).
+
+- **Unmodified copy** (only the `TOOL_VERSION` line differs, if anything):
+  re-run the `cp` from the vendoring steps above. `adr.yaml` is untouched —
+  config and tool update independently.
+- **Customized copy**: diff first, then carry the local changes forward onto
+  the new version — never overwrite on sight:
+
+```bash
+diff docs/scripts/adr ~/.claude/hooks/ways/documentation/adr/adr-tool
+```
+
+If the macro instead says the *installed template* is behind the project's
+copy, the agent-ways install is stale — update it (`/ways-update`), don't
+downgrade the project.
+
 ## Key Rules
 
 - **Always use the CLI** — never create `ADR-*.md` files by hand

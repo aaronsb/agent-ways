@@ -37,6 +37,10 @@ import math
 import sys
 from collections import Counter
 
+# Vendored-tool version (ADR-177). Bump when this tool changes — way macros
+# compare it against the installed template to tell stale from customized.
+TOOL_VERSION = "1.0.0"
+
 # ============================================================================
 # Color helpers
 # ============================================================================
@@ -348,6 +352,10 @@ RENDERERS = {
 }
 
 def main():
+    if "--version" in sys.argv[1:]:
+        print(f"chart-tool {TOOL_VERSION}")
+        sys.exit(0)
+
     if sys.stdin.isatty():
         print(__doc__)
         sys.exit(0)

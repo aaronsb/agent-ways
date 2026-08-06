@@ -39,11 +39,34 @@ if [[ -n "$ADR_SCRIPT" ]]; then
   echo ""
   echo "**Always use \`$ADR_SCRIPT new\` to create ADRs** — it handles numbering, domain routing, and templates."
 
-  # Check if project script differs from universal template
+  # Direction-aware drift check against the universal template (ADR-177):
+  # compare TOOL_VERSION stamps to tell stale from customized from ahead.
   UNIVERSAL="${HOME}/.claude/hooks/ways/documentation/adr/adr-tool"
-  if [[ -f "$UNIVERSAL" ]] && ! diff -q "$PROJECT_DIR/$ADR_SCRIPT" "$UNIVERSAL" &>/dev/null; then
-    echo ""
-    echo "_Note: Project script differs from the universal template. This is expected for customized setups._"
+  if [[ -f "$UNIVERSAL" ]]; then
+    # Capture is shape-restricted: a stamp that isn't a plain version string is
+    # treated as unversioned rather than echoed into disclosed context.
+    ver_re='^TOOL_VERSION = "\K[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?(?=")'
+    local_ver=$(grep -m1 -oP "$ver_re" "$PROJECT_DIR/$ADR_SCRIPT" 2>/dev/null || true)
+    univ_ver=$(grep -m1 -oP "$ver_re" "$UNIVERSAL" 2>/dev/null || true)
+    if [[ -z "$local_ver" && -n "$univ_ver" ]]; then
+      echo ""
+      echo "_The project's copy predates tool versioning (ways ships v${univ_ver}) — it is out of date. Re-vendor via the \`adr\` skill; if it was customized, diff first and carry the changes forward._"
+    elif [[ -n "$local_ver" && -z "$univ_ver" ]]; then
+      echo ""
+      echo "_The project's copy is v${local_ver} but the installed template is unversioned — the agent-ways install is stale. Update it (\`/ways-update\`)._"
+    elif [[ -n "$local_ver" && -n "$univ_ver" && "$local_ver" != "$univ_ver" ]]; then
+      newest=$(printf '%s\n%s\n' "$local_ver" "$univ_ver" | sort -V | tail -1)
+      if [[ "$newest" == "$univ_ver" ]]; then
+        echo ""
+        echo "_The project's copy is v${local_ver}; ways ships v${univ_ver} — out of date. Re-vendor via the \`adr\` skill; if it was customized, diff first and carry the changes forward._"
+      else
+        echo ""
+        echo "_The project's copy is v${local_ver}, ahead of the installed template (v${univ_ver}) — the agent-ways install is stale. Update it (\`/ways-update\`)._"
+      fi
+    elif ! diff -q <(grep -v '^TOOL_VERSION = ' "$PROJECT_DIR/$ADR_SCRIPT") <(grep -v '^TOOL_VERSION = ' "$UNIVERSAL") &>/dev/null; then
+      echo ""
+      echo "_Note: Project script differs from the universal template. This is expected for customized setups._"
+    fi
   fi
   exit 0
 fi
