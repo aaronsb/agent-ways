@@ -1,4 +1,8 @@
 ---
+supersedes:
+  - ADR-104
+  - ADR-119
+  - ADR-121
 status: Accepted
 date: 2026-04-14
 deciders:

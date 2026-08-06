@@ -9,7 +9,8 @@ related:
   - ADR-107
   - ADR-108
   - ADR-110
-supersedes_in_part: ADR-107
+supersedes:
+  - ADR-107
 amends: ADR-108
 ---
 

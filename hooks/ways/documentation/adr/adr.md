@@ -27,8 +27,9 @@ refire: 0.15
 | `docs/scripts/adr new <domain> <title>` | Create new ADR |
 | `docs/scripts/adr list [--group]` | List all ADRs |
 | `docs/scripts/adr view <number>` | View an ADR |
-| `docs/scripts/adr lint [--check]` | Validate ADRs |
-| `docs/scripts/adr index -y` | Regenerate index |
+| `docs/scripts/adr lint [--check]` | Validate ADRs (incl. supersession links) |
+| `docs/scripts/adr index -y` | Regenerate index (active set) |
+| `docs/scripts/adr archive <n> --reason "..."` | Move an ADR out of the active set |
 | `docs/scripts/adr domains` | Show domain number series |
 
 ## Directory Structure

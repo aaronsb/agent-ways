@@ -1,4 +1,7 @@
 ---
+supersedes:
+  - ADR-147
+  - ADR-149
 status: Proposed
 date: 2026-07-18
 deciders:

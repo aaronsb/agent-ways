@@ -63,6 +63,7 @@ fi
 # ADR lint tests (frontmatter detection, field validation)
 if command -v python3 &>/dev/null; then
   run_suite "ADR Lint Tests" bash "$REPO_ROOT/tests/adr-lint-test.sh"
+  run_suite "ADR Archive Tests" bash "$REPO_ROOT/tests/adr-archive-test.sh"
 else
   echo ""
   echo "=== ADR Lint Tests ==="

@@ -13,7 +13,8 @@ Operate ADRs through the `docs/scripts/adr` CLI tool. Never create ADR files man
 ```bash
 # Discover
 docs/scripts/adr domains                  # Show domain number series and ranges
-docs/scripts/adr list --group             # List all ADRs grouped by domain
+docs/scripts/adr list --group             # List active ADRs grouped by domain
+docs/scripts/adr list --archived          # Archived only; --all for both
 docs/scripts/adr list --domain system     # Filter to one domain
 docs/scripts/adr list --status Accepted   # Filter by status
 docs/scripts/adr view <number>            # View an ADR (accepts 14, 014, ADR-014)
@@ -22,9 +23,12 @@ docs/scripts/adr view <number>            # View an ADR (accepts 14, 014, ADR-01
 docs/scripts/adr new <domain> "Title"     # Create from template in correct subdirectory
 
 # Maintain
-docs/scripts/adr lint                     # Check all ADRs for issues
+docs/scripts/adr lint                     # Check all ADRs (archive included) for issues
 docs/scripts/adr lint --check             # Exit 1 on errors (CI mode)
-docs/scripts/adr index -y                 # Regenerate INDEX.md
+docs/scripts/adr index -y                 # Regenerate INDEX.md from the active set
+
+# Archive (ADR-303) — not deletion: the file stays tracked, linted, linkable
+docs/scripts/adr archive <n> --reason "why" [--superseded-by ADR-N[,ADR-M#sec]] [--status S] [--dry-run]
 
 # Config
 docs/scripts/adr config                   # Show current adr.yaml configuration

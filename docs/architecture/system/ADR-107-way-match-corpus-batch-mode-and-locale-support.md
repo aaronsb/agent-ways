@@ -1,8 +1,8 @@
 ---
 status: Accepted
 date: 2026-04-02
-supersedes: ADR-107 Draft (2026-03-20)
-superseded_in_part_by: ADR-125
+superseded_by:
+  - ADR-125
 deciders:
   - aaronsb
   - claude

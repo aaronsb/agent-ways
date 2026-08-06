@@ -5,10 +5,11 @@ ADR - Architecture Decision Record CLI Tool
 A librarian for managing Architecture Decision Records.
 
 Usage:
-    adr list [--domain DOMAIN] [--status STATUS] [--group]
+    adr list [--domain DOMAIN] [--status STATUS] [--group] [--archived|--all]
     adr view <number>          # View an ADR (aliases: v, show)
     adr new <domain> <title>
     adr rename <number> [new-title] [--slug SLUG]
+    adr archive <number> --reason "..." [--superseded-by ADR-N[,ADR-M]] [--status S] [--dry-run]
     adr lint [--check] [paths...]
     adr index [-y]
     adr domains
@@ -36,7 +37,11 @@ except ImportError:
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
+
+# Statuses that mean "no longer in force" — used by archive and the
+# partial-supersession convention (ADR-303 / issue #438 option C2).
+NON_ACTIVE_STATUSES = {'Superseded', 'Deprecated', 'Rejected'}
 
 # ============================================================================
 # Configuration
@@ -175,6 +180,8 @@ class ADRInfo:
     date: Optional[str] = None
     deciders: list = field(default_factory=list)
     related: list = field(default_factory=list)
+    supersedes: list = field(default_factory=list)
+    superseded_by: list = field(default_factory=list)
     domain: Optional[str] = None
     issues: list = field(default_factory=list)
 
@@ -219,6 +226,13 @@ def parse_adr(path: Path) -> ADRInfo:
                 deciders = data.get('deciders', [])
                 info.deciders = deciders if isinstance(deciders, list) else [deciders]
                 info.related = data.get('related', [])
+
+                def as_list(value):
+                    if value is None:
+                        return []
+                    return value if isinstance(value, list) else [value]
+                info.supersedes = [str(v) for v in as_list(data.get('supersedes'))]
+                info.superseded_by = [str(v) for v in as_list(data.get('superseded_by'))]
             except yaml.YAMLError as e:
                 info.issues.append(Issue(f"YAML error: {e}", 'error'))
         else:
@@ -283,22 +297,73 @@ def parse_adr(path: Path) -> ADRInfo:
 
     return info
 
-def find_adrs() -> list[Path]:
-    """Find all ADR files."""
-    arch_dir = get_project_root() / 'docs' / 'architecture'
-    return sorted(arch_dir.rglob("ADR-*.md"))
+def is_archived(path: Path) -> bool:
+    """True if the path sits under an archive/ segment."""
+    return 'archive' in path.parts
 
-def get_all_adrs() -> list[ADRInfo]:
-    """Parse all ADR files."""
-    return [parse_adr(p) for p in find_adrs()]
+def find_adrs(include_archived: bool = False) -> list[Path]:
+    """Find ADR files — the active set by default (ADR-303)."""
+    arch_dir = get_project_root() / 'docs' / 'architecture'
+    paths = sorted(arch_dir.rglob("ADR-*.md"))
+    if include_archived:
+        return paths
+    return [p for p in paths if not is_archived(p)]
+
+def get_all_adrs(include_archived: bool = False) -> list[ADRInfo]:
+    """Parse ADR files — the active set by default."""
+    return [parse_adr(p) for p in find_adrs(include_archived=include_archived)]
+
+# ============================================================================
+# Supersession references (ADR-303 / issue #438)
+# ============================================================================
+
+def norm_ref(ref) -> tuple[str, Optional[str]]:
+    """Normalize a supersession reference to (number, section).
+
+    Accepts 167, "167", "ADR-167", "ADR-167#4" — returns ("167", None) or
+    ("167", "4"). The number keeps sub-numbers ("51.2") but drops zero padding.
+    """
+    text = str(ref).strip().upper().replace('ADR-', '')
+    number, _, section = text.partition('#')
+    number = number.lstrip('0') or '0'
+    return number, (section or None)
+
+def filename_number(path: Path) -> Optional[str]:
+    """Extract the ADR number from a filename (ADR-051.2-foo.md -> 51.2)."""
+    match = re.match(r'ADR-(\d+(?:\.\d+)?)', path.name, re.IGNORECASE)
+    return match.group(1).lstrip('0') if match else None
+
+def find_by_ref(ref: str, adrs: list) -> list:
+    """Find ADRs matching a reference by title number or filename number."""
+    number, _ = norm_ref(ref)
+    return [a for a in adrs if
+            (a.number and a.number.lstrip('0') == number) or
+            filename_number(a.path) == number]
+
+def supersession_note(adr) -> str:
+    """Human-readable supersession annotation for list/index, or ''."""
+    if not adr.superseded_by:
+        return ''
+    parts = []
+    for entry in adr.superseded_by:
+        number, section = norm_ref(entry)
+        parts.append(f"ADR-{number} §{section}" if section else f"ADR-{number}")
+    in_force = adr.status not in NON_ACTIVE_STATUSES
+    label = 'partially superseded by' if in_force else 'superseded by'
+    return f"{label} {', '.join(parts)}"
 
 # ============================================================================
 # Commands
 # ============================================================================
 
 def cmd_list(args):
-    """List all ADRs."""
-    adrs = get_all_adrs()
+    """List ADRs — the active set by default (ADR-303)."""
+    if getattr(args, 'all', False):
+        adrs = get_all_adrs(include_archived=True)
+    elif getattr(args, 'archived', False):
+        adrs = [a for a in get_all_adrs(include_archived=True) if is_archived(a.path)]
+    else:
+        adrs = get_all_adrs()
     domains = get_domains()
 
     # Filter by domain
@@ -332,7 +397,10 @@ def cmd_list(args):
         }.get(status, '❓')
 
     def print_adr(adr):
-        print(f"  {status_icon(adr.status)} ADR-{adr.number or '???':8} {adr.title or '(no title)'}")
+        note = supersession_note(adr)
+        suffix = f"  ({note})" if note else ''
+        marker = ' [archived]' if is_archived(adr.path) and getattr(args, 'all', False) else ''
+        print(f"  {status_icon(adr.status)} ADR-{adr.number or '???':8} {adr.title or '(no title)'}{suffix}{marker}")
 
     if args.group:
         # Group by domain - show domains in config order, then legacy
@@ -366,19 +434,8 @@ def cmd_view(args):
     """View an ADR using the configured viewer."""
     import shutil
 
-    # Normalize the ADR reference (accept "38", "038", "ADR-038", "ADR-38", "51.2")
-    ref = args.adr.upper().replace('ADR-', '').lstrip('0') or '0'
-
-    # Helper to extract number from filename (e.g., ADR-051.2-foo.md -> 51.2)
-    def filename_number(path):
-        match = re.match(r'ADR-(\d+(?:\.\d+)?)', path.name, re.IGNORECASE)
-        return match.group(1).lstrip('0') if match else None
-
-    # Find the ADR by title number or filename number
-    adrs = get_all_adrs()
-    matches = [a for a in adrs if
-               (a.number and a.number.lstrip('0') == ref) or
-               filename_number(a.path) == ref]
+    # Find the ADR by title number or filename number (archived stay viewable)
+    matches = find_by_ref(args.adr, get_all_adrs(include_archived=True))
 
     if not matches:
         print(f"Error: ADR not found: {args.adr}", file=sys.stderr)
@@ -608,12 +665,43 @@ def cmd_rename(args):
     return 0
 
 def cmd_lint(args):
-    """Lint ADR files for issues."""
+    """Lint ADR files for issues.
+
+    Deliberately covers the archive (ADR-303): a malformed ADR must not be
+    able to hide by being moved.
+    """
     if args.paths:
         paths = [Path(p) for p in args.paths]
         adrs = [parse_adr(p) for p in paths]
     else:
-        adrs = get_all_adrs()
+        adrs = get_all_adrs(include_archived=True)
+
+    # Cross-file supersession checks resolve against the full corpus, even
+    # when linting an explicit subset of paths.
+    corpus = adrs if not args.paths else get_all_adrs(include_archived=True)
+    by_number = {}
+    for adr in corpus:
+        if adr.number:
+            by_number.setdefault(adr.number.lstrip('0') or '0', adr)
+
+    for adr in adrs:
+        for field_name in ('supersedes', 'superseded_by'):
+            for entry in getattr(adr, field_name):
+                number, _ = norm_ref(entry)
+                target = by_number.get(number)
+                if target is None:
+                    adr.issues.append(Issue(
+                        f"{field_name}: '{entry}' resolves to no known ADR", 'error'))
+                    continue
+                # Reciprocity: A superseded_by B ⟺ B supersedes A (sections ignored)
+                if adr.number:
+                    own = adr.number.lstrip('0') or '0'
+                    reverse = 'supersedes' if field_name == 'superseded_by' else 'superseded_by'
+                    reverse_numbers = {norm_ref(e)[0] for e in getattr(target, reverse)}
+                    if own not in reverse_numbers:
+                        adr.issues.append(Issue(
+                            f"{field_name}: ADR-{number} does not declare the reciprocal "
+                            f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
 
     total_errors = 0
     total_warnings = 0
@@ -658,8 +746,10 @@ def cmd_lint(args):
     return 0
 
 def cmd_index(args):
-    """Generate/update the ADR index file."""
-    adrs = get_all_adrs()
+    """Generate/update the ADR index from the active set (ADR-303)."""
+    all_adrs = get_all_adrs(include_archived=True)
+    adrs = [a for a in all_adrs if not is_archived(a.path)]
+    archived = [a for a in all_adrs if is_archived(a.path)]
     domains = get_domains()
     legacy_range = get_legacy_range()
 
@@ -671,6 +761,12 @@ def cmd_index(args):
         return (int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
 
     adrs.sort(key=sort_key)
+    archived.sort(key=sort_key)
+
+    def status_cell(adr):
+        note = supersession_note(adr)
+        status = adr.status or '?'
+        return f"{status} ({note})" if note else status
 
     lines = [
         "# Architecture Decision Records",
@@ -709,7 +805,7 @@ def cmd_index(args):
             folder = adr.path.parent.name
             filename = adr.path.name
             link = f"[ADR-{adr.number}](./{folder}/{filename})"
-            lines.append(f"| {link} | {adr.title or '?'} | {adr.status or '?'} |")
+            lines.append(f"| {link} | {adr.title or '?'} | {status_cell(adr)} |")
 
         lines.append("")
 
@@ -725,8 +821,26 @@ def cmd_index(args):
         for adr in uncategorized:
             rel_path = adr.path.relative_to(adr.path.parent.parent)
             link = f"[ADR-{adr.number}](./{rel_path})"
-            lines.append(f"| {link} | {adr.title or '?'} | {adr.status or '?'} |")
+            lines.append(f"| {link} | {adr.title or '?'} | {status_cell(adr)} |")
 
+        lines.append("")
+
+    # Archived ADRs: collapsed, not main-table rows (ADR-303)
+    if archived:
+        arch_root = get_project_root() / 'docs' / 'architecture'
+        lines.append("## Archived")
+        lines.append("")
+        lines.append(f"<details><summary>{len(archived)} archived ADRs — "
+                     "no longer part of the active set; kept for history</summary>")
+        lines.append("")
+        lines.append("| ADR | Title | Status |")
+        lines.append("|-----|-------|--------|")
+        for adr in archived:
+            rel_path = adr.path.relative_to(arch_root)
+            link = f"[ADR-{adr.number}](./{rel_path})"
+            lines.append(f"| {link} | {adr.title or '?'} | {status_cell(adr)} |")
+        lines.append("")
+        lines.append("</details>")
         lines.append("")
 
     content = '\n'.join(lines)
@@ -764,6 +878,170 @@ def cmd_index(args):
 
     index_path.write_text(content)
     print(f"Updated: {relative_path(index_path)}")
+    return 0
+
+def cmd_archive(args):
+    """Archive an ADR out of the active set (ADR-303 / issue #438).
+
+    git mv to docs/architecture/archive/<folder>/, rewrite status, prepend a
+    banner after the H1. Archiving is not deletion: the file stays tracked,
+    linted, and linkable.
+    """
+    root = get_project_root()
+    arch_root = root / 'docs' / 'architecture'
+    today = date.today().isoformat()
+
+    # Validate status against config
+    archive_status = args.status or 'Superseded'
+    valid_statuses = get_statuses()
+    if archive_status not in valid_statuses:
+        print(f"Error: status '{archive_status}' not in adr.yaml "
+              f"(valid: {', '.join(sorted(valid_statuses))})", file=sys.stderr)
+        return 1
+
+    # Resolve the ADR
+    all_adrs = get_all_adrs(include_archived=True)
+    matches = find_by_ref(args.adr, all_adrs)
+    if not matches:
+        print(f"Error: ADR not found: {args.adr}", file=sys.stderr)
+        return 1
+    if len(matches) > 1:
+        print(f"Multiple ADRs match '{args.adr}':", file=sys.stderr)
+        for adr in matches:
+            print(f"  ADR-{adr.number}: {adr.title}", file=sys.stderr)
+        return 1
+    adr = matches[0]
+
+    # Already archived: no-op, not an error
+    if is_archived(adr.path):
+        print(f"ADR-{adr.number} is already archived: {relative_path(adr.path)}")
+        return 0
+
+    # Refuse to archive a partially superseded document (ADR-303 part C):
+    # superseded_by declared while the status is still in force means part of
+    # it is live — the archive is for documents a reader no longer opens.
+    if adr.superseded_by and adr.status not in NON_ACTIVE_STATUSES:
+        note = supersession_note(adr)
+        print(f"Error: ADR-{adr.number} is {note} while status is "
+              f"'{adr.status}' — it is partially superseded, and mostly-live "
+              f"documents do not belong in the archive. Either supersede it "
+              f"fully (set status accordingly) or leave it active.",
+              file=sys.stderr)
+        return 1
+
+    # Parse and validate --superseded-by against the corpus
+    sup_refs = []
+    if args.superseded_by:
+        for raw in args.superseded_by.split(','):
+            raw = raw.strip()
+            if not raw:
+                continue
+            number, section = norm_ref(raw)
+            if not find_by_ref(number, all_adrs):
+                print(f"Error: --superseded-by '{raw}' resolves to no known ADR",
+                      file=sys.stderr)
+                return 1
+            sup_refs.append(f"ADR-{number}#{section}" if section else f"ADR-{number}")
+
+    dest_dir = arch_root / 'archive' / adr.path.parent.name
+    dest = dest_dir / adr.path.name
+
+    if args.dry_run:
+        print(f"Would archive ADR-{adr.number}: {adr.title}")
+        print(f"  move:   {relative_path(adr.path)} -> {relative_path(dest)}")
+        print(f"  status: {adr.status} -> {archive_status}")
+        print(f"  banner: date {today}, reason: {args.reason}"
+              + (f", superseded by: {', '.join(sup_refs)}" if sup_refs else ""))
+        return 0
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # git mv so history follows the file; plain rename outside a work tree
+    moved_by_git = False
+    try:
+        result = subprocess.run(
+            ['git', 'mv', str(adr.path), str(dest)],
+            cwd=root, capture_output=True, text=True, timeout=10)
+        moved_by_git = result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    if not moved_by_git:
+        adr.path.rename(dest)
+
+    # Read the moved file defensively — a broken move must be a named failure
+    try:
+        content = dest.read_text()
+    except Exception as e:
+        print(f"Error: archive move left no readable file at "
+              f"{relative_path(dest)}: {e}", file=sys.stderr)
+        return 1
+
+    lines = content.split('\n')
+
+    # Rewrite frontmatter: status, and merge superseded_by
+    fm_end = None
+    if lines and lines[0].strip() == '---':
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == '---':
+                fm_end = i
+                break
+    if fm_end:
+        new_fm = []
+        skipping_sup = False
+        status_idx = None
+        for line in lines[1:fm_end]:
+            if skipping_sup:
+                if line.startswith((' ', '\t')) or line.strip().startswith('-'):
+                    continue
+                skipping_sup = False
+            if re.match(r'^superseded_by\s*:', line):
+                # existing entries already merged via adr.superseded_by
+                skipping_sup = not line.split(':', 1)[1].strip()
+                continue
+            if re.match(r'^status\s*:', line):
+                status_idx = len(new_fm)
+                new_fm.append(f'status: {archive_status}')
+                continue
+            new_fm.append(line)
+        merged = []
+        for entry in [*adr.superseded_by, *sup_refs]:
+            number, section = norm_ref(entry)
+            normalized = f"ADR-{number}#{section}" if section else f"ADR-{number}"
+            if normalized not in merged:
+                merged.append(normalized)
+        if merged:
+            insert_at = (status_idx + 1) if status_idx is not None else len(new_fm)
+            new_fm[insert_at:insert_at] = ['superseded_by:'] + [
+                f'  - "{entry}"' for entry in merged]
+        lines = ['---'] + new_fm + lines[fm_end:]
+
+    # Banner after the H1 so the title still reads first
+    h1_idx = next((i for i, line in enumerate(lines) if line.startswith('# ')), None)
+    if h1_idx is None:
+        print(f"Error: no H1 found in {relative_path(dest)} — file moved but "
+              f"banner not written; fix by hand", file=sys.stderr)
+        dest.write_text('\n'.join(lines))
+        return 1
+    banner = [
+        '',
+        f'> **ARCHIVED — {today}.** No longer part of the active architecture set. Kept for history',
+        '> and so existing references still resolve.',
+        '>',
+        f'> **Why:** {args.reason}',
+    ]
+    if sup_refs:
+        banner.append(f"> **Superseded by:** {', '.join(sup_refs)}")
+    banner += ['>', '> Nothing below this line has been edited.']
+    lines[h1_idx + 1:h1_idx + 1] = banner
+
+    dest.write_text('\n'.join(lines))
+
+    print(f"Archived ADR-{adr.number}: {adr.title}")
+    print(f"  {relative_path(adr.path)} -> {relative_path(dest)}"
+          + ("" if moved_by_git else "  (plain rename — not a git work tree)"))
+    print(f"  status: {archive_status}"
+          + (f", superseded by: {', '.join(sup_refs)}" if sup_refs else ""))
+    print(f"\nRegenerate the index: {sys.argv[0]} index -y")
     return 0
 
 def cmd_domains(args):
@@ -830,6 +1108,10 @@ def main():
     p_list.add_argument('--status', '-s', help='Filter by status')
     p_list.add_argument('--group', '-g', action='store_true',
                         help='Group by domain')
+    p_list.add_argument('--archived', action='store_true',
+                        help='List archived ADRs only')
+    p_list.add_argument('--all', action='store_true',
+                        help='List active and archived ADRs')
 
     # view
     p_view = subparsers.add_parser('view', aliases=['v', 'show'], help='View an ADR')
@@ -859,6 +1141,19 @@ def main():
     # domains
     subparsers.add_parser('domains', help='List domain number series')
 
+    # archive
+    p_archive = subparsers.add_parser(
+        'archive', help='Archive an ADR out of the active set')
+    p_archive.add_argument('adr', help='ADR number (e.g., 38, 038, ADR-038)')
+    p_archive.add_argument('--reason', required=True,
+                           help='Why this ADR leaves the active set (recorded in the banner)')
+    p_archive.add_argument('--superseded-by', dest='superseded_by',
+                           help='Superseding ADR(s), comma-separated (e.g., ADR-51 or 51,52#4)')
+    p_archive.add_argument('--status',
+                           help='Archive status (default: Superseded; validated against adr.yaml)')
+    p_archive.add_argument('--dry-run', action='store_true',
+                           help='Report what would change without changing it')
+
     # config
     subparsers.add_parser('config', help='Show configuration')
 
@@ -878,6 +1173,7 @@ def main():
         'rename': cmd_rename,
         'lint': cmd_lint,
         'index': cmd_index,
+        'archive': cmd_archive,
         'domains': cmd_domains,
         'config': cmd_config,
     }

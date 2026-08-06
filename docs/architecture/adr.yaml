@@ -32,6 +32,7 @@ statuses:
   - Accepted
   - Superseded
   - Deprecated
+  - Rejected
 
 # Default values for new ADRs
 defaults:
