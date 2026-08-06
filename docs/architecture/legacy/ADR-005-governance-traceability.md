@@ -1,5 +1,7 @@
 ---
 status: Superseded
+superseded_by:
+  - ADR-200
 date: 2026-02-05
 deciders:
   - aaronsb

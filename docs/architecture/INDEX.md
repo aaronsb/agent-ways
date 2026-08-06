@@ -24,10 +24,10 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-101](./system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) | Wormhole relay protocol for cross-instance agent communication | Deprecated |
 | [ADR-102](./system/ADR-102-irc-based-local-agent-communication.md) | IRC-based local agent communication | Deprecated |
 | [ADR-103](./system/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) | Checks — Epoch-Distance-Aware Confidence Sensors for Ways | Accepted |
-| [ADR-104](./system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) | Token-Gated Way Re-Disclosure for Long Context Windows | Superseded |
+| [ADR-104](./system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) | Token-Gated Way Re-Disclosure for Long Context Windows | Superseded (superseded by ADR-123) |
 | [ADR-105](./system/ADR-105-progressive-disclosure-for-way-trees.md) | Progressive Disclosure for Way Trees | Accepted |
 | [ADR-106](./system/ADR-106-project-pulse-epoch-mapped-project-awareness.md) | Project Pulse — Epoch-Mapped Project Awareness | Accepted |
-| [ADR-107](./system/ADR-107-way-match-corpus-batch-mode-and-locale-support.md) | Corpus, Matching Pipeline, and Locale Support | Accepted |
+| [ADR-107](./system/ADR-107-way-match-corpus-batch-mode-and-locale-support.md) | Corpus, Matching Pipeline, and Locale Support | Accepted (partially superseded by ADR-125) |
 | [ADR-108](./system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) | Embedding-Based Way Matching with all-MiniLM-L6-v2 | Accepted |
 | [ADR-109](./system/ADR-109-project-scope-way-embedding-with-manifest-based-staleness-detection.md) | Project-Scope Way Embedding with Manifest-Based Staleness Detection | Accepted |
 | [ADR-110](./system/ADR-110-way-file-separation-and-graph-compatible-structure.md) | Way File Separation and Graph-Compatible Structure | Accepted |
@@ -39,9 +39,9 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-116](./system/ADR-116-declarative-permission-requirements.md) | Declarative Permission Requirements | Accepted |
 | [ADR-117](./system/ADR-117-sensor-crate-extraction-and-feature-flags.md) | Sensor Crate Extraction and Feature Flags | Accepted |
 | [ADR-118](./system/ADR-118-focus-groups-dynamic-agent-grouping.md) | Focus Groups — Dynamic Agent Grouping | Accepted |
-| [ADR-119](./system/ADR-119-action-potential-engagement-model.md) | Action Potential Engagement Model | Superseded |
+| [ADR-119](./system/ADR-119-action-potential-engagement-model.md) | Action Potential Engagement Model | Superseded (superseded by ADR-123) |
 | [ADR-120](./system/ADR-120-interactive-chat-tui-human-in-the-signal-loop.md) | Interactive Chat TUI — Human in the Signal Loop | Accepted |
-| [ADR-121](./system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) | Salience decay for signal presentation — turn-based exponential | Superseded |
+| [ADR-121](./system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) | Salience decay for signal presentation — turn-based exponential | Superseded (superseded by ADR-123) |
 | [ADR-122](./system/ADR-122-attend-disclosure-sensor-token-gated-affordance-reheat.md) | Attend disclosure sensor — token-gated affordance reheat | Draft |
 | [ADR-123](./system/ADR-123-firing-dynamics-progression-axis-unification.md) | Firing dynamics — progression-axis unification for attend and ways | Accepted |
 | [ADR-124](./system/ADR-124-channel-bar-ordering-open-as-base.md) | TUI Legend Architecture — Base Channel, Liveness, and Ordering | Accepted |
@@ -67,9 +67,9 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Accepted |
 | [ADR-145](./system/ADR-145-explicit-three-source-convergence-manifest.md) | Explicit three-source convergence manifest | Draft |
 | [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
-| [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Superseded |
+| [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Superseded (superseded by ADR-169) |
 | [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Draft |
-| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Superseded |
+| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Superseded (superseded by ADR-169) |
 | [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
 | [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Accepted |
 | [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
@@ -82,7 +82,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-159](./system/ADR-159-remove-ways-tune-curves-and-the-legacy-curve-cadence-field.md) | Remove ways tune-curves and the legacy curve: cadence field | Accepted |
 | [ADR-160](./system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) | Chunked late-interaction matching with softmax-share gating for way selection | Accepted |
 | [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | Proposed |
-| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Superseded |
+| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Superseded (superseded by ADR-167) |
 | [ADR-163](./system/ADR-163-config-separation-dotfiles-source-of-truth.md) | Config separation — dotfiles as source-of-truth feeding the settings fragment store | Accepted |
 | [ADR-164](./system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md) | File artifacts distributed across hosts must be carried by value not host-absolute reference | Accepted |
 | [ADR-165](./system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md) | Loop-control bookends: start, develop, merge, release, wrap | Accepted |
@@ -115,12 +115,13 @@ _Documentation structure, tooling, coherence_
 | [ADR-300](./documentation/ADR-300-documentation-structure.md) | Documentation Structure | Accepted |
 | [ADR-301](./documentation/ADR-301-situated-socialization-as-canonical-framing-and-documentation-prose-refactor.md) | Situated socialization as canonical framing and documentation prose refactor | Accepted |
 | [ADR-302](./documentation/ADR-302-unified-documentation-model.md) | A unified documentation model — typed graph, ways packaging, cross-repo convergence | Accepted |
+| [ADR-303](./documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md) | Active-set semantics, adr archive, and supersession reading for the ADR corpus | Draft |
 
 ## Legacy (Pre-Domain Numbering)
 
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-004](./legacy/ADR-004-way-macros.md) | Way Macros for Dynamic Context Injection | Accepted |
-| [ADR-005](./legacy/ADR-005-governance-traceability.md) | Governance Traceability for Ways | Superseded |
+| [ADR-005](./legacy/ADR-005-governance-traceability.md) | Governance Traceability for Ways | Superseded (superseded by ADR-200) |
 | [ADR-013](./legacy/ADR-013-ways-skills-governance-architecture.md) | Ways, Skills, and Governance Architecture | Accepted |
 | [ADR-014](./legacy/ADR-014-tfidf-semantic-matcher.md) | TF-IDF/BM25 Binary for Semantic Way Matching | Accepted |

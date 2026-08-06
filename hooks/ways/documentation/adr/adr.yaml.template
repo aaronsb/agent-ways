@@ -43,6 +43,7 @@ statuses:
   - Accepted      # Approved and ready for implementation
   - Superseded    # Replaced by another ADR
   - Deprecated    # No longer relevant
+  - Rejected      # Decided against; kept for the record
 
 # Default values for new ADRs
 defaults:
