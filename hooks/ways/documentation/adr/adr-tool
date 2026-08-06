@@ -298,8 +298,17 @@ def parse_adr(path: Path) -> ADRInfo:
     return info
 
 def is_archived(path: Path) -> bool:
-    """True if the path sits under an archive/ segment."""
-    return 'archive' in path.parts
+    """True if the path sits under docs/architecture/archive/.
+
+    Only segments below the 'architecture' directory count, so a repo that
+    itself lives under a directory named 'archive' is unaffected. The
+    archive/ name is reserved: a domain must not use it as its folder.
+    """
+    parts = path.parts
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i] == 'architecture':
+            return 'archive' in parts[i + 1:]
+    return 'archive' in parts
 
 def find_adrs(include_archived: bool = False) -> list[Path]:
     """Find ADR files — the active set by default (ADR-303)."""
@@ -323,9 +332,9 @@ def norm_ref(ref) -> tuple[str, Optional[str]]:
     Accepts 167, "167", "ADR-167", "ADR-167#4" — returns ("167", None) or
     ("167", "4"). The number keeps sub-numbers ("51.2") but drops zero padding.
     """
-    text = str(ref).strip().upper().replace('ADR-', '')
-    number, _, section = text.partition('#')
-    number = number.lstrip('0') or '0'
+    text = str(ref).strip()
+    number, _, section = text.partition('#')  # before upper(): sections keep their case
+    number = number.upper().replace('ADR-', '').lstrip('0') or '0'
     return number, (section or None)
 
 def filename_number(path: Path) -> Optional[str]:
@@ -477,8 +486,8 @@ def cmd_new(args):
 
     config = domains[domain]
 
-    # Find next available number in range
-    adrs = get_all_adrs()
+    # Find next available number in range — archived ADRs keep their numbers
+    adrs = get_all_adrs(include_archived=True)
     used_numbers = set()
     for adr in adrs:
         if adr.number:
@@ -585,7 +594,7 @@ def cmd_rename(args):
         m = re.match(r'ADR-(\d+(?:\.\d+)?)', path.name, re.IGNORECASE)
         return m.group(1).lstrip('0') if m else None
 
-    adrs = get_all_adrs()
+    adrs = get_all_adrs(include_archived=True)
     matches = [a for a in adrs if
                (a.number and a.number.lstrip('0') == ref) or
                filename_number(a.path) == ref]
@@ -598,6 +607,11 @@ def cmd_rename(args):
         print(f"Multiple ADRs match '{args.adr}':", file=sys.stderr)
         for adr in matches:
             print(f"  ADR-{adr.number}: {adr.title}", file=sys.stderr)
+        return 1
+    if is_archived(matches[0].path):
+        print(f"Error: ADR-{matches[0].number} is archived "
+              f"({relative_path(matches[0].path)}) — archived ADRs are kept "
+              f"as-is; not renaming", file=sys.stderr)
         return 1
 
     if not args.title and not args.slug:
@@ -683,6 +697,10 @@ def cmd_lint(args):
     for adr in corpus:
         if adr.number:
             by_number.setdefault(adr.number.lstrip('0') or '0', adr)
+        # Filename fallback: a target with a malformed H1 should still resolve
+        fn_number = filename_number(adr.path)
+        if fn_number:
+            by_number.setdefault(fn_number, adr)
 
     for adr in adrs:
         for field_name in ('supersedes', 'superseded_by'):
@@ -945,6 +963,10 @@ def cmd_archive(args):
 
     dest_dir = arch_root / 'archive' / adr.path.parent.name
     dest = dest_dir / adr.path.name
+    if dest.exists():
+        print(f"Error: {relative_path(dest)} already exists — refusing to "
+              f"overwrite", file=sys.stderr)
+        return 1
 
     if args.dry_run:
         print(f"Would archive ADR-{adr.number}: {adr.title}")
@@ -1003,6 +1025,10 @@ def cmd_archive(args):
                 new_fm.append(f'status: {archive_status}')
                 continue
             new_fm.append(line)
+        if status_idx is None:
+            # No status field at all — an archived ADR must carry one
+            status_idx = len(new_fm)
+            new_fm.append(f'status: {archive_status}')
         merged = []
         for entry in [*adr.superseded_by, *sup_refs]:
             number, section = norm_ref(entry)
@@ -1015,8 +1041,16 @@ def cmd_archive(args):
                 f'  - "{entry}"' for entry in merged]
         lines = ['---'] + new_fm + lines[fm_end:]
 
-    # Banner after the H1 so the title still reads first
-    h1_idx = next((i for i, line in enumerate(lines) if line.startswith('# ')), None)
+    # Banner after the H1 so the title still reads first. Scan only below the
+    # frontmatter — a YAML '# comment' line must not be mistaken for the H1.
+    body_start = 0
+    if lines and lines[0].strip() == '---':
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == '---':
+                body_start = i + 1
+                break
+    h1_idx = next((i for i in range(body_start, len(lines))
+                   if lines[i].startswith('# ')), None)
     if h1_idx is None:
         print(f"Error: no H1 found in {relative_path(dest)} — file moved but "
               f"banner not written; fix by hand", file=sys.stderr)
@@ -1038,7 +1072,7 @@ def cmd_archive(args):
 
     print(f"Archived ADR-{adr.number}: {adr.title}")
     print(f"  {relative_path(adr.path)} -> {relative_path(dest)}"
-          + ("" if moved_by_git else "  (plain rename — not a git work tree)"))
+          + ("" if moved_by_git else "  (plain rename — git mv unavailable or failed)"))
     print(f"  status: {archive_status}"
           + (f", superseded by: {', '.join(sup_refs)}" if sup_refs else ""))
     print(f"\nRegenerate the index: {sys.argv[0]} index -y")
@@ -1108,10 +1142,11 @@ def main():
     p_list.add_argument('--status', '-s', help='Filter by status')
     p_list.add_argument('--group', '-g', action='store_true',
                         help='Group by domain')
-    p_list.add_argument('--archived', action='store_true',
-                        help='List archived ADRs only')
-    p_list.add_argument('--all', action='store_true',
-                        help='List active and archived ADRs')
+    list_scope = p_list.add_mutually_exclusive_group()
+    list_scope.add_argument('--archived', action='store_true',
+                            help='List archived ADRs only')
+    list_scope.add_argument('--all', action='store_true',
+                            help='List active and archived ADRs')
 
     # view
     p_view = subparsers.add_parser('view', aliases=['v', 'show'], help='View an ADR')

@@ -185,6 +185,81 @@ after=$(git status --porcelain; ls docs/architecture/system)
 assert_contains "dry run reports the move" "$out" 'Would archive ADR-102'
 [[ "$before" == "$after" ]] && pass "dry run changes nothing" || fail "dry run changes nothing"
 
+echo "== Review regressions (PR #442)"
+# 1: adr new must not reissue an archived ADR's number (101 is archived)
+new_out=$("$ADR_TOOL" new system "Reissue check" 2>&1)
+assert_not_contains "adr new does not reissue archived number" "$new_out" 'ADR-101'
+rm -f docs/architecture/system/ADR-*-reissue-check.md
+
+# 2: a YAML '# comment' in frontmatter must not attract the banner
+cat > docs/architecture/system/ADR-105-test.md <<'EOF'
+---
+status: Accepted
+# yaml comment that looks like an H1 scan target
+date: 2026-01-01
+deciders:
+  - tester
+---
+
+# ADR-105: Comment in frontmatter
+
+## Context
+
+Body.
+EOF
+"$ADR_TOOL" archive 105 --reason "comment fixture" >/dev/null 2>&1
+arch105=docs/architecture/archive/system/ADR-105-test.md
+fm_block=$(awk '/^---$/{n++; next} n==1' "$arch105")
+assert_not_contains "banner not injected into frontmatter" "$fm_block" 'ARCHIVED'
+assert_contains "banner present in body" "$(cat "$arch105")" 'ARCHIVED'
+assert_contains "comment fixture still has valid status" "$(cat "$arch105")" '^status: Superseded$'
+
+# 4: an ADR with no status field gains one on archive
+cat > docs/architecture/system/ADR-106-test.md <<'EOF'
+---
+date: 2026-01-01
+deciders:
+  - tester
+---
+
+# ADR-106: No status field
+
+## Context
+
+Body.
+EOF
+"$ADR_TOOL" archive 106 --reason "status fixture" >/dev/null 2>&1
+assert_contains "missing status is appended on archive" \
+  "$(cat docs/architecture/archive/system/ADR-106-test.md)" '^status: Superseded$'
+
+# 9: --all and --archived are mutually exclusive
+assert_exit "list --all --archived refuses" 2 "$ADR_TOOL" list --all --archived
+
+# 3: a repo living under a directory named 'archive' still sees its active set
+mkdir -p "$TMPDIR/archive"
+cd "$TMPDIR/archive"
+git init -q repo2 && cd repo2
+git config user.email test@example.com && git config user.name Test
+mkdir -p docs/architecture/system
+cp "$TMPDIR/repo/docs/architecture/adr.yaml" docs/architecture/adr.yaml
+cat > docs/architecture/system/ADR-110-test.md <<'EOF'
+---
+status: Accepted
+date: 2026-01-01
+deciders:
+  - tester
+---
+
+# ADR-110: Repo under an archive dir
+
+## Context
+
+Body.
+EOF
+list_out=$("$ADR_TOOL" list 2>&1)
+assert_contains "repo under archive/ parent still lists active ADRs" "$list_out" 'ADR-110'
+cd "$TMPDIR/repo"
+
 echo
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]
