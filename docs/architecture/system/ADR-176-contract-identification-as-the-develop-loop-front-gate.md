@@ -29,7 +29,7 @@ The gate is **recovery-first, not creation-first**. It reconciles the work-in-ha
 
 - **Binding found** → surface the contract cheaply and proceed. No authoring.
 - **Binding partial** → the gaps *are* the open questions. Batch them (via `meta/choices`); do not invent answers.
-- **No binding at all** → the absence is the finding. Name it, and route to the existing front (`adr` / `design` / `implement`) to establish one. Do not build against nothing.
+- **No binding at all** → the absence is the finding. Name it, and route to a binding-establishing stage — `adr`, `design`, or the `implement` briefing — to create one. (Not `prototype`: a prototype burns down uncertainty but produces no binding.) Do not build against nothing.
 
 Authoring a contract is the no-binding branch, never the default path. This deliberately inverts socratic: socratic generates the contract by self-interrogation; we recover it from the ledger and generate only on absence. The inversion is what keeps the gate cheap on routine turn-40 work and honest to the ledger — a self-generated contract that duplicates an ADR already on disk is the memory-shortcut ADR-128 warns against, wearing a new costume.
 
