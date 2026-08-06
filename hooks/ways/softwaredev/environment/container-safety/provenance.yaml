@@ -1,0 +1,31 @@
+policy:
+  - uri: governance/policies/operations.md
+    type: governance-doc
+controls:
+  - id: NIST SP 800-53 AC-6 (Least Privilege)
+    justifications:
+      - Non-root USER required in build/run stages; root-as-default is called out as a decision to override, not a baseline to accept
+      - Privilege table prohibits --privileged, requires dropping unneeded capabilities, and forbids binding the docker socket into builds
+      - Bind mounts scoped to the narrowest path and read-only where possible; mounting $HOME or / into a build is named as the failure case
+    satisfied_when: >
+      Container definitions written or reviewed in the session set a non-root USER
+      (or pass --user at run time), grant no --privileged or unneeded capabilities,
+      and scope bind mounts to the narrowest necessary path. A definition left
+      silently running as root, or a build granted host-level power it does not
+      need, is the failure case.
+  - id: CIS Docker Benchmark 4.1 (Create a user for the container)
+    justifications:
+      - Preferred Dockerfile shape creates a uid/gid-matched user and switches to it before the runtime stage
+      - Lighter path for throwaway builds runs as the host identity via --user $(id -u):$(id -g)
+      - Artifact-ownership check ensures build output lands host-owned, so cleanup never needs sudo
+    satisfied_when: >
+      Images built in the session define and switch to a non-root user (or the run
+      command passes the host uid/gid), and artifacts written to bind-mounted host
+      paths land owned by the invoking user. Root-owned build output on the host is
+      the failure case.
+verified: 2026-08-06
+rationale: >
+  Non-root execution, capability minimization, and scoped mounts implement least
+  privilege at the container-definition level. Uid/gid matching operationalizes the
+  CIS non-root-user benchmark while keeping host artifact cleanup sudo-free, which
+  is the developer-safety blast-radius concern the way exists to bound.
