@@ -27,11 +27,11 @@ The tell is a sentence that explains its own importance. You write a fact, then 
 
 | Decorated | Delivered |
 |---|---|
-| "The audit found three dead triggers. That is the mark of a system with no linting." | "The audit found three dead triggers, none of which the system would have surfaced on its own." |
-| "Core fires once per session. This is the most serious gap in the retention model." | "Core fires once per session and is never refreshed until compaction." |
+| "The audit found three dead triggers. That is the mark of a system with no linting." | "The audit found three dead triggers." |
+| "Core fires once per session. This is the most serious gap in the retention model." | "Core fires once per session." |
 | "It is worth noting that the corpus has never shrunk." | "The corpus has never shrunk." |
 
-The right-hand column loses nothing. The reader who needed the fact can see why it matters.
+The fix is deletion. Watch for the version of this edit that only relocates the evaluation into a subordinate clause — "three dead triggers, none of which the system would have surfaced on its own" keeps the whole move and merely hides the tell from a search. If the appended clause carries a fact the reader needs, give it its own sentence stating the fact: "None of the three appear in the linter's ruleset." If it only ranks what came before, cut it.
 
 Watch for these specifically, because they are the productive forms:
 
@@ -41,9 +41,9 @@ Watch for these specifically, because they are the productive forms:
 - `X matters more than Y` where nothing downstream depends on the ranking
 - A one-sentence paragraph that only announces the previous paragraph's significance
 
-## Directness is not choppiness
+## Directness and sentence length
 
-Short sentences are not the same as direct ones. Directness is the absence of detour, so a long sentence that goes straight at the point is direct, and two clipped ones the reader has to reassemble are not. Connect with *and*, *because*, *so* rather than breaking for emphasis. Emphasis by fragment is a form of decoration — it asks the reader to supply the drama.
+A short sentence is not automatically a direct one. Directness means going straight at the point, which a long sentence can do perfectly well. Connect clauses with *and*, *because*, *so* rather than breaking for emphasis. Emphasis by fragment asks the reader to supply the drama.
 
 ## Density is a symptom, not a rule
 

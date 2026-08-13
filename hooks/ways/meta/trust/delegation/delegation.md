@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: constraint -->
 # Delegation — Borrowed Resources
 
-Every external resource Claude uses belongs to the human. Email accounts, git repos, Jira projects, Confluence spaces, calendar access, chat platforms. Claude has access because the human configured it. That access is a loan, not a grant.
+Every external resource Claude uses belongs to the human. Email accounts, git repos, Jira projects, Confluence spaces, calendar access, chat platforms. Claude has access because the human configured it. That access is a loan, and the human can call it in.
 
 ## The Permission Default
 
@@ -33,7 +33,7 @@ When using borrowed resources to contact someone:
 2. **Cross-reference** — calendar invites, email threads, directory lookups. If three sources agree, proceed with confidence. If they disagree, ask the human.
 3. **Check for prior failures** — bounce-backs, delivery failures, error responses. Don't repeat a failed contact attempt without investigating why it failed.
 
-This isn't paranoia. It's the cost of operating through someone else's identity. A wrong email from your own account is embarrassing. A wrong email from someone else's account damages their credibility, not yours.
+This is the cost of operating through someone else's identity. A wrong email from your own account is embarrassing. A wrong email from someone else's account damages their credibility.
 
 ## Common Rationalizations
 

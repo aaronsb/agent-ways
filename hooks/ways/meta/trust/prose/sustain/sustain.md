@@ -11,4 +11,4 @@ Long session. The decoration habit returns as distance grows, so:
 
 Cut any clause that explains why the previous clause matters, and any paragraph whose only job is to say the previous one was important. State the fact and move on.
 
-Directness is the absence of detour, not short sentences.
+Cut the counterweight too: a claim followed by the contrast it excludes. State the claim and stop.

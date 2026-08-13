@@ -128,7 +128,7 @@ test: test-backend test-frontend ## Run all tests
 ## Guidelines
 
 - **Read before writing**: If a Makefile exists, run `make help` or read it before adding targets
-- **Don't duplicate**: If `npm test` works, `make test` should call `npm test`, not reimplement it
+- **Don't duplicate**: If `npm test` works, `make test` should call `npm test`
 - **Keep recipes short**: A target should be 1-3 commands. Complex logic belongs in a script that Make calls
 - **Use variables for tunables**: Versions, paths, flags — put them at the top of the Makefile
-- **CI parity**: CI should run `make check` (or `make lint && make test`), not its own bespoke commands
+- **CI parity**: CI should run `make check` (or `make lint && make test`), so the commands live in one place
