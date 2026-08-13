@@ -1,7 +1,7 @@
 ---
 name: merge
 description: Land an increment to main through the branch → commit → push → PR → review-gate → merge → cleanup flow. The review gate is a four-square decision (review depth × human gate). Picks up wherever you are in the cycle. Use when the user says "merge this", "land this", "run a review and merge", "ship it", or invokes /merge.
-allowed-tools: Bash, Read, Grep, Glob, Agent
+allowed-tools: Bash, Read, Edit, Grep, Glob, Agent
 ---
 
 # Merge — land an increment
@@ -135,7 +135,37 @@ git branch   # verify only main + active work branches remain
 
 Always run the full sequence — stale branches and dangling refs accumulate fast.
 
-### 9. Release? (only if warranted)
+### 9. Reconcile the ADR status
+
+If the merged work implements an ADR, that ADR is still `Draft` or `Proposed`. Flip it
+now, while you know which one it was.
+
+```bash
+docs/scripts/adr list --status Draft      # implemented by this merge?
+docs/scripts/adr list --status Proposed
+```
+
+Set `status: Accepted` in the frontmatter of each one this merge delivered, then:
+
+```bash
+docs/scripts/adr index -y                 # regenerate the index
+docs/scripts/adr lint                     # 0 errors before committing
+```
+
+If the merge supersedes an ADR, or the work proved one unnecessary, archive it instead
+of leaving it in the active set:
+
+```bash
+docs/scripts/adr archive <n> --superseded-by ADR-<m> --reason "..." --dry-run
+docs/scripts/adr archive <n> --status Rejected --reason "..."    # never built
+```
+
+`adr lint` requires the reciprocal `supersedes:` on the superseding ADR. Add it, or the
+link rots one-directionally.
+
+Commit as `docs(adr): accept ADR-<n> post-merge and regenerate index`.
+
+### 10. Release? (only if warranted)
 
 Landing is not releasing. If the merged change warrants a versioned release (new
 feature, breaking change, artifact-bearing project), **suggest `/release`** — don't
@@ -148,6 +178,8 @@ auto-publish. Publishing is a one-way door.
 - **The four-square drives the gate**, not change size alone — a one-line ADR still
   gates on the operator; a big leaf refactor may not.
 - **Remediate before merge** — findings that aren't fixed aren't findings, they're debt.
+- **Reconcile the ledger at land time** — a Draft ADR whose work just merged is a stale
+  record. The correction costs one line now and a corpus audit later.
 - **If mid-flow**, pick up from current state — don't restart.
 - **Merge ≠ release** — landing an increment is the daily act; releasing is `/release`.
 

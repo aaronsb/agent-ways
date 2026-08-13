@@ -36,6 +36,12 @@ A review that finds nothing changes nothing; a review that finds something is on
 
 Merge (regular merge commit, preserving the branch's narrative — see `delivery/github`), then run the full cleanup: back to `main`, pull, prune, delete the merged branch. Landing an increment is **not** cutting a release — versioning, changelogs, and artifacts are `delivery/release` and the `/release` skill, a separate, heavier act.
 
+## Reconcile the decision ledger
+
+An ADR that authorized the work sits at `Draft` for as long as the work is unmerged. Merging is the moment its claim becomes true, so flip it to `Accepted` in the same pass as the cleanup. An ADR that the merge supersedes, or one the work proved unnecessary, leaves the active set through `adr archive`.
+
+Skipping this costs nothing per merge and compounds. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their implementation long shipped — one of them carrying thirteen source references while marked "Proposed" — and four documents that had been abandoned or quietly solved by a neighbour. The archive command had existed for weeks and had never been run. Nothing fails while this drifts; the ledger simply stops describing the system, and the correction arrives as a corpus-wide audit instead of a one-line edit.
+
 ## See Also
 
 - delivery/github(softwaredev) — PR creation, merge strategy, and post-merge cleanup discipline.
