@@ -88,6 +88,30 @@ inherits the TaskList with **zero memory of this conversation** — so the list 
 work that's actually done? Does any real remaining thread have no task? A dishonest list
 is worse than none — it hands the next session a confident lie.
 
+**Then print the list.** Reconciling silently gives the user nothing to check against.
+Enumerate every task — finished, in progress, and backlog — with its full description:
+
+```
+#1 [IN PROGRESS] <subject>
+  <description verbatim: paths, decisions already made, what was tried, next concrete step>
+
+#2 [OPEN] <subject>
+  <description>
+
+#3 [OPEN, blocked by #2] <subject>
+  <description>
+
+#4 [DONE] <subject>
+```
+
+Number in the order the next session should work them, not creation order. Mark blocking
+relationships inline (`[OPEN, blocked by #2]`). Finished tasks get subject only — enough to
+confirm they were closed deliberately, not enough to crowd the live work.
+
+Do not compress the descriptions here. This block and Step 3's prompt carry different
+weight: the prompt is the cold-start narrative, this is the per-thread detail, and a
+summarized description is exactly the content post-reset-you cannot reconstruct.
+
 ## Step 3 — Write the continuation prompt
 
 Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is
@@ -105,6 +129,9 @@ STATE — IN FLIGHT — <anything parked: branch, uncommitted files, why; from S
 INVARIANTS / GOTCHAS — <things NOT recoverable from git: crash-safety rules, ordering
 constraints, "X is noise, trust Y", env quirks. Skip if none.>
 
+TASKS — recreate these with the task list tool before starting; they are the working set.
+<the Step 2 enumeration verbatim — number, status, subject, full description>.
+
 DO NEXT — <the immediate next step, then 1-3 alternatives, each specific enough to start>.
 
 CONVENTIONS — <project-specific workflow worth repeating: branch→PR→review→merge, lint
@@ -115,6 +142,11 @@ KEY FILES / BRANCHES — <the handful that matter, with paths>.
 
 If a `/goal` is active, **restate the goal condition** at the top — it's the anchor the
 post-compaction turns steer by, and it survives compaction.
+
+The `TASKS` section carries the Step 2 enumeration in full and tells the next session to
+rehydrate it with `TaskCreate`. Pasting this prompt into a `/clear`ed or brand-new window
+arrives with an empty task list, so spell the instruction out — "recreate these as tasks
+before starting" — rather than assuming the list travels with the prompt.
 
 Keep it dense and concrete. The gold standard is a prompt a stranger could resume from.
 
@@ -151,10 +183,11 @@ copyable. Do not claim the session is compacted — you've prepared it; the user
 ## Key Principles
 
 - **The TaskList must be honest** — done is done, stale is gone, real work is captured with resume-detail. That's the load-bearing deliverable.
+- **Print the list you squared** — an unenumerated honesty pass is unreviewable; the user should see every task and description without asking.
 - **Prepare, don't pretend** — the skill can't self-compact; it hands off a ready `/compact`. Never report compaction as done.
 - **Directed > generic** — a synthesis-anchored `/compact` keeps what matters; an unanchored one keeps what the system guesses.
 - **On-demand, not automatic** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam.
-- **Two survival layers** — TaskList + continuation prompt survive even a hard reset; `/compact` is the lighter same-session path on top.
+- **Two survival layers** — TaskList + continuation prompt survive even a hard reset; `/compact` is the lighter same-session path on top. The prompt carries the tasks *and* the instruction to rehydrate them, because a fresh window starts with an empty list.
 
 ## Not for
 
