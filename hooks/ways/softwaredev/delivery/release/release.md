@@ -48,6 +48,25 @@ From commit messages since last tag:
 
 Detect the version file (package.json, Cargo.toml, pyproject.toml, version.txt) and update it.
 
+## Reconcile the Issue Tracker
+
+A release is the moment "fixed in X" becomes a public claim, so the tracker is reconciled before the tag, not after. This is the release-time sibling of the ADR status flip in `delivery/merge` — same failure, different ledger: nothing breaks while it drifts, and the correction arrives later as a bulk audit.
+
+Find what the release claims:
+
+```bash
+git log $(git describe --tags --abbrev=0)..HEAD --format='%s%n%b' \
+  | grep -oiE '(clos|fix|resolv)(e[sd])? +#?[A-Z]+-?[0-9]+'
+```
+
+The pattern is deliberately tracker-agnostic — it catches `#123` and `PROJ-456` equally. Three things to settle with the hits:
+
+- Items the commits closed get the released version recorded, where the tracker has a fix-version field.
+- Items referenced without a closing keyword get checked against what the release actually does.
+- An item the changelog names as fixed while the tracker shows it open means one of the two is wrong.
+
+Act through whatever CLI the project already uses — `gh issue`, `glab`, `jira`, an MCP tool, a checklist in a file. Detect it from the repo rather than assuming. **A project with no tracker is a valid outcome**: say so and move on.
+
 ## Publishing Artifacts
 
 | Destination | How |
@@ -63,10 +82,9 @@ For multi-platform binaries (like ways, mmaid), build per-platform, attach all t
 
 ## This Project
 
-- Annotated tags: `git tag -a vX.Y.Z -m "summary"`
-- Push tags explicitly: `git push origin main --tags`
-- No CI release pipeline — tagging is the release
-- Binary tools: GitHub Releases with per-platform artifacts + `checksums.txt`
+Two steps, because `main` is branch-protected (ADR-150). `make cut-release COMPONENT=<c> LEVEL=<patch|minor|major>` opens a version-bump PR; after it merges, `make publish-release COMPONENT=<c> PUSH=1` tags `<c>-vX.Y.Z` on main and pushes it.
+
+Pushing the tag is the one outward step. CI (`build-<c>.yml`) then builds every platform and creates the GitHub Release with per-platform artifacts and `checksums.txt`. Tags are annotated and GPG-signed, so `publish-release` needs the operator's passphrase — an agent cannot complete that step.
 
 ## Do Not
 
