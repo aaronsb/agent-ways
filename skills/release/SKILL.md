@@ -47,14 +47,35 @@ Detect and update: `package.json`, `Cargo.toml`, `pyproject.toml`, `version.txt`
 
 Keep a Changelog format, grouped Added / Changed / Fixed / Removed.
 
-### 4. Tag
+### 4. Reconcile the issue tracker
+
+A release is when "fixed in X" becomes a true statement. Find what this release claims
+to close, before the tag makes the claim public:
+
+```bash
+git log $(git describe --tags --abbrev=0)..HEAD --format='%s%n%b' \
+  | grep -oiE '(clos|fix|resolv)(e[sd])? +#?[A-Z]+-?[0-9]+'
+```
+
+That catches `#123` and `PROJ-456` alike. What to do with the hits depends on what the
+project's tracker offers:
+
+- Items the commits closed — stamp the released version, if there's a fix-version field.
+- Items referenced without a closing keyword — check whether this release resolves them.
+- An item named in the changelog that the tracker still shows open — one of the two is wrong.
+
+Use whatever CLI the project already uses (`gh issue`, `glab`, `jira`, an MCP tool, a
+`TODO.md`). Detect it; don't assume one. **No tracker is a valid answer** — say so and
+move on rather than inventing one.
+
+### 5. Tag
 
 ```bash
 git tag -a vX.Y.Z -m "summary"
 git push origin main --tags
 ```
 
-### 5. Publish artifacts (confirm first — one-way door)
+### 6. Publish artifacts (confirm first — one-way door)
 
 | Destination | How |
 |---|---|

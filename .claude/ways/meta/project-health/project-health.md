@@ -40,6 +40,24 @@ The default window is feathered: anchored at our last release tag, expanded to i
 - Update ADR status when implementation lands, not when the ADR is written
 - Draft = intent not yet committed to. Accepted = we're building or built it.
 
+## Release Mechanics
+
+Two steps, because `main` is branch-protected (ADR-150):
+
+```bash
+make cut-release COMPONENT=<c> LEVEL=<patch|minor|major>   # opens a version-bump PR
+# after that PR merges:
+make publish-release COMPONENT=<c> PUSH=1                  # tags <c>-vX.Y.Z on main
+```
+
+Components: `ways`, `ways-audit`, `attend`, `attend-chat`. `way-embed` versions through its own Makefile.
+
+Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform and creates the GitHub Release with per-platform binaries and `checksums.txt`.
+
+Tags are GPG-signed, so `publish-release` needs a passphrase from the operator's own terminal. An agent cannot complete it — do everything up to that point and hand over the command.
+
+Bump level follows the commit types, against the *binary*. A corpus-only change with a `fix:` commit is a patch even when it changes what every session sees; the CLI interface is what the version tracks.
+
 ## What to Adopt vs Ignore
 
 Filter upstream changes through what this project cares about:
