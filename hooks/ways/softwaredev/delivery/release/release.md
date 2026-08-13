@@ -78,13 +78,15 @@ Act through whatever CLI the project already uses — `gh issue`, `glab`, `jira`
 | AUR | Update PKGBUILD, `makepkg --printsrcinfo > .SRCINFO`, push to AUR |
 | Container registry | `docker build -t repo:vX.Y.Z . && docker push` |
 
-For multi-platform binaries (like ways, mmaid), build per-platform, attach all to a single GitHub Release with checksums.
+For multi-platform binaries, build per-platform and attach all of them to a single GitHub Release with a `checksums.txt`.
 
-## This Project
+## Two-Step Release Under Branch Protection
 
-Two steps, because `main` is branch-protected (ADR-150). `make cut-release COMPONENT=<c> LEVEL=<patch|minor|major>` opens a version-bump PR; after it merges, `make publish-release COMPONENT=<c> PUSH=1` tags `<c>-vX.Y.Z` on main and pushes it.
+A protected `main` splits the release in two, and this is common enough to plan for. The bump — version file, lockfile, changelog — goes through a PR like any other change. Only after it merges does the tag land on `main`.
 
-Pushing the tag is the one outward step. CI (`build-<c>.yml`) then builds every platform and creates the GitHub Release with per-platform artifacts and `checksums.txt`. Tags are annotated and GPG-signed, so `publish-release` needs the operator's passphrase — an agent cannot complete that step.
+Tagging is then the single outward step, and CI usually takes it from there: a tag-triggered workflow builds each platform and creates the release. Check for that workflow before hand-building artifacts.
+
+Signed tags stop an agent cold. If the project signs (`tag.gpgsign`, or a `-s` in the release script), the tag command needs a passphrase from a terminal the agent doesn't own. Do everything up to that point, then hand the exact command to the operator rather than retrying into a timeout.
 
 ## Do Not
 
