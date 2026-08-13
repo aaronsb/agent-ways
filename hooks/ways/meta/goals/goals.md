@@ -16,7 +16,7 @@ Set a goal when the work is **multi-turn, has a checkable end-state, and you'd o
 ## What changes in goal mode
 
 - **Per-turn approvals are gone.** Claude continues on its own until the condition holds; the `◎` indicator shows the regime is active. Setting a goal is consent to that — the operator should know they've entered it.
-- **The evaluator judges surfaced text, not the world.** It can't run commands itself, so a condition must be met by *shown evidence* (an exit code, a clean status), not by assertion. Author for evidence, not claims.
+- **The evaluator judges surfaced text.** It can't run commands itself, so a condition must be met by *shown evidence*: an exit code, a clean status. Author for evidence.
 - **There is no model-side abort.** Only the operator (`/goal clear`), the met condition, a timeout, or session end stops it. Claude can always *decline* an action and surface a concern — the loop blocks stopping, it never forces an action — but it can't end the loop itself. So the bounds live in the condition.
 
 ## Author the condition deliberately

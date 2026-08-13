@@ -149,5 +149,17 @@ if [[ -x "$REPO_TOP/scripts/check-portability.sh" ]]; then
     fi
 fi
 
+# --- Register lint on the always-on guidance surface (ADR-178) ---
+# core.md is prepended to every session, so its prose is the largest style
+# sample in the context window. Style transfers by imitation before it obeys a
+# rule, so the file has to read the way it asks output to read.
+if [[ -x "$REPO_TOP/scripts/check-register.sh" ]]; then
+    if ! "$REPO_TOP/scripts/check-register.sh"; then
+        echo -e "${RED}❌ Register lint failed (see above).${NC}"
+        echo -e "${YELLOW}If intentional, bypass with: git commit --no-verify${NC}"
+        exit 1
+    fi
+fi
+
 echo -e "${GREEN}✅ Safe to commit!${NC}"
 exit 0

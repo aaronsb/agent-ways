@@ -1,5 +1,5 @@
 ---
-description: version-numbered identifiers, function/class/variable names, and docstrings/comments — process_v2, HandlerV2, _FOO_V0, 'v0 seed for the namespace'; the symbol name should describe what the thing is, not which revision it is
+description: version-numbered identifiers, function/class/variable names, and docstrings/comments — process_v2, HandlerV2, _FOO_V0, 'v0 seed for the namespace'; the symbol name should describe what the thing is
 vocabulary: identifier symbol naming rename suffix function class variable module docstring comment glueball twin revision snapshot versioned
 refire: 0.15
 scope: agent,subagent
@@ -23,8 +23,8 @@ The version label is a snapshot of *when it was written*, frozen into a name tha
 ## What To Do Instead
 
 - **Rename in place.** Changing `process`? Edit `process`. If the contract changed, the new name should say *how it differs* (`process_streaming`, `parse_strict`) — a behavioral distinction a reader can reason about — not `_v2`.
-- **Let VCS carry the timeline.** "Seed for the `crowd-dc` namespace" — not "v0 seed." The reader cares what it seeds, not that it's the zeroth cut.
-- **Migrating with a real overlap window?** Then the *old* name gets the deprecation marker and a removal condition (`# remove after all callers move off — tracked in #123`), not a `_v2` twin that silently becomes permanent.
+- **Let VCS carry the timeline.** Write "Seed for the `crowd-dc` namespace" in place of "v0 seed." The reader cares what it seeds.
+- **Migrating with a real overlap window?** Then the *old* name gets the deprecation marker and a removal condition (`# remove after all callers move off — tracked in #123`). A `_v2` twin silently becomes permanent.
 
 ## Not This — Legitimate Version References
 

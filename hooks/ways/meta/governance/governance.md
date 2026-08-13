@@ -20,7 +20,7 @@ Don't force a citation into every response — use one when it adds authority or
 
 ## How to phrase it
 
-Quote the *justification*, not just the standard — the justification is the evidence
+Quote the *justification* along with the standard — the justification is the evidence
 that maps a specific directive to a specific control requirement.
 
 **Inline** (brief):
@@ -34,9 +34,9 @@ that maps a specific directive to a specific control requirement.
 
 ## Principles
 
-- **Quote the justification, not the standard** — "parameterized queries required as default" beats "per NIST IA-5."
+- **Quote the justification** — "parameterized queries required as default" beats "per NIST IA-5."
 - **Don't over-cite** — one relevant control with its justification beats listing every standard that tangentially applies.
-- **Cite from the data, not from memory** — run the lookup (the **governance-cite** skill) to get current controls; provenance may have changed since training.
+- **Cite from the data** — run the lookup (the **governance-cite** skill) to get current controls; provenance may have changed since training.
 
 ## See also
 

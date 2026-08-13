@@ -30,12 +30,12 @@ An order-of-magnitude gap between a package and the thing it depends on is the f
 
 Search results increasingly include packages that are competent, well-documented, recently created, and barely used. Coding agents make that combination cheap to produce, so the correlation search rank once carried — polish implies adoption implies maturity — has weakened.
 
-Apply the same skepticism to your own output. A capable library written this afternoon and a capable library with a decade of adversarial inputs behind it read almost identically in a README. They are not the same dependency.
+Apply the same skepticism to your own output. A capable library written this afternoon and a capable library with a decade of adversarial inputs behind it read almost identically in a README. They carry different risk.
 
 ## What the numbers do and don't tell you
 
-- **Low adoption is not a verdict.** New, narrow, and excellent all look alike from the download count. It is a prompt to look at what is underneath, not a rejection.
-- **High adoption is not safety.** Widely used packages are worth *more* attacker attention, not less. This is an appropriateness check; the other tiers stay necessary.
+- **Low adoption asks a question.** New, narrow, and excellent all look alike from the download count. Look at what is underneath before judging.
+- **High adoption carries its own risk.** Widely used packages are worth *more* attacker attention. This is an appropriateness check; the other tiers stay necessary.
 - **Prefer the layer doing the work.** When a wrapper and its dependency both solve the problem, the dependency is usually the smaller, better-tested, longer-lived choice.
 
 ## The same question about building it yourself
