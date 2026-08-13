@@ -1,5 +1,7 @@
 ---
-status: Draft
+status: Superseded
+superseded_by:
+  - "ADR-144"
 date: 2026-06-30
 deciders:
   - aaronsb
@@ -11,6 +13,14 @@ related:
 ---
 
 # ADR-145: Explicit three-source convergence manifest
+
+> **ARCHIVED — 2026-08-13.** No longer part of the active architecture set. Kept for history
+> and so existing references still resolve.
+>
+> **Why:** ADR-144 shipped the two-source reconciler the day before this refinement was written, and solved the problem without a pinned Claude-Code baseline. The three-source manifest is absent from manifest.rs and reconcile.rs.
+> **Superseded by:** ADR-144
+>
+> Nothing below this line has been edited.
 
 ## Context
 

@@ -1,5 +1,7 @@
 ---
-status: Draft
+status: Superseded
+superseded_by:
+  - "ADR-123"
 date: 2026-04-05
 deciders:
   - aaronsb
@@ -11,6 +13,14 @@ related:
 ---
 
 # ADR-112: Session Ledger with Optional Knowledge Graph Enhancement
+
+> **ARCHIVED — 2026-08-13.** No longer part of the active architecture set. Kept for history
+> and so existing references still resolve.
+>
+> **Why:** Tiers 0 and 1 shipped under a different design: events.jsonl in state_root survives compaction and 'ways rethink' / 'ways introspect' replay it, delivered by ADR-123 and ADR-153/154. Tier 2 (knowledge graph ingestion) was never built and is dropped.
+> **Superseded by:** ADR-123
+>
+> Nothing below this line has been edited.
 
 ## Context
 

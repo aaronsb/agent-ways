@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Rejected
 date: 2026-07-17
 deciders:
   - aaronsb
@@ -12,6 +12,13 @@ related:
 ---
 
 # ADR-168: Instance-addressable directed messaging for same-cwd attend siblings
+
+> **ARCHIVED — 2026-08-13.** No longer part of the active architecture set. Kept for history
+> and so existing references still resolve.
+>
+> **Why:** Never implemented and never debated. The Decision section still reads 'Proposed (pending debate)'; no cwd-scoped addressing exists in attend. ADR-136's one-inbox-per-cwd invariant stands unchanged.
+>
+> Nothing below this line has been edited.
 
 ## Context
 
