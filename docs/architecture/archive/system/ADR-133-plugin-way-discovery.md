@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Rejected
 date: 2026-04-25
 deciders:
   - aaronsb
@@ -10,6 +10,13 @@ related:
 ---
 
 # ADR-133: Plugin Way Discovery
+
+> **ARCHIVED — 2026-08-13.** No longer part of the active architecture set. Kept for history
+> and so existing references still resolve.
+>
+> **Why:** Never implemented. Four months after proposal, no plugin way-path resolution exists; the only 'claude plugin list' call in the tree counts skills for the context-cost warning in hooks/ways/macro.sh.
+>
+> Nothing below this line has been edited.
 
 > **Provenance.** This ADR was originally drafted on 2026-04-25 as ADR-129 on the
 > exploratory `feat/plugin-way-discovery` branch (PR #76). That branch was discarded

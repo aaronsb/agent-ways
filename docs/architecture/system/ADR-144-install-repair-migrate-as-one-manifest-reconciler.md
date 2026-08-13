@@ -1,4 +1,6 @@
 ---
+supersedes:
+  - ADR-145
 status: Accepted
 date: 2026-06-29
 deciders:

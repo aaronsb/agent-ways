@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Accepted
 date: 2026-08-13
 deciders:
   - aaronsb
@@ -68,7 +68,7 @@ Claude Code output styles inject register into the system prompt, unconditionall
 
 **`core.md` carries policy and epistemics. Register instruction leaves it.**
 
-Four changes.
+Five changes.
 
 **1. Strip register content from `core.md`.**
 
@@ -76,7 +76,7 @@ Removed: the reasoning-tic ban list with its verbatim forbidden strings; the pro
 
 Retained: the uncertainty taxonomy, which is epistemic routing carried nowhere else; the collaboration and post-compaction guidance; Method; Language; Line handling; Attribution. One line of the ban list survives as reasoning guidance rather than phrasing guidance — a one-sided claim is stated once and stopped.
 
-Result: roughly 400 words, all policy.
+Result: 632 words, all policy, measured by the same prose extraction the checks use.
 
 **2. The constraint on `core.md` is structural and checked, in `scripts/check-register.sh`.**
 
@@ -113,7 +113,7 @@ Adding an antithesis counter to the `density` postcheck was considered and defer
 ### Positive
 
 - The largest register sample in the always-on window stops demonstrating the constructions the project is trying to remove.
-- `core.md` drops from 1,002 to roughly 400 words, all of it policy that no other surface carries.
+- `core.md` drops from 1,002 to 632 words, all of it policy that no other surface carries.
 - The output style becomes the single register authority, with no competing voice in the hook path.
 - The forbidden strings leave the context window.
 
