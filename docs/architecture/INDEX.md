@@ -95,6 +95,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-176](./system/ADR-176-contract-identification-as-the-develop-loop-front-gate.md) | Contract identification as the develop-loop front gate | Accepted |
 | [ADR-177](./system/ADR-177-version-stamped-vendored-tools-with-direction-aware-drift-detection.md) | Version-stamped vendored tools with direction-aware drift detection | Accepted |
 | [ADR-178](./system/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md) | Register transfers by demonstration - core.md carries policy | Accepted |
+| [ADR-179](./system/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md) | Remove the pre-1.0 in-place migrator; keep the guards and the transition fallbacks | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_

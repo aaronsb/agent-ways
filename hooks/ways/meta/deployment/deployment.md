@@ -1,5 +1,5 @@
 ---
-description: How agent-ways itself deploys into the home config dir — ~/.claude as a thin projection of an XDG application (source in $XDG_DATA_HOME/agent-ways), how the agent-ways installer/update/`ways reconcile` work under it, and how to spot a legacy pre-1.0 in-place agent-ways clone that must `ways migrate` instead of pull — surfaced only when installing, updating, migrating, or reconciling agent-ways itself, or resolving an existing ~/.claude conflict during agent-ways setup
+description: How agent-ways itself deploys into the home config dir — ~/.claude as a thin projection of an XDG application (source in $XDG_DATA_HOME/agent-ways), how the agent-ways installer/update/`ways reconcile` work under it, how to spot a legacy pre-1.0 in-place agent-ways clone that must `ways migrate` instead of pull, and where the migrator lives now that 1.9.0 removed it from the binary — surfaced only when installing, updating, migrating, or reconciling agent-ways itself, or resolving an existing ~/.claude conflict during agent-ways setup
 vocabulary: agent-ways ~/.claude thin projection XDG application $XDG_DATA_HOME/agent-ways ways reconcile ways migrate reproject legacy in-place clone pre-1.0 agent-ways projected roots settings.json merge curl bash agent-ways installer existing .claude clobber sync-to-home topology ADR-142
 pattern: agent-ways|~/\.claude|existing \.?claude|ways (reconcile|migrate)|make update|in-place clone|thin projection|xdg.?data
 refire: 0.15
@@ -21,14 +21,20 @@ This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "i
 
 ## The one decision left: is this a legacy in-place clone?
 
-The only fork worth establishing before giving a command is whether `~/.claude` is a **pre-1.0 in-place clone** (it has its own `.git` *and* ships the app source — `~/.claude/tools/`, `~/.claude/docs/`). If so, **do not `git pull` it** and do not reconcile it — point the user at migration:
+The only fork worth establishing before giving a command is whether `~/.claude` is a **pre-1.0 in-place clone** (it has its own `.git` *and* ships the app source — `~/.claude/tools/`, `~/.claude/docs/`). If so, **do not `git pull` it** and do not reconcile it — point the user at migration.
+
+`ways migrate` was removed in 1.9.0 (ADR-179) and lives at the `ways-v1.8.3` tag. Build it in a scratch clone; it acts on `~/.claude` and the XDG roots at runtime, so where it was built doesn't matter:
 
 ```
-ways migrate --what-if     # preview (read-only dry-run)
-ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
+git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways /tmp/ways-migrator
+cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml
+/tmp/ways-migrator/tools/target/release/ways migrate --what-if     # preview (read-only dry-run)
+/tmp/ways-migrator/tools/target/release/ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
 ```
 
-Migration is gated and backs up first. See `docs/migration-1.0.md` for the full walkthrough and the deprecation window (the migrator ships through 1.0.x and is removed at 1.1; an un-migrated install then bases on a pre-1.1 `ways-v1.0.x` tag).
+Migration is gated and backs up first. See `docs/migration-1.0.md` for the full walkthrough.
+
+An un-migrated install still **works** — the transition fallbacks in `paths.rs` read the legacy cache and stats locations. What it can't do is `ways update` or `ways reconcile`; both refuse and point here.
 
 ## Why this way exists
 
@@ -38,4 +44,4 @@ The first touch for many adopters is `curl … | bash`, often with *a Claude rea
 
 - skills(meta) — skills are one of the projected roots
 - `docs/development.md` — the same projection model, from a contributor's seat (install vs dev checkout vs sandbox)
-- `docs/migration-1.0.md` — the `ways migrate` walkthrough and deprecation lifecycle
+- `docs/migration-1.0.md` — the `ways migrate` walkthrough, run from the `ways-v1.8.3` tag

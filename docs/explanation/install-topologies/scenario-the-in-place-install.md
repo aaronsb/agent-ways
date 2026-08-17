@@ -14,7 +14,8 @@ aliases: []
 
 > ⚠️ **Historical (pre-1.0).** The in-place topology — `~/.claude` *is* the git clone — is
 > **superseded** by the 1.0 native projection ([[ADR-142]]). A pre-1.0 in-place clone
-> migrates to the projection with `ways migrate`; see the
+> migrates to the projection with `ways migrate`, which left the binary in 1.9.0 ([[ADR-179]])
+> and now runs from the `ways-v1.8.3` tag; see the
 > [Migration Guide](../../migration-1.0.md). Kept as a record of how the model evolved.
 
 **A greenfield machine: no existing `~/.claude` worth keeping.** The simplest, default

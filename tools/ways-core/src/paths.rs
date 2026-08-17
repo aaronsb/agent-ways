@@ -3,7 +3,7 @@
 //! Every file agent-ways touches is classified by *durability and ownership*,
 //! and placed in the XDG location whose contract matches. This module is the
 //! single source of truth for those locations; no call site should hand-build a
-//! path under `~/.claude` or `$XDG_*` once migration is complete.
+//! path under `~/.claude` or `$XDG_*`.
 //!
 //! | Root | Holds | Durability |
 //! |---|---|---|
@@ -21,7 +21,7 @@
 //!
 //! Because every root resolves through `$XDG_*`, pointing those env vars at a
 //! tmpdir gives every consumer a sandbox `HOME` — this module is the test seam
-//! the reconciler and migrator are validated against, never the live install.
+//! the reconciler is validated against, never the live install.
 
 use crate::util::{home_dir, normalize_path_sep};
 use std::path::{Path, PathBuf};
@@ -29,7 +29,9 @@ use std::path::{Path, PathBuf};
 /// The XDG application-directory name, shared by all four tiers.
 const APP: &str = "agent-ways";
 
-/// The pre-1.0 cache directory name, kept as a read-fallback during migration.
+/// The pre-1.0 cache directory name, kept as a read-fallback for un-migrated
+/// installs (ADR-179 keeps the transition fallbacks after the migrator's
+/// removal).
 const LEGACY_CACHE: &str = "claude-ways";
 
 // ---------------------------------------------------------------------------
@@ -99,20 +101,12 @@ pub fn state_root() -> PathBuf {
 /// `$XDG_CACHE/agent-ways`, but if that doesn't exist yet while the legacy
 /// `$XDG_CACHE/claude-ways` does, it returns the legacy dir. So an un-migrated
 /// install keeps using its already-downloaded model + corpus (no re-fetch, no
-/// split-brain with the tooling that populated it); the migrator renames the
-/// dir, after which the preferred path simply wins. A fresh install gets the
-/// new name. Reads and writes both route through here, so they never diverge.
+/// split-brain with the tooling that populated it). Once the dir carries the
+/// new name — the migrator renamed it, or the install was always 1.0+ — the
+/// preferred path wins. A fresh install gets the new name. Reads and writes
+/// both route through here, so they never diverge.
 pub fn cache_root() -> PathBuf {
     resolve_cache(&xdg_cache_base())
-}
-
-/// The canonical cache root (`$XDG_CACHE/agent-ways`), ignoring the legacy
-/// fallback. Use this where the target must be the NEW location regardless of
-/// what exists yet — specifically the migrator's rename *destination*. Runtime
-/// reads use [`cache_root`] (fallback-aware); the migrator must not, or its
-/// rename destination collapses onto the legacy source and the rename no-ops.
-pub fn cache_root_canonical() -> PathBuf {
-    normalize_path_sep(&xdg_cache_base().join(APP))
 }
 
 /// Pure fallback resolution, factored out so it's testable without mutating the
@@ -179,9 +173,10 @@ pub fn user_config() -> PathBuf {
 /// Fallback-aware during the transition, mirroring [`cache_root`]: prefers the
 /// `$XDG_STATE` location, but if that doesn't exist yet while the legacy
 /// `~/.claude/stats/events.jsonl` does, returns the legacy file so an
-/// un-migrated install keeps appending to its existing history. The migrator
-/// lifts the file to `$XDG_STATE`, after which the preferred path wins. Reads
-/// and the writer both route through here, so they never diverge.
+/// un-migrated install keeps appending to its existing history. Once the file
+/// sits under `$XDG_STATE` — lifted by the migrator, or written there from the
+/// start — the preferred path wins. Reads and the writer both route through
+/// here, so they never diverge.
 pub fn events_log() -> PathBuf {
     resolve_events(&state_root(), &projection_root())
 }
@@ -214,8 +209,9 @@ fn resolve_events(state: &Path, projection: &Path) -> PathBuf {
 /// were still hardcoding the legacy `~/.claude/stats/events.jsonl` (pre-fix),
 /// their `session_start` lines were orphaned in the legacy file while the Rust
 /// writer moved to `$XDG_STATE`. Reading both recovers those orphaned sessions
-/// without a backfill. The migrator *moves* `stats/` (never copies), so the two
-/// files never overlap and the union is a plain concatenation — no dedup needed.
+/// without a backfill. The migrator *moved* `stats/` (it never copied), so the
+/// two files never overlap and the union is a plain concatenation — no dedup
+/// needed.
 pub fn events_log_sources() -> Vec<PathBuf> {
     resolve_event_sources(&state_root(), &projection_root())
 }
@@ -345,14 +341,6 @@ mod tests {
         assert!(both[1].starts_with(&projection));
 
         let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn cache_root_canonical_ignores_legacy_fallback() {
-        // Always the new name regardless of what exists — the migrator's rename
-        // destination must never collapse onto the legacy source (cache_root's
-        // fallback would, which is correct for reads but wrong as a rename target).
-        assert!(cache_root_canonical().ends_with("agent-ways"));
     }
 
     #[test]

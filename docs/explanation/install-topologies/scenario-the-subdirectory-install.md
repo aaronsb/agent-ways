@@ -15,7 +15,8 @@ aliases: []
 > ⚠️ **Historical (pre-1.0).** The subdirectory topology (`make sync-to-home`) existed to
 > keep an existing `~/.claude` intact. The 1.0 native projection ([[ADR-142]]) does that by
 > default, so this topology is **superseded** — `ways migrate` moves an existing subdirectory
-> install to the projection. See the [Migration Guide](../../migration-1.0.md). Kept as a
+> install to the projection. That command left the binary in 1.9.0 ([[ADR-179]]) and now runs
+> from the `ways-v1.8.3` tag. See the [Migration Guide](../../migration-1.0.md). Kept as a
 > record of how the model evolved.
 
 **An operator who already has a `~/.claude` they value installs agent-ways without

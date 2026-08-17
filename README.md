@@ -16,7 +16,7 @@ An LLM session cannot internalize norms — no weight updates, no carried memory
 
 > **Current status:** Agent Ways ships with full support for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Support for additional CLI-based coding agents is in development.
 
-> ⚠️ **Breaking change in 1.0 — existing installs must migrate.** Before 1.0, the repo *was* your install (`~/.claude` was the clone). 1.0 turns `~/.claude` into a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways`. A pre-1.0 in-place clone moves over with one gated, backup-first command — `ways migrate --execute` — after upgrading (`cd ~/.claude && git pull && make update`). Your `projects/` and `settings.json` are preserved. The migrator is **transitional**: it ships through the 1.2.x line and is **removed in 1.3**, after which migrating means checking out a pre-1.3 release first. **See the [Migration Guide](docs/migration-1.0.md).**
+> ⚠️ **Breaking change in 1.0 — existing installs must migrate.** Before 1.0, the repo *was* your install (`~/.claude` was the clone). 1.0 turns `~/.claude` into a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways`. A pre-1.0 in-place clone moves over with one gated, backup-first command — `ways migrate --execute`. Your `projects/` and `settings.json` are preserved. The migrator was **removed in 1.9.0** and lives at the `ways-v1.8.3` tag, so migrating now means building the binary from that tag and running it against your install. **See the [Migration Guide](docs/migration-1.0.md).**
 
 ```mermaid
 sequenceDiagram
@@ -102,7 +102,7 @@ This stages the app into `$XDG_DATA_HOME/agent-ways`, builds the binaries and fe
 
 The built-in ways cover software development, but the framework is domain-agnostic. To customize, fork it and pass your fork to the installer, or set up a **[development checkout](docs/development.md)** — then replace the ways and add your own domains. For non-straightforward installs (existing forks, offline, custom prefixes), see the **[install guide](docs/install-guide.md)**.
 
-> **Upgrading a pre-1.0 in-place clone** (where `~/.claude` *is* the git repo)? Don't `git pull` it — run the gated, backup-first migrator after upgrading: `ways migrate --execute`. Your `projects/` and `settings.json` are preserved. See the **[Migration Guide](docs/migration-1.0.md)**.
+> **Upgrading a pre-1.0 in-place clone** (where `~/.claude` *is* the git repo)? Don't `git pull` it — run the gated, backup-first migrator, built from the `ways-v1.8.3` tag that still ships it. Your `projects/` and `settings.json` are preserved. See the **[Migration Guide](docs/migration-1.0.md)**.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.
 
@@ -299,7 +299,7 @@ At session start, `check-config-updates.sh` flags when you're behind upstream (`
 |----------|-------------|--------------|
 | **Native projection (1.0)** | app source at `$XDG_DATA_HOME/agent-ways` | `cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile` |
 | **Fork** | GitHub API reports `parent` is `aaronsb/agent-ways` | fetch/merge upstream in the app dir, then `make update-binaries && ways reconcile` |
-| **Legacy in-place clone** | `~/.claude` is itself the git repo | `ways migrate --execute` first (moves it to the projection model) |
+| **Legacy in-place clone** | `~/.claude` is itself the git repo | migrate first — the migrator lives at the `ways-v1.8.3` tag ([guide](docs/migration-1.0.md)) |
 | **Plugin** | `CLAUDE_PLUGIN_ROOT` set with `plugin.json` | `/plugin update disciplined-methodology` |
 
 ### Renamed clones (org-internal copies)

@@ -50,7 +50,8 @@ APP="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
 # (Same triad as reconcile.rs is_legacy_in_place: own .git + ships tools/ + docs/.)
 if [ -d "$HOME/.claude/.git" ] && [ -d "$HOME/.claude/tools" ] && [ -d "$HOME/.claude/docs" ]; then
   echo "~/.claude looks like a pre-1.0 in-place clone. Don't update it in place —"
-  echo "migrate to the 1.0 projection first:  ways migrate --what-if  then  --execute"
+  echo "migrate to the 1.0 projection first. The migrator was removed in 1.9.0 and"
+  echo "lives at the ways-v1.8.3 tag; see docs/migration-1.0.md."
   exit 1
 fi
 

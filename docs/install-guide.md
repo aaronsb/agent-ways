@@ -37,12 +37,16 @@ cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile
 
 **A legacy pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo — it has its own `.git/` and ships `~/.claude/tools/`, `~/.claude/docs/`) — do **not** `git pull` it. Migrate it to the 1.0 model with the gated, backup-first migrator:
 
+The migrator was removed in 1.9.0 (ADR-179) and lives at the `ways-v1.8.3` tag. Build it in a scratch clone and run it against your install:
+
 ```bash
-ways migrate --what-if     # preview (read-only)
-ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
+git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways /tmp/ways-migrator
+cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml
+/tmp/ways-migrator/tools/target/release/ways migrate --what-if   # preview (read-only)
+/tmp/ways-migrator/tools/target/release/ways migrate --execute   # relocate the clone to $XDG_DATA, build the projection
 ```
 
-See the [Migration Guide](migration-1.0.md) for the full walkthrough and the deprecation window (the migrator ships through 1.2.x and is removed at 1.3).
+See the [Migration Guide](migration-1.0.md) for the full walkthrough.
 
 ## Scenario: you want a fork
 
@@ -72,7 +76,7 @@ If you're actively *developing* agent-ways (not just carrying a few custom ways)
 
 ## Legacy: the subdirectory topology
 
-Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project with `make sync-to-home`. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, `ways migrate` moves you to the native projection. (The conceptual history lives in [docs/explanation/install-topologies/](explanation/install-topologies/), kept as a record of how the model evolved.)
+Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project with `make sync-to-home`. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, the migrator at the `ways-v1.8.3` tag moves you to the native projection ([guide](migration-1.0.md)). (The conceptual history lives in [docs/explanation/install-topologies/](explanation/install-topologies/), kept as a record of how the model evolved.)
 
 ## After installing
 
