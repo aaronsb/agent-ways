@@ -46,7 +46,7 @@ export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=my-bedrock-profile
 export AWS_REGION=us-east-1
 # Optional: override model
-# export ANTHROPIC_MODEL="us.anthropic.claude-sonnet-4-20250514-v1:0"
+# export ANTHROPIC_MODEL="anthropic.claude-opus-5"
 ```
 
 ### Google Vertex AI
@@ -71,7 +71,7 @@ export ANTHROPIC_FOUNDRY_API_KEY="..."
 
 ```bash
 # .envrc — append to any of the above
-export ANTHROPIC_MODEL="claude-opus-4-8"   # pin a specific model snapshot; update as releases land
+export ANTHROPIC_MODEL="claude-opus-5"     # pin a specific model snapshot; update as releases land
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 export CLAUDE_CODE_EFFORT_LEVEL=high
 export CLAUDE_CODE_AUTOCOMPACT_PCT_OVERRIDE=99
