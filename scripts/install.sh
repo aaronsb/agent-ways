@@ -189,6 +189,23 @@ is_agent_ways_repo() {
   return 1
 }
 
+# The migration route off a pre-1.0 in-place clone. `ways migrate` was removed in
+# 1.9.0 (ADR-179) and lives at the ways-v1.8.3 tag, so the user builds it from
+# there. Shared by both in-place branches below — same dead end, same help.
+print_migration_steps() {
+  echo "  Migrate to the new layout (gated, backs up first). The migrator was"
+  echo "  removed in 1.9.0 — build it from the last tag that ships it:"
+  echo ""
+  echo -e "    ${CYAN}git clone --branch ways-v1.8.3 ${UPSTREAM_URL} /tmp/ways-migrator${RESET}"
+  echo -e "    ${CYAN}cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml${RESET}"
+  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways migrate --what-if${RESET}   # preview (read-only)"
+  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways migrate --execute${RESET}   # convert (backs up first)"
+  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways update${RESET}              # then bring the app to current"
+  echo ""
+  echo -e "  Guide: ${CYAN}${UPSTREAM_URL}/blob/main/docs/migration-1.0.md${RESET}"
+  echo ""
+}
+
 # Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.
 # Uses `if` (not `&&`) and an explicit `return 0` so a missing binary in the last
 # loop iteration can't make the function return non-zero and trip `set -e`.
@@ -278,9 +295,8 @@ if is_agent_ways_repo "$APP_DIR"; then
   # update. Route to the gated migrator instead.
   if is_agent_ways_repo "$DEST"; then
     echo -e "${YELLOW}App is installed at ${APP_DIR}, but ~/.claude is still a pre-1.0 in-place clone.${RESET}"
-    echo "  Migrate it rather than reconcile over it (gated, backs up first)."
-    echo "  The migrator was removed in 1.9.0; it lives at the ways-v1.8.3 tag."
-    echo -e "  Guide: ${CYAN}${UPSTREAM_URL}/blob/main/docs/migration-1.0.md${RESET}"
+    echo "  Reconciling over it would symlink projection roots onto your live repo."
+    print_migration_steps
     exit 1
   fi
 
@@ -316,16 +332,7 @@ if is_agent_ways_repo "$DEST"; then
   echo -e "${YELLOW}You have a pre-1.0 in-place agent-ways clone at ~/.claude.${RESET}"
   echo ""
   echo "  1.0 moved agent-ways to an XDG application projected into ~/.claude."
-  echo "  Migrate your install to the new layout (gated, backs up first)."
-  echo "  The migrator was removed in 1.9.0 — build it from the tag that ships it:"
-  echo ""
-  echo -e "    ${CYAN}git clone --branch ways-v1.8.3 ${UPSTREAM_URL} /tmp/ways-migrator${RESET}"
-  echo -e "    ${CYAN}cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml${RESET}"
-  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways migrate --what-if${RESET}   # preview (read-only)"
-  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways migrate --execute${RESET}   # convert (backs up first)"
-  echo ""
-  echo -e "  Guide: ${CYAN}${UPSTREAM_URL}/blob/main/docs/migration-1.0.md${RESET}"
-  echo ""
+  print_migration_steps
   exit 0
 fi
 

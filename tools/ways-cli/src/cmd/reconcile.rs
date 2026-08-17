@@ -79,10 +79,12 @@ pub fn run(
         bail!(
             "{} looks like a legacy in-place agent-ways clone — reconcile won't \
              clobber it. Migration (ADR-144 §5) is the path off in-place. The \
-             migrator was removed in 1.9.0 (ADR-179); run it from the last tag \
+             migrator was removed in 1.9.0 (ADR-179); build it from the last tag \
              that ships it:\n\
-             \x20 git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways\n\
-             \x20 cd agent-ways && make build && ./tools/target/release/ways migrate --what-if",
+             \x20 git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways /tmp/ways-migrator\n\
+             \x20 cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml\n\
+             \x20 /tmp/ways-migrator/tools/target/release/ways migrate --what-if\n\
+             Guide: docs/migration-1.0.md",
             dest_root.display()
         );
     }

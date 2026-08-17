@@ -82,11 +82,21 @@ $MIGRATE migrate --what-if  # dry-run the executor: assert every phase's contrac
 $MIGRATE migrate --execute
 ```
 
-**4. Update to the current release**, then delete the scratch checkout:
+**4. Update to the current release** — with the scratch binary, not a bare `ways`:
 
 ```bash
-ways update
+$MIGRATE update
 rm -rf /tmp/ways-migrator
+```
+
+Migration *relocates* your clone; it doesn't upgrade it. So the app now at
+`$XDG_DATA_HOME/agent-ways` is still the pre-1.0 checkout, and `~/.claude/bin/ways` still
+points at its pre-1.0 binary — which has no `update` subcommand at all. `$MIGRATE update`
+pulls and rebuilds in `$XDG_DATA_HOME/agent-ways`, which is what closes the gap. Equivalent
+by hand:
+
+```bash
+cd "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways" && git pull && make setup
 ```
 
 When it finishes, `~/.claude` is the projection and the app lives in `$XDG_DATA_HOME/agent-ways`. Verify:
