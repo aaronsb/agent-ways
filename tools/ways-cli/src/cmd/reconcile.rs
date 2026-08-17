@@ -10,9 +10,10 @@
 //! nothing changed**, a short list of what was (re)linked otherwise.
 //!
 //! Safety: this is the *update/repair* posture only (silent, autonomous, low
-//! blast radius). It refuses to run against a live in-place clone — that is the
-//! migrator's job (§5), not plain reconciliation, and clobbering a clone's tree
-//! with symlinks would strand the user's checkout.
+//! blast radius). It refuses to run against a live in-place clone, because
+//! clobbering a clone's tree with symlinks would strand the user's checkout.
+//! That case routes to the pre-1.0 migrator, which shipped through
+//! `ways-v1.8.3` and was removed in 1.9.0 (ADR-179).
 
 use crate::cmd::manifest::{projection_roots, ProjectionRoot, RootKind};
 use crate::paths;
@@ -47,18 +48,16 @@ struct Outcome {
 
 /// `ways reconcile` entrypoint.
 ///
-/// `allow_in_place` bypasses the legacy-in-place guard. It is `false` for the
-/// CLI (a manual `ways reconcile` must never clobber an in-place clone) and
-/// `true` only for the migrator, which calls reconcile mid-migration when the
-/// dest still *looks* in-place (its `.git`/`tools`/`docs` aren't removed until
-/// after this step) but has already been backed up and relocated.
+/// The legacy-in-place guard is unconditional: a manual `ways reconcile` must
+/// never clobber an in-place clone. The migrator used to bypass it (it called
+/// reconcile mid-migration, over a backed-up and relocated tree that still
+/// *looked* in-place); that bypass left with the migrator in 1.9.0 (ADR-179).
 pub fn run(
     source: Option<String>,
     dest: Option<String>,
     mode: Option<String>,
     dry_run: bool,
     quiet: bool,
-    allow_in_place: bool,
 ) -> Result<()> {
     let source_root: PathBuf = source.map(PathBuf::from).unwrap_or_else(paths::data_root);
     let dest_root: PathBuf = dest.map(PathBuf::from).unwrap_or_else(paths::projection_root);
@@ -73,16 +72,17 @@ pub fn run(
         bail!("source checkout not found: {}", source_root.display());
     }
 
-    // Refuse to reconcile a live in-place clone — that path needs the migrator,
+    // Refuse to reconcile a live in-place clone — that path needs migration,
     // not the repair posture. An in-place clone is a dest that is itself the
-    // agent-ways git repo (has a .git AND ships the app source). The migrator
-    // sets allow_in_place: it is *mid-migration* over a backed-up, relocated
-    // tree, so the dest still looks in-place but reconciling it is correct.
-    if !allow_in_place && is_legacy_in_place(&dest_root) {
+    // agent-ways git repo (has a .git AND ships the app source).
+    if is_legacy_in_place(&dest_root) {
         bail!(
             "{} looks like a legacy in-place agent-ways clone — reconcile won't \
-             clobber it. Migration (ADR-144 §5) is the path off in-place; it is \
-             gated and backs up first.",
+             clobber it. Migration (ADR-144 §5) is the path off in-place. The \
+             migrator was removed in 1.9.0 (ADR-179); run it from the last tag \
+             that ships it:\n\
+             \x20 git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways\n\
+             \x20 cd agent-ways && make build && ./tools/target/release/ways migrate --what-if",
             dest_root.display()
         );
     }
@@ -282,7 +282,7 @@ mod tests {
         std::fs::create_dir_all(&dst).unwrap();
         fake_source(&src);
 
-        run(Some(src.to_string_lossy().into()), Some(dst.to_string_lossy().into()), None, false, true, false).unwrap();
+        run(Some(src.to_string_lossy().into()), Some(dst.to_string_lossy().into()), None, false, true).unwrap();
 
         // A file reached through the projection must be the source file.
         let via_projection = std::fs::read_to_string(dst.join("skills/wrap/SKILL.md")).unwrap();
@@ -302,7 +302,7 @@ mod tests {
 
         let s = |p: &Path| Some(p.to_string_lossy().into_owned());
         // First run creates; second run must find everything already correct.
-        run(s(&src), s(&dst), None, false, true, false).unwrap();
+        run(s(&src), s(&dst), None, false, true).unwrap();
 
         // Re-run in dry-run: zero roots should want changing.
         let roots = projection_roots(&src);
@@ -326,14 +326,12 @@ mod tests {
         std::fs::create_dir_all(dst.join("docs")).unwrap();
 
         let s = |p: &Path| Some(p.to_string_lossy().into_owned());
-        // CLI posture (allow_in_place=false): refuses.
-        let err = run(s(&src), s(&dst), None, false, true, false).unwrap_err();
+        // The guard is unconditional since ADR-179 — the migrator's bypass was
+        // its only exception and left with it.
+        let err = run(s(&src), s(&dst), None, false, true).unwrap_err();
         assert!(err.to_string().contains("in-place"), "should refuse: {err}");
-        // Migrator posture (allow_in_place=true): bypasses the guard and reconciles
-        // the still-in-place-looking tree. This is the bug the real migration hit —
-        // the guard fired mid-migration because dest still has .git/tools/docs.
-        run(s(&src), s(&dst), None, false, true, true).expect("migrator bypass must reconcile");
-        assert!(std::fs::symlink_metadata(dst.join("skills")).unwrap().file_type().is_symlink());
+        // The dest is left untouched: no projection root was materialized.
+        assert!(!dst.join("skills").exists(), "guard must not project over the clone");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

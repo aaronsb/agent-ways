@@ -40,9 +40,8 @@ developing — **don't** put it ahead of your installed `ways` on `PATH` unless 
      ./tools/target/release/ways <subcommand>
    ```
 
-   For migration work specifically, `ways migrate --what-if` and `--execute` honour these
-   env vars, so a fake in-place clone under `$SB/.claude` exercises the full migrator
-   without ever touching `~/.claude`.
+   `ways reconcile` honours these env vars too, so a fake install under `$SB/.claude`
+   exercises the projection engine without ever touching `~/.claude`.
 
 2. **Dogfood via reconcile.** Project your dev tree into your live install to run your own
    code for real:
@@ -68,9 +67,9 @@ developing — **don't** put it ahead of your installed `ways` on `PATH` unless 
   the per-platform artifacts. See the release way / `docs/architecture` for the pipeline.
 - **The transition fallbacks are load-bearing, not legacy cruft.** `paths::cache_root()` and
   `events_log()` prefer the new XDG location but fall back to the pre-1.0 one so an un-migrated
-  install keeps working. When you touch cache/state paths, preserve the fallback — and use
-  `cache_root_canonical()` (no fallback) only where you must *target* the new location (the
-  migrator's rename destination).
+  install keeps working. When you touch cache/state paths, preserve the fallback. ADR-179
+  kept these when it removed the migrator — they are what lets a current binary read a
+  legacy install correctly.
 
 ## See also
 

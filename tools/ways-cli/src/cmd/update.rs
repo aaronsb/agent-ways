@@ -41,8 +41,12 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     let projection = paths::projection_root();
     if super::reconcile::is_legacy_in_place(&projection) {
         bail!(
-            "{} looks like a pre-1.0 in-place clone. Migrate to the 1.0 projection first:\n\
-             \x20 ways migrate --what-if   then   ways migrate --execute",
+            "{} looks like a pre-1.0 in-place clone. Migrate to the 1.0 projection \
+             first. The migrator was removed in 1.9.0 (ADR-179); run it from the \
+             last tag that ships it:\n\
+             \x20 git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways\n\
+             \x20 cd agent-ways && make build && ./tools/target/release/ways migrate --what-if\n\
+             Guide: docs/migration-1.0.md",
             projection.display()
         );
     }
