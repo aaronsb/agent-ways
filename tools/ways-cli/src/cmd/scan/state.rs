@@ -28,30 +28,18 @@ pub fn state(
 
     let mut context = String::new();
 
-    // Core re-injection safety net
+    // Core re-injection safety net. The marker is cleared by `clear-markers.sh`
+    // on the `startup`, `compact`, and `clear` SessionStart matchers, so a
+    // missing marker is the one signal that core needs showing. (An earlier
+    // transcript-size heuristic — "marker older than 30 s and under 5 KB of
+    // transcript since the last summary" — re-showed core on the first prompt
+    // of any session whose operator paused before typing, because a fresh
+    // transcript is tiny. Removed.)
     if !session::core_is_shown(session_id) {
         let out = capture_show_core(session_id);
         if !out.is_empty() {
             context.push_str(&out);
             context.push_str("\n\n");
-        }
-    } else if let Some(tp) = transcript {
-        // Check for stale core (context cleared under us)
-        let ctx_size = transcript_size_since_summary(tp);
-        if let Some(marker_ts) = session::core_marker_ts(session_id) {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let age = now.saturating_sub(marker_ts);
-            if ctx_size < 5000 && age > 30 {
-                session::clear_core(session_id);
-                let out = capture_show_core(session_id);
-                if !out.is_empty() {
-                    context.push_str(&out);
-                    context.push_str("\n\n");
-                }
-            }
         }
     }
 
@@ -127,31 +115,6 @@ fn evaluate_context_threshold(threshold_pct: u64, transcript: Option<&str>) -> b
         crate::cmd::context::pct_used_from_transcript(transcript),
         Some(pct) if pct >= threshold_pct
     )
-}
-
-fn transcript_size_since_summary(transcript: &str) -> u64 {
-    let file_size = match std::fs::metadata(transcript) {
-        Ok(m) => m.len(),
-        Err(_) => return 0,
-    };
-
-    // Check last 100KB for summary markers
-    let content = match std::fs::read_to_string(transcript) {
-        Ok(c) => c,
-        Err(_) => return file_size,
-    };
-
-    // Find last summary line position
-    let mut last_summary_pos = 0u64;
-    let mut pos = 0u64;
-    for line in content.lines() {
-        if line.contains("\"type\":\"summary\"") {
-            last_summary_pos = pos + line.len() as u64 + 1;
-        }
-        pos += line.len() as u64 + 1;
-    }
-
-    file_size.saturating_sub(last_summary_pos)
 }
 
 fn evaluate_file_exists(pattern: &str, project_dir: &str) -> bool {

@@ -454,20 +454,6 @@ pub fn core_is_shown(session_id: &str) -> bool {
     session_dir(session_id).join("core").exists()
 }
 
-/// Read the timestamp from the core marker.
-pub fn core_marker_ts(session_id: &str) -> Option<u64> {
-    let path = session_dir(session_id).join("core");
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-}
-
-/// Remove the core marker (for re-injection after context clear).
-pub fn clear_core(session_id: &str) {
-    let path = session_dir(session_id).join("core");
-    let _ = std::fs::remove_file(&path);
-}
-
 // ── Scope detection ─────────────────────────────────────────────
 
 /// Detect execution scope: "agent" or "teammate".
