@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "ways"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "agent-fmt",
  "anyhow",
