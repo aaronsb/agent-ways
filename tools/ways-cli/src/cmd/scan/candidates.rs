@@ -18,50 +18,89 @@ pub(crate) fn collect_candidates(project_dir: &str) -> Vec<WayCandidate> {
     // `resolve_way_file` *renders* (no match/render divergence). `seen`
     // accumulates the claimed bare ids down the chain.
     let mut seen: HashSet<String> = HashSet::new();
+    let roots = WayRoots::resolve(project_dir);
+    // Canonical paths already collected, across every root (see `WayRoots`).
+    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
     // Project-local first. The corpus namespaces project ways as
     // `{encode_project_key(project_dir)}/{id}`; we compute the identical prefix
     // here so the embedding lookup (best_en/best_multi) finds them (Bug B fix).
-    let project_ways = PathBuf::from(project_dir).join(".claude/ways");
-    if project_ways.is_dir() {
+    if roots.project.is_dir() {
         let prefix = project_corpus_prefix(project_dir);
-        collect_from_dir(&project_ways, &prefix, &mut candidates, &HashSet::new(), &mut seen);
+        collect_from_dir(Walk { dir: &roots.project, corpus_prefix: &prefix, kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.project) }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths);
     }
 
     // User ways ($XDG_CONFIG/agent-ways/ways) — bare ids; drop any project shadows.
-    let user_ways = crate::paths::user_ways_root();
-    if user_ways.is_dir() {
+    if roots.user.is_dir() {
         let claimed = seen.clone();
-        collect_from_dir(&user_ways, "", &mut candidates, &claimed, &mut seen);
+        collect_from_dir(Walk { dir: &roots.user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.user) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
     }
 
     // Core ways — bare ids; drop any project- or user-claimed id.
-    let global_ways = super::scoring::home_dir().join(".claude/hooks/ways");
     let claimed = seen.clone();
-    collect_from_dir(&global_ways, "", &mut candidates, &claimed, &mut seen);
+    collect_from_dir(Walk { dir: &roots.core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.core) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
     candidates
+}
+
+/// The three way roots and their canonical forms.
+///
+/// The walk follows symlinks. A link inside one root that points at another
+/// root — or back at its own root — would otherwise yield the same `.md` a
+/// second time under a different id (`ways/softwaredev/...` beside
+/// `softwaredev/...`), and both copies would fire, render, and stamp their
+/// own markers. Two rules close that: a file that resolves inside a *different*
+/// root is skipped here (that root collects it under its proper id), and a file
+/// that resolves inside *this* root takes its id from the canonical path, so the
+/// second sighting collapses onto the first by path. A link that resolves
+/// outside every root (a dotfiles checkout, say) keeps its walked id as before.
+struct WayRoots {
+    project: PathBuf,
+    user: PathBuf,
+    core: PathBuf,
+}
+
+impl WayRoots {
+    fn resolve(project_dir: &str) -> Self {
+        Self {
+            project: PathBuf::from(project_dir).join(".claude/ways"),
+            user: crate::paths::user_ways_root(),
+            core: super::scoring::home_dir().join(".claude/hooks/ways"),
+        }
+    }
+
+    /// Canonical paths of every root other than `own` (existing ones only). Two
+    /// roots that resolve to the same directory are one root, so neither is
+    /// foreign to the other — otherwise every file in both would be skipped.
+    fn foreign_to(&self, own: &Path) -> Vec<PathBuf> {
+        let own_canon = canonical(own);
+        [&self.project, &self.user, &self.core]
+            .into_iter()
+            .filter(|r| *r != own && r.is_dir())
+            .map(|r| canonical(r))
+            .filter(|c| *c != own_canon)
+            .collect()
+    }
 }
 
 pub(crate) fn collect_checks(project_dir: &str) -> Vec<WayCandidate> {
     let mut candidates = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    let roots = WayRoots::resolve(project_dir);
+    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
-    let project_ways = PathBuf::from(project_dir).join(".claude/ways");
-    if project_ways.is_dir() {
+    if roots.project.is_dir() {
         let prefix = project_corpus_prefix(project_dir);
-        collect_checks_from_dir(&project_ways, &prefix, &mut candidates, &HashSet::new(), &mut seen);
+        collect_from_dir(Walk { dir: &roots.project, corpus_prefix: &prefix, kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.project) }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths);
     }
 
-    let user_ways = crate::paths::user_ways_root();
-    if user_ways.is_dir() {
+    if roots.user.is_dir() {
         let claimed = seen.clone();
-        collect_checks_from_dir(&user_ways, "", &mut candidates, &claimed, &mut seen);
+        collect_from_dir(Walk { dir: &roots.user, corpus_prefix: "", kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.user) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
     }
 
-    let global_ways = super::scoring::home_dir().join(".claude/hooks/ways");
     let claimed = seen.clone();
-    collect_checks_from_dir(&global_ways, "", &mut candidates, &claimed, &mut seen);
+    collect_from_dir(Walk { dir: &roots.core, corpus_prefix: "", kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.core) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
     candidates
 }
@@ -104,13 +143,33 @@ fn project_corpus_prefix(project_dir: &str) -> String {
     format!("{}/", crate::util::encode_project_key(Path::new(project_dir)))
 }
 
+/// Which files a walk collects.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    /// `{way}.md` — everything but `.check.md` files.
+    Ways,
+    /// `{way}.check.md` post-check files.
+    Checks,
+}
+
+/// One root's walk: where, what kind of file, how project ways are namespaced,
+/// and which other roots' canonical trees to leave alone.
+struct Walk<'a> {
+    dir: &'a Path,
+    corpus_prefix: &'a str,
+    kind: Kind,
+    foreign_roots: &'a [PathBuf],
+}
+
 fn collect_from_dir(
-    dir: &Path,
-    corpus_prefix: &str,
+    walk: Walk<'_>,
     out: &mut Vec<WayCandidate>,
     skip: &HashSet<String>,
     written: &mut HashSet<String>,
+    seen_paths: &mut HashSet<PathBuf>,
 ) {
+    let Walk { dir, corpus_prefix, kind, foreign_roots } = walk;
+    let root_canon = canonical(dir);
     for entry in WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
@@ -121,8 +180,28 @@ fn collect_from_dir(
             continue;
         }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.contains(".check.") {
+        let is_check = name.contains(".check.");
+        if is_check != (kind == Kind::Checks) {
             continue;
+        }
+
+        // Identity and shadowing first: a duplicate sighting or a shadowed id
+        // is dropped before its body is read.
+        let id = match way_identity(path, dir, &root_canon, seen_paths, foreign_roots) {
+            Some(id) => id,
+            None => continue,
+        };
+        // Dedup-by-name (ADR-143): a higher-precedence root already claimed this
+        // id, so the shadowed candidate is dropped before it can fire.
+        if skip.contains(&id) {
+            continue;
+        }
+        // Domain disable (user scope) and per-way disable (project scope, ADR-131).
+        if kind == Kind::Ways {
+            let domain = id.split('/').next().unwrap_or(&id);
+            if session::domain_disabled(domain) || session::way_disabled(&id) {
+                continue;
+            }
         }
 
         let content = match std::fs::read_to_string(path) {
@@ -130,23 +209,6 @@ fn collect_from_dir(
             Err(_) => continue,
         };
         if !crate::util::has_frontmatter(&content) {
-            continue;
-        }
-
-        let id = way_id_from_path(path, dir);
-        if id.is_empty() {
-            continue;
-        }
-
-        // Dedup-by-name (ADR-143): a higher-precedence root already claimed this
-        // id, so the shadowed candidate is dropped before it can fire.
-        if skip.contains(&id) {
-            continue;
-        }
-
-        // Check domain disable (user scope) and per-way disable (project scope, ADR-131)
-        let domain = id.split('/').next().unwrap_or(&id);
-        if session::domain_disabled(domain) || session::way_disabled(&id) {
             continue;
         }
 
@@ -157,49 +219,36 @@ fn collect_from_dir(
     }
 }
 
-fn collect_checks_from_dir(
+/// Resolved identity of a way file for cross-root dedup. Falls back to the
+/// walked path when the filesystem can't resolve it (then nothing is deduped,
+/// which is the pre-existing behaviour).
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Bare id for a walked way file, or `None` when the file was already collected
+/// (by canonical path), resolves inside another root, or has no id. See
+/// `WayRoots` for the rules.
+fn way_identity(
+    path: &Path,
     dir: &Path,
-    corpus_prefix: &str,
-    out: &mut Vec<WayCandidate>,
-    skip: &HashSet<String>,
-    written: &mut HashSet<String>,
-) {
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if !name.contains(".check.md") {
-            continue;
-        }
-
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if !crate::util::has_frontmatter(&content) {
-            continue;
-        }
-
-        let id = way_id_from_path(path, dir);
-        if id.is_empty() {
-            continue;
-        }
-
-        if skip.contains(&id) {
-            continue;
-        }
-
-        if let Some(candidate) = parse_candidate(&id, corpus_prefix, path, &content) {
-            written.insert(id.clone());
-            out.push(candidate);
-        }
+    root_canon: &Path,
+    seen_paths: &mut HashSet<PathBuf>,
+    foreign_roots: &[PathBuf],
+) -> Option<String> {
+    let canon = canonical(path);
+    if foreign_roots.iter().any(|r| canon.starts_with(r)) {
+        return None;
     }
+    if !seen_paths.insert(canon.clone()) {
+        return None;
+    }
+    let id = if canon.starts_with(root_canon) {
+        way_id_from_path(&canon, root_canon)
+    } else {
+        way_id_from_path(path, dir)
+    };
+    (!id.is_empty()).then_some(id)
 }
 
 // ── Parsing ────────────────────────────────────────────────────
@@ -328,6 +377,82 @@ mod tests {
     const LF: &str = "---\ndescription: hello\npattern: foo\n---\n# Body\n";
     const CRLF: &str = "---\r\ndescription: hello\r\npattern: foo\r\n---\r\n# Body\r\n";
 
+    /// An alias link inside a root (`root/alias -> root/dom`) must not yield
+    /// the same way file twice under two ids. (A link straight back at the
+    /// root is caught by walkdir as a loop and never reaches us.)
+    #[cfg(unix)]
+    #[test]
+    fn alias_link_inside_root_yields_each_way_once() {
+        let root = std::env::temp_dir().join(format!("ways-cand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("dom/alpha")).unwrap();
+        std::fs::write(root.join("dom/alpha/alpha.md"), LF).unwrap();
+        std::os::unix::fs::symlink(root.join("dom"), root.join("alias")).unwrap();
+
+        let mut out = Vec::new();
+        let mut written = HashSet::new();
+        let mut seen_paths = HashSet::new();
+        collect_from_dir(Walk { dir: &root, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut out, &HashSet::new(), &mut written, &mut seen_paths);
+
+        let ids: Vec<&str> = out.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["dom/alpha"], "got {ids:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Two roots that resolve to the same directory (user root symlinked to
+    /// core) are one root: the ways must still be collected, once.
+    #[cfg(unix)]
+    #[test]
+    fn roots_resolving_to_the_same_dir_are_not_foreign_to_each_other() {
+        let base = std::env::temp_dir().join(format!("ways-sameroot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let core = base.join("core");
+        let user = base.join("user");
+        std::fs::create_dir_all(core.join("dom/alpha")).unwrap();
+        std::fs::write(core.join("dom/alpha/alpha.md"), LF).unwrap();
+        std::os::unix::fs::symlink(&core, &user).unwrap();
+        let roots = WayRoots { project: base.join("absent"), user: user.clone(), core: core.clone() };
+        assert!(roots.foreign_to(&user).is_empty());
+        assert!(roots.foreign_to(&core).is_empty());
+
+        let mut out = Vec::new();
+        let mut written = HashSet::new();
+        let mut seen_paths = HashSet::new();
+        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&user) }, &mut out, &HashSet::new(), &mut written, &mut seen_paths);
+        let claimed = written.clone();
+        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&core) }, &mut out, &claimed, &mut written, &mut seen_paths);
+        let ids: Vec<&str> = out.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["dom/alpha"], "got {ids:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A link from the user root into the core root: the user root yields
+    /// nothing for it, the core root yields it once under its proper id.
+    #[cfg(unix)]
+    #[test]
+    fn link_into_another_root_is_collected_by_that_root_only() {
+        let base = std::env::temp_dir().join(format!("ways-xroot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let user = base.join("user");
+        let core = base.join("core");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::create_dir_all(core.join("dom/alpha")).unwrap();
+        std::fs::write(core.join("dom/alpha/alpha.md"), LF).unwrap();
+        std::os::unix::fs::symlink(&core, user.join("ways")).unwrap();
+
+        let mut out = Vec::new();
+        let mut written = HashSet::new();
+        let mut seen_paths = HashSet::new();
+        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[canonical(&core)] }, &mut out, &HashSet::new(), &mut written, &mut seen_paths);
+        assert!(out.is_empty(), "user root must not collect core's files: {:?}", out.iter().map(|c| &c.id).collect::<Vec<_>>());
+        let claimed = written.clone();
+        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[canonical(&user)] }, &mut out, &claimed, &mut written, &mut seen_paths);
+
+        let ids: Vec<&str> = out.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["dom/alpha"], "got {ids:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn fields_parse_identically_across_line_endings() {
         let lf = extract_frontmatter(LF).expect("LF frontmatter");
@@ -360,9 +485,10 @@ mod tests {
 
         let mut candidates = Vec::new();
         let mut seen = HashSet::new();
-        collect_from_dir(&user, "", &mut candidates, &HashSet::new(), &mut seen);
+        let mut seen_paths = HashSet::new();
+        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths);
         let claimed = seen.clone();
-        collect_from_dir(&core, "", &mut candidates, &claimed, &mut seen);
+        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
         let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
         // The blocker: a unique user way must be a candidate (i.e. can fire).
