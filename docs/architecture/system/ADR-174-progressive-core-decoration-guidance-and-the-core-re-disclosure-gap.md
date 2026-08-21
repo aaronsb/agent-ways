@@ -51,6 +51,8 @@ The retention profile is inverted relative to the rest of the corpus. Every matc
 
 This is not a defect in the safety net, which does the job it was written for. It is a gap: no path was ever built for core to re-disclose on distance, because core predates the firing-dynamics work in ADR-123.
 
+> **Amendment (2026-08-20).** The transcript-size safety net quoted above is gone (PR #454). It mis-fired on the first prompt of any fresh session whose operator paused more than 30 seconds before typing: a new transcript is under 5000 bytes, so core was cleared and shown a second time. The `startup`, `compact`, and `clear` SessionStart matchers already run `clear-markers.sh`, which removes the core marker, so a missing marker is now the only condition under which `scan state` shows core. The gap this ADR addresses — no re-disclosure on distance — is unchanged by that removal.
+
 Placing new always-relevant guidance in `core.md` would therefore place it in the one location with no re-disclosure at all.
 
 ## Decision
