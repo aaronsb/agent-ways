@@ -4,7 +4,7 @@ export const meta = {
   phases: [{ title: 'Rewrite', detail: 'one agent per authoring/tuning file' }],
 }
 
-const REPO = '/home/aaron/Projects/ai/agent-ways'
+const REPO = '/home/aaron/Projects/ai/harness/agent-ways'
 const STYLE = `${REPO}/docs/hooks-and-ways/authoring-docs-style.md`
 
 const FILES = [

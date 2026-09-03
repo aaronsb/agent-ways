@@ -4,7 +4,7 @@ export const meta = {
   phases: [{ title: 'Inventory', detail: 'one reader per surface cluster; no edits' }],
 }
 
-const REPO = '/home/aaron/Projects/ai/agent-ways'
+const REPO = '/home/aaron/Projects/ai/harness/agent-ways'
 
 // ── The CURRENT model the docs must reflect (staleness = deviation from this) ──
 const TRUTH = `
