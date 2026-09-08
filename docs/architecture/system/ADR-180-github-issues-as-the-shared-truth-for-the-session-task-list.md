@@ -40,10 +40,13 @@ Three facts, verified in-session on 2026-09-08, shape the design:
    id and `CLAUDE_CODE_CHILD_SESSION=1`. No child task directory is created. A
    general-purpose subagent gets no Task tools at all, so the store is the
    only task view available to it.
-3. **The ID allocator reconciles from disk on read.** After an externally
-   written `2.json` was read by `TaskList`, `.highwatermark` advanced from 1
-   to 2 without a `TaskCreate` call. Whether the in-process counter is
-   memoized between reads is unobserved.
+3. **The ID allocator reconciles from disk on read, and ids are strings.**
+   After an externally written `2.json` was read by `TaskList`,
+   `.highwatermark` advanced from 1 to 2 without a `TaskCreate` call. A task
+   file with id `gh-455` listed, updated through `TaskUpdate` with its
+   metadata intact, and a following `TaskCreate` allocated numeric `4` beside
+   it. Whether the in-process counter is memoized between reads is
+   unobserved.
 
 Two facts are unverified and the design treats them as such. The `.lock` file
 is zero bytes and its protocol is undocumented, so an external writer cannot
@@ -116,12 +119,12 @@ whispers the change, and B's push never labels a closed issue.
 
 ### Identity and ids
 
-Pulled tasks take deterministic ids: `10000` plus the issue number. Pull is
+Pulled tasks take deterministic string ids: `gh-<issue number>`. Pull is
 idempotent, every session holds the same id for the same issue, `blockedBy`
 translation needs no lookup table, and the external writer never touches
-`.highwatermark`. Claude Code's allocator reconciles from disk on read and
-continues above the block; the display cost is a five-digit id on issue-backed
-tasks.
+`.highwatermark`. The numeric allocator cannot produce a string id, so the two
+namespaces never meet. Pull refuses to overwrite a file at its id whose
+`metadata.github_issue` does not match, and whispers the conflict.
 
 Hooks read `session_id` from stdin. Skills and subagent shells read
 `CLAUDE_CODE_SESSION_ID`. When neither resolves, the executable refuses to
@@ -198,7 +201,7 @@ work, which is the example the Claude Code hooks reference ships.
 - The push half rides only on documented surfaces. The undocumented layout is
   confined to the pull half and one module, and a layout change degrades to
   one whisper line.
-- Deterministic ids make pull idempotent and remove the allocator race.
+- String ids make pull idempotent and keep the allocator out of the picture.
 
 ### Negative
 
@@ -209,7 +212,7 @@ work, which is the example the Claude Code hooks reference ships.
   the comment back.
 - Each hook event that runs `pull` costs a `gh` round trip. The threshold on
   `UserPromptSubmit` bounds it, and `SessionStart` pays it once.
-- Issue-backed tasks display five-digit ids.
+- Issue-backed tasks display as `#gh-455` rather than a bare number.
 - `TaskCreated` rejection adds friction for labeled work created without a
   link. That friction is the convention taking hold.
 - Read-only contributors and fork workflows get pull without push.
