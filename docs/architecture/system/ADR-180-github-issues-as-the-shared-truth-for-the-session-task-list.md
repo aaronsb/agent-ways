@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Accepted
 date: 2026-09-08
 deciders:
   - aaronsb
@@ -140,7 +140,7 @@ field shape of every existing task file; on mismatch it writes nothing and
 files in a temporary directory and renames them into place, so a failure
 partway leaves the store as it was. The lock protocol Claude Code uses is
 probed once during implementation and recorded here; until then, ordering
-against a concurrent `TaskCreate` is best-effort, and the disjoint id block is
+against a concurrent `TaskCreate` is best-effort, and the string id namespace is
 what makes the race harmless.
 
 ### The executable
