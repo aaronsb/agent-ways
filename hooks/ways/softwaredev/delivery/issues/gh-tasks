@@ -246,8 +246,12 @@ fetch_issues() {
 # Ownership (ADR-180): GitHub owns subject, description, open/closed, and
 # gh- edges in blockedBy. The session owns status otherwise, owner,
 # activeForm, local edges, and every blocks edge it added.
+# metadata.format stamps the fence format; a bump forces the description
+# through once so no task keeps a fence an older version could not secure.
+FORMAT=2
 MERGE='
-  (if $e == null or ($e.metadata.body_sha // "") != $r.body_sha then true else false end) as $body_changed |
+  (if $e == null or ($e.metadata.body_sha // "") != $r.body_sha
+      or (($e.metadata.format // 0) != $r.metadata.format) then true else false end) as $body_changed |
   {
     id: $r.id,
     subject: (if $body_changed then $r.subject else $e.subject end),
@@ -314,7 +318,7 @@ cmd_pull() {
   while IFS= read -r issue; do
     n="$(jq -r '.number' <<<"$issue")"
     body_sha="$(jq -r '"\(.title)\n\(.body)"' <<<"$issue" | sha)"
-    jq -n --argjson i "$issue" --argjson numbers "$numbers" --arg sha "$body_sha" --arg fence "$fence" '
+    jq -n --argjson i "$issue" --argjson numbers "$numbers" --arg sha "$body_sha" --arg fence "$fence" --argjson format "$FORMAT" '
       ($i.number | tostring) as $n |
       ($i.body | gsub("-->"; "-- >")) as $body |
       {
@@ -329,7 +333,7 @@ cmd_pull() {
         metadata: {
           github_issue: $i.number, github_url: $i.url, github_repo: $i.repo,
           body_sha: $sha, observed_state: $i.state, state_reason: $i.stateReason,
-          labels: $i.labels, assignees: $i.assignees
+          labels: $i.labels, assignees: $i.assignees, format: $format
         }
       }' >"$STAGE/gh-$n.json"
   done < <(jq -c '.[]' <<<"$issues")

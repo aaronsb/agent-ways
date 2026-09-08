@@ -208,6 +208,12 @@ jq '.blocks += ["gh-30"]' "$STORE/gh-14.json" >"$TMP/x" && mv "$TMP/x" "$STORE/g
 "$GH_TASKS" pull 2>/dev/null
 assert_has "session-added gh- blocks edge kept" "$(jq -c .blocks "$STORE/gh-14.json")" '"gh-30"'
 
+# ── 9e2. a fence-format bump refreshes an unchanged body ──────
+jq '.description="<!-- old fence -->\nx\n<!-- end -->" | .metadata.format=1' "$STORE/gh-30.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-30.json"
+"$GH_TASKS" --force pull 2>/dev/null
+assert_has "old-format description re-fenced" "$(jq -r .description "$STORE/gh-30.json")" "gh-tasks:end fence="
+assert_eq "format stamped" "$(jq -r .metadata.format "$STORE/gh-30.json")" "2"
+
 # ── 9f. guard scope ────────────────────────────────────────────
 assert_eq "guard ignores #N in description" "$(guard 'Refactor parser' 'see #12 for context')" "0"
 assert_eq "guard still catches /issues/N in description" "$(guard 'Do a thing' 'https://github.com/acme/widgets/issues/12')" "2"
