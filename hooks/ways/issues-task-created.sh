@@ -12,10 +12,10 @@ SUBJECT=$(echo "$INPUT" | jq -r '.task_input.subject // .task_subject // empty')
 DESC=$(echo "$INPUT" | jq -r '.task_input.description // .task_description // empty')
 [[ -n "$SESSION_ID" && -n "$SUBJECT" ]] || exit 0
 
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-LIST_ID="${CLAUDE_CODE_TASK_LIST_ID:-session-${SESSION_ID:0:8}}"
-DIR="$CONFIG_DIR/tasks/${LIST_ID//[^A-Za-z0-9_-]/-}"
-[[ -d "$DIR" ]] || exit 0
+GH_TASKS="$(dirname "$0")/softwaredev/delivery/issues/gh-tasks"
+[[ -x "$GH_TASKS" ]] || exit 0
+DIR="$("$GH_TASKS" --session "$SESSION_ID" dir 2>/dev/null)"
+[[ -n "$DIR" && -d "$DIR" ]] || exit 0
 
 [[ "$SUBJECT" =~ ^\[gh#[0-9]+\] ]] && exit 0
 

@@ -60,10 +60,14 @@ and settled two facts the first draft left open:
   full participant.
 - **The list id, not the session, names the store.** The directory is
   `tasks/<list id>/`, where the list id is `CLAUDE_CODE_TASK_LIST_ID` when
-  set, else the agent-team name when in a team, else `session-<first 8 of
-  session id>`. A resumed session's store follows whatever id it reports, and
-  the `SessionStart` hook receives that id on stdin, so the bridge resolves
-  the right directory without knowing whether resume preserves it.
+  set, else the team name, else the full session id. An interactive session
+  initializes an in-process "session team" at startup, names it
+  `session-<first 8 of session id>`, and renames `tasks/<session id>` to
+  `tasks/session-<8>`. A `claude -p` session never initializes that team, so
+  its store stays under the full id; a probe confirmed both forms on disk.
+  The bridge prefers whichever form exists and, before either does, picks by
+  `CLAUDE_CODE_ENTRYPOINT` (`cli` versus `sdk-cli`). A resumed session's
+  store follows whatever id it reports on the `SessionStart` stdin.
   `CLAUDE_CODE_ENABLE_TASKS=false` disables the store outright.
 
 The schema is `id` string, `subject`, `description`, `status` enum,

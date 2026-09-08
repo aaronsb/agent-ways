@@ -6,7 +6,11 @@
 # Store protocol, read from the Claude Code 2.1.263 bundle and recorded in
 # ADR-180:
 #   dir     $CLAUDE_CONFIG_DIR/tasks/<list-id>/
-#           list-id = $CLAUDE_CODE_TASK_LIST_ID, else session-<first 8 of session id>
+#           list-id = $CLAUDE_CODE_TASK_LIST_ID, else the team name, else the
+#           full session id. An interactive session initializes an in-process
+#           "session team" at startup named session-<first 8 of session id> and
+#           renames tasks/<session id> to tasks/session-<8>. A `claude -p`
+#           session never does, so its store stays under the full id.
 #   file    <id>.json, id sanitized to [A-Za-z0-9_-]
 #   create  proper-lockfile on <dir>/.lock: mkdir <dir>/.lock.lock, 30 retries
 #           at 5–100 ms, stale after 10 s
@@ -26,6 +30,7 @@
 #   gh-tasks [--session ID] link <issue> <task-id>
 #   gh-tasks [--session ID] list
 #   gh-tasks [--session ID] status
+#   gh-tasks [--session ID] dir        # print the resolved store directory
 #
 # Session id resolution: --session, then $GH_TASKS_SESSION, then
 # $CLAUDE_CODE_SESSION_ID. Hooks pass stdin session_id via --session; skills
@@ -58,11 +63,11 @@ while (($#)); do
     --session=*) SESSION="${1#--session=}"; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    pull|whisper|link|list|status) VERB="$1"; shift; ARGS=("$@"); break ;;
+    pull|whisper|link|list|status|dir) VERB="$1"; shift; ARGS=("$@"); break ;;
     *) die "unknown argument: $1" ;;
   esac
 done
-[[ -n "$VERB" ]] || die "usage: gh-tasks [--session ID] [--force] <pull|whisper|link|list|status>"
+[[ -n "$VERB" ]] || die "usage: gh-tasks [--session ID] [--force] <pull|whisper|link|list|status|dir>"
 
 # ── portability helpers ──────────────────────────────────────────
 
@@ -78,11 +83,25 @@ require_session() {
   [[ "$SESSION" =~ ^[A-Za-z0-9_-]+$ ]] || die "session id has unexpected shape"
 }
 
+# Resolution order: an explicit list id; then whichever of the two session
+# forms already exists on disk; then, when neither exists yet, the form this
+# entrypoint will create. Interactive (`CLAUDE_CODE_ENTRYPOINT=cli`) renames
+# the full-id directory to session-<8> at startup, so a pre-startup write to
+# either form ends up in the same place.
 list_id() {
   if [[ -n "${CLAUDE_CODE_TASK_LIST_ID:-}" ]]; then
     printf '%s' "${CLAUDE_CODE_TASK_LIST_ID//[^A-Za-z0-9_-]/-}"
+    return
+  fi
+  local short="session-${SESSION:0:8}" full="${SESSION//[^A-Za-z0-9_-]/-}"
+  if [[ -d "$CONFIG_DIR/tasks/$short" ]]; then
+    printf '%s' "$short"
+  elif [[ -d "$CONFIG_DIR/tasks/$full" ]]; then
+    printf '%s' "$full"
+  elif [[ "${CLAUDE_CODE_ENTRYPOINT:-cli}" == "cli" ]]; then
+    printf '%s' "$short"
   else
-    printf 'session-%s' "${SESSION:0:8}"
+    printf '%s' "$full"
   fi
 }
 
@@ -447,4 +466,5 @@ case "$VERB" in
   link) cmd_link ;;
   list) cmd_list ;;
   status) cmd_status ;;
+  dir) require_session; store_dir; echo ;;
 esac

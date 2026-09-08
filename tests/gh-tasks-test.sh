@@ -154,7 +154,18 @@ assert_eq "guard allows prefixed sub-task" "$(guard '[gh#12] part one' 'x')" "0"
 assert_eq "guard ignores unmirrored reference" "$(guard 'Fix #999' 'x')" "0"
 assert_eq "guard ignores plain task" "$(guard 'Refactor parser' 'no refs')" "0"
 
-# ── 9. identity ────────────────────────────────────────────────
+# ── 9. store resolution ────────────────────────────────────────
+assert_eq "existing session-<8> dir wins" "$("$GH_TASKS" dir)" "$STORE"
+( export CLAUDE_CODE_SESSION_ID="ffffffff-1111-2222-3333-444444444444"
+  mkdir -p "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  assert_eq "existing full-id dir wins when short is absent" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  rmdir "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  assert_eq "no dir yet, interactive entrypoint → session-<8>" "$(CLAUDE_CODE_ENTRYPOINT=cli "$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/session-ffffffff"
+  assert_eq "no dir yet, sdk entrypoint → full id" "$(CLAUDE_CODE_ENTRYPOINT=sdk-cli "$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  assert_eq "explicit list id overrides" "$(CLAUDE_CODE_TASK_LIST_ID=team-x "$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/team-x"
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out"))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out")))
+
+# ── 10. identity ───────────────────────────────────────────────
 rc=0; ( unset CLAUDE_CODE_SESSION_ID; "$GH_TASKS" pull 2>/dev/null ) || rc=$?
 assert_eq "refuses without a session id" "$rc" "1"
 
