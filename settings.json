@@ -156,6 +156,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/bin/ways corpus --if-stale --quiet"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
           }
         ]
       },
@@ -169,6 +173,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
           }
         ]
       },
@@ -178,6 +186,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
           }
         ]
       },
@@ -195,6 +207,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/bin/ways init"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
           }
         ]
       }
@@ -251,6 +267,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh prompt"
           }
         ]
       }
@@ -278,6 +298,16 @@
             "command": "${HOME}/.claude/hooks/ways/check-queued.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh issue *)",
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh post-gh"
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -301,6 +331,16 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/attend-drain-stop.sh"
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/issues-task-created.sh"
           }
         ]
       }

@@ -48,10 +48,27 @@ Three facts, verified in-session on 2026-09-08, shape the design:
    it. Whether the in-process counter is memoized between reads is
    unobserved.
 
-Two facts are unverified and the design treats them as such. The `.lock` file
-is zero bytes and its protocol is undocumented, so an external writer cannot
-know whether it excludes anything. Whether a `--resume` session keeps its id,
-and so its store, was not probed.
+Implementation read the store module out of the Claude Code 2.1.263 bundle
+and settled two facts the first draft left open:
+
+- **The lock is `proper-lockfile`.** The zero-byte `.lock` file is the lock
+  target; the mutex is a `.lock.lock` directory taken with `mkdir`, 30
+  retries at 5 to 100 ms, stale after 10 s. Creation holds that directory
+  lock and re-reads the highest numeric id from disk each time, so nothing is
+  memoized. Updates hold a per-file lock, `<id>.json.lock`, the same way.
+  Deletes hold none. An external writer using `mkdir` on the same names is a
+  full participant.
+- **The list id, not the session, names the store.** The directory is
+  `tasks/<list id>/`, where the list id is `CLAUDE_CODE_TASK_LIST_ID` when
+  set, else the agent-team name when in a team, else `session-<first 8 of
+  session id>`. A resumed session's store follows whatever id it reports, and
+  the `SessionStart` hook receives that id on stdin, so the bridge resolves
+  the right directory without knowing whether resume preserves it.
+  `CLAUDE_CODE_ENABLE_TASKS=false` disables the store outright.
+
+The schema is `id` string, `subject`, `description`, `status` enum,
+`blocks[]`, `blockedBy[]`, optional `activeForm`, `owner`, `metadata`
+record. Listing sorts by `Number(id)`, so string ids sort after numeric ones.
 
 Documented surfaces: the `metadata` field, the `TaskCreated` and
 `TaskCompleted` hooks, and `session_id` on hook stdin. `CLAUDE_CODE_SESSION_ID`
