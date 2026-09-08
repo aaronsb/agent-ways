@@ -71,6 +71,8 @@ else
 fi
 
 # Doc-graph link integrity
+run_suite "gh-tasks Bridge Tests" bash "$REPO_ROOT/tests/gh-tasks-test.sh"
+
 run_suite "Doc-Graph Link Integrity" bash "$REPO_ROOT/scripts/doc-graph.sh" --stats
 
 # Governance provenance lint

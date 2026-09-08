@@ -399,6 +399,8 @@ sequenceDiagram
 ├── inject-subagent.sh          # SubagentStart → emit stashed ways (JSON hookSpecificOutput)
 ├── clear-markers.sh            # SessionStart → reset session state
 ├── mark-tasks-active.sh        # PreToolUse:TaskCreate → context nag gate
+├── issues-pull.sh              # SessionStart|UserPromptSubmit|PostToolUse:gh issue → gh-tasks pull + whisper (ADR-180)
+├── issues-task-created.sh      # TaskCreated → reject unprefixed duplicates of mirrored issues (ADR-180)
 │
 ├── softwaredev/                # Domain: software development
 │   ├── commits/commits.md       #   git commit format
