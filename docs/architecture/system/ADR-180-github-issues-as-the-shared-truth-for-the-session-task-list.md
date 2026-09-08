@@ -65,10 +65,12 @@ and settled two facts the first draft left open:
   `session-<first 8 of session id>`, and renames `tasks/<session id>` to
   `tasks/session-<8>`. A `claude -p` session never initializes that team, so
   its store stays under the full id; a probe confirmed both forms on disk.
-  The bridge prefers whichever form exists and, before either does, picks by
-  `CLAUDE_CODE_ENTRYPOINT` (`cli` versus `sdk-cli`). A resumed session's
-  store follows whatever id it reports on the `SessionStart` stdin.
-  `CLAUDE_CODE_ENABLE_TASKS=false` disables the store outright.
+  The team is recorded in `teams/<name>/config.json` with a
+  `leadSessionId`, for the session team and for named teams alike; print
+  mode writes none. The bridge resolves the list id from that file and
+  otherwise uses the full id, which the rename carries forward. A resumed
+  session's store follows whatever id it reports on the `SessionStart`
+  stdin. `CLAUDE_CODE_ENABLE_TASKS=false` disables the store outright.
 
 The schema is `id` string, `subject`, `description`, `status` enum,
 `blocks[]`, `blockedBy[]`, optional `activeForm`, `owner`, `metadata`
@@ -125,7 +127,7 @@ Ownership, plus two small pieces of memory per task, avoids all of it.
 | `completed` | session, as a request | push closes the issue only when local status disagrees with both the observed remote state and `metadata.pushed_state` |
 | `in_progress` | session | push sets a label; never on a closed issue |
 | `blockedBy` edges between pulled tasks | GitHub | from native `blockedBy`; a blocking issue without the label yields no edge |
-| `blockedBy` edges to local tasks, `owner`, `activeForm` | session | pull never touches them; writes are read-modify-write over the GitHub-owned fields only |
+| `blockedBy` edges to local tasks, every `blocks` edge, `owner`, `activeForm` | session | pull never removes them; reciprocals of GitHub edges are added to `blocks`, and every read-merge-write happens under the task file's lock |
 | session-side description edits | session | posted as an issue comment; the local text persists until the body changes |
 
 `metadata.pushed_state` records the last open/closed state this session

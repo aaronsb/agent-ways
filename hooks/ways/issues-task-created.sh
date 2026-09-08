@@ -19,8 +19,11 @@ DIR="$("$GH_TASKS" --session "$SESSION_ID" dir 2>/dev/null)"
 
 [[ "$SUBJECT" =~ ^\[gh#[0-9]+\] ]] && exit 0
 
-# Issue references: [gh#N], #N, or /issues/N.
-REFS=$(printf '%s\n%s' "$SUBJECT" "$DESC" | grep -oE '(\[gh#|#|/issues/)[0-9]+' | grep -oE '[0-9]+' | sort -u)
+# Issue references. A bare #N counts only in the subject: a description that
+# says "see #12 for context" is not a task about issue 12, and PRs share the
+# number space.
+REFS=$( { printf '%s\n' "$SUBJECT" | grep -oE '(\[gh#|#|/issues/)[0-9]+';
+          printf '%s\n' "$DESC" | grep -oE '(\[gh#|/issues/)[0-9]+'; } | grep -oE '[0-9]+' | sort -u)
 [[ -n "$REFS" ]] || exit 0
 
 for n in $REFS; do
