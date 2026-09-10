@@ -60,6 +60,10 @@ if [[ -x "$WAYS_BIN" ]]; then
   run_suite "Multilingual Way Matching" bash "$SCRIPT_DIR/test-multilingual.sh"
 fi
 
+# Golden routing: committed prompt-to-way pairs, failed on a misroute.
+# Skips itself when the engine is missing, so it is safe to run unconditionally.
+run_suite "Golden Routing" bash "$SCRIPT_DIR/test-routing-golden.sh"
+
 # ADR lint tests (frontmatter detection, field validation)
 if command -v python3 &>/dev/null; then
   run_suite "ADR Lint Tests" bash "$REPO_ROOT/tests/adr-lint-test.sh"
@@ -78,6 +82,26 @@ run_suite "Doc-Graph Link Integrity" bash "$REPO_ROOT/scripts/doc-graph.sh" --st
 # Governance provenance lint
 if [[ -x "$WAYS_BIN" ]]; then
   run_suite "Governance Provenance Lint" "$WAYS_BIN" governance lint
+fi
+
+# Guard hook verdicts (ADR-181)
+if command -v python3 &>/dev/null; then
+  run_suite "Bash Guard Hook Verdicts" bash "$REPO_ROOT/tests/test-bash-bound.sh"
+else
+  echo ""
+  echo "=== Bash Guard Hook Verdicts ==="
+  echo "SKIP: python3 not found"
+fi
+
+# Markdown fact drift. Advisory: it reports what a rewrite dropped and leaves
+# the judgement to the editor, so it stays outside the pass/fail tally.
+echo ""
+echo "=== Markdown Fact Drift (advisory) ==="
+echo ""
+if command -v python3 &>/dev/null; then
+  bash "$REPO_ROOT/scripts/check-facts.sh" || true
+else
+  echo "SKIP: python3 not found"
 fi
 
 echo ""

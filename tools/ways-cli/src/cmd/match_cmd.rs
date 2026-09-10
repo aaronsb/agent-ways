@@ -16,8 +16,20 @@ type Row = (String, ScorePair);
 /// multi score on another way (ADR-139). The multi column is a diagnostic
 /// display, dormant on English installs (all "—"), populated only when an
 /// adopter has localized via ways-localize.
-pub fn run(query: String, _corpus: Option<String>) -> Result<()> {
-    let scores = super::scan::batch_embed_score(&query);
+/// `--corpus PATH` scores that JSONL instead of the canonical corpus, so a dev
+/// checkout can be scored from a corpus built by `ways corpus --output DIR`
+/// without reprojecting it into `~/.claude` first.
+pub fn run(query: String, corpus: Option<String>) -> Result<()> {
+    let corpus_path = corpus.as_deref().map(std::path::Path::new);
+
+    if let Some(p) = corpus_path {
+        if !p.is_file() {
+            eprintln!("ERROR: corpus not found: {}", p.display());
+            std::process::exit(1);
+        }
+    }
+
+    let scores = super::scan::batch_embed_score_with(&query, corpus_path);
 
     if !scores.any_ran() {
         eprintln!("ERROR: embedding engine unavailable.");
@@ -59,7 +71,14 @@ pub fn run(query: String, _corpus: Option<String>) -> Result<()> {
         key(&b.1).partial_cmp(&key(&a.1)).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let en_corpus = crate::paths::corpus_dir().join("ways-corpus-en.jsonl");
+    // Descriptions come from the English corpus beside the one being scored, so
+    // an isolated corpus describes its own ways. The canonical file covers the
+    // case where that sibling is absent.
+    let canonical = crate::paths::corpus_dir();
+    let mut en_corpus = super::scan::sibling_corpus(corpus_path, &canonical, "ways-corpus-en.jsonl");
+    if !en_corpus.is_file() {
+        en_corpus = canonical.join("ways-corpus-en.jsonl");
+    }
     let descriptions = load_descriptions(en_corpus.to_str().unwrap_or(""));
 
     let mut t = Table::new(&["Way", "EN", "Multi", "Description"]);

@@ -1,0 +1,36 @@
+prompt	expected_way
+the same test keeps failing after two retries, what now	softwaredev/environment/recovery
+the subagent came back with the wrong answer twice in a row	softwaredev/environment/recovery
+did the tests actually run before we merge this	softwaredev/code/testing/gates
+zero tests failed but I want a positive control that the suite collected anything	softwaredev/code/testing/gates
+fix this bug without leaving a v2 wrapper around the old function	softwaredev/code/quality/integration
+I refactored it but the dead code and unused imports are still there	softwaredev/code/quality/integration
+the container and the CI runner are separate hosts from my laptop	softwaredev/environment/hostparity
+the untracked file exists here but CI will never see it	softwaredev/environment/hostparity
+should this rate limiter fail open or fail closed	softwaredev/code/security/guards
+we have written authorization to pentest our own staging API	softwaredev/code/security/pentest
+test this agent for prompt injection and tool hijacking	softwaredev/code/security/injection/prompt
+test the onboarding docs with fresh eyes	documentation/validate
+write the commit message for this change	softwaredev/delivery/commits
+merge this branch to main after review	softwaredev/delivery/merge
+what should I name this branch	softwaredev/delivery/branching
+cut a release and tag the version	softwaredev/delivery/release
+file a github issue for this bug	softwaredev/delivery/issues
+write a migration to add a column to the users table	data/migrations
+this migration is not idempotent if it runs twice	data/migrations/idempotent
+record this architecture decision as an ADR	documentation/adr
+write the README for this project	documentation/readme
+spawn parallel agents to explore these three approaches	meta/subagents
+open a working session and get me oriented	meta/start
+let us wrap up the session and hand off	meta/wrap
+add some logging so I can trace where this goes wrong	softwaredev/environment/debugging
+rotate this leaked credential and get it out of the history	softwaredev/code/security/secrets
+how should login and session tokens be authenticated	softwaredev/code/security/auth
+threat model this new authentication flow	softwaredev/architecture/threat-modeling
+run npm audit on this project	softwaredev/code/supplychain/depscan/node
+red green refactor for this feature	softwaredev/code/testing/tdd
+use a fake instead of a real network call in this unit test	softwaredev/code/testing/mocking
+set up my ssh agent so I stop typing the passphrase	workstation/shell/sshagent
+what is a good recipe for sourdough bread	none
+recommend a good science fiction novel	none
+how many teaspoons are in a tablespoon	none
