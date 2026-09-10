@@ -134,6 +134,9 @@ TASKS — recreate these with the task list tool before starting; they are the w
 
 DO NEXT — <the immediate next step, then 1-3 alternatives, each specific enough to start>.
 
+DECISIONS: <each choice left to the operator, numbered, one line each, so the answer
+can be "1 and 3">. Skip if none.
+
 CONVENTIONS — <project-specific workflow worth repeating: branch→PR→review→merge, lint
 quirks, verification patterns>.
 
@@ -149,6 +152,22 @@ arrives with an empty task list, so spell the instruction out — "recreate thes
 before starting" — rather than assuming the list travels with the prompt.
 
 Keep it dense and concrete. The gold standard is a prompt a stranger could resume from.
+Test that before moving on. A stranger holding only the repository and this prompt can:
+run the project, run the verification gates, find the current plan, and name the next
+step. Fix the prompt for any of the four that fails.
+
+Number every decision left to the operator, in the prompt and in the chat, so the reply
+can be "1 and 3". A decision buried in a paragraph gets paraphrased back or missed.
+
+## Close-out: what the session taught
+
+Walk four categories. Each item lands in an issue, a design note, or a way edit, or gets
+the line "nothing of interest, because <reason>":
+
+- A sharp edge that bit, and the tell that would spot it next time.
+- A corrected assumption: the session started believing X and the work proved it false.
+- A trigger that should have fired and did not (a way, a skill description, a hook).
+- A reusable tool the session built: a script, a query, or a check worth running again.
 
 ## Step 4 — Hand off (compaction is gauge-dependent)
 

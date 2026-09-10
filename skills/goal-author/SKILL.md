@@ -50,6 +50,16 @@ Propose a draft condition, then reach agreement with the operator on:
 Use `AskUserQuestion` with curated options and a recommendation. The menu is itself
 how Claude demonstrates it understood the work — a signpost, not a quiz.
 
+Pace the interview: one to three questions per turn; after every two answers, reflect
+the draft back ("I now believe the goal is X. Tell me where I'm wrong"); cap at nine
+questions. Past nine, the interview is trying to plan the work as well as bound it.
+Accept the gaps, write each one into the condition as an explicit bound, and draft.
+
+The interview has converged when the four items above are settled and you can also
+state the non-goals (what the loop must leave alone) and the assumptions that, if
+false, change the condition. The `start` skill carries the fuller eight-point
+convergence checklist for framing a piece of work; a condition needs only these.
+
 ### 3. Draft (the condition)
 
 Emit a single paste-ready condition string. The operator sets it. **This skill

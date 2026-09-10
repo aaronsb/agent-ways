@@ -30,6 +30,7 @@ Agent(
 | **code-reviewer** | `code-reviewer` | Review large PRs, quality checks |
 | **workflow-orchestrator** | `workflow-orchestrator` | Project status, phase coordination |
 | **workspace-curator** | `workspace-curator` | Organize docs/, manage .claude/ directory |
+| **skeptic** | `skeptic` | Refute, challenge, poke holes, red-team a finished document; "is this report right" |
 
 Project agents live in `agents/`. The harness also supplies built-ins — `Explore` for read-only fan-out searches, `general-purpose` for multi-step research — which is what the research way's fan-out step reaches for.
 

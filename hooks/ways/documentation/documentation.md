@@ -33,6 +33,7 @@ Children of this way split into the **model** that types the corpus and the
 | Craft | Code-level docs (docstrings, JSDoc, rustdoc) | `docstrings` |
 | Craft | Structural diagrams | `mermaid` |
 | Craft | House norms — style, conventions, accessibility | `standards` |
+| Craft | A cold read by a fresh agent, and a linter proven by a planted violation | `validate` |
 
 *Forthcoming* model ways are authored as ADR-302 lands; until then this parent
 names the shape so the corpus has somewhere to grow into.
@@ -50,3 +51,4 @@ names the shape so the corpus has somewhere to grow into.
 - readme(documentation) — README as the front door
 - standards(documentation) — documentation house norms
 - mermaid(documentation) — structural diagrams
+- validate(documentation) — a fresh agent given only the entry point grades the docs; a wrong answer is a docs defect

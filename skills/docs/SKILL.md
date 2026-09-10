@@ -51,6 +51,12 @@ docs/scripts/doc lint [--strict]                # lint the catalog graph (the te
    (`[[ADR-136]]`, `[[01.003.E]]`) — these are the graph edges the linter checks.
 6. **Lint**: `docs/scripts/doc lint` before committing (dangling edges, malformed
    ids, mode/pole mismatches all surface here).
+7. **Validate after a substantial change** (a new page set, a rewritten tutorial,
+   a moved entry point). Lint says the graph is well-formed; a cold read says the
+   pages work. The **validate** way (`documentation/validate`) carries the
+   method: spawn a fresh agent (never a fork), hand it only the entry point, have
+   it declare what it loaded, ask a few newcomer questions plus one false-premise
+   question, and grade every wrong answer as a docs defect.
 
 ## Page format
 
@@ -113,4 +119,5 @@ scaffold, run `/project-init`. To decline the catalog for a project:
 
 - the **diataxis** way — picking the mode (the 2×2)
 - the **documentation** way — the typed-graph model
+- the **validate** way — the cold read after a substantial docs change
 - the **adr** skill — the decisions half of the same catalog

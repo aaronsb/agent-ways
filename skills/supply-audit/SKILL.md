@@ -77,12 +77,19 @@ patched version available? severity?
 End with a structured verdict:
 
 - **Findings by tier** — each with severity and the evidence (the command and what
-  it showed).
+  it showed). Mark each finding PROVEN (reproduced or directly observed) or
+  INFERRED (reasoned from configuration or source). Give each one disposition:
+  *confirmed*, *overstated or already mitigated*, or *could not reach*. Every
+  candidate gets one of the three.
+- **Controls that held.** A guard the audit exercised and found sound is a finding
+  too. A report of only what broke hides the difference between an untested
+  surface and a sound one.
 - **Trust verdict** — one of: *clear* (no blocking findings), *caution* (things to
   understand before running), *do-not-run* (disqualifying: live secrets,
   install-time execution, critical unpatched vuln).
-- **What you did NOT check** — name any tier skipped (tool missing, scan declined)
-  so gaps read as gaps, never as a clean bill.
+- **Could not test.** Every tier skipped (tool missing, scan declined) and every
+  surface the audit never exercised (an unreadable blob, an install hook left
+  untraced, a lockfile absent), so gaps read as gaps, never as a clean bill.
 
 ## Not for
 
