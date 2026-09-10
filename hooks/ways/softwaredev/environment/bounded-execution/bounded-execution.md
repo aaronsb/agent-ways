@@ -8,7 +8,7 @@ refire: 0.2
 <!-- epistemic: heuristic -->
 # Bounded Execution
 
-The Bash tool bounds every foreground command by a timeout and refuses a bare `sleep`. Within that bound four shapes still go wrong: a command that sits on a prompt, a command that never returns, a kill that matches the wrong process, and a launch that returned without the work being done. The guard hook (ADR-181) refuses the first three outright. This way covers how to run them instead, and how to read the fourth.
+The Bash tool bounds every foreground command by a timeout and refuses a bare `sleep`. Within that bound four shapes still go wrong: a command that sits on a prompt, a command that never returns, a kill that matches the wrong process, and a launch that returned without the work being done. A guard hook that refuses the first three ships deactivated (ADR-181); a project opts in with one settings line. This way covers how to run each one, and how to read the fourth.
 
 ## Pick the form before you run
 
@@ -20,7 +20,7 @@ The Bash tool bounds every foreground command by a timeout and refuses a bare `s
 | Waits for a condition (a port to open, a file to appear, CI to finish) | The Monitor tool, or a bounded poll with `timeout` |
 | Downloads and runs an installer | Download to a file, read it, run the file |
 
-The `setsid nohup ... &` idiom from other harnesses works here and is accepted by the guard. Prefer `run_in_background`, which the harness tracks and reports on.
+The `setsid nohup ... &` idiom from other harnesses works here. Prefer `run_in_background`, which the harness tracks and reports on.
 
 ## Stop a process by its pid
 
@@ -49,4 +49,3 @@ The harness killed a foreground command at its bound. Read what it produced befo
 - environment/recovery(softwaredev) — a no-progress attempt is a failed attempt; classify before retrying
 - environment/container-safety(softwaredev) — the container the attached run would hold
 - environment/ssh(softwaredev) — batch mode and key setup for remote shells
-- code/security/guards(softwaredev) — why the guard hook refuses rather than warns

@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 date: 2026-09-10
 deciders:
   - aaronsb
@@ -9,76 +9,66 @@ related:
   - ADR-178
 ---
 
-# ADR-181: Guard hooks: a blocking PreToolUse class for pattern kills and interactive-prone commands
+# ADR-181: Guard hooks: a blocking PreToolUse class, shipped deactivated
 
 ## Context
 
-Every hook this project ships injects context and exits zero. `check-bash-pre.sh` scores a command against the ways corpus and prints guidance; the model reads it and decides. One hook departs from that: `strip-session-link-pre.sh` (ADR-162) exits 2 to refuse a commit that would publish a session link. It is the only hook that can stop a tool call, and nothing in the corpus names the class it belongs to.
+Every hook this project ships injects context and exits zero. One departs from that: `strip-session-link-pre.sh` (ADR-162) exits 2 to refuse a commit that would publish a session link. It is the only hook that can stop a tool call, and nothing in the corpus names the class it belongs to.
 
-The Cypress survey (`docs/design-notes/cypress-survey.md`, issue #465) proposed a second refusing hook, ported from a guard that blocks any shell command lacking an explicit `timeout` or a detached launch. That guard was written for harnesses that run foreground commands unbounded. This harness is different on three points, verified against the Bash tool's contract:
+The Cypress survey (`docs/design-notes/cypress-survey.md`, issue #465) proposed a second refusing hook, ported from a guard that blocks any shell command lacking an explicit `timeout` or a detached launch. That guard was written for harnesses that run foreground commands unbounded. This harness is different on three points:
 
-1. **Every foreground command is already bounded.** The Bash tool enforces a timeout, 120 seconds by default and 600 at most, and refuses a bare foreground `sleep`. A command that never returns burns its timeout and comes back with an error. Nothing hangs the session.
-2. **Detached work has a first-class form.** `run_in_background: true` on the Bash tool, and the Monitor tool for watching a condition, replace the `setsid nohup ... & echo $! > pid` idiom the ported guard demanded. The hook sees `run_in_background` in `tool_input`.
-3. **The corpus carries the liveness discipline as guidance.** The `softwaredev/environment/recovery` and `code/testing/gates` ways landed this week already say how to treat a command that returned without doing its work.
+1. **Every foreground command is already bounded.** The Bash tool enforces a timeout, 120 seconds by default and 600 at most, and refuses a bare foreground `sleep`.
+2. **Detached work has a first-class form.** `run_in_background: true` on the Bash tool, and the Monitor tool for watching a condition. The hook sees `run_in_background` in `tool_input`.
+3. **The permission system already gates Bash** by command prefix, and the operator tunes that list per project.
 
-So the ported guard's central rule, "no bound, no run", is satisfied by the harness. What the harness leaves open is narrower:
+What the harness leaves open is narrower: pattern kills (`pkill`, `killall`, `kill` by name) that can match the agent's own shell or an operator process; interactive-prone commands (`sudo` without `-n`, `ssh` without `BatchMode`, `docker exec -it`, package managers without their flag) that sit on a prompt until the timeout; log followers and attached containers that never return in the foreground; and pipe-to-shell.
 
-- **Pattern kills.** `pkill`, `killall`, and `kill` with a name or pattern can match the shell issuing the kill, a subagent's process, or an unrelated process of the operator's. No timeout repairs that, and no injected guidance reliably stops a model that has decided a process is stuck.
-- **Interactive-prone commands.** `sudo` without `-n`, `ssh` without `BatchMode`, `docker exec -it`, and package managers without their non-interactive flag sit on a prompt until the timeout, then return garbage. The cost is bounded and the outcome is always wrong.
-- **Log followers and attached containers.** `tail -f`, `journalctl -f`, and `docker run` without `-d` in the foreground never return. They belong in the background.
-- **Pipe to shell.** `curl ... | sh` runs whatever arrived. The supply-chain ways say to download, read, and then run; the guidance is advisory and this is the one place a refusal is cheap and exact.
-
-The question this ADR settles is whether those four classes justify a second refusing hook, and what contract refusing hooks share.
+The operator's read: Bash execution is already guarded enough, and another refusal wired in by default is unwanted.
 
 ## Decision
 
-**Establish "guard hooks" as a named class, with a contract, and ship `check-bash-bound.py` as its second member.**
+**Establish guard hooks as a named class with a contract. Ship `check-bash-bound.py` as a member, deactivated.**
 
 A guard hook:
 
-1. **Refuses by exit 2 with the reason and the accepted form on stderr.** The model receives the reason as the tool result and chooses again. Nothing else in the session changes.
-2. **Exits only 0 or 2.** Every internal failure path (stdin unparseable, tool not Bash, an exception) exits 0 with one line on stderr. A bug in a guard degrades to no guard; it never blocks everything.
-3. **Is wired without `|| true`.** A guard that cannot block is decoration (the `code/security/guards` way). The asymmetry is paid inside the script by rule 2.
-4. **Refuses a closed list, named in the script, each entry with its repair.** Extending the list is a one-line change and a lint-visible one; a guard has no semantic lane.
-5. **Honors the harness's own forms.** A command sent with `run_in_background: true`, or carrying a `timeout` prefix in the same segment, is exempt from the never-returns classes. Pattern kills and pipe-to-shell have no exemption; their repair is a different command.
+1. Refuses by exit 2 with the reason and the accepted form on stderr. The model receives the reason as the tool result and chooses again.
+2. Exits only 0 or 2. Every internal failure path exits 0 with one line on stderr. A bug in a guard degrades to no guard.
+3. Is wired without `|| true` when it is wired at all.
+4. Refuses a closed list named in the script, each entry with its repair. A guard has no semantic lane.
+5. Honors the harness's own forms: `run_in_background` and a `timeout` prefix exempt the never-returns class.
 
-`check-bash-bound.py` refuses:
+`check-bash-bound.py` refuses the four classes above and lives at `hooks/ways/check-bash-bound.py` with its verdict test at `tests/test-bash-bound.sh`, which runs in the suite. **It is not wired in `settings.json`.** An operator who wants it adds one entry under `hooks.PreToolUse` for matcher `Bash`:
 
-| Class | Refused | Exempt when | Repair offered |
-|---|---|---|---|
-| Pattern kill | `pkill`, `killall`, `kill -SIG <pattern>` | `kill` given a literal pid or `$(cat *.pid)` | kill by recorded or literal pid |
-| Interactive prompt | `sudo`, `ssh`, `docker exec -it`, `apt`, `pacman`, `yay` | `sudo -n`, `-o BatchMode=yes`, `-y` or `--noconfirm`, no `-it` | add the non-interactive flag |
-| Never returns | `tail -f`, `journalctl -f`, `docker run` (attached) | `run_in_background`, `timeout N` prefix, `docker run -d` | run it in the background |
-| Pipe to shell | `... \| sh`, `... \| bash` | none | download to a file, read it, run the file |
+```json
+{ "type": "command", "command": "${HOME}/.claude/hooks/ways/check-bash-bound.py" }
+```
 
-Builds, installs, and test runs are **not** refused. They are bounded by the harness timeout, and the `softwaredev/environment/bounded-execution` way, which fires on the same command classes through the ordinary inject path, carries the liveness discipline: running is claimed only on an observed liveness signal, and completion is the marker, never the absence of output or a timeout.
+**Bounded execution is guidance.** The `softwaredev/environment/bounded-execution` way fires on the same command classes through the ordinary inject path and carries the discipline: background the never-returning command, give the interactive one its flag, kill by pid, download an installer before running it, and claim running only on a liveness signal.
 
-The way and the guard are a pair. The way fires first through `check-bash-pre.sh` and teaches; the guard runs after it and refuses the four classes the teaching cannot be trusted to prevent.
+Activating the guard by default needs its own ADR, and the bar is ADR-162's: an irreversible or disclosing outcome that injected guidance has been observed to fail to prevent.
 
 ## Consequences
 
 ### Positive
 
-- A pattern kill that could take out the agent's own shell, a subagent, or an operator process is stopped before it runs, with the pid-based form handed back.
-- Interactive prompts stop burning the full timeout and returning a misleading error.
-- The class now has a name and a contract. A third guard, when one is justified, has a shape to follow and a place to be cited.
-- The refused list is closed and visible in one file. Reviewing what the harness can stop is a read of that list.
+- Bash stays as permissive as the harness and the operator's permission list make it. No hook runs in front of every shell call unless the operator asks.
+- The class has a name, a contract, and a tested reference member. A project that wants the refusal gets it with one settings line.
+- The discipline still reaches the model at the moment it is about to run one of those commands.
 
 ### Negative
 
-- A second hook runs before every Bash call. The script is regex over one string and exits in milliseconds; the cost is real and small.
-- A closed list misses what it does not name. That is the design: a guard with a semantic lane would refuse on a guess.
-- An operator who legitimately wants `pkill` in a session must run it outside the agent or add an exemption. The reason line says so.
+- A pattern kill or a pipe-to-shell that the model decides on despite the guidance runs. The harness timeout and the permission prompt are the remaining stops.
+- A deactivated script drifts. Its test runs in the suite, which keeps it working; whether its refused list still matches the harness is checked only when someone activates it.
 
 ### Neutral
 
-- `strip-session-link-pre.sh` is retroactively a member of the class. Its contract already matches; no change is needed.
-- The Cypress guard's `setsid nohup` detached form is accepted as an exemption for compatibility, and the way recommends `run_in_background` instead.
-- The way's `commands:` trigger overlaps the guard's list on purpose, so the model has read the discipline before it meets the refusal.
+- `strip-session-link-pre.sh` is retroactively a member of the class. Its contract already matches.
+- The Makefile marks `.py` hooks executable alongside `.sh`, so the opt-in path works after `make install`.
+- The `code/security/guards` way, which says a guard that cannot block is decoration, describes controls a project ships in its own code. It does not argue for wiring this one.
 
 ## Alternatives Considered
 
-- **Port the Cypress guard unchanged: refuse any command without an explicit bound.** Rejected. The harness already bounds every foreground command, so the rule would refuse `make`, `cargo build`, and `npm install` in their ordinary bounded form and teach the model to prefix `timeout` to everything, which adds nothing the harness does not already do.
-- **Guidance only, no refusal.** Rejected for the four classes above. The recovery way already tells the model to classify a stuck process before acting, and a model under time pressure still reaches for `pkill`. A pattern kill is irreversible and the repair is exact, which is the profile that justifies a refusal over a hint.
-- **Implement the guard inside the `ways` binary's `scan command` path.** Rejected for now. The scan path is an inject path with a semantic lane; the guard needs neither, and keeping it a separate script keeps the refused list readable without building Rust. Folding it in later is an ordinary refactor once a third guard exists.
-- **Refuse pipe-to-shell only with a bound, as Cypress does.** Rejected. The hazard is provenance, and a `timeout` does nothing for it.
+- **Wire the guard by default (the first draft of this ADR).** Rejected by the operator: Bash execution is already guarded enough.
+- **Withdraw the guard entirely.** Rejected in favor of shipping it deactivated: the port and its forty-case test exist, and a project with a different risk posture can opt in without re-deriving them.
+- **Port the Cypress guard unchanged, refusing any command without an explicit bound.** Rejected. The harness already bounds foreground commands; the rule would refuse ordinary builds and installs.
+- **Fold the guard into the `ways` binary's scan path.** Rejected for now; the scan path is an inject path with a semantic lane, and a deactivated script is easier to read and to opt into.
