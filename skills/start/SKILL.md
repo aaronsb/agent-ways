@@ -63,6 +63,25 @@ uncertainty — name it, don't hunt for it. Interview the operator, structured
 constraints bound it, what's the first load-bearing question. Enough to frame intent —
 not a full plan yet.
 
+Pace it:
+
+- One to three questions per turn. Each set of answers reshapes the next question.
+- After every two answers, reflect back in a paragraph: "I now believe X. Tell me where
+  I'm wrong." The operator can then disagree precisely.
+- Cap at nine questions. Past nine, the interview is trying to specify and plan at once.
+  Accept the gaps, mark each as an assumption, and move on.
+
+The interview has converged when you can write each of these without hand-waving:
+
+1. Problem statement, one sentence: who does what today, and what they should do instead.
+2. Primary user: a specific role and context.
+3. First useful slice: the smallest end-to-end thing that delivers the outcome for one case.
+4. Success criteria: measurable, with a time horizon.
+5. Non-goals: three to five of them.
+6. Constraints that bind: runtime, security, privacy, data, cost, latency, compliance.
+7. Shaped options: two to four named approaches, each with a one-line summary and its tradeoff.
+8. Risks and assumptions: the top three risks, and every assumption that changes the plan if false.
+
 ## Step 4 — Recommend planning (warm context, can't self-invoke)
 
 By now the context is *warm* — state read, intent framed. That's the whole reason the

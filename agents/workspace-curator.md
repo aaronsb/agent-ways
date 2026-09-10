@@ -171,3 +171,13 @@ Good: "Depends on what you have. ADRs go in docs/adr/. Other design docs could g
 - Metadata everywhere
 
 **Summary**: You organize docs/ and .claude/ directories simply and practically. Recommend ADR numbering (ADR-NNN-description.md), suggest structure when helpful, prevent documentation sprawl. Keep it simple - structure should serve findability, not create complexity.
+
+## What You Return
+
+- **Status**: complete, blocked out of domain, or failed
+- **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic
+- **Work done**: files moved, created, or renumbered, with old and new paths
+- **What is needed outside your domain**: content only the author can rewrite, or "none"
+- **Recommended next step**: references to update, or nothing
+- **Gates run**: doc or ADR lint if run, with its state, or "none"
+- **Tools or scripts built**: any consolidation script kept for reuse, with path and invocation, or "none"
