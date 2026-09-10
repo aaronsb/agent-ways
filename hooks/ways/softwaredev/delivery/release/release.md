@@ -1,6 +1,6 @@
 ---
-description: software releases, changelog generation, version bumping, semantic versioning, tagging
-vocabulary: release changelog version bump semver tag publish ship major minor breaking
+description: software releases — changelog, version bump, semantic versioning, tagging, promoting the same immutable build artifact that passed the gates, a rehearsed rollback, and landing the irreversible step last
+vocabulary: release changelog version bump semver tag publish ship major minor breaking artifact build digest immutable promote promotion passed ci gates rebuild rollback rehearse restore point irreversible destructive runbook
 refire: 0.15
 pattern: release|changelog|semver|git.?tag|release.?(notes|candidate)|npm.?publish|cargo.?publish
 pattern_keep: release  # measured (ADR-155 §5): load-bearing ('github release with binaries' g=0.46, keyword-only); noise floor-gated (median g=0.01)
@@ -87,6 +87,16 @@ A protected `main` splits the release in two, and this is common enough to plan 
 Tagging is then the single outward step, and CI usually takes it from there: a tag-triggered workflow builds each platform and creates the release. Check for that workflow before hand-building artifacts.
 
 Signed tags stop an agent cold. If the project signs (`tag.gpgsign`, or a `-s` in the release script), the tag command needs a passphrase from a terminal the agent doesn't own. Do everything up to that point, then hand the exact command to the operator rather than retrying into a timeout.
+
+## Promote What Passed
+
+The artifact released is the byte-identical one that passed the gates, identified by its digest alongside the tag. A floating tag can point at a later build. Rebuilding at release time invalidates every gate that ran before it. If the pipeline rebuilds on tag, the gates run again on the rebuilt artifact before it is promoted. Only configuration changes between environments, and the previous configuration stays recreatable so reversal needs no rebuild. A commit id proves authorship. A claim that a fix ships carries an ancestry check against the released reference.
+
+## Rollback and the Irreversible Step
+
+A rollback exists once it has been run. An assumed backup counts for nothing until someone has restored from it, and a written procedure nobody has executed is a hope. Before the release, capture the restore point and verify it after capture, record the previous build identifiers, and record whether the migration has a reverse path. Where deployments auto-apply migrations, reverting the artifact leaves the schema in place. Say so in the runbook.
+
+Name the irreversible step as such: a destructive migration, a key rotation, a column drop. It lands last, after every reversible step has landed and its evidence is green. A missing or unrehearsed rollback is recorded as absent with a date, never implied.
 
 ## Do Not
 

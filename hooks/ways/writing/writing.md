@@ -1,6 +1,6 @@
 ---
-description: Content creation — documents, presentations, reports, proposals, editing, and structured writing beyond code documentation
-vocabulary: write draft compose author proposal report presentation deck slides memo brief narrative outline revise edit polish tone audience prose style
+description: writing and editing prose for people — a report, proposal, memo, status or progress update, presentation, or announcement, and the conventions each genre follows
+vocabulary: write writing draft compose write up proposal report presentation deck slides memo status update progress update announcement outline revise edit rewrite polish tone audience prose style genre
 macro: append
 scope: agent
 requires: ["Bash(grep:*)"]
@@ -31,6 +31,18 @@ Outline before drafting. Defend the structure to the user.
 | Status update | Progress → blockers → next steps |
 | Presentation | Hook → tension → resolution → takeaway |
 | Decision doc | Context → options → recommendation → consequences |
+
+## Genre
+
+Where a genre's needs and a general style rule disagree, the genre wins.
+
+| Genre | Prioritize | Avoid |
+|---|---|---|
+| Technical doc | task success, exact terms, prerequisites, observable behavior, examples, failure modes, recovery | flourish in a procedure; varying a canonical term for style; softening mandatory wording |
+| ADR | problem, constraints, alternatives considered, decision, trade-offs, interfaces, migration, verification | dressing a preference as an inevitability; blurring "we chose" with "the system requires" |
+| Brief for an agent | the task, the done criteria, the bounds, what to read first, the shape of the report back | pasting context the agent can read from disk; leaving done undefined |
+| Proposal | problem, proposed change, rationale, scope, cost where known, trade-offs, risks, success criteria | overselling; omitting limitations |
+| Status update | what changed, what is blocked and by whom, the next action, all early | scene-setting the reader already has; a list of next steps with no owner |
 
 ## Prose Style
 

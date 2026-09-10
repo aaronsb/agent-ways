@@ -28,4 +28,6 @@ Flag these as security issues:
 - code/security/auth(softwaredev) — authentication requirements
 - code/security/injection(softwaredev) — injection prevention
 - code/security/secrets(softwaredev) — credential management
+- code/security/guards(softwaredev) — restrictive rules, fallback posture, never widen a control to clear a symptom
+- code/security/pentest(softwaredev) — authorized offensive testing, scope gate first
 - code/supplychain(softwaredev) — dependency security

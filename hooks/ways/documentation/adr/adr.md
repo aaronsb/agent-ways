@@ -1,6 +1,6 @@
 ---
-description: Architecture Decision Records — creating, managing, and referencing ADRs for technical choices
-vocabulary: adr architecture decision record design pattern technical choice trade-off rationale alternative
+description: Architecture Decision Records — creating, managing, and referencing ADRs for technical choices, how reversible a decision is, a deliberate deviation from a standard, and superseding an accepted ADR
+vocabulary: adr architecture decision record design pattern technical choice trade-off rationale alternative reversibility reversible one-way irreversible deviation deviate depart standard exception waiver supersede superseded accepted defer
 pattern: (^| )adr( |$)|architect|decision|design.?pattern|technical.?choice|trade.?off
 files: docs/architecture/.*\.md$
 macro: prepend
@@ -69,6 +69,7 @@ Why this decision is needed. What forces are at play.
 
 ## Decision
 What we're doing and how.
+Reversibility: reversible | expensive | one-way, with the milestone that graduates it.
 
 ## Consequences
 
@@ -99,6 +100,20 @@ The test: a future reader who never saw your session should be able to apply thi
 - **Decision and Consequences carry no session-specifics.** If a sentence only parses with this week's feature in mind, lift it to the general form or cut it.
 
 A generalized ADR is reusable across everything that hits the same force. A discovery-laden one is single-use.
+
+## What Counts as a Decision
+
+- **Doing nothing is a decision** when the alternatives were live. Record the destination, the trigger that starts the work, and what makes waiting safe.
+- **An as-built observation does not qualify.** A detail reconstructed from source with no recorded rationale goes in a design note or README, marked "rationale not recorded".
+- **A deliberate deviation qualifies.** When the project departs from a standard on purpose, the ADR names the standard, the reason, the scope (paths, environments, components), and the condition that ends it. Without the end condition a later session reads the departure as drift and fixes it.
+
+## Reversibility
+
+Tag every ADR with one of three grades: reversible (changed in one session, no data migration), expensive (a multi-day project), one-way (a rewrite or a migration on live data). Let the tag graduate when the cost changes at a known point: "reversible now, expensive after the first production import". A one-way decision gets the fullest Alternatives section, with a concrete reason each alternative lost.
+
+## Editing an Accepted ADR
+
+A clarification lands in place: a fixed typo, a sharper sentence, a link. A change in what the project does gets a new ADR that supersedes the old one; flip the old status to Superseded and leave its body alone.
 
 ## Fixing ADR Issues
 

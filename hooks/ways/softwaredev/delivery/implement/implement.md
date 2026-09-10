@@ -1,6 +1,6 @@
 ---
-description: Implementation planning — work breakdown, safe parallelization, and briefing the human before writing code
-vocabulary: implement build begin start work execute plan breakdown parallelize worktree task sprint kick off begin coding
+description: Implementation planning, work breakdown, safe parallelization, briefing the human before writing code, and the four-field shape of a task description
+vocabulary: implement build begin start work execute plan breakdown parallelize worktree task sprint kick off begin coding increment contract failing test red rollback depends slice
 macro: append
 scope: agent
 requires: ["Read", "Bash(cat:*)", "Bash(find:*)", "Bash(wc:*)"]
@@ -41,6 +41,19 @@ Don't just say "that won't work" — say "I think you're trying to [intent]. Her
 ## After the Briefing
 
 Once the human approves (or you adjust based on their feedback), create tasks using `TaskCreate` with enough detail for a subagent or post-compaction agent to execute cold — file paths, ADR reference, dependencies, and isolation strategy.
+
+### The Shape of a Task
+
+Each task description carries four fields:
+
+| Field | What it holds |
+|---|---|
+| Contract | the requirement or ADR clause this increment implements |
+| Failing test | the test written first, red until the increment lands; it authorizes the work |
+| Rollback path | how the change comes out: revert, feature flag, or a named reverse migration |
+| Depends on | earlier tasks and the libraries or services it relies on; `none` is a valid value and a blank field is a defect |
+
+Tasks are listed in dependency order. A task that depends on a later one is misordered. A task whose test cannot be written from its description as written is re-sliced before anyone starts it.
 
 ## See Also
 

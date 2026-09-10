@@ -1,7 +1,7 @@
 ---
-description: when describing how a system actually behaves, derive ground truth from executable artifacts (code, migrations, runtime config) and treat design docs / ADRs / specs as claims to verify
-vocabulary: source of truth ground truth authoritative audit security review reconcile docs vs code spec vs implementation design doc stale what does the system actually do how does this really work migrations schema enforcement code drift baseline supersede
-pattern: source.?of.?truth|ground.?truth|security.?review|reconcile|docs?.vs.?code|spec.vs.?implementation|actually (do|behave|work|enforce)|is (this|the|that).{0,30}(up.?to.?date|still (true|accurate|current))|stale (adr|doc|spec)
+description: deriving how a system actually behaves from executable artifacts (code, migrations, runtime config) rather than from docs, ADRs or specs, and capturing a golden-master baseline before a refactor or migration so the diff afterward proves the behavior did not change
+vocabulary: ground truth source of truth authoritative security review reconcile docs vs code spec vs implementation stale drift what does the system actually do baseline supersede golden master oracle refactor migration behavior preserved no behavior change same outputs recapture intended delta pinning
+pattern: source.?of.?truth|ground.?truth|security.?review|reconcile|docs?.vs.?code|spec.vs.?implementation|actually (do|behave|work|enforce)|is (this|the|that).{0,30}(up.?to.?date|still (true|accurate|current))|stale (adr|doc|spec)|golden.?master
 scope: agent, subagent
 refire: 0.2
 ---
@@ -36,7 +36,14 @@ Naming *which* of these it is, with the evidence, is most of the value.
 
 Design docs accrete like migrations. When enough of a domain's docs have drifted that patching each one leaves the reader reconciling overlapping half-truths, the clean move is the same one a migration chain eventually makes: **find the sum of what the code actually does, write one fresh baseline that says it, and supersede the drifted predecessors** — preserving them as history, not deleting them. A baseline that describes the implemented system (with the remaining code/doc gaps tracked as explicit work) beats five aspirational documents nobody trusts.
 
+## The golden-master oracle
+
+Before a refactor, a migration, or a re-platforming, "it builds and the tests pass" says nothing about preserved behavior. Capture the current observable outputs (endpoint responses, persisted shapes, message payloads, computed results) over a representative input set, one baseline per consumer, normalized to mask only volatile leaves such as timestamps and ids. Review the capture and land it as its own slice, before any code change. Capture it read-only: once the migration has overwritten the system, that evidence is gone. On a codebase with no tests this baseline is often the only executable gate; say so, and treat effort estimates as floors.
+
+After the change, re-capture and diff. The gate passes when everything matches the baseline except an enumerated list of intended deltas, each row naming the change and why it is deliberate. An unexplained diff, or an additive-only edit to the pinning tests, is justified before the gate goes green. Never re-baseline silently.
+
 ## See Also
 
 - freshness(softwaredev) — the parent: history-age drift in derived artifacts
 - adr(documentation) — superseding and baselining ADRs through the proper workflow
+- code/testing/gates/assertions(softwaredev) — the shape of the baseline assertion: snapshot and golden baselines, the known-bug marker
