@@ -85,7 +85,9 @@ The gate is **not one policy**. Classify the increment on two axes and pick the 
 | **human gate: required** | single `code-reviewer` → offer to read before merge | swarm review **and** operator approval before merge |
 
 - **X (review depth)** ← complexity and blast-radius: diff size, files touched,
-  core-vs-leaf, test coverage, reversibility.
+  core-vs-leaf, test coverage, reversibility. The same change class sets the gate
+  depth (`code/testing/gates` way): choose review depth and gate depth together, and
+  report each gate as executed, discovered, or absent.
 - **Y (human gate)** ← does the work set direction (an ADR, an architecture change →
   human gate required, however small), and has the operator already read it (wrote it
   or reviewed it live → gate already satisfied).
