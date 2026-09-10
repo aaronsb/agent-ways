@@ -1,6 +1,6 @@
 ---
-description: Sub-agent delegation — when and how to spawn specialized sub-agents for token-intensive work
-vocabulary: subagent delegate spawn background task parallel worker teammate planner
+description: Sub-agent delegation — when to spawn a specialized sub-agent, writing the brief so each constraint keeps its stated strength, the shape the worker reports back, and how deep delegation goes
+vocabulary: subagent sub-agent delegate delegation spawn background parallel worker teammate explore fan-out brief instructions constraint preference hard requirement bound restate fidelity handback report back blocked leaf depth
 pattern: subagent|delegat|spawn.{0,30}agent|review.{0,30}\bpr\b|organiz.{0,30}docs
 scope: agent
 refire: 0.15
@@ -39,6 +39,37 @@ Project agents live in `agents/`. The harness also supplies built-ins — `Explo
 - State what you want back: a report, a list of issues, a plan
 - For reviews: include the diff or PR number
 - For planning: include requirements and constraints
+
+## What Comes Back
+
+Ask for the same return shape in every brief, and read it before the report body:
+
+- **Status**: complete, blocked out of domain, or failed
+- **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic (the classes in environment/recovery)
+- **Work done**, with file paths
+- **What is needed outside the agent's domain**, or "none"
+- **Recommended next step**
+- **Gates run**, each with its state, or "none"
+- **Tools or scripts built** that a later session could run again, with path and invocation. An unreported tool is a lost capability.
+
+A blocked or failed worker still returns the whole shape. What it finished is where the next attempt starts.
+
+## Brief Fidelity
+
+Carry each constraint at its stated strength. "Avoid X where you can" is a preference the worker weighs against the goal. "No X" is a bound it does not cross. Restating either as the other is a brief defect. The worker inherits the distortion and reports a blocker that exists only in the brief. Hardening a preference corrupts the brief as much as relaxing a bound.
+
+## Depth
+
+Leaf agents carry no `Agent` tool. Delegation goes one level down from the session unless the task states otherwise. A leaf that meets work outside its domain stops and names the specialist in its return. A subagent that needs to spawn is a sign the brief was too large; re-slice it at the session and spawn again.
+
+## Investigation Briefs
+
+For read-only fan-out (`Explore`, or `general-purpose` told to read only), state these rules in the brief:
+
+- Say "not found" rather than guess
+- Every claim carries a file path and an exact value (version, port, name)
+- Sample rather than bulk-read: name the manifests, entry points, and config files to start from
+- End with what was deliberately omitted, so the caller can ask for it
 
 ## When NOT to Use
 
@@ -88,3 +119,8 @@ Calibrate the wrapper against the agent's documented purpose:
 The distinction: did the subagent do what its contract says it does, or did it act outside that contract? The wrapper alone doesn't tell you; the agent file does. Read the contract, then judge.
 
 PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See `agents/code-reviewer.md` for the mode breakdown.
+
+## See Also
+
+- environment/recovery(softwaredev) — classify a failed or wrong handback before retrying or re-briefing
+- research(softwaredev) — the fan-out step that uses these investigation rules

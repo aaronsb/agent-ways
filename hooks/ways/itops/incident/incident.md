@@ -1,7 +1,7 @@
 ---
-description: Incident response tiers, escalation paths, MTTR targets, alert triage, and remediation workflows
-vocabulary: incident response escalation support tier l0 l1 l2 mttr mean time alert triage remediate on-call outage severity page production down broken
-pattern: incident.?response|l0.?support|l1.?support|l2.?support|escalat|mean.?time|alert.?(response|triage)|remediat
+description: production incidents — something is down or broken, alert triage, escalation tiers and MTTR targets, fixing forward versus rolling back, and what has to exist before an incident closes
+vocabulary: incident outage production down broken failing alert page on-call escalation severity triage tier l0 l1 l2 mttr remediate fix forward roll back restore contain regression postmortem closure prevention hazard residual
+pattern: incident.?response|l0.?support|l1.?support|l2.?support|escalat|mean.?time|alert.?(response|triage)|remediat|fix.?forward|post.?mortem|on.?call
 scope: agent, subagent
 refire: 0.15
 ---
@@ -48,3 +48,15 @@ When escalating, provide:
 5. **Autonomous action**: Unlock account
 6. Respond with context and next steps
 
+## Fix Forward
+
+The first move on a failure is the smallest forward fix or the smallest reversible containment. Classify the fault before reversing anything. A configuration fault takes the non-destructive path. A data restore is a separate, separately approved last resort. Do not restore a database to fix a configuration problem. When reversal is chosen, record why and who approved it. A containment that leaves the improper state standing stays open with an owner.
+
+## Closure
+
+An incident closes with three artifacts: a regression test that reproduces the failure, a gate where one would have caught it, and a prevention rule recorded where the system keeps its durable rules. The narrative is the least durable part of the record and never counts as closure. A hazard seen twice is recorded as a fact with an owner, and the earlier one-off note is retired. Findings outside the incident's scope become named residual issues with an owner and the condition that reopens them.
+
+## See Also
+
+- delivery/issues(softwaredev) — residuals with an owner and a reopen condition
+- delivery/release(softwaredev) — the rehearsed rollback a reversal relies on

@@ -1,6 +1,6 @@
 ---
-description: Structured investigation — exploring topics, comparing options, synthesizing findings, evaluating sources
-vocabulary: research investigate explore find out compare evaluate analyze synthesize sources evidence survey landscape assess discover understand learn about look into dig into alternatives options
+description: Structured investigation — scoping a question, fanning out across independent sources, ranking source authority from official docs down to community posts, and synthesizing findings into an answer
+vocabulary: research investigate look into dig into find out compare evaluate assess synthesize source sources primary source official docs authority credible trust citation evidence survey landscape alternatives options fan-out sweep confidence
 macro: append
 scope: agent
 requires: ["Bash(grep:*)"]
@@ -16,8 +16,12 @@ Before searching, state what you're trying to learn and why. A vague "research X
 ## Investigation Structure
 
 1. **Scope** — What's in bounds? What would be a tangent?
-2. **Gather** — Use tools (WebSearch, WebFetch, Grep, Read) to collect information. Prefer primary sources over summaries of summaries. When the question spans several independent sources, asking for the research is asking for the sweep: fan `Explore` or `general-purpose` agents across them rather than pausing to request permission, and say why in a clause ("six independent sources; agents return conclusions, not page dumps"). Deep-research and `Workflow` are not covered by that — propose those and discuss. See ADR-175.
-3. **Evaluate** — Not all sources are equal. Official docs > blog posts > forum answers > LLM-generated content. Flag confidence levels.
+2. **Gather** — Use tools (WebSearch, WebFetch, Grep, Read) to collect information. Prefer primary sources over summaries of summaries. When the question spans several independent sources, asking for the research is asking for the sweep: fan `Explore` or `general-purpose` agents across them rather than pausing to request permission, and say why in a clause ("six independent sources; agents return conclusions, not page dumps"). Deep-research and `Workflow` are not covered by that — propose those and discuss. See ADR-175. Put four rules in every fan-out brief:
+   - Say "not found" rather than guess.
+   - Every claim carries a file path or URL and an exact value (version, port, name).
+   - Sample rather than bulk-read: name the manifests, entry points, and config files to start from.
+   - End with what was deliberately omitted, so you can ask for it.
+3. **Evaluate** — Not all sources are equal. Rank them: official docs for the exact version in use, then upstream source, then migration guides and advisories, then community posts, then LLM-generated content. Flag confidence levels.
 4. **Synthesize** — Compress findings into a structure the user can act on. Don't dump raw results.
 5. **Present** — Lead with the answer, then the evidence. The user wants the conclusion first.
 
