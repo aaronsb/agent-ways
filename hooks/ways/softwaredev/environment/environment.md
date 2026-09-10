@@ -17,7 +17,9 @@ Children of this way cover the development environment:
 | SSH, remote access | `environment/ssh` |
 | Makefile targets | `environment/makefile` |
 | Container build/run safety | `environment/container-safety` |
+| Authoring host versus target host | `environment/hostparity` |
 | Awareness / attend loop | `environment/attend` |
+| Recovering from a failed attempt | `environment/recovery` |
 
 ## See Also
 
@@ -27,4 +29,6 @@ Children of this way cover the development environment:
 - environment/ssh(softwaredev) — SSH and remote access
 - environment/makefile(softwaredev) — Makefile targets and conventions
 - environment/container-safety(softwaredev) — developer safety in container build/run definitions
+- environment/hostparity(softwaredev) — a green result on the authoring host is evidence about the authoring host only
 - environment/attend(softwaredev) — the attend awareness sensor loop
+- environment/recovery(softwaredev) — classify a failure, take its one allowed move, escalate after three attempts

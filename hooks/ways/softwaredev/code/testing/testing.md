@@ -37,4 +37,5 @@ Detect the test framework from project files (package.json, requirements.txt, Ca
 
 - code/testing/mocking(softwaredev) — when and how to mock
 - code/testing/tdd(softwaredev) — test-driven development cycle
+- code/testing/gates(softwaredev) — every gate reports executed, discovered, or absent; a zero needs a positive control
 - code/quality(softwaredev) — tests enforce quality thresholds

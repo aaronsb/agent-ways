@@ -46,6 +46,7 @@ A validation — a lint rule, an assertion, a schema constraint, a CI check —
 
 ## See Also
 
+- code/quality/integration(softwaredev) — a change integrates into the whole file; forbidden patch moves, the class sweep
 - code/testing(softwaredev) — quality requires test coverage
 - code/errors(softwaredev) — error handling is a quality signal
 - tooling(softwaredev) — encode enforced conventions in tooling
