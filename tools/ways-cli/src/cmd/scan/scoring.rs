@@ -79,13 +79,30 @@ pub(crate) fn multilingual_enabled(output_language: &str) -> bool {
 /// Run both models against `query` and return per-model scores independently.
 /// Either or both may be None if their engine/model is unavailable.
 pub(crate) fn batch_embed_score(query: &str) -> EmbedScores {
+    batch_embed_score_with(query, None)
+}
+
+/// Score `query` against an explicit corpus JSONL instead of the canonical one.
+///
+/// `corpus` is the English-lane corpus file. The multilingual lane reads
+/// `ways-corpus-multi.jsonl` as its sibling in the same directory, so a corpus
+/// built by `ways corpus --output DIR` scores as a unit. Models and calibration
+/// still come from the canonical corpus dir. An isolated corpus holds way
+/// entries; `make setup` is what puts the weights on disk.
+pub(crate) fn batch_embed_score_with(
+    query: &str,
+    corpus: Option<&std::path::Path>,
+) -> EmbedScores {
     let Some(embed_bin) = find_way_embed() else {
         return EmbedScores { en: None, multi: None, calibration: Default::default() };
     };
     let xdg = crate::paths::corpus_dir();
     let calibration = load_calibration(&xdg);
 
-    let en_corpus = xdg.join("ways-corpus-en.jsonl");
+    let en_corpus = match corpus {
+        Some(p) => p.to_path_buf(),
+        None => xdg.join("ways-corpus-en.jsonl"),
+    };
     let en_model = xdg.join("minilm-l6-v2.gguf");
     let en = run_if_ready(&embed_bin, &en_corpus, &en_model, query, "EN");
 
@@ -93,15 +110,16 @@ pub(crate) fn batch_embed_score(query: &str) -> EmbedScores {
     // English-mode installs never load the heavier 768-dim model on a match —
     // gated on output_language, not on corpus-file presence.
     let multi = if multilingual_enabled(&crate::config::global().language) {
-        let multi_corpus = xdg.join("ways-corpus-multi.jsonl");
+        let multi_corpus = sibling_corpus(corpus, &xdg, "ways-corpus-multi.jsonl");
         let multi_model = xdg.join("multilingual-minilm-l12-v2-q8.gguf");
         run_if_ready(&embed_bin, &multi_corpus, &multi_model, query, "multilingual")
     } else {
         None
     };
 
-    // Legacy fallback: combined corpus + EN model if neither ran.
-    if en.is_none() && multi.is_none() {
+    // Legacy fallback: combined corpus + EN model if neither ran. An explicit
+    // `--corpus` names the file to score, so it gets no substitute.
+    if en.is_none() && multi.is_none() && corpus.is_none() {
         let combined = xdg.join("ways-corpus.jsonl");
         if combined.is_file() && en_model.is_file() {
             let fallback = run_embed_match(&embed_bin, &combined, &en_model, query);
@@ -110,6 +128,20 @@ pub(crate) fn batch_embed_score(query: &str) -> EmbedScores {
     }
 
     EmbedScores { en, multi, calibration }
+}
+
+/// Resolve `name` next to an explicit corpus file, falling back to the canonical
+/// corpus dir when no corpus was given or it has no parent directory.
+pub(crate) fn sibling_corpus(
+    corpus: Option<&std::path::Path>,
+    xdg: &std::path::Path,
+    name: &str,
+) -> std::path::PathBuf {
+    corpus
+        .and_then(|p| p.parent())
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(xdg)
+        .join(name)
 }
 
 /// Load per-model calibration (ADR-156) from the corpus manifest
@@ -240,7 +272,33 @@ pub(crate) use crate::util::home_dir;
 
 #[cfg(test)]
 mod tests {
-    use super::multilingual_enabled;
+    use super::{multilingual_enabled, sibling_corpus};
+    use std::path::Path;
+
+    #[test]
+    fn sibling_resolves_next_to_an_explicit_corpus() {
+        let given = Path::new("/tmp/iso/ways-corpus.jsonl");
+        let canonical = Path::new("/home/u/.cache/agent-ways/user");
+        assert_eq!(
+            sibling_corpus(Some(given), canonical, "ways-corpus-en.jsonl"),
+            Path::new("/tmp/iso/ways-corpus-en.jsonl")
+        );
+    }
+
+    #[test]
+    fn sibling_falls_back_to_the_canonical_dir() {
+        let canonical = Path::new("/home/u/.cache/agent-ways/user");
+        assert_eq!(
+            sibling_corpus(None, canonical, "ways-corpus-en.jsonl"),
+            canonical.join("ways-corpus-en.jsonl")
+        );
+        // A bare filename has an empty parent; the canonical dir covers it.
+        let bare = Path::new("ways-corpus.jsonl");
+        assert_eq!(
+            sibling_corpus(Some(bare), canonical, "ways-corpus-en.jsonl"),
+            canonical.join("ways-corpus-en.jsonl")
+        );
+    }
 
     #[test]
     fn english_mode_disables_multilingual_lane() {

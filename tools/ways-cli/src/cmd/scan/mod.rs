@@ -9,7 +9,7 @@ mod lookbehind;
 mod reduce;
 mod scoring;
 mod state;
-pub(crate) use scoring::batch_embed_score;
+pub(crate) use scoring::{batch_embed_score, batch_embed_score_with, sibling_corpus};
 
 // Per-hook embed-query budgets (approximate tokens). MiniLM's window
 // is 128 position embeddings; we budget ~85% of that. The reducer

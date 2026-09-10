@@ -235,6 +235,10 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/strip-session-link-pre.sh"
+          },
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-bash-bound.py"
           }
         ]
       },

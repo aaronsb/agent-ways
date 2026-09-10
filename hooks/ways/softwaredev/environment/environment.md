@@ -20,6 +20,7 @@ Children of this way cover the development environment:
 | Authoring host versus target host | `environment/hostparity` |
 | Awareness / attend loop | `environment/attend` |
 | Recovering from a failed attempt | `environment/recovery` |
+| Long, interactive, or never-returning commands | `environment/bounded-execution` |
 
 ## See Also
 
@@ -32,3 +33,4 @@ Children of this way cover the development environment:
 - environment/hostparity(softwaredev) — a green result on the authoring host is evidence about the authoring host only
 - environment/attend(softwaredev) — the attend awareness sensor loop
 - environment/recovery(softwaredev) — classify a failure, take its one allowed move, escalate after three attempts
+- environment/bounded-execution(softwaredev) — background the never-returning command, flag the interactive one, kill by pid; the guard hook refuses the rest

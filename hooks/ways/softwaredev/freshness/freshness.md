@@ -14,6 +14,8 @@ Some files exist to *describe* or *derive from* something else — a README desc
 
 The check below looks at one signal — how far the recorded history of these artifacts lags the history of what they track — and surfaces a note only when the gap is wide *and* nothing already in flight closes it. Silence means things are keeping pace.
 
+A second check reads ADR frontmatter under `docs/architecture` and reports how many decisions sit in Draft or Proposed, naming the oldest of each. A decision parked in one of those states is one the project stopped deciding. The remedy is to accept it, reject it, or say in the ADR what it is waiting on.
+
 ## What it catches — and what it doesn't
 
 - **Catches:** the artifact nobody has touched while its source moved on. The abandoned README. The generated file last regenerated dozens of commits ago.

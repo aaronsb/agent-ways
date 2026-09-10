@@ -417,7 +417,7 @@ publish-release:
 # --- Supporting ---
 
 hooks-executable:
-	@find hooks -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
+	@find hooks \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true
 	@echo "Hooks marked executable."
 
 clean:
