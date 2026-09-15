@@ -23,9 +23,9 @@ A test directory can look fine until someone explains the reruns. A deployment s
 
 ## Then aim at the longest wait
 
-Suppose coding takes two days and everything after it takes eight. Cutting coding in half saves one day in ten. The slide can say 50%; the customer waits nine days. Recovered coding time counts — it is just not five days.
+Suppose writing the change takes ten turns and getting it into production takes forty more: reruns until green, a review round, an environment somebody has to request, an approval that sits until a person reads it. Halving the ten saves five turns of fifty. The fix goes where the forty are.
 
-So the fix goes where the change waited longest. Another hundred tests will not make someone answer an approval request. Another agent will not schedule the release window. If the longest wait is a decision, the finding is a decision, and it belongs to a person.
+Another hundred tests will not make someone answer an approval request. Another agent will not schedule the release window. If the longest wait is a decision, the finding is a decision, and it belongs to a person.
 
 ## Common Rationalizations
 
@@ -33,7 +33,7 @@ So the fix goes where the change waited longest. Another hundred tests will not 
 |---|---|
 | "We already know it's slow, let's just add automation" | Automation of the fast part is how coding got faster and delivery didn't. Walk it first. |
 | "One change isn't a representative sample" | It is a real one. Walk a second comparable change after the fix and compare. |
-| "The delay is organizational, not our problem" | Then say so, with the wait measured and the owner named. That is the finding. |
+| "The delay is organizational, not our problem" | Then say so, with the wait measured and the owner named. |
 | "The tests pass eventually" | Record how many runs. Eventually is a wait. |
 
 ## See Also

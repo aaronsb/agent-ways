@@ -7,7 +7,7 @@ refire: 0.2
 <!-- epistemic: heuristic -->
 # Order in the Queue
 
-A change can be individually good and still wrong to accept **now**. That is what *premature* means: a question of order, not merit. Five reasonable capabilities merged onto a module nobody can test make the module harder to fix and each other harder to trust.
+A change can be individually good and still wrong to accept **now**. *Premature* names that: a question of order. Five reasonable capabilities merged onto a module nobody can test make the module harder to fix and each other harder to trust.
 
 ## Triage by readiness
 
@@ -15,8 +15,8 @@ For each open item, name the area it touches and check that area against the fou
 
 | The item | Placement |
 |---|---|
-| **Establishes** a missing condition — adds the test command, wires CI, makes the deploy repeatable, demonstrates rollback | Jumps the queue. This is the work that makes the rest possible. |
-| **Assumes** a condition the area does not meet — changes behaviour nobody can verify, deploys through a path nobody can repeat | Held, with the prerequisite named. Not rejected: held. |
+| **Establishes** a missing condition: adds the test command, wires CI, makes the deploy repeatable, demonstrates rollback | Jumps the queue. The work that makes the rest possible. |
+| **Assumes** a condition the area does not meet: changes behaviour nobody can verify, deploys through a path nobody can repeat | Held, with the prerequisite named. |
 | Touches an area that meets all four | Normal review depth per `delivery/merge`. |
 
 A hold is a state with an exit condition: the prerequisite item landing, or a named person deciding the area does not need it. Record it that way (see `delivery/issues`, residuals). A hold without a condition is a quiet drop.
@@ -25,7 +25,7 @@ A hold is a state with an exit condition: the prerequisite item landing, or a na
 
 - Merge a stack of behaviour changes into an unverifiable area because each one is small.
 - Write the tests *after* the queue clears. The queue is what needs them.
-- Rank items by how well they are argued. Rank them by what they make possible.
+- Rank items by how well they are argued instead of by what they make possible.
 
 ## Common Rationalizations
 

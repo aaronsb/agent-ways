@@ -34,3 +34,8 @@ set up my ssh agent so I stop typing the passphrase	workstation/shell/sshagent
 what is a good recipe for sourdough bread	none
 recommend a good science fiction novel	none
 how many teaspoons are in a tablespoon	none
+before we add this new agent, can this service even be built and deployed from a clean checkout	softwaredev/delivery/groundwork
+the agent says it wrote comprehensive tests, should I take its word for it	softwaredev/delivery/groundwork/claims
+we have twelve open PRs against a module nobody can test, which should land first	softwaredev/delivery/groundwork/sequence
+the platform team owns the pipeline and we can't touch it, so I'll write a wrapper script	softwaredev/delivery/groundwork/permission
+why aren't we shipping faster, walk one change from commit to production and find where it waits	softwaredev/delivery/groundwork/stall
