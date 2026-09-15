@@ -15,16 +15,18 @@ For each open item, name the area it touches and check that area against the fou
 
 | The item | Placement |
 |---|---|
-| **Establishes** a missing condition: adds the test command, wires CI, makes the deploy repeatable, demonstrates rollback | Jumps the queue. The work that makes the rest possible. |
+| **Establishes** a missing condition: adds the test command, wires CI, makes the deploy repeatable, demonstrates rollback | Jumps the queue. |
 | **Assumes** a condition the area does not meet: changes behaviour nobody can verify, deploys through a path nobody can repeat | Held, with the prerequisite named. |
 | Touches an area that meets all four | Normal review depth per `delivery/merge`. |
 
-A hold is a state with an exit condition: the prerequisite item landing, or a named person deciding the area does not need it. Record it that way (see `delivery/issues`, residuals). A hold without a condition is a quiet drop.
+A hold is a state with an owner and an exit condition: the prerequisite item landing, or a named person deciding the area does not need it. Record it that way (see `delivery/issues`, residuals). A hold without a condition is a quiet drop.
+
+The hold sits upstream of the four-square in `delivery/merge`. Merge's coverage axis picks a review depth once Verify holds for the area; until then there is nothing for a reviewer to lean on.
 
 ## What we do not do
 
 - Merge a stack of behaviour changes into an unverifiable area because each one is small.
-- Write the tests *after* the queue clears. The queue is what needs them.
+- Write the tests *after* the queue clears.
 - Rank items by how well they are argued instead of by what they make possible.
 
 ## Common Rationalizations

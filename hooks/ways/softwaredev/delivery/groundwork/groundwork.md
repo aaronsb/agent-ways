@@ -7,13 +7,13 @@ refire: 0.15
 <!-- epistemic: premise -->
 # Groundwork
 
-A skill, agent definition, prompt, or new abstraction is a description of how work gets done here. It becomes a **premature primitive** when it describes a process that cannot run yet: no command that proves the behaviour, no repeatable deploy, no way back. It looks like progress in the repository. Nothing the customer receives has changed. We wrote the onboarding packet before we fixed the building.
+A skill, agent definition, prompt, or new abstraction is a description of how work gets done here. It becomes a **premature primitive** when it describes a process that cannot run yet: no command that proves the behaviour, no repeatable deploy, no way back. It looks like progress in the repository. Nothing the customer receives has changed.
 
 The order we keep is: make the area deliverable, then change it, then write the instructions that describe what now works.
 
 ## The four conditions
 
-Before we change product code in an area, or accept someone else's change into it, we can answer each row for that area. The rest of the codebase can wait.
+Before we change the behaviour or contract of product code in an area, or accept someone else's change to it, we can answer each row for that area. The rest of the codebase can wait. A trivial edit with no behaviour surface takes the one focused check `code/testing/gates` names for it and skips this table.
 
 | Condition | We can say |
 |---|---|
@@ -28,7 +28,7 @@ Where a row is missing, filling it is the first piece of work, and it is a findi
 
 Writing the change is the short part of getting it to a customer. Every primitive that changes how we write code lands on that short part. None of it reaches the review, the environment request, the approval, or the release window where the change waits. `groundwork/stall` measures the split for one real change.
 
-Once the area meets the four conditions, capture the working commands, gates, and deploy path in the project instructions. Now the skill describes something we can do.
+Once the area meets the four conditions, capture the working commands, gates, and deploy path in the project instructions.
 
 ## Children
 

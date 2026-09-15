@@ -107,4 +107,4 @@ Name the irreversible step as such: a destructive migration, a key rotation, a c
 ## See Also
 
 - delivery/commits(softwaredev) — changelog generated from commits
-- delivery/groundwork(softwaredev) — the four conditions a release assumes; a release into an area missing one is premature, whatever the merit of the change
+- delivery/groundwork(softwaredev) — the four conditions a release assumes

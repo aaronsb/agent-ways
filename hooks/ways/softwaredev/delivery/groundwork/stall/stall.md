@@ -17,13 +17,15 @@ When the question is "why isn't more coming out the other end," the answer is ra
 | Which checks run | Automatically, by hand, or "rerun until green" |
 | Where it waits | Review, environment, approval, a product decision, a release window |
 | Who could move it | A named person or role, and whether they know it is waiting |
-| How long | Working time and waiting time, kept separate |
+| How long | Working time in turns, waiting time from timestamps, kept separate |
 
 A test directory can look fine until someone explains the reruns. A deployment script can have an impressive name for something that still needs the one person who remembers.
 
 ## Then aim at the longest wait
 
-Suppose writing the change takes ten turns and getting it into production takes forty more: reruns until green, a review round, an environment somebody has to request, an approval that sits until a person reads it. Halving the ten saves five turns of fifty. The fix goes where the forty are.
+Suppose writing the change takes ten turns. The pull request then shows nine days from opened to deployed: three reruns until green, a review that arrived on day two, an environment somebody had to request, an approval that sat until a person read it. Halving the ten turns saves an hour of nine days. The fix goes where the days are.
+
+We do not watch the wait happen. It falls after our closing message and often across sessions, so we read it off the timestamps on the pull request, the pipeline runs, and the approval.
 
 Another hundred tests will not make someone answer an approval request. Another agent will not schedule the release window. If the longest wait is a decision, the finding is a decision, and it belongs to a person.
 
@@ -39,5 +41,6 @@ Another hundred tests will not make someone answer an approval request. Another 
 ## See Also
 
 - delivery/merge(softwaredev) — the review gate as one of the places a change waits
-- incident(itops) — the closure artifacts a stall finding is filed alongside
+- delivery/issues(softwaredev) — the shape a stall finding takes: an owner and the condition that reopens it
+- incident(itops) — when the walk happens inside a postmortem, the finding rides its closure artifacts
 - delivery/groundwork(softwaredev) — parent: readiness before change

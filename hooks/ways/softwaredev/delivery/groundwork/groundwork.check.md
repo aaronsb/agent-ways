@@ -16,4 +16,4 @@ Before writing this:
 - **Does what it describes run today?** The build command, the test command, the deploy path, the rollback. Name them. If you cannot, the instruction is describing a wish.
 - **Is fixing the missing step the smaller change?** A working `make test` beats a paragraph telling the agent to test carefully.
 - **Is this a workaround for something you are not permitted to fix?** Then the finding is the permission boundary. Report it; do not encode it.
-- **Once it works, capture it.** Write it down the moment the process runs.
+- **Write it down the moment the process runs.**
