@@ -47,5 +47,6 @@ Skipping this costs nothing per merge and compounds. An audit in August 2026 fou
 - delivery/github(softwaredev) — PR creation, merge strategy, and post-merge cleanup discipline.
 - delivery/commits(softwaredev) — the commit quality the PR is built from.
 - delivery/release(softwaredev) — the heavier sibling: publishing a versioned release.
+- delivery/groundwork/sequence(softwaredev) — a hold for an area that cannot yet be verified, decided before the four-square classifies the review.
 - develop(meta) — the loop whose stable tail this is.
 - code-reviewer (subagent, `agents/code-reviewer.md`) — the reviewer `merge` spawns at the gate; the built-in `/code-review` is the operator's manual equivalent.

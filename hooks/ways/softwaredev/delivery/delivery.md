@@ -19,6 +19,7 @@ Children of this way cover the journey from local changes to production:
 | Releases, tagging, publishing | `delivery/release` |
 | Patch creation | `delivery/patches` |
 | Implementation planning | `delivery/implement` |
+| Readiness of an area before changing it | `delivery/groundwork` |
 
 Deploying a schema migration is a delivery step, but the migration *discipline*
 — design, numbering, idempotency, consolidation — lives in its own domain now:
@@ -30,4 +31,5 @@ see `data/migrations`.
 - delivery/github(softwaredev) — PR workflow
 - delivery/merge(softwaredev) — the review gate and landing an increment
 - delivery/implement(softwaredev) — implementation planning
+- delivery/groundwork(softwaredev) — build, verify, deliver, recover before adding primitives
 - data/migrations(data) — schema migration discipline (moved out of delivery)
