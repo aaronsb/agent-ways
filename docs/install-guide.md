@@ -27,6 +27,26 @@ Just run the one-liner. The projection coexists with your directory; your files 
 
 If `~/.claude/` is your **own** git repo (you version-control your config), that still works: the projection adds symlinks alongside your tracked files, as long as the repo does not itself track directories at the projected root paths. If it does, reconcile refuses rather than replacing them. Add the projected roots to your `.gitignore` if you don't want them tracked.
 
+## Scenario: you want ways in one repository only
+
+**Signs:** you keep your own skills, agents, or hooks in `~/.claude`, you run more than one Claude Code profile, or you want to try ways on one codebase before turning them on everywhere.
+
+Pass a scope to the installer:
+
+```bash
+curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/install.sh | bash -s -- --bootstrap --scope=project --project=/path/to/repo
+```
+
+Project scope ([ADR-182](architecture/system/ADR-182-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md)) does three things differently from the default:
+
+- It links only the hook tree and the binaries into `~/.claude` (`hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`). `skills/`, `agents/`, and `commands/` are not projected, so yours stay yours.
+- It writes the hooks block into `<repo>/.claude/settings.local.json` instead of `~/.claude/settings.json`. Claude Code concatenates hooks across the user file and the project files, so ways fire only in sessions under that directory. Nothing is written to your user `settings.json`.
+- It writes hooks only. The `permissions.allow` entries and the secret-path `permissions.deny` baseline are user-level policy and stay out of the project file.
+
+What you give up: the shipped skills, agents, and commands (`ways-update`, `ways-tests`, `/ways`, and the rest). Copy any you want into `<repo>/.claude/skills/`. To update, pull the app source and run `ways reconcile`; the scope is remembered from the state the first run wrote, so a bare `ways reconcile` (which is what `ways update` runs) stays in project scope. Add a second repository with `ways reconcile --scope project --project /path/to/other`.
+
+`settings.local.json.bak` lands next to the merged file; `ways init` gitignores it for new projects. Add the line yourself in an existing one.
+
 ## Scenario: a previous agent-ways install
 
 **A 1.0 projection install** (the app is in `$XDG_DATA_HOME/agent-ways`, `~/.claude` is not a repo) — update in place:

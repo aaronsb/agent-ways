@@ -52,6 +52,10 @@ developing — **don't** put it ahead of your installed `ways` on `PATH` unless 
 
    Revert by reconciling from the released app: `ways reconcile --source $XDG_DATA_HOME/agent-ways --dest ~/.claude`.
 
+   To exercise project scope (ADR-182) without touching your user settings, point it at a
+   scratch repo inside the sandbox: `ways reconcile --source ~/src/agent-ways --dest $SB/.claude --scope project --project $SB/repo`,
+   then read `$SB/repo/.claude/settings.local.json` and `$XDG_STATE_HOME/agent-ways/projects/`.
+
 3. **Worktree (parallel branches).** `git worktree add` from your **standalone clone** —
    never from `$XDG_DATA/agent-ways`. The app dir is replaced wholesale on update, which
    would orphan a worktree hung off it (its gitdir link dies).
