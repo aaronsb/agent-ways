@@ -18,9 +18,10 @@
 //! symlink is ever removed, and `--force` moves a real path aside rather than
 //! deleting it.
 
-use crate::cmd::manifest::{projection_roots, ProjectionRoot, RootKind};
+use crate::cmd::manifest::{hook_roots, projection_roots, ProjectionRoot, RootKind};
+use crate::cmd::settings_merge::{self, Slices};
 use crate::paths;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
 /// Materialization strategy.
@@ -28,6 +29,34 @@ use std::path::{Path, PathBuf};
 pub enum Mode {
     Symlink,
     Copy,
+}
+
+/// Install scope (ADR-182): where the hooks block is merged and which roots
+/// are projected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Scope {
+    /// Hooks plus ways permissions into `~/.claude/settings.json`; every
+    /// projection root linked. Ways fire in every session.
+    User,
+    /// Hooks only into each listed `<project>/.claude/settings.local.json`;
+    /// only the hook tree and binaries linked. Ways fire in sessions under
+    /// those directories.
+    Project(Vec<PathBuf>),
+}
+
+/// Inputs to [`run_with`]. `state_root` overrides `paths::state_root()` for
+/// tests that must not touch the real `$XDG_STATE`; the CLI leaves it `None`.
+#[derive(Debug, Default)]
+pub struct Options {
+    pub source: Option<String>,
+    pub dest: Option<String>,
+    pub mode: Option<String>,
+    pub dry_run: bool,
+    pub quiet: bool,
+    pub force: bool,
+    pub scope: Option<String>,
+    pub project: Option<String>,
+    pub state_root: Option<PathBuf>,
 }
 
 /// What reconciliation did to one root.
@@ -64,6 +93,7 @@ struct Outcome {
 /// a pre-1.0 `make install` copy of `hooks/ways`) is never deleted. Without
 /// `force` the run stops before touching any root and names the paths; with
 /// `force` each such path is renamed to a timestamped sibling first.
+#[cfg(test)]
 pub fn run(
     source: Option<String>,
     dest: Option<String>,
@@ -72,8 +102,15 @@ pub fn run(
     quiet: bool,
     force: bool,
 ) -> Result<()> {
+    run_with(Options { source, dest, mode, dry_run, quiet, force, ..Options::default() })
+}
+
+/// [`run`] with the full option set, including install scope (ADR-182).
+pub fn run_with(opts: Options) -> Result<()> {
+    let Options { source, dest, mode, dry_run, quiet, force, scope, project, state_root } = opts;
     let source_root: PathBuf = source.map(PathBuf::from).unwrap_or_else(paths::data_root);
     let dest_root: PathBuf = dest.map(PathBuf::from).unwrap_or_else(paths::projection_root);
+    let state_root: PathBuf = state_root.unwrap_or_else(paths::state_root);
 
     let mode = match mode.as_deref() {
         None | Some("symlink") => Mode::Symlink,
@@ -108,7 +145,12 @@ pub fn run(
         bail!("copy mode not yet implemented; symlink mode is the default");
     }
 
-    let roots = projection_roots(&source_root);
+    let scope = resolve_scope(scope.as_deref(), project.as_deref(), &state_root)?;
+
+    let roots = match &scope {
+        Scope::User => projection_roots(&source_root),
+        Scope::Project(_) => hook_roots(&source_root),
+    };
     if roots.is_empty() {
         bail!("no projection roots found under {}", source_root.display());
     }
@@ -142,17 +184,148 @@ pub fn run(
     if !dry_run {
         let src_settings = source_root.join("settings.json");
         if src_settings.exists() {
-            let dest_settings = dest_root.join("settings.json");
-            let base_path = paths::state_root().join("settings-applied.json");
-            let summary =
-                crate::cmd::settings_merge::apply_to_files(&src_settings, &dest_settings, &base_path)?;
-            if !quiet {
-                eprintln!("{summary}");
+            match &scope {
+                Scope::User => {
+                    let dest_settings = dest_root.join("settings.json");
+                    let base_path = state_root.join("settings-applied.json");
+                    let summary =
+                        settings_merge::apply_to_files(&src_settings, &dest_settings, &base_path)?;
+                    if !quiet {
+                        eprintln!("{summary}");
+                    }
+                }
+                Scope::Project(projects) => {
+                    if user_scope_hooks_present(&dest_root) && !quiet {
+                        eprintln!(
+                            "note: {} already carries the ways hooks, so ways fire in every \
+                             session; project scope adds nothing until those entries are removed",
+                            dest_root.join("settings.json").display()
+                        );
+                    }
+                    for project_dir in projects {
+                        let summary =
+                            apply_project_hooks(&src_settings, project_dir, &state_root)?;
+                        if !quiet {
+                            eprintln!("{summary}");
+                        }
+                    }
+                    if !quiet {
+                        eprintln!("project scope: skills/, agents/, commands/ were not projected");
+                    }
+                }
             }
         }
     }
 
     Ok(())
+}
+
+/// Turn the `--scope` / `--project` flags into a [`Scope`].
+///
+/// With neither flag, keep whatever scope this machine already uses: if no
+/// user-scope base has ever been written but project bases have, this is a
+/// project-scope install and every recorded project is re-merged. Otherwise
+/// user scope, exactly as before ADR-182. That is what lets `ways update`
+/// call a bare `ways reconcile` without turning a project-scope install into
+/// a user-scope one.
+fn resolve_scope(scope: Option<&str>, project: Option<&str>, state_root: &Path) -> Result<Scope> {
+    match scope {
+        Some("user") => Ok(Scope::User),
+        Some("project") => Ok(Scope::Project(vec![resolve_project_dir(project)?])),
+        Some(other) => bail!("unknown scope {other:?} (expected 'user' or 'project')"),
+        None => {
+            if project.is_some() {
+                bail!("--project only applies with --scope project");
+            }
+            let user_base = state_root.join("settings-applied.json");
+            let recorded = recorded_projects(state_root);
+            if !user_base.exists() && !recorded.is_empty() {
+                Ok(Scope::Project(recorded))
+            } else {
+                Ok(Scope::User)
+            }
+        }
+    }
+}
+
+/// `--project`, else `$CLAUDE_PROJECT_DIR`, else the current directory;
+/// canonicalized so the per-project key is stable across spellings.
+fn resolve_project_dir(project: Option<&str>) -> Result<PathBuf> {
+    let raw = match project {
+        Some(p) => PathBuf::from(p),
+        None => match std::env::var("CLAUDE_PROJECT_DIR") {
+            Ok(p) if !p.is_empty() => PathBuf::from(p),
+            _ => std::env::current_dir().context("resolving the current directory")?,
+        },
+    };
+    if !raw.is_dir() {
+        bail!("project directory not found: {}", raw.display());
+    }
+    Ok(std::fs::canonicalize(&raw).unwrap_or(raw))
+}
+
+/// Where a project's last-applied base lives: one directory per project under
+/// the state root, keyed like the corpus keys projects, with the original path
+/// recorded beside it (the key is lossy).
+fn project_state_dir(state_root: &Path, project_dir: &Path) -> PathBuf {
+    state_root.join("projects").join(crate::util::encode_project_key(project_dir))
+}
+
+/// Projects a prior project-scope reconcile recorded (their `project-path`
+/// files), skipping any whose directory no longer exists.
+fn recorded_projects(state_root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(state_root.join("projects")) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let Ok(p) = std::fs::read_to_string(e.path().join("project-path")) else {
+            continue;
+        };
+        let dir = PathBuf::from(p.trim());
+        if dir.is_dir() {
+            out.push(dir);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Merge the hooks block (hooks only, no permissions) into
+/// `<project>/.claude/settings.local.json`, with a per-project base.
+fn apply_project_hooks(src_settings: &Path, project_dir: &Path, state_root: &Path) -> Result<String> {
+    let claude_dir = project_dir.join(".claude");
+    std::fs::create_dir_all(&claude_dir)
+        .with_context(|| format!("creating {}", claude_dir.display()))?;
+    let dest_settings = claude_dir.join("settings.local.json");
+
+    let state_dir = project_state_dir(state_root, project_dir);
+    std::fs::create_dir_all(&state_dir).with_context(|| format!("creating {}", state_dir.display()))?;
+    std::fs::write(state_dir.join("project-path"), project_dir.to_string_lossy().as_bytes())?;
+    let base_path = state_dir.join("settings-applied.json");
+
+    let summary =
+        settings_merge::apply_to_files_with(src_settings, &dest_settings, &base_path, Slices::HooksOnly)?;
+    Ok(format!("{summary} [{}]", dest_settings.display()))
+}
+
+/// True if the user-scope settings.json at `dest_root` already holds any hook
+/// entry of ours.
+fn user_scope_hooks_present(dest_root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(dest_root.join("settings.json")) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    v.get("hooks")
+        .and_then(|h| h.as_object())
+        .map(|events| {
+            events.values().any(|arr| {
+                arr.as_array().map(|a| a.iter().any(settings_merge::entry_is_ours)).unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Symlink one projection root: `dest/rel -> source/rel`, idempotently.
@@ -566,6 +739,233 @@ mod tests {
         assert_eq!(std::fs::read_to_string(elsewhere.join("marker")).unwrap(), "keep\n");
         assert!(backups_of(&dst, "skills").is_empty());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Like `fake_source`, plus a `bin/ways` placeholder and a settings.json
+    /// carrying one hook of ours, so the settings step has something to merge.
+    fn fake_source_with_settings(root: &Path) {
+        fake_source(root);
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(root.join("bin/ways"), "#!/bin/sh\n").unwrap();
+        std::fs::write(
+            root.join("settings.json"),
+            r#"{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh"}]}]}}"#,
+        )
+        .unwrap();
+    }
+
+    fn project_opts(src: &Path, dst: &Path, state: &Path, project: Option<&Path>) -> Options {
+        Options {
+            source: Some(src.to_string_lossy().into_owned()),
+            dest: Some(dst.to_string_lossy().into_owned()),
+            quiet: true,
+            scope: project.map(|_| "project".to_string()),
+            project: project.map(|p| p.to_string_lossy().into_owned()),
+            state_root: Some(state.to_path_buf()),
+            ..Options::default()
+        }
+    }
+
+    fn read_json(p: &Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn project_scope_links_only_hook_roots() {
+        let base = sandbox("proj-roots");
+        let (src, dst, state, proj) = (base.join("data"), base.join("home"), base.join("state"), base.join("repo"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        fake_source_with_settings(&src);
+
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+
+        for rel in ["hooks/ways", "hooks/check-config-updates.sh", "bin/ways"] {
+            assert!(std::fs::symlink_metadata(dst.join(rel)).unwrap().file_type().is_symlink(), "{rel}");
+            assert!(same_path(&dst.join(rel), &src.join(rel)), "{rel} must resolve into the source");
+        }
+        assert!(!dst.join("skills").exists(), "content trees are not projected in project scope");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn project_scope_writes_hooks_only_into_settings_local() {
+        let base = sandbox("proj-settings");
+        let (src, dst, state, proj) = (base.join("data"), base.join("home"), base.join("state"), base.join("repo"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        fake_source_with_settings(&src);
+
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+
+        let local = read_json(&proj.join(".claude/settings.local.json"));
+        assert_eq!(
+            local["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            "\"${HOME}/.claude/hooks/ways/check-setup.sh\"",
+            "the hook lands quoted, pointing at the user-scope projection"
+        );
+        assert!(local.get("permissions").is_none(), "no permissions in a project file: {local}");
+        assert!(!dst.join("settings.json").exists(), "user-scope settings.json must not be created");
+
+        let proj_canon = std::fs::canonicalize(&proj).unwrap();
+        let state_dir = project_state_dir(&state, &proj_canon);
+        assert!(state_dir.join("settings-applied.json").is_file(), "per-project base at {}", state_dir.display());
+        assert_eq!(
+            std::fs::read_to_string(state_dir.join("project-path")).unwrap(),
+            proj_canon.to_string_lossy()
+        );
+        assert!(!state.join("settings-applied.json").exists(), "no user-scope base was written");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn project_scope_preserves_existing_local_settings() {
+        let base = sandbox("proj-preserve");
+        let (src, dst, state, proj) = (base.join("data"), base.join("home"), base.join("state"), base.join("repo"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        fake_source_with_settings(&src);
+        let user_stop = serde_json::json!({ "hooks": [ { "type": "command", "command": "echo done" } ] });
+        std::fs::write(
+            proj.join(".claude/settings.local.json"),
+            serde_json::to_string(&serde_json::json!({
+                "permissions": { "allow": ["Bash(npm:*)"] },
+                "hooks": { "Stop": [ user_stop.clone() ] }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+
+        let local = read_json(&proj.join(".claude/settings.local.json"));
+        assert_eq!(local["permissions"]["allow"], serde_json::json!(["Bash(npm:*)"]));
+        assert_eq!(local["hooks"]["Stop"].as_array().unwrap(), &vec![user_stop]);
+        let ss = local["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(ss.len(), 1, "ours exactly once after two applies: {ss:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn project_scope_does_not_claim_preexisting_project_hooks() {
+        let base = sandbox("proj-claim");
+        let (src, dst, state, proj) = (base.join("data"), base.join("home"), base.join("state"), base.join("repo"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        fake_source_with_settings(&src);
+        let user_ss = serde_json::json!({ "hooks": [ { "type": "command", "command": "echo hello" } ] });
+        std::fs::write(
+            proj.join(".claude/settings.local.json"),
+            serde_json::to_string(&serde_json::json!({ "hooks": { "SessionStart": [ user_ss.clone() ] } })).unwrap(),
+        )
+        .unwrap();
+
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+
+        let proj_canon = std::fs::canonicalize(&proj).unwrap();
+        let base_v = read_json(&project_state_dir(&state, &proj_canon).join("settings-applied.json"));
+        let base_ss = base_v["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(base_ss.len(), 1, "base records only ours: {base_ss:?}");
+        assert!(base_ss[0]["hooks"][0]["command"].as_str().unwrap().contains("check-setup.sh"));
+
+        let local = read_json(&proj.join(".claude/settings.local.json"));
+        let ss = local["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(ss[0], user_ss, "user entry first, untouched");
+        assert_eq!(ss.len(), 2);
+
+        // Ship a changed command; the user entry survives and ours is replaced.
+        std::fs::write(
+            src.join("settings.json"),
+            r#"{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup-v2.sh"}]}]}}"#,
+        )
+        .unwrap();
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+        let local = read_json(&proj.join(".claude/settings.local.json"));
+        let cmds: Vec<String> = local["hooks"]["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["hooks"][0]["command"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(cmds.len(), 2, "{cmds:?}");
+        assert_eq!(cmds[0], "echo hello");
+        assert!(cmds[1].contains("check-setup-v2.sh") && !cmds.iter().any(|c| c.ends_with("check-setup.sh\"")), "{cmds:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn project_scope_bases_are_per_project() {
+        let base = sandbox("proj-two");
+        let (src, dst, state) = (base.join("data"), base.join("home"), base.join("state"));
+        let (a, b) = (base.join("repo-a"), base.join("repo-b"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        fake_source_with_settings(&src);
+
+        run_with(project_opts(&src, &dst, &state, Some(&a))).unwrap();
+        run_with(project_opts(&src, &dst, &state, Some(&b))).unwrap();
+
+        let da = project_state_dir(&state, &std::fs::canonicalize(&a).unwrap());
+        let db = project_state_dir(&state, &std::fs::canonicalize(&b).unwrap());
+        assert_ne!(da, db);
+        assert!(da.join("settings-applied.json").is_file() && db.join("settings-applied.json").is_file());
+        assert!(a.join(".claude/settings.local.json").is_file() && b.join(".claude/settings.local.json").is_file());
+        let mut recorded = recorded_projects(&state);
+        recorded.sort();
+        let mut expected = vec![std::fs::canonicalize(&a).unwrap(), std::fs::canonicalize(&b).unwrap()];
+        expected.sort();
+        assert_eq!(recorded, expected);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn project_scope_refuses_real_hooks_dir_without_force() {
+        let base = sandbox("proj-refuse");
+        let (src, dst, state, proj) = (base.join("data"), base.join("home"), base.join("state"), base.join("repo"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        fake_source_with_settings(&src);
+        std::fs::create_dir_all(dst.join("hooks/ways")).unwrap();
+        std::fs::write(dst.join("hooks/ways/mine.md"), "mine\n").unwrap();
+
+        let err = run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap_err();
+        assert!(err.to_string().contains("real paths"), "{err}");
+        assert_eq!(std::fs::read_to_string(dst.join("hooks/ways/mine.md")).unwrap(), "mine\n");
+        assert!(!proj.join(".claude/settings.local.json").exists(), "settings must not be written after a refusal");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn bare_reconcile_infers_project_scope_from_state() {
+        let base = sandbox("proj-infer");
+        let (src, dst, state, proj) = (base.join("data"), base.join("home"), base.join("state"), base.join("repo"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        fake_source_with_settings(&src);
+        run_with(project_opts(&src, &dst, &state, Some(&proj))).unwrap();
+
+        // What `ways update` runs: no --scope, no --project.
+        run_with(project_opts(&src, &dst, &state, None)).unwrap();
+
+        assert!(!dst.join("settings.json").exists(), "must not fall back to user scope");
+        assert!(!dst.join("skills").exists());
+        assert!(!state.join("settings-applied.json").exists());
+        let local = read_json(&proj.join(".claude/settings.local.json"));
+        assert_eq!(local["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+
+        // With no state at all, a bare run is user scope, as before.
+        let base2 = sandbox("proj-infer-none");
+        let (src2, dst2, state2) = (base2.join("data"), base2.join("home"), base2.join("state"));
+        std::fs::create_dir_all(&src2).unwrap();
+        fake_source_with_settings(&src2);
+        run_with(project_opts(&src2, &dst2, &state2, None)).unwrap();
+        assert!(dst2.join("skills").exists());
+        assert!(dst2.join("settings.json").is_file());
+        assert!(state2.join("settings-applied.json").is_file());
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&base2);
     }
 
     #[test]

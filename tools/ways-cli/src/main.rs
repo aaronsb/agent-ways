@@ -272,6 +272,17 @@ enum Commands {
         /// of stopping. Never deletes.
         #[arg(long)]
         force: bool,
+        /// Install scope: "user" merges the hooks into ~/.claude/settings.json
+        /// (default); "project" wires them into <project>/.claude/settings.local.json
+        /// and projects only the hook tree and binaries, leaving skills/, agents/
+        /// and commands/ alone (ADR-182). Omit to keep whichever scope this
+        /// machine already uses.
+        #[arg(long)]
+        scope: Option<String>,
+        /// Project directory for --scope project (default: $CLAUDE_PROJECT_DIR,
+        /// else the current directory)
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
@@ -743,8 +754,18 @@ fn run() -> Result<()> {
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
-        Commands::Reconcile { source, dest, mode, dry_run, quiet, force } => {
-            cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
+        Commands::Reconcile { source, dest, mode, dry_run, quiet, force, scope, project } => {
+            cmd::reconcile::run_with(cmd::reconcile::Options {
+                source,
+                dest,
+                mode,
+                dry_run,
+                quiet,
+                force,
+                scope,
+                project,
+                state_root: None,
+            })
         }
         Commands::Rethink { session, project, all, speed, list, json } => {
             eprintln!(

@@ -102,6 +102,17 @@ impl Owned {
     }
 }
 
+/// Which owned slices a merge writes. User scope (`~/.claude/settings.json`)
+/// carries hooks plus the ways permissions (ADR-169). Project scope
+/// (`<project>/.claude/settings.local.json`, ADR-182) carries hooks only: the
+/// `permissions.allow` entries name user-level paths and the secret-path deny
+/// baseline is a user-level policy, so neither belongs in a per-repo file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slices {
+    HooksAndPermissions,
+    HooksOnly,
+}
+
 /// Result of a merge: the new settings document and the new base to persist.
 pub struct Merged {
     pub settings: Value,
@@ -109,12 +120,27 @@ pub struct Merged {
 }
 
 /// Three-way merge of our owned slices into `live`, given the desired hooks and
-/// the prior base. Pure: no I/O, fully testable.
+/// the prior base. Pure: no I/O, fully testable. The user-scope form of
+/// [`merge_with`]; production callers go through [`apply_to_files`].
+#[cfg(test)]
 pub fn merge(
     live: &Value,
     desired_hooks: &Value,
     base: &Owned,
     deny_secrets: bool,
+) -> Result<Merged> {
+    merge_with(live, desired_hooks, base, deny_secrets, Slices::HooksAndPermissions)
+}
+
+/// [`merge`] with an explicit choice of slices. `HooksOnly` leaves the
+/// `permissions` object exactly as the user has it and records empty
+/// `perms`/`deny` in the base.
+pub fn merge_with(
+    live: &Value,
+    desired_hooks: &Value,
+    base: &Owned,
+    deny_secrets: bool,
+    slices: Slices,
 ) -> Result<Merged> {
     let mut out = live.as_object().cloned().unwrap_or_default();
 
@@ -179,6 +205,13 @@ pub fn merge(
         out.remove("hooks");
     } else {
         out.insert("hooks".into(), Value::Object(new_hooks));
+    }
+
+    if slices == Slices::HooksOnly {
+        return Ok(Merged {
+            settings: Value::Object(out),
+            base: Owned { hooks: base_hooks, perms: Vec::new(), deny: Vec::new() },
+        });
     }
 
     // --- permissions.allow: set-union with removal of deprecated-ours ---
@@ -435,7 +468,7 @@ fn exe_token(cmd: &str) -> &str {
 /// Trade-off: a user hook placed under `.claude/hooks/` (contrary to the ways
 /// model, which extends via `ways/` fragments — not hand-edited settings.json)
 /// would be treated as ours. Accepted and documented.
-fn entry_is_ours(entry: &Value) -> bool {
+pub(crate) fn entry_is_ours(entry: &Value) -> bool {
     match entry.get("hooks").and_then(|h| h.as_array()) {
         Some(cmds) if !cmds.is_empty() => cmds.iter().all(|h| {
             h.get("command").and_then(|c| c.as_str()).map(command_is_ours).unwrap_or(false)
@@ -455,6 +488,23 @@ pub fn apply_to_files(
     dest_settings: &Path,
     base_path: &Path,
 ) -> Result<String> {
+    apply_to_files_with(source_settings, dest_settings, base_path, Slices::HooksAndPermissions)
+}
+
+/// [`apply_to_files`] with an explicit choice of slices. Project scope
+/// (ADR-182) calls this with `HooksOnly` against
+/// `<project>/.claude/settings.local.json` and a per-project base; the
+/// backup, atomic write, self-audit, and base persistence are the same.
+pub fn apply_to_files_with(
+    source_settings: &Path,
+    dest_settings: &Path,
+    base_path: &Path,
+    slices: Slices,
+) -> Result<String> {
+    let name = dest_settings
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "settings.json".to_string());
     let desired: Value = read_json_or_empty(source_settings)?;
     let desired_hooks = desired.get("hooks").cloned().unwrap_or(Value::Object(Map::new()));
 
@@ -479,7 +529,10 @@ pub fn apply_to_files(
     } else {
         Owned {
             hooks: seed_ours_from_live(&live),
-            perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
+            perms: match slices {
+                Slices::HooksAndPermissions => WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
+                Slices::HooksOnly => Vec::new(),
+            },
             // Seed deny EMPTY, not with WAYS_DENY. Unlike allow (which agent-ways
             // has long written, so a legacy install's entries must be claimed to
             // avoid duplication), agent-ways has NEVER written permissions.deny
@@ -493,11 +546,12 @@ pub fn apply_to_files(
         }
     };
 
-    let merged = merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
+    let merged =
+        merge_with(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, slices)?;
 
     // Idempotent: if nothing changed, don't churn the file or a backup.
     if merged.settings == live {
-        return Ok("settings.json already up to date".into());
+        return Ok(format!("{name} already up to date"));
     }
 
     // Back up the live file before writing.
@@ -536,11 +590,14 @@ pub fn apply_to_files(
     }
     write_json_atomic(base_path, &merged.base.to_value())?;
 
-    Ok(format!(
-        "merged settings.json (hooks + {} ways permissions); backup at {}",
-        WAYS_PERMS.len(),
-        backup.display()
-    ))
+    Ok(match slices {
+        Slices::HooksAndPermissions => format!(
+            "merged {name} (hooks + {} ways permissions); backup at {}",
+            WAYS_PERMS.len(),
+            backup.display()
+        ),
+        Slices::HooksOnly => format!("merged {name} (hooks only); backup at {}", backup.display()),
+    })
 }
 
 fn read_json_or_empty(p: &Path) -> Result<Value> {
@@ -801,6 +858,50 @@ mod tests {
         );
         // Already quoted → untouched (idempotent).
         assert_eq!(quote_first_token("\"already\" quoted"), "\"already\" quoted");
+    }
+
+    #[test]
+    fn hooks_only_slices_add_no_permissions_key() {
+        let m = merge_with(&json!({}), &ours_hooks(), &Owned::default(), true, Slices::HooksOnly).unwrap();
+        assert!(m.settings.get("permissions").is_none(), "{:?}", m.settings);
+        assert!(m.settings["hooks"]["SessionStart"].is_array());
+        assert!(m.base.perms.is_empty() && m.base.deny.is_empty());
+        assert_eq!(m.base.hooks.keys().collect::<Vec<_>>(), vec!["SessionStart"]);
+    }
+
+    #[test]
+    fn hooks_only_slices_leave_user_permissions_untouched() {
+        let live = json!({ "permissions": { "allow": ["Bash(git:*)"], "deny": ["Bash(rm:*)"] },
+                           "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "echo bye" } ] } ] } });
+        let m = merge_with(&live, &ours_hooks(), &Owned::default(), true, Slices::HooksOnly).unwrap();
+        assert_eq!(m.settings["permissions"], live["permissions"], "permissions must be byte-identical");
+        assert_eq!(m.settings["hooks"]["Stop"], live["hooks"]["Stop"]);
+        assert_eq!(m.settings["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn apply_hooks_only_to_settings_local_reports_by_file_name() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ways-setmerge-local-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("settings.local.json");
+        let source = dir.join("source.json");
+        let base = dir.join("base.json");
+        std::fs::write(&source, serde_json::to_string(&ours_hooks_doc()).unwrap()).unwrap();
+
+        let first = apply_to_files_with(&source, &dest, &base, Slices::HooksOnly).unwrap();
+        assert!(first.starts_with("merged settings.local.json (hooks only)"), "{first}");
+        assert!(dir.join("settings.local.json.bak").exists() || !dest.with_extension("json.bak").exists());
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert!(after.get("permissions").is_none());
+        let second = apply_to_files_with(&source, &dest, &base, Slices::HooksOnly).unwrap();
+        assert_eq!(second, "settings.local.json already up to date");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

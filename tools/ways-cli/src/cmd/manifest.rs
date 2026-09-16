@@ -80,6 +80,19 @@ pub fn projection_roots(source_root: &Path) -> Vec<ProjectionRoot> {
     roots
 }
 
+/// The roots a project-scope install (ADR-182) still needs in `~/.claude`: the
+/// hook tree, the top-level hook files, and the binaries. Every shipped hook
+/// command in `settings.json` is written as `${HOME}/.claude/...` and the hook
+/// scripts find the binary the same way, so these stay user-scope even when the
+/// hooks block itself is wired into one project. The content trees (`skills`,
+/// `agents`, `commands`) are what project scope leaves alone.
+pub fn hook_roots(source_root: &Path) -> Vec<ProjectionRoot> {
+    projection_roots(source_root)
+        .into_iter()
+        .filter(|r| r.kind != RootKind::Tree || r.rel == "hooks/ways")
+        .collect()
+}
+
 /// How an entry is sourced — which decides how it's kept current.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryClass {
@@ -245,6 +258,22 @@ mod tests {
             m.iter().any(|e| e.rel.starts_with("hooks/ways/") && e.rel.ends_with(".md")),
             "expected at least one hooks/ways way file in the manifest"
         );
+    }
+
+    #[test]
+    fn hook_roots_exclude_content_trees() {
+        let all = projection_roots(&repo_root());
+        let hooks = hook_roots(&repo_root());
+        let rels: Vec<&str> = hooks.iter().map(|r| r.rel.as_str()).collect();
+        assert!(rels.contains(&"hooks/ways"), "{rels:?}");
+        assert!(rels.contains(&"hooks/check-config-updates.sh"), "{rels:?}");
+        for content in ["skills", "agents", "commands"] {
+            assert!(!rels.contains(&content), "{content} must not be a hook root: {rels:?}");
+        }
+        // Every hook root is a projection root; nothing new is invented.
+        for r in &hooks {
+            assert!(all.iter().any(|a| a.rel == r.rel && a.kind == r.kind), "{} not in projection_roots", r.rel);
+        }
     }
 
     #[test]
