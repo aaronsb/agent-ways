@@ -243,8 +243,12 @@ pub struct RootPlan {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SettingsPlan {
     pub hooks_added: Vec<HookRef>,
-    /// Entries of ours from a prior install that the merge replaces.
+    /// Entries the ownership predicate claims that the base never recorded:
+    /// a hook the user wrote under `.claude/hooks/`. These block.
     pub hooks_replaced: Vec<HookRef>,
+    /// Entries the base recorded as ours that the merge refreshes, after a
+    /// source upgrade changed a command. These do not block.
+    pub hooks_refreshed: Vec<HookRef>,
     /// Entries that are not structurally ours and would still be dropped.
     pub hooks_removed: Vec<HookRef>,
     pub user_hooks_kept: usize,
@@ -288,9 +292,14 @@ pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: 
         let desired_hooks = desired.get("hooks").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
         let dest_settings = dest_root.join("settings.json");
         let live: serde_json::Value = sm::read_json_or_empty(&dest_settings)?;
-        let base = sm::base_for(&live, &base_path_for(state_root, dest_root))?;
+        let base_path = base_path_for(state_root, dest_root);
+        let base = sm::base_for(&live, &base_path)?;
         let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
-        Some(diff_settings(&live, &merged.settings))
+        // Classify against the base as it exists on disk. A first apply's
+        // seeded base claims entries by shape, and the plan must show those
+        // as claimed rather than as ours from a prior version.
+        let recorded = if base_path.exists() { base } else { sm::Owned::default() };
+        Some(diff_settings(&live, &merged.settings, &recorded))
     } else {
         None
     };
@@ -324,7 +333,11 @@ fn hook_refs(event: &str, entry: &serde_json::Value) -> HookRef {
     HookRef { event: event.to_string(), command }
 }
 
-fn diff_settings(live: &serde_json::Value, merged: &serde_json::Value) -> SettingsPlan {
+fn diff_settings(
+    live: &serde_json::Value,
+    merged: &serde_json::Value,
+    base: &crate::cmd::settings_merge::Owned,
+) -> SettingsPlan {
     use crate::cmd::settings_merge::entry_is_ours;
     let empty = serde_json::Map::new();
     let live_hooks = live.get("hooks").and_then(|h| h.as_object()).unwrap_or(&empty);
@@ -335,10 +348,12 @@ fn diff_settings(live: &serde_json::Value, merged: &serde_json::Value) -> Settin
             events.push(k);
         }
     }
-    let (mut added, mut replaced, mut removed, mut kept) = (Vec::new(), Vec::new(), Vec::new(), 0usize);
+    let (mut added, mut replaced, mut refreshed, mut removed, mut kept) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0usize);
     for event in events {
         let l = live_hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         let m = merged_hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let recorded = base.hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         for e in &m {
             if !l.contains(e) {
                 added.push(hook_refs(event, e));
@@ -349,6 +364,8 @@ fn diff_settings(live: &serde_json::Value, merged: &serde_json::Value) -> Settin
                 if !entry_is_ours(e) {
                     kept += 1;
                 }
+            } else if recorded.contains(e) {
+                refreshed.push(hook_refs(event, e));
             } else if entry_is_ours(e) {
                 replaced.push(hook_refs(event, e));
             } else {
@@ -370,6 +387,7 @@ fn diff_settings(live: &serde_json::Value, merged: &serde_json::Value) -> Settin
     SettingsPlan {
         hooks_added: added,
         hooks_replaced: replaced,
+        hooks_refreshed: refreshed,
         hooks_removed: removed,
         user_hooks_kept: kept,
         perms_added,
@@ -462,6 +480,16 @@ fn withdraw_one(
     if is_legacy_in_place(dest_root) {
         bail!("{} looks like a legacy in-place agent-ways clone; nothing to withdraw", dest_root.display());
     }
+    // Settings first: if the withdrawal's self-audit reverts, the links are
+    // still in place and no hook entry points at a removed path.
+    let mut settings_summary = None;
+    if !dry_run {
+        let dest_settings = dest_root.join("settings.json");
+        let src_settings = source_root.join("settings.json");
+        if dest_settings.exists() {
+            settings_summary = Some(crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?);
+        }
+    }
     let mut outcomes = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);
@@ -490,17 +518,8 @@ fn withdraw_one(
     }
 
     report(&outcomes, source_root, dest_root, dry_run, quiet, true);
-
-    if !dry_run {
-        let dest_settings = dest_root.join("settings.json");
-        let src_settings = source_root.join("settings.json");
-        if dest_settings.exists() {
-            let summary =
-                crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?;
-            if !quiet {
-                eprintln!("{summary}");
-            }
-        }
+    if let (Some(summary), false) = (settings_summary, quiet) {
+        eprintln!("{summary}");
     }
     Ok(())
 }
@@ -859,6 +878,60 @@ mod tests {
         assert_eq!(hook_commands(&live, "Stop"), vec!["echo user-stop".to_string()], "over-recorded user hook kept: {live}");
         assert!(!hook_commands(&live, "SessionStart").iter().any(|c| c.contains("check-setup.sh")), "shipped hook removed");
         assert_eq!(hook_commands(&live, "SessionStart"), vec!["echo user-start".to_string()]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_source_upgrade_refreshes_our_entries_without_blocking() {
+        let base = sandbox("upgrade");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        let state = base.join("state");
+        run_targets_in(&state, &src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        // The next version ships a changed command.
+        std::fs::write(
+            src.join("settings.json"),
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh --v2"}]}]}}"#,
+        )
+        .unwrap();
+        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let s = plan.settings.as_ref().unwrap();
+        assert_eq!(s.hooks_refreshed.len(), 1, "{s:?}");
+        assert!(s.hooks_replaced.is_empty(), "{s:?}");
+        assert!(!plan.blocked, "an upgrade of our own entry must not block");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_permission_the_user_already_had_survives_withdrawal() {
+        let base = sandbox("perm-kept");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(
+            dst.join("settings.json"),
+            r#"{"permissions":{"allow":["Bash(ways:*)","Bash(make:*)"],"deny":["Read(~/.ssh/**)"]}}"#,
+        )
+        .unwrap();
+        let roots = projection_roots(&src);
+        let state = base.join("state");
+        run_targets_in(&state, &src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        run_targets_in(&state, &src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        let live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        let allow: Vec<&str> = live["permissions"]["allow"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(allow, vec!["Bash(ways:*)", "Bash(make:*)"], "{live}");
+        let deny: Vec<&str> = live["permissions"]["deny"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(deny, vec!["Read(~/.ssh/**)"], "{live}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -221,22 +221,26 @@ fn merge_impl(
         .cloned()
         .unwrap_or_default();
     let theirs_allow = perms_obj.get("allow").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let theirs_allow_strs: Vec<String> =
+        theirs_allow.iter().filter_map(|v| v.as_str().map(String::from)).collect();
     let ours_perms: Vec<String> =
         if withdrawing { Vec::new() } else { WAYS_PERMS.iter().map(|s| s.to_string()).collect() };
 
     // Keep their entries except ones we previously added and no longer want.
     let deprecated: Vec<String> =
         base.perms.iter().filter(|p| !ours_perms.contains(p)).cloned().collect();
+    // Keep every entry of theirs except ones we added before and no longer
+    // ship. An entry they already have that we also ship stays where it is,
+    // in their order, so the user's view is unchanged; only the missing ones
+    // are appended.
     let mut new_allow: Vec<Value> = theirs_allow
         .into_iter()
-        .filter(|v| {
-            v.as_str()
-                .map(|s| !deprecated.iter().any(|d| d == s) && !ours_perms.iter().any(|o| o == s))
-                .unwrap_or(true)
-        })
+        .filter(|v| v.as_str().map(|s| !deprecated.iter().any(|d| d == s)).unwrap_or(true))
         .collect();
     for p in &ours_perms {
-        new_allow.push(Value::String(p.clone()));
+        if !new_allow.iter().any(|v| v.as_str() == Some(p.as_str())) {
+            new_allow.push(Value::String(p.clone()));
+        }
     }
     if withdrawing && new_allow.is_empty() {
         perms_obj.remove("allow");
@@ -249,6 +253,8 @@ fn merge_impl(
     // so the opt-out flows through the ordinary deprecated-cleanup: entries we
     // added on a prior reconcile are dropped here, restoring the user's own deny.
     let theirs_deny = perms_obj.get("deny").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let theirs_deny_strs: Vec<String> =
+        theirs_deny.iter().filter_map(|v| v.as_str().map(String::from)).collect();
     let ours_deny: Vec<String> = if deny_secrets && !withdrawing {
         WAYS_DENY.iter().map(|s| s.to_string()).collect()
     } else {
@@ -258,14 +264,12 @@ fn merge_impl(
         base.deny.iter().filter(|p| !ours_deny.contains(p)).cloned().collect();
     let mut new_deny: Vec<Value> = theirs_deny
         .into_iter()
-        .filter(|v| {
-            v.as_str()
-                .map(|s| !deprecated_deny.iter().any(|d| d == s) && !ours_deny.iter().any(|o| o == s))
-                .unwrap_or(true)
-        })
+        .filter(|v| v.as_str().map(|s| !deprecated_deny.iter().any(|d| d == s)).unwrap_or(true))
         .collect();
     for d in &ours_deny {
-        new_deny.push(Value::String(d.clone()));
+        if !new_deny.iter().any(|v| v.as_str() == Some(d.as_str())) {
+            new_deny.push(Value::String(d.clone()));
+        }
     }
     if new_deny.is_empty() {
         perms_obj.remove("deny");
@@ -281,7 +285,22 @@ fn merge_impl(
 
     Ok(Merged {
         settings: Value::Object(out),
-        base: Owned { hooks: base_hooks, perms: ours_perms, deny: ours_deny },
+        // The base records what we added, so withdrawal removes only that:
+        // an entry the user already had, unless a prior base claimed it, is
+        // theirs and stays out of the record.
+        base: Owned {
+            hooks: base_hooks,
+            perms: ours_perms
+                .iter()
+                .filter(|p| base.perms.contains(p) || !theirs_allow_strs.contains(p))
+                .cloned()
+                .collect(),
+            deny: ours_deny
+                .iter()
+                .filter(|d| base.deny.contains(d) || !theirs_deny_strs.contains(d))
+                .cloned()
+                .collect(),
+        },
     })
 }
 
@@ -496,11 +515,12 @@ pub fn base_for(live: &Value, base_path: &Path) -> Result<Owned> {
     if base_path.exists() {
         return Ok(read_json_or_empty(base_path).map(|v| Owned::from_value(&v)).unwrap_or_default());
     }
-    Ok(Owned {
-        hooks: seed_ours_from_live(live),
-        perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
-        deny: Vec::new(),
-    })
+    // Permissions seed empty, like deny: a `Bash(ways:*)` already in the
+    // file may be the user's own, and a seed that claimed it would let a
+    // withdrawal remove it. The merge dedups against the constants anyway,
+    // so nothing is duplicated; what is lost is only the cleanup of an entry
+    // a legacy install added that a later version stops shipping.
+    Ok(Owned { hooks: seed_ours_from_live(live), perms: Vec::new(), deny: Vec::new() })
 }
 
 /// Apply the merge to the live files: back up, merge, atomic-write, persist the

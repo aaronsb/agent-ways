@@ -106,16 +106,24 @@ fn replace_top_level_block(text: &str, key: &str, block: &str) -> String {
             && !l.starts_with([' ', '\t', '#', '-'])
             && l.contains(':')
     };
+    let is_block_line = |l: &str| l.starts_with([' ', '\t']) || l.starts_with("- ") || l == "-";
     let mut out: Vec<String> = Vec::new();
     let mut i = 0;
     let mut replaced = false;
     while i < lines.len() {
         if !replaced && is_top_key(lines[i], key) {
             out.push(block.trim_end_matches('\n').to_string());
-            i += 1;
-            while i < lines.len() && !is_any_top_key(lines[i]) {
-                i += 1;
+            // The old block ends at its last indented or list line. Comments
+            // and blank lines after that belong to whatever follows and stay.
+            let mut end = i;
+            let mut j = i + 1;
+            while j < lines.len() && !is_any_top_key(lines[j]) {
+                if is_block_line(lines[j]) {
+                    end = j;
+                }
+                j += 1;
             }
+            i = end + 1;
             replaced = true;
             continue;
         }
@@ -318,6 +326,13 @@ impl Config {
             }
         }
         let body = replace_top_level_block(&existing, "targets", &block);
+        // The edit is textual; prove the result still parses and carries
+        // exactly this list before it replaces the file.
+        match serde_yaml::from_str::<serde_yaml::Value>(&body) {
+            Ok(doc) if Self::read_targets(&doc).as_deref() == Some(list) => {}
+            Ok(_) => return Err(std::io::Error::other("targets write did not round-trip; file left unchanged")),
+            Err(e) => return Err(std::io::Error::other(format!("targets write produced invalid YAML: {e}"))),
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -855,6 +870,12 @@ mod tests {
         assert!(body.contains("# tail comment\n"), "{body}");
         let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
         assert_eq!(Config::read_targets(&doc).unwrap(), vec![Target { path: "/x".into(), enabled: false, observe: Some(true), config: None }]);
+        // A comment between the block and the next key survives a rewrite.
+        std::fs::write(&path, "targets:\n  - path: /a\n    enabled: true\n# language setting\n\nlanguage: es\n").unwrap();
+        Config::write_targets_to(&path, &[Target::new("/b")]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("# language setting\n\nlanguage: es\n"), "{body}");
+        assert!(!body.contains("/a\n"), "{body}");
         // The comments-only template `ways config init` writes is accepted.
         std::fs::write(&path, "# only comments\n# targets:\n#   - path: ~/.claude\n").unwrap();
         Config::write_targets_to(&path, &[]).unwrap();

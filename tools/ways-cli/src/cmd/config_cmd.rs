@@ -246,6 +246,9 @@ pub fn print_plan(plan: &Plan, json: bool) -> Result<()> {
             for h in &s.hooks_added {
                 println!("  add       {}: {}", h.event, h.command);
             }
+            for h in &s.hooks_refreshed {
+                println!("  refresh   {}: {}  (ours, from a prior version)", h.event, h.command);
+            }
             for h in &s.hooks_replaced {
                 println!("  replace   {}: {}  (reads as an agent-ways hook)", h.event, h.command);
             }
