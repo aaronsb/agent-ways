@@ -351,8 +351,14 @@ fn read_token_usage(content: &str) -> (u64, String) {
 
 /// The last `n` assistant messages that carry usage, oldest first. Sentinel
 /// turns (`<synthetic>`) carry no usage and are skipped by the usage check.
+///
+/// Claude Code writes one transcript line per content block, and every line
+/// of one response carries the same `message.id` and the same usage. One
+/// entry per id, keyed on the last line written, so its timestamp is the
+/// latest one for that response.
 fn read_usage_tail(content: &str, n: usize) -> Vec<UsageEntry> {
     let mut tail: Vec<UsageEntry> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     for line in content.lines().rev() {
         if tail.len() >= n {
             break;
@@ -366,6 +372,11 @@ fn read_usage_tail(content: &str, n: usize) -> Vec<UsageEntry> {
         }
         let Some(message) = val.get("message") else { continue };
         let Some(usage) = message.get("usage") else { continue };
+        if let Some(id) = message.get("id").and_then(|i| i.as_str()) {
+            if !seen_ids.insert(id.to_string()) {
+                continue;
+            }
+        }
         let at = val.get("timestamp").and_then(|t| t.as_str()).unwrap_or("").to_string();
         let creation = usage.get("cache_creation");
         let tier_tokens = |key: &str| {
@@ -617,5 +628,15 @@ mod tests {
         assert_eq!(tail[1].cache_read, 90000);
         assert_eq!(tail[1].tier, "");
         assert_eq!(read_usage_tail(&content, 1)[0].at, "2026-09-17T20:02:00Z");
+    }
+
+    #[test]
+    fn usage_tail_collapses_the_lines_of_one_response() {
+        // One response, three content blocks, three lines with the same id and usage.
+        let line = |ts: &str| format!(r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"msg_1","model":"claude-fable-5-1","usage":{{"input_tokens":3,"cache_creation_input_tokens":24000,"cache_read_input_tokens":23805,"output_tokens":2}}}}}}"#);
+        let content = format!("{}\n{}\n{}\n", line("2026-09-17T20:02:00Z"), line("2026-09-17T20:02:01Z"), line("2026-09-17T20:02:02Z"));
+        let tail = read_usage_tail(&content, 32);
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].at, "2026-09-17T20:02:02Z");
     }
 }

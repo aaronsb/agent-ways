@@ -169,9 +169,17 @@ pub fn read_arm(dir: &Path, session_id: &str) -> Option<ArmFile> {
 }
 
 pub fn write_arm(dir: &Path, session_id: &str, arm: &ArmFile) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
     let text = serde_json::to_string(arm).map_err(std::io::Error::other)?;
-    std::fs::write(arm_path(dir, session_id), text)
+    write_atomic(dir, &arm_path(dir, session_id), &text)
+}
+
+/// Write through a temp file and rename, so a reader never sees a torn file
+/// and two writers never interleave bytes.
+fn write_atomic(dir: &Path, path: &Path, text: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)
 }
 
 pub fn read_ledger(dir: &Path, session_id: &str) -> Option<Ledger> {
@@ -180,9 +188,8 @@ pub fn read_ledger(dir: &Path, session_id: &str) -> Option<Ledger> {
 }
 
 pub fn write_ledger(dir: &Path, session_id: &str, ledger: &Ledger) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
     let text = serde_json::to_string(ledger).map_err(std::io::Error::other)?;
-    std::fs::write(ledger_path(dir, session_id), text)
+    write_atomic(dir, &ledger_path(dir, session_id), &text)
 }
 
 // ── Reading ────────────────────────────────────────────────────
@@ -267,6 +274,19 @@ pub struct Outcome {
 }
 
 impl State {
+    /// A state that remembers what the last run recorded, so a self-reload
+    /// mid-stretch neither wakes twice nor forgets the card.
+    pub fn from_ledger(ledger: Option<Ledger>) -> Self {
+        let mut s = State::default();
+        if let Some(l) = ledger {
+            s.misses = l.misses;
+            s.last_ping = l.last_ping;
+            s.stopped = l.stopped;
+            s.pinged_at = l.pinged_at;
+        }
+        s
+    }
+
     pub fn is_cold(&self, now: u64) -> bool {
         self.last_seen_at > 0 && now.saturating_sub(self.last_seen_at) >= TTL_SECS
     }
@@ -297,6 +317,11 @@ impl State {
         if file_deadline != self.deadline {
             if file_deadline > now {
                 self.stopped = None;
+            } else {
+                // Operator `off`: no wake is pending any more, and no stop
+                // reason belongs to a window the operator closed.
+                self.pinged_at = None;
+                self.stopped = None;
             }
             self.deadline = file_deadline;
             out.changed = true;
@@ -307,6 +332,12 @@ impl State {
             self.last_seen_at = reading.last_at();
             self.ctx = reading.tokens_used;
             self.model = reading.model.clone();
+            // A wake recorded before a restart whose turn has since landed:
+            // the verdict is lost with the old process, the stretch is over.
+            if matches!(self.pinged_at, Some(p) if self.last_seen_at >= p) {
+                self.pinged_at = None;
+                out.changed = true;
+            }
             out.logs.push(format!(
                 "baseline: {} tokens, last request {} ago, {}",
                 fmt_tok(self.ctx),
@@ -324,13 +355,20 @@ impl State {
             }
             let price = price_of(&self.model);
 
-            // A write of half the prior context or more is a paid cold write.
-            if prior > MISS_FLOOR_TOKENS && entry.cache_creation >= prior / 2 {
+            // A paid cold write rewrites the prefix: a write of half the prior
+            // context or more, with a read under half of it. A large tool
+            // result appended to a warm prefix writes a lot and reads the
+            // whole prior context, so it does not score.
+            let rewrote = prior > MISS_FLOOR_TOKENS
+                && entry.cache_creation >= prior / 2
+                && entry.cache_read < prior / 2;
+            if rewrote {
                 let usd = price.map(|p| entry.cache_creation as f64 * p.write_1h / 1e6);
                 self.misses.push(Miss { at: entry.at_epoch, tokens: entry.cache_creation, usd });
                 out.changed = true;
                 let mut line = format!("cold write of {} tokens paid ({})", fmt_tok(entry.cache_creation), fmt_usd(usd));
-                if self.deadline < now + AUTO_WARM_SECS {
+                // Only a context the floor can serve is worth holding warm.
+                if entry.context() >= BIG_TOKENS && self.deadline < now + AUTO_WARM_SECS {
                     self.deadline = now + AUTO_WARM_SECS;
                     self.stopped = None;
                     out.arm_write = Some(self.deadline);
@@ -339,10 +377,13 @@ impl State {
                 out.logs.push(line);
             }
 
-            // The first request after a wake carries the verdict.
+            // The first request after a wake carries the verdict. Warm means
+            // it read at least half the prior context from cache; what it
+            // wrote does not matter, since a real turn landing in the same
+            // window can append a large tool result to a warm prefix.
             if let Some(pinged) = self.pinged_at {
                 if entry.at_epoch >= pinged {
-                    let warm = entry.cache_read > 0 && entry.cache_creation < entry.cache_read / 10;
+                    let warm = prior > 0 && entry.cache_read >= prior / 2;
                     let usd = price.map(|p| {
                         (entry.cache_read as f64 * p.read
                             + entry.cache_creation as f64 * p.write_1h
@@ -507,7 +548,8 @@ impl KeepwarmSensor {
     /// `dir` is attend's keepwarm directory; the arm file and ledger for
     /// this session live there.
     pub fn new(session_id: String, dir: PathBuf) -> Self {
-        Self { session_id, dir, state: State::default() }
+        let state = State::from_ledger(read_ledger(&dir, &session_id));
+        Self { session_id, dir, state }
     }
 }
 
@@ -529,10 +571,18 @@ impl Sensor for KeepwarmSensor {
             eprintln!("[attend] keepwarm: {line}");
         }
         if let Some(deadline) = out.arm_write {
-            let window = arm.as_ref().map(|a| a.window_secs).unwrap_or(0);
-            let file = ArmFile { deadline, armed_at: now, window_secs: if deadline == 0 { 0 } else { deadline.saturating_sub(now).max(window) } };
-            if let Err(e) = write_arm(&self.dir, &self.session_id, &file) {
-                eprintln!("[attend] keepwarm: could not write the arm file: {e}");
+            // The operator may have armed or disarmed while `ways context`
+            // ran. Their word is newer than this poll's, so write only if
+            // the file still says what the step started from.
+            let started_from = arm.as_ref().map(|a| a.deadline).unwrap_or(0);
+            let on_disk = read_arm(&self.dir, &self.session_id).map(|a| a.deadline).unwrap_or(0);
+            if on_disk != started_from {
+                eprintln!("[attend] keepwarm: arm file changed during the poll, leaving it");
+            } else {
+                let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now) };
+                if let Err(e) = write_arm(&self.dir, &self.session_id, &file) {
+                    eprintln!("[attend] keepwarm: could not write the arm file: {e}");
+                }
             }
         }
         if out.changed {
@@ -686,6 +736,80 @@ mod tests {
         assert_eq!(s.misses[0].usd.map(|u| (u * 100.0).round() / 100.0), Some(4.01));
         assert_eq!(out.arm_write, Some(back + 30 + AUTO_WARM_SECS));
         assert!(out.logs[0].contains("cold write of 201k tokens paid ($4.01), keeping the cache warm for 3h00m"));
+    }
+
+    #[test]
+    fn a_large_tool_result_on_a_warm_prefix_is_not_a_cold_write() {
+        // The reviewer's case from a real transcript: 24k written, 24k read.
+        let r = reading(vec![entry(1000, 23_805, 100)]);
+        let mut s = State::default();
+        s.step(&r, None, 1000);
+        let r2 = reading(vec![entry(1000, 23_805, 100), entry(1300, 23_805, 24_000)]);
+        let out = s.step(&r2, None, 1400);
+        assert!(s.misses.is_empty());
+        assert_eq!(out.arm_write, None);
+    }
+
+    #[test]
+    fn a_small_context_cold_write_is_scored_but_not_auto_armed() {
+        let r = reading(vec![entry(1000, 30_000, 100)]);
+        let mut s = State::default();
+        s.step(&r, None, 1000);
+        let back = 1000 + TTL_SECS + 600;
+        let r2 = reading(vec![entry(1000, 30_000, 100), entry(back, 0, 30_120)]);
+        let out = s.step(&r2, None, back + 30);
+        assert_eq!(s.misses.len(), 1);
+        assert_eq!(out.arm_write, None);
+    }
+
+    #[test]
+    fn a_coincident_turn_with_a_big_write_still_reads_warm() {
+        let (mut s, r) = warm_state();
+        let arm = armed(1000 + DEFAULT_WINDOW_SECS);
+        let pinged = 1000 + PING_AFTER_SECS + 30;
+        s.step(&r, Some(&arm), pinged);
+        // A real turn lands with the wake and appends a 40k tool result.
+        let r2 = reading(vec![entry(1000, 200_000, 500), entry(pinged + 20, 200_600, 40_000)]);
+        s.step(&r2, Some(&arm), pinged + 80);
+        assert!(s.last_ping.as_ref().unwrap().warm);
+        assert_eq!(s.deadline, 1000 + DEFAULT_WINDOW_SECS);
+    }
+
+    #[test]
+    fn operator_off_clears_a_pending_wake_without_a_stop_reason() {
+        let (mut s, r) = warm_state();
+        let arm = armed(1000 + DEFAULT_WINDOW_SECS);
+        let pinged = 1000 + PING_AFTER_SECS + 30;
+        s.step(&r, Some(&arm), pinged);
+        assert!(s.pinged_at.is_some());
+        s.step(&r, None, pinged + 60);
+        assert_eq!(s.pinged_at, None);
+        // Well past the margin, nothing fires.
+        let out = s.step(&r, None, pinged + TTL_SECS);
+        assert_eq!(s.stopped, None);
+        assert_eq!(out.arm_write, None);
+    }
+
+    #[test]
+    fn a_restart_mid_stretch_remembers_the_pending_wake() {
+        let (mut s, r) = warm_state();
+        let arm = armed(1000 + DEFAULT_WINDOW_SECS);
+        let pinged = 1000 + PING_AFTER_SECS + 30;
+        s.step(&r, Some(&arm), pinged);
+        let ledger = s.ledger(pinged);
+        // New process, same stretch, no turn yet: no second wake.
+        let mut s2 = State::from_ledger(Some(ledger.clone()));
+        let out = s2.step(&r, Some(&arm), pinged + 120);
+        assert!(out.observations.is_empty());
+        let out = s2.step(&r, Some(&arm), pinged + 180);
+        assert!(out.observations.is_empty());
+        assert_eq!(s2.pinged_at, Some(pinged));
+        // New process after the wake's turn landed: the stretch is over.
+        let r2 = reading(vec![entry(1000, 200_000, 500), entry(pinged + 20, 200_600, 60)]);
+        let mut s3 = State::from_ledger(Some(ledger));
+        s3.step(&r2, Some(&arm), pinged + 200);
+        assert_eq!(s3.pinged_at, None);
+        assert_eq!(s3.misses.len(), 0);
     }
 
     #[test]
