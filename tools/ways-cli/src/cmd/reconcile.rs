@@ -108,8 +108,25 @@ pub fn run(
         return converge_one(&source_root, &dest_root, &roots, &base, dry_run, quiet, force);
     }
 
-    let targets = crate::config::global().targets();
-    run_targets(&source_root, &roots, &targets, dry_run, quiet, force)
+    let cfg = crate::config::global();
+    let targets = cfg.targets();
+    run_targets(&source_root, &roots, &targets, dry_run, quiet, force)?;
+
+    // Migration (ADR-184 item 2): an install from before the targets key has
+    // just converged its implicit default. Record it, so the install is
+    // explicit from here and `ways config targets` reads the truth.
+    if !cfg.targets_explicit() && !dry_run {
+        match crate::config::Config::write_user_targets(&targets) {
+            Ok(path) if !quiet => eprintln!(
+                "recorded {} as the active target in {}",
+                targets.iter().map(|t| t.path.as_str()).collect::<Vec<_>>().join(", "),
+                path.display()
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!("could not record the target in the user config: {e}"),
+        }
+    }
+    Ok(())
 }
 
 /// Converge every enabled target and withdraw from every disabled one
@@ -440,7 +457,7 @@ fn withdraw_one(
                     if dry_run {
                         Outcome { rel: root.rel.clone(), action: Action::Would, detail: "unlink".into() }
                     } else {
-                        std::fs::remove_file(&dst)?;
+                        remove_symlink(&dst)?;
                         Outcome { rel: root.rel.clone(), action: Action::Unlinked, detail: "unlinked".into() }
                     }
                 } else {
@@ -585,11 +602,28 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// check; a real directory never gets here.
 fn remove_path(p: &Path) -> Result<()> {
     let meta = std::fs::symlink_metadata(p)?;
-    if meta.file_type().is_dir() && !meta.file_type().is_symlink() {
+    if meta.file_type().is_symlink() {
+        return remove_symlink(p);
+    }
+    if meta.file_type().is_dir() {
         std::fs::remove_dir_all(p)?;
     } else {
         std::fs::remove_file(p)?;
     }
+    Ok(())
+}
+
+/// Remove a symlink and only the symlink. On Windows a directory symlink is a
+/// directory entry and `remove_file` is refused with "access is denied"; a
+/// dangling one has no target to inspect, so try the directory call first.
+fn remove_symlink(p: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        if std::fs::remove_dir(p).is_ok() {
+            return Ok(());
+        }
+    }
+    std::fs::remove_file(p)?;
     Ok(())
 }
 
@@ -777,8 +811,7 @@ mod tests {
         std::fs::create_dir_all(&elsewhere).unwrap();
         std::fs::write(dst.join("skills/mine.md"), "mine").unwrap();
         std::fs::create_dir_all(dst.join("hooks")).unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&elsewhere, dst.join("hooks/ways")).unwrap();
+        make_symlink(&elsewhere, &dst.join("hooks/ways"), true).unwrap();
         fake_source(&src);
         let roots = projection_roots(&src);
         std::env::set_var("XDG_STATE_HOME", base.join("state"));

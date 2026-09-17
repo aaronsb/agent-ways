@@ -21,7 +21,7 @@ The one case that needs your attention: if a projected root path (`~/.claude/ski
 
 ## Activation is separate from installation
 
-Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as.
+Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways reconcile` or `ways update` records it, and the install is explicit from then on.
 
 Before activating a directory, ask what it would do:
 
