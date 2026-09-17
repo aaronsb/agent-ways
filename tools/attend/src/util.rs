@@ -17,6 +17,16 @@ pub(crate) fn signals_base() -> std::path::PathBuf {
         .join("signals")
 }
 
+/// Where keepwarm's per-session arm file and ledger live (ADR-182).
+/// Attend-owned state: the CLI verbs are the only sanctioned readers.
+pub(crate) fn keepwarm_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    std::path::PathBuf::from(home)
+        .join(".cache")
+        .join("attend")
+        .join("keepwarm")
+}
+
 /// Claude Code's per-project data dir. A project is "live" iff its
 /// encoded-cwd subdir exists here; message-tray lifetime is bound to it
 /// (ADR-136) rather than to a wall-clock age.

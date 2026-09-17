@@ -233,6 +233,7 @@ dependencies = [
  "sensor-context",
  "sensor-disclosure",
  "sensor-git",
+ "sensor-keepwarm",
  "sensor-peers",
  "sensor-processes",
  "sensor-trait",
@@ -1219,6 +1220,15 @@ name = "sensor-git"
 version = "0.6.0"
 dependencies = [
  "sensor-trait",
+]
+
+[[package]]
+name = "sensor-keepwarm"
+version = "0.1.0"
+dependencies = [
+ "sensor-trait",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

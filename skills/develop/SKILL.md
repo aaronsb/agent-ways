@@ -52,9 +52,24 @@ Let the stage ways fire on their own as you go; `develop` doesn't repeat what th
 teach. When the piece is landed, that's one turn of the loop — pick up the next, or
 `wrap` if the session is done.
 
+## Delegation
+
+Invoking `/develop` is the operator's request for the delegation its stages call for
+(subagents(meta)). Where it pays:
+
+- **front** — a read-only survey of unfamiliar code goes to `Explore`; a design read
+  that must not anchor on your reasoning goes to `system-architect` or `skeptic`
+- **build** — edits with no shared state run in parallel `general-purpose` workers,
+  each briefed with file paths and the check to run
+- **tail** — `/merge` spawns its own reviewers
+
+Pick the model by the job (the way's model section), name the payoff in a clause, and
+keep it one level deep. Coupled work stays inline.
+
 ## Key Principles
 
 - **Route, don't reimplement** — `develop` sequences the stage skills/ways; it is thin.
+- **Delegate where it pays** — the grant comes with the invocation; the payoff is yours to name.
 - **Front by uncertainty** — lead with the stage that answers the load-bearing question.
 - **Stable tail** — build → review → fix → merge, every time, via `/merge`.
 - **Claim then evidence** — record decisions, then hold them to what the system proves.

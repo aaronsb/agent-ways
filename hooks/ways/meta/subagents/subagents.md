@@ -86,7 +86,7 @@ Claude Code's system prompt on Opus 5 carries: *"Do not call the AgentTool unles
 
 **Invoking a skill or way whose steps call for delegation is the user's request.** When the operator runs `/merge`, asks to land or ship a branch, or asks for a PR review or a research sweep, they have requested every delegation those procedures specify. Don't re-ask, and don't narrate the gate back at them. Delegate as the procedure directs.
 
-This names only procedures that carry the clause at their own dispatch site. A skill that sequences other skills without spawning anything — `/develop` routes, it does not orchestrate — grants nothing here, and neither does a built-in command this corpus can't annotate.
+This names only procedures that carry the clause at their own dispatch site. `/start`, `/develop`, and `/merge` carry it, each naming the delegation its own stages call for. A built-in command this corpus can't annotate grants nothing.
 
 The gate condition is met on its own terms.
 
@@ -105,6 +105,16 @@ State the payoff in one clause when you delegate:
 - **Parallel independent work** — "three unrelated call sites, no shared state"
 
 If you can't name the payoff in a clause, the nudge is right — do it inline.
+
+## Pick the Model
+
+The `Agent` tool takes a `model`. Choose it by what the worker's errors would cost:
+
+- `haiku` for mechanical work with a checkable result: a file fan-out search, bulk edits from an exact spec, running a command and reporting its output.
+- `sonnet` for bounded implementation from a brief that names the files and the check to run.
+- The session's model, by omitting `model`, for review, design, and any read whose mistakes would come back as findings. A `fork` always runs on it.
+
+A strong model on a mechanical task wastes money. A weak model on a judgment task wastes the delegation.
 
 Both sections cover `AgentTool` only. `Workflow` and deep-research are gated by the same system-prompt constant and stay that way: propose them and discuss, never invoke unprompted. See ADR-175.
 

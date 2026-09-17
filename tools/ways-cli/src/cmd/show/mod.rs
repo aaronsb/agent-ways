@@ -512,6 +512,8 @@ mod tests {
             method: "test".to_string(),
             session: "test".to_string(),
             window_source,
+            transcript: String::new(),
+            usage_tail: Vec::new(),
         }
     }
 

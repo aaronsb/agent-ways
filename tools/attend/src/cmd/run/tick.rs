@@ -252,7 +252,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         // throttling git/process churn. It still rides the permissive
         // message governor downstream. The event lane keeps the
         // refractory gate unchanged.
-        let is_message_lane = s.slots[i].name() == "peers";
+        let is_message_lane = rides_message_lane(s.slots[i].name());
 
         // ADR-172 Decision 3, the other direction: the sensor marks
         // scanned signals seen in memory, but the drain reads the FILE
@@ -311,7 +311,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // observation (also the seam a future Slack event-sensor wants).
     let (msg_ready, evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
         .iter()
-        .partition(|&&i| s.slots[i].name() == "peers");
+        .partition(|&&i| rides_message_lane(s.slots[i].name()));
     try_disclose(s.slots, &evt_ready, s.governor, true);
     // Message lane: do not record engagement, so it never builds the
     // action-potential refractory that would later hold conversation.
@@ -360,6 +360,13 @@ pub(super) fn tick_iteration(s: &mut TickState) {
             *s.last_cleanup = Some(Instant::now());
         }
     }
+}
+
+/// Sensors whose output is never observation noise: authored peer
+/// messages (ADR-136) and the keepwarm floor (ADR-182), a timed wake that
+/// must not be held by a refractory built for git and process churn.
+fn rides_message_lane(name: &str) -> bool {
+    matches!(name, "peers" | "keepwarm")
 }
 
 /// Disclose a batch of ready sensors through `governor`, or log a hold if

@@ -34,6 +34,9 @@ enum Commands {
         /// Project directory (default: detect from cwd or CLAUDE_PROJECT_DIR)
         #[arg(long)]
         project: Option<String>,
+        /// Pin to one session id instead of guessing the transcript from cwd
+        #[arg(long)]
+        session: Option<String>,
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
@@ -711,7 +714,7 @@ fn run() -> Result<()> {
     };
 
     match command {
-        Commands::Context { project, json } => cmd::context::run(project.as_deref(), json),
+        Commands::Context { project, session, json } => cmd::context::run(project.as_deref(), session.as_deref(), json),
         Commands::Lint { path, schema, check, fix, all, global } => cmd::lint::run(path, schema, check, fix, all, global),
         Commands::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
