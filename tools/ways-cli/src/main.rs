@@ -270,6 +270,11 @@ enum Commands {
         /// Suppress the summary line (still prints any changes)
         #[arg(long)]
         quiet: bool,
+        /// When a projection root is already a real directory or file, rename
+        /// it to a timestamped sibling (<name>.ways-backup-<seconds>) instead
+        /// of stopping. Never deletes.
+        #[arg(long)]
+        force: bool,
     },
     /// Replay a session's way-firing history as an interactive animation
     Rethink {
@@ -741,8 +746,8 @@ fn run() -> Result<()> {
         }
         Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
-        Commands::Reconcile { source, dest, mode, dry_run, quiet } => {
-            cmd::reconcile::run(source, dest, mode, dry_run, quiet)
+        Commands::Reconcile { source, dest, mode, dry_run, quiet, force } => {
+            cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
         }
         Commands::Rethink { session, project, all, speed, list, json } => {
             eprintln!(

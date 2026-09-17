@@ -60,7 +60,9 @@ ${CYAN}What it does (1.0 XDG layout):${RESET}
   2. Stages the app into \$XDG_DATA_HOME/agent-ways
   3. Builds binaries + embedding model ('make setup')
   4. Reconciles the projection into ~/.claude ('ways reconcile')
-     — your Claude Code files (projects/, credentials, settings) are preserved
+     Your Claude Code files (projects/, credentials, settings) are preserved.
+     A real skills/, agents/, commands/ or hooks/ways/ directory of your own at
+     a projected root stops this step; nothing is deleted.
 
 ${CYAN}Already have a pre-1.0 in-place clone at ~/.claude?${RESET}
   Migrate it to the 1.0 layout — see
@@ -378,10 +380,18 @@ link_path_binaries
 echo ""
 if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-  echo -e "${DIM}(symlinks the projected trees; merges settings.json; your Claude Code files stay)${RESET}"
+  echo -e "${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
   echo ""
   mkdir -p "$DEST"
-  "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"
+  if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
+    echo ""
+    echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
+    echo "  Read the list above. Move those paths aside (or copy what you want to keep"
+    echo "  into a project's .claude/skills/), then run:"
+    echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
+    echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+    exit 1
+  fi
   echo ""
   echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
   echo ""

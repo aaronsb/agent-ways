@@ -408,6 +408,24 @@ ways-audit report --json
 
 ## Administration
 
+### `ways reconcile`
+
+**When:** Installing, updating, or repairing the `~/.claude` projection (ADR-144). The installer and `ways update` run it for you; run it by hand after pulling the app source or when a projected root is missing.
+
+**Run from:** Anywhere.
+
+**Tells you:** Which projection roots it linked or relinked, one line each; silent when everything is already correct. Stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is already a real directory or file rather than a symlink; the message lists the paths. It never deletes a real path.
+
+```
+ways reconcile                       # default: $XDG_DATA_HOME/agent-ways -> ~/.claude
+ways reconcile --dry-run             # preview; prints "refused <root>" for real paths, exit 0
+ways reconcile --force               # rename each real path to <name>.ways-backup-<seconds>, then link
+ways reconcile --source <checkout> --dest <dir>   # dogfood a development checkout
+ways reconcile --quiet               # suppress the summary line
+```
+
+---
+
 ### `ways disable`
 
 **When:** A global way keeps firing in a project where it isn't relevant (e.g., `itops/incident` showing up in a writing project).
