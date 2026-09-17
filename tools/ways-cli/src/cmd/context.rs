@@ -22,7 +22,32 @@ pub struct ContextInfo {
     /// is never mistaken for a detected one — the failure that let a 1M Fable
     /// session report 106% of a 200k window.
     pub window_source: WindowSource,
+    /// The transcript file the figures were read from.
+    pub transcript: String,
+    /// The last assistant usage entries, oldest first (ADR-182). The keepwarm
+    /// sensor reads the idle clock and the cache verdict from these.
+    pub usage_tail: Vec<UsageEntry>,
 }
+
+/// One assistant message's API usage, as the transcript records it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct UsageEntry {
+    /// ISO-8601 timestamp as written in the transcript.
+    pub at: String,
+    /// The same instant as Unix seconds, 0 when the timestamp did not parse.
+    pub at_epoch: u64,
+    pub model: String,
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
+    pub output: u64,
+    /// Cache tier the write landed on: "1h", "5m", or "" when nothing was written.
+    pub tier: String,
+}
+
+/// How many assistant usage entries `usage_tail` carries. A ten-step turn
+/// inside one sensor poll interval still fits with room to spare.
+pub const USAGE_TAIL_LEN: usize = 32;
 
 /// Get context info for the current session. Used by `ways context` and `ways list`.
 ///
@@ -95,6 +120,8 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
     };
     let pct_remaining = 100u64.saturating_sub(pct_used);
 
+    let usage_tail = read_usage_tail(&content, USAGE_TAIL_LEN);
+
     Ok(ContextInfo {
         tokens_used,
         tokens_total: window_tokens,
@@ -105,6 +132,8 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
         method,
         session,
         window_source: window.source,
+        transcript: transcript.to_string_lossy().to_string(),
+        usage_tail,
     })
 }
 
@@ -157,8 +186,11 @@ fn resolve_transcript(
         .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))
 }
 
-pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
-    let ctx = get_context(project)?;
+pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Result<()> {
+    let ctx = match session {
+        Some(sid) => get_context_for_session(sid)?,
+        None => get_context(project)?,
+    };
 
     if json_out {
         let output = json!({
@@ -171,6 +203,10 @@ pub fn run(project: Option<&str>, json_out: bool) -> Result<()> {
             "method": ctx.method,
             "session": ctx.session,
             "window_source": ctx.window_source.as_str(),
+            "transcript": ctx.transcript,
+            "last_assistant_at": ctx.usage_tail.last().map(|u| u.at.clone()),
+            "last_assistant_at_epoch": ctx.usage_tail.last().map(|u| u.at_epoch),
+            "usage_tail": ctx.usage_tail,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
@@ -311,6 +347,96 @@ fn read_token_usage(content: &str) -> (u64, String) {
     // Conservative: ~6.3 transcript JSON bytes per token
     let estimated = active_bytes * 10 / 63;
     (estimated, "bytes".to_string())
+}
+
+/// The last `n` assistant messages that carry usage, oldest first. Sentinel
+/// turns (`<synthetic>`) carry no usage and are skipped by the usage check.
+///
+/// Claude Code writes one transcript line per content block, and every line
+/// of one response carries the same `message.id` and the same usage. One
+/// entry per id, keyed on the last line written, so its timestamp is the
+/// latest one for that response.
+fn read_usage_tail(content: &str, n: usize) -> Vec<UsageEntry> {
+    let mut tail: Vec<UsageEntry> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for line in content.lines().rev() {
+        if tail.len() >= n {
+            break;
+        }
+        if !line.contains("cache_read_input_tokens") {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if val.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(message) = val.get("message") else { continue };
+        let Some(usage) = message.get("usage") else { continue };
+        if let Some(id) = message.get("id").and_then(|i| i.as_str()) {
+            if !seen_ids.insert(id.to_string()) {
+                continue;
+            }
+        }
+        let at = val.get("timestamp").and_then(|t| t.as_str()).unwrap_or("").to_string();
+        let creation = usage.get("cache_creation");
+        let tier_tokens = |key: &str| {
+            creation.and_then(|c| c.get(key)).and_then(|v| v.as_u64()).unwrap_or(0)
+        };
+        let tier = if tier_tokens("ephemeral_1h_input_tokens") > 0 {
+            "1h"
+        } else if tier_tokens("ephemeral_5m_input_tokens") > 0 {
+            "5m"
+        } else {
+            ""
+        };
+        tail.push(UsageEntry {
+            at_epoch: iso_to_epoch(&at).unwrap_or(0),
+            at,
+            model: message.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string(),
+            input: usage["input_tokens"].as_u64().unwrap_or(0),
+            cache_read: usage["cache_read_input_tokens"].as_u64().unwrap_or(0),
+            cache_creation: usage["cache_creation_input_tokens"].as_u64().unwrap_or(0),
+            output: usage["output_tokens"].as_u64().unwrap_or(0),
+            tier: tier.to_string(),
+        });
+    }
+    tail.reverse();
+    tail
+}
+
+/// `YYYY-MM-DDTHH:MM:SS[.fff]Z` to Unix seconds. The transcript writes UTC
+/// with a trailing `Z`; any other offset returns `None` rather than a wrong
+/// instant. Fractional seconds are dropped.
+pub fn iso_to_epoch(s: &str) -> Option<u64> {
+    let s = s.trim().strip_suffix('Z')?;
+    let (date, time) = s.split_once('T')?;
+    let mut d = date.split('-');
+    let y: i64 = d.next()?.parse().ok()?;
+    let m: u32 = d.next()?.parse().ok()?;
+    let day: u32 = d.next()?.parse().ok()?;
+    if d.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let time = time.split('.').next()?;
+    let mut t = time.split(':');
+    let hh: u64 = t.next()?.parse().ok()?;
+    let mm: u64 = t.next()?.parse().ok()?;
+    let ss: u64 = t.next()?.parse().ok()?;
+    if t.next().is_some() || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    // Days from civil, Howard Hinnant's algorithm.
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp as u64 + 2) / 5 + day as u64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe as i64 - 719_468;
+    if days < 0 {
+        return None;
+    }
+    Some(days as u64 * 86_400 + hh * 3_600 + mm * 60 + ss)
 }
 
 /// The root every session transcript lives under, one directory per project.
@@ -476,5 +602,41 @@ mod tests {
         let err = resolve_transcript(None, None, Some(""), &root).unwrap_err();
         assert!(err.to_string().contains("No active transcript"));
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn iso_to_epoch_parses_transcript_timestamps() {
+        // date -u -d 2026-09-17T20:37:03Z +%s
+        assert_eq!(iso_to_epoch("2026-09-17T20:37:03.286Z"), Some(1_789_677_423));
+        assert_eq!(iso_to_epoch("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(iso_to_epoch("2000-03-01T00:00:00Z"), Some(951_868_800));
+        assert_eq!(iso_to_epoch("2026-09-17T20:37:03+02:00"), None);
+        assert_eq!(iso_to_epoch("garbage"), None);
+    }
+
+    #[test]
+    fn usage_tail_is_oldest_first_and_skips_non_assistant_lines() {
+        let a = r#"{"type":"assistant","timestamp":"2026-09-17T20:00:00Z","message":{"model":"claude-fable-5-1","usage":{"input_tokens":10,"cache_creation_input_tokens":90000,"cache_read_input_tokens":0,"output_tokens":5,"cache_creation":{"ephemeral_1h_input_tokens":90000,"ephemeral_5m_input_tokens":0}}}}"#;
+        let user = r#"{"type":"user","timestamp":"2026-09-17T20:01:00Z","message":{"content":"cache_read_input_tokens in a prompt"}}"#;
+        let b = r#"{"type":"assistant","timestamp":"2026-09-17T20:02:00Z","message":{"model":"claude-fable-5-1","usage":{"input_tokens":3,"cache_creation_input_tokens":120,"cache_read_input_tokens":90000,"output_tokens":2}}}"#;
+        let content = format!("{a}\n{user}\n{b}\n");
+        let tail = read_usage_tail(&content, 32);
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail[0].cache_creation, 90000);
+        assert_eq!(tail[0].tier, "1h");
+        assert_eq!(tail[0].at_epoch, 1_789_675_200);
+        assert_eq!(tail[1].cache_read, 90000);
+        assert_eq!(tail[1].tier, "");
+        assert_eq!(read_usage_tail(&content, 1)[0].at, "2026-09-17T20:02:00Z");
+    }
+
+    #[test]
+    fn usage_tail_collapses_the_lines_of_one_response() {
+        // One response, three content blocks, three lines with the same id and usage.
+        let line = |ts: &str| format!(r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"msg_1","model":"claude-fable-5-1","usage":{{"input_tokens":3,"cache_creation_input_tokens":24000,"cache_read_input_tokens":23805,"output_tokens":2}}}}}}"#);
+        let content = format!("{}\n{}\n{}\n", line("2026-09-17T20:02:00Z"), line("2026-09-17T20:02:01Z"), line("2026-09-17T20:02:02Z"));
+        let tail = read_usage_tail(&content, 32);
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].at, "2026-09-17T20:02:02Z");
     }
 }

@@ -30,7 +30,7 @@ mod util;
 use attend_state as state;
 
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, FocusCmd, PermissionsCmd};
+use cli::{Cli, Commands, ConfigCmd, FocusCmd, KeepwarmCmd, PermissionsCmd};
 use sensors::Focus;
 
 fn main() {
@@ -72,6 +72,7 @@ fn main() {
         Commands::Status => cmd::status::cmd_status(),
         Commands::Whoami { machine } => cmd::whoami::cmd_whoami(machine),
         Commands::Sensors => cmd::sensors::cmd_sensors(),
+        Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
         Commands::Send { broadcast, to, focus, re, message } => {
             cmd::send::cmd_send(broadcast, to, focus, re, message);
         }

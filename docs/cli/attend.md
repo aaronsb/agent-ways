@@ -11,6 +11,10 @@ This document contains the help content for the `attend` command-line program.
 * [`attend status`↴](#attend-status)
 * [`attend whoami`↴](#attend-whoami)
 * [`attend sensors`↴](#attend-sensors)
+* [`attend keepwarm`↴](#attend-keepwarm)
+* [`attend keepwarm on`↴](#attend-keepwarm-on)
+* [`attend keepwarm off`↴](#attend-keepwarm-off)
+* [`attend keepwarm status`↴](#attend-keepwarm-status)
 * [`attend send`↴](#attend-send)
 * [`attend reply`↴](#attend-reply)
 * [`attend chat`↴](#attend-chat)
@@ -56,6 +60,7 @@ Active awareness for Claude Code sessions
 * `status` — Show running instances, signals, and channel state
 * `whoami` — Print this session's canonical bus identity (issue #378)
 * `sensors` — List all sensors — built-in and config-defined script sensors
+* `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `send` — Send a signal to peer sessions (defaults to #open base channel)
 * `reply` — Reply to the most recent peer message (auto-threaded)
 * `chat` — Launch the interactive chat TUI (ADR-120)
@@ -144,6 +149,48 @@ Print this session's canonical bus identity (issue #378)
 List all sensors — built-in and config-defined script sensors
 
 **Usage:** `attend sensors`
+
+
+
+## `attend keepwarm`
+
+Keep the prompt cache warm across idle stretches (ADR-182; default: status)
+
+**Usage:** `attend keepwarm [COMMAND]`
+
+###### **Subcommands:**
+
+* `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
+* `off` — Disarm and forget the window
+* `status` — Cache state, context size, cold price, window left, and this session's cold writes
+
+
+
+## `attend keepwarm on`
+
+Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
+
+**Usage:** `attend keepwarm on [WINDOW]`
+
+###### **Arguments:**
+
+* `<WINDOW>` — Window such as 6h, 90m, or 2h30m (default 6h)
+
+
+
+## `attend keepwarm off`
+
+Disarm and forget the window
+
+**Usage:** `attend keepwarm off`
+
+
+
+## `attend keepwarm status`
+
+Cache state, context size, cold price, window left, and this session's cold writes
+
+**Usage:** `attend keepwarm status`
 
 
 

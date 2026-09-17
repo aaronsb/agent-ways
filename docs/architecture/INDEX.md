@@ -98,6 +98,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-179](./system/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md) | Remove the pre-1.0 in-place migrator; keep the guards and the transition fallbacks | Accepted |
 | [ADR-180](./system/ADR-180-github-issues-as-the-shared-truth-for-the-session-task-list.md) | GitHub issues as the shared truth for the session task list | Accepted |
 | [ADR-181](./system/ADR-181-guard-hooks-a-blocking-pretooluse-class-for-pattern-kills-and-interactive-prone-commands.md) | Guard hooks: a blocking PreToolUse class, shipped deactivated | Accepted |
+| [ADR-182](./system/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md) | Keepwarm: attend keeps the prompt cache warm with a wake floor | Accepted |
 | [ADR-183](./system/ADR-183-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md) | Install scope: project-scoped hook wiring on the one reconciler | Draft |
 
 ## Governance

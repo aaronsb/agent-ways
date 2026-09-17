@@ -219,7 +219,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "attend"
-version = "0.12.1"
+version = "0.13.0"
 dependencies = [
  "agent-fmt",
  "agent-identity",
@@ -233,6 +233,7 @@ dependencies = [
  "sensor-context",
  "sensor-disclosure",
  "sensor-git",
+ "sensor-keepwarm",
  "sensor-peers",
  "sensor-processes",
  "sensor-trait",
@@ -1222,6 +1223,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sensor-keepwarm"
+version = "0.1.0"
+dependencies = [
+ "sensor-trait",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sensor-peers"
 version = "0.6.0"
 dependencies = [
@@ -1582,7 +1592,7 @@ dependencies = [
 
 [[package]]
 name = "ways"
-version = "1.12.0"
+version = "1.13.0"
 dependencies = [
  "agent-fmt",
  "anyhow",

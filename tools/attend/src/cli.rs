@@ -83,6 +83,12 @@ pub(crate) enum Commands {
     /// List all sensors — built-in and config-defined script sensors
     Sensors,
 
+    /// Keep the prompt cache warm across idle stretches (ADR-182; default: status)
+    Keepwarm {
+        #[command(subcommand)]
+        sub: Option<KeepwarmCmd>,
+    },
+
     /// Send a signal to peer sessions (defaults to #open base channel)
     Send {
         /// Force broadcast (every peer + every Aaron session)
@@ -205,6 +211,20 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         sub: Option<ConfigCmd>,
     },
+}
+
+/// Subcommands for `attend keepwarm`. With no subcommand, defaults to `status`.
+#[derive(Subcommand)]
+pub enum KeepwarmCmd {
+    /// Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
+    On {
+        /// Window such as 6h, 90m, or 2h30m (default 6h)
+        window: Option<String>,
+    },
+    /// Disarm and forget the window
+    Off,
+    /// Cache state, context size, cold price, window left, and this session's cold writes
+    Status,
 }
 
 /// Subcommands for `attend channels`. With no subcommand, defaults to
