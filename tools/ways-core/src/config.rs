@@ -35,6 +35,11 @@ pub struct Target {
     /// Included in transcript-derived readers. Defaults to `enabled`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observe: Option<bool>,
+    /// This target's own configuration file, layered over the user config for
+    /// sessions under this target. Defaults to
+    /// `$XDG_CONFIG/agent-ways/targets/<key>/config.yaml`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -43,7 +48,23 @@ fn default_true() -> bool {
 
 impl Target {
     pub fn new(path: impl Into<String>) -> Self {
-        Target { path: path.into(), enabled: true, observe: None }
+        Target { path: path.into(), enabled: true, observe: None, config: None }
+    }
+
+    /// Where this target's own config.yaml lives, explicit or default.
+    pub fn config_path(&self) -> PathBuf {
+        match &self.config {
+            Some(p) => expand_tilde(p),
+            None => crate::paths::target_config_root(&self.dir()).join("config.yaml"),
+        }
+    }
+
+    /// True when `dir` is this target's directory.
+    pub fn matches_dir(&self, dir: &Path) -> bool {
+        let mine = self.dir();
+        let mine = std::fs::canonicalize(&mine).unwrap_or(mine);
+        let theirs = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        mine == theirs
     }
 
     /// The directory as a path, with a leading `~` expanded.
@@ -73,6 +94,8 @@ pub struct Config {
     /// Projection targets (ADR-184). `None` means the key is absent and the
     /// implicit default applies; see [`Config::targets`].
     pub targets: Option<Vec<Target>>,
+    /// The target whose own config layer applied to this load, if any.
+    pub target_config: Option<PathBuf>,
     /// Project-scope master switch (ADR-184 item 6). `false` in a project's
     /// `ways.yaml` makes the scan inject nothing there.
     pub enabled: bool,
@@ -164,6 +187,7 @@ impl Default for Config {
 
         Self {
             targets: None,
+            target_config: None,
             enabled: true,
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
@@ -276,6 +300,18 @@ impl Config {
                 if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
                     cfg.targets = Self::read_targets(&doc);
                 }
+            }
+        }
+
+        // Layer 3.5: the current target's own config (ADR-184). The session's
+        // config directory names the target; its config.yaml, when present,
+        // overrides the user layer for every key except `targets` itself.
+        let current = crate::paths::current_config_dir();
+        if let Some(t) = cfg.targets().iter().find(|t| t.matches_dir(&current)) {
+            let path = t.config_path();
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                cfg.apply_yaml(&content);
+                cfg.target_config = Some(path);
             }
         }
 
@@ -459,6 +495,9 @@ impl Config {
 #   - path: ~/.claude
 #     enabled: true
 #     observe: true        # include in transcript-derived reports (default: enabled)
+#     config: ~/.config/agent-ways/targets/<key>/config.yaml   # this target's own
+#                          # settings, same keys as this file, layered over it for
+#                          # sessions under that config directory (default location)
 
 # enabled: false          # In {project}/.claude/ways.yaml: switch ways off for that
 #                         # project; hooks inject nothing there (ADR-184).
@@ -713,7 +752,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.yaml");
         std::fs::write(&path, "language: es\ndisabled_domains: [ea]\n").unwrap();
-        let list = vec![Target::new("~/.claude"), Target { path: "/x/.claude".into(), enabled: false, observe: Some(true) }];
+        let list = vec![Target::new("~/.claude"), Target { path: "/x/.claude".into(), enabled: false, observe: Some(true), config: None }];
         Config::write_targets_to(&path, &list).unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
@@ -735,5 +774,30 @@ mod tests {
         assert!(!cfg.enabled);
         cfg.apply_yaml("language: en\n");
         assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn a_target_config_layers_over_the_user_config_for_its_sessions() {
+        let base = std::env::temp_dir().join(format!("ways-target-cfg-{}", std::process::id()));
+        let dir = base.join("claude-work");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg_file = base.join("work.yaml");
+        std::fs::write(&cfg_file, "language: es\ndisabled_domains: [ea]\ntargets: [{path: /elsewhere}]\n").unwrap();
+        let t = Target { path: dir.to_string_lossy().to_string(), enabled: true, observe: None, config: Some(cfg_file.to_string_lossy().to_string()) };
+        assert!(t.matches_dir(&dir));
+        assert!(!t.matches_dir(&base));
+        assert_eq!(t.config_path(), cfg_file);
+        // Apply the layer the way `load` does: same keys, `targets` never read.
+        let mut cfg = Config { targets: Some(vec![t.clone()]), ..Default::default() };
+        cfg.apply_yaml(&std::fs::read_to_string(t.config_path()).unwrap());
+        assert_eq!(cfg.language, "es");
+        assert_eq!(cfg.disabled_domains, vec!["ea".to_string()]);
+        assert_eq!(cfg.targets().len(), 1, "a target layer cannot redirect the targets list");
+        assert_eq!(cfg.targets()[0].path, t.path);
+        // The default location is keyed by the directory.
+        let d = Target::new(dir.to_string_lossy().to_string());
+        assert!(d.config_path().starts_with(crate::paths::target_config_root(&dir)));
+        assert!(d.config_path().ends_with("config.yaml"));
+        std::fs::remove_dir_all(&base).ok();
     }
 }

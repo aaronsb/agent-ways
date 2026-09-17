@@ -29,6 +29,8 @@ Two further needs came with the same report: wiring ways into one profile or one
 
 2. **Targets live in the user config.** `config.yaml` under the agent-ways config root gains a `targets` list. Each entry names a config directory and carries `enabled` and `observe` flags. When the key is absent the list is one implicit entry, the default config directory, enabled. An install that predates this decision keeps working unchanged. Writing the key makes the list explicit and the implicit entry stops.
 
+   **Each target carries its own configuration set.** A target's `config.yaml`, at `targets/<key>/config.yaml` under the agent-ways config root or at the path its entry names, holds the same keys as the user config and is layered over it for every session running under that target's config directory. The session names its target through `CLAUDE_CONFIG_DIR`, with the default directory as the fallback. The `targets` key itself is read from the user layer only, so a target cannot redirect the list. Two profiles on one machine can run different languages, disabled domains, or thresholds without sharing them.
+
 3. **Verbs on `ways config`.** `targets` lists entries with their converged state. `target add`, `enable`, `disable`, and `remove` edit the list and reconcile. When the list is empty, `targets` runs the bootstrap: discovery, candidates, the plan per target, confirmation. The installer's last act is to invoke it or, unattended, to print it.
 
 4. **Reconcile converges per target.** An enabled target receives the projection roots and the hooks merge into its `settings.json`, with a merge base kept per target under the state root. A disabled target is withdrawn: our symlinks are unlinked, our hooks block is removed through the same three-way merge base that wrote it, and nothing else in the directory is touched. Reconcile is idempotent in every state, so `ways update` is safe wherever the operator stopped.
@@ -39,7 +41,9 @@ Two further needs came with the same report: wiring ways into one profile or one
 
 7. **Discovery is heuristic and never a verdict.** Candidates come from three signals: `CLAUDE_CONFIG_DIR` in the environment, shell rc files, and direnv's allow records; directories under the home and XDG config roots with the shape of a Claude Code config dir; and the environment of running `claude` processes. Attended mode confirms them. Unattended mode with more than one candidate and no explicit list exits with the literal command that would resolve it.
 
-8. **Unattended stays.** The installer keeps a flag for pipelines. It stages and builds, reads the targets list, and reconciles. With no list and one candidate it activates that one. With no list and several it stops with the hint. It never guesses.
+8. **One bus across targets.** Attend's signals, channels, instance roster, heartbeats, and state live under the user cache, keyed by the user, never by a config directory. Agents in sessions under different targets are peers on the same bus. What attend resolves through a config directory, its own session identity and its peers' from the session records, walks every target's directory plus the one `CLAUDE_CONFIG_DIR` names, so a session under a relocated profile is a full peer and never a fallback identity.
+
+9. **Unattended stays.** The installer keeps a flag for pipelines. It stages and builds, reads the targets list, and reconciles. With no list and one candidate it activates that one. With no list and several it stops with the hint. It never guesses.
 
 Reversibility: expensive. The implicit-target compatibility in item 2 keeps every existing install on the old behavior until it writes the key, so the model can be withdrawn by removing the verbs and leaving the key ignored. After the installer hands off to the bootstrap, reversing means restoring the installer's own projection step.
 

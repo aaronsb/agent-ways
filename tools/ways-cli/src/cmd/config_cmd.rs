@@ -49,6 +49,8 @@ fn effective_json(cfg: &Config) -> serde_json::Value {
         "secret_path_deny": cfg.secret_path_deny,
         "targets": cfg.targets(),
         "targets_explicit": cfg.targets_explicit(),
+        "target_config": cfg.target_config,
+        "current_config_dir": paths::current_config_dir(),
     })
 }
 
@@ -96,6 +98,10 @@ pub fn show(json: bool, effective: bool) -> Result<()> {
     }
     t.print();
     eprintln!("stored: {}", paths::user_config().display());
+    match &cfg.target_config {
+        Some(p) => eprintln!("target:  {} (layered for {})", p.display(), paths::current_config_dir().display()),
+        None => eprintln!("target:  no target config for {}", paths::current_config_dir().display()),
+    }
     Ok(())
 }
 
@@ -147,6 +153,8 @@ pub fn targets(json: bool) -> Result<()> {
                     "dir": t.dir(),
                     "enabled": t.enabled,
                     "observe": t.observes(),
+                    "config": t.config_path(),
+                    "config_present": t.config_path().is_file(),
                     "state": target_state(t),
                 })
             })
@@ -166,15 +174,17 @@ pub fn targets(json: bool) -> Result<()> {
         println!("  ways config target add <dir>    # activate it (default dir: ~/.claude)");
         return Ok(());
     }
-    let mut t = Table::new(&["Target", "Enabled", "Observe", "State"]);
+    let mut t = Table::new(&["Target", "Enabled", "Observe", "State", "Config"]);
     t.align(0, Align::Left);
     t.no_auto_fit();
     for target in &list {
+        let cfg_path = target.config_path();
         t.add_owned(vec![
             target.path.clone(),
             target.enabled.to_string(),
             target.observes().to_string(),
             target_state(target),
+            if cfg_path.is_file() { cfg_path.display().to_string() } else { "(user config)".to_string() },
         ]);
     }
     t.print();

@@ -702,7 +702,7 @@ mod tests {
     }
 
     fn target(dst: &Path, enabled: bool) -> crate::config::Target {
-        crate::config::Target { path: dst.to_string_lossy().to_string(), enabled, observe: None }
+        crate::config::Target { path: dst.to_string_lossy().to_string(), enabled, observe: None, config: None }
     }
 
     fn hook_commands(settings: &serde_json::Value, event: &str) -> Vec<String> {

@@ -31,6 +31,8 @@ ways config target plan ~/.claude-work
 
 The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways config target add <dir>` prints the same plan and stops when something of yours would be refused or removed. `ways config target disable <dir>` withdraws the links and our hooks block through the same merge base that wrote them, and `ways config targets` shows where agent-ways is active. `ways status` says the same on its first line.
 
+Each target can carry its own configuration set, a `config.yaml` under `$XDG_CONFIG_HOME/agent-ways/targets/<key>/` with the same keys as the user config, layered over it for sessions under that directory. Two profiles on one machine can run different languages or disabled domains.
+
 Claude Code relocated through `CLAUDE_CONFIG_DIR` is a second config directory. It can be a second target once the hook commands stop naming `~/.claude` (issue #503); until then the honest target is the default directory.
 
 ## Scenario: you already have a `~/.claude` you value

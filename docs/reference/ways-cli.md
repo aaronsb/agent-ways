@@ -482,7 +482,9 @@ ways config init                   # create config at XDG path if missing
 
 **Run from:** Anywhere.
 
-**Tells you:** Each target with its enabled and observe flags and its converged state: `active`, `pending`, `partial`, `refused`, `stale`, or `withdrawn`. With no `targets` key in the user config the list is the implicit default, `~/.claude`.
+**Tells you:** Each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale`, or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config the list is the implicit default, `~/.claude`.
+
+Each target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml` (or the path in the entry's `config:` field) with the same keys as the user config, layered over it for sessions under that target's config directory. `ways config show` names the layer it applied.
 
 `target plan` previews activation without touching anything: every projection root as `linked`, `link`, `relink`, or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced, and what would be removed. `target add` prints that plan and stops with exit code 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `remove` withdraws and drops it.
 
