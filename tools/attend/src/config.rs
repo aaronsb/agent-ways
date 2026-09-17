@@ -133,6 +133,16 @@ impl Default for Config {
             requires: vec!["Read".to_string()],
             watch: None,
         });
+        sensors.insert("keepwarm".to_string(), SensorConfig {
+            enabled: true,
+            interval: Duration::from_secs(60),
+            min_interval: Duration::from_secs(60),
+            threshold: 3.0,
+            decay_threshold: 3,
+            script: None,
+            requires: vec!["Bash(ways:*)".to_string()],
+            watch: None,
+        });
         sensors.insert("git".to_string(), SensorConfig {
             enabled: true,
             interval: Duration::from_secs(30),

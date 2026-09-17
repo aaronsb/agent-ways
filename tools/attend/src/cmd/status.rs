@@ -66,6 +66,12 @@ pub(crate) fn cmd_status() {
     // ── Separator
     t.add(vec!["", "", ""]);
 
+    // ── Keepwarm section (ADR-182)
+    t.add(vec!["keepwarm", &crate::cmd::keepwarm::status_line(), ""]);
+
+    // ── Separator
+    t.add(vec!["", "", ""]);
+
     // ── Focus section
     if my_focus.is_empty() {
         t.add(vec!["focus", "project only", ""]);

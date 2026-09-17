@@ -1,6 +1,6 @@
 ---
 description: attend binary — active awareness sensor loop, peer session discovery, inter-session signaling for Claude Code
-vocabulary: attend attend-run attend-send attend-focus attend-peers attend-status attend-scene sensor-loop awareness-layer focus-group signal-file disclosure-governor peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private scene-open
+vocabulary: attend attend-run attend-send attend-focus attend-peers attend-status attend-scene sensor-loop awareness-layer focus-group signal-file disclosure-governor peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private scene-open attend-keepwarm keepwarm cache-warm prompt-cache
 pattern: attend|awareness.?layer|peer.?session|peer.?discover|signal.?file|focus.?group|sensor.?loop
 commands: attend
 refire: 0.15
@@ -12,8 +12,9 @@ requires: ["Bash(attend:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(sed:*)"]
 <!--
   Messaging guidance lives in three synchronized sources. When you edit
   the peer-messaging section, the autonomy paragraph, the silence-is-valid
-  callout, or the CLI-is-the-contract note in this file, update the
-  other two so agents receive consistent guidance at every point:
+  callout, the CLI-is-the-contract note, or the keepwarm contract in this
+  file, update the other two so agents receive consistent guidance at every
+  point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)
     - tools/sensor-disclosure/src/disclosures/messaging.md     (runtime reheat)
@@ -32,6 +33,7 @@ Use `/attend` or launch manually via Monitor with `attend run`.
 - **git** — dirty files, branch changes, upstream divergence
 - **peers** — discovers other Claude Code sessions, reads peer signals
 - **processes** — application presence (not PID churn)
+- **keepwarm** — one wake at 50 idle minutes while armed, so the prompt cache is read before its hour lapses (ADR-182)
 
 ## Peer Messaging
 
@@ -54,6 +56,16 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 
 Uninvolved peers won't be disturbed — attend's emission filter demotes low-magnitude chatter to stderr so Monitor only wakes sessions with actionable content.
+
+## Keepwarm
+
+```bash
+attend keepwarm on [WINDOW]                # arm a window (default 6h; also 90m, 2h30m)
+attend keepwarm off                        # disarm
+attend keepwarm status                     # cache state, context size, cold price, window remaining
+```
+
+A notification beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm (ADR-182). Arming is the operator's call. The sensor arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic.
 
 ## Channels (escape hatch)
 

@@ -25,6 +25,9 @@ pub use sensor_processes::ProcessSensor;
 #[cfg(feature = "sensor-disclosure")]
 pub use sensor_disclosure::DisclosureSensor;
 
+#[cfg(feature = "sensor-keepwarm")]
+pub use sensor_keepwarm::KeepwarmSensor;
+
 // ScriptSensor stays in attend — it's part of the orchestrator, not a sensor impl
 pub use script::ScriptSensor;
 
@@ -94,6 +97,24 @@ pub fn register_sensors(
 
     #[cfg(feature = "sensor-disclosure")]
     register_builtin!("disclosure", DisclosureSensor::new(), 60, 20, 3);
+
+    // Keepwarm (ADR-182) is pinned to this session's transcript, so a
+    // peer session in the same project can never be its idle clock.
+    // With no resolved session there is no transcript to read, so the
+    // sensor is skipped rather than registered against a `pid-` id.
+    #[cfg(feature = "sensor-keepwarm")]
+    {
+        let ident = attend_session::identity();
+        if ident.session_resolved {
+            register_builtin!(
+                "keepwarm",
+                KeepwarmSensor::new(ident.session_id.clone(), crate::util::keepwarm_dir()),
+                60, 60, 3
+            );
+        } else if cfg.sensors.get("keepwarm").map(|s| s.enabled).unwrap_or(true) {
+            crate::emit::log("keepwarm: no resolved session id, sensor not started");
+        }
+    }
 
     #[cfg(feature = "sensor-peers")]
     {
@@ -281,6 +302,9 @@ pub fn enumerate_sensors(cfg: &Config, focus: &Focus) -> Vec<SensorEntry> {
     enumerate_builtin!(entries, cfg, "sensor-disclosure", "disclosure",
         Duration::from_secs(60), Duration::from_secs(20),
         DisclosureSensor::new());
+    enumerate_builtin!(entries, cfg, "sensor-keepwarm", "keepwarm",
+        Duration::from_secs(60), Duration::from_secs(60),
+        KeepwarmSensor::new(String::new(), std::path::PathBuf::new()));
 
     // Script sensors — anything in config with `script:` set, regardless
     // of whether the file currently resolves.

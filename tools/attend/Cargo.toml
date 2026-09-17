@@ -10,12 +10,13 @@ name = "attend"
 path = "src/main.rs"
 
 [features]
-default = ["sensor-git", "sensor-context", "sensor-peers", "sensor-processes", "sensor-disclosure"]
+default = ["sensor-git", "sensor-context", "sensor-peers", "sensor-processes", "sensor-disclosure", "sensor-keepwarm"]
 sensor-git = ["dep:sensor-git"]
 sensor-context = ["dep:sensor-context"]
 sensor-peers = ["dep:sensor-peers"]
 sensor-processes = ["dep:sensor-processes"]
 sensor-disclosure = ["dep:sensor-disclosure"]
+sensor-keepwarm = ["dep:sensor-keepwarm"]
 
 [dependencies]
 agent-fmt = { path = "../agent-fmt" }
@@ -36,3 +37,4 @@ sensor-context = { path = "../sensor-context", optional = true }
 sensor-peers = { path = "../sensor-peers", optional = true }
 sensor-processes = { path = "../sensor-processes", optional = true }
 sensor-disclosure = { path = "../sensor-disclosure", optional = true }
+sensor-keepwarm = { path = "../sensor-keepwarm", optional = true }

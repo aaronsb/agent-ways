@@ -9,7 +9,8 @@ allowed-tools: Bash, Monitor, Read
 <!--
 Messaging guidance lives in three synchronized sources. When you edit
 the peer-messaging section, the autonomy paragraph, the silence-is-valid
-callout, or the CLI-is-the-contract note, update all three:
+callout, the CLI-is-the-contract note, or the keepwarm contract, update
+all three:
 
   - skills/attend/SKILL.md                                   (this file — read at /attend invocation)
   - tools/sensor-disclosure/src/disclosures/messaging.md     (runtime reheat fired by sensor-disclosure)
@@ -17,7 +18,7 @@ callout, or the CLI-is-the-contract note, update all three:
 
 Drift between the three causes agents to receive inconsistent guidance
 at different points in a session. Keep the load-bearing framing
-(send vs reply, autonomy, silence, CLI contract) in lockstep.
+(send vs reply, autonomy, silence, CLI contract, keepwarm) in lockstep.
 -->
 
 Attend gives the session the awareness an employee would otherwise have ambiently — what is changing, who else is working, what deserves attention. It surfaces those changes as Monitor notifications, rate-limited so the channel stays calm: most of the time it is silent, and a notification means something actually moved. The peer-messaging commands below are workspace awareness for agent sessions — colleagues noticing and addressing each other, not a protocol to be ceremonious about.
@@ -52,6 +53,7 @@ On startup, attend emits a usage summary notification. After that, notifications
 - **processes** — application presence (not PID churn)
 - **git** — dirty files, branch changes, upstream divergence
 - **peers** — other Claude Code sessions + signal files from peers
+- **keepwarm** — one wake at 50 idle minutes while armed, so the prompt cache is read before its hour lapses (ADR-182)
 
 ## CLI Reference
 
@@ -112,6 +114,16 @@ attend scenes                        # list available scenes
 attend peers                         # list active sessions and their channels
 attend status                        # instances, signals, and channel state
 ```
+
+### Keepwarm
+
+```bash
+attend keepwarm on [WINDOW]          # arm a window (default 6h; also 90m, 2h30m)
+attend keepwarm off                  # disarm
+attend keepwarm status               # cache state, context size, cold price, window remaining, cold writes
+```
+
+A notification beginning `keepwarm:` asks for one word and no tools. Do not investigate it. The turn it produces is what keeps the prompt cache warm (ADR-182). Arming is the operator's call. The sensor arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic.
 
 ### Stopping
 
