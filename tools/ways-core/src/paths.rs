@@ -160,6 +160,23 @@ pub fn user_ways_root() -> PathBuf {
     config_root().join("ways")
 }
 
+/// Per-target configuration root (ADR-184): `$XDG_CONFIG/agent-ways/targets/<key>`.
+/// A target's own `config.yaml` there is layered over the user config for
+/// sessions running under that target's config directory.
+pub fn target_config_root(target_dir: &Path) -> PathBuf {
+    config_root().join("targets").join(crate::util::encode_project_key(target_dir))
+}
+
+/// The Claude Code config directory this process runs under: `CLAUDE_CONFIG_DIR`
+/// when set, else the default projection root. Hooks inherit the variable from
+/// the session, so this names the active target at runtime.
+pub fn current_config_dir() -> PathBuf {
+    match std::env::var("CLAUDE_CONFIG_DIR") {
+        Ok(v) if !v.trim().is_empty() => PathBuf::from(v),
+        _ => projection_root(),
+    }
+}
+
 /// User config file: `$XDG_CONFIG/agent-ways/config.yaml` (migrated from the
 /// legacy `$XDG_CONFIG/ways/config.yaml` and `~/.claude/ways.json`).
 pub fn user_config() -> PathBuf {

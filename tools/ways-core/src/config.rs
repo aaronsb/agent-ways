@@ -24,9 +24,184 @@ pub fn global() -> &'static Config {
     &GLOBAL
 }
 
+/// One Claude Code config directory agent-ways projects into (ADR-184).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Target {
+    /// The config directory, as written. `~` is expanded on read.
+    pub path: String,
+    /// Projected and merged when true; withdrawn when false.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Included in transcript-derived readers. Defaults to `enabled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observe: Option<bool>,
+    /// This target's own configuration file, layered over the user config for
+    /// sessions under this target. Defaults to
+    /// `$XDG_CONFIG/agent-ways/targets/<key>/config.yaml`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Target {
+    pub fn new(path: impl Into<String>) -> Self {
+        Target { path: path.into(), enabled: true, observe: None, config: None }
+    }
+
+    /// Where this target's own config.yaml lives, explicit or default.
+    pub fn config_path(&self) -> PathBuf {
+        match &self.config {
+            Some(p) => expand_tilde(p),
+            None => crate::paths::target_config_root(&self.dir()).join("config.yaml"),
+        }
+    }
+
+    /// True when `dir` is this target's directory.
+    pub fn matches_dir(&self, dir: &Path) -> bool {
+        let mine = self.dir();
+        let mine = std::fs::canonicalize(&mine).unwrap_or(mine);
+        let theirs = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        mine == theirs
+    }
+
+    /// The directory as a path, with a leading `~` expanded.
+    pub fn dir(&self) -> PathBuf {
+        expand_tilde(&self.path)
+    }
+
+    /// Effective observe flag: explicit value, else `enabled`.
+    pub fn observes(&self) -> bool {
+        self.observe.unwrap_or(self.enabled)
+    }
+}
+
+/// A lock file beside the user config, held for the span of one
+/// read-modify-write of the `targets` key. Created exclusively; a holder that
+/// died leaves a stale file, which is taken over after a short wait.
+struct TargetsLock(PathBuf);
+
+impl TargetsLock {
+    fn acquire(config_path: &Path) -> std::io::Result<Self> {
+        let lock = config_path.with_extension("yaml.lock");
+        if let Some(parent) = lock.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        for attempt in 0..50u32 {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+                Ok(_) => return Ok(TargetsLock(lock)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Take over a lock older than five seconds: its holder is
+                    // gone, no writer of this key runs that long.
+                    let stale = std::fs::metadata(&lock)
+                        .and_then(|m| m.modified())
+                        .map(|t| t.elapsed().map(|d| d.as_secs() >= 5).unwrap_or(false))
+                        .unwrap_or(true);
+                    if stale && attempt > 0 {
+                        let _ = std::fs::remove_file(&lock);
+                        continue;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::other(format!("could not lock {} for the targets write", lock.display())))
+    }
+}
+
+impl Drop for TargetsLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Quote a scalar for YAML when it needs it (a leading `~` or `*`, a colon,
+/// a hash, or leading or trailing space); otherwise write it bare.
+fn yaml_scalar(s: &str) -> String {
+    let needs = s.is_empty()
+        || s.starts_with(['~', '*', '&', '!', '%', '@', '`', '\'', '"', '[', '{', '#', '-', '?', '|', '>'])
+        || s.contains(": ")
+        || s.contains(" #")
+        || s.ends_with(':')
+        || s.trim() != s;
+    if needs {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Replace the top-level `key:` block in a YAML text with `block`, or append
+/// `block` when the key is absent. A top-level block runs from its key line
+/// to the next line that starts a top-level key or the end of the text.
+/// Comments and every other key are left byte for byte.
+fn replace_top_level_block(text: &str, key: &str, block: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let is_top_key = |l: &str, k: &str| l.starts_with(k) && l[k.len()..].trim_start().starts_with(':');
+    let is_any_top_key = |l: &str| {
+        !l.is_empty()
+            && !l.starts_with([' ', '\t', '#', '-'])
+            && l.contains(':')
+    };
+    let is_block_line = |l: &str| l.starts_with([' ', '\t']) || l.starts_with("- ") || l == "-";
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    let mut replaced = false;
+    while i < lines.len() {
+        if !replaced && is_top_key(lines[i], key) {
+            out.push(block.trim_end_matches('\n').to_string());
+            // The old block ends at its last indented or list line. Comments
+            // and blank lines after that belong to whatever follows and stay.
+            let mut end = i;
+            let mut j = i + 1;
+            while j < lines.len() && !is_any_top_key(lines[j]) {
+                if is_block_line(lines[j]) {
+                    end = j;
+                }
+                j += 1;
+            }
+            i = end + 1;
+            replaced = true;
+            continue;
+        }
+        out.push(lines[i].to_string());
+        i += 1;
+    }
+    if !replaced {
+        if !out.is_empty() && !out.last().map(|l| l.is_empty()).unwrap_or(true) {
+            out.push(String::new());
+        }
+        out.push(block.trim_end_matches('\n').to_string());
+    }
+    let mut s = out.join("\n");
+    s.push('\n');
+    s
+}
+
+fn expand_tilde(p: &str) -> PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        home_dir().join(rest)
+    } else if p == "~" {
+        home_dir()
+    } else {
+        PathBuf::from(p)
+    }
+}
+
 /// Ways configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Projection targets (ADR-184). `None` means the key is absent and the
+    /// implicit default applies; see [`Config::targets`].
+    pub targets: Option<Vec<Target>>,
+    /// The target whose own config layer applied to this load, if any.
+    pub target_config: Option<PathBuf>,
+    /// Project-scope master switch (ADR-184 item 6). `false` in a project's
+    /// `ways.yaml` makes the scan inject nothing there.
+    pub enabled: bool,
     /// Default scope for ways without explicit scope
     pub default_scope: String,
     /// Output language (e.g., "en", "ja", "auto")
@@ -114,6 +289,9 @@ impl Default for Config {
         refire_presets.insert("frequent".to_string(), 0.05);
 
         Self {
+            targets: None,
+            target_config: None,
+            enabled: true,
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
@@ -133,6 +311,115 @@ impl Config {
     /// Public read accessor for the project-scope disable list (ADR-131).
     pub fn disabled_ways(&self) -> &[String] {
         &self.disabled_ways
+    }
+
+    /// The effective projection targets (ADR-184). With no `targets` key the
+    /// list is one implicit entry, the default projection root, enabled, so an
+    /// install that predates the key behaves as before. Once the key is written
+    /// the list is exactly what it says, including empty.
+    pub fn targets(&self) -> Vec<Target> {
+        match &self.targets {
+            Some(list) => list.clone(),
+            None => vec![Target::new(crate::paths::projection_root().to_string_lossy().to_string())],
+        }
+    }
+
+    /// Whether the `targets` key is written, i.e. activation is explicit.
+    pub fn targets_explicit(&self) -> bool {
+        self.targets.is_some()
+    }
+
+    /// Rewrite only the `targets` key of the user config, keeping every other
+    /// key and comment-free content as it was. Creates the file when absent.
+    pub fn write_user_targets(list: &[Target]) -> std::io::Result<PathBuf> {
+        let path = crate::paths::user_config();
+        Self::write_targets_to(&path, list)?;
+        Ok(path)
+    }
+
+    /// Read the targets as the user file has them right now, apply `edit`, and
+    /// write the result, all under a lock file beside the config. Every writer
+    /// of the key goes through here, so a hook's migration write and an
+    /// operator's `target add` cannot lose each other's change. `edit` returns
+    /// `None` to leave the file alone. Returns the list written, or the list
+    /// found when nothing was written.
+    pub fn edit_user_targets<F>(edit: F) -> std::io::Result<(PathBuf, Vec<Target>)>
+    where
+        F: FnOnce(Option<Vec<Target>>) -> Option<Vec<Target>>,
+    {
+        let path = crate::paths::user_config();
+        let _lock = TargetsLock::acquire(&path)?;
+        let current = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_yaml::from_str::<serde_yaml::Value>(&t).ok())
+            .and_then(|doc| Self::read_targets(&doc));
+        let found = current.clone().unwrap_or_default();
+        match edit(current) {
+            Some(list) => {
+                Self::write_targets_to(&path, &list)?;
+                Ok((path, list))
+            }
+            None => Ok((path, found)),
+        }
+    }
+
+    /// The writer behind [`Config::write_user_targets`], on an explicit path so
+    /// tests never touch the real config.
+    pub fn write_targets_to(path: &Path, list: &[Target]) -> std::io::Result<()> {
+        let existing = std::fs::read_to_string(path).unwrap_or_default();
+        // The file is edited textually so its comments survive: the template
+        // `ways config init` writes is comments only, and serde_yaml would
+        // drop every one of them. A parse failure of what is there is an
+        // error; a comments-only or empty file parses as null and is fine.
+        if !existing.trim().is_empty() {
+            match serde_yaml::from_str::<serde_yaml::Value>(&existing) {
+                Ok(serde_yaml::Value::Mapping(_)) | Ok(serde_yaml::Value::Null) => {}
+                Ok(_) => return Err(std::io::Error::other("user config is not a mapping")),
+                Err(e) => return Err(std::io::Error::other(e)),
+            }
+        }
+        let mut block = String::from("targets:\n");
+        if list.is_empty() {
+            block = String::from("targets: []\n");
+        }
+        for t in list {
+            block.push_str(&format!("  - path: {}\n    enabled: {}\n", yaml_scalar(&t.path), t.enabled));
+            if let Some(o) = t.observe {
+                block.push_str(&format!("    observe: {o}\n"));
+            }
+            if let Some(c) = &t.config {
+                block.push_str(&format!("    config: {}\n", yaml_scalar(c)));
+            }
+        }
+        let mut body = replace_top_level_block(&existing, "targets", &block);
+        if existing.contains("\r\n") {
+            body = body.replace('\n', "\r\n");
+        }
+        // The edit is textual; prove the result still parses and carries
+        // exactly this list before it replaces the file.
+        match serde_yaml::from_str::<serde_yaml::Value>(&body) {
+            Ok(doc) if Self::read_targets(&doc).as_deref() == Some(list) => {}
+            Ok(_) => return Err(std::io::Error::other("targets write did not round-trip; file left unchanged")),
+            Err(e) => return Err(std::io::Error::other(format!("targets write produced invalid YAML: {e}"))),
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_extension(format!("yaml.tmp.{}", std::process::id()));
+        std::fs::write(&tmp, body)?;
+        std::fs::rename(&tmp, path)
+    }
+
+    /// Parse a `targets:` sequence from a YAML document, used by the user layer.
+    fn read_targets(doc: &serde_yaml::Value) -> Option<Vec<Target>> {
+        let seq = doc.get("targets")?;
+        match serde_yaml::from_value::<Vec<Target>>(seq.clone()) {
+            Ok(list) => Some(list),
+            Err(e) => {
+                eprintln!("[ways] config: targets: {e}; ignoring the key");
+                None
+            }
+        }
     }
 
     /// Load config with full resolution chain.
@@ -160,6 +447,23 @@ impl Config {
         if user_config != legacy_xdg {
             if let Ok(content) = std::fs::read_to_string(&user_config) {
                 cfg.apply_yaml(&content);
+                // Targets are user scope only (ADR-184): a project cannot
+                // redirect where the install lands.
+                if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                    cfg.targets = Self::read_targets(&doc);
+                }
+            }
+        }
+
+        // Layer 3.5: the current target's own config (ADR-184). The session's
+        // config directory names the target; its config.yaml, when present,
+        // overrides the user layer for every key except `targets` itself.
+        let current = crate::paths::current_config_dir();
+        if let Some(t) = cfg.targets().iter().find(|t| t.matches_dir(&current)) {
+            let path = t.config_path();
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                cfg.apply_yaml(&content);
+                cfg.target_config = Some(path);
             }
         }
 
@@ -268,6 +572,9 @@ impl Config {
         if let Some(v) = doc.get("secret_path_deny").and_then(|v| v.as_bool()) {
             self.secret_path_deny = v;
         }
+        if let Some(v) = doc.get("enabled").and_then(|v| v.as_bool()) {
+            self.enabled = v;
+        }
     }
 
     /// Parse the project-scope `ways:` mapping for per-way toggles (ADR-131).
@@ -332,6 +639,20 @@ impl Config {
 # secret_path_deny: true # Project the secret-path permissions.deny baseline
 #                        # (~/.ssh, ~/.aws, .env, …) into settings.json — ADR-152.
 #                        # Set false to opt out entirely (secure by default).
+
+# Projection targets (ADR-184): the Claude Code config directories agent-ways
+# is active in. Absent: the default ~/.claude, enabled. Edit with
+# `ways config target add|enable|disable|remove <dir>`.
+# targets:
+#   - path: ~/.claude
+#     enabled: true
+#     observe: true        # include in transcript-derived reports (default: enabled)
+#     config: ~/.config/agent-ways/targets/<key>/config.yaml   # this target's own
+#                          # settings, same keys as this file, layered over it for
+#                          # sessions under that config directory (default location)
+
+# enabled: false          # In {project}/.claude/ways.yaml: switch ways off for that
+#                         # project; hooks inject nothing there (ADR-184).
 
 # Per-way enable/disable (ADR-131) is project scope only — set it in
 # {project}/.claude/ways.yaml using either form:
@@ -546,5 +867,133 @@ mod tests {
         // Localized mode — a specific non-English code.
         cfg.language = "es".to_string();
         assert_eq!(cfg.localized_language(), Some("es"));
+    }
+
+    #[test]
+    fn targets_absent_means_the_implicit_default_root() {
+        let cfg = Config::default();
+        assert!(!cfg.targets_explicit());
+        let t = cfg.targets();
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].dir(), crate::paths::projection_root());
+        assert!(t[0].enabled);
+        assert!(t[0].observes());
+    }
+
+    #[test]
+    fn targets_key_parses_and_an_empty_list_is_empty() {
+        let doc: serde_yaml::Value = serde_yaml::from_str(
+            "targets:\n  - path: ~/.claude\n  - path: /srv/work/.claude-work\n    enabled: false\n    observe: true\n",
+        )
+        .unwrap();
+        let list = Config::read_targets(&doc).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].dir(), crate::util::home_dir().join(".claude"));
+        assert!(list[0].enabled && list[0].observes());
+        assert!(!list[1].enabled);
+        assert!(list[1].observes());
+        let empty: serde_yaml::Value = serde_yaml::from_str("targets: []\n").unwrap();
+        assert_eq!(Config::read_targets(&empty), Some(Vec::new()));
+        let cfg = Config { targets: Some(Vec::new()), ..Default::default() };
+        assert!(cfg.targets().is_empty());
+    }
+
+    #[test]
+    fn write_targets_keeps_other_keys_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("ways-targets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(&path, "language: es\ndisabled_domains: [ea]\n").unwrap();
+        let list = vec![Target::new("~/.claude"), Target { path: "/x/.claude".into(), enabled: false, observe: Some(true), config: None }];
+        Config::write_targets_to(&path, &list).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(doc.get("language").and_then(|v| v.as_str()), Some("es"));
+        assert_eq!(Config::read_targets(&doc), Some(list.clone()));
+        // Rewriting replaces the key rather than appending a second one.
+        Config::write_targets_to(&path, &list[..1]).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(Config::read_targets(&doc).unwrap().len(), 1);
+        assert_eq!(doc.get("disabled_domains").and_then(|v| v.as_sequence()).map(|s| s.len()), Some(1));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_targets_keeps_comments_and_accepts_the_init_template() {
+        let dir = std::env::temp_dir().join(format!("ways-targets-comments-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(&path, "# ways configuration\n# language: en\n\nlanguage: es\n# tail comment\n").unwrap();
+        Config::write_targets_to(&path, &[Target::new("~/.claude")]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.starts_with("# ways configuration\n# language: en\n"), "{body}");
+        assert!(body.contains("# tail comment\n"), "{body}");
+        assert!(body.contains("targets:\n  - path: \"~/.claude\"\n    enabled: true\n"), "{body}");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(doc.get("language").and_then(|v| v.as_str()), Some("es"));
+        assert_eq!(Config::read_targets(&doc).unwrap()[0].path, "~/.claude");
+        // Second write replaces the block in place, comments still intact.
+        Config::write_targets_to(&path, &[Target { path: "/x".into(), enabled: false, observe: Some(true), config: None }]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(body.matches("targets:").count(), 1, "{body}");
+        assert!(body.contains("# tail comment\n"), "{body}");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(Config::read_targets(&doc).unwrap(), vec![Target { path: "/x".into(), enabled: false, observe: Some(true), config: None }]);
+        // A comment between the block and the next key survives a rewrite.
+        std::fs::write(&path, "targets:\n  - path: /a\n    enabled: true\n# language setting\n\nlanguage: es\n").unwrap();
+        Config::write_targets_to(&path, &[Target::new("/b")]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("# language setting\n\nlanguage: es\n"), "{body}");
+        assert!(!body.contains("/a\n"), "{body}");
+        // CRLF in, CRLF out.
+        std::fs::write(&path, "language: es\r\n# note\r\n").unwrap();
+        Config::write_targets_to(&path, &[Target::new("/c")]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("language: es\r\n# note\r\n"), "{body:?}");
+        assert!(body.contains("targets:\r\n  - path: /c\r\n"), "{body:?}");
+        assert!(!body.contains("\n\n") || body.contains("\r\n\r\n"), "no bare LF: {body:?}");
+        // The comments-only template `ways config init` writes is accepted.
+        std::fs::write(&path, "# only comments\n# targets:\n#   - path: ~/.claude\n").unwrap();
+        Config::write_targets_to(&path, &[]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("# only comments\n"));
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(Config::read_targets(&doc), Some(Vec::new()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn enabled_false_in_yaml_switches_the_layer_off() {
+        let mut cfg = Config::default();
+        assert!(cfg.enabled);
+        cfg.apply_yaml("enabled: false\n");
+        assert!(!cfg.enabled);
+        cfg.apply_yaml("language: en\n");
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn a_target_config_layers_over_the_user_config_for_its_sessions() {
+        let base = std::env::temp_dir().join(format!("ways-target-cfg-{}", std::process::id()));
+        let dir = base.join("claude-work");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg_file = base.join("work.yaml");
+        std::fs::write(&cfg_file, "language: es\ndisabled_domains: [ea]\ntargets: [{path: /elsewhere}]\n").unwrap();
+        let t = Target { path: dir.to_string_lossy().to_string(), enabled: true, observe: None, config: Some(cfg_file.to_string_lossy().to_string()) };
+        assert!(t.matches_dir(&dir));
+        assert!(!t.matches_dir(&base));
+        assert_eq!(t.config_path(), cfg_file);
+        // Apply the layer the way `load` does: same keys, `targets` never read.
+        let mut cfg = Config { targets: Some(vec![t.clone()]), ..Default::default() };
+        cfg.apply_yaml(&std::fs::read_to_string(t.config_path()).unwrap());
+        assert_eq!(cfg.language, "es");
+        assert_eq!(cfg.disabled_domains, vec!["ea".to_string()]);
+        assert_eq!(cfg.targets().len(), 1, "a target layer cannot redirect the targets list");
+        assert_eq!(cfg.targets()[0].path, t.path);
+        // The default location is keyed by the directory.
+        let d = Target::new(dir.to_string_lossy().to_string());
+        assert!(d.config_path().starts_with(crate::paths::target_config_root(&dir)));
+        assert!(d.config_path().ends_with("config.yaml"));
+        std::fs::remove_dir_all(&base).ok();
     }
 }

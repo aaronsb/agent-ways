@@ -19,6 +19,18 @@ This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "i
 - **Update** — pull the app source (or re-run the installer) in `$XDG_DATA_HOME/agent-ways`, then `ways reconcile` reprojects. Because the roots are symlinks into the app dir, a symlink projection is *live* the moment the source updates; reconcile is idempotent and silent when nothing changed.
 - **Repair** — `ways reconcile` alone re-materializes any missing or stale projected root. It refuses to run against a legacy in-place clone (that would strand the user's checkout) — that case routes to the migrator.
 
+## Targets: where the install is active (ADR-184)
+
+Installation and activation are separate states. The projection lands in each **target**, a Claude Code config directory recorded under `targets:` in the user config. `ways reconcile` converges every enabled target and withdraws from every disabled one: our symlinks unlinked, our hooks block and permissions removed through the merge base that wrote them, nothing else touched. With no `targets` key the one target is `~/.claude`, enabled.
+
+- `ways config targets` lists targets and their converged state; `ways status` says it on its first line.
+- `ways config target plan <dir>` previews activation: every root as linked, link, relink, or refused, and the settings merge as kept, added, replaced, removed. Nothing is touched.
+- `ways config target add <dir>` prints the plan and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
+- `ways config target disable <dir>` and `remove <dir>` withdraw.
+- A project switches ways off for itself with `enabled: false` in `.claude/ways.yaml`.
+
+When a user asks whether agent-ways will touch something they own, the answer is the plan. Run it and read it back to them before `add`. The installer still activates the default target on its own in this release; the handoff to the targets bootstrap is the next increment of ADR-184.
+
 ## The one decision left: is this a legacy in-place clone?
 
 The only fork worth establishing before giving a command is whether `~/.claude` is a **pre-1.0 in-place clone** (it has its own `.git` *and* ships the app source — `~/.claude/tools/`, `~/.claude/docs/`). If so, **do not `git pull` it** and do not reconcile it — point the user at migration.

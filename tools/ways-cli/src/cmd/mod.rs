@@ -1,5 +1,6 @@
 pub mod banner;
 pub mod compositor;
+pub mod config_cmd;
 pub mod context;
 pub mod corpus;
 pub mod disable;
