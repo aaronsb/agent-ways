@@ -275,7 +275,7 @@ enum Commands {
         /// Install scope: "user" merges the hooks into ~/.claude/settings.json
         /// (default); "project" wires them into <project>/.claude/settings.local.json
         /// and projects only the hook tree and binaries, leaving skills/, agents/
-        /// and commands/ alone (ADR-182). Omit to keep whichever scope this
+        /// and commands/ alone (ADR-183). Omit to keep whichever scope this
         /// machine already uses.
         #[arg(long)]
         scope: Option<String>,

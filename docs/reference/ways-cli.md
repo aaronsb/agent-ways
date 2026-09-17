@@ -420,7 +420,7 @@ ways-audit report --json
 ways reconcile                       # default: $XDG_DATA_HOME/agent-ways -> ~/.claude, scope remembered
 ways reconcile --dry-run             # preview; prints "refused <root>" for real paths, exit 0
 ways reconcile --force               # rename each real path to <name>.ways-backup-<seconds>, then link
-ways reconcile --scope project --project <repo>   # hooks into <repo>/.claude/settings.local.json only (ADR-182)
+ways reconcile --scope project --project <repo>   # hooks into <repo>/.claude/settings.local.json only (ADR-183)
 ways reconcile --scope user          # hooks + ways permissions into ~/.claude/settings.json (the default)
 ways reconcile --source <checkout> --dest <dir>   # dogfood a development checkout
 ways reconcile --quiet               # suppress the summary line

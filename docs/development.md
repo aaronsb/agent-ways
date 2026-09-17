@@ -52,7 +52,7 @@ developing — **don't** put it ahead of your installed `ways` on `PATH` unless 
 
    Revert by reconciling from the released app: `ways reconcile --source $XDG_DATA_HOME/agent-ways --dest ~/.claude`.
 
-   To exercise project scope (ADR-182) without touching your user settings, point it at a
+   To exercise project scope (ADR-183) without touching your user settings, point it at a
    scratch repo inside the sandbox: `ways reconcile --source ~/src/agent-ways --dest $SB/.claude --scope project --project $SB/repo`,
    then read `$SB/repo/.claude/settings.local.json` and `$XDG_STATE_HOME/agent-ways/projects/`.
 

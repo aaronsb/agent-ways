@@ -140,7 +140,7 @@ A legacy `~/.claude/ways.json` (`{"disabled": [...]}`) is still honored as a low
 
 Disabled domains are completely ignored — no pattern matching, no output.
 
-**Install scope.** By default the hooks are merged into `~/.claude/settings.json` and ways fire in every session. `ways reconcile --scope project --project <repo>` (or the installer's `--scope=project`) wires the hooks into `<repo>/.claude/settings.local.json` instead and links only the hook tree and binaries into `~/.claude`; `skills/`, `agents/`, and `commands/` are not projected, and nothing is written to your user `settings.json`. Ways then fire only in sessions under that repository. See [ADR-182](docs/architecture/system/ADR-182-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md) and the [install guide](docs/install-guide.md).
+**Install scope.** By default the hooks are merged into `~/.claude/settings.json` and ways fire in every session. `ways reconcile --scope project --project <repo>` (or the installer's `--scope=project`) wires the hooks into `<repo>/.claude/settings.local.json` instead and links only the hook tree and binaries into `~/.claude`; `skills/`, `agents/`, and `commands/` are not projected, and nothing is written to your user `settings.json`. Ways then fire only in sessions under that repository. See [ADR-183](docs/architecture/system/ADR-183-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md) and the [install guide](docs/install-guide.md).
 
 ## Creating Ways
 

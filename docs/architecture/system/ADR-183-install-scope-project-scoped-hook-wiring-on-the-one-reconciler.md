@@ -12,7 +12,7 @@ related:
   - ADR-179
 ---
 
-# ADR-182: Install scope: project-scoped hook wiring on the one reconciler
+# ADR-183: Install scope: project-scoped hook wiring on the one reconciler
 
 ## Context
 

@@ -80,7 +80,7 @@ pub fn projection_roots(source_root: &Path) -> Vec<ProjectionRoot> {
     roots
 }
 
-/// The roots a project-scope install (ADR-182) still needs in `~/.claude`: the
+/// The roots a project-scope install (ADR-183) still needs in `~/.claude`: the
 /// hook tree, the top-level hook files, and the binaries. Every shipped hook
 /// command in `settings.json` is written as `${HOME}/.claude/...` and the hook
 /// scripts find the binary the same way, so these stay user-scope even when the

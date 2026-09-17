@@ -381,7 +381,7 @@ fn user_way_shadows_core_way() {
     assert!(!content.contains("CORE foo about"), "core foo must be shadowed out of the corpus");
 }
 
-/// ADR-182: `ways reconcile --scope project` wires the hooks into one repo's
+/// ADR-183: `ways reconcile --scope project` wires the hooks into one repo's
 /// `.claude/settings.local.json`, projects only hook roots and binaries into
 /// the (sandbox) `~/.claude`, and never creates a user-scope settings.json.
 #[test]

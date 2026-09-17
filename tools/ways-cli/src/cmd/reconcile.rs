@@ -31,7 +31,7 @@ pub enum Mode {
     Copy,
 }
 
-/// Install scope (ADR-182): where the hooks block is merged and which roots
+/// Install scope (ADR-183): where the hooks block is merged and which roots
 /// are projected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
@@ -105,7 +105,7 @@ pub fn run(
     run_with(Options { source, dest, mode, dry_run, quiet, force, ..Options::default() })
 }
 
-/// [`run`] with the full option set, including install scope (ADR-182).
+/// [`run`] with the full option set, including install scope (ADR-183).
 pub fn run_with(opts: Options) -> Result<()> {
     let Options { source, dest, mode, dry_run, quiet, force, scope, project, state_root } = opts;
     let source_root: PathBuf = source.map(PathBuf::from).unwrap_or_else(paths::data_root);
@@ -225,7 +225,7 @@ pub fn run_with(opts: Options) -> Result<()> {
 /// With neither flag, keep whatever scope this machine already uses: if no
 /// user-scope base has ever been written but project bases have, this is a
 /// project-scope install and every recorded project is re-merged. Otherwise
-/// user scope, exactly as before ADR-182. That is what lets `ways update`
+/// user scope, exactly as before ADR-183. That is what lets `ways update`
 /// call a bare `ways reconcile` without turning a project-scope install into
 /// a user-scope one.
 fn resolve_scope(scope: Option<&str>, project: Option<&str>, state_root: &Path) -> Result<Scope> {

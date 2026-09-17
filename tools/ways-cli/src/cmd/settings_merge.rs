@@ -104,7 +104,7 @@ impl Owned {
 
 /// Which owned slices a merge writes. User scope (`~/.claude/settings.json`)
 /// carries hooks plus the ways permissions (ADR-169). Project scope
-/// (`<project>/.claude/settings.local.json`, ADR-182) carries hooks only: the
+/// (`<project>/.claude/settings.local.json`, ADR-183) carries hooks only: the
 /// `permissions.allow` entries name user-level paths and the secret-path deny
 /// baseline is a user-level policy, so neither belongs in a per-repo file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,7 +492,7 @@ pub fn apply_to_files(
 }
 
 /// [`apply_to_files`] with an explicit choice of slices. Project scope
-/// (ADR-182) calls this with `HooksOnly` against
+/// (ADR-183) calls this with `HooksOnly` against
 /// `<project>/.claude/settings.local.json` and a per-project base; the
 /// backup, atomic write, self-audit, and base persistence are the same.
 pub fn apply_to_files_with(

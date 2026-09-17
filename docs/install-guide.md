@@ -37,7 +37,7 @@ Pass a scope to the installer:
 curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/install.sh | bash -s -- --bootstrap --scope=project --project=/path/to/repo
 ```
 
-Project scope ([ADR-182](architecture/system/ADR-182-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md)) does three things differently from the default:
+Project scope ([ADR-183](architecture/system/ADR-183-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md)) does three things differently from the default:
 
 - It links only the hook tree and the binaries into `~/.claude` (`hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`). `skills/`, `agents/`, and `commands/` are not projected, so yours stay yours.
 - It writes the hooks block into `<repo>/.claude/settings.local.json` instead of `~/.claude/settings.json`. Claude Code concatenates hooks across the user file and the project files, so ways fire only in sessions under that directory. Nothing is written to your user `settings.json`.

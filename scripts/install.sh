@@ -52,7 +52,7 @@ ${CYAN}Usage:${RESET}
 
 ${CYAN}Options:${RESET}
   --bootstrap               Clone latest release to temp, then install
-  --scope=project           Wire ways into one repository only (ADR-182): hooks go to
+  --scope=project           Wire ways into one repository only (ADR-183): hooks go to
                             <project>/.claude/settings.local.json; skills/, agents/ and
                             commands/ are not projected into ~/.claude
   --project=DIR             The repository for --scope=project (default: current directory)
