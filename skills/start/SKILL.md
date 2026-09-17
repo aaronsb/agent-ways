@@ -43,6 +43,10 @@ Also check for continuity markers: the `TaskList` (via the tool), any tracking f
 under `.claude/`, and the `CLAUDE.md` where this was invoked. `tracking(meta)` is the
 discipline here — check for existing tracking before beginning anything.
 
+On a repo too large to read in a few calls, hand the state read to an `Explore` agent
+with the investigation-brief rules from subagents(meta), on a cheap model. Invoking
+`/start` is that request. The interview in Step 3 stays inline.
+
 ## Step 2 — Branch on what you found
 
 - **Work in flight** (uncommitted changes, an open branch, live TaskList tasks) → this
