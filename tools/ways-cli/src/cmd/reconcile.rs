@@ -104,13 +104,13 @@ pub fn run(
     // consulted and not changed.
     if let Some(d) = dest {
         let dest_root = PathBuf::from(d);
-        let base = base_path_for(&dest_root);
+        let base = base_path_for(&paths::state_root(), &dest_root);
         return converge_one(&source_root, &dest_root, &roots, &base, dry_run, quiet, force);
     }
 
     let cfg = crate::config::global();
     let targets = cfg.targets();
-    run_targets(&source_root, &roots, &targets, dry_run, quiet, force)?;
+    run_targets_in(&paths::state_root(), &source_root, &roots, &targets, dry_run, quiet, force)?;
 
     // Migration (ADR-184 item 2): an install from before the targets key has
     // just converged its implicit default. Record it, so the install is
@@ -140,6 +140,20 @@ pub(crate) fn run_targets(
     quiet: bool,
     force: bool,
 ) -> Result<()> {
+    run_targets_in(&paths::state_root(), source_root, roots, targets, dry_run, quiet, force)
+}
+
+/// `run_targets` with the state root explicit, so tests keep their merge
+/// bases in a sandbox without touching the process environment.
+pub(crate) fn run_targets_in(
+    state_root: &Path,
+    source_root: &Path,
+    roots: &[ProjectionRoot],
+    targets: &[crate::config::Target],
+    dry_run: bool,
+    quiet: bool,
+    force: bool,
+) -> Result<()> {
     if targets.is_empty() {
         if !quiet {
             eprintln!(
@@ -153,7 +167,7 @@ pub(crate) fn run_targets(
     let mut first_err: Option<anyhow::Error> = None;
     for t in targets {
         let dest_root = t.dir();
-        let base = base_path_for(&dest_root);
+        let base = base_path_for(state_root, &dest_root);
         let result = if t.enabled {
             converge_one(source_root, &dest_root, roots, &base, dry_run, quiet, force)
         } else {
@@ -190,18 +204,18 @@ pub fn run_for_targets(targets: &[crate::config::Target], dry_run: bool, quiet: 
 pub fn plan_target(dest_root: &Path) -> Result<Plan> {
     let source_root = paths::data_root();
     let roots = projection_roots(&source_root);
-    plan_for(&source_root, dest_root, &roots)
+    plan_for(&paths::state_root(), &source_root, dest_root, &roots)
 }
 
 /// The settings merge base for one target. The default projection root keeps
 /// the path every install before ADR-184 wrote, so an existing base is honored;
 /// every other target gets its own under `state/targets/<key>/`.
-pub(crate) fn base_path_for(dest_root: &Path) -> PathBuf {
+pub(crate) fn base_path_for(state_root: &Path, dest_root: &Path) -> PathBuf {
     if same_path(dest_root, &paths::projection_root()) {
-        paths::state_root().join("settings-applied.json")
+        state_root.join("settings-applied.json")
     } else {
         let key = ways_core::util::encode_project_key(dest_root);
-        paths::state_root().join("targets").join(key).join("settings-applied.json")
+        state_root.join("targets").join(key).join("settings-applied.json")
     }
 }
 
@@ -246,7 +260,7 @@ pub struct HookRef {
 }
 
 /// Classify every root and dry-run the settings merge in memory.
-pub fn plan_for(source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot]) -> Result<Plan> {
+pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot]) -> Result<Plan> {
     let mut root_plans = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);
@@ -274,7 +288,7 @@ pub fn plan_for(source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot]) 
         let desired_hooks = desired.get("hooks").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
         let dest_settings = dest_root.join("settings.json");
         let live: serde_json::Value = sm::read_json_or_empty(&dest_settings)?;
-        let base = sm::base_for(&live, &base_path_for(dest_root))?;
+        let base = sm::base_for(&live, &base_path_for(state_root, dest_root))?;
         let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
         Some(diff_settings(&live, &merged.settings))
     } else {
@@ -763,9 +777,9 @@ mod tests {
         let roots = projection_roots(&src);
         // The base for a non-default dest lives under the state root; point it
         // into the sandbox so the test never touches real state.
-        std::env::set_var("XDG_STATE_HOME", base.join("state"));
+        let state = base.join("state");
 
-        run_targets(&src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        run_targets_in(&state, &src, &roots, &[target(&dst, true)], false, true, false).unwrap();
         assert!(std::fs::symlink_metadata(dst.join("skills")).unwrap().file_type().is_symlink());
         let live: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
@@ -774,7 +788,7 @@ mod tests {
         assert!(start.iter().any(|c| c == "echo user-start"), "user kept: {start:?}");
         assert_eq!(live["model"], "opus");
 
-        run_targets(&src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        run_targets_in(&state, &src, &roots, &[target(&dst, false)], false, true, false).unwrap();
         assert!(std::fs::symlink_metadata(dst.join("skills")).is_err(), "our link removed");
         assert!(std::fs::symlink_metadata(dst.join("hooks/check-config-updates.sh")).is_err());
         let live: serde_json::Value =
@@ -787,16 +801,15 @@ mod tests {
         assert!(live["permissions"].get("deny").is_none(), "our deny baseline gone");
 
         // Withdrawing again changes nothing.
-        run_targets(&src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        run_targets_in(&state, &src, &roots, &[target(&dst, false)], false, true, false).unwrap();
         let again = std::fs::read_to_string(dst.join("settings.json")).unwrap();
         assert_eq!(serde_json::from_str::<serde_json::Value>(&again).unwrap(), live);
 
         // Re-enabling after withdrawal starts from the empty base and converges.
-        run_targets(&src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        run_targets_in(&state, &src, &roots, &[target(&dst, true)], false, true, false).unwrap();
         let live: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
         assert_eq!(hook_commands(&live, "SessionStart").len(), 2);
-        std::env::remove_var("XDG_STATE_HOME");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -814,11 +827,10 @@ mod tests {
         make_symlink(&elsewhere, &dst.join("hooks/ways"), true).unwrap();
         fake_source(&src);
         let roots = projection_roots(&src);
-        std::env::set_var("XDG_STATE_HOME", base.join("state"));
-        run_targets(&src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        let state = base.join("state");
+        run_targets_in(&state, &src, &roots, &[target(&dst, false)], false, true, false).unwrap();
         assert_eq!(std::fs::read_to_string(dst.join("skills/mine.md")).unwrap(), "mine");
         assert!(std::fs::read_link(dst.join("hooks/ways")).is_ok(), "foreign symlink kept");
-        std::env::remove_var("XDG_STATE_HOME");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -829,7 +841,7 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         fake_source(&src);
         let roots = projection_roots(&src);
-        run_targets(&src, &roots, &[], false, true, false).unwrap();
+        run_targets_in(&base.join("state"), &src, &roots, &[], false, true, false).unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -845,8 +857,8 @@ mod tests {
         fake_settings(&src);
         std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
         let roots = projection_roots(&src);
-        std::env::set_var("XDG_STATE_HOME", base.join("state"));
-        let plan = plan_for(&src, &dst, &roots).unwrap();
+        let state = base.join("state");
+        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
         let skills = plan.roots.iter().find(|r| r.rel == "skills").unwrap();
         assert_eq!(skills.state, "refused");
         assert!(skills.detail.starts_with("real directory, 1 entries"));
@@ -862,7 +874,6 @@ mod tests {
         // Nothing was touched by planning.
         assert!(std::fs::symlink_metadata(dst.join("hooks/ways")).is_err());
         assert_eq!(std::fs::read_to_string(dst.join("settings.json")).unwrap(), user_settings());
-        std::env::remove_var("XDG_STATE_HOME");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -883,20 +894,20 @@ mod tests {
         )
         .unwrap();
         let roots = projection_roots(&src);
-        std::env::set_var("XDG_STATE_HOME", base.join("state"));
-        let plan = plan_for(&src, &dst, &roots).unwrap();
+        let state = base.join("state");
+        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
         let s = plan.settings.as_ref().unwrap();
         assert_eq!(s.hooks_replaced.len(), 1, "claimed as ours: {s:?}");
         assert!(s.hooks_replaced[0].command.contains("my-own.sh"));
-        std::env::remove_var("XDG_STATE_HOME");
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn default_root_keeps_the_legacy_base_path() {
-        let legacy = paths::state_root().join("settings-applied.json");
-        assert_eq!(base_path_for(&paths::projection_root()), legacy);
-        let other = base_path_for(Path::new("/tmp/some-other-claude"));
+        let state = Path::new("/tmp/ways-state-test");
+        let legacy = state.join("settings-applied.json");
+        assert_eq!(base_path_for(state, &paths::projection_root()), legacy);
+        let other = base_path_for(state, Path::new("/tmp/some-other-claude"));
         assert_ne!(other, legacy);
         assert!(other.to_string_lossy().contains("targets"));
     }
