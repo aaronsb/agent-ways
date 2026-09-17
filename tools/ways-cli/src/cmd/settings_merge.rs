@@ -645,28 +645,42 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
         std::fs::create_dir_all(parent).ok();
     }
     write_json_atomic(base_path, &merged.base.to_value())?;
-    let left_behind = count_claimed_not_shipped(&after, &base);
-    let note = if left_behind > 0 {
-        format!("; {left_behind} recorded entr{} not shipped by this version left in place", if left_behind == 1 { "y" } else { "ies" })
-    } else {
+    let survivors = surviving_ours_not_shipped(&after, &shipped_hooks);
+    let note = if survivors.is_empty() {
         String::new()
+    } else {
+        format!(
+            "; left in place, ours by shape but not shipped by this version (edited by hand, or from another version): {}",
+            survivors.join(", ")
+        )
     };
     Ok(format!("withdrew our hooks and permissions from settings.json; backup at {}{note}", backup.display()))
 }
 
-/// Entries the prior base recorded as ours that survived a withdrawal: a hook
-/// this version does not ship, or one the seed claimed from the user.
-fn count_claimed_not_shipped(after: &Value, prior_base: &Owned) -> usize {
+/// Hook commands that survived a withdrawal and read as ours by shape yet are
+/// not what this version ships: a shipped hook edited by hand, or a hook from
+/// a version installed and then upgraded without a reconcile. Named so the
+/// operator can see what now points at a removed path.
+pub fn surviving_ours_not_shipped(after: &Value, shipped_hooks: &Value) -> Vec<String> {
     let empty = Map::new();
     let hooks = after.get("hooks").and_then(|h| h.as_object()).unwrap_or(&empty);
-    prior_base
-        .hooks
-        .iter()
-        .map(|(event, arr)| {
-            let live = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            arr.as_array().map(|a| a.iter().filter(|e| live.contains(e)).count()).unwrap_or(0)
-        })
-        .sum()
+    let shipped = shipped_hooks.as_object().unwrap_or(&empty);
+    let mut out = Vec::new();
+    for (event, entries) in hooks {
+        let ours = shipped.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let ours_quoted: Vec<Value> = ours.iter().map(quote_entry_commands).collect();
+        for e in entries.as_array().cloned().unwrap_or_default() {
+            if entry_is_ours(&e) && !ours.contains(&e) && !ours_quoted.contains(&e) {
+                let cmds: Vec<&str> = e
+                    .get("hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|a| a.iter().filter_map(|h| h.get("command").and_then(|c| c.as_str())).collect())
+                    .unwrap_or_default();
+                out.push(format!("{event}: {}", cmds.join(" && ")));
+            }
+        }
+    }
+    out
 }
 
 pub(crate) fn read_json_or_empty(p: &Path) -> Result<Value> {

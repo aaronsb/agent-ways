@@ -116,8 +116,11 @@ pub fn run(
     // just converged its implicit default. Record it, so the install is
     // explicit from here and `ways config targets` reads the truth.
     if !cfg.targets_explicit() && !dry_run {
-        match crate::config::Config::write_user_targets(&targets) {
-            Ok(path) if !quiet => eprintln!(
+        // Under the lock, and only if the key is still absent: an operator's
+        // `target add` that landed meanwhile wins.
+        let implicit = targets.clone();
+        match crate::config::Config::edit_user_targets(|current| if current.is_none() { Some(implicit) } else { None }) {
+            Ok((path, _)) if !quiet => eprintln!(
                 "recorded {} as the active target in {}",
                 targets.iter().map(|t| t.path.as_str()).collect::<Vec<_>>().join(", "),
                 path.display()
@@ -932,6 +935,42 @@ mod tests {
         assert_eq!(allow, vec!["Bash(ways:*)", "Bash(make:*)"], "{live}");
         let deny: Vec<&str> = live["permissions"]["deny"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
         assert_eq!(deny, vec!["Read(~/.ssh/**)"], "{live}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn withdrawal_names_a_shipped_hook_the_user_edited_by_hand() {
+        let base = sandbox("survivor");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        let state = base.join("state");
+        run_targets_in(&state, &src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        // The operator adds a timeout to our entry; it is no longer byte-equal to what ships.
+        let mut live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        for e in live["hooks"]["SessionStart"].as_array_mut().unwrap() {
+            if e["hooks"][0]["command"].as_str().unwrap_or("").contains("check-setup.sh") {
+                e["hooks"][0]["timeout"] = serde_json::json!(5);
+            }
+        }
+        std::fs::write(dst.join("settings.json"), serde_json::to_string_pretty(&live).unwrap()).unwrap();
+        let summary = crate::cmd::settings_merge::withdraw_from_files(
+            &src.join("settings.json"),
+            &dst.join("settings.json"),
+            &base_path_for(&state, &dst),
+        )
+        .unwrap();
+        assert!(summary.contains("left in place"), "{summary}");
+        assert!(summary.contains("check-setup.sh"), "{summary}");
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        assert!(hook_commands(&after, "SessionStart").iter().any(|c| c.contains("check-setup.sh")), "edited entry kept");
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -289,20 +289,27 @@ pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<(
         std::process::exit(EXIT_BLOCKED);
     }
     let _ = canonical;
-    let cfg = Config::load(&project_dir());
-    let mut list = cfg.targets();
-    let target = match find_target(&list, dir) {
-        Some(i) => {
-            list[i].enabled = true;
-            list[i].clone()
-        }
-        None => {
-            let t = Target::new(stored);
-            list.push(t.clone());
-            t
-        }
-    };
-    let path = Config::write_user_targets(&list)?;
+    let implicit = Config::load(&project_dir()).targets();
+    let mut chosen: Option<Target> = None;
+    let (path, _) = Config::edit_user_targets(|current| {
+        // A file with no key starts from the implicit list, so the default
+        // target is recorded alongside the new one.
+        let mut list = current.unwrap_or(implicit);
+        let t = match find_target(&list, dir) {
+            Some(i) => {
+                list[i].enabled = true;
+                list[i].clone()
+            }
+            None => {
+                let t = Target::new(stored.clone());
+                list.push(t.clone());
+                t
+            }
+        };
+        chosen = Some(t);
+        Some(list)
+    })?;
+    let target = chosen.expect("edit closure always runs");
     // Under --json the plan document is the whole of stdout; the apply logs
     // to stderr.
     if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
@@ -318,17 +325,26 @@ pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<(
 }
 
 fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
-    let cfg = Config::load(&project_dir());
-    let mut list = cfg.targets();
-    let Some(i) = find_target(&list, dir) else {
+    let implicit = Config::load(&project_dir()).targets();
+    let mut chosen: Option<Target> = None;
+    let mut missing = false;
+    Config::edit_user_targets(|current| {
+        let mut list = current.unwrap_or(implicit);
+        let Some(i) = find_target(&list, dir) else {
+            missing = true;
+            return None;
+        };
+        list[i].enabled = enabled;
+        chosen = Some(list[i].clone());
+        Some(list)
+    })?;
+    if missing {
         bail!("{dir} is not a target; `ways config targets` lists them, `ways config target add` adds one");
-    };
-    list[i].enabled = enabled;
-    let target = list[i].clone();
+    }
+    let target = chosen.expect("set when found");
     if enabled && !target.dir().is_dir() {
         bail!("{} does not exist; a target must be a directory to enable", target.dir().display());
     }
-    Config::write_user_targets(&list)?;
     reconcile::run_for_targets(&[target], false, false, false)
 }
 
@@ -341,19 +357,29 @@ pub fn target_disable(dir: &str) -> Result<()> {
 }
 
 pub fn target_remove(dir: &str) -> Result<()> {
-    let cfg = Config::load(&project_dir());
-    let mut list = cfg.targets();
-    let Some(i) = find_target(&list, dir) else {
+    let implicit = Config::load(&project_dir()).targets();
+    let mut removed: Option<Target> = None;
+    // Withdraw first, then forget: a removed target is a withdrawn one. The
+    // record is dropped under the lock only after the withdrawal succeeded.
+    let list = Config::edit_user_targets(|current| {
+        let list = current.unwrap_or(implicit);
+        removed = find_target(&list, dir).map(|i| list[i].clone());
+        None
+    })?
+    .1;
+    let Some(mut target) = removed else {
         bail!("{dir} is not a target");
     };
-    let mut target = list.remove(i);
+    let _ = list;
     target.enabled = false;
-    // Withdraw first, then forget: a removed target is a withdrawn one. A
-    // directory that is gone has nothing to withdraw from.
     if target.dir().is_dir() {
-        reconcile::run_for_targets(&[target], false, false, false)?;
+        reconcile::run_for_targets(&[target.clone()], false, false, false)?;
     }
-    let path = Config::write_user_targets(&list)?;
+    let (path, _) = Config::edit_user_targets(|current| {
+        let mut list = current.unwrap_or_default();
+        list.retain(|t| t.path != target.path);
+        Some(list)
+    })?;
     eprintln!("target removed from {}", path.display());
     Ok(())
 }

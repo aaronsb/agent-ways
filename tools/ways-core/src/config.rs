@@ -78,6 +78,46 @@ impl Target {
     }
 }
 
+/// A lock file beside the user config, held for the span of one
+/// read-modify-write of the `targets` key. Created exclusively; a holder that
+/// died leaves a stale file, which is taken over after a short wait.
+struct TargetsLock(PathBuf);
+
+impl TargetsLock {
+    fn acquire(config_path: &Path) -> std::io::Result<Self> {
+        let lock = config_path.with_extension("yaml.lock");
+        if let Some(parent) = lock.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        for attempt in 0..50u32 {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+                Ok(_) => return Ok(TargetsLock(lock)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Take over a lock older than five seconds: its holder is
+                    // gone, no writer of this key runs that long.
+                    let stale = std::fs::metadata(&lock)
+                        .and_then(|m| m.modified())
+                        .map(|t| t.elapsed().map(|d| d.as_secs() >= 5).unwrap_or(false))
+                        .unwrap_or(true);
+                    if stale && attempt > 0 {
+                        let _ = std::fs::remove_file(&lock);
+                        continue;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::other(format!("could not lock {} for the targets write", lock.display())))
+    }
+}
+
+impl Drop for TargetsLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Quote a scalar for YAML when it needs it (a leading `~` or `*`, a colon,
 /// a hash, or leading or trailing space); otherwise write it bare.
 fn yaml_scalar(s: &str) -> String {
@@ -297,6 +337,32 @@ impl Config {
         Ok(path)
     }
 
+    /// Read the targets as the user file has them right now, apply `edit`, and
+    /// write the result, all under a lock file beside the config. Every writer
+    /// of the key goes through here, so a hook's migration write and an
+    /// operator's `target add` cannot lose each other's change. `edit` returns
+    /// `None` to leave the file alone. Returns the list written, or the list
+    /// found when nothing was written.
+    pub fn edit_user_targets<F>(edit: F) -> std::io::Result<(PathBuf, Vec<Target>)>
+    where
+        F: FnOnce(Option<Vec<Target>>) -> Option<Vec<Target>>,
+    {
+        let path = crate::paths::user_config();
+        let _lock = TargetsLock::acquire(&path)?;
+        let current = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_yaml::from_str::<serde_yaml::Value>(&t).ok())
+            .and_then(|doc| Self::read_targets(&doc));
+        let found = current.clone().unwrap_or_default();
+        match edit(current) {
+            Some(list) => {
+                Self::write_targets_to(&path, &list)?;
+                Ok((path, list))
+            }
+            None => Ok((path, found)),
+        }
+    }
+
     /// The writer behind [`Config::write_user_targets`], on an explicit path so
     /// tests never touch the real config.
     pub fn write_targets_to(path: &Path, list: &[Target]) -> std::io::Result<()> {
@@ -325,7 +391,10 @@ impl Config {
                 block.push_str(&format!("    config: {}\n", yaml_scalar(c)));
             }
         }
-        let body = replace_top_level_block(&existing, "targets", &block);
+        let mut body = replace_top_level_block(&existing, "targets", &block);
+        if existing.contains("\r\n") {
+            body = body.replace('\n', "\r\n");
+        }
         // The edit is textual; prove the result still parses and carries
         // exactly this list before it replaces the file.
         match serde_yaml::from_str::<serde_yaml::Value>(&body) {
@@ -876,6 +945,13 @@ mod tests {
         let body = std::fs::read_to_string(&path).unwrap();
         assert!(body.contains("# language setting\n\nlanguage: es\n"), "{body}");
         assert!(!body.contains("/a\n"), "{body}");
+        // CRLF in, CRLF out.
+        std::fs::write(&path, "language: es\r\n# note\r\n").unwrap();
+        Config::write_targets_to(&path, &[Target::new("/c")]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("language: es\r\n# note\r\n"), "{body:?}");
+        assert!(body.contains("targets:\r\n  - path: /c\r\n"), "{body:?}");
+        assert!(!body.contains("\n\n") || body.contains("\r\n\r\n"), "no bare LF: {body:?}");
         // The comments-only template `ways config init` writes is accepted.
         std::fs::write(&path, "# only comments\n# targets:\n#   - path: ~/.claude\n").unwrap();
         Config::write_targets_to(&path, &[]).unwrap();
