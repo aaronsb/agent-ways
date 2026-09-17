@@ -295,8 +295,11 @@ pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: 
         None
     };
 
+    // A replaced entry blocks too: the merge would claim a hook the user wrote
+    // under .claude/hooks/, and withdrawal would later leave it alone only
+    // because it is not shipped, so the operator should see it now.
     let blocked = root_plans.iter().any(|r| r.state == "refused")
-        || settings.as_ref().map(|s| !s.hooks_removed.is_empty()).unwrap_or(false);
+        || settings.as_ref().map(|s| !s.hooks_removed.is_empty() || !s.hooks_replaced.is_empty()).unwrap_or(false);
     Ok(Plan { dest: dest_root.to_string_lossy().to_string(), roots: root_plans, settings, blocked })
 }
 
@@ -490,8 +493,10 @@ fn withdraw_one(
 
     if !dry_run {
         let dest_settings = dest_root.join("settings.json");
+        let src_settings = source_root.join("settings.json");
         if dest_settings.exists() {
-            let summary = crate::cmd::settings_merge::withdraw_from_files(&dest_settings, base_path)?;
+            let summary =
+                crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?;
             if !quiet {
                 eprintln!("{summary}");
             }
@@ -691,7 +696,11 @@ fn report(outcomes: &[Outcome], source: &Path, dest: &Path, dry_run: bool, quiet
             Action::Unlinked => "unlinked",
             Action::Ok | Action::Kept => unreachable!(),
         };
-        println!("{verb} {} ({})", o.rel, o.detail);
+        if quiet {
+            eprintln!("{verb} {} ({})", o.rel, o.detail);
+        } else {
+            println!("{verb} {} ({})", o.rel, o.detail);
+        }
     }
     if !quiet {
         let what = match (dry_run, withdrawing) {
@@ -814,6 +823,46 @@ mod tests {
     }
 
     #[test]
+    fn withdrawal_keeps_a_user_hook_the_predicate_claims_and_an_over_recorded_base_entry() {
+        // Two hooks withdrawal must not touch: one the user added under
+        // .claude/hooks/ after activation (the ownership predicate claims it),
+        // and one a base seeded before #502 recorded as ours (it is the
+        // user's). Withdrawal removes only what the app ships.
+        let base = sandbox("withdraw-claimed");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        let state = base.join("state");
+        run_targets_in(&state, &src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+
+        // After activation the user adds a hook under .claude/hooks/, and an
+        // old base is rewritten to claim the user's Stop hook as ours.
+        let mut live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        live["hooks"]["PreToolUse"] = serde_json::json!([{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/my-own.sh"}]}]);
+        std::fs::write(dst.join("settings.json"), serde_json::to_string_pretty(&live).unwrap()).unwrap();
+        let base_path = base_path_for(&state, &dst);
+        let mut recorded: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&base_path).unwrap()).unwrap();
+        recorded["hooks"]["Stop"] = serde_json::json!([{"hooks":[{"type":"command","command":"echo user-stop"}]}]);
+        std::fs::write(&base_path, serde_json::to_string_pretty(&recorded).unwrap()).unwrap();
+
+        run_targets_in(&state, &src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        let live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        assert!(hook_commands(&live, "PreToolUse").iter().any(|c| c.contains("my-own.sh")), "claimed user hook kept: {live}");
+        assert_eq!(hook_commands(&live, "Stop"), vec!["echo user-stop".to_string()], "over-recorded user hook kept: {live}");
+        assert!(!hook_commands(&live, "SessionStart").iter().any(|c| c.contains("check-setup.sh")), "shipped hook removed");
+        assert_eq!(hook_commands(&live, "SessionStart"), vec!["echo user-start".to_string()]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn withdraw_leaves_real_paths_and_foreign_symlinks() {
         let base = sandbox("withdraw-keep");
         let src = base.join("data");
@@ -899,6 +948,7 @@ mod tests {
         let s = plan.settings.as_ref().unwrap();
         assert_eq!(s.hooks_replaced.len(), 1, "claimed as ours: {s:?}");
         assert!(s.hooks_replaced[0].command.contains("my-own.sh"));
+        assert!(plan.blocked, "a claimed user hook blocks activation");
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -119,10 +119,14 @@ pub fn merge(
     merge_impl(live, desired_hooks, base, deny_secrets, false)
 }
 
-/// The inverse merge (ADR-184 item 4): remove every slice the base says we own
-/// and contribute nothing. The result's base is empty. Pure, like `merge`.
-pub fn withdraw(live: &Value, base: &Owned) -> Result<Merged> {
-    merge_impl(live, &Value::Object(Map::new()), base, false, true)
+/// The inverse merge (ADR-184 item 4). Hooks are removed by content: an entry
+/// goes only when it is one the app ships (`shipped_hooks`, raw or quoted),
+/// so a user's hook that the ownership predicate would claim, or that an
+/// over-recording base lists, survives. Permissions and deny entries go by the
+/// base, which is the only record of what we added there. The result's base
+/// is empty. Pure, like `merge`.
+pub fn withdraw(live: &Value, shipped_hooks: &Value, base: &Owned) -> Result<Merged> {
+    merge_impl(live, shipped_hooks, base, false, true)
 }
 
 fn merge_impl(
@@ -166,28 +170,41 @@ fn merge_impl(
         // `entry_is_ours` is the base-independent backstop: it also drops a prior
         // entry of OURS whose command CHANGED (so it matches neither base nor the
         // new `ours`), which byte-matching alone would leave lingering.
-        let mut merged: Vec<Value> = theirs
-            .into_iter()
-            .filter(|e| {
-                !base_entries.contains(e)
-                    && !ours.contains(e)
-                    && !ours_quoted.contains(e)
-                    && !entry_is_ours(e)
-            })
-            .collect();
-        merged.extend(ours_quoted);
+        let mut merged: Vec<Value> = if withdrawing {
+            // Withdrawal removes exactly what this version ships. The base and
+            // the ownership predicate are not consulted: both can name a hook
+            // the user wrote (a hook under .claude/hooks/, or a base seeded
+            // before #502), and withdrawal must never drop one of those.
+            theirs.into_iter().filter(|e| !ours.contains(e) && !ours_quoted.contains(e)).collect()
+        } else {
+            theirs
+                .into_iter()
+                .filter(|e| {
+                    !base_entries.contains(e)
+                        && !ours.contains(e)
+                        && !ours_quoted.contains(e)
+                        && !entry_is_ours(e)
+                })
+                .collect()
+        };
+        if !withdrawing {
+            merged.extend(ours_quoted);
+        }
 
         if !merged.is_empty() {
             new_hooks.insert(event.clone(), Value::Array(merged));
         }
     }
 
-    // The base records exactly the (quoted) hook entries we contributed.
+    // The base records exactly the (quoted) hook entries we contributed;
+    // after a withdrawal, nothing.
     let mut base_hooks: Map<String, Value> = Map::new();
-    for (event, ours) in &ours_hooks {
-        if let Some(arr) = ours.as_array() {
-            let quoted: Vec<Value> = arr.iter().map(quote_entry_commands).collect();
-            base_hooks.insert(event.clone(), Value::Array(quoted));
+    if !withdrawing {
+        for (event, ours) in &ours_hooks {
+            if let Some(arr) = ours.as_array() {
+                let quoted: Vec<Value> = arr.iter().map(quote_entry_commands).collect();
+                base_hooks.insert(event.clone(), Value::Array(quoted));
+            }
         }
     }
 
@@ -556,10 +573,12 @@ pub fn apply_to_files(
 /// of `apply_to_files`, with the same backup, atomic write, and self-audit.
 /// With no base on disk the ownership predicate decides what is ours, as on a
 /// first apply. Leaves an empty base behind so a later enable starts clean.
-pub fn withdraw_from_files(dest_settings: &Path, base_path: &Path) -> Result<String> {
+pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_path: &Path) -> Result<String> {
+    let shipped: Value = read_json_or_empty(source_settings)?;
+    let shipped_hooks = shipped.get("hooks").cloned().unwrap_or(Value::Object(Map::new()));
     let live: Value = read_json_or_empty(dest_settings)?;
     let base = base_for(&live, base_path)?;
-    let merged = withdraw(&live, &base)?;
+    let merged = withdraw(&live, &shipped_hooks, &base)?;
     if merged.settings == live {
         return Ok("settings.json holds nothing of ours".into());
     }
@@ -571,9 +590,26 @@ pub fn withdraw_from_files(dest_settings: &Path, base_path: &Path) -> Result<Str
     }
     write_json_atomic(dest_settings, &merged.settings)?;
 
+    // Self-audit with the notion of ours that withdrawal used: the shipped
+    // hooks (raw and quoted) on both sides, the base's permissions on the
+    // before side only, since the after side has none. The base's hook list
+    // is not the strip set here: an entry it over-records is the user's and
+    // was kept on purpose.
+    let mut shipped_strip: Map<String, Value> = Map::new();
+    if let Some(m) = shipped_hooks.as_object() {
+        for (event, arr) in m {
+            if let Some(a) = arr.as_array() {
+                let mut both: Vec<Value> = a.clone();
+                both.extend(a.iter().map(quote_entry_commands));
+                shipped_strip.insert(event.clone(), Value::Array(both));
+            }
+        }
+    }
     let after: Value = read_json_or_empty(dest_settings)?;
-    let user_before = stripped_user_view(&live, &base);
-    let user_after = stripped_user_view(&after, &merged.base);
+    let before_strip = Owned { hooks: shipped_strip.clone(), perms: base.perms.clone(), deny: base.deny.clone() };
+    let after_strip = Owned { hooks: shipped_strip, perms: Vec::new(), deny: Vec::new() };
+    let user_before = stripped_user_view(&live, &before_strip);
+    let user_after = stripped_user_view(&after, &after_strip);
     if user_before != user_after {
         if backup.exists() {
             std::fs::copy(&backup, dest_settings).ok();
@@ -589,7 +625,28 @@ pub fn withdraw_from_files(dest_settings: &Path, base_path: &Path) -> Result<Str
         std::fs::create_dir_all(parent).ok();
     }
     write_json_atomic(base_path, &merged.base.to_value())?;
-    Ok(format!("withdrew our hooks and permissions from settings.json; backup at {}", backup.display()))
+    let left_behind = count_claimed_not_shipped(&after, &base);
+    let note = if left_behind > 0 {
+        format!("; {left_behind} recorded entr{} not shipped by this version left in place", if left_behind == 1 { "y" } else { "ies" })
+    } else {
+        String::new()
+    };
+    Ok(format!("withdrew our hooks and permissions from settings.json; backup at {}{note}", backup.display()))
+}
+
+/// Entries the prior base recorded as ours that survived a withdrawal: a hook
+/// this version does not ship, or one the seed claimed from the user.
+fn count_claimed_not_shipped(after: &Value, prior_base: &Owned) -> usize {
+    let empty = Map::new();
+    let hooks = after.get("hooks").and_then(|h| h.as_object()).unwrap_or(&empty);
+    prior_base
+        .hooks
+        .iter()
+        .map(|(event, arr)| {
+            let live = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            arr.as_array().map(|a| a.iter().filter(|e| live.contains(e)).count()).unwrap_or(0)
+        })
+        .sum()
 }
 
 pub(crate) fn read_json_or_empty(p: &Path) -> Result<Value> {

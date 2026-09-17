@@ -78,6 +78,61 @@ impl Target {
     }
 }
 
+/// Quote a scalar for YAML when it needs it (a leading `~` or `*`, a colon,
+/// a hash, or leading or trailing space); otherwise write it bare.
+fn yaml_scalar(s: &str) -> String {
+    let needs = s.is_empty()
+        || s.starts_with(['~', '*', '&', '!', '%', '@', '`', '\'', '"', '[', '{', '#', '-', '?', '|', '>'])
+        || s.contains(": ")
+        || s.contains(" #")
+        || s.ends_with(':')
+        || s.trim() != s;
+    if needs {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Replace the top-level `key:` block in a YAML text with `block`, or append
+/// `block` when the key is absent. A top-level block runs from its key line
+/// to the next line that starts a top-level key or the end of the text.
+/// Comments and every other key are left byte for byte.
+fn replace_top_level_block(text: &str, key: &str, block: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let is_top_key = |l: &str, k: &str| l.starts_with(k) && l[k.len()..].trim_start().starts_with(':');
+    let is_any_top_key = |l: &str| {
+        !l.is_empty()
+            && !l.starts_with([' ', '\t', '#', '-'])
+            && l.contains(':')
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    let mut replaced = false;
+    while i < lines.len() {
+        if !replaced && is_top_key(lines[i], key) {
+            out.push(block.trim_end_matches('\n').to_string());
+            i += 1;
+            while i < lines.len() && !is_any_top_key(lines[i]) {
+                i += 1;
+            }
+            replaced = true;
+            continue;
+        }
+        out.push(lines[i].to_string());
+        i += 1;
+    }
+    if !replaced {
+        if !out.is_empty() && !out.last().map(|l| l.is_empty()).unwrap_or(true) {
+            out.push(String::new());
+        }
+        out.push(block.trim_end_matches('\n').to_string());
+    }
+    let mut s = out.join("\n");
+    s.push('\n');
+    s
+}
+
 fn expand_tilde(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix("~/") {
         home_dir().join(rest)
@@ -238,21 +293,34 @@ impl Config {
     /// tests never touch the real config.
     pub fn write_targets_to(path: &Path, list: &[Target]) -> std::io::Result<()> {
         let existing = std::fs::read_to_string(path).unwrap_or_default();
-        let mut doc: serde_yaml::Value = if existing.trim().is_empty() {
-            serde_yaml::Value::Mapping(Default::default())
-        } else {
-            serde_yaml::from_str(&existing).map_err(std::io::Error::other)?
-        };
-        let map = match &mut doc {
-            serde_yaml::Value::Mapping(m) => m,
-            _ => return Err(std::io::Error::other("user config is not a mapping")),
-        };
-        let value = serde_yaml::to_value(list).map_err(std::io::Error::other)?;
-        map.insert(serde_yaml::Value::String("targets".into()), value);
+        // The file is edited textually so its comments survive: the template
+        // `ways config init` writes is comments only, and serde_yaml would
+        // drop every one of them. A parse failure of what is there is an
+        // error; a comments-only or empty file parses as null and is fine.
+        if !existing.trim().is_empty() {
+            match serde_yaml::from_str::<serde_yaml::Value>(&existing) {
+                Ok(serde_yaml::Value::Mapping(_)) | Ok(serde_yaml::Value::Null) => {}
+                Ok(_) => return Err(std::io::Error::other("user config is not a mapping")),
+                Err(e) => return Err(std::io::Error::other(e)),
+            }
+        }
+        let mut block = String::from("targets:\n");
+        if list.is_empty() {
+            block = String::from("targets: []\n");
+        }
+        for t in list {
+            block.push_str(&format!("  - path: {}\n    enabled: {}\n", yaml_scalar(&t.path), t.enabled));
+            if let Some(o) = t.observe {
+                block.push_str(&format!("    observe: {o}\n"));
+            }
+            if let Some(c) = &t.config {
+                block.push_str(&format!("    config: {}\n", yaml_scalar(c)));
+            }
+        }
+        let body = replace_top_level_block(&existing, "targets", &block);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let body = serde_yaml::to_string(&doc).map_err(std::io::Error::other)?;
         let tmp = path.with_extension(format!("yaml.tmp.{}", std::process::id()));
         std::fs::write(&tmp, body)?;
         std::fs::rename(&tmp, path)
@@ -763,6 +831,37 @@ mod tests {
         let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(Config::read_targets(&doc).unwrap().len(), 1);
         assert_eq!(doc.get("disabled_domains").and_then(|v| v.as_sequence()).map(|s| s.len()), Some(1));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_targets_keeps_comments_and_accepts_the_init_template() {
+        let dir = std::env::temp_dir().join(format!("ways-targets-comments-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(&path, "# ways configuration\n# language: en\n\nlanguage: es\n# tail comment\n").unwrap();
+        Config::write_targets_to(&path, &[Target::new("~/.claude")]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.starts_with("# ways configuration\n# language: en\n"), "{body}");
+        assert!(body.contains("# tail comment\n"), "{body}");
+        assert!(body.contains("targets:\n  - path: \"~/.claude\"\n    enabled: true\n"), "{body}");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(doc.get("language").and_then(|v| v.as_str()), Some("es"));
+        assert_eq!(Config::read_targets(&doc).unwrap()[0].path, "~/.claude");
+        // Second write replaces the block in place, comments still intact.
+        Config::write_targets_to(&path, &[Target { path: "/x".into(), enabled: false, observe: Some(true), config: None }]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(body.matches("targets:").count(), 1, "{body}");
+        assert!(body.contains("# tail comment\n"), "{body}");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(Config::read_targets(&doc).unwrap(), vec![Target { path: "/x".into(), enabled: false, observe: Some(true), config: None }]);
+        // The comments-only template `ways config init` writes is accepted.
+        std::fs::write(&path, "# only comments\n# targets:\n#   - path: ~/.claude\n").unwrap();
+        Config::write_targets_to(&path, &[]).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("# only comments\n"));
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(Config::read_targets(&doc), Some(Vec::new()));
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -10,7 +10,7 @@ use crate::config::{Config, Target};
 use crate::paths;
 use agent_fmt::{Align, Table};
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Exit code for a plan that would refuse or remove something the operator
 /// owns (ADR-185 item 5): distinguishable from a failure.
@@ -194,8 +194,9 @@ pub fn targets(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Resolve an operator-supplied directory: must exist and be a directory. The
-/// stored form keeps `~` when the operator typed it.
+/// Resolve an operator-supplied directory for activation: it must exist and
+/// be a directory. The stored form keeps `~` when the operator typed it and is
+/// the canonical absolute path otherwise, so a relative path is never recorded.
 fn resolve_dir(dir: &str) -> Result<(String, PathBuf)> {
     let expanded = Target::new(dir).dir();
     if !expanded.is_dir() {
@@ -206,13 +207,20 @@ fn resolve_dir(dir: &str) -> Result<(String, PathBuf)> {
         );
     }
     let canonical = std::fs::canonicalize(&expanded).unwrap_or(expanded);
-    Ok((dir.to_string(), canonical))
+    let stored = if dir.starts_with('~') { dir.to_string() } else { canonical.to_string_lossy().to_string() };
+    Ok((stored, canonical))
 }
 
-fn find_target(list: &[Target], dir: &Path) -> Option<usize> {
+/// Match a recorded target to an operator-supplied directory, whether or not
+/// the directory still exists: canonical paths when both resolve, the
+/// expanded path otherwise. Disable and remove must work on a deleted dir.
+fn find_target(list: &[Target], dir: &str) -> Option<usize> {
+    let wanted = Target::new(dir).dir();
+    let wanted_c = std::fs::canonicalize(&wanted).unwrap_or(wanted.clone());
     list.iter().position(|t| {
         let d = t.dir();
-        std::fs::canonicalize(&d).unwrap_or(d) == dir
+        let dc = std::fs::canonicalize(&d).unwrap_or(d.clone());
+        dc == wanted_c || d == wanted || t.path == dir
     })
 }
 
@@ -277,9 +285,10 @@ pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<(
     if plan.blocked && !force {
         std::process::exit(EXIT_BLOCKED);
     }
+    let _ = canonical;
     let cfg = Config::load(&project_dir());
     let mut list = cfg.targets();
-    let target = match find_target(&list, &canonical) {
+    let target = match find_target(&list, dir) {
         Some(i) => {
             list[i].enabled = true;
             list[i].clone()
@@ -291,20 +300,31 @@ pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<(
         }
     };
     let path = Config::write_user_targets(&list)?;
-    reconcile::run_for_targets(&[target], false, false, force)?;
+    // Under --json the plan document is the whole of stdout; the apply logs
+    // to stderr.
+    if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
+        eprintln!(
+            "target recorded in {} but the reconcile failed; `ways reconcile` retries it, \
+             `ways config target remove` forgets it",
+            path.display()
+        );
+        return Err(e);
+    }
     eprintln!("target recorded in {}", path.display());
     Ok(())
 }
 
 fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
-    let (_, canonical) = resolve_dir(dir)?;
     let cfg = Config::load(&project_dir());
     let mut list = cfg.targets();
-    let Some(i) = find_target(&list, &canonical) else {
-        bail!("{} is not a target; `ways config targets` lists them, `ways config target add` adds one", canonical.display());
+    let Some(i) = find_target(&list, dir) else {
+        bail!("{dir} is not a target; `ways config targets` lists them, `ways config target add` adds one");
     };
     list[i].enabled = enabled;
     let target = list[i].clone();
+    if enabled && !target.dir().is_dir() {
+        bail!("{} does not exist; a target must be a directory to enable", target.dir().display());
+    }
     Config::write_user_targets(&list)?;
     reconcile::run_for_targets(&[target], false, false, false)
 }
@@ -318,16 +338,18 @@ pub fn target_disable(dir: &str) -> Result<()> {
 }
 
 pub fn target_remove(dir: &str) -> Result<()> {
-    let (_, canonical) = resolve_dir(dir)?;
     let cfg = Config::load(&project_dir());
     let mut list = cfg.targets();
-    let Some(i) = find_target(&list, &canonical) else {
-        bail!("{} is not a target", canonical.display());
+    let Some(i) = find_target(&list, dir) else {
+        bail!("{dir} is not a target");
     };
     let mut target = list.remove(i);
     target.enabled = false;
-    // Withdraw first, then forget: a removed target is a withdrawn one.
-    reconcile::run_for_targets(&[target], false, false, false)?;
+    // Withdraw first, then forget: a removed target is a withdrawn one. A
+    // directory that is gone has nothing to withdraw from.
+    if target.dir().is_dir() {
+        reconcile::run_for_targets(&[target], false, false, false)?;
+    }
     let path = Config::write_user_targets(&list)?;
     eprintln!("target removed from {}", path.display());
     Ok(())
