@@ -99,6 +99,8 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-180](./system/ADR-180-github-issues-as-the-shared-truth-for-the-session-task-list.md) | GitHub issues as the shared truth for the session task list | Accepted |
 | [ADR-181](./system/ADR-181-guard-hooks-a-blocking-pretooluse-class-for-pattern-kills-and-interactive-prone-commands.md) | Guard hooks: a blocking PreToolUse class, shipped deactivated | Accepted |
 | [ADR-182](./system/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md) | Keepwarm: attend keeps the prompt cache warm with a wake floor | Accepted |
+| [ADR-184](./system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md) | Installation and activation are separate states: targets as the unit of activation | Accepted |
+| [ADR-185](./system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | Accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
