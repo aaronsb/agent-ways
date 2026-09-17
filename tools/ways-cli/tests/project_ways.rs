@@ -58,6 +58,7 @@ struct Env {
     xdg_cache: PathBuf,
     xdg_config: PathBuf,
     xdg_runtime: PathBuf,
+    xdg_state: PathBuf,
 }
 
 impl Env {
@@ -68,10 +69,11 @@ impl Env {
         let xdg_cache = base.join("cache");
         let xdg_config = base.join("config");
         let xdg_runtime = base.join("runtime");
-        for d in [&home, &xdg_cache, &xdg_config, &xdg_runtime] {
+        let xdg_state = base.join("state");
+        for d in [&home, &xdg_cache, &xdg_config, &xdg_runtime, &xdg_state] {
             std::fs::create_dir_all(d).unwrap();
         }
-        Env { base, home, xdg_cache, xdg_config, xdg_runtime }
+        Env { base, home, xdg_cache, xdg_config, xdg_runtime, xdg_state }
     }
 
     /// Write a semantic way file at `<root>/<id>/<leaf>.md`.
@@ -94,6 +96,7 @@ impl Env {
             .env("XDG_CACHE_HOME", &self.xdg_cache)
             .env("XDG_CONFIG_HOME", &self.xdg_config)
             .env("XDG_RUNTIME_DIR", &self.xdg_runtime)
+            .env("XDG_STATE_HOME", &self.xdg_state)
             .env_remove("CLAUDE_PROJECT_DIR")
             .env_remove("PWD");
     }
@@ -376,4 +379,60 @@ fn user_way_shadows_core_way() {
     let content = std::fs::read_to_string(env.corpus_jsonl()).unwrap();
     assert!(content.contains("USER foo override"), "the surviving foo must be the user's");
     assert!(!content.contains("CORE foo about"), "core foo must be shadowed out of the corpus");
+}
+
+/// ADR-183: `ways reconcile --scope project` wires the hooks into one repo's
+/// `.claude/settings.local.json`, projects only hook roots and binaries into
+/// the (sandbox) `~/.claude`, and never creates a user-scope settings.json.
+#[test]
+fn reconcile_project_scope_wires_one_repo() {
+    let env = Env::new("reconcile-scope");
+    let source = env.base.join("source");
+    for d in ["skills/x", "hooks/ways/meta", "bin"] {
+        std::fs::create_dir_all(source.join(d)).unwrap();
+    }
+    std::fs::write(source.join("skills/x/SKILL.md"), "---\nx\n").unwrap();
+    std::fs::write(source.join("hooks/ways/meta/a.md"), "---\nx\n").unwrap();
+    std::fs::write(source.join("hooks/check-config-updates.sh"), "#!/bin/sh\n").unwrap();
+    std::fs::write(source.join("bin/ways"), "#!/bin/sh\n").unwrap();
+    std::fs::write(
+        source.join("settings.json"),
+        r#"{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh"}]}]}}"#,
+    )
+    .unwrap();
+    let proj = env.base.join("proj");
+    std::fs::create_dir_all(proj.join(".git")).unwrap();
+    let dest = env.home.join(".claude");
+
+    let mut cmd = Command::new(ways_bin());
+    env.apply(&mut cmd);
+    cmd.args(["reconcile", "--source"])
+        .arg(&source)
+        .arg("--dest")
+        .arg(&dest)
+        .args(["--scope", "project", "--project"])
+        .arg(&proj)
+        .arg("--quiet");
+    let out = cmd.output().expect("spawn ways reconcile");
+    assert!(
+        out.status.success(),
+        "exit {:?}\nstdout:\n{}\nstderr:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert!(!dest.join("skills").exists(), "content trees stay out of ~/.claude in project scope");
+    assert!(std::fs::symlink_metadata(dest.join("hooks/ways")).unwrap().file_type().is_symlink());
+    assert!(std::fs::symlink_metadata(dest.join("bin/ways")).unwrap().file_type().is_symlink());
+    assert!(!dest.join("settings.json").exists(), "no user-scope settings.json");
+
+    let local: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(proj.join(".claude/settings.local.json")).unwrap()).unwrap();
+    assert!(local["hooks"]["SessionStart"].is_array(), "{local}");
+    assert!(local.get("permissions").is_none(), "{local}");
+
+    let key = encode_project_key(&proj);
+    let base = env.xdg_state.join("agent-ways/projects").join(&key).join("settings-applied.json");
+    assert!(base.is_file(), "per-project base expected at {}", base.display());
 }

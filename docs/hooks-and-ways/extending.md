@@ -107,6 +107,16 @@ Example: If a project has `.claude/ways/softwaredev/code/testing/testing.md`, it
 
 Project-local macros require explicit trust. Add the project path to `~/.claude/trusted-project-macros` (one path per line) to enable macro execution for that project.
 
+### Wiring ways into one repository only (ADR-183)
+
+Project-local ways change *what* fires inside a project. Install scope changes *where* ways fire at all. By default the hooks live in `~/.claude/settings.json`, so every session on the machine runs them. To turn ways on for one repository and nowhere else:
+
+```
+ways reconcile --scope project --project /path/to/repo
+```
+
+This links only the hook tree and the binaries into `~/.claude`, leaves `skills/`, `agents/`, and `commands/` alone, and merges the hooks block (hooks only, no permissions) into `/path/to/repo/.claude/settings.local.json`. Claude Code concatenates hooks across the user and project settings files, so the ways fire in sessions under that directory and in no others. The scope is remembered: a bare `ways reconcile` after an update stays in project scope. Project-local ways under `.claude/ways/` work exactly the same in either scope.
+
 ## Managing Ways and Domains
 
 ### Disabling a single way for one project (ADR-131)

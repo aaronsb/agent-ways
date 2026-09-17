@@ -98,7 +98,7 @@ See [Semantic Matching](docs/hooks-and-ways.md#semantic-matching) for the full s
 curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/install.sh | bash -s -- --bootstrap
 ```
 
-This stages the app into `$XDG_DATA_HOME/agent-ways`, builds the binaries and fetches the embedding model (~21MB), links the CLIs onto your `PATH`, and runs `ways reconcile` to project the framework into `~/.claude`. In 1.0, `~/.claude` is a thin **projection** — so your existing config (sessions, credentials, `settings.json`, `projects/`) is **preserved**, not replaced: the install only adds symlinks for the projected roots and merges the hooks block into your settings. Restart Claude Code and the ways are active.
+This stages the app into `$XDG_DATA_HOME/agent-ways`, builds the binaries and fetches the embedding model (~21MB), links the CLIs onto your `PATH`, and runs `ways reconcile` to project the framework into `~/.claude`. In 1.0, `~/.claude` is a thin **projection** — so your existing config (sessions, credentials, `settings.json`, `projects/`) is **preserved**, not replaced: the install adds symlinks for the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) and merges the hooks block into your settings. If one of those root paths is already a real directory of yours, reconcile stops and tells you; it never deletes it (see the [install guide](docs/install-guide.md)). Restart Claude Code and the ways are active.
 
 The built-in ways cover software development, but the framework is domain-agnostic. To customize, fork it and pass your fork to the installer, or set up a **[development checkout](docs/development.md)** — then replace the ways and add your own domains. For non-straightforward installs (existing forks, offline, custom prefixes), see the **[install guide](docs/install-guide.md)**.
 
@@ -139,6 +139,8 @@ A legacy `~/.claude/ways.json` (`{"disabled": [...]}`) is still honored as a low
 | `disabled_domains` | List of domain names to skip (e.g., `[itops, softwaredev]`) — in legacy `ways.json` this key is `disabled` |
 
 Disabled domains are completely ignored — no pattern matching, no output.
+
+**Install scope.** By default the hooks are merged into `~/.claude/settings.json` and ways fire in every session. `ways reconcile --scope project --project <repo>` (or the installer's `--scope=project`) wires the hooks into `<repo>/.claude/settings.local.json` instead and links only the hook tree and binaries into `~/.claude`; `skills/`, `agents/`, and `commands/` are not projected, and nothing is written to your user `settings.json`. Ways then fire only in sessions under that repository. See [ADR-183](docs/architecture/system/ADR-183-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md) and the [install guide](docs/install-guide.md).
 
 ## Creating Ways
 
@@ -293,7 +295,7 @@ cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile
 
 `make update` pulls (robustly — it autostashes around machine-local settings drift), **force-rebuilds** the binaries, regenerates the corpus, and relinks; `ways reconcile` then refreshes the `~/.claude` projection. Use `make update`, not `make setup` — `setup` skips binaries that already exist, so on an update it would leave you on the *old* binary. A fork fetches and merges upstream in the app dir first (`git fetch upstream && git merge upstream/main`), then `make update-binaries && ways reconcile` (force-rebuild without re-pulling origin; the corpus self-heals via the `SessionStart` hook).
 
-At session start, `check-config-updates.sh` flags when you're behind upstream (`aaronsb/agent-ways`), rate-limited to once per hour. It currently recognizes **legacy** git-based layouts — an in-place clone at `~/.claude`, and the ADR-140 subdirectory (`.claude-source` marker). Native-projection update detection is being wired (it reads the app source in `$XDG_DATA`); until then, use the manual command above.
+At session start, `check-config-updates.sh` flags when you're behind upstream (`aaronsb/agent-ways`), rate-limited to once per hour. It recognizes the native projection (it reads the app source in `$XDG_DATA`) as well as the **legacy** git-based layouts: an in-place clone at `~/.claude`, and the ADR-140 subdirectory (`.claude-source` marker).
 
 | Scenario | How detected | Sync command |
 |----------|-------------|--------------|

@@ -52,6 +52,10 @@ ${CYAN}Usage:${RESET}
 
 ${CYAN}Options:${RESET}
   --bootstrap               Clone latest release to temp, then install
+  --scope=project           Wire ways into one repository only (ADR-183): hooks go to
+                            <project>/.claude/settings.local.json; skills/, agents/ and
+                            commands/ are not projected into ~/.claude
+  --project=DIR             The repository for --scope=project (default: current directory)
   --dangerously-clobber     Remove ~/.claude AND the app dir, then reinstall (backs up first)
   --help                    Show this help
 
@@ -60,7 +64,9 @@ ${CYAN}What it does (1.0 XDG layout):${RESET}
   2. Stages the app into \$XDG_DATA_HOME/agent-ways
   3. Builds binaries + embedding model ('make setup')
   4. Reconciles the projection into ~/.claude ('ways reconcile')
-     — your Claude Code files (projects/, credentials, settings) are preserved
+     Your Claude Code files (projects/, credentials, settings) are preserved.
+     A real skills/, agents/, commands/ or hooks/ways/ directory of your own at
+     a projected root stops this step; nothing is deleted.
 
 ${CYAN}Already have a pre-1.0 in-place clone at ~/.claude?${RESET}
   Migrate it to the 1.0 layout — see
@@ -73,14 +79,38 @@ HELP
 
 BOOTSTRAP=false
 CLOBBER=false
+SCOPE=""
+PROJECT_DIR=""
 
 for arg in "$@"; do
   case "$arg" in
     --bootstrap) BOOTSTRAP=true ;;
     --dangerously-clobber) CLOBBER=true ;;
+    --scope=*) SCOPE="${arg#*=}" ;;
+    --project=*) PROJECT_DIR="${arg#*=}" ;;
     --help|-h) show_help; exit 0 ;;
   esac
 done
+
+case "$SCOPE" in
+  ""|user|project) ;;
+  *) echo "Unknown --scope=${SCOPE} (expected user or project)"; exit 1 ;;
+esac
+if [[ -n "$PROJECT_DIR" && "$SCOPE" != "project" ]]; then
+  echo "--project only applies with --scope=project"; exit 1
+fi
+[[ "$SCOPE" == "project" && -z "$PROJECT_DIR" ]] && PROJECT_DIR="$PWD"
+
+# Arguments every reconcile call gets. Project scope is passed through so
+# an update keeps the scope the operator chose (the binary also infers it
+# from its state when no flag is given).
+reconcile_args() {
+  local -a a=(--source "$APP_DIR" --dest "$DEST")
+  if [[ "$SCOPE" == "project" ]]; then
+    a+=(--scope project --project "$PROJECT_DIR")
+  fi
+  printf '%s\n' "${a[@]}"
+}
 
 # No flags at all → show help
 if [[ "$BOOTSTRAP" == "false" ]] && [[ ! -f "hooks/check-config-updates.sh" ]]; then
@@ -315,7 +345,8 @@ if is_agent_ways_repo "$APP_DIR"; then
   echo ""
   if [[ -x "$APP_DIR/bin/ways" ]]; then
     echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-    "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" || true
+    RECONCILE_ARGS=(); while IFS= read -r line; do RECONCILE_ARGS+=("$line"); done < <(reconcile_args)
+    "$APP_DIR/bin/ways" reconcile "${RECONCILE_ARGS[@]}" || true
     echo ""
     echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
     embedding_engine_ok || print_recovery_card
@@ -378,12 +409,28 @@ link_path_binaries
 echo ""
 if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-  echo -e "${DIM}(symlinks the projected trees; merges settings.json; your Claude Code files stay)${RESET}"
+  echo -e "${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
   echo ""
   mkdir -p "$DEST"
-  "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"
+  RECONCILE_ARGS=(); while IFS= read -r line; do RECONCILE_ARGS+=("$line"); done < <(reconcile_args)
+  if ! "$APP_DIR/bin/ways" reconcile "${RECONCILE_ARGS[@]}"; then
+    echo ""
+    echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
+    echo "  Read the list above. Move those paths aside (or copy what you want to keep"
+    echo "  into a project's .claude/skills/), then run:"
+    echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
+    echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+    exit 1
+  fi
   echo ""
-  echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
+  if [[ "$SCOPE" == "project" ]]; then
+    echo -e "${BOLD}Done.${RESET} Ways are wired into ${CYAN}${PROJECT_DIR}/.claude/settings.local.json${RESET}"
+    echo "  and fire only in sessions under that directory. Only the hook tree and the"
+    echo "  binaries were linked into ~/.claude; skills/, agents/ and commands/ were left alone."
+    echo "  Re-run the installer (or 'ways reconcile') after updating; the scope is remembered."
+  else
+    echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
+  fi
   echo ""
   echo "  Restart Claude Code for ways to take effect."
   echo -e "  If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."

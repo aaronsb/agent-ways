@@ -15,15 +15,37 @@ Before 1.0, this repo *was* `~/.claude/` — installing meant cloning over the d
 - symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, and
 - three-way-merges its owned slices into your `settings.json`: the hooks block, its `permissions.allow` entries (its own binaries), and a `permissions.deny` secret-path baseline (`~/.ssh`, `~/.aws`, `.env`, … — [ADR-152](architecture/system/ADR-152-framework-default-secret-path-deny-baseline.md); opt out with `secret_path_deny: false`).
 
-Everything else you have in `~/.claude` — `settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md` — is **preserved by construction**. There is nothing to back up first and no clobber prompt, because the install never replaces your directory. (`scripts/` and `tools/` and the rest of the app stay in `$XDG_DATA` and are deliberately *not* projected.)
+Everything else you have in `~/.claude` (`settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md`) is **preserved by construction**, because the install never replaces your directory. There is no clobber prompt. (`scripts/` and `tools/` and the rest of the app stay in `$XDG_DATA` and are deliberately *not* projected.)
+
+The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways reconcile` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways reconcile --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
 
 ## Scenario: you already have a `~/.claude` you value
 
 **Signs:** `~/.claude/` has `settings.json`, `projects/`, credentials, or sessions — with or without its own `.git/`.
 
-Just run the one-liner. The projection coexists with your directory; your files are untouched and your `settings.json` keeps its model, theme, plugins, and your own permissions (agent-ways merges only its owned slices — the hooks block, its `permissions.allow` entries, and the secret-path `permissions.deny` baseline — and backs up first). No move-aside, no restore dance.
+Just run the one-liner. The projection coexists with your directory; your files are untouched and your `settings.json` keeps its model, theme, plugins, and your own permissions (agent-ways merges only its owned slices, the hooks block, its `permissions.allow` entries, and the secret-path `permissions.deny` baseline, and backs `settings.json` up first). No move-aside, no restore dance, unless you keep your own `skills/`, `agents/`, or `commands/` directory in `~/.claude`; in that case reconcile stops and tells you, as described above.
 
-If `~/.claude/` is your **own** git repo (you version-control your config), that still works — the projection adds symlinks alongside your tracked files. Add the projected roots to your `.gitignore` if you don't want them tracked.
+If `~/.claude/` is your **own** git repo (you version-control your config), that still works: the projection adds symlinks alongside your tracked files, as long as the repo does not itself track directories at the projected root paths. If it does, reconcile refuses rather than replacing them. Add the projected roots to your `.gitignore` if you don't want them tracked.
+
+## Scenario: you want ways in one repository only
+
+**Signs:** you keep your own skills, agents, or hooks in `~/.claude`, you run more than one Claude Code profile, or you want to try ways on one codebase before turning them on everywhere.
+
+Pass a scope to the installer:
+
+```bash
+curl -sL https://raw.githubusercontent.com/aaronsb/agent-ways/main/scripts/install.sh | bash -s -- --bootstrap --scope=project --project=/path/to/repo
+```
+
+Project scope ([ADR-183](architecture/system/ADR-183-install-scope-project-scoped-hook-wiring-on-the-one-reconciler.md)) does three things differently from the default:
+
+- It links only the hook tree and the binaries into `~/.claude` (`hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`). `skills/`, `agents/`, and `commands/` are not projected, so yours stay yours.
+- It writes the hooks block into `<repo>/.claude/settings.local.json` instead of `~/.claude/settings.json`. Claude Code concatenates hooks across the user file and the project files, so ways fire only in sessions under that directory. Nothing is written to your user `settings.json`.
+- It writes hooks only. The `permissions.allow` entries and the secret-path `permissions.deny` baseline are user-level policy and stay out of the project file.
+
+What you give up: the shipped skills, agents, and commands (`ways-update`, `ways-tests`, `/ways`, and the rest). Copy any you want into `<repo>/.claude/skills/`. To update, pull the app source and run `ways reconcile`; the scope is remembered from the state the first run wrote, so a bare `ways reconcile` (which is what `ways update` runs) stays in project scope. Add a second repository with `ways reconcile --scope project --project /path/to/other`.
+
+`settings.local.json.bak` lands next to the merged file; `ways init` gitignores it for new projects. Add the line yourself in an existing one.
 
 ## Scenario: a previous agent-ways install
 

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 const GITIGNORE_CONTENT: &str = "\
 # Developer-local files (not committed)
 settings.local.json
+settings.local.json.bak
 todo-*.md
 memory/
 projects/
