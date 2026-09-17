@@ -24,9 +24,58 @@ pub fn global() -> &'static Config {
     &GLOBAL
 }
 
+/// One Claude Code config directory agent-ways projects into (ADR-184).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Target {
+    /// The config directory, as written. `~` is expanded on read.
+    pub path: String,
+    /// Projected and merged when true; withdrawn when false.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Included in transcript-derived readers. Defaults to `enabled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observe: Option<bool>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Target {
+    pub fn new(path: impl Into<String>) -> Self {
+        Target { path: path.into(), enabled: true, observe: None }
+    }
+
+    /// The directory as a path, with a leading `~` expanded.
+    pub fn dir(&self) -> PathBuf {
+        expand_tilde(&self.path)
+    }
+
+    /// Effective observe flag: explicit value, else `enabled`.
+    pub fn observes(&self) -> bool {
+        self.observe.unwrap_or(self.enabled)
+    }
+}
+
+fn expand_tilde(p: &str) -> PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        home_dir().join(rest)
+    } else if p == "~" {
+        home_dir()
+    } else {
+        PathBuf::from(p)
+    }
+}
+
 /// Ways configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Projection targets (ADR-184). `None` means the key is absent and the
+    /// implicit default applies; see [`Config::targets`].
+    pub targets: Option<Vec<Target>>,
+    /// Project-scope master switch (ADR-184 item 6). `false` in a project's
+    /// `ways.yaml` makes the scan inject nothing there.
+    pub enabled: bool,
     /// Default scope for ways without explicit scope
     pub default_scope: String,
     /// Output language (e.g., "en", "ja", "auto")
@@ -114,6 +163,8 @@ impl Default for Config {
         refire_presets.insert("frequent".to_string(), 0.05);
 
         Self {
+            targets: None,
+            enabled: true,
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
@@ -133,6 +184,66 @@ impl Config {
     /// Public read accessor for the project-scope disable list (ADR-131).
     pub fn disabled_ways(&self) -> &[String] {
         &self.disabled_ways
+    }
+
+    /// The effective projection targets (ADR-184). With no `targets` key the
+    /// list is one implicit entry, the default projection root, enabled, so an
+    /// install that predates the key behaves as before. Once the key is written
+    /// the list is exactly what it says, including empty.
+    pub fn targets(&self) -> Vec<Target> {
+        match &self.targets {
+            Some(list) => list.clone(),
+            None => vec![Target::new(crate::paths::projection_root().to_string_lossy().to_string())],
+        }
+    }
+
+    /// Whether the `targets` key is written, i.e. activation is explicit.
+    pub fn targets_explicit(&self) -> bool {
+        self.targets.is_some()
+    }
+
+    /// Rewrite only the `targets` key of the user config, keeping every other
+    /// key and comment-free content as it was. Creates the file when absent.
+    pub fn write_user_targets(list: &[Target]) -> std::io::Result<PathBuf> {
+        let path = crate::paths::user_config();
+        Self::write_targets_to(&path, list)?;
+        Ok(path)
+    }
+
+    /// The writer behind [`Config::write_user_targets`], on an explicit path so
+    /// tests never touch the real config.
+    pub fn write_targets_to(path: &Path, list: &[Target]) -> std::io::Result<()> {
+        let existing = std::fs::read_to_string(path).unwrap_or_default();
+        let mut doc: serde_yaml::Value = if existing.trim().is_empty() {
+            serde_yaml::Value::Mapping(Default::default())
+        } else {
+            serde_yaml::from_str(&existing).map_err(std::io::Error::other)?
+        };
+        let map = match &mut doc {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => return Err(std::io::Error::other("user config is not a mapping")),
+        };
+        let value = serde_yaml::to_value(list).map_err(std::io::Error::other)?;
+        map.insert(serde_yaml::Value::String("targets".into()), value);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let body = serde_yaml::to_string(&doc).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension(format!("yaml.tmp.{}", std::process::id()));
+        std::fs::write(&tmp, body)?;
+        std::fs::rename(&tmp, path)
+    }
+
+    /// Parse a `targets:` sequence from a YAML document, used by the user layer.
+    fn read_targets(doc: &serde_yaml::Value) -> Option<Vec<Target>> {
+        let seq = doc.get("targets")?;
+        match serde_yaml::from_value::<Vec<Target>>(seq.clone()) {
+            Ok(list) => Some(list),
+            Err(e) => {
+                eprintln!("[ways] config: targets: {e}; ignoring the key");
+                None
+            }
+        }
     }
 
     /// Load config with full resolution chain.
@@ -160,6 +271,11 @@ impl Config {
         if user_config != legacy_xdg {
             if let Ok(content) = std::fs::read_to_string(&user_config) {
                 cfg.apply_yaml(&content);
+                // Targets are user scope only (ADR-184): a project cannot
+                // redirect where the install lands.
+                if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                    cfg.targets = Self::read_targets(&doc);
+                }
             }
         }
 
@@ -268,6 +384,9 @@ impl Config {
         if let Some(v) = doc.get("secret_path_deny").and_then(|v| v.as_bool()) {
             self.secret_path_deny = v;
         }
+        if let Some(v) = doc.get("enabled").and_then(|v| v.as_bool()) {
+            self.enabled = v;
+        }
     }
 
     /// Parse the project-scope `ways:` mapping for per-way toggles (ADR-131).
@@ -332,6 +451,17 @@ impl Config {
 # secret_path_deny: true # Project the secret-path permissions.deny baseline
 #                        # (~/.ssh, ~/.aws, .env, …) into settings.json — ADR-152.
 #                        # Set false to opt out entirely (secure by default).
+
+# Projection targets (ADR-184): the Claude Code config directories agent-ways
+# is active in. Absent: the default ~/.claude, enabled. Edit with
+# `ways config target add|enable|disable|remove <dir>`.
+# targets:
+#   - path: ~/.claude
+#     enabled: true
+#     observe: true        # include in transcript-derived reports (default: enabled)
+
+# enabled: false          # In {project}/.claude/ways.yaml: switch ways off for that
+#                         # project; hooks inject nothing there (ADR-184).
 
 # Per-way enable/disable (ADR-131) is project scope only — set it in
 # {project}/.claude/ways.yaml using either form:
@@ -546,5 +676,64 @@ mod tests {
         // Localized mode — a specific non-English code.
         cfg.language = "es".to_string();
         assert_eq!(cfg.localized_language(), Some("es"));
+    }
+
+    #[test]
+    fn targets_absent_means_the_implicit_default_root() {
+        let cfg = Config::default();
+        assert!(!cfg.targets_explicit());
+        let t = cfg.targets();
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].dir(), crate::paths::projection_root());
+        assert!(t[0].enabled);
+        assert!(t[0].observes());
+    }
+
+    #[test]
+    fn targets_key_parses_and_an_empty_list_is_empty() {
+        let doc: serde_yaml::Value = serde_yaml::from_str(
+            "targets:\n  - path: ~/.claude\n  - path: /srv/work/.claude-work\n    enabled: false\n    observe: true\n",
+        )
+        .unwrap();
+        let list = Config::read_targets(&doc).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].dir(), crate::util::home_dir().join(".claude"));
+        assert!(list[0].enabled && list[0].observes());
+        assert!(!list[1].enabled);
+        assert!(list[1].observes());
+        let empty: serde_yaml::Value = serde_yaml::from_str("targets: []\n").unwrap();
+        assert_eq!(Config::read_targets(&empty), Some(Vec::new()));
+        let cfg = Config { targets: Some(Vec::new()), ..Default::default() };
+        assert!(cfg.targets().is_empty());
+    }
+
+    #[test]
+    fn write_targets_keeps_other_keys_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("ways-targets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(&path, "language: es\ndisabled_domains: [ea]\n").unwrap();
+        let list = vec![Target::new("~/.claude"), Target { path: "/x/.claude".into(), enabled: false, observe: Some(true) }];
+        Config::write_targets_to(&path, &list).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&body).unwrap();
+        assert_eq!(doc.get("language").and_then(|v| v.as_str()), Some("es"));
+        assert_eq!(Config::read_targets(&doc), Some(list.clone()));
+        // Rewriting replaces the key rather than appending a second one.
+        Config::write_targets_to(&path, &list[..1]).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(Config::read_targets(&doc).unwrap().len(), 1);
+        assert_eq!(doc.get("disabled_domains").and_then(|v| v.as_sequence()).map(|s| s.len()), Some(1));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn enabled_false_in_yaml_switches_the_layer_off() {
+        let mut cfg = Config::default();
+        assert!(cfg.enabled);
+        cfg.apply_yaml("enabled: false\n");
+        assert!(!cfg.enabled);
+        cfg.apply_yaml("language: en\n");
+        assert!(!cfg.enabled);
     }
 }

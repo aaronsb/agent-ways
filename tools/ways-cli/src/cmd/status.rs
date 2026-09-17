@@ -89,6 +89,7 @@ pub fn run(json_output: bool) -> Result<()> {
 
     if json_output {
         let output = json!({
+            "install": install_json(),
             "engine": {
                 "active": engine,
             },
@@ -129,6 +130,8 @@ pub fn run(json_output: bool) -> Result<()> {
     } else {
         println!("Ways Engine Status");
         println!("==================");
+        println!();
+        println!("Install:   {}", install_line());
         println!();
 
         // Engine & language
@@ -279,3 +282,47 @@ fn count_lines(path: &Path) -> usize {
 }
 
 use crate::util::home_dir;
+
+/// The install state (ADR-184 item 1): installed and inactive, or active with
+/// the targets and their converged state.
+fn install_targets() -> (Vec<crate::config::Target>, bool) {
+    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
+        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let cfg = crate::config::Config::load(&project_dir);
+    (cfg.targets(), cfg.targets_explicit())
+}
+
+fn install_line() -> String {
+    let (targets, explicit) = install_targets();
+    let enabled: Vec<&crate::config::Target> = targets.iter().filter(|t| t.enabled).collect();
+    if enabled.is_empty() {
+        return "installed, inactive (no enabled target; `ways config target add <dir>` activates one)".to_string();
+    }
+    let names: Vec<String> = enabled
+        .iter()
+        .map(|t| format!("{} [{}]", t.path, crate::cmd::config_cmd::target_state(t)))
+        .collect();
+    format!(
+        "active, {} of {} target{} enabled: {}{}",
+        enabled.len(),
+        targets.len(),
+        if targets.len() == 1 { "" } else { "s" },
+        names.join(", "),
+        if explicit { "" } else { " (implicit)" }
+    )
+}
+
+fn install_json() -> serde_json::Value {
+    let (targets, explicit) = install_targets();
+    let any_enabled = targets.iter().any(|t| t.enabled);
+    json!({
+        "state": if any_enabled { "active" } else { "installed" },
+        "explicit": explicit,
+        "targets": targets.iter().map(|t| json!({
+            "path": t.path,
+            "enabled": t.enabled,
+            "observe": t.observes(),
+            "state": crate::cmd::config_cmd::target_state(t),
+        })).collect::<Vec<_>>(),
+    })
+}

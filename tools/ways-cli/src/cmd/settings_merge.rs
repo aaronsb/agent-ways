@@ -116,6 +116,22 @@ pub fn merge(
     base: &Owned,
     deny_secrets: bool,
 ) -> Result<Merged> {
+    merge_impl(live, desired_hooks, base, deny_secrets, false)
+}
+
+/// The inverse merge (ADR-184 item 4): remove every slice the base says we own
+/// and contribute nothing. The result's base is empty. Pure, like `merge`.
+pub fn withdraw(live: &Value, base: &Owned) -> Result<Merged> {
+    merge_impl(live, &Value::Object(Map::new()), base, false, true)
+}
+
+fn merge_impl(
+    live: &Value,
+    desired_hooks: &Value,
+    base: &Owned,
+    deny_secrets: bool,
+    withdrawing: bool,
+) -> Result<Merged> {
     let mut out = live.as_object().cloned().unwrap_or_default();
 
     // --- hooks: per-event three-way ---
@@ -188,7 +204,8 @@ pub fn merge(
         .cloned()
         .unwrap_or_default();
     let theirs_allow = perms_obj.get("allow").and_then(|a| a.as_array()).cloned().unwrap_or_default();
-    let ours_perms: Vec<String> = WAYS_PERMS.iter().map(|s| s.to_string()).collect();
+    let ours_perms: Vec<String> =
+        if withdrawing { Vec::new() } else { WAYS_PERMS.iter().map(|s| s.to_string()).collect() };
 
     // Keep their entries except ones we previously added and no longer want.
     let deprecated: Vec<String> =
@@ -204,14 +221,18 @@ pub fn merge(
     for p in &ours_perms {
         new_allow.push(Value::String(p.clone()));
     }
-    perms_obj.insert("allow".into(), Value::Array(new_allow));
+    if withdrawing && new_allow.is_empty() {
+        perms_obj.remove("allow");
+    } else {
+        perms_obj.insert("allow".into(), Value::Array(new_allow));
+    }
 
     // --- permissions.deny: same set-union + deprecated-ours cleanup (ADR-152) ---
     // `ours_deny` is empty when the operator opts out (`secret_path_deny: false`),
     // so the opt-out flows through the ordinary deprecated-cleanup: entries we
     // added on a prior reconcile are dropped here, restoring the user's own deny.
     let theirs_deny = perms_obj.get("deny").and_then(|a| a.as_array()).cloned().unwrap_or_default();
-    let ours_deny: Vec<String> = if deny_secrets {
+    let ours_deny: Vec<String> = if deny_secrets && !withdrawing {
         WAYS_DENY.iter().map(|s| s.to_string()).collect()
     } else {
         Vec::new()
@@ -235,7 +256,11 @@ pub fn merge(
         perms_obj.insert("deny".into(), Value::Array(new_deny));
     }
 
-    out.insert("permissions".into(), Value::Object(perms_obj));
+    if withdrawing && perms_obj.is_empty() {
+        out.remove("permissions");
+    } else {
+        out.insert("permissions".into(), Value::Object(perms_obj));
+    }
 
     Ok(Merged {
         settings: Value::Object(out),
@@ -435,13 +460,30 @@ fn exe_token(cmd: &str) -> &str {
 /// Trade-off: a user hook placed under `.claude/hooks/` (contrary to the ways
 /// model, which extends via `ways/` fragments — not hand-edited settings.json)
 /// would be treated as ours. Accepted and documented.
-fn entry_is_ours(entry: &Value) -> bool {
+pub(crate) fn entry_is_ours(entry: &Value) -> bool {
     match entry.get("hooks").and_then(|h| h.as_array()) {
         Some(cmds) if !cmds.is_empty() => cmds.iter().all(|h| {
             h.get("command").and_then(|c| c.as_str()).map(command_is_ours).unwrap_or(false)
         }),
         _ => false,
     }
+}
+
+/// The merge base for a live settings doc. With a last-applied record, that
+/// record. Without one, the first apply: seed from the live entries that are
+/// structurally ours (`entry_is_ours`), so a pre-existing agent-ways install is
+/// replaced rather than duplicated, and a user's own hooks are never claimed.
+/// Deny seeds empty: agent-ways never wrote `permissions.deny` before ADR-152,
+/// so a matching entry there is the user's.
+pub fn base_for(live: &Value, base_path: &Path) -> Result<Owned> {
+    if base_path.exists() {
+        return Ok(read_json_or_empty(base_path).map(|v| Owned::from_value(&v)).unwrap_or_default());
+    }
+    Ok(Owned {
+        hooks: seed_ours_from_live(live),
+        perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
+        deny: Vec::new(),
+    })
 }
 
 /// Apply the merge to the live files: back up, merge, atomic-write, persist the
@@ -459,40 +501,7 @@ pub fn apply_to_files(
     let desired_hooks = desired.get("hooks").cloned().unwrap_or(Value::Object(Map::new()));
 
     let live: Value = read_json_or_empty(dest_settings)?;
-    // The merge base. With a last-applied record, use it (per-entry user-hook
-    // preservation on subsequent applies). WITHOUT one — the first apply, e.g.
-    // migrating an existing in-place install whose settings.json already holds
-    // agent-ways hooks + perms from the pre-1.0 wholesale-replace sync — seed the
-    // base from the live content so those pre-existing entries are treated as
-    // OURS: replaced wholesale (matching pre-1.0 behavior) rather than mistaken
-    // for user content. Without this seed the merge both duplicated our old hooks
-    // in the result and the self-audit false-positived on us removing them.
-    //
-    // Seed only the entries that are structurally ours (`entry_is_ours`). The
-    // seed used to take every live hook, which on a fresh 1.0 install into an
-    // existing ~/.claude claimed the user's own hooks as ours and the merge then
-    // removed them. The self-audit did not catch it because the base said we had
-    // written them. A user's hook never targets `.claude/hooks/` or `.claude/bin/`,
-    // so the predicate separates the two exactly.
-    let base = if base_path.exists() {
-        read_json_or_empty(base_path).map(|v| Owned::from_value(&v)).unwrap_or_default()
-    } else {
-        Owned {
-            hooks: seed_ours_from_live(&live),
-            perms: WAYS_PERMS.iter().map(|s| s.to_string()).collect(),
-            // Seed deny EMPTY, not with WAYS_DENY. Unlike allow (which agent-ways
-            // has long written, so a legacy install's entries must be claimed to
-            // avoid duplication), agent-ways has NEVER written permissions.deny
-            // before this baseline. Seeding WAYS_DENY would falsely claim ownership
-            // of any textually-matching entry the user authored themselves — and on
-            // the opt-out + first-reconcile path that entry would be silently
-            // stripped while the self-audit still passed. Empty is correct: enabled,
-            // the deny is added fresh and the user's own entries are provably
-            // preserved; opted out, nothing is touched.
-            deny: Vec::new(),
-        }
-    };
-
+    let base = base_for(&live, base_path)?;
     let merged = merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
 
     // Idempotent: if nothing changed, don't churn the file or a backup.
@@ -543,7 +552,47 @@ pub fn apply_to_files(
     ))
 }
 
-fn read_json_or_empty(p: &Path) -> Result<Value> {
+/// Withdraw our slices from a live settings file (ADR-184 item 4): the inverse
+/// of `apply_to_files`, with the same backup, atomic write, and self-audit.
+/// With no base on disk the ownership predicate decides what is ours, as on a
+/// first apply. Leaves an empty base behind so a later enable starts clean.
+pub fn withdraw_from_files(dest_settings: &Path, base_path: &Path) -> Result<String> {
+    let live: Value = read_json_or_empty(dest_settings)?;
+    let base = base_for(&live, base_path)?;
+    let merged = withdraw(&live, &base)?;
+    if merged.settings == live {
+        return Ok("settings.json holds nothing of ours".into());
+    }
+
+    let backup = dest_settings.with_extension("json.bak");
+    if dest_settings.exists() {
+        std::fs::copy(dest_settings, &backup)
+            .with_context(|| format!("backing up {}", dest_settings.display()))?;
+    }
+    write_json_atomic(dest_settings, &merged.settings)?;
+
+    let after: Value = read_json_or_empty(dest_settings)?;
+    let user_before = stripped_user_view(&live, &base);
+    let user_after = stripped_user_view(&after, &merged.base);
+    if user_before != user_after {
+        if backup.exists() {
+            std::fs::copy(&backup, dest_settings).ok();
+        }
+        bail!(
+            "settings withdrawal changed unmanaged fields — reverted from {}. \
+             This is a bug in the merge; the backup is your settings as they were.",
+            backup.display()
+        );
+    }
+
+    if let Some(parent) = base_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    write_json_atomic(base_path, &merged.base.to_value())?;
+    Ok(format!("withdrew our hooks and permissions from settings.json; backup at {}", backup.display()))
+}
+
+pub(crate) fn read_json_or_empty(p: &Path) -> Result<Value> {
     match std::fs::read_to_string(p) {
         Ok(s) if s.trim().is_empty() => Ok(Value::Object(Map::new())),
         Ok(s) => serde_json::from_str(&s).with_context(|| format!("parsing {}", p.display())),

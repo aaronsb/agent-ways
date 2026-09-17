@@ -414,10 +414,12 @@ ways-audit report --json
 
 **Run from:** Anywhere.
 
-**Tells you:** Which projection roots it linked or relinked, one line each; silent when everything is already correct. Stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is already a real directory or file rather than a symlink; the message lists the paths. It never deletes a real path.
+**Tells you:** Which projection roots it linked or relinked, one line each, plus a one-line summary unless `--quiet`. Stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is already a real directory or file rather than a symlink; the message lists the paths. It never deletes a real path.
+
+With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)): each enabled target is converged, and each disabled one is withdrawn, meaning our symlinks are unlinked and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. With no `targets` key the one target is `~/.claude`, enabled. An explicit `--dest` is a single-target run and leaves the list alone.
 
 ```
-ways reconcile                       # default: $XDG_DATA_HOME/agent-ways -> ~/.claude
+ways reconcile                       # every target in config.yaml; default: ~/.claude
 ways reconcile --dry-run             # preview; prints "refused <root>" for real paths, exit 0
 ways reconcile --force               # rename each real path to <name>.ways-backup-<seconds>, then link
 ways reconcile --source <checkout> --dest <dir>   # dogfood a development checkout
@@ -462,13 +464,39 @@ ways enable itops/incident
 
 **Run from:** Anywhere.
 
-**Tells you:** Full resolved configuration — default scope, language, matching thresholds, refire presets (frequent / normal / rare / once), disabled collections. This is the config the engine actually uses at runtime.
+**Tells you:** The resolved configuration as a table: language, scope, the project switch, disabled collections, matching thresholds, refire presets, and the targets. `--json` prints the stored user file as one document; `--json --effective` prints the resolved state with defaults applied ([ADR-185](../architecture/system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md)). Only the stored form is meant to be written back.
 
 ```
 ways config show
+ways config show --json            # the stored file
+ways config show --json --effective
 ways config path                   # where the config file lives
 ways config init                   # create config at XDG path if missing
 ```
+
+---
+
+### `ways config targets`
+
+**When:** Finding out where agent-ways is active on this machine, or activating and deactivating it for a Claude Code config directory ([ADR-184](../architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)).
+
+**Run from:** Anywhere.
+
+**Tells you:** Each target with its enabled and observe flags and its converged state: `active`, `pending`, `partial`, `refused`, `stale`, or `withdrawn`. With no `targets` key in the user config the list is the implicit default, `~/.claude`.
+
+`target plan` previews activation without touching anything: every projection root as `linked`, `link`, `relink`, or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced, and what would be removed. `target add` prints that plan and stops with exit code 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `remove` withdraws and drops it.
+
+```
+ways config targets
+ways config target plan ~/.claude-work
+ways config target add ~/.claude-work            # record, then reconcile into it
+ways config target add ~/.claude-work --dry-run  # the plan only
+ways config target disable ~/.claude-work        # withdraw our links and hooks
+ways config target enable ~/.claude-work
+ways config target remove ~/.claude-work
+```
+
+A project can switch ways off for itself with `enabled: false` in its `.claude/ways.yaml`; every scan lane then injects nothing there.
 
 ---
 

@@ -658,10 +658,55 @@ enum ShowCommand {
 enum ConfigCommand {
     /// Initialize user config at XDG path
     Init,
-    /// Show resolved configuration
-    Show,
+    /// Show the configuration (ADR-185: a table; --json the stored file; --json --effective the resolved state)
+    Show {
+        #[arg(long)]
+        json: bool,
+        /// With --json: the resolved configuration with defaults applied, rather than the stored file
+        #[arg(long)]
+        effective: bool,
+    },
     /// Show config file paths
     Path,
+    /// List projection targets: the Claude Code config directories agent-ways is active in (ADR-184)
+    Targets {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Manage one projection target (ADR-184)
+    Target {
+        #[command(subcommand)]
+        action: TargetCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TargetCommand {
+    /// Preview what activating a config directory would link, merge, refuse, or remove
+    Plan {
+        /// Claude Code config directory (e.g. ~/.claude, or what CLAUDE_CONFIG_DIR names)
+        dir: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Activate a config directory: record it as a target, then reconcile into it. Stops on a blocked plan unless --force
+    Add {
+        dir: String,
+        /// Move real paths at projection roots aside and proceed past a blocked plan
+        #[arg(long)]
+        force: bool,
+        /// Show the plan and stop
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Re-enable a recorded target and reconcile into it
+    Enable { dir: String },
+    /// Disable a recorded target: withdraw our links and hooks, keep the record
+    Disable { dir: String },
+    /// Withdraw from a target and drop its record
+    Remove { dir: String },
 }
 
 #[derive(Subcommand)]
@@ -782,22 +827,42 @@ fn run() -> Result<()> {
         },
         Commands::Status { json } => cmd::status::run(json),
         Commands::Scan { mode } => match mode {
+            // ADR-184 item 6: a project (or user config) with `enabled: false`
+            // injects nothing. Checked before any lane runs.
             ScanCommand::Prompt { query, session, project, response_context } => {
+                if !cmd::scan::enabled_for(project.as_deref()) {
+                    return Ok(());
+                }
                 cmd::scan::prompt(&query, &session, project.as_deref(), response_context.as_deref())
             }
             ScanCommand::Messages { session, project, transcript } => {
+                if !cmd::scan::enabled_for(project.as_deref()) {
+                    return Ok(());
+                }
                 cmd::scan::messages(&session, project.as_deref(), transcript.as_deref())
             }
             ScanCommand::Command { command, description, session, project } => {
+                if !cmd::scan::enabled_for(project.as_deref()) {
+                    return Ok(());
+                }
                 cmd::scan::command(&command, description.as_deref(), &session, project.as_deref())
             }
             ScanCommand::File { path, session, project } => {
+                if !cmd::scan::enabled_for(project.as_deref()) {
+                    return Ok(());
+                }
                 cmd::scan::file(&path, &session, project.as_deref())
             }
             ScanCommand::Task { query, session, project, team } => {
+                if !cmd::scan::enabled_for(project.as_deref()) {
+                    return Ok(());
+                }
                 cmd::scan::task(&query, &session, project.as_deref(), team.as_deref())
             }
             ScanCommand::State { session, project, transcript, hook_event } => {
+                if !cmd::scan::enabled_for(project.as_deref()) {
+                    return Ok(());
+                }
                 let event = hook_event.unwrap_or_else(|| {
                     eprintln!(
                         "[ways] scan state invoked without --hook-event; defaulting to SessionStart. \
@@ -837,19 +902,21 @@ fn run() -> Result<()> {
                 println!("wrote config to {}", path.display());
                 Ok(())
             }
-            ConfigCommand::Show => {
-                // Intentionally loads fresh from disk (not config::global()) —
-                // diagnostic command should always reflect current file state
-                let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-                    .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
-                let cfg = config::Config::load(&project_dir);
-                println!("{:#?}", cfg);
-                Ok(())
-            }
+            ConfigCommand::Show { json, effective } => cmd::config_cmd::show(json, effective),
             ConfigCommand::Path => {
                 println!("{}", config::Config::config_path());
                 Ok(())
             }
+            ConfigCommand::Targets { json } => cmd::config_cmd::targets(json),
+            ConfigCommand::Target { action } => match action {
+                TargetCommand::Plan { dir, json } => cmd::config_cmd::target_plan(&dir, json),
+                TargetCommand::Add { dir, force, dry_run, json } => {
+                    cmd::config_cmd::target_add(&dir, force, dry_run, json)
+                }
+                TargetCommand::Enable { dir } => cmd::config_cmd::target_enable(&dir),
+                TargetCommand::Disable { dir } => cmd::config_cmd::target_disable(&dir),
+                TargetCommand::Remove { dir } => cmd::config_cmd::target_remove(&dir),
+            },
         },
         Commands::Disable { name, list, names_only } => {
             if list {

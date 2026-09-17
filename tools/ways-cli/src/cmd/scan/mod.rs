@@ -87,6 +87,18 @@ impl WayCandidate {
 /// weighs the prompt's and the response's sentences by salience within one
 /// budget: a terse follow-up ("yes, do it") lets the response carry the
 /// topic; a substantive prompt dominates on its own salience.
+/// The project switch (ADR-184 item 6): `enabled: false` in the project's
+/// `ways.yaml` makes every scan lane inject nothing there. The user config can
+/// carry the same key to switch ways off everywhere.
+pub fn enabled_for(project: Option<&str>) -> bool {
+    let dir = match project {
+        Some(p) => p.to_string(),
+        None => std::env::var("CLAUDE_PROJECT_DIR")
+            .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string())),
+    };
+    crate::config::Config::load(&dir).enabled
+}
+
 pub fn prompt(
     query: &str,
     session_id: &str,
@@ -1447,5 +1459,16 @@ mod queued_tests {
         let s = collect_queued(&only_old, Some("2026-07-05T11:00:00Z"));
         assert!(s.fragments.is_empty());
         assert!(s.newest.is_none());
+    }
+
+    #[test]
+    fn enabled_for_reads_the_project_switch() {
+        let dir = std::env::temp_dir().join(format!("ways-enabled-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        std::fs::write(dir.join(".claude/ways.yaml"), "enabled: false\n").unwrap();
+        assert!(!super::enabled_for(Some(dir.to_str().unwrap())));
+        std::fs::write(dir.join(".claude/ways.yaml"), "ways: {}\n").unwrap();
+        assert!(super::enabled_for(Some(dir.to_str().unwrap())));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

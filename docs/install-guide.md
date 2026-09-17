@@ -19,6 +19,20 @@ Everything else you have in `~/.claude` (`settings.json` values you set, `.crede
 
 The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways reconcile` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways reconcile --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
 
+## Activation is separate from installation
+
+Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as.
+
+Before activating a directory, ask what it would do:
+
+```
+ways config target plan ~/.claude-work
+```
+
+The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways config target add <dir>` prints the same plan and stops when something of yours would be refused or removed. `ways config target disable <dir>` withdraws the links and our hooks block through the same merge base that wrote them, and `ways config targets` shows where agent-ways is active. `ways status` says the same on its first line.
+
+Claude Code relocated through `CLAUDE_CONFIG_DIR` is a second config directory. It can be a second target once the hook commands stop naming `~/.claude` (issue #503); until then the honest target is the default directory.
+
 ## Scenario: you already have a `~/.claude` you value
 
 **Signs:** `~/.claude/` has `settings.json`, `projects/`, credentials, or sessions — with or without its own `.git/`.

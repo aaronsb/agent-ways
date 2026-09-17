@@ -44,6 +44,10 @@ enum Action {
     /// A real (non-symlink) path sits at the root and `--force` was not
     /// given. Nothing was touched.
     Refused,
+    /// Withdrawal removed our symlink (ADR-184).
+    Unlinked,
+    /// Withdrawal left a path alone: a real path, or a symlink that is not ours.
+    Kept,
 }
 
 struct Outcome {
@@ -73,7 +77,6 @@ pub fn run(
     force: bool,
 ) -> Result<()> {
     let source_root: PathBuf = source.map(PathBuf::from).unwrap_or_else(paths::data_root);
-    let dest_root: PathBuf = dest.map(PathBuf::from).unwrap_or_else(paths::projection_root);
 
     let mode = match mode.as_deref() {
         None | Some("symlink") => Mode::Symlink,
@@ -85,10 +88,277 @@ pub fn run(
         bail!("source checkout not found: {}", source_root.display());
     }
 
+    if mode == Mode::Copy {
+        // Copy materialization + per-file orphan prune is the fallback path
+        // (ADR-142 §2); not yet ported from sync-to-home.sh.
+        bail!("copy mode not yet implemented; symlink mode is the default");
+    }
+
+    let roots = projection_roots(&source_root);
+    if roots.is_empty() {
+        bail!("no projection roots found under {}", source_root.display());
+    }
+
+    // An explicit --dest is a single-target run against that directory, with
+    // the base that directory has always used. The targets list is not
+    // consulted and not changed.
+    if let Some(d) = dest {
+        let dest_root = PathBuf::from(d);
+        let base = base_path_for(&dest_root);
+        return converge_one(&source_root, &dest_root, &roots, &base, dry_run, quiet, force);
+    }
+
+    let targets = crate::config::global().targets();
+    run_targets(&source_root, &roots, &targets, dry_run, quiet, force)
+}
+
+/// Converge every enabled target and withdraw from every disabled one
+/// (ADR-184). Each target is attempted; the first error is returned after the
+/// rest have run, so one refused directory never blocks the others.
+pub(crate) fn run_targets(
+    source_root: &Path,
+    roots: &[ProjectionRoot],
+    targets: &[crate::config::Target],
+    dry_run: bool,
+    quiet: bool,
+    force: bool,
+) -> Result<()> {
+    if targets.is_empty() {
+        if !quiet {
+            eprintln!(
+                "no targets: agent-ways is installed and inactive. \
+                 `ways config target add <dir>` activates a Claude Code config directory; \
+                 `ways config targets` lists them."
+            );
+        }
+        return Ok(());
+    }
+    let mut first_err: Option<anyhow::Error> = None;
+    for t in targets {
+        let dest_root = t.dir();
+        let base = base_path_for(&dest_root);
+        let result = if t.enabled {
+            converge_one(source_root, &dest_root, roots, &base, dry_run, quiet, force)
+        } else {
+            withdraw_one(source_root, &dest_root, roots, &base, dry_run, quiet)
+        };
+        if let Err(e) = result {
+            eprintln!("target {}: {e:#}", dest_root.display());
+            if first_err.is_none() {
+                first_err = Some(e);
+            }
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Resolve the source and roots once and run the given targets. The config
+/// verbs (`ways config target …`) reach reconcile through here.
+pub fn run_for_targets(targets: &[crate::config::Target], dry_run: bool, quiet: bool, force: bool) -> Result<()> {
+    let source_root = paths::data_root();
+    if !source_root.is_dir() {
+        bail!("source checkout not found: {}", source_root.display());
+    }
+    let roots = projection_roots(&source_root);
+    if roots.is_empty() {
+        bail!("no projection roots found under {}", source_root.display());
+    }
+    run_targets(&source_root, &roots, targets, dry_run, quiet, force)
+}
+
+/// The plan for one target against the installed source.
+pub fn plan_target(dest_root: &Path) -> Result<Plan> {
+    let source_root = paths::data_root();
+    let roots = projection_roots(&source_root);
+    plan_for(&source_root, dest_root, &roots)
+}
+
+/// The settings merge base for one target. The default projection root keeps
+/// the path every install before ADR-184 wrote, so an existing base is honored;
+/// every other target gets its own under `state/targets/<key>/`.
+pub(crate) fn base_path_for(dest_root: &Path) -> PathBuf {
+    if same_path(dest_root, &paths::projection_root()) {
+        paths::state_root().join("settings-applied.json")
+    } else {
+        let key = ways_core::util::encode_project_key(dest_root);
+        paths::state_root().join("targets").join(key).join("settings-applied.json")
+    }
+}
+
+// ── Preflight (ADR-184 item 3) ─────────────────────────────────
+
+/// What activating a target would do, computed without touching it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Plan {
+    pub dest: String,
+    pub roots: Vec<RootPlan>,
+    /// `None` when the source ships no settings.json.
+    pub settings: Option<SettingsPlan>,
+    /// True when something the operator owns would be refused or removed.
+    pub blocked: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RootPlan {
+    pub rel: String,
+    /// `linked`, `link`, `relink`, or `refused`.
+    pub state: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SettingsPlan {
+    pub hooks_added: Vec<HookRef>,
+    /// Entries of ours from a prior install that the merge replaces.
+    pub hooks_replaced: Vec<HookRef>,
+    /// Entries that are not structurally ours and would still be dropped.
+    pub hooks_removed: Vec<HookRef>,
+    pub user_hooks_kept: usize,
+    pub perms_added: Vec<String>,
+    pub deny_added: Vec<String>,
+    pub unchanged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct HookRef {
+    pub event: String,
+    pub command: String,
+}
+
+/// Classify every root and dry-run the settings merge in memory.
+pub fn plan_for(source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot]) -> Result<Plan> {
+    let mut root_plans = Vec::new();
+    for root in roots {
+        let src = source_root.join(&root.rel);
+        let dst = dest_root.join(&root.rel);
+        let (state, detail) = match std::fs::read_link(&dst) {
+            Ok(target) => {
+                let resolved =
+                    if target.is_absolute() { target } else { dst.parent().unwrap_or(dest_root).join(&target) };
+                if same_path(&resolved, &src) {
+                    ("linked", "already ours".to_string())
+                } else {
+                    ("relink", format!("symlink to {}", resolved.display()))
+                }
+            }
+            Err(_) if is_foreign(&dst) => ("refused", describe_real_path(&dst)),
+            Err(_) => ("link", "absent".to_string()),
+        };
+        root_plans.push(RootPlan { rel: root.rel.clone(), state: state.to_string(), detail });
+    }
+
+    let src_settings = source_root.join("settings.json");
+    let settings = if src_settings.exists() {
+        use crate::cmd::settings_merge as sm;
+        let desired: serde_json::Value = sm::read_json_or_empty(&src_settings)?;
+        let desired_hooks = desired.get("hooks").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+        let dest_settings = dest_root.join("settings.json");
+        let live: serde_json::Value = sm::read_json_or_empty(&dest_settings)?;
+        let base = sm::base_for(&live, &base_path_for(dest_root))?;
+        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
+        Some(diff_settings(&live, &merged.settings))
+    } else {
+        None
+    };
+
+    let blocked = root_plans.iter().any(|r| r.state == "refused")
+        || settings.as_ref().map(|s| !s.hooks_removed.is_empty()).unwrap_or(false);
+    Ok(Plan { dest: dest_root.to_string_lossy().to_string(), roots: root_plans, settings, blocked })
+}
+
+fn describe_real_path(p: &Path) -> String {
+    match std::fs::read_dir(p) {
+        Ok(rd) => format!("real directory, {} entries", rd.count()),
+        Err(_) => "real file".to_string(),
+    }
+}
+
+fn hook_refs(event: &str, entry: &serde_json::Value) -> HookRef {
+    let command = entry
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|h| h.get("command").and_then(|c| c.as_str()))
+                .collect::<Vec<_>>()
+                .join(" && ")
+        })
+        .unwrap_or_default();
+    HookRef { event: event.to_string(), command }
+}
+
+fn diff_settings(live: &serde_json::Value, merged: &serde_json::Value) -> SettingsPlan {
+    use crate::cmd::settings_merge::entry_is_ours;
+    let empty = serde_json::Map::new();
+    let live_hooks = live.get("hooks").and_then(|h| h.as_object()).unwrap_or(&empty);
+    let merged_hooks = merged.get("hooks").and_then(|h| h.as_object()).unwrap_or(&empty);
+    let mut events: Vec<&String> = live_hooks.keys().collect();
+    for k in merged_hooks.keys() {
+        if !events.contains(&k) {
+            events.push(k);
+        }
+    }
+    let (mut added, mut replaced, mut removed, mut kept) = (Vec::new(), Vec::new(), Vec::new(), 0usize);
+    for event in events {
+        let l = live_hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let m = merged_hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        for e in &m {
+            if !l.contains(e) {
+                added.push(hook_refs(event, e));
+            }
+        }
+        for e in &l {
+            if m.contains(e) {
+                if !entry_is_ours(e) {
+                    kept += 1;
+                }
+            } else if entry_is_ours(e) {
+                replaced.push(hook_refs(event, e));
+            } else {
+                removed.push(hook_refs(event, e));
+            }
+        }
+    }
+    let strings = |v: &serde_json::Value, key: &str| -> Vec<String> {
+        v.get("permissions")
+            .and_then(|p| p.get(key))
+            .and_then(|a| a.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    let live_allow = strings(live, "allow");
+    let live_deny = strings(live, "deny");
+    let perms_added = strings(merged, "allow").into_iter().filter(|p| !live_allow.contains(p)).collect();
+    let deny_added = strings(merged, "deny").into_iter().filter(|p| !live_deny.contains(p)).collect();
+    SettingsPlan {
+        hooks_added: added,
+        hooks_replaced: replaced,
+        hooks_removed: removed,
+        user_hooks_kept: kept,
+        perms_added,
+        deny_added,
+        unchanged: live == merged,
+    }
+}
+
+/// Project every root into `dest_root` and merge the hooks block into its
+/// `settings.json`. The pre-ADR-184 body of `run`, on one target.
+fn converge_one(
+    source_root: &Path,
+    dest_root: &Path,
+    roots: &[ProjectionRoot],
+    base_path: &Path,
+    dry_run: bool,
+    quiet: bool,
+    force: bool,
+) -> Result<()> {
     // Refuse to reconcile a live in-place clone — that path needs migration,
     // not the repair posture. An in-place clone is a dest that is itself the
     // agent-ways git repo (has a .git AND ships the app source).
-    if is_legacy_in_place(&dest_root) {
+    if is_legacy_in_place(dest_root) {
         bail!(
             "{} looks like a legacy in-place agent-ways clone — reconcile won't \
              clobber it. Migration (ADR-144 §5) is the path off in-place. The \
@@ -100,17 +370,6 @@ pub fn run(
              Guide: docs/migration-1.0.md",
             dest_root.display()
         );
-    }
-
-    if mode == Mode::Copy {
-        // Copy materialization + per-file orphan prune is the fallback path
-        // (ADR-142 §2); not yet ported from sync-to-home.sh.
-        bail!("copy mode not yet implemented; symlink mode is the default");
-    }
-
-    let roots = projection_roots(&source_root);
-    if roots.is_empty() {
-        bail!("no projection roots found under {}", source_root.display());
     }
 
     // Pre-check, then act. Classify every root before any of them is touched,
@@ -131,11 +390,11 @@ pub fn run(
     }
 
     let mut outcomes = Vec::new();
-    for root in &roots {
-        outcomes.push(reconcile_symlink(&source_root, &dest_root, root, dry_run, force)?);
+    for root in roots {
+        outcomes.push(reconcile_symlink(source_root, dest_root, root, dry_run, force)?);
     }
 
-    report(&outcomes, &source_root, &dest_root, dry_run, quiet);
+    report(&outcomes, source_root, dest_root, dry_run, quiet, false);
 
     // The settings.json three-way merge — the one shared-write seam (ADR-142).
     // Skipped in dry-run; backed up + self-audited inside apply_to_files.
@@ -143,15 +402,70 @@ pub fn run(
         let src_settings = source_root.join("settings.json");
         if src_settings.exists() {
             let dest_settings = dest_root.join("settings.json");
-            let base_path = paths::state_root().join("settings-applied.json");
             let summary =
-                crate::cmd::settings_merge::apply_to_files(&src_settings, &dest_settings, &base_path)?;
+                crate::cmd::settings_merge::apply_to_files(&src_settings, &dest_settings, base_path)?;
             if !quiet {
                 eprintln!("{summary}");
             }
         }
     }
 
+    Ok(())
+}
+
+/// Withdraw from a disabled target (ADR-184 item 4): remove every symlink of
+/// ours, remove our hooks block through the merge base, touch nothing else.
+/// A real path at a root is left where it is, and so is a symlink that points
+/// anywhere but our source.
+fn withdraw_one(
+    source_root: &Path,
+    dest_root: &Path,
+    roots: &[ProjectionRoot],
+    base_path: &Path,
+    dry_run: bool,
+    quiet: bool,
+) -> Result<()> {
+    if is_legacy_in_place(dest_root) {
+        bail!("{} looks like a legacy in-place agent-ways clone; nothing to withdraw", dest_root.display());
+    }
+    let mut outcomes = Vec::new();
+    for root in roots {
+        let src = source_root.join(&root.rel);
+        let dst = dest_root.join(&root.rel);
+        let outcome = match std::fs::read_link(&dst) {
+            Ok(target) => {
+                let resolved =
+                    if target.is_absolute() { target } else { dst.parent().unwrap_or(dest_root).join(&target) };
+                if same_path(&resolved, &src) {
+                    if dry_run {
+                        Outcome { rel: root.rel.clone(), action: Action::Would, detail: "unlink".into() }
+                    } else {
+                        std::fs::remove_file(&dst)?;
+                        Outcome { rel: root.rel.clone(), action: Action::Unlinked, detail: "unlinked".into() }
+                    }
+                } else {
+                    Outcome { rel: root.rel.clone(), action: Action::Kept, detail: "symlink elsewhere".into() }
+                }
+            }
+            Err(_) if std::fs::symlink_metadata(&dst).is_ok() => {
+                Outcome { rel: root.rel.clone(), action: Action::Kept, detail: "real path".into() }
+            }
+            Err(_) => Outcome { rel: root.rel.clone(), action: Action::Ok, detail: "absent".into() },
+        };
+        outcomes.push(outcome);
+    }
+
+    report(&outcomes, source_root, dest_root, dry_run, quiet, true);
+
+    if !dry_run {
+        let dest_settings = dest_root.join("settings.json");
+        if dest_settings.exists() {
+            let summary = crate::cmd::settings_merge::withdraw_from_files(&dest_settings, base_path)?;
+            if !quiet {
+                eprintln!("{summary}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -303,13 +617,18 @@ pub(crate) fn is_legacy_in_place(dest: &Path) -> bool {
     dest.join(".git").exists() && dest.join("tools").is_dir() && dest.join("docs").is_dir()
 }
 
-fn report(outcomes: &[Outcome], source: &Path, dest: &Path, dry_run: bool, quiet: bool) {
-    let changed: Vec<&Outcome> = outcomes.iter().filter(|o| o.action != Action::Ok).collect();
+fn report(outcomes: &[Outcome], source: &Path, dest: &Path, dry_run: bool, quiet: bool, withdrawing: bool) {
+    let changed: Vec<&Outcome> =
+        outcomes.iter().filter(|o| o.action != Action::Ok && o.action != Action::Kept).collect();
 
     if changed.is_empty() {
         // Silent-on-success: nothing to say unless explicitly asked.
         if !quiet {
-            eprintln!("projection up to date ({} roots) — {}", outcomes.len(), dest.display());
+            if withdrawing {
+                eprintln!("withdrawn ({} roots) — {}", outcomes.len(), dest.display());
+            } else {
+                eprintln!("projection up to date ({} roots) — {}", outcomes.len(), dest.display());
+            }
         }
         return;
     }
@@ -318,14 +637,21 @@ fn report(outcomes: &[Outcome], source: &Path, dest: &Path, dry_run: bool, quiet
         let verb = match o.action {
             Action::Created => "linked",
             Action::Replaced => "relinked",
+            Action::Would if withdrawing => "would unlink",
             Action::Would => "would link",
             Action::Refused => "refused",
-            Action::Ok => unreachable!(),
+            Action::Unlinked => "unlinked",
+            Action::Ok | Action::Kept => unreachable!(),
         };
         println!("{verb} {} ({})", o.rel, o.detail);
     }
     if !quiet {
-        let what = if dry_run { "would reconcile" } else { "reconciled" };
+        let what = match (dry_run, withdrawing) {
+            (true, true) => "would withdraw",
+            (false, true) => "withdrew",
+            (true, false) => "would reconcile",
+            (false, false) => "reconciled",
+        };
         eprintln!(
             "{} {} of {} roots — {} → {}",
             what,
@@ -360,6 +686,186 @@ mod tests {
         std::fs::create_dir_all(root.join("hooks/ways/meta")).unwrap();
         std::fs::write(root.join("hooks/ways/meta/a.md"), "---\nx\n").unwrap();
         std::fs::write(root.join("hooks/check-config-updates.sh"), "#!/bin/sh\n").unwrap();
+    }
+
+    /// A source settings.json with one hook of ours, in the shape the app ships.
+    fn fake_settings(root: &Path) {
+        std::fs::write(
+            root.join("settings.json"),
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh"}]}]}}"#,
+        )
+        .unwrap();
+    }
+
+    fn user_settings() -> &'static str {
+        r#"{"model":"opus","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo user-start"}]}],"Stop":[{"hooks":[{"type":"command","command":"echo user-stop"}]}]},"permissions":{"allow":["Bash(make:*)"]}}"#
+    }
+
+    fn target(dst: &Path, enabled: bool) -> crate::config::Target {
+        crate::config::Target { path: dst.to_string_lossy().to_string(), enabled, observe: None }
+    }
+
+    fn hook_commands(settings: &serde_json::Value, event: &str) -> Vec<String> {
+        settings["hooks"][event]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|e| e["hooks"][0]["command"].as_str().map(|c| c.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn enabled_target_converges_and_disabled_target_withdraws() {
+        let base = sandbox("targets");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        // The base for a non-default dest lives under the state root; point it
+        // into the sandbox so the test never touches real state.
+        std::env::set_var("XDG_STATE_HOME", base.join("state"));
+
+        run_targets(&src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        assert!(std::fs::symlink_metadata(dst.join("skills")).unwrap().file_type().is_symlink());
+        let live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        let start = hook_commands(&live, "SessionStart");
+        assert!(start.iter().any(|c| c.contains("check-setup.sh")), "ours added: {start:?}");
+        assert!(start.iter().any(|c| c == "echo user-start"), "user kept: {start:?}");
+        assert_eq!(live["model"], "opus");
+
+        run_targets(&src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        assert!(std::fs::symlink_metadata(dst.join("skills")).is_err(), "our link removed");
+        assert!(std::fs::symlink_metadata(dst.join("hooks/check-config-updates.sh")).is_err());
+        let live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(hook_commands(&live, "SessionStart"), vec!["echo user-start".to_string()]);
+        assert_eq!(hook_commands(&live, "Stop"), vec!["echo user-stop".to_string()]);
+        assert_eq!(live["model"], "opus");
+        let allow: Vec<&str> = live["permissions"]["allow"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(allow, vec!["Bash(make:*)"], "user permission kept, ours gone");
+        assert!(live["permissions"].get("deny").is_none(), "our deny baseline gone");
+
+        // Withdrawing again changes nothing.
+        run_targets(&src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        let again = std::fs::read_to_string(dst.join("settings.json")).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&again).unwrap(), live);
+
+        // Re-enabling after withdrawal starts from the empty base and converges.
+        run_targets(&src, &roots, &[target(&dst, true)], false, true, false).unwrap();
+        let live: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dst.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(hook_commands(&live, "SessionStart").len(), 2);
+        std::env::remove_var("XDG_STATE_HOME");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn withdraw_leaves_real_paths_and_foreign_symlinks() {
+        let base = sandbox("withdraw-keep");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        let elsewhere = base.join("elsewhere");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(dst.join("skills")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(dst.join("skills/mine.md"), "mine").unwrap();
+        std::fs::create_dir_all(dst.join("hooks")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, dst.join("hooks/ways")).unwrap();
+        fake_source(&src);
+        let roots = projection_roots(&src);
+        std::env::set_var("XDG_STATE_HOME", base.join("state"));
+        run_targets(&src, &roots, &[target(&dst, false)], false, true, false).unwrap();
+        assert_eq!(std::fs::read_to_string(dst.join("skills/mine.md")).unwrap(), "mine");
+        assert!(std::fs::read_link(dst.join("hooks/ways")).is_ok(), "foreign symlink kept");
+        std::env::remove_var("XDG_STATE_HOME");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn empty_target_list_touches_nothing() {
+        let base = sandbox("no-targets");
+        let src = base.join("data");
+        std::fs::create_dir_all(&src).unwrap();
+        fake_source(&src);
+        let roots = projection_roots(&src);
+        run_targets(&src, &roots, &[], false, true, false).unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn plan_names_refused_roots_kept_user_hooks_and_added_entries() {
+        let base = sandbox("plan");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(dst.join("skills/own")).unwrap();
+        std::fs::write(dst.join("skills/own/SKILL.md"), "mine").unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        std::env::set_var("XDG_STATE_HOME", base.join("state"));
+        let plan = plan_for(&src, &dst, &roots).unwrap();
+        let skills = plan.roots.iter().find(|r| r.rel == "skills").unwrap();
+        assert_eq!(skills.state, "refused");
+        assert!(skills.detail.starts_with("real directory, 1 entries"));
+        let hooks_ways = plan.roots.iter().find(|r| r.rel == "hooks/ways").unwrap();
+        assert_eq!(hooks_ways.state, "link");
+        let s = plan.settings.as_ref().unwrap();
+        assert_eq!(s.user_hooks_kept, 2);
+        assert_eq!(s.hooks_added.len(), 1);
+        assert!(s.hooks_added[0].command.contains("check-setup.sh"));
+        assert!(s.hooks_removed.is_empty());
+        assert!(s.perms_added.iter().any(|p| p.starts_with("Bash(")));
+        assert!(plan.blocked, "a refused root blocks");
+        // Nothing was touched by planning.
+        assert!(std::fs::symlink_metadata(dst.join("hooks/ways")).is_err());
+        assert_eq!(std::fs::read_to_string(dst.join("settings.json")).unwrap(), user_settings());
+        std::env::remove_var("XDG_STATE_HOME");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn plan_flags_a_user_hook_the_predicate_would_claim() {
+        // The documented trade-off: a user hook under .claude/hooks/ reads as ours
+        // and would be replaced. The plan must say so, and block.
+        let base = sandbox("plan-claim");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(
+            dst.join("settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/my-own.sh"}]}]}}"#,
+        )
+        .unwrap();
+        let roots = projection_roots(&src);
+        std::env::set_var("XDG_STATE_HOME", base.join("state"));
+        let plan = plan_for(&src, &dst, &roots).unwrap();
+        let s = plan.settings.as_ref().unwrap();
+        assert_eq!(s.hooks_replaced.len(), 1, "claimed as ours: {s:?}");
+        assert!(s.hooks_replaced[0].command.contains("my-own.sh"));
+        std::env::remove_var("XDG_STATE_HOME");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn default_root_keeps_the_legacy_base_path() {
+        let legacy = paths::state_root().join("settings-applied.json");
+        assert_eq!(base_path_for(&paths::projection_root()), legacy);
+        let other = base_path_for(Path::new("/tmp/some-other-claude"));
+        assert_ne!(other, legacy);
+        assert!(other.to_string_lossy().contains("targets"));
     }
 
     #[test]
