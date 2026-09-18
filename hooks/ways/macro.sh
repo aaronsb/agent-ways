@@ -81,7 +81,6 @@ while IFS= read -r wayfile; do
       *"docs/adr"*)       tool_trigger="Edit \`docs/adr/*.md\`" ;;
       *"\.env"*)          tool_trigger="Edit \`.env\`" ;;
       *"\.patch"*)        tool_trigger="Edit \`*.patch\`" ;;
-      *"todo-"*)          tool_trigger="Edit \`.claude/todo-*.md\`" ;;
       *"ways/"*)          tool_trigger="Edit \`.claude/ways/*.md\`" ;;
       *"README"*)         tool_trigger="Edit \`README.md\`" ;;
       *)                  tool_trigger="Edit files" ;;

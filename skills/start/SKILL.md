@@ -39,9 +39,10 @@ git branch --show-current
 git log --oneline -5
 ```
 
-Also check for continuity markers: the `TaskList` (via the tool), any tracking files
-under `.claude/`, and the `CLAUDE.md` where this was invoked. `tracking(meta)` is the
-discipline here — check for existing tracking before beginning anything.
+Also check for continuity markers: the `TaskList` (via the tool), mirrored from the
+GitHub issues that carry the `tasklist` label (ADR-180), and the `CLAUDE.md` where this
+was invoked. delivery/issues(softwaredev) is the discipline here — read what is already
+open before beginning anything.
 
 On a repo too large to read in a few calls, hand the state read to an `Explore` agent
 with the investigation-brief rules from subagents(meta), on a cheap model. Invoking

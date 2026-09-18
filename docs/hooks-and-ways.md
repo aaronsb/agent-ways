@@ -252,7 +252,7 @@ Once a corpus has been firing for a while, two commands audit and calibrate the 
 ways tune-precision
 ```
 
-`ways tune-precision` is a report-only relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate plus a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session (remedy: narrow its vocabulary, tighten its `pattern:`, or change the trigger channel, then re-measure — there is no per-way threshold to move; a globally leaky keyword is tightened by raising `τ_k`); **cross-cutting** is a way that fires broadly by design, e.g. meta/tracking ways (remedy: scope by trigger — never auto-narrow vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
+`ways tune-precision` is a report-only relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate plus a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session (remedy: narrow its vocabulary, tighten its `pattern:`, or change the trigger channel, then re-measure — there is no per-way threshold to move; a globally leaky keyword is tightened by raising `τ_k`); **cross-cutting** is a way that fires broadly by design, e.g. meta/todos ways (remedy: scope by trigger — never auto-narrow vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
 
 Cadence has no tuning command: `ways tune-curves` was removed in ADR-159. It suggested a legacy ADR-123 `half_life` (a `curve:` block the schema no longer recognizes) — superseded by `refire:`, a fraction of the context window (ADR-126) authored directly on each way. Telemetry-driven cadence tuning is the deferred ADR-134 auto-tune, which targets `refire:`.
 
@@ -275,7 +275,7 @@ Estimates transcript size since last compaction (~4 chars/token, ~155K token win
 
 ```yaml
 trigger: file-exists
-path: .claude/todo-*.md
+path: .claude/ways/*.md
 ```
 
 Fires once (standard marker) if the glob pattern matches any file relative to the project directory.
@@ -286,7 +286,7 @@ Fires once (standard marker) if the glob pattern matches any file relative to th
 trigger: session-start
 ```
 
-Always evaluates true. Uses standard marker, so fires exactly once per session on the first UserPromptSubmit.
+Fires once per session, on the first state scan after the session's markers were cleared (startup, compact, clear). It does not ride the refire curve on later prompts.
 
 ## Once-Per-Session Gating
 

@@ -39,7 +39,7 @@ Frame this as a collaboration checkpoint, not a limitation apology. Something li
 After the user responds, combine your summary with their steering into a checkpoint file:
 
 1. If active `TaskCreate` tasks exist, update their descriptions with the user's input
-2. If no task list, write a brief synthesis to the project's tracking file (`.claude/todo-*.md`)
+2. If no task list, put the synthesis on a GitHub issue carrying the `tasklist` label (ADR-180), new or existing
 3. Include the user's priorities and direction — their words, not your paraphrase
 4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
 
