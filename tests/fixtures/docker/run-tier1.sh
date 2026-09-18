@@ -50,9 +50,13 @@ assert_contains() {
 
 section() { printf '\n== %s\n' "$1"; }
 
-# Hash of a whole tree: every regular file's path and content, in path order.
+# Hash of a whole tree: every entry's path, type, and link target, plus every
+# regular file's content, in path order. A new symlink or directory changes it.
 tree_hash() {
-  (cd "$1" && find . -type f | LC_ALL=C sort | while read -r f; do sha256sum "$f"; done) | sha256sum | cut -d' ' -f1
+  (cd "$1" && {
+    find . -mindepth 1 -printf '%p %y %l\n' | LC_ALL=C sort
+    find . -type f | LC_ALL=C sort | while read -r f; do sha256sum "$f"; done
+  }) | sha256sum | cut -d' ' -f1
 }
 
 file_hash() { sha256sum "$1" | cut -d' ' -f1; }
@@ -60,27 +64,37 @@ file_hash() { sha256sum "$1" | cut -d' ' -f1; }
 # --- hook driver: run an event the way Claude Code does --------------------
 #
 # Reads the hook commands for EVENT out of the merged settings.json, keeps the
-# entries whose matcher is absent or matches NAME (the SessionStart source or
-# the tool name), expands ${HOME}, and pipes PAYLOAD to each command's stdin.
-# Prints the concatenated stdout; records every exit code in HOOK_EXITS.
-HOOK_EXITS=""
+# entries whose matcher is absent, empty, or "*" (Claude Code's match-all) or
+# whose matcher regex matches NAME (the SessionStart source or the tool name),
+# expands ${HOME}, and pipes PAYLOAD to each command's stdin. Prints the
+# concatenated stdout. Exit codes go to HOOK_EXITS_FILE, one "rc:command" per
+# line, because callers run this inside $(...) and a variable set here would
+# die with the subshell. A jq failure (an invalid matcher regex) is recorded
+# there too, as "jq:<rc>", so it fails the exit-code assertion with a cause.
+HOOK_EXITS_FILE="$HOME/hook-exits"
 run_event() {
-  local event="$1" name="$2" payload="$3" cmd expanded rc
-  HOOK_EXITS=""
+  local event="$1" name="$2" payload="$3" cmd expanded rc commands
+  : > "$HOOK_EXITS_FILE"
+  commands=$(jq -r --arg ev "$event" --arg name "$name" '
+      .hooks[$ev][]?
+      | (.matcher // "") as $m
+      | select($m == "" or $m == "*" or ($name | test("^(" + $m + ")$")))
+      | .hooks[].command' "$DEST/settings.json" 2>>"$LOG")
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    printf 'jq:%s:matcher lookup for %s/%s failed (see hook stderr)\n' "$rc" "$event" "$name" >> "$HOOK_EXITS_FILE"
+    return 0
+  fi
   while IFS= read -r cmd; do
     [[ -z "$cmd" ]] && continue
     expanded="${cmd//\$\{HOME\}/$HOME}"
     (cd "$PROJECT" && CLAUDE_PROJECT_DIR="$PROJECT" bash -c "$expanded" < "$payload" 2>>"$LOG")
     rc=$?
-    HOOK_EXITS+="$rc:$expanded"$'\n'
-  done < <(jq -r --arg ev "$event" --arg name "$name" '
-      .hooks[$ev][]?
-      | (.matcher // "") as $m
-      | select($m == "" or ($name | test("^(" + $m + ")$")))
-      | .hooks[].command' "$DEST/settings.json")
+    printf '%s:%s\n' "$rc" "$expanded" >> "$HOOK_EXITS_FILE"
+  done <<<"$commands"
 }
 
-nonzero_hooks() { printf '%s' "$HOOK_EXITS" | grep -v '^0:' || true; }
+nonzero_hooks() { grep -v '^0:' "$HOOK_EXITS_FILE" || true; }
 
 # --- 0. preflight ----------------------------------------------------------
 
@@ -138,6 +152,15 @@ INSTALL_OUT=$(cat "$HOME/install.out")
 assert_eq "installer exits 1 on the real skills dir" "1" "$INSTALL_RC"
 assert_contains "installer names the refusal" "Projection stopped" "$INSTALL_OUT"
 assert "app staged" test -x "$APP_DIR/bin/ways"
+# The image carries no C++ toolchain, so the only way to a working way-embed
+# is the release download. A source-build fallback here is the defect the
+# download script's probe used to cause (#516).
+assert_contains "way-embed came from the release download" "Pre-built binary installed." "$INSTALL_OUT"
+if [[ "$INSTALL_OUT" == *"building from source"* ]]; then
+  fail "way-embed did not fall back to a source build"
+else
+  ok "way-embed did not fall back to a source build"
+fi
 assert "skills dir is still a real directory" test -d "$DEST/skills" -a ! -L "$DEST/skills"
 assert_eq "user skill untouched" "$SEED_SKILL_HASH" "$(file_hash "$DEST/skills/my-skill/SKILL.md")"
 assert_eq "settings.json untouched by a refused run" "$SEED_SETTINGS_HASH" "$(file_hash "$DEST/settings.json")"

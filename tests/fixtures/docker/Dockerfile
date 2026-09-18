@@ -4,9 +4,12 @@
 # across branches and flavors.
 #
 # Build args:
-#   CLAUDE_VERSION    Claude Code version to install; `latest` for the newest
+#   CLAUDE_VERSION    Claude Code version to install; `latest` for the newest.
+#                     compose.yaml always passes it; the pin lives in
+#                     test-live.sh. The default here only covers a bare
+#                     `docker build`.
 #   CLAUDE_INSTALLER  `native` (claude.ai/install.sh) or `npm`
-ARG CLAUDE_VERSION=2.1.275
+ARG CLAUDE_VERSION=latest
 ARG CLAUDE_INSTALLER=native
 
 FROM debian:trixie-slim
@@ -15,13 +18,12 @@ ARG CLAUDE_VERSION
 ARG CLAUDE_INSTALLER
 
 # Installer prerequisites (git, jq, make), the download helpers' tools (gh,
-# curl), what docs/prerequisites-debian.md lists, and the C++ toolchain that
-# `make deps` installs. The newest way-embed release predates `match --batch`,
-# so setup builds way-embed from source until a release ships (issue #516).
+# curl), and what docs/prerequisites-debian.md lists. No C++ toolchain: the
+# way-embed binary has to arrive as a release download, and the runner
+# asserts that it did. A source-build fallback is the defect under test.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash ca-certificates curl wget git jq make bc gzip python3 procps unzip gh \
-      cmake g++ \
  && rm -rf /var/lib/apt/lists/*
 
 # The npm installer needs Node; the native one does not. Root installs it

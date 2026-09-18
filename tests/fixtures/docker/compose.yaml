@@ -3,24 +3,27 @@
 # Variables (all optional):
 #   FLAVOR            branch (default): install the mounted checkout with the
 #                     binaries under WAYS_BINARIES. release: run the one-liner.
-#   CLAUDE_VERSION    Claude Code version baked into the image (default pinned)
-#   CLAUDE_INSTALLER  native (default) or npm
+#   CLAUDE_VERSION    Claude Code version baked into the image. test-live.sh
+#                     sets it (its pin, or the caller's value); it is required
+#                     here so the pin lives in one place.
+#   CLAUDE_INSTALLER  native or npm; test-live.sh sets it
 #   WAYS_BINARIES     host dir holding ways, ways-audit, attend, attend-chat
+#                     (an empty scratch dir in the release flavor)
 #   GH_TOKEN          for the release-asset downloads through gh
 services:
   tier1:
     build:
       context: .
       args:
-        CLAUDE_VERSION: ${CLAUDE_VERSION:-2.1.275}
-        CLAUDE_INSTALLER: ${CLAUDE_INSTALLER:-native}
-    image: agent-ways-fixture:tier1-${CLAUDE_INSTALLER:-native}-${CLAUDE_VERSION:-2.1.275}
+        CLAUDE_VERSION: ${CLAUDE_VERSION:?set by test-live.sh}
+        CLAUDE_INSTALLER: ${CLAUDE_INSTALLER:?set by test-live.sh}
+    image: agent-ways-fixture:tier1-${CLAUDE_INSTALLER}-${CLAUDE_VERSION}
     environment:
       FLAVOR: ${FLAVOR:-branch}
-      CLAUDE_VERSION: ${CLAUDE_VERSION:-2.1.275}
+      CLAUDE_VERSION: ${CLAUDE_VERSION}
       GH_TOKEN: ${GH_TOKEN:-}
     volumes:
       - ../../..:/src:ro
-      - ${WAYS_BINARIES:-../../../tools/target/release}:/binaries:ro
+      - ${WAYS_BINARIES:?set by test-live.sh}:/binaries:ro
       - .:/fixture:ro
     command: bash /fixture/run-tier1.sh

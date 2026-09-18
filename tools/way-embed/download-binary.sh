@@ -11,10 +11,12 @@
 
 set -euo pipefail
 
-# Platform detection
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m)
-PLATFORM="${OS}-${ARCH}"
+# Shared retry/backoff and platform helpers, the same ones the other
+# download scripts use, so a transient API blip is retried and reported
+# rather than read as "no release".
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)/prebuilt-lib.sh"
+
+PLATFORM="$(detect_platform)"
 
 GH_REPO="aaronsb/agent-ways"
 RELEASE_TAG="${WAY_EMBED_RELEASE:-latest}"
@@ -68,8 +70,12 @@ mkdir -p "$OUTPUT_DIR"
 
 # Find the latest way-embed release
 if [[ "$RELEASE_TAG" == "latest" ]]; then
-  RELEASE_TAG=$(gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName' 2>/dev/null \
-    | grep '^way-embed-v' | head -1)
+  if ! release_tags=$(retry gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName'); then
+    echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
+    echo "  Falling back to build-from-source: cd $APP_DIR && make setup" >&2
+    exit 1
+  fi
+  RELEASE_TAG=$(echo "$release_tags" | grep '^way-embed-v' | head -1 || true)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No way-embed release found. Build from source:" >&2
     echo "  cd $APP_DIR && make setup" >&2
@@ -81,10 +87,15 @@ echo "Platform: ${PLATFORM}" >&2
 echo "Release:  ${RELEASE_TAG}" >&2
 
 # Check if our platform binary exists in the release
-if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -q "^${BIN_NAME}$"; then
+if ! release_assets=$(retry gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name'); then
+  echo "error: could not read release ${RELEASE_TAG} after retries (network/gh/auth?)." >&2
+  echo "  Falling back to build-from-source: cd $APP_DIR && make setup" >&2
+  exit 1
+fi
+if ! grep -q "^${BIN_NAME}$" <<<"$release_assets"; then
   echo "No pre-built binary for ${PLATFORM} in release ${RELEASE_TAG}." >&2
   echo "Available binaries:" >&2
-  gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep "way-embed-" | sed 's/^/  /' >&2
+  grep "way-embed-" <<<"$release_assets" | sed 's/^/  /' >&2
   echo "" >&2
   echo "Build from source instead:" >&2
   echo "  cd $APP_DIR && make setup" >&2
@@ -93,11 +104,15 @@ fi
 
 # Download binary + checksums
 echo "Downloading ${BIN_NAME}..." >&2
-gh release download "$RELEASE_TAG" \
-  --repo "$GH_REPO" \
-  --pattern "$BIN_NAME" \
-  --dir "$OUTPUT_DIR" \
-  --clobber
+if ! retry gh release download "$RELEASE_TAG" \
+    --repo "$GH_REPO" \
+    --pattern "$BIN_NAME" \
+    --dir "$OUTPUT_DIR" \
+    --clobber; then
+  echo "error: download of ${BIN_NAME} failed after retries." >&2
+  echo "  Falling back to build-from-source: cd $APP_DIR && make setup" >&2
+  exit 1
+fi
 
 # Verify checksum (if checksums.txt exists in release)
 CHECKSUMS_FILE="${OUTPUT_DIR}/checksums.txt"
@@ -141,12 +156,14 @@ fi
 
 # Capability gate: the late-interaction matcher (ADR-160) requires `match --batch`,
 # added in #319. A release binary cut before that runs fine (`--version` passes) but
-# lacks --batch — and the matcher then silently degrades to the single-vector
+# lacks --batch, and the matcher then silently degrades to the single-vector
 # fail-safe on every scan, so ADR-160 is effectively off. The version string does not
-# distinguish them (both report 0.1.0), so probe the contract directly: the supporting
-# binary names `--batch` in its `match` usage. Reject a binary that does not, so
-# `setup-binary` falls through to a source build until a new release is cut.
-if ! "$OUTPUT_FILE" match --batch </dev/null 2>&1 | grep -q -- "--batch"; then
+# distinguish them (both report 0.1.0), so probe the contract directly. The binary
+# exits 1 either way (a supporting one wants --corpus and --model; an old one rejects
+# the flag), so the exit code is discarded and only the text decides: a supporting
+# binary names `--batch` in its usage line, an old one prints `unknown option`.
+probe="$("$OUTPUT_FILE" match --batch </dev/null 2>&1 || true)"
+if [[ "$probe" == *"unknown option"* ]] || [[ "$probe" != *"--batch"* ]]; then
   echo "Downloaded way-embed predates the required 'match --batch' primitive (ADR-160, #319)." >&2
   echo "Building from source instead." >&2
   rm -f "$OUTPUT_FILE" "$PLATFORM_FILE"

@@ -23,9 +23,9 @@ The release-asset downloads go through `gh`, so the wrapper exports `GH_TOKEN` f
 | Path | Role |
 |------|------|
 | `CLAUDE.md` | How to run, change, and debug the fixture ([here](CLAUDE.md)) |
-| `Dockerfile` | Debian trixie, the installer prerequisites, `gh`, an unprivileged user, Claude Code at `CLAUDE_VERSION` through `CLAUDE_INSTALLER` |
+| `Dockerfile` | Debian trixie, the installer prerequisites, `gh`, an unprivileged user, Claude Code at `CLAUDE_VERSION` through `CLAUDE_INSTALLER`. No C++ toolchain |
 | `compose.yaml` | The `tier1` service: mounts the checkout at `/src`, the binaries at `/binaries`, this directory at `/fixture` |
-| `test-live.sh` | Host-side entry point behind `make test-live` |
+| `test-live.sh` | Host-side entry point behind `make test-live`. Holds the Claude Code version pin |
 | `run-tier1.sh` | The runner inside the container: seed, install, assert |
 | `seed/claude/` | What `~/.claude` holds before the install: a real `skills/` directory, three user hooks, a `model` key |
 | `seed/claude-work/` | A second Claude Code config directory, asserted untouched |
@@ -33,7 +33,7 @@ The release-asset downloads go through `gh`, so the wrapper exports `GH_TOKEN` f
 
 ## What tier 1 asserts
 
-1. The installer runs unattended, exits 1 on the real `skills/` directory, and leaves the skill, `settings.json`, and the hooks directory as they were.
+1. The installer runs unattended, exits 1 on the real `skills/` directory, and leaves the skill, `settings.json`, and the hooks directory as they were. `way-embed` arrived as a release download; the image cannot build it.
 2. `ways reconcile --force` moves the directory to a timestamped sibling with the skill intact, links the projection roots, and merges `settings.json` with every user hook kept by identity and the `model` key kept.
 3. The target is recorded in the user config. `ways config targets --json` and `ways status --json` report one enabled target, active, with the embedding engine up.
 4. `ways reconcile --dry-run` twice prints identical output and reports up to date. A bare reconcile changes nothing.

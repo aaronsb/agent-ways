@@ -28,13 +28,14 @@ ADR-184 increment 2 (#509) changes the installer's last act from projecting into
 1. **Tier 1: install and configure, no key.** A Debian container with Claude Code installed at a pinned version. The home is seeded before the installer runs: a real `~/.claude/skills/` with a user's own skill, a `settings.json` with three user hooks and a `model` key, and a second config directory with its own settings and skills. The runner asserts:
    - the installer runs unattended and refuses the real `skills/` directory with nothing deleted and `settings.json` byte-identical;
    - the documented recovery (`ways reconcile --force`) moves the directory aside with the user's skill intact, links the projection roots, and keeps every user hook by identity in its event;
-   - the target is recorded in the user config, and `ways config targets` and `ways status` report one enabled target in the active state with the embedding engine up;
+   - the target is recorded in the user config, `ways config targets` reports one enabled target, and `ways status` reports the active state with the embedding engine up;
    - `ways reconcile --dry-run` run twice prints identical output and reports no change;
    - the second config directory is byte-identical to its seed;
+   - `way-embed` arrived as a release download. The image carries no C++ toolchain, so a source-build fallback is a failed assertion;
    - `attend status` and `claude --version` exit zero, and the version is the pinned one;
    - the hooks fire the way Claude Code fires them: the runner reads the hook commands out of the merged `settings.json`, pipes a synthetic `SessionStart`, `UserPromptSubmit`, and `PreToolUse` payload to each, and asserts on the additional-context output. Disclosure is proven with no model.
 
-2. **Two flavors of tier 1.** The `branch` flavor mounts the checkout and the binaries CI built for the same commit, so a pull request is tested against its own binary and its own hooks. It is the gate. The `release` flavor runs the documented one-liner, which clones `main` and downloads the latest release assets. It runs on dispatch and on the nightly schedule, with Claude Code at its `latest` version, to catch drift on either side.
+2. **Two flavors of tier 1.** The `branch` flavor mounts the checkout and the binaries CI built for the same commit, so a pull request is tested against its own binary and its own hooks. It is the gate, and it runs on every pull request that touches the path and on every push to `main`. The `release` flavor runs the documented one-liner, which clones `main` and downloads the latest release assets. It runs on dispatch and on the nightly schedule, with Claude Code at its `latest` version, to catch drift on either side.
 
 3. **Tier 2: exercise with a key.** `claude -p` runs non-interactively under `CLAUDE_CONFIG_DIR` with prompts chosen to trigger named ways. The evidence is the transcript and the events log read through `ways introspect`, plus the answer scored against a rubric with a stated pass threshold. Two containers on one compose network carry the attend peer test: send from one, assert the other's inbox. Keepwarm is out of scope.
 
@@ -57,16 +58,16 @@ Reversibility: cheap. The fixture is additive. Removing the job removes the gate
 
 ### Negative
 
-- Tier 1 needs network: the Claude Code installer, the way-embed and model downloads, and the release assets through `gh`. A network fault fails the job. The branch flavor keeps the ways binary off the network; the rest stays on it.
+- Tier 1 needs network: the Claude Code installer, the way-embed and model downloads, and the release assets through `gh`. A network fault fails the job. The branch flavor keeps the four suite binaries off the network; way-embed, mmaid, and the model stay on it.
 - Docker on the runner adds minutes to the portability workflow.
 - Tier 2 on a schedule spends tokens on a fixed cadence. The threshold and the prompt set have to be maintained.
 
 ### Neutral
 
 - The runner drives hooks from `settings.json` rather than by path, so a hook that the merge drops is a failed assertion rather than a silent skip.
-- `portability.yml`'s Ubuntu job builds all four suite binaries, since the branch flavor needs `ways-audit` and `attend-chat` beside `ways` and `attend`.
+- `portability.yml` gains a job that builds all four suite binaries before the fixture runs, since the branch flavor needs `ways-audit` and `attend-chat` beside `ways` and `attend`. The existing cross-platform matrix is unchanged.
 - ADR-185's `--json` views are what the runner parses.
-- The image carries cmake and g++ while the newest way-embed release predates `match --batch` (#516), so setup completes from source. When that release ships, the download takes over in the same run.
+- The first run of the fixture found two defects on the download path, both fixed on the same branch. The download scripts listed 20 or 30 releases before grepping for a component prefix, and the newest tags of three components sat past that window. The way-embed download script's capability probe ran under `pipefail` and rejected every binary, since a supporting binary also exits nonzero when asked for `match --batch` without a corpus. #516 had diagnosed that as a release that predates the primitive. The release supports it; the probe was wrong. The image carries no C++ toolchain, so the fixture fails if either defect returns.
 
 ## Alternatives Considered
 

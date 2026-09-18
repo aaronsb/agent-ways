@@ -30,13 +30,13 @@ Assertions live in `run-tier1.sh` under numbered sections. Three helpers:
 
 Add a new assertion to the section it belongs to. Name it as a sentence that reads true when it passes.
 
-**To assert a new hook event or trigger**, add a payload under `payloads/` with `cwd` set to `/home/tester/project` and call `run_event EVENT NAME PAYLOAD`. `NAME` is the `SessionStart` source or the tool name and is matched against each hook's `matcher`. The driver expands `${HOME}` and nothing else, so a hook command that relies on another variable will not run the way Claude Code runs it. Check `nonzero_hooks` after every event.
+**To assert a new hook event or trigger**, add a payload under `payloads/` with `cwd` set to `/home/tester/project` and call `run_event EVENT NAME PAYLOAD`. `NAME` is the `SessionStart` source or the tool name and is matched against each hook's `matcher`, with empty and `*` as match-all. The driver expands `${HOME}` and nothing else, so a hook command that relies on another variable will not run the way Claude Code runs it. Exit codes land in a file, not a variable, because the call sits inside command substitution. Check `nonzero_hooks` after every event.
 
 **The seed is the #501 shape.** A real `skills/` directory, three user hooks across three events, a `model` key, and a second config directory. Assertions in sections 2, 4, and 8 hash against it. Do not add files to `seed/` to make a new assertion convenient. Add a new seed directory and its own section instead.
 
-**The Claude Code version** is pinned in `compose.yaml` and the `Dockerfile` default. Bump both together. Section 9 asserts the exact version unless `CLAUDE_VERSION=latest`.
+**The Claude Code version** is pinned once, in `test-live.sh`. `compose.yaml` and the `Dockerfile` take it from there. Section 9 asserts the exact version unless `CLAUDE_VERSION=latest`.
 
-**The toolchain in the image** (`cmake`, `g++`) exists so `make setup` can build `way-embed` from source. It comes out once #516 ships a `way-embed` release with `match --batch`.
+**The image has no C++ toolchain.** Section 2 asserts that `way-embed` arrived as a release download. Do not add `cmake` or `g++` to make a failing run pass. A source-build fallback means the download script or the release is broken, which is what the assertion is for.
 
 ## CI
 
