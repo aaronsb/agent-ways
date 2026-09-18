@@ -73,7 +73,7 @@ mkdir -p "$OUTPUT_DIR"
 if [[ "$RELEASE_TAG" == "latest" ]]; then
   # Retry transient API failures, then distinguish "couldn't reach the API"
   # (retries exhausted → honest error) from "reached it, no matching release".
-  if ! release_tags=$(retry gh release list --repo "$GH_REPO" --limit 30 --json tagName --jq '.[].tagName'); then
+  if ! release_tags=$(retry gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName'); then
     echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
     echo "  Falling back to build-from-source: cd \"$REPO_ROOT\" && make attend" >&2
     exit 1
