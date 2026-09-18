@@ -65,7 +65,15 @@ pub fn state(
                     false
                 }
             }
-            "session-start" => true,
+            // Once per session: the state hook also runs on every prompt for
+            // the two conditional triggers above, and a session-start way
+            // must not ride that cadence on its refire curve. The marker is
+            // cleared on startup, compact, and clear, so the way still shows
+            // again after a compaction. Gated here on the marker rather than
+            // on the SessionStart event because the teammate scope marker is
+            // written after session start, and the teams way must still
+            // reach a teammate on its first prompt.
+            "session-start" => !session::way_is_shown(&way.id, session_id),
             _ => false,
         };
 
@@ -118,7 +126,7 @@ fn evaluate_context_threshold(threshold_pct: u64, transcript: Option<&str>) -> b
 }
 
 fn evaluate_file_exists(pattern: &str, project_dir: &str) -> bool {
-    // Use glob matching for patterns like "*.md" or ".claude/todo-*.md"
+    // Use glob matching for patterns like "*.md" or "docs/architecture/*.md"
     let full_pattern = format!("{project_dir}/{pattern}");
     glob::glob(&full_pattern)
         .map(|paths| paths.filter_map(|p| p.ok()).next().is_some())

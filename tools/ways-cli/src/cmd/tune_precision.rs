@@ -16,14 +16,14 @@
 //!     kind of session. A real precision problem; remedy is a threshold raise,
 //!     vocabulary narrowing, or trigger-channel change.
 //!   - **cross-cutting** — a way that fires across *many* different session
-//!     kinds because it is broad by design (`meta/tracking`, `freshness`).
+//!     kinds because it is broad by design (`meta/todos`, `freshness`).
 //!     ADR-134's Negative section names exactly this false positive. We detect
 //!     it from breadth (`spread`) and label it as such, never as a defect — and
 //!     a flag here must NEVER drive an automatic vocabulary change.
 //!
 //! ### Method (all from existing `way_fired` fields — no new telemetry)
 //!
-//! - **Family** = a way id at depth 2 (`softwaredev/delivery`, `meta/tracking`).
+//! - **Family** = a way id at depth 2 (`softwaredev/delivery`, `meta/todos`).
 //!   The top-level domain (`softwaredev`) is too coarse — nearly every way is
 //!   `softwaredev/*`, so it would call almost everything corroborated.
 //! - **Session activity class** = the families whose share of that session's
@@ -442,7 +442,7 @@ mod tests {
     fn family_is_parent_path() {
         assert_eq!(family_of("softwaredev/delivery/migrations"), "softwaredev/delivery");
         assert_eq!(family_of("kg/api"), "kg");
-        assert_eq!(family_of("meta/tracking"), "meta");
+        assert_eq!(family_of("meta/todos"), "meta");
         assert_eq!(family_of("solo"), "solo");
     }
 
@@ -504,10 +504,10 @@ mod tests {
         for (i, fam) in themes.iter().enumerate() {
             let sid = format!("s{i}");
             fires.extend(filler(fam, 6, &sid));
-            fires.push(fire("meta/tracking", &sid, "state"));
+            fires.push(fire("meta/todos", &sid, "state"));
         }
         let r = compute_precision(&fires, 5, 0.5, None);
-        let track = r.iter().find(|w| w.way == "meta/tracking").unwrap();
+        let track = r.iter().find(|w| w.way == "meta/todos").unwrap();
         assert_eq!(track.off_class, 5);
         assert!(track.spread >= CROSSCUT_SPREAD);
         assert!(matches!(track.flag, Flag::CrossCutting));

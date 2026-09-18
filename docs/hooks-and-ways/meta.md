@@ -103,20 +103,3 @@ See [teams.md](teams.md) for the full three-scope model and detection mechanism.
 The memory checkpoint way fires at session start to remind the agent about MEMORY.md — the persistent memory that survives across conversations. It's gated to `scope: agent` because only the main session should read and write MEMORY.md. If three teammates all tried to update it simultaneously, the file would get corrupted.
 
 This way works in tandem with the todos way: todos handles in-session task continuity, memory handles cross-session knowledge continuity.
-
-## Tracking
-
-**Triggers**: Prompt mentions "tracking file", "cross-session", "multi-session", "picking up where we left off"; editing `.claude/todo-*.md`
-
-Guides the creation and maintenance of persistent tracking files for work that spans multiple sessions.
-
-While `TaskCreate`/`TaskList` provides in-session task visibility (and survives compaction within a session), tracking files in `.claude/todo-*.md` survive across sessions entirely. They're plain markdown files on disk.
-
-Naming convention: `.claude/todo-{context}.md` - e.g., `todo-adr-005.md`, `todo-pr-42.md`, `todo-issue-17.md`. The context links the tracking file to the work it tracks.
-
-The way prescribes:
-- Markdown format with completed/remaining items
-- Cleanup when work is done (delete or archive the file)
-- Reading tracking files when resuming work after a session break
-
-This complements the todos way: todos ensures in-session task lists exist before compaction; tracking ensures cross-session state persists in files that Claude can read on the next startup.

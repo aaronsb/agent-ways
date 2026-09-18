@@ -258,8 +258,8 @@ Unlike other ways, context-threshold triggers **repeat on every prompt** until t
 
 ### file-exists
 
-Checks for a glob pattern relative to the project directory. Fires once (standard marker) if any matching file exists. Useful for detecting project state - e.g., whether tracking files exist.
+Checks for a glob pattern relative to the project directory. Fires once (standard marker) if any matching file exists. Useful for detecting project state - e.g., whether a lockfile or a generated client exists.
 
 ### session-start
 
-Always evaluates true. Uses the standard marker, so it fires exactly once on the first UserPromptSubmit after session start. Useful for one-time session initialization that doesn't belong in SessionStart hooks.
+Fires once per session, on the first state scan after the session's markers were cleared (startup, compact, clear). The state hook also runs on every prompt for the two conditional triggers above, and a session-start way does not ride that cadence on its refire curve.
