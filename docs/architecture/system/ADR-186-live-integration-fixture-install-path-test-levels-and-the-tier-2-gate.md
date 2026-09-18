@@ -66,6 +66,7 @@ Reversibility: cheap. The fixture is additive. Removing the job removes the gate
 - The runner drives hooks from `settings.json` rather than by path, so a hook that the merge drops is a failed assertion rather than a silent skip.
 - `portability.yml`'s Ubuntu job builds all four suite binaries, since the branch flavor needs `ways-audit` and `attend-chat` beside `ways` and `attend`.
 - ADR-185's `--json` views are what the runner parses.
+- The image carries cmake and g++ while the newest way-embed release predates `match --batch` (#516), so setup completes from source. When that release ships, the download takes over in the same run.
 
 ## Alternatives Considered
 
