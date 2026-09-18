@@ -22,6 +22,7 @@ The release-asset downloads go through `gh`, so the wrapper exports `GH_TOKEN` f
 
 | Path | Role |
 |------|------|
+| `CLAUDE.md` | How to run, change, and debug the fixture ([here](CLAUDE.md)) |
 | `Dockerfile` | Debian trixie, the installer prerequisites, `gh`, an unprivileged user, Claude Code at `CLAUDE_VERSION` through `CLAUDE_INSTALLER` |
 | `compose.yaml` | The `tier1` service: mounts the checkout at `/src`, the binaries at `/binaries`, this directory at `/fixture` |
 | `test-live.sh` | Host-side entry point behind `make test-live` |
