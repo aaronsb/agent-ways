@@ -1,0 +1,26 @@
+# Live integration fixture (ADR-186). Entry point: `make test-live TIER=1`.
+#
+# Variables (all optional):
+#   FLAVOR            branch (default): install the mounted checkout with the
+#                     binaries under WAYS_BINARIES. release: run the one-liner.
+#   CLAUDE_VERSION    Claude Code version baked into the image (default pinned)
+#   CLAUDE_INSTALLER  native (default) or npm
+#   WAYS_BINARIES     host dir holding ways, ways-audit, attend, attend-chat
+#   GH_TOKEN          for the release-asset downloads through gh
+services:
+  tier1:
+    build:
+      context: .
+      args:
+        CLAUDE_VERSION: ${CLAUDE_VERSION:-2.1.275}
+        CLAUDE_INSTALLER: ${CLAUDE_INSTALLER:-native}
+    image: agent-ways-fixture:tier1-${CLAUDE_INSTALLER:-native}-${CLAUDE_VERSION:-2.1.275}
+    environment:
+      FLAVOR: ${FLAVOR:-branch}
+      CLAUDE_VERSION: ${CLAUDE_VERSION:-2.1.275}
+      GH_TOKEN: ${GH_TOKEN:-}
+    volumes:
+      - ../../..:/src:ro
+      - ${WAYS_BINARIES:-../../../tools/target/release}:/binaries:ro
+      - .:/fixture:ro
+    command: bash /fixture/run-tier1.sh

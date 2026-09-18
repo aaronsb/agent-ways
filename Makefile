@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual release purge-attend-state
+.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual test-live release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -55,6 +55,7 @@ help:
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
+	@echo "  make test-live TIER=1  Live install fixture in Docker (ADR-186; FLAVOR=branch|release)"
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
 	@echo "  make release      Build release binary for current platform"
 	@echo "  make cut-release  Open a version-bump PR for a component (COMPONENT=ways LEVEL=patch)"
@@ -387,6 +388,12 @@ test-locales:
 
 test-multilingual: ways
 	@bash tests/test-multilingual.sh
+
+# Live integration fixture (ADR-186): a Debian container with Claude Code,
+# a seeded home, and the installer run unattended. TIER=1 needs no API key.
+# The branch flavor mounts the checkout and the four suite binaries.
+test-live:
+	@TIER="$(or $(TIER),1)" bash tests/fixtures/docker/test-live.sh
 
 # --- Release ---
 

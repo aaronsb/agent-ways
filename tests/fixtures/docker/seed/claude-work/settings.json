@@ -1,0 +1,15 @@
+{
+  "model": "sonnet",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo WORK-PROFILE-SESSION-START"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+name: Live fixture (release flavor)
+
+# ADR-186 item 2: the release flavor runs the documented one-liner, which
+# clones main and downloads the latest release assets, with Claude Code at its
+# latest version. It runs nightly and on dispatch, never on a pull request, so
+# drift on either side shows up here and not as a red check on someone's PR.
+# The branch flavor, the PR gate, lives in portability.yml.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      claude_version:
+        description: Claude Code version to bake into the image
+        default: latest
+      claude_installer:
+        description: native or npm
+        default: native
+
+jobs:
+  tier1-release:
+    name: tier 1, release flavor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run tier 1 against the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLAVOR: release
+          CLAUDE_VERSION: ${{ inputs.claude_version || 'latest' }}
+          CLAUDE_INSTALLER: ${{ inputs.claude_installer || 'native' }}
+        run: make test-live TIER=1

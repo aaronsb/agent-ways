@@ -1,0 +1,1 @@
+{"session_id":"tier1-fixture","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git config --global user.name tester","description":"Set the git user name"},"cwd":"/home/tester/project"}
