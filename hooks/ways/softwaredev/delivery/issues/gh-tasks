@@ -31,7 +31,7 @@
 # file's lock.
 #
 # Usage:
-#   gh-tasks [--session ID] attach    # resolve the live list, carry the previous one forward
+#   gh-tasks [--session ID] attach [startup|resume]   # resolve the live list, carry the previous one forward
 #   gh-tasks [--session ID] [--force] pull
 #   gh-tasks [--session ID] whisper [--full]
 #   gh-tasks [--session ID] link <issue> <task-id>
@@ -98,11 +98,14 @@ sanitize_id() { printf '%s' "${1//[^A-Za-z0-9_-]/-}"; }
 # Resolution order: the environment, the id `attach` recorded for this
 # session, a team that names this session as lead (several: prefer one whose
 # store exists, else the newest config), the full session id.
+# The record names the process's list whether or not its directory exists
+# yet: pull creates the directory, and an operator who cleared it to reset
+# the list still wants the mirror to land where the process reads.
 recorded_list_id() {
   local f; f="$(state_dir)/list_id"
   [[ -f "$f" ]] || return 0
   local id; id="$(head -n1 "$f" 2>/dev/null || true)"
-  [[ -n "$id" && -d "$CONFIG_DIR/tasks/$id" ]] && printf '%s' "$id"
+  [[ -n "$id" ]] && printf '%s' "$(sanitize_id "$id")"
   return 0
 }
 
@@ -143,20 +146,10 @@ team_list_id() {
 store_dir() { printf '%s/tasks/%s' "$CONFIG_DIR" "$(list_id)"; }
 
 # Per-session bridge state lives beside the other hook state, under the
-# sessions root shared with the ways binary. Never inside the task store:
-# Claude Code parses every *.json there.
-state_dir() {
-  local root
-  if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-    root="${XDG_RUNTIME_DIR}/claude-sessions"
-  else
-    case "$(uname -s 2>/dev/null)" in
-      MINGW*|MSYS*|CYGWIN*) root="${LOCALAPPDATA:-${TEMP:-/tmp}}/claude-ways/sessions" ;;
-      *) root="/tmp/.claude-sessions-$(id -u)" ;;
-    esac
-  fi
-  printf '%s/%s/gh-tasks' "$root" "$SESSION"
-}
+# sessions root shared with the ways binary (sessions-root.sh is the one
+# rule). Never inside the task store: Claude Code parses every *.json there.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/sessions-root.sh"
+state_dir() { printf '%s/%s/gh-tasks' "$SESSIONS_ROOT" "$SESSION"; }
 
 # ── locks (proper-lockfile compatible) ───────────────────────────
 
@@ -419,57 +412,83 @@ cmd_pull() {
 }
 
 # ── attach ───────────────────────────────────────────────────────
-# Run once per SessionStart. Finds the team this process created at startup:
-# the newest teams/session-*/config.json created within ATTACH_WINDOW seconds,
-# whose leader cwd is this cwd, and that no other session's state has
-# claimed. Records it, and when the recorded id changed, carries the open
-# tasks of the previous store into the new one so a resume does not start
-# from an empty list.
+# Run on SessionStart for startup and resume. Finds the team this process
+# created at startup: a teams/session-*/config.json whose leader cwd is this
+# cwd, that no other session's state has claimed, and that was created after
+# this process started (the hook's parent chain reaches the claude process;
+# ps gives its age). The oldest such team is the one created at startup.
+# Without a reachable process the fallback is the newest team created within
+# ATTACH_WINDOW seconds. Records the name, and when the record changed,
+# carries the open tasks of the previous store into the new one so a resume
+# does not start from an empty list.
 
 ATTACH_WINDOW="${GH_TASKS_ATTACH_WINDOW:-300}"
 
 # Teams claimed by other sessions' state files, one name per line.
 claimed_teams() {
-  local root; root="$(dirname "$(state_dir)")"; root="$(dirname "$root")"
   local f
-  for f in "$root"/*/gh-tasks/list_id; do
+  for f in "$SESSIONS_ROOT"/*/gh-tasks/list_id; do
     [[ -f "$f" ]] || continue
     [[ "$f" == "$(state_dir)/list_id" ]] && continue
     head -n1 "$f" 2>/dev/null || true
   done
 }
 
+# Start time in ms of the nearest ancestor named claude, or nothing.
+process_start_ms() {
+  local pid=$$ comm age i
+  for ((i = 0; i < 12; i++)); do
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ -n "$comm" ]] || return 0
+    if [[ "$comm" == claude* ]]; then
+      age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+      [[ "$age" =~ ^[0-9]+$ ]] || return 0
+      printf '%s' $(( ($(now) - age) * 1000 ))
+      return 0
+    fi
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 0
+  done
+  return 0
+}
+
 fresh_team() {
-  local teams="$CONFIG_DIR/teams" cwd claimed c name created ms best="" best_created=0
+  local teams="$CONFIG_DIR/teams" cwd claimed c name created tcwd bound oldest=1 best="" best_created=0
   [[ -d "$teams" ]] || return 0
   cwd="$(pwd -P 2>/dev/null || pwd)"
   claimed="$(claimed_teams)"
-  ms=$(( ($(now) - ATTACH_WINDOW) * 1000 ))
+  bound="$(process_start_ms)"
+  if [[ -n "$bound" ]]; then
+    bound=$(( bound - 2000 ))
+  else
+    bound=$(( ($(now) - ATTACH_WINDOW) * 1000 )); oldest=0
+  fi
   for c in "$teams"/session-*/config.json; do
     [[ -f "$c" ]] || continue
-    name="$(jq -r '.name // empty' "$c" 2>/dev/null)"
-    [[ -n "$name" ]] || continue
+    IFS=$'\t' read -r name created tcwd < <(jq -r '[(.name // ""), ((.createdAt // 0) | tostring), (.members[0].cwd // "")] | @tsv' "$c" 2>/dev/null) || continue
+    [[ -n "$name" && "$created" =~ ^[0-9]+$ ]] || continue
+    (( created >= bound )) || continue
+    [[ "$tcwd" == "$cwd" ]] || continue
     grep -qxF "$name" <<<"$claimed" && continue
-    created="$(jq -r '.createdAt // 0' "$c" 2>/dev/null)"
-    [[ "$created" =~ ^[0-9]+$ ]] || continue
-    (( created >= ms )) || continue
-    [[ "$(jq -r '.members[0].cwd // empty' "$c" 2>/dev/null)" == "$cwd" ]] || continue
-    if (( created > best_created )); then best="$name"; best_created="$created"; fi
+    if [[ -z "$best" ]] || { (( oldest )) && (( created < best_created )); } || { (( ! oldest )) && (( created > best_created )); }; then
+      best="$name"; best_created="$created"
+    fi
   done
   [[ -n "$best" ]] && sanitize_id "$best"
   return 0
 }
 
-# Copy the open tasks of $1 into $2 when $2 holds no numeric task yet.
-# Ids are kept so blocks/blockedBy edges stay valid. owner is dropped: the
-# agent it named did not survive the restart.
+# Copy the open tasks of $1 into $2 when $2 holds no numeric task yet. Ids
+# are kept; edges to tasks that did not come along are dropped; owner is
+# dropped, since the agent it named did not survive the restart.
 carry_tasks() {
-  local from="$1" to="$2" f id n=0
+  local from="$1" to="$2" f id n=0 ids
   [[ -d "$from" ]] || return 0
   for f in "$to"/[0-9]*.json; do
     [[ -e "$f" ]] && { note "task list not carried from $(basename "$from"): the new list already has tasks"; return 0; }
   done
   validate_store "$from" || { note "task list not carried from $(basename "$from"): layout unrecognized"; return 0; }
+  validate_store "$to" || { note "task list not carried into $(basename "$to"): layout unrecognized"; return 0; }
   mkdir -p "$to"
   lock_acquire "$to/.lock" || { note "task list not carried from $(basename "$from"): could not lock the store"; return 0; }
   [[ -e "$to/.lock" ]] || : >"$to/.lock"
@@ -481,27 +500,54 @@ carry_tasks() {
     jq 'del(.owner)' "$f" >"$to/$id.json.gh-tasks.tmp" && mv -f "$to/$id.json.gh-tasks.tmp" "$to/$id.json"
     n=$((n + 1))
   done
+  ids="$(for f in "$to"/*.json; do [[ -e "$f" ]] && basename "$f" .json; done | jq -R . | jq -s .)"
+  for f in "$to"/*.json; do
+    [[ -e "$f" ]] || continue
+    jq --argjson ids "$ids" '.blocks |= map(select(. as $x | $ids | index($x))) | .blockedBy |= map(select(. as $x | $ids | index($x)))' \
+      "$f" >"$f.gh-tasks.tmp" && mv -f "$f.gh-tasks.tmp" "$f"
+  done
   lock_release "$to/.lock"
   (( n > 0 )) && note "task list carried forward from $(basename "$from"): $n task(s)"
   return 0
 }
 
+# attach [startup|resume|compact|clear]: the SessionStart source. Only a new
+# process has a new team, so compact and clear are no-ops.
 cmd_attach() {
   require_session
-  local state prev new; state="$(state_dir)"; mkdir -p "$state"
+  local source="${ARGS[0]:-startup}" state prev new origin=""
+  case "$source" in
+    startup|resume) ;;
+    *) return 0 ;;
+  esac
+  state="$(state_dir)"; mkdir -p "$state"
   prev="$(recorded_list_id)"
   if [[ -n "${CLAUDE_CODE_TASK_LIST_ID:-}" ]]; then
-    new="$(sanitize_id "$CLAUDE_CODE_TASK_LIST_ID")"
+    # An explicit list is the operator's choice, shared or named; nothing
+    # private is carried into it.
+    new="$(sanitize_id "$CLAUDE_CODE_TASK_LIST_ID")"; origin=env
   else
     new="$(fresh_team)"
-    [[ -n "$new" ]] || new="$prev"
-    [[ -n "$new" ]] || new="$(team_list_id)"
+    if [[ -n "$new" ]]; then
+      origin=team
+    elif [[ -n "$prev" ]]; then
+      new="$prev"; origin=record
+    else
+      new="$(team_list_id)"
+    fi
   fi
-  if [[ -n "$prev" && "$prev" != "$new" ]]; then
+  if [[ "$origin" == team && -n "$prev" && "$prev" != "$new" ]]; then
     carry_tasks "$CONFIG_DIR/tasks/$prev" "$CONFIG_DIR/tasks/$new"
+  elif [[ "$origin" != env && -z "$prev" && "$source" == resume ]]; then
+    note "no previous task list recorded for this session; nothing carried (the list before the resume stays under its old name)"
   fi
-  printf '%s\n' "$new" >"$state/list_id.tmp" && mv -f "$state/list_id.tmp" "$state/list_id"
-  log "attach: list $new$([[ -n "$prev" && "$prev" != "$new" ]] && echo " (was $prev)")"
+  # Only a resolved id is recorded. The fallback stays unrecorded so the
+  # lead-session match keeps working for a process that named its team from
+  # this session id.
+  if [[ "$origin" == env || "$origin" == team ]]; then
+    printf '%s\n' "$new" >"$state/list_id.tmp" && mv -f "$state/list_id.tmp" "$state/list_id"
+  fi
+  log "attach ($source): list $new$([[ -n "$prev" && "$prev" != "$new" ]] && echo " (was $prev)")"
 }
 
 # ── whisper ──────────────────────────────────────────────────────

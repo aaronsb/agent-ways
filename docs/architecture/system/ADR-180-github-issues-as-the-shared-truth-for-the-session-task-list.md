@@ -74,17 +74,26 @@ and settled two facts the first draft left open:
   team from that id, and reads `tasks/session-<8 of the fresh id>`, which
   starts empty. The `SessionStart` stdin and `CLAUDE_CODE_SESSION_ID` still
   carry the transcript's id, so no `leadSessionId` matches it. The bridge's
-  `attach` verb, run first on every `SessionStart`, therefore finds the team
-  by shape rather than by id: the newest `teams/session-*/config.json`
-  created within the last 300 seconds whose leader `cwd` is the hook's cwd
-  and that no other session's bridge state has claimed. It records the name
-  in the bridge state, and every later verb reads the record. When the
-  record changes, `attach` copies the previous store's open tasks into the
-  new one with their ids, drops `owner` (the agent it named did not survive
-  the restart), and whispers one line. It copies nothing into a store that
-  already holds a numeric task. Known gap: `/clear` inside one process keeps
-  the old team, which the previous session's state has claimed, so that
-  path falls back to the full id, as before.
+  `attach` verb, run first on `SessionStart` for the `startup` and `resume`
+  sources, therefore finds the team by shape rather than by id: a
+  `teams/session-*/config.json` whose leader `cwd` is the hook's cwd, that
+  no other session's bridge state has claimed, and that was created after
+  this process started. The hook's parent chain reaches the `claude`
+  process and `ps` gives its age; the oldest team created after that start
+  is the one created at startup. Without a reachable process the fallback
+  is the newest team created within the last 300 seconds. `attach` records
+  the name in the bridge state, and every later verb reads the record; the
+  full-id fallback is never recorded, so the lead-session match keeps
+  working where it did. When the record changes, `attach` copies the
+  previous store's open tasks into the new one with their ids, drops edges
+  to tasks that did not come along and `owner` (the agent it named did not
+  survive the restart), and whispers one line. It copies nothing into a
+  store that already holds a numeric task, into an explicit
+  `CLAUDE_CODE_TASK_LIST_ID` list, or into a store whose layout it does not
+  recognize. A resume with no record (the first after this landed, or after
+  the runtime directory was cleared) whispers that nothing was carried.
+  `compact` and `clear` keep the process and its team, so `attach` is a
+  no-op there.
 
 The schema is `id` string, `subject`, `description`, `status` enum,
 `blocks[]`, `blockedBy[]`, optional `activeForm`, `owner`, `metadata`
