@@ -6,7 +6,9 @@
 # in_progress, remote close and reopen move status, body change replaces
 # description, local description edit survives an unchanged body); id
 # conflict left untouched; unrecognized layout writes nothing; whisper
-# deltas; link; the TaskCreated guard; refusal without a session id.
+# deltas; link; the TaskCreated guard; attach on a resume (fresh team by age
+# and cwd, carry-forward of open tasks, claimed and stale teams skipped);
+# refusal without a session id.
 
 set -euo pipefail
 
@@ -217,6 +219,108 @@ assert_eq "format stamped" "$(jq -r .metadata.format "$STORE/gh-30.json")" "2"
 # ── 9f. guard scope ────────────────────────────────────────────
 assert_eq "guard ignores #N in description" "$(guard 'Refactor parser' 'see #12 for context')" "0"
 assert_eq "guard still catches /issues/N in description" "$(guard 'Do a thing' 'https://github.com/acme/widgets/issues/12')" "2"
+
+# ── 11. attach: resume finds the live team and carries the list ─
+# A process creates teams/session-<8 of its own id> at startup with createdAt
+# and the leader's cwd. On a resume that id is not the hook's session_id.
+live_team() { # name lead-id created-ms cwd
+  mkdir -p "$CLAUDE_CONFIG_DIR/teams/$1"
+  jq -n --arg n "$1" --arg s "$2" --argjson c "$3" --arg d "$4" \
+    '{name:$n, leadSessionId:$s, createdAt:$c, members:[{name:"team-lead", tmuxPaneId:"leader", cwd:$d}]}' \
+    >"$CLAUDE_CONFIG_DIR/teams/$1/config.json"
+}
+task_file() { # dir id status [owner]
+  mkdir -p "$1"
+  jq -n --arg id "$2" --arg st "$3" --arg o "${4:-}" \
+    '{id:$id, subject:"task \($id)", description:"d", status:$st, blocks:[], blockedBy:[]} + (if $o != "" then {owner:$o} else {} end)' \
+    >"$1/$2.json"
+}
+NOW_MS=$(( $(date +%s) * 1000 ))
+WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
+( cd "$WORK"
+  export CLAUDE_CODE_SESSION_ID="11111111-aaaa-bbbb-cccc-dddddddddddd"
+  st="$XDG_RUNTIME_DIR/claude-sessions/$CLAUDE_CODE_SESSION_ID/gh-tasks"; mkdir -p "$st"
+  prev="$CLAUDE_CONFIG_DIR/tasks/session-prev0001"
+  task_file "$prev" 1 pending
+  task_file "$prev" 2 completed
+  task_file "$prev" 3 in_progress some-agent
+  jq '.blockedBy = ["2", "1"]' "$prev/3.json" >"$prev/3.tmp" && mv "$prev/3.tmp" "$prev/3.json"
+  jq '.blocks = ["3"]' "$prev/2.json" >"$prev/2.tmp" && mv "$prev/2.tmp" "$prev/2.json"
+  jq -n '{id:"gh-5", subject:"[gh#5] mirrored", description:"d", status:"in_progress", blocks:[], blockedBy:[], metadata:{github_issue:5}}' >"$prev/gh-5.json"
+  echo session-prev0001 >"$st/list_id"
+  live_team session-newproc "99999999-0000-0000-0000-000000000000" "$NOW_MS" "$WORK_P"
+  "$GH_TASKS" attach resume 2>/dev/null
+  new="$CLAUDE_CONFIG_DIR/tasks/session-newproc"
+  assert_eq "attach records the fresh team" "$(cat "$st/list_id")" "session-newproc"
+  assert_eq "dir follows the recorded id" "$("$GH_TASKS" dir)" "$new"
+  assert_eq "open task carried" "$(jq -r .status "$new/1.json")" "pending"
+  assert_eq "in-progress task carried, owner dropped" "$(jq -c '[.status, .owner]' "$new/3.json")" '["in_progress",null]'
+  assert_eq "completed task left behind" "$([[ -e "$new/2.json" ]] && echo present || echo absent)" "absent"
+  assert_eq "edge to a task not carried is dropped, edge to a carried one kept" "$(jq -c .blockedBy "$new/3.json")" '["1"]'
+  assert_eq "mirrored task carried with its status" "$(jq -r .status "$new/gh-5.json")" "in_progress"
+  out="$("$GH_TASKS" whisper 2>/dev/null)"
+  assert_has "whisper names the carry once" "$out" "carried forward from session-prev0001: 3 task"
+  "$GH_TASKS" attach resume 2>/dev/null
+  assert_empty "second attach carries nothing" "$("$GH_TASKS" whisper 2>/dev/null)"
+  assert_eq "second attach keeps the id" "$(cat "$st/list_id")" "session-newproc"
+  rm -rf "$new"
+  assert_eq "the record survives a cleared store" "$("$GH_TASKS" dir)" "$new"
+  live_team session-neighbor "99999999-1111-0000-0000-000000000000" "$NOW_MS" "$WORK_P"
+  "$GH_TASKS" attach compact 2>/dev/null
+  assert_eq "compact does not re-attach" "$(cat "$st/list_id")" "session-newproc"
+  "$GH_TASKS" attach clear 2>/dev/null
+  assert_eq "clear does not re-attach" "$(cat "$st/list_id")" "session-newproc"
+  rm -rf "$CLAUDE_CONFIG_DIR/teams/session-neighbor"
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
+
+( cd "$WORK"
+  export CLAUDE_CODE_SESSION_ID="22222222-aaaa-bbbb-cccc-dddddddddddd"
+  live_team session-stale01 "88888888-0000-0000-0000-000000000000" $(( NOW_MS - 86400000 )) "$WORK_P"
+  "$GH_TASKS" attach resume 2>/dev/null
+  assert_eq "a team created before this process is ignored" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  st="$XDG_RUNTIME_DIR/claude-sessions/$CLAUDE_CODE_SESSION_ID/gh-tasks"
+  assert_eq "the fallback id is not recorded" "$([[ -e "$st/list_id" ]] && echo present || echo absent)" "absent"
+  team_file session-22222222 "$CLAUDE_CODE_SESSION_ID"
+  assert_eq "the lead-session match still wins after a fallback" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/session-22222222"
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
+
+( cd "$WORK"
+  export CLAUDE_CODE_SESSION_ID="33333333-aaaa-bbbb-cccc-dddddddddddd"
+  live_team session-claimed1 "77777777-0000-0000-0000-000000000000" "$NOW_MS" "$WORK_P"
+  other="$XDG_RUNTIME_DIR/claude-sessions/other-session/gh-tasks"; mkdir -p "$other"; echo session-claimed1 >"$other/list_id"
+  mkdir -p "$CLAUDE_CONFIG_DIR/tasks/session-claimed1"
+  "$GH_TASKS" attach resume 2>/dev/null
+  assert_eq "a team another session claimed is skipped" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  assert_has "a resume with no record says so" "$("$GH_TASKS" whisper 2>/dev/null)" "no previous task list recorded"
+  live_team session-elsewhere "66666666-0000-0000-0000-000000000000" "$NOW_MS" "/somewhere/else"
+  "$GH_TASKS" attach resume 2>/dev/null
+  assert_eq "a team with another cwd is skipped" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  live_team session-first00 "55555555-0000-0000-0000-000000000000" $(( NOW_MS + 1000 )) "$WORK_P"
+  live_team session-second0 "44444444-0000-0000-0000-000000000000" $(( NOW_MS + 2000 )) "$WORK_P"
+  "$GH_TASKS" attach startup 2>/dev/null
+  assert_eq "the oldest team created after this process wins" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/session-first00"
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
+
+( cd "$WORK"
+  export CLAUDE_CODE_SESSION_ID="44444444-aaaa-bbbb-cccc-dddddddddddd"
+  st="$XDG_RUNTIME_DIR/claude-sessions/$CLAUDE_CODE_SESSION_ID/gh-tasks"; mkdir -p "$st"
+  task_file "$CLAUDE_CONFIG_DIR/tasks/session-prev0002" 1 pending
+  echo session-prev0002 >"$st/list_id"
+  live_team session-busy001 "33333333-0000-0000-0000-000000000000" "$NOW_MS" "$WORK_P"
+  task_file "$CLAUDE_CONFIG_DIR/tasks/session-busy001" 7 pending
+  "$GH_TASKS" attach resume 2>/dev/null
+  assert_eq "a new list with tasks is not written to" "$([[ -e "$CLAUDE_CONFIG_DIR/tasks/session-busy001/1.json" ]] && echo present || echo absent)" "absent"
+  assert_has "the refusal is whispered" "$("$GH_TASKS" whisper 2>/dev/null)" "not carried from session-prev0002"
+  assert_eq "the fresh team is still recorded" "$(cat "$st/list_id")" "session-busy001"
+  ( export CLAUDE_CODE_SESSION_ID="55555555-aaaa-bbbb-cccc-dddddddddddd"
+    st="$XDG_RUNTIME_DIR/claude-sessions/$CLAUDE_CODE_SESSION_ID/gh-tasks"; mkdir -p "$st"
+    task_file "$CLAUDE_CONFIG_DIR/tasks/session-prev0003" 1 pending
+    echo session-prev0003 >"$st/list_id"
+    CLAUDE_CODE_TASK_LIST_ID=team-sprint "$GH_TASKS" attach resume 2>/dev/null
+    assert_eq "an explicit list id is recorded" "$(cat "$st/list_id")" "team-sprint"
+    assert_eq "nothing is carried into an explicit list" "$([[ -e "$CLAUDE_CONFIG_DIR/tasks/team-sprint/1.json" ]] && echo present || echo absent)" "absent"
+  )
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
 
 # ── 10. identity ───────────────────────────────────────────────
 rc=0; ( unset CLAUDE_CODE_SESSION_ID; "$GH_TASKS" pull 2>/dev/null ) || rc=$?
