@@ -106,6 +106,15 @@ pub fn prompt(
     response_context: Option<&str>,
 ) -> Result<()> {
     // A user prompt starts a turn: bump the epoch.
+    //
+    // A Monitor notification that wakes an idle session also arrives as a
+    // prompt, wrapped in a `<task-notification>` envelope. Its body is a
+    // sensor line or a peer message, so it is not operator intent (ADR-161
+    // scopes matching to operator text). Bump the epoch and skip the scan.
+    if is_system_envelope(query) {
+        session::bump_epoch(session_id);
+        return Ok(());
+    }
     scan_prompt_surface(query, session_id, project, response_context, true, "UserPromptSubmit")
 }
 
@@ -203,8 +212,9 @@ fn collect_queued(content: &str, mark: Option<&str>) -> QueuedScan {
     QueuedScan { fragments, newest }
 }
 
-/// A queued entry whose content is a harness-generated envelope, not operator
-/// prose — it should not be matched as intent.
+/// Content that is a harness-generated envelope, not operator prose — it
+/// should not be matched as intent. Covers the harness's own tags and the
+/// header attend puts on a turn-boundary drain (ADR-172).
 fn is_system_envelope(s: &str) -> bool {
     let t = s.trim_start();
     t.starts_with("<task-notification")
@@ -212,6 +222,7 @@ fn is_system_envelope(s: &str) -> bool {
         || t.starts_with("<local-command")
         || t.starts_with("<command-")
         || t.starts_with("<persisted-output")
+        || t.starts_with("[attend")
 }
 
 fn scan_prompt_surface(
@@ -1391,6 +1402,20 @@ mod queued_tests {
     //! ADR-161: pure selection of queued mid-turn operator messages from a
     //! transcript — dedup by mark, envelope filtering, burst aggregation. No
     //! I/O, no matcher.
+
+    #[test]
+    fn envelopes_are_not_operator_intent() {
+        assert!(super::is_system_envelope("<task-notification> <task-id>x</task-id> attend: peers"));
+        assert!(super::is_system_envelope("  <system-reminder>hook output</system-reminder>"));
+        assert!(super::is_system_envelope("[attend] 2 peer message(s) delivered at the turn boundary"));
+        assert!(super::is_system_envelope("[attend sensor=peers priority=high] ssh started"));
+    }
+
+    #[test]
+    fn operator_prose_is_scanned() {
+        assert!(!super::is_system_envelope("set up ssh to the bastion"));
+        assert!(!super::is_system_envelope("reply to the attend message from zoe"));
+    }
     use super::*;
 
     fn enq(ts: &str, content: &str) -> String {

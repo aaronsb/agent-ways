@@ -65,7 +65,15 @@ pub fn state(
                     false
                 }
             }
-            "session-start" => true,
+            // Once per session: the state hook also runs on every prompt for
+            // the two conditional triggers above, and a session-start way
+            // must not ride that cadence on its refire curve. The marker is
+            // cleared on startup, compact, and clear, so the way still shows
+            // again after a compaction. Gated here on the marker rather than
+            // on the SessionStart event because the teammate scope marker is
+            // written after session start, and the teams way must still
+            // reach a teammate on its first prompt.
+            "session-start" => !session::way_is_shown(&way.id, session_id),
             _ => false,
         };
 

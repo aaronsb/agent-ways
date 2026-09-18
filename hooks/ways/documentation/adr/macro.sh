@@ -8,6 +8,9 @@
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
+# Outside a work tree there is nothing to vendor into; say nothing.
+git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree &>/dev/null || exit 0
+
 # State 1: Declined
 if [[ -f "$PROJECT_DIR/.claude/no-adr-tooling" ]]; then
   echo "ADR tooling declined for this project. Remove \`.claude/no-adr-tooling\` to enable."
