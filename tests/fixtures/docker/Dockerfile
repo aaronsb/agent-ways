@@ -15,10 +15,13 @@ ARG CLAUDE_VERSION
 ARG CLAUDE_INSTALLER
 
 # Installer prerequisites (git, jq, make), the download helpers' tools (gh,
-# curl), and what docs/prerequisites-debian.md lists.
+# curl), what docs/prerequisites-debian.md lists, and the C++ toolchain that
+# `make deps` installs. The newest way-embed release predates `match --batch`,
+# so setup builds way-embed from source until a release ships (issue #516).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash ca-certificates curl wget git jq make bc gzip python3 procps unzip gh \
+      cmake g++ \
  && rm -rf /var/lib/apt/lists/*
 
 # The npm installer needs Node; the native one does not. Root installs it
