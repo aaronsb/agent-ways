@@ -16,6 +16,7 @@ The bridge executable is `~/.claude/hooks/ways/softwaredev/delivery/issues/gh-ta
 | List mirrored tasks with their status and URL | `gh-tasks list` |
 | Attach an existing task to an issue | `gh-tasks link <issue> <task-id>` |
 | Where is everything, is the store layout recognized | `gh-tasks status` |
+| The list looks empty after a resume | `gh-tasks attach && gh-tasks whisper` (the SessionStart hook already ran it; this is the retry) |
 
 Use the full path in the command. Example:
 

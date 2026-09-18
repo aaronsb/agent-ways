@@ -60,17 +60,31 @@ and settled two facts the first draft left open:
   full participant.
 - **The list id, not the session, names the store.** The directory is
   `tasks/<list id>/`, where the list id is `CLAUDE_CODE_TASK_LIST_ID` when
-  set, else the team name, else the full session id. An interactive session
-  initializes an in-process "session team" at startup, names it
-  `session-<first 8 of session id>`, and renames `tasks/<session id>` to
-  `tasks/session-<8>`. A `claude -p` session never initializes that team, so
-  its store stays under the full id; a probe confirmed both forms on disk.
-  The team is recorded in `teams/<name>/config.json` with a
-  `leadSessionId`, for the session team and for named teams alike; print
-  mode writes none. The bridge resolves the list id from that file and
-  otherwise uses the full id, which the rename carries forward. A resumed
-  session's store follows whatever id it reports on the `SessionStart`
-  stdin. `CLAUDE_CODE_ENABLE_TASKS=false` disables the store outright.
+  set, else the current team's name, else the full session id. An
+  interactive process initializes an in-process "session team" at startup,
+  names it `session-<first 8 of its own id>`, and records it in
+  `teams/<name>/config.json` with `leadSessionId`, `createdAt`, and the
+  leader's `cwd`. The team directory is removed when the process exits; the
+  task directory stays. A `claude -p` session never initializes that team, so
+  its store stays under the full id. `CLAUDE_CODE_ENABLE_TASKS=false`
+  disables the store outright.
+- **A resumed session's list is keyed by an id the hooks never see** (read
+  from the 2.1.276 bundle after a resume put the mirror in a store nothing
+  read). The process that resumes a transcript gets a fresh id, names its
+  team from that id, and reads `tasks/session-<8 of the fresh id>`, which
+  starts empty. The `SessionStart` stdin and `CLAUDE_CODE_SESSION_ID` still
+  carry the transcript's id, so no `leadSessionId` matches it. The bridge's
+  `attach` verb, run first on every `SessionStart`, therefore finds the team
+  by shape rather than by id: the newest `teams/session-*/config.json`
+  created within the last 300 seconds whose leader `cwd` is the hook's cwd
+  and that no other session's bridge state has claimed. It records the name
+  in the bridge state, and every later verb reads the record. When the
+  record changes, `attach` copies the previous store's open tasks into the
+  new one with their ids, drops `owner` (the agent it named did not survive
+  the restart), and whispers one line. It copies nothing into a store that
+  already holds a numeric task. Known gap: `/clear` inside one process keeps
+  the old team, which the previous session's state has claimed, so that
+  path falls back to the full id, as before.
 
 The schema is `id` string, `subject`, `description`, `status` enum,
 `blocks[]`, `blockedBy[]`, optional `activeForm`, `owner`, `metadata`
