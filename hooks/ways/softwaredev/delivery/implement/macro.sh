@@ -9,7 +9,6 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 # --- Complexity signals ---
 has_adrs=false
-has_tracking=false
 file_count=0
 
 # Check for ADRs (suggests architectural work, not a quick fix)
@@ -18,10 +17,6 @@ if [[ -d "$PROJECT_DIR/docs/architecture" ]]; then
   [[ "$adr_count" -gt 0 ]] && has_adrs=true
 fi
 
-# Check for active tracking files (signals multi-session complexity)
-tracking_count=$(find "$PROJECT_DIR/.claude" -name "todo-*.md" 2>/dev/null | wc -l)
-[[ "$tracking_count" -gt 0 ]] && has_tracking=true
-
 # Estimate project size (rough proxy for parallelization relevance)
 if command -v find >/dev/null 2>&1; then
   file_count=$(find "$PROJECT_DIR" -maxdepth 3 -name "*.md" -o -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.go" -o -name "*.rs" -o -name "*.sh" -o -name "*.c" -o -name "*.h" 2>/dev/null | wc -l)
@@ -29,7 +24,7 @@ fi
 
 # --- Decide disclosure level ---
 # Show full parallelization guidance if any complexity signal fires
-if $has_adrs || $has_tracking || [[ "$file_count" -gt 20 ]]; then
+if $has_adrs || [[ "$file_count" -gt 20 ]]; then
   cat <<'EOF'
 
 ## Safe Parallelization

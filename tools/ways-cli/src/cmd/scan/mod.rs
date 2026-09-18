@@ -216,7 +216,9 @@ fn collect_queued(content: &str, mark: Option<&str>) -> QueuedScan {
 /// should not be matched as intent. Covers the harness's own tags and the
 /// header attend puts on a turn-boundary drain (ADR-172).
 fn is_system_envelope(s: &str) -> bool {
-    let t = s.trim_start();
+    // The prompt lane hands over lowercased text and the queued lane raw
+    // content; fold case here so neither caller carries the dependency.
+    let t = s.trim_start().to_ascii_lowercase();
     t.starts_with("<task-notification")
         || t.starts_with("<system-reminder")
         || t.starts_with("<local-command")
@@ -1403,20 +1405,21 @@ mod queued_tests {
     //! transcript — dedup by mark, envelope filtering, burst aggregation. No
     //! I/O, no matcher.
 
+    use super::*;
+
     #[test]
     fn envelopes_are_not_operator_intent() {
-        assert!(super::is_system_envelope("<task-notification> <task-id>x</task-id> attend: peers"));
-        assert!(super::is_system_envelope("  <system-reminder>hook output</system-reminder>"));
-        assert!(super::is_system_envelope("[attend] 2 peer message(s) delivered at the turn boundary"));
-        assert!(super::is_system_envelope("[attend sensor=peers priority=high] ssh started"));
+        assert!(is_system_envelope("<task-notification> <task-id>x</task-id> attend: peers"));
+        assert!(is_system_envelope("  <System-Reminder>hook output</System-Reminder>"));
+        assert!(is_system_envelope("[attend] 2 peer message(s) delivered at the turn boundary"));
+        assert!(is_system_envelope("[ATTEND sensor=peers priority=high] ssh started"));
     }
 
     #[test]
     fn operator_prose_is_scanned() {
-        assert!(!super::is_system_envelope("set up ssh to the bastion"));
-        assert!(!super::is_system_envelope("reply to the attend message from zoe"));
+        assert!(!is_system_envelope("set up ssh to the bastion"));
+        assert!(!is_system_envelope("reply to the attend message from zoe"));
     }
-    use super::*;
 
     fn enq(ts: &str, content: &str) -> String {
         format!(

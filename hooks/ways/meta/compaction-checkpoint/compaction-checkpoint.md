@@ -66,6 +66,6 @@ A `/goal` survives compaction — it's session-scoped, and compaction doesn't en
 ## See Also
 
 - wrap(meta) — the on-demand version: same wrap-up when *you* pick the seam, routing to the `/wrap` skill. This way is the automatic sibling that fires near the limit.
-- tracking(meta) — tracking files survive compaction
+- delivery/issues(softwaredev) — the GitHub issues behind the task list survive compaction (ADR-180)
 - todos(meta) — task state should be captured before compaction
 - goals(meta) — an active /goal anchors continuation across the checkpoint

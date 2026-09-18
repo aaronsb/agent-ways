@@ -126,7 +126,7 @@ fn evaluate_context_threshold(threshold_pct: u64, transcript: Option<&str>) -> b
 }
 
 fn evaluate_file_exists(pattern: &str, project_dir: &str) -> bool {
-    // Use glob matching for patterns like "*.md" or ".claude/todo-*.md"
+    // Use glob matching for patterns like "*.md" or "docs/architecture/*.md"
     let full_pattern = format!("{project_dir}/{pattern}");
     glob::glob(&full_pattern)
         .map(|paths| paths.filter_map(|p| p.ok()).next().is_some())

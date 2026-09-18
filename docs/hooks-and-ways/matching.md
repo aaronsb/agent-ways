@@ -258,7 +258,7 @@ Unlike other ways, context-threshold triggers **repeat on every prompt** until t
 
 ### file-exists
 
-Checks for a glob pattern relative to the project directory. Fires once (standard marker) if any matching file exists. Useful for detecting project state - e.g., whether tracking files exist.
+Checks for a glob pattern relative to the project directory. Fires once (standard marker) if any matching file exists. Useful for detecting project state - e.g., whether a lockfile or a generated client exists.
 
 ### session-start
 

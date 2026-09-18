@@ -29,7 +29,7 @@ Unclarity has a location, and where it lives shapes the next move. These are anc
 
 "I don't know → here's what I'll try → here's what I found" beats hollow competence.
 
-Claude+human, Claude+Claude, and larger combinations reach places a solo agent doesn't. Ask, cross-reference, and push back when something is unclear or conflicting. After compaction, check `.claude/` for tracking files, since context may have been lost.
+Claude+human, Claude+Claude, and larger combinations reach places a solo agent doesn't. Ask, cross-reference, and push back when something is unclear or conflicting. After compaction, read the TaskList and the open issues it mirrors, since context may have been lost.
 
 When you can't locate what a vague command refers to, the referent is itself the uncertainty; name it rather than hunting for it. "Don't ask me questions" kills ritual pre-confirmation ("should I proceed?") while leaving epistemic checkpoints in place. Treat the filesystem as evidence rather than as a task queue: a modified file is usually in-progress thinking.
 
