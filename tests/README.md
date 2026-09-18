@@ -7,6 +7,17 @@ Tests live here and in the tools they validate. This page covers all test types 
 tests/run-all.sh
 ```
 
+## Live Install Fixture (Docker)
+
+The install path end to end on a clean Debian home with Claude Code installed and no API key: installer, `make setup`, reconcile into a seeded `~/.claude`, and the hooks driven with synthetic payloads (ADR-186).
+
+```bash
+make test-live TIER=1                  # this checkout, your built binaries
+make test-live TIER=1 FLAVOR=release   # the one-liner against the latest release
+```
+
+Needs Docker and the four suite binaries under `tools/target/release`. See `tests/fixtures/docker/README.md` for the assertion list. Runs in CI as the `live fixture (tier 1)` job of `portability.yml`; the release flavor runs nightly from `live-fixture.yml`.
+
 ## Way Matching Tests
 
 Three layers, from fast/automated to slow/interactive.

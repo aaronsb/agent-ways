@@ -16,6 +16,8 @@ on:
       - 'scripts/**'
       - 'settings.json'
       - '.gitattributes'
+      - 'tests/fixtures/docker/**'
+      - 'Makefile'
       - '.github/workflows/portability.yml'
   pull_request:
     paths:
@@ -24,6 +26,8 @@ on:
       - 'scripts/**'
       - 'settings.json'
       - '.gitattributes'
+      - 'tests/fixtures/docker/**'
+      - 'Makefile'
       - '.github/workflows/portability.yml'
   workflow_dispatch:
 
@@ -58,3 +62,24 @@ jobs:
 
       - name: Portability lint (incl. sessions_root agreement)
         run: bash scripts/check-portability.sh
+
+  # Live install fixture, tier 1 (ADR-186): a Debian container with Claude Code
+  # pinned, a seeded home, the installer run unattended, and the hooks driven
+  # with synthetic payloads. No API key. The branch flavor installs this
+  # commit's checkout with the four suite binaries built here, so the ways
+  # binary never comes off the network.
+  live-fixture:
+    name: live fixture (tier 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the suite binaries
+        run: cargo build --release --manifest-path tools/Cargo.toml -p ways -p ways-audit -p attend -p attend-chat
+
+      - name: Run tier 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make test-live TIER=1
