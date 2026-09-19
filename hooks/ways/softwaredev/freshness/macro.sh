@@ -124,7 +124,7 @@ adr_lifecycle() {
     [[ -n "$counts" ]] && counts="${counts}, "
     counts="${counts}${n_proposed} Proposed"
   fi
-  echo "📐 **ADR lifecycle:** ${counts} under \`docs/architecture\` ${age_note}."
+  echo "📐 **ADR lifecycle:** ${counts} under \`docs/architecture\`${age_note}."
 
   local label rows_var line date num title
   for label in Draft Proposed; do
