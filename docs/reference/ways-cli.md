@@ -560,7 +560,7 @@ These are used internally by hook scripts. You rarely need to call them directly
 |---------|---------|
 | `ways scan command` | `PreToolUse` hook — fires ways based on bash commands Claude runs |
 | `ways scan file` | `PreToolUse` hook — fires ways based on files Claude is editing |
-| `ways scan state` | `UserPromptSubmit` + `SessionStart` — evaluates context-threshold and file-exists triggers |
+| `ways scan state` | `UserPromptSubmit` + `SessionStart` — evaluates context-threshold, file-exists, and session-start triggers; `--query` carries the prompt so a harness envelope (Monitor notification, task hand-back, skill body) skips the scan |
 | `ways scan task` | `SubagentStart` hook — injects ways into teammate/subagent sessions |
 | `ways response-topics-path` | `PostToolUse` Stop hook — single source of truth for the response-topics state file location |
 | `ways sessions-root` | Hook scripts — verifies all hooks resolve the same sessions root path |

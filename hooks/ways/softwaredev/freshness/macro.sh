@@ -6,8 +6,10 @@
 #                    with no local branch carrying an update.
 #   adr_lifecycle  — ADRs parked in Draft or Proposed under docs/architecture.
 #
-# Tunable: WAYS_FRESHNESS_COMMITS (default 25), how far HEAD may advance past
-# the last doc-touching commit before doc_freshness fires.
+# Tunables: WAYS_FRESHNESS_COMMITS (default 25), how far HEAD may advance past
+# the last doc-touching commit before doc_freshness fires; WAYS_ADR_STALE_DAYS
+# (default 30), how old a Draft or Proposed ADR must be before adr_lifecycle
+# names it. A decision that is a week old is still being decided.
 #
 # The same shape applies to other derived or descriptive artifacts (lockfile vs
 # manifest, generated client vs schema). Add those as further functions here
@@ -94,6 +96,20 @@ adr_lifecycle() {
     ' 2>/dev/null)
   [[ -z "$rows" ]] && return 0
 
+  # Age gate. Measured over a month of sessions, the ungated notice fired 42
+  # times and produced no status change: a project with an active ADR practice
+  # always has something in Draft. Only decisions parked past the threshold
+  # are reported; undated ADRs count as parked.
+  # Dates compare lexically, so only ISO YYYY-MM-DD values are trusted; any
+  # other shape counts as parked, the same as no date at all.
+  local STALE_DAYS=${WAYS_ADR_STALE_DAYS:-30} cutoff age_note=""
+  cutoff=$(date -d "-${STALE_DAYS} days" +%F 2>/dev/null || date -v-"${STALE_DAYS}"d +%F 2>/dev/null)
+  if [[ "$cutoff" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    rows=$(printf '%s\n' "$rows" | awk -F'\t' -v c="$cutoff" '$2 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ || $2 < c')
+    [[ -z "$rows" ]] && return 0
+    age_note=" older than ${STALE_DAYS} days"
+  fi
+
   local draft proposed n_draft n_proposed
   draft=$(printf '%s\n' "$rows" | awk -F'\t' 'tolower($1) == "draft"' | sort -t"$(printf '\t')" -k2,2 -k3,3n)
   proposed=$(printf '%s\n' "$rows" | awk -F'\t' 'tolower($1) == "proposed"' | sort -t"$(printf '\t')" -k2,2 -k3,3n)
@@ -108,7 +124,7 @@ adr_lifecycle() {
     [[ -n "$counts" ]] && counts="${counts}, "
     counts="${counts}${n_proposed} Proposed"
   fi
-  echo "📐 **ADR lifecycle:** ${counts} under \`docs/architecture\`."
+  echo "📐 **ADR lifecycle:** ${counts} under \`docs/architecture\`${age_note}."
 
   local label rows_var line date num title
   for label in Draft Proposed; do

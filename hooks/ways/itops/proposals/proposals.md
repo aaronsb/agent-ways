@@ -1,6 +1,6 @@
 ---
-description: Structured proposals for human approval before executing high-risk operations, human-in-the-loop workflows
-vocabulary: proposal approval human loop review confirm dangerous operation lifecycle primitive structured request permission sign-off authorize before running
+description: itops change proposals, a structured approval request before a high-risk operation on production systems, with blast radius, rollback plan, approval lifecycle, and timeout escalation
+vocabulary: change proposal change request approval lifecycle approver blast radius rollback plan production operation destructive infrastructure change maintenance window change advisory board timeout escalation multi-party approval
 pattern: proposal.?(primitive|lifecycle|structure)|human.?in.?(the.?)?loop|approval.?workflow|operation.?proposal
 scope: agent, subagent
 refire: 0.15

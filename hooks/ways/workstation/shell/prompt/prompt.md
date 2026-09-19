@@ -1,6 +1,5 @@
 ---
-description: interactive shell prompt appearance — nerd fonts, oh-my-posh, powerline themes, PS1 customization
-vocabulary: oh-my-posh ohmyposh omp starship powerline nerd font MesloLGS FiraCode glyph icon prompt theme PS1 PROMPT montys jandedobbeleer
+pattern: oh-?my-?posh|\bomp\b|starship|powerlevel10k|\bp10k\b|nerd ?fonts?|powerline|\bps1=|\$ps1\b|ps1 prompt
 commands: oh-my-posh\b
 files: \.omp\.(json|yaml|toml)$
 scope: agent
