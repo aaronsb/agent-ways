@@ -1,6 +1,6 @@
 ---
-description: software releases — changelog, version bump, semantic versioning, tagging, promoting the same immutable build artifact that passed the gates, a rehearsed rollback, and landing the irreversible step last
-vocabulary: release changelog version bump semver tag publish ship major minor breaking artifact build digest immutable promote promotion passed ci gates rebuild rollback rehearse restore point irreversible destructive runbook
+description: software releases, the changelog, version bump, semantic versioning, tagging, publishing the same immutable artifact that passed CI, and a rehearsed rollback
+vocabulary: release releases changelog version bump semver semantic versioning git tag tagging release notes release candidate publish package registry artifact digest immutable build promote promotion rollback rehearsal restore point github release cargo publish npm publish
 refire: 0.15
 pattern: release|changelog|semver|git.?tag|release.?(notes|candidate)|npm.?publish|cargo.?publish
 pattern_keep: release  # measured (ADR-155 §5): load-bearing ('github release with binaries' g=0.46, keyword-only); noise floor-gated (median g=0.01)

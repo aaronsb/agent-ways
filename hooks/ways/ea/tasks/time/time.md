@@ -1,6 +1,6 @@
 ---
-description: time tracking, logging billable hours, time entries, invoicing, billing reports, end of day wrap-up
-vocabulary: time tracking log hours billable timesheet EOD end of day wrap up invoice billing client project entry weekly report
+description: logging billable hours to a timesheet, time entries by client and project, catching up on unlogged time, preparing an invoice
+vocabulary: timesheet timesheets billable hours time entry time entries unlogged time hours worked per client invoice invoicing client engagement kantata harvest toggl clockify
 scope: agent, subagent
 refire: 0.15
 ---

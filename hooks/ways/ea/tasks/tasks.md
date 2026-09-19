@@ -1,6 +1,6 @@
 ---
-description: personal task management, action items, obligations, task lifecycle, create update complete cleanup tasks
-vocabulary: task action item to-do obligation track create complete update overdue pending priority due date assign stale cleanup eisenhower
+description: the human's personal to-dos and obligations in their task manager app, due dates and reminders, marking items done, clearing stale ones
+vocabulary: to-do todos personal obligation errand chore commitment due date deadline overdue reminder nag done mark complete stale google tasks todoist things omnifocus eisenhower urgent important
 scope: agent, subagent
 refire: 0.15
 ---

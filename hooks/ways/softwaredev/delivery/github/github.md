@@ -1,9 +1,9 @@
 ---
-description: GitHub pull requests, issues, code review, CI checks, repository management
-vocabulary: pr pullrequest issue review checks ci label milestone fork repository upstream draft ship land merge squash rebase
-pattern: github|\ issue|pull.?request|\ pr\ |\ pr$|review.?(pr|comment)|merge.?request|ship.?(it|this|the)|land.?(it|this)|merge.?(it|this)|squash.?merge|rebase.?merge
+description: GitHub pull requests, issues, review comments, CI checks
+vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks
+pattern: github|\bissues?\b|pull.?requests?|\bprs?\b|review.?(pr|comment)|merge.?request
 commands: ^gh\ |^gh$
-refire: 0.1
+refire: 0.15
 macro: prepend
 scope: agent, subagent
 requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(jq:*)", "Bash(rm:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(tr:*)", "Bash(wc:*)"]
@@ -11,84 +11,39 @@ requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "
 <!-- epistemic: convention -->
 # GitHub Way
 
-## Pull Requests — Always
+## Pull Requests, Always
 
-We use PRs for all changes, including solo projects. A PR without reviewers still has value — it's a decision record, a CI gate, and muscle memory for when the project grows. Working solo without PRs is like doing research without keeping notes.
+Every change lands through a PR, solo projects included. A PR with no reviewer is still a decision record and a CI gate.
 
-- **Solo/pair**: Lightweight PRs — a title and a few bullets is enough
-- **Team**: Full PR with context, reviewers, and linked issues
-- **Team (3+ contributors)**: Consider enabling [Claude Code Review](https://claude.com/blog/code-review) — automated multi-agent PR analysis that catches bugs skimmed reviews miss. $15-25/review, Team/Enterprise plans, org spending caps available
+- **Solo or pair:** a title and a few bullets.
+- **Team:** context, reviewers, linked issues.
+- **Three or more contributors:** consider automated PR review such as Claude Code Review.
 
-## Code Review Before Merge
+## Review Before Merge
 
-After creating a PR, review before merging — don't wait to be asked. But *how hard* to review, and *whether a human reads first*, is the four-square decision in `delivery/merge`, not a fixed "always spawn one reviewer." At minimum dispatch a `code-reviewer` subagent; scale to a swarm for complex, high-blast-radius changes, and gate on operator approval when the work sets direction.
+Review after opening the PR without waiting to be asked. Review depth and whether a human reads first are the four-square decision in `delivery/merge`. At minimum dispatch a `code-reviewer` subagent; scale to a swarm for high-blast-radius changes, and gate on operator approval when the work sets direction. "Merge it" is a request for that review, so dispatch it (ADR-175). Merge strategy is a separate question and still gets asked.
 
-Asking to merge is asking for that review, so dispatch it rather than asking permission to (ADR-175). The four-square decides review *depth* and whether a human reads first — never whether a review happens. Merge *strategy* is a separate question and still gets asked, below.
+## Merge Strategy: Regular Merge by Default
 
-## Merge Strategy — Prefer Regular Merge
+Default to `gh pr merge --merge`. A branch with an ADR, an implementation, and review fixes carries a narrative that `git log` on main should keep. Squash only when the branch is single-purpose with commit noise worth dropping. Never rebase-merge unless asked; it rewrites authorship and timestamps.
 
-Default to a regular merge commit (`gh pr merge --merge`), not squash. When a branch has multiple meaningful commits — ADR, implementation, follow-up fixes, review responses — each carries its own narrative, and `git log` on main should preserve that story. Squashing flattens the history into one commit and loses the reasoning trail future readers would otherwise see.
-
-Ask before merging; don't choose a strategy unilaterally. If the user says "merge it" without specifying, offer: "regular merge or squash?"
-
-Squash is only the right call when the branch is single-purpose with commit noise you genuinely want to drop (typo fixes, WIP snapshots, lint autofix commits). If the commits each document a distinct step, keep them.
-
-Never rebase-merge unless the user explicitly asks — it rewrites authorship and timestamps in ways that surprise collaborators.
+When the user says "merge it" without a strategy, ask: regular merge or squash?
 
 ## Post-Merge Cleanup
 
-After merging a PR, always run the full cleanup: `git checkout main && git pull && git fetch --prune`, then `git branch -d <branch>`. Stale branches accumulate fast — clean up every time.
-
-## When User Mentions GitHub
-
-**Trigger words**: "issue", "PR", "pull request", "review", "comments", "checks"
-
-**If ambiguous, clarify**:
-- "Do you mean a GitHub issue, or a problem to investigate?"
-- "Should I check GitHub PRs/issues, or look in the code?"
-
-## Common Commands
-
-```bash
-# Finding issues
-gh issue list --search "keyword"
-gh issue list --label bug
-gh issue view 123
-
-# PR operations
-gh pr view                    # Current branch PR
-gh pr view 42                 # Specific PR
-gh pr checks                  # CI/test status
-gh pr view --comments         # Review comments
-
-# Creating PRs
-gh pr create --title "feat: Description" \
-  --body "## Changes\n- Item 1\n- Item 2"
-
-# ADR PRs
-gh pr create --title "ADR-003: Decision Title" \
-  --body "## Context\n\n## Decision\n\n## Consequences"
-```
-
-## What to Use
-- **PRs**: Always — lightweight for solo, thorough for teams
-- **Issues**: Optional, for requirements/discussions/bugs
-- **Labels**: Basic set (bug, enhancement, documentation)
+After every merge: `git checkout main && git pull && git fetch --prune`, then `git branch -d <branch>`.
 
 ## Repo Health
 
-The macro checks repository configuration (README, license, templates, branch protection, badges, etc.) and reports what's missing. If the report shows gaps:
-- Offer to help configure items the user has rights to fix
-- For items needing admin access, note them but don't push
-- When badges are missing, suggest adding shields.io badges below the README title (license, stars, version)
+The macro checks repository configuration (README, license, templates, branch protection, badges) and reports gaps. Offer to fix the items the user has rights to. Note the ones needing admin access without pushing. When badges are missing, suggest shields.io badges under the README title.
 
-## What to Avoid
-- Complex project boards
-- Elaborate milestone hierarchies
-- Over-labeled issues
+## Keep It Light
+
+Issues for requirements and bugs, a basic label set, no project boards or milestone hierarchies.
 
 ## See Also
 
 - delivery/commits(softwaredev) — PR quality depends on commit quality
 - delivery/merge(softwaredev) — the review-gate decision and landing an increment
+- delivery/issues(softwaredev) — issues mirrored into the session task list
 - adr(documentation) — reference ADRs in PR descriptions

@@ -1,6 +1,6 @@
 ---
-description: Using human's accounts, tools, and infrastructure responsibly — email inboxes, repos, APIs, communication channels as borrowed resources
-vocabulary: account inbox send publish create delete access permission borrow resource verify contact safe unsent attributed consequences behalf someone wrong
+description: sending email, posting chat messages, pushing commits, or changing calendar events through the human's own accounts, where the action carries their name and cannot be unsent
+vocabulary: send this email post this message reply as me on my behalf from my account my inbox my calendar push to my repo as the human their identity their name attributed unsent recipient verify the address bounce borrowed access
 scope: agent, subagent
 refire: 0.15
 ---
