@@ -10,7 +10,7 @@ refire: 0.15
 <!-- epistemic: heuristic -->
 # Freshness Way
 
-A README describes the code, a lockfile derives from a manifest, a generated client derives from a schema. Nothing fails when they fall behind. The note above reports two signals: documentation whose git history lags HEAD by many commits with no branch carrying an update, and ADRs parked in Draft or Proposed past an age threshold. Silence means both are keeping pace.
+A README describes the code, a lockfile derives from a manifest, a generated client derives from a schema. Nothing fails when they fall behind. When a note appears above this text, it reports one of two signals: documentation whose git history lags HEAD by many commits with no branch carrying an update, and ADRs parked in Draft or Proposed past an age threshold. Silence means both are keeping pace.
 
 The check reads history. It sees the abandoned artifact and misses the one that is still edited yet wrong: a stale count, a dead link, a list that no longer matches the code. When you are in one of these files, reconcile the parts that assert facts against the current source.
 

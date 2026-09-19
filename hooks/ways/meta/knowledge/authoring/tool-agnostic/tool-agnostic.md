@@ -1,5 +1,5 @@
 ---
-files: \.claude/(hooks/)?ways/.*\.md$
+files: (\.claude/ways|hooks/ways)/.*\.md$
 scope: agent, subagent
 refire: 0.15
 ---

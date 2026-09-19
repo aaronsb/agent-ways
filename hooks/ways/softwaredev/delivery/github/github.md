@@ -1,7 +1,7 @@
 ---
 description: GitHub pull requests, issues, review comments, CI checks
 vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks
-pattern: github|\bissues?\b|pull.?requests?|\bprs?\b|review.?(pr|comment)|merge.?request
+pattern: github|\bgh (pr|issue)\b|issue #?\d+|github issues?|pull.?requests?|\bprs?\b|review.?(pr|comment)|merge.?request
 commands: ^gh\ |^gh$
 refire: 0.15
 macro: prepend
@@ -39,7 +39,7 @@ The macro checks repository configuration (README, license, templates, branch pr
 
 ## Keep It Light
 
-Issues for requirements and bugs, a basic label set, no project boards or milestone hierarchies.
+Issues for requirements and bugs, a basic label set, no project boards or milestone hierarchies. When "issue" could mean a GitHub issue or a problem to investigate, ask which.
 
 ## See Also
 

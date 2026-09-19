@@ -1,5 +1,5 @@
 ---
-pattern: oh-?my-?posh|\bomp\b|starship|powerlevel10k|\bp10k\b|nerd ?fonts?|powerline|\bps1\b
+pattern: oh-?my-?posh|\bomp\b|starship|powerlevel10k|\bp10k\b|nerd ?fonts?|powerline|\bps1=|\$ps1\b|ps1 prompt
 commands: oh-my-posh\b
 files: \.omp\.(json|yaml|toml)$
 scope: agent

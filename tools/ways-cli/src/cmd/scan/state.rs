@@ -23,15 +23,11 @@ pub fn state(
     // A UserPromptSubmit that carries a harness envelope rather than an
     // operator turn does not advance the session's guidance. Measured over a
     // month of transcripts, 154 of 470 Prose Check fires landed on Monitor
-    // and task notifications where no human was reading the reply. The
-    // prompt lane already skips these; the state lane skips them here.
-    if hook_event == "UserPromptSubmit" {
-        if let Some(q) = query {
-            if super::is_system_envelope(q) {
-                return Ok(());
-            }
-        }
-    }
+    // and task notifications where no human was reading the reply. Only the
+    // context-threshold arm is gated: the core safety net and session-start
+    // ways (the teams way reaches a teammate on its first prompt, which may
+    // be harness-wrapped) still run.
+    let envelope_turn = is_envelope_turn(hook_event, query);
 
     let project_dir = project
         .map(|s| s.to_string())
@@ -70,7 +66,7 @@ pub fn state(
 
         let triggered = match trigger_type {
             "context-threshold" => {
-                evaluate_context_threshold(way.threshold as u64, transcript)
+                !envelope_turn && evaluate_context_threshold(way.threshold as u64, transcript)
             }
             "file-exists" => {
                 if let Some(ref pattern) = way.trigger_path {
@@ -116,6 +112,12 @@ pub fn state(
     Ok(())
 }
 
+/// True when the invoking prompt is a harness envelope on a UserPromptSubmit,
+/// so context-threshold ways should not ride it.
+fn is_envelope_turn(hook_event: &str, query: Option<&str>) -> bool {
+    hook_event == "UserPromptSubmit" && query.is_some_and(super::is_system_envelope)
+}
+
 fn evaluate_context_threshold(threshold_pct: u64, transcript: Option<&str>) -> bool {
     // Guard: a missing or 0 threshold on a context-threshold trigger is a bug
     // (would fire on every non-empty transcript). Caller should have set a
@@ -149,4 +151,23 @@ fn evaluate_file_exists(pattern: &str, project_dir: &str) -> bool {
 
 fn capture_show_core(session_id: &str) -> String {
     crate::cmd::show::core(session_id).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod envelope_gate_tests {
+    use super::is_envelope_turn;
+
+    #[test]
+    fn notification_turns_do_not_carry_threshold_ways() {
+        assert!(is_envelope_turn("UserPromptSubmit", Some("<task-notification> <task-id>x</task-id>")));
+        assert!(is_envelope_turn("UserPromptSubmit", Some("  [attend] 2 peer message(s)")));
+        assert!(is_envelope_turn("UserPromptSubmit", Some("base directory for this skill: /x")));
+    }
+
+    #[test]
+    fn operator_turns_and_other_events_are_untouched() {
+        assert!(!is_envelope_turn("UserPromptSubmit", Some("let's wrap up")));
+        assert!(!is_envelope_turn("UserPromptSubmit", None));
+        assert!(!is_envelope_turn("SessionStart", Some("<task-notification>")));
+    }
 }

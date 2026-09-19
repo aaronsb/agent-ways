@@ -100,11 +100,14 @@ adr_lifecycle() {
   # times and produced no status change: a project with an active ADR practice
   # always has something in Draft. Only decisions parked past the threshold
   # are reported; undated ADRs count as parked.
-  local STALE_DAYS=${WAYS_ADR_STALE_DAYS:-30} cutoff
+  # Dates compare lexically, so only ISO YYYY-MM-DD values are trusted; any
+  # other shape counts as parked, the same as no date at all.
+  local STALE_DAYS=${WAYS_ADR_STALE_DAYS:-30} cutoff age_note=""
   cutoff=$(date -d "-${STALE_DAYS} days" +%F 2>/dev/null || date -v-"${STALE_DAYS}"d +%F 2>/dev/null)
-  if [[ -n "$cutoff" ]]; then
-    rows=$(printf '%s\n' "$rows" | awk -F'\t' -v c="$cutoff" '$2 == "9999-99-99" || $2 < c')
+  if [[ "$cutoff" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    rows=$(printf '%s\n' "$rows" | awk -F'\t' -v c="$cutoff" '$2 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ || $2 < c')
     [[ -z "$rows" ]] && return 0
+    age_note=" older than ${STALE_DAYS} days"
   fi
 
   local draft proposed n_draft n_proposed
@@ -121,7 +124,7 @@ adr_lifecycle() {
     [[ -n "$counts" ]] && counts="${counts}, "
     counts="${counts}${n_proposed} Proposed"
   fi
-  echo "📐 **ADR lifecycle:** ${counts} under \`docs/architecture\` older than ${STALE_DAYS} days."
+  echo "📐 **ADR lifecycle:** ${counts} under \`docs/architecture\` ${age_note}."
 
   local label rows_var line date num title
   for label in Draft Proposed; do

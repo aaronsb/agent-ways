@@ -16,7 +16,12 @@ HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // "SessionStart"')
 # On UserPromptSubmit the payload carries the prompt. The binary uses it only
 # to recognise harness envelopes (Monitor notifications, task hand-backs, skill
 # bodies) and skip the scan, so state-triggered ways ride operator turns only.
+# Only the leading prefix travels: the predicate reads the first tag, and a
+# pasted log or persisted-output blob would otherwise overflow argv (E2BIG),
+# which the skew guard below would misread as an old binary.
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' | tr '[:upper:]' '[:lower:]')
+PROMPT="${PROMPT#"${PROMPT%%[![:space:]]*}"}"
+PROMPT="${PROMPT:0:96}"
 
 export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 
