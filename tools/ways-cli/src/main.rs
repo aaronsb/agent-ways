@@ -599,6 +599,12 @@ enum ScanCommand {
         /// Transcript path (for context-threshold)
         #[arg(long)]
         transcript: Option<String>,
+        /// The submitted prompt, when the invoking event is UserPromptSubmit.
+        /// A harness envelope (Monitor notification, task hand-back, skill
+        /// body) is not an operator turn, so the state lane skips it the way
+        /// the prompt lane does.
+        #[arg(long)]
+        query: Option<String>,
         /// Hook event that invoked this scan (recorded as the envelope's
         /// `hookEventName`; the `hookSpecificOutput` shape itself is
         /// canonical for every event). When omitted, falls back to
@@ -859,7 +865,7 @@ fn run() -> Result<()> {
                 }
                 cmd::scan::task(&query, &session, project.as_deref(), team.as_deref())
             }
-            ScanCommand::State { session, project, transcript, hook_event } => {
+            ScanCommand::State { session, project, transcript, query, hook_event } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
                     return Ok(());
                 }
@@ -871,7 +877,7 @@ fn run() -> Result<()> {
                     );
                     "SessionStart".to_string()
                 });
-                cmd::scan::state(&session, project.as_deref(), transcript.as_deref(), &event)
+                cmd::scan::state(&session, project.as_deref(), transcript.as_deref(), &event, query.as_deref())
             }
         },
         Commands::Show { what } => match what {

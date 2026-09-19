@@ -18,7 +18,21 @@ pub fn state(
     project: Option<&str>,
     transcript: Option<&str>,
     hook_event: &str,
+    query: Option<&str>,
 ) -> Result<()> {
+    // A UserPromptSubmit that carries a harness envelope rather than an
+    // operator turn does not advance the session's guidance. Measured over a
+    // month of transcripts, 154 of 470 Prose Check fires landed on Monitor
+    // and task notifications where no human was reading the reply. The
+    // prompt lane already skips these; the state lane skips them here.
+    if hook_event == "UserPromptSubmit" {
+        if let Some(q) = query {
+            if super::is_system_envelope(q) {
+                return Ok(());
+            }
+        }
+    }
+
     let project_dir = project
         .map(|s| s.to_string())
         .unwrap_or_else(default_project);

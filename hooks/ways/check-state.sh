@@ -13,6 +13,10 @@ AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(echo "$INPUT" | jq -r '.cwd // empty')}"
 HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // "SessionStart"')
+# On UserPromptSubmit the payload carries the prompt. The binary uses it only
+# to recognise harness envelopes (Monitor notifications, task hand-backs, skill
+# bodies) and skip the scan, so state-triggered ways ride operator turns only.
+PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' | tr '[:upper:]' '[:lower:]')
 
 export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 
@@ -20,4 +24,13 @@ export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 ARGS=(--session="$SESSION_ID" --project="$PROJECT_DIR" --hook-event="$HOOK_EVENT")
 [[ -n "$TRANSCRIPT" ]] && ARGS+=(--transcript="$TRANSCRIPT")
 
+# Deploy-order skew guard, as in check-prompt.sh: projected hooks newer than the
+# installed binary would make clap reject --query with a non-zero exit, which
+# UserPromptSubmit reads as "block the prompt". Retry without the flag instead.
+if [[ -n "$PROMPT" ]]; then
+  if OUTPUT=$("${HOME}/.claude/bin/ways" scan state "${ARGS[@]}" --query="$PROMPT" 2>/dev/null); then
+    [[ -n "$OUTPUT" ]] && printf '%s\n' "$OUTPUT"
+    exit 0
+  fi
+fi
 "${HOME}/.claude/bin/ways" scan state "${ARGS[@]}"
