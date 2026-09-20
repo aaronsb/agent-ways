@@ -102,6 +102,18 @@ pub fn write_queued_scan_mark(session_id: &str, ts: &str) {
     let _ = std::fs::write(path, ts);
 }
 
+/// Path to the per-session, per-agent PreToolUse stash (spike for #528).
+///
+/// PreToolUse `additionalContext` is not delivered to the model (upstream
+/// anthropics/claude-code#19432), so the Bash and file lanes park their matched
+/// bodies here and the next `UserPromptSubmit` drains them. Keyed by agent id
+/// for the same reason way markers are: a subagent's PreToolUse fires must not
+/// drain into the parent's prompt.
+pub fn pretool_stash_path(session_id: &str) -> PathBuf {
+    let agent_id = current_agent_id().unwrap_or_else(|| "main".to_string());
+    session_dir(session_id).join(format!("pretool-stash.{agent_id}.jsonl"))
+}
+
 /// Path to the per-session response-topics state file written by the Stop
 /// hook (`check-response.sh`) and consumed on the next turn by
 /// `check-prompt.sh` to enrich prompt matching with topics from Claude's

@@ -16,7 +16,7 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None, None, None)
+    way_scored(id, session_id, trigger, None, None, None, None)
 }
 
 /// Whether a resolved context actually detected its window, rather than falling
@@ -79,6 +79,7 @@ pub fn way_scored(
     fire_score: Option<f64>,
     matched_span: Option<&str>,
     surface: Option<&str>,
+    delivery: Option<&str>,
 ) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
@@ -271,6 +272,11 @@ pub fn way_scored(
     if let Some(t) = team {
         log_fields.push(("team", t));
     }
+    // #528 spike: how the body reaches the model. Absent means the emitting
+    // hook's own stdout; `stash` means parked for the next UserPromptSubmit.
+    if let Some(d) = delivery {
+        log_fields.push(("delivery", d.to_string()));
+    }
     let refs: Vec<(&str, &str)> = log_fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
     session::log_event(&refs);
 
@@ -279,7 +285,13 @@ pub fn way_scored(
 
 // ── ways show check ─────────────────────────────────────────────
 
-pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Result<String> {
+pub fn check(
+    id: &str,
+    session_id: &str,
+    trigger: &str,
+    match_score: f64,
+    delivery: Option<&str>,
+) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
 
@@ -365,6 +377,8 @@ pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Res
         ("scope", &scope),
         ("project", &project_dir),
         ("session", session_id),
+        // #528 spike: delivery path, as on `way_fired`. Empty when direct.
+        ("delivery", delivery.unwrap_or("")),
     ]);
 
     Ok(output)

@@ -887,7 +887,7 @@ fn run() -> Result<()> {
                 Ok(())
             }
             ShowCommand::Check { id, session, trigger, score } => {
-                let out = cmd::show::check(&id, &session, &trigger, score)?;
+                let out = cmd::show::check(&id, &session, &trigger, score, None)?;
                 if !out.is_empty() { print!("{out}"); }
                 Ok(())
             }

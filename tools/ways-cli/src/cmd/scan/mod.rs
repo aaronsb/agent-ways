@@ -8,6 +8,7 @@ mod late_interaction;
 mod lookbehind;
 mod reduce;
 mod scoring;
+mod stash;
 mod state;
 pub(crate) use scoring::{batch_embed_score, batch_embed_score_with, sibling_corpus};
 
@@ -111,11 +112,28 @@ pub fn prompt(
     // prompt, wrapped in a `<task-notification>` envelope. Its body is a
     // sensor line or a peer message, so it is not operator intent (ADR-161
     // scopes matching to operator text). Bump the epoch and skip the scan.
+    //
+    // #528 spike: drain the PreToolUse stash on every UserPromptSubmit, envelope
+    // or not. The parked bodies are guidance for the model's next work, not a
+    // reply to the operator, so a Monitor wake is as good a carrier as a typed
+    // turn — and holding them back would only widen the one-turn lag further.
+    let deferred = stash::render(&stash::drain(session_id));
     if is_system_envelope(query) {
         session::bump_epoch(session_id);
+        if !deferred.is_empty() {
+            emit_hook_context("UserPromptSubmit", &deferred);
+        }
         return Ok(());
     }
-    scan_prompt_surface(query, session_id, project, response_context, true, "UserPromptSubmit")
+    scan_prompt_surface(
+        query,
+        session_id,
+        project,
+        response_context,
+        true,
+        "UserPromptSubmit",
+        &deferred,
+    )
 }
 
 /// ADR-161: the queued-message scan lane. A message the operator types while the
@@ -155,7 +173,7 @@ pub fn messages(
     // Aggregate the burst into one surface; lowercase to match the prompt lane's
     // keyword expectations (check-prompt.sh lowercases the prompt).
     let surface = scan.fragments.join("\n").to_lowercase();
-    scan_prompt_surface(&surface, session_id, project, None, false, "PostToolUse")
+    scan_prompt_surface(&surface, session_id, project, None, false, "PostToolUse", "")
 }
 
 /// Result of selecting queued operator messages from a transcript: the operator
@@ -238,6 +256,9 @@ fn scan_prompt_surface(
     response_context: Option<&str>,
     bump_epoch: bool,
     hook_event: &str,
+    // #528 spike: already-rendered PreToolUse stash content to lead the
+    // envelope with. Empty when nothing was parked (or on the queued lane).
+    preface: &str,
 ) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
@@ -286,6 +307,10 @@ fn scan_prompt_surface(
     let mut prompt_only_scores: Option<EmbedScores> = None;
 
     let mut context = String::new();
+    if !preface.is_empty() {
+        context.push_str(preface);
+        context.push_str("\n\n");
+    }
 
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
@@ -338,7 +363,7 @@ fn scan_prompt_surface(
 
         match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
-                let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref(), Some(reduced.as_str()));
+                let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref(), Some(reduced.as_str()), None);
                 if !out.is_empty() {
                     context.push_str(&out);
                     context.push_str("\n\n");
@@ -501,7 +526,9 @@ pub fn command(
     let scope = session::detect_scope(session_id);
     let candidates = collect_candidates(&project_dir);
 
-    let mut context = String::new();
+    // #528 spike: PreToolUse stdout never reaches the model, so matched bodies
+    // are parked for the next UserPromptSubmit instead of printed here.
+    let mut stashed: Vec<stash::Entry> = Vec::new();
 
     // One embed pass for the whole surface (ways and checks share it).
     // ADR-130: cap embed input. Heredoc bodies (gh pr create --body
@@ -546,9 +573,9 @@ pub fn command(
             });
 
         if let Some(span) = matched_span {
-            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()), None);
+            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()), None, Some("stash"));
             if !out.is_empty() {
-                context.push_str(&out);
+                stashed.push(stash::Entry::way(&way.id, "bash", out));
             }
             continue;
         }
@@ -578,9 +605,9 @@ pub fn command(
             None
         };
         if let Some((channel, score)) = fired {
-            let out = capture_show_way(&way.id, session_id, channel, score, None, Some(reduced_for_embed.as_str()));
+            let out = capture_show_way(&way.id, session_id, channel, score, None, Some(reduced_for_embed.as_str()), Some("stash"));
             if !out.is_empty() {
-                context.push_str(&out);
+                stashed.push(stash::Entry::way(&way.id, channel, out));
             }
         }
     }
@@ -609,23 +636,16 @@ pub fn command(
         }
 
         if match_score > 0.0 {
-            let out = capture_show_check(&check.id, session_id, "bash", match_score);
+            let out = capture_show_check(&check.id, session_id, "bash", match_score, Some("stash"));
             if !out.is_empty() {
-                context.push_str(&out);
+                stashed.push(stash::Entry::check(&check.id, "bash", out));
             }
         }
     }
 
-    // Output JSON for PreToolUse
-    if !context.is_empty() {
-        println!(
-            "{}",
-            serde_json::json!({
-                "decision": "approve",
-                "additionalContext": context
-            })
-        );
-    }
+    // Park for the next UserPromptSubmit (see `stash`). Nothing on stdout: the
+    // former `{"decision":"approve","additionalContext":...}` was never delivered.
+    stash::push(session_id, &stashed)?;
 
     Ok(())
 }
@@ -641,7 +661,8 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
     let scope = session::detect_scope(session_id);
     let candidates = collect_candidates(&project_dir);
 
-    let mut context = String::new();
+    // #528 spike: parked for the next UserPromptSubmit, as in `command`.
+    let mut stashed: Vec<stash::Entry> = Vec::new();
 
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
@@ -653,9 +674,9 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
 
         if let Some(ref files_pattern) = way.files {
             if let Some(span) = regex_span(files_pattern, filepath) {
-                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()), None);
+                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()), None, Some("stash"));
                 if !out.is_empty() {
-                    context.push_str(&out);
+                    stashed.push(stash::Entry::way(&way.id, "file", out));
                 }
             }
         }
@@ -688,22 +709,14 @@ pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<(
         }
 
         if match_score > 0.0 {
-            let out = capture_show_check(&check.id, session_id, "file", match_score);
+            let out = capture_show_check(&check.id, session_id, "file", match_score, Some("stash"));
             if !out.is_empty() {
-                context.push_str(&out);
+                stashed.push(stash::Entry::check(&check.id, "file", out));
             }
         }
     }
 
-    if !context.is_empty() {
-        println!(
-            "{}",
-            serde_json::json!({
-                "decision": "approve",
-                "additionalContext": context
-            })
-        );
-    }
+    stash::push(session_id, &stashed)?;
 
     Ok(())
 }
