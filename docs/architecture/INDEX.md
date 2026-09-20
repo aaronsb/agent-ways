@@ -102,6 +102,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-184](./system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md) | Installation and activation are separate states: targets as the unit of activation | Accepted |
 | [ADR-185](./system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | Accepted |
 | [ADR-186](./system/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
+| [ADR-188](./system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | Proposed |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
