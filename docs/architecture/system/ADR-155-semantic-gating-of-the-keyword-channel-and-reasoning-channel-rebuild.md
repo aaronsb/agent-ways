@@ -10,6 +10,7 @@ related:
   - 130
   - 134
   - 153
+superseded_by: ADR-188#3
 ---
 
 # ADR-155: Semantic gating of the keyword channel and reasoning-channel rebuild
