@@ -69,6 +69,8 @@ Two adjacent threads shape the parameters. Issues #532 and #533 add structured e
 | Signal files | appended by acting frontends | append |
 | Channel membership | acting frontends (`join`, `leave`) | atomic file write, as the CLI does today |
 
+12. **One state contract, then a trial.** The MCP verbs and the CLI message verbs keep one state contract: the same verb against the same disk state leaves the same disk state, whichever frontend ran it. A contract test runs each verb through both frontends against one seeded state directory and diffs the result. Once implemented, agent sessions switch to the MCP frontend for daily use while the CLI message verbs stay in the binary for comparison. What follows the trial is a later decision on the evidence of use; this ADR does not remove the CLI message verbs.
+
 Reversibility: reversible. The CLI frontend stays whole. Removing the MCP frontend deletes the `mcp` subcommand and the settings entries. The library extraction in item 3 stands on its own merits and would remain.
 
 ```mermaid
