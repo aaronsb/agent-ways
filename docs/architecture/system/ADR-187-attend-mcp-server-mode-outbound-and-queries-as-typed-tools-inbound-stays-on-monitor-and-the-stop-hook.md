@@ -36,7 +36,7 @@ Two adjacent threads shape the parameters. Issues #532 and #533 add structured e
 
 ## Decision
 
-**Attend runs as two pieces. Inbound stays on the Monitor-hosted sensor loop and the Stop-hook drain. Outbound and queries become typed tools on an MCP server that shares one library with the CLI.**
+**Attend runs as two roles. The perceiving role, the Monitor-hosted sensor loop and the Stop-hook drain, owns every piece of mutable session state. The acting role, the CLI message verbs and the MCP server, owns none and is a client of it. Outbound and queries become typed tools on an MCP server that shares one library with the CLI.**
 
 1. **The split is forced by the protocol.** Under the 2026-07-28 revision a server can answer a client request and can notify the host of a changed list or resource. Neither reaches the model mid-turn or wakes an idle session. The two conduits ADR-172 fixed therefore remain the only inbound paths, unchanged in mechanism and in contract. The MCP server carries the direction the protocol supports: the model calling out.
 
@@ -57,6 +57,17 @@ Two adjacent threads shape the parameters. Issues #532 and #533 add structured e
 9. **Envelope fields are typed parameters.** `send` and `reply` take `message: string` and the optional `channel`, `to`, `broadcast`, and `on_behalf_of`. `from_kind` and `from_id` are set by the server from the connection identity and are never parameters, per #532. `inbox` and `peers` results carry the same fields as typed members of each row. The field semantics, the `to` grammar, and the wire format belong to the #532/#533 design note; this ADR fixes only that the fields cross the tool boundary as schema.
 
 10. **The contract statement changes.** "CLI is the contract" becomes: the attend tool surface is the contract, meaning the MCP tools where the server is connected and the CLI verbs everywhere; attend-owned paths remain implementation detail.
+
+11. **Ownership by role.** The sensor loop is the one process per session that holds the ADR-129 duplicate lock, registers and touches the instance record, writes the seen-set, writes the last-inbound record, and supplies the pid that liveness checks. An acting frontend, whether a one-shot `attend send` or the resident `attend mcp`, takes none of these. It appends signal files, writes channel membership on `join` and `leave`, and reads everything else. Identity flows one way: the sensor loop derives and registers the tuple, an acting frontend reads it back through the ADR-171 lookup, and `send` and `reply` refuse when no registration exists rather than derive a tuple of their own. A session without the sensor loop cannot send, as it already cannot receive. The two processes therefore never contend for a lock, never register twice, and never disagree on who the session is. The library extraction in item 3 follows the same rule: verb bodies return values and frontends print, so nothing in the shared code writes to the stdout an MCP transport owns.
+
+| State | Owner | Acting frontends |
+|---|---|---|
+| Duplicate lock (ADR-129) | sensor loop | never taken |
+| Instance record and liveness pid | sensor loop | read |
+| Seen-set (ADR-172) | sensor loop and drain | read (`inbox`) |
+| Last-inbound record | delivering conduit | read (`reply`) |
+| Signal files | appended by acting frontends | append |
+| Channel membership | acting frontends (`join`, `leave`) | atomic file write, as the CLI does today |
 
 Reversibility: reversible. The CLI frontend stays whole. Removing the MCP frontend deletes the `mcp` subcommand and the settings entries. The library extraction in item 3 stands on its own merits and would remain.
 
