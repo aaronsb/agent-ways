@@ -31,12 +31,21 @@ export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 ARGS=(--command="$CMD" --description="$DESC" --session="$SESSION_ID" --project="$PROJECT_DIR")
 
 # Deploy-order skew guard, as in check-prompt.sh: projected hooks newer than
-# the installed binary make clap reject --transcript with a non-zero exit.
-# Retry without the flag rather than surfacing a usage error on every call.
+# the installed binary make clap reject --transcript with a usage error
+# (exit 2), which PreToolUse would read as "block the tool". Retry without
+# the flag on exit 2 only: any other status means the scan ran (and stamped
+# its ways), so it is passed through as-is, stderr included, rather than
+# re-run.
 if [[ -n "$TRANSCRIPT" ]]; then
-  if OUTPUT=$("${HOME}/.claude/bin/ways" scan command "${ARGS[@]}" --transcript="$TRANSCRIPT" 2>/dev/null); then
+  ERR=$(mktemp)
+  OUTPUT=$("${HOME}/.claude/bin/ways" scan command "${ARGS[@]}" --transcript="$TRANSCRIPT" 2>"$ERR")
+  STATUS=$?
+  if [[ $STATUS -ne 2 ]]; then
+    cat "$ERR" >&2
+    rm -f "$ERR"
     [[ -n "$OUTPUT" ]] && printf '%s\n' "$OUTPUT"
-    exit 0
+    exit $STATUS
   fi
+  rm -f "$ERR"
 fi
 "${HOME}/.claude/bin/ways" scan command "${ARGS[@]}"

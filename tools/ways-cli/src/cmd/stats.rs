@@ -48,6 +48,9 @@ struct Event {
     #[allow(dead_code)]
     team: String,
     session: String,
+    /// The agent the fire was delivered to (`main` or a subagent id). Empty
+    /// when the row predates the field.
+    agent_id: String,
     /// The model id stamped at fire time. `None` when the row predates the
     /// field; the literal `unknown` when stamping ran and found no model.
     model: Option<String>,
@@ -103,6 +106,7 @@ fn parse_events(content: &str, days: Option<u32>, project_filter: Option<&str>) 
                 project,
                 team: v["team"].as_str().unwrap_or("").to_string(),
                 session: v["session"].as_str().unwrap_or("").to_string(),
+                agent_id: v["agent_id"].as_str().unwrap_or("").to_string(),
                 model: v["model"].as_str().map(str::to_string),
                 check: v["check"].as_str().unwrap_or("").to_string(),
                 distance: v["distance"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0),
@@ -168,16 +172,16 @@ fn way_model_split(events: &[Event]) -> HashMap<&str, HashMap<&str, u32>> {
 /// fires ways under `keyword` and the `semantic:embedding:*` /
 /// `semantic:late-interaction:*` channels (the queued-message lane, which runs
 /// the same matcher on PostToolUse, is folded in with it); the bash lane under
-/// `bash` and `semantic:bash:*`. Everything else is its own lane, named by the
-/// segment before the first colon (`file`, `state`, `attend`, ...).
+/// `semantic:bash:*`. Everything else is its own lane, named by the segment
+/// before the first colon: `bash`, `file`, `state`, `attend:*`, and the one
+/// legacy `bash:semantic:en` spelling in early history all resolve that way.
 fn trigger_channel(trigger: &str) -> &str {
     match trigger {
-        "keyword" | "prompt" => "prompt",
+        "keyword" => "prompt",
         t if t.starts_with("semantic:embedding") || t.starts_with("semantic:late-interaction") => {
             "prompt"
         }
-        "bash" => "bash",
-        t if t.starts_with("semantic:bash") || t.starts_with("bash:") => "bash",
+        t if t.starts_with("semantic:bash") => "bash",
         t => t.split(':').next().unwrap_or(t),
     }
 }
@@ -191,19 +195,24 @@ struct InvocationLoad {
 }
 
 /// How many ways each hook invocation fired, per channel. An invocation is
-/// approximated as the set of `way_fired` rows sharing (session, timestamp,
-/// channel): the log carries no invocation id, and one `ways` process writes
-/// all its fires within the same second. A slow invocation that straddles a
-/// second boundary counts as two, so the figures lean low, never high.
+/// approximated as the set of `way_fired` rows sharing (session, agent,
+/// timestamp, channel): the log carries no invocation id, and one `ways`
+/// process writes all its fires within the same second. The agent is in the
+/// key because subagent hooks report the parent's session id, so parallel
+/// agents firing in the same second would otherwise merge into one oversized
+/// invocation. Two residual errors pull in opposite directions: a slow
+/// invocation that straddles a second boundary counts as two (low), and rows
+/// written before `agent_id` existed still merge parallel agents (high), so
+/// the tail on historical data is an upper bound.
 fn ways_per_invocation(events: &[Event]) -> Vec<(String, InvocationLoad)> {
-    let mut per_invocation: HashMap<(&str, &str, &str), u32> = HashMap::new();
+    let mut per_invocation: HashMap<(&str, &str, &str, &str), u32> = HashMap::new();
     for e in events.iter().filter(|e| e.event == "way_fired") {
         *per_invocation
-            .entry((&e.session, &e.ts, trigger_channel(&e.trigger)))
+            .entry((&e.session, &e.agent_id, &e.ts, trigger_channel(&e.trigger)))
             .or_insert(0) += 1;
     }
     let mut by_channel: BTreeMap<&str, InvocationLoad> = BTreeMap::new();
-    for ((_, _, channel), n) in per_invocation {
+    for ((_, _, _, channel), n) in per_invocation {
         let load = by_channel.entry(channel).or_default();
         load.invocations += 1;
         let idx = (n as usize).clamp(1, INVOCATION_TAIL) - 1;
@@ -445,7 +454,7 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
             ]);
         }
         t.print();
-        println!("  An invocation is the way_fired rows sharing session, second, and channel.");
+        println!("  An invocation is the way_fired rows sharing session, agent, second, and channel.");
         println!();
     }
 
@@ -547,6 +556,9 @@ mod tests {
         assert_eq!(trigger_channel("semantic:late-interaction:en"), "prompt");
         assert_eq!(trigger_channel("bash"), "bash");
         assert_eq!(trigger_channel("semantic:bash:en"), "bash");
+        // One early row in local history spells the bash semantic channel this
+        // way; the first-segment fallback lands it with the rest of the lane.
+        assert_eq!(trigger_channel("bash:semantic:en"), "bash");
         assert_eq!(trigger_channel("file"), "file");
         assert_eq!(trigger_channel("state"), "state");
         assert_eq!(trigger_channel("attend:context-pressure"), "attend");
@@ -554,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn ways_per_invocation_groups_by_session_second_and_channel() {
+    fn ways_per_invocation_groups_by_session_agent_second_and_channel() {
         // s1 at 10:00:00 fired two ways on the prompt lane (keyword + semantic)
         // in one invocation; s2 fired one way on bash. A second-later fire in
         // s1 is a separate invocation.
@@ -569,6 +581,29 @@ mod tests {
         assert_eq!(bash.invocations, 1, "the redisclosure is not a way_fired row");
         assert_eq!(bash.buckets, [1, 0, 0, 0]);
         assert_eq!(bash.max, 1);
+    }
+
+    #[test]
+    fn parallel_agents_under_one_session_are_separate_invocations() {
+        // Subagent hooks report the parent's session id. Three agents each
+        // firing two bash ways in the same second are three invocations of
+        // two, not one invocation of six.
+        let rows: Vec<String> = ["main", "agent-a", "agent-b"]
+            .iter()
+            .flat_map(|agent| {
+                (0..2).map(move |i| {
+                    format!(
+                        r#"{{"ts":"2026-09-01T12:00:00Z","event":"way_fired","way":"d/w{i}","trigger":"bash","session":"parent","agent_id":"{agent}"}}"#
+                    )
+                })
+            })
+            .collect();
+        let refs: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let loads = ways_per_invocation(&events(&refs));
+        let bash = &loads.iter().find(|(c, _)| c == "bash").unwrap().1;
+        assert_eq!(bash.invocations, 3);
+        assert_eq!(bash.buckets, [0, 3, 0, 0]);
+        assert_eq!(bash.max, 2);
     }
 
     #[test]
