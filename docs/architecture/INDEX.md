@@ -72,7 +72,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
 | [ADR-153](./system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) | Session-introspection substrate — correlating fired ways to turns | Accepted |
 | [ADR-154](./system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) | `ways introspect` — one model, three front-ends | Accepted |
-| [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | Accepted |
+| [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | Accepted (partially superseded by ADR-188 §3) |
 | [ADR-156](./system/ADR-156-calibrated-relevance-scoring-for-the-semantic-lane.md) | Calibrated relevance scoring for the semantic lane | Accepted |
 | [ADR-157](./system/ADR-157-case-insensitive-trigger-regex-compilation.md) | Case-insensitive trigger regex compilation | Accepted |
 | [ADR-158](./system/ADR-158-calibration-boundary-quality-hard-negatives-and-fire-breadth-ship-gate.md) | Calibration boundary quality — hard negatives and a fire-breadth ship gate | Accepted |
@@ -102,6 +102,7 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-184](./system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md) | Installation and activation are separate states: targets as the unit of activation | Accepted |
 | [ADR-185](./system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | Accepted |
 | [ADR-186](./system/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
+| [ADR-187](./system/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | Proposed |
 | [ADR-188](./system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | Proposed |
 
 ## Governance
