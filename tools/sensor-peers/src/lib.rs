@@ -120,7 +120,10 @@ enum MsgKind {
 /// whole poll's volume is known.
 struct PendingMsg {
     magnitude: f64,
-    sender: String,
+    /// Wire `from` and `cwd`, kept raw: the sender label renders only
+    /// in the per-message emit branch, since a digest never shows it.
+    from: String,
+    cwd: String,
     body: String,
     kind: MsgKind,
     /// Wall-clock age in seconds (since the file's mtime) at scan time.
@@ -327,12 +330,6 @@ impl PeerSensor {
                         }
                     }
 
-                    // One display form on both conduits (#534): the same
-                    // persona-plus-project label the Stop-hook drain
-                    // renders, so a receiver correlates a Monitor
-                    // notification with a later drain row by name.
-                    let sender = sender_label(from, source_cwd);
-
                     // Directed messages (in own project dir) get highest priority.
                     // Broadcast and focus group messages are important but less urgent.
                     let dir_name = dir.file_name()
@@ -374,7 +371,8 @@ impl PeerSensor {
                     // after the whole poll is scanned (see below).
                     pending.push(PendingMsg {
                         magnitude,
-                        sender,
+                        from: from.to_string(),
+                        cwd: source_cwd.to_string(),
                         body: message.to_string(),
                         kind,
                         age_secs,
@@ -424,7 +422,16 @@ impl PeerSensor {
         if pending.len() > DIGEST_THRESHOLD {
             observations.push(build_digest(&pending));
         } else {
+            // One display form on both conduits (#534): the same
+            // persona-plus-project label the Stop-hook drain renders,
+            // so a receiver correlates a Monitor notification with a
+            // later drain row by name. One registry snapshot per cwd
+            // for this pass; built here, after the digest branch is
+            // ruled out, because a digest never shows a sender.
+            let instances = attend_identity_view::SnapshotCache::new();
             for m in &pending {
+                let sender =
+                    attend_identity_view::render_sender_label_plain(&m.from, &m.cwd, &instances);
                 let include_reply_hint = !self.reply_hint_shown;
                 // Chunk long messages at word boundaries so each event stays
                 // under Monitor's ~400-char stdout line ceiling; chunks ride
@@ -432,7 +439,7 @@ impl PeerSensor {
                 let chunks = chunk_message(&m.body, MAX_CHUNK_BODY, MAX_CHUNKS);
                 let total = chunks.len();
                 for (i, chunk) in chunks.into_iter().enumerate() {
-                    let header = message_header(&m.sender, i, total);
+                    let header = message_header(&sender, i, total);
                     let body = if i == 0 && include_reply_hint {
                         format!("{} (reply: attend send <msg>)", chunk)
                     } else {
@@ -889,19 +896,11 @@ pub fn find_own_session_id(own_pid: u32) -> Option<String> {
     attend_session::find_own_session_id(own_pid)
 }
 
-// ── Sender label and event header ───────────────────────────────
-
-/// The sender label the Monitor conduit shows: the persona-plus-project
-/// form (`Nickname-instance (project)`) the ADR-172 drain renders, from
-/// the same wire `from`/`cwd` pair (#534). Public so the drain side can
-/// assert the two conduits agree on one message.
-pub fn sender_label(from: &str, cwd: &str) -> String {
-    attend_identity_view::render_sender_label_plain(from, cwd)
-}
+// ── Event header ────────────────────────────────────────────────
 
 /// The `message from …: ` prefix of one Monitor event line. Chunked
 /// messages carry an `(i/n)` counter after the sender.
-pub fn message_header(sender: &str, chunk_index: usize, total: usize) -> String {
+fn message_header(sender: &str, chunk_index: usize, total: usize) -> String {
     if total == 1 {
         format!("message from {sender}: ")
     } else {
@@ -1124,7 +1123,8 @@ mod tests {
     fn pmsg(kind: MsgKind, age_secs: u64, magnitude: f64) -> PendingMsg {
         PendingMsg {
             magnitude,
-            sender: "Peer (x)".to_string(),
+            from: "claude:x".to_string(),
+            cwd: "/x".to_string(),
             body: "hi".to_string(),
             kind,
             age_secs,

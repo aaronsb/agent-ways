@@ -113,29 +113,13 @@ pub fn color_for(p: PaletteEntry, caps: TermCaps) -> Color {
     }
 }
 
-/// Compose `<nickname>-<instance>` for a claude session (ADR-129).
-/// Falls back to the bare nickname when the registry has no entry —
-/// only happens in the moments before a session has registered, or
-/// when the registry file is unreadable.
-///
-/// Reads through `instances`, which caches per-cwd snapshots for
-/// the lifetime of one render pass. Without this cache the render
-/// path read + parsed the registry yaml once per chip; with it,
-/// the read is amortized to once per distinct cwd per render.
-///
-/// Visible to sibling submodules (`registry`) so the legend builds
-/// the same display strings the chip does.
-pub(super) fn with_instance(
-    nickname: &str,
-    cwd: &str,
-    session_id: &str,
-    instances: &SnapshotCache,
-) -> String {
-    match instances.lookup(cwd, session_id) {
-        Some(inst) => format!("{nickname}-{inst}"),
-        None => nickname.to_string(),
-    }
-}
+/// `<nickname>-<instance>` composition (ADR-129) is the shared
+/// derivation in `attend-identity-view`: the peers sensor, the drain,
+/// and this chip all call the same function, so a session wears one
+/// persona on every surface (#534). Re-exported here so the sibling
+/// `registry` submodule keeps building the legend's display strings
+/// through the chip's own path.
+pub(super) use attend_identity_view::with_instance;
 
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
