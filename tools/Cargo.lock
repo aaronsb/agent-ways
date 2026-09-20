@@ -225,6 +225,7 @@ dependencies = [
  "agent-identity",
  "attend-groups",
  "attend-heartbeat",
+ "attend-identity-view",
  "attend-instances",
  "attend-session",
  "attend-state",
@@ -248,6 +249,7 @@ dependencies = [
  "async-channel",
  "attend-groups",
  "attend-heartbeat",
+ "attend-identity-view",
  "attend-instances",
  "attend-session",
  "attend-state",
@@ -268,6 +270,14 @@ name = "attend-heartbeat"
 version = "0.1.0"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "attend-identity-view"
+version = "0.1.0"
+dependencies = [
+ "agent-identity",
+ "attend-instances",
 ]
 
 [[package]]
@@ -1235,6 +1245,7 @@ dependencies = [
 name = "sensor-peers"
 version = "0.6.0"
 dependencies = [
+ "attend-identity-view",
  "attend-session",
  "sensor-trait",
  "serde_json",

@@ -6,7 +6,8 @@
 //! the right direction of dependency: the parser owns what a valid id
 //! looks like, senders consult it.
 
-use crate::identity_view::{render_sender_label, render_sender_label_plain};
+use attend_identity_view::{render_sender_label, render_sender_label_plain};
+use attend_instances::SnapshotCache;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 use agent_identity::TermCaps;
 
@@ -106,10 +107,11 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
         };
         // Piped output must be escape-free (#388).
         use std::io::IsTerminal;
+        let instances = SnapshotCache::new();
         let sender = if std::io::stdout().is_terminal() {
-            render_sender_label(sig.from, sig.cwd, TermCaps::detect())
+            render_sender_label(sig.from, sig.cwd, TermCaps::detect(), &instances)
         } else {
-            render_sender_label_plain(sig.from, sig.cwd)
+            render_sender_label_plain(sig.from, sig.cwd, &instances)
         };
         println!("From: {sender}");
         println!("ID:   {msg_id}");
@@ -153,6 +155,8 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
         re: String,
     }
     let mut entries: Vec<InboxEntry> = Vec::new();
+    // One registry snapshot per distinct cwd for this listing.
+    let instances = SnapshotCache::new();
 
     for dir in &scan_dirs {
         let dir_entries = match std::fs::read_dir(dir) {
@@ -205,9 +209,9 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
             // would style a pipe. TTY keeps the identity colors.
             use std::io::IsTerminal;
             let sender = if std::io::stdout().is_terminal() {
-                render_sender_label(sig.from, sig.cwd, TermCaps::detect())
+                render_sender_label(sig.from, sig.cwd, TermCaps::detect(), &instances)
             } else {
-                render_sender_label_plain(sig.from, sig.cwd)
+                render_sender_label_plain(sig.from, sig.cwd, &instances)
             };
 
             let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
@@ -353,6 +357,9 @@ struct Drained {
     mtime: std::time::SystemTime,
     when: String,
     sender: String,
+    /// The wire `from` field — the canonical sender id (ADR-171). The
+    /// display label is presentation over it, never a substitute.
+    sender_id: String,
     scope: String,
     id: String,
     body: String,
@@ -361,6 +368,7 @@ struct Drained {
 impl DrainedView for Drained {
     fn when(&self) -> &str { &self.when }
     fn sender(&self) -> &str { &self.sender }
+    fn sender_id(&self) -> &str { &self.sender_id }
     fn scope(&self) -> &str { &self.scope }
     fn id(&self) -> &str { &self.id }
     fn body(&self) -> &str { &self.body }
@@ -385,6 +393,8 @@ fn scan_pending(
 ) -> (Vec<Drained>, Vec<String>) {
     let mut delivered: Vec<Drained> = Vec::new();
     let mut mark: Vec<String> = Vec::new();
+    // One registry snapshot per distinct cwd for this scan.
+    let instances = SnapshotCache::new();
 
     for (dir, scope) in scan_dirs {
         let entries = match std::fs::read_dir(dir) {
@@ -434,10 +444,13 @@ fn scan_pending(
             // Escape-free by construction: the drain's output is
             // hook-injection text (or a pipe), never a styled terminal.
             // Mono was not enough — it still emits style bits (#388).
+            // The label is the same form the peers sensor shows under
+            // Monitor (#534); the wire `from` rides along as the id.
             delivered.push(Drained {
                 when: agent_fmt::compact_time(mtime, std::time::SystemTime::now()),
                 mtime,
-                sender: render_sender_label_plain(sig.from, sig.cwd),
+                sender: render_sender_label_plain(sig.from, sig.cwd, &instances),
+                sender_id: sig.from.to_string(),
                 scope: scope.clone(),
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 body: sig.message.to_string(),
@@ -561,6 +574,11 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
             println!("[{}] {}", d.scope, d.sender);
             println!("  when:    {}", d.when);
             println!("  id:      {}", d.id);
+            // The label carries only the cwd basename; the wire `from`
+            // (with an external sender's terminal suffix) and the full
+            // source path stay reachable here.
+            println!("  from:    {}", d.sender_id);
+            println!("  cwd:     {}", d.source_cwd);
             println!("  message: {}", d.body);
             println!();
         }
@@ -593,12 +611,21 @@ fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
         delivered.len()
     );
     for d in delivered.iter().take(DRAIN_RENDER_MAX) {
+        // The canonical id is usually already the id stem's prefix;
+        // spell it out only when it is not, so the reason does not
+        // repeat ~45 characters per row.
+        let from = if from_is_id_prefix(d.sender_id(), d.id()) {
+            String::new()
+        } else {
+            format!(", from {}", d.sender_id())
+        };
         out.push_str(&format!(
-            "\n[{}] {} ({}, id {}):\n{}\n",
+            "\n[{}] {} ({}, id {}{}):\n{}\n",
             d.when(),
             d.sender(),
             d.scope(),
             d.id(),
+            from,
             d.body()
         ));
     }
@@ -616,11 +643,27 @@ fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
     out
 }
 
+/// Whether the canonical sender id is already legible from the message
+/// id. Id stems are `<sender-id>-<timestamp>-<seq>`
+/// (`agent_identity::signal_filename`), so for a claude sender the
+/// session id opens the stem. External ids are sanitized in the stem
+/// (`aaron@kitty` → `aaron-kitty`) and so do not match; those rows, and
+/// hand-written ids, get an explicit `from`.
+fn from_is_id_prefix(from: &str, id: &str) -> bool {
+    let ident = from.split_once(':').map(|(_, i)| i).unwrap_or(from);
+    !ident.is_empty()
+        && id
+            .strip_prefix(ident)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
+}
+
 /// View trait so `render_drain_reason` is testable without the
 /// filesystem-shaped `Drained` struct.
 trait DrainedView {
     fn when(&self) -> &str;
     fn sender(&self) -> &str;
+    /// Canonical sender id — the wire `from` (`claude:<session-id>`).
+    fn sender_id(&self) -> &str;
     fn scope(&self) -> &str;
     fn id(&self) -> &str;
     fn body(&self) -> &str;
@@ -713,6 +756,7 @@ mod drain_tests {
     struct FakeMsg {
         when: String,
         sender: String,
+        sender_id: String,
         scope: String,
         id: String,
         body: String,
@@ -720,6 +764,7 @@ mod drain_tests {
     impl DrainedView for FakeMsg {
         fn when(&self) -> &str { &self.when }
         fn sender(&self) -> &str { &self.sender }
+        fn sender_id(&self) -> &str { &self.sender_id }
         fn scope(&self) -> &str { &self.scope }
         fn id(&self) -> &str { &self.id }
         fn body(&self) -> &str { &self.body }
@@ -728,6 +773,7 @@ mod drain_tests {
         FakeMsg {
             when: "11:4{}".replace("{}", &(n % 10).to_string()),
             sender: format!("peer-{n}"),
+            sender_id: format!("claude:session-{n}"),
             scope: "#open".into(),
             id: format!("id-{n}"),
             body: format!("body {n}"),
@@ -767,7 +813,7 @@ mod drain_tests {
         let msgs = vec![msg(1), msg(2)];
         let reason = render_drain_reason(&msgs);
         assert!(reason.contains("2 peer message(s)"));
-        assert!(reason.contains("peer-1 (#open, id id-1):"));
+        assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
         assert!(reason.contains("silence is a valid reply"));
     }
@@ -856,6 +902,94 @@ mod drain_tests {
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue #534: one message, two conduits, one name. A real
+    /// `PeerSensor` polls the fixture tray (the Monitor conduit) and the
+    /// scan core drains it (the Stop-hook conduit); the sender text must
+    /// be identical, or a receiver has to know both forms to correlate a
+    /// notification with a later drain row.
+    #[cfg(feature = "sensor-peers")]
+    #[test]
+    fn monitor_and_drain_render_the_same_sender() {
+        use sensor_trait::{Focus, Sensor};
+
+        let dir = scan_fixture("conduits");
+        write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
+        let dirs = vec![(dir.clone(), "project".to_string())];
+
+        // Drain path.
+        let (delivered, _) =
+            scan_pending(&dirs, &Default::default(), "my-session", false, HOUR);
+        assert_eq!(delivered.len(), 1);
+        let drained = &delivered[0];
+
+        // Monitor path: the sensor scans its standard trays plus the
+        // fixture. Import the host's durable `#open` backlog as already
+        // seen — exactly what a warm restart restores — so it neither
+        // floods the poll into a digest nor leaks into the assertion;
+        // a non-empty import also skips the cold-start baseline that
+        // would otherwise swallow the fixture, and `reply_hint_shown`
+        // keeps the hint off the body.
+        let mut sensor = sensor_peers::PeerSensor::new();
+        let extra = dir.clone();
+        sensor.set_extra_scan_dirs_provider(std::sync::Arc::new(move || vec![extra.clone()]));
+        let broadcast = signals_base().join("_broadcast");
+        let mut state = vec![("reply_hint_shown".to_string(), "true".to_string())];
+        if let Ok(entries) = std::fs::read_dir(&broadcast) {
+            for name in entries.flatten().filter_map(|e| e.file_name().into_string().ok()) {
+                state.push(("seen_signal".to_string(), format!("{}:{name}", broadcast.display())));
+            }
+        }
+        sensor.import_state(&state);
+        // The fixture's cwd doubles as the focus so the sensor's
+        // `attend reply` bookkeeping (keyed on the host session) sees
+        // an own-project message and records nothing.
+        let focus = Focus {
+            description: String::new(),
+            working_dir: "/src/cwd".to_string(),
+            keywords: Vec::new(),
+        };
+        let _ = sensor.poll(&focus); // first poll: peer-presence baseline, emits nothing
+        let observations = sensor.poll(&focus);
+
+        let expected = format!("message from {}: same name on both", drained.sender);
+        assert!(
+            observations.iter().any(|(_, line)| line == &expected),
+            "Monitor conduit did not emit {expected:?}; got {:?}",
+            observations.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>()
+        );
+        // Persona-plus-project form on both — not the pre-#534 Monitor
+        // form `claude//src/cwd`.
+        assert!(drained.sender.ends_with(" (cwd)"), "{:?}", drained.sender);
+        assert!(!drained.sender.contains('/'), "{:?}", drained.sender);
+        // The canonical id rides the row, so the label never has to be
+        // the key (ADR-171).
+        assert_eq!(drained.sender_id, "claude:other-session");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The id stem already opens with the sender's session id, so the
+    /// hook reason spells `from` out only when the id does not carry it.
+    #[test]
+    fn drain_reason_omits_from_when_id_carries_it() {
+        let carried = FakeMsg {
+            when: "11:40".into(),
+            sender: "Jovan-alpha (ws)".into(),
+            sender_id: "claude:abc123".into(),
+            scope: "project".into(),
+            id: "abc123-1712345-0".into(),
+            body: "hi".into(),
+        };
+        let reason = render_drain_reason(&[carried]);
+        assert!(reason.contains("Jovan-alpha (ws) (project, id abc123-1712345-0):"), "{reason}");
+        assert!(!reason.contains("from claude:"), "{reason}");
+
+        assert!(from_is_id_prefix("claude:abc", "abc-1-0"));
+        assert!(from_is_id_prefix("claude:abc", "abc"));
+        assert!(!from_is_id_prefix("claude:abc", "abcd-1-0"), "partial match is not a prefix");
+        assert!(!from_is_id_prefix("external:aaron@kitty", "aaron-kitty-1-0"));
+        assert!(!from_is_id_prefix("claude:", "-1-0"));
     }
 
     #[test]
