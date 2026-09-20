@@ -67,6 +67,18 @@ pub fn get_context_for_session(session_id: &str) -> Result<ContextInfo> {
     get_context_inner(None, Some(session_id))
 }
 
+/// Like `get_context`, but reads one named transcript file. This is the path
+/// a hook payload hands over as `transcript_path`: authoritative for the
+/// invoking agent (a subagent's own transcript, not its parent's) and free of
+/// the directory walk the session-id lookup pays.
+pub fn get_context_for_transcript(transcript: &str) -> Result<ContextInfo> {
+    let path = PathBuf::from(transcript);
+    if !path.is_file() {
+        anyhow::bail!("No transcript at: {transcript}");
+    }
+    context_from_transcript(path)
+}
+
 /// Accurate context-fill percentage (0–100) from a transcript file path.
 ///
 /// Single source of truth shared with the `context-threshold` trigger in
@@ -95,7 +107,11 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
         env_session_id.as_deref(),
         &projects_root,
     )?;
+    context_from_transcript(transcript)
+}
 
+/// Read one transcript file into a `ContextInfo`: model, window, usage.
+fn context_from_transcript(transcript: PathBuf) -> Result<ContextInfo> {
     let session = transcript
         .file_stem()
         .and_then(|s| s.to_str())
@@ -113,11 +129,7 @@ fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Res
     let (tokens_used, method) = read_token_usage(&content);
 
     let tokens_remaining = window_tokens.saturating_sub(tokens_used);
-    let pct_used = if window_tokens > 0 {
-        tokens_used * 100 / window_tokens
-    } else {
-        0
-    };
+    let pct_used = (tokens_used * 100).checked_div(window_tokens).unwrap_or(0);
     let pct_remaining = 100u64.saturating_sub(pct_used);
 
     let usage_tail = read_usage_tail(&content, USAGE_TAIL_LEN);
@@ -289,7 +301,7 @@ fn detect_model(content: &str) -> String {
 
 /// Sentinel `detect_model` returns when the transcript holds no assistant turn
 /// yet — the launch race. It is the *absence* of a model, not a model id.
-const UNKNOWN_MODEL: &str = "unknown";
+pub(crate) const UNKNOWN_MODEL: &str = "unknown";
 
 /// Resolve the window for a transcript's detected model through the one resolver
 /// (ADR-166). The `"unknown"` sentinel is an absent model, not a model named

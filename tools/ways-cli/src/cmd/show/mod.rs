@@ -8,6 +8,7 @@ mod metrics;
 use anyhow::Result;
 use serde_json::json;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::{frontmatter, session};
 use helpers::{extract_field, extract_attend_signals, home_dir, is_project_trusted, body_text, check_sections_text, run_macro};
@@ -26,24 +27,82 @@ fn window_detected(ctx: &crate::cmd::context::ContextInfo) -> bool {
     ctx.window_source != ways_core::context_window::WindowSource::Default
 }
 
-/// Choose the window a firing way's `refire:` fraction resolves against.
+/// The transcript the invoking hook named (`transcript_path` in its payload),
+/// handed in as `--transcript` by the scan lanes. One `ways` process serves one
+/// hook invocation, so this is process state rather than a parameter threaded
+/// through every scan lane and into [`way_scored`]. Unset when the hook
+/// predates the flag or the caller is a dry run; the firing path then falls
+/// back to the session-id lookup exactly as before.
+static FIRING_TRANSCRIPT: OnceLock<String> = OnceLock::new();
+
+/// Record the transcript this process is firing ways for. Empty values are
+/// ignored (a hook may pass `--transcript=` with nothing behind it); a second
+/// call is a no-op.
+pub fn set_firing_transcript(path: Option<&str>) {
+    if let Some(p) = path.filter(|p| !p.is_empty()) {
+        let _ = FIRING_TRANSCRIPT.set(p.to_string());
+    }
+}
+
+fn firing_transcript() -> Option<&'static str> {
+    FIRING_TRANSCRIPT.get().map(String::as_str)
+}
+
+/// What a firing way needs from the session's transcript: the window its
+/// `refire:` fraction resolves against, and the model id stamped on the event.
+struct FiringContext {
+    window: u64,
+    /// `None` when no transcript for *this* session resolved a real model. The
+    /// project fallback is never consulted for it: that transcript may belong
+    /// to a sibling session running a different model, and a wrong model on
+    /// the event is worse than an absent one.
+    model: Option<String>,
+}
+
+/// Choose the window a firing way's `refire:` fraction resolves against, and
+/// the model the fire is stamped with.
 ///
-/// Prefers the session-pinned lookup, but only when it detected a window —
-/// a transcript with no assistant turn yet returns `Ok` carrying a defaulted
-/// window, and accepting that would be worse than the project heuristic it
-/// replaced. `fallback` is lazy: the heuristic scans every project dir, and
-/// this runs on every way fire.
-fn resolve_firing_window(
-    pinned: Option<crate::cmd::context::ContextInfo>,
+/// Candidates in order: the hook's own `transcript_path` (`explicit`), the
+/// session-pinned lookup, then the project heuristic. A candidate contributes
+/// its window only when it detected one — a transcript with no assistant turn
+/// yet returns `Ok` carrying a defaulted window, and accepting that would be
+/// worse than the next candidate — and its model only when it found a real one.
+/// Both later candidates are lazy: the pinned lookup walks the projects dir,
+/// the heuristic scans every project dir, and this runs on every way fire.
+fn resolve_firing_context(
+    explicit: Option<crate::cmd::context::ContextInfo>,
+    pinned: impl FnOnce() -> Option<crate::cmd::context::ContextInfo>,
     fallback: impl FnOnce() -> Option<crate::cmd::context::ContextInfo>,
-) -> u64 {
-    if let Some(ctx) = pinned.filter(window_detected) {
-        return ctx.tokens_total;
+) -> FiringContext {
+    fn absorb(
+        ctx: &crate::cmd::context::ContextInfo,
+        window: &mut Option<u64>,
+        model: &mut Option<String>,
+    ) {
+        if window.is_none() && window_detected(ctx) {
+            *window = Some(ctx.tokens_total);
+        }
+        if model.is_none() && ctx.model != crate::cmd::context::UNKNOWN_MODEL {
+            *model = Some(ctx.model.clone());
+        }
     }
-    if let Some(ctx) = fallback().filter(window_detected) {
-        return ctx.tokens_total;
+    let mut window: Option<u64> = None;
+    let mut model: Option<String> = None;
+    if let Some(ctx) = explicit.as_ref() {
+        absorb(ctx, &mut window, &mut model);
     }
-    ways_core::context_window::resolve(None).tokens
+    if window.is_none() || model.is_none() {
+        if let Some(ctx) = pinned() {
+            absorb(&ctx, &mut window, &mut model);
+        }
+    }
+    if window.is_none() {
+        window = fallback().filter(window_detected).map(|ctx| ctx.tokens_total);
+    }
+    FiringContext {
+        window: window.unwrap_or_else(|| ways_core::context_window::resolve(None).tokens),
+        model,
+    }
 }
 
 /// Bound a matched surface to a single readable line for the `surface` telemetry
@@ -127,11 +186,17 @@ pub fn way_scored(
     // candidates are filtered on `window_source` — the field ADR-166 added so a
     // default is never mistaken for a detection. `EnvOverride` counts as
     // detected, keeping CLAUDE_CONTEXT_WINDOW authoritative on this path.
+    //
+    // The hook's own `transcript_path` (when the lane passed `--transcript`)
+    // comes first: it names the invoking agent's transcript directly, and the
+    // same read yields the model id the event is stamped with.
     let fm = frontmatter::parse(&way_file)?;
-    let window = resolve_firing_window(
-        crate::cmd::context::get_context_for_session(session_id).ok(),
+    let firing = resolve_firing_context(
+        firing_transcript().and_then(|t| crate::cmd::context::get_context_for_transcript(t).ok()),
+        || crate::cmd::context::get_context_for_session(session_id).ok(),
         || crate::cmd::context::get_context(Some(&project_dir)).ok(),
     );
+    let window = firing.window;
     let curve = fm.resolved_curve(window).ok_or_else(|| {
         anyhow::anyhow!(
             "way {} is missing a `refire:` field in its frontmatter (ADR-126)",
@@ -227,6 +292,14 @@ pub fn way_scored(
         ("project", project_dir),
         ("session", session_id.to_string()),
         ("token_position", token_pos.to_string()),
+        // The model id the session was running at fire time, read from the
+        // same transcript the refire window came from. Written on every fire
+        // so `ways stats` can split fires and re-disclosures by model. The
+        // literal `unknown` records that resolution ran and found no assistant
+        // turn (the launch race, or a dry run with no transcript); rows that
+        // lack the field predate it. Identification only: nothing reads this
+        // field to decide whether a way fires.
+        ("model", firing.model.unwrap_or_else(|| crate::cmd::context::UNKNOWN_MODEL.to_string())),
     ];
     // ADR-134 task D: the calibrated probability that fired this way, feeding the
     // fire-score telemetry that calibration (ADR-156) is fit from. Logged on every
@@ -517,11 +590,29 @@ mod tests {
         }
     }
 
+    fn ctx_model(
+        tokens_total: u64,
+        window_source: WindowSource,
+        model: &str,
+    ) -> crate::cmd::context::ContextInfo {
+        let mut c = ctx(tokens_total, window_source);
+        c.model = model.to_string();
+        c
+    }
+
+    /// The pre-flag shape: no explicit transcript, the pinned lookup first.
+    fn window_of(
+        pinned: Option<crate::cmd::context::ContextInfo>,
+        fallback: impl FnOnce() -> Option<crate::cmd::context::ContextInfo>,
+    ) -> u64 {
+        resolve_firing_context(None, || pinned, fallback).window
+    }
+
     #[test]
     fn firing_window_prefers_the_pinned_session() {
         // The fix: the firing session's own window wins over whatever the
         // project heuristic's newest-transcript scan happens to land on.
-        let got = resolve_firing_window(Some(ctx(200_000, WindowSource::ModelTable)), || {
+        let got = window_of(Some(ctx(200_000, WindowSource::ModelTable)), || {
             Some(ctx(1_000_000, WindowSource::ModelTable))
         });
         assert_eq!(got, 200_000);
@@ -533,7 +624,7 @@ mod tests {
         // assistant turn yet, so the pinned lookup returns Ok carrying
         // DEFAULT_WINDOW. Accepting it would latch a 200k curve on a 1M
         // session; the project heuristic's real detection must win instead.
-        let got = resolve_firing_window(Some(ctx(200_000, WindowSource::Default)), || {
+        let got = window_of(Some(ctx(200_000, WindowSource::Default)), || {
             Some(ctx(1_000_000, WindowSource::ModelTable))
         });
         assert_eq!(got, 1_000_000);
@@ -543,7 +634,7 @@ mod tests {
     fn env_override_counts_as_detected() {
         // ADR-166 keeps CLAUDE_CONTEXT_WINDOW authoritative, so an override on
         // the pinned lookup must not be treated as a miss.
-        let got = resolve_firing_window(Some(ctx(500_000, WindowSource::EnvOverride)), || {
+        let got = window_of(Some(ctx(500_000, WindowSource::EnvOverride)), || {
             Some(ctx(1_000_000, WindowSource::ModelTable))
         });
         assert_eq!(got, 500_000);
@@ -553,7 +644,7 @@ mod tests {
     fn both_defaulted_falls_through_to_the_resolver() {
         // Neither candidate detected anything: fall through to the single
         // resolver rather than propagating either defaulted number.
-        let got = resolve_firing_window(Some(ctx(123, WindowSource::Default)), || {
+        let got = window_of(Some(ctx(123, WindowSource::Default)), || {
             Some(ctx(456, WindowSource::Default))
         });
         assert_eq!(got, ways_core::context_window::resolve(None).tokens);
@@ -564,12 +655,71 @@ mod tests {
         // The heuristic scans every project dir and this runs on every fire,
         // so a usable pinned answer must short-circuit it.
         let mut called = false;
-        let got = resolve_firing_window(Some(ctx(1_000_000, WindowSource::ModelTable)), || {
+        let got = window_of(Some(ctx(1_000_000, WindowSource::ModelTable)), || {
             called = true;
             None
         });
         assert_eq!(got, 1_000_000);
         assert!(!called, "fallback ran despite a detected pinned window");
+    }
+
+    #[test]
+    fn explicit_transcript_short_circuits_both_lookups() {
+        // The hook's own transcript_path resolved a window and a model, so
+        // neither the projects-dir walk nor the project heuristic runs.
+        let mut pinned_called = false;
+        let mut fallback_called = false;
+        let got = resolve_firing_context(
+            Some(ctx_model(1_000_000, WindowSource::ModelTable, "claude-fable-5-1")),
+            || {
+                pinned_called = true;
+                None
+            },
+            || {
+                fallback_called = true;
+                None
+            },
+        );
+        assert_eq!(got.window, 1_000_000);
+        assert_eq!(got.model.as_deref(), Some("claude-fable-5-1"));
+        assert!(!pinned_called && !fallback_called);
+    }
+
+    #[test]
+    fn model_comes_from_the_session_never_the_project_fallback() {
+        // The project heuristic may land on a sibling session running another
+        // model. Its window is accepted when nothing else detected one; its
+        // model is not.
+        let got = resolve_firing_context(
+            None,
+            || Some(ctx_model(200_000, WindowSource::Default, "unknown")),
+            || Some(ctx_model(1_000_000, WindowSource::ModelTable, "claude-opus-5")),
+        );
+        assert_eq!(got.window, 1_000_000);
+        assert_eq!(got.model, None);
+    }
+
+    #[test]
+    fn unknown_explicit_model_falls_through_to_pinned() {
+        // Launch race: the named transcript has no assistant turn yet, so the
+        // pinned lookup (which may be a later read of the same file) is asked.
+        let got = resolve_firing_context(
+            Some(ctx_model(200_000, WindowSource::Default, "unknown")),
+            || Some(ctx_model(200_000, WindowSource::ModelTable, "claude-opus-5")),
+            || None,
+        );
+        assert_eq!(got.window, 200_000);
+        assert_eq!(got.model.as_deref(), Some("claude-opus-5"));
+    }
+
+    #[test]
+    fn set_firing_transcript_ignores_empty() {
+        // A hook may pass `--transcript=` with nothing behind it; an empty
+        // value must not claim the slot. (Process-global: this test must not
+        // set a non-empty value, or the other tests in this binary see it.)
+        set_firing_transcript(Some(""));
+        set_firing_transcript(None);
+        assert_eq!(firing_transcript(), None);
     }
 
     #[test]

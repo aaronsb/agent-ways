@@ -530,6 +530,11 @@ enum ScanCommand {
         /// Feeds only the embed lane — never the keyword regex lane.
         #[arg(long)]
         response_context: Option<String>,
+        /// Transcript path from the hook payload. Fired ways read the session's
+        /// model id from it (stamped on the event as `model`) and its refire
+        /// window; without it the binary locates the transcript by session id.
+        #[arg(long)]
+        transcript: Option<String>,
     },
     /// Scan queued mid-turn operator messages from the transcript (ADR-161).
     /// Aggregates every `queue-operation`/`enqueue` newer than the per-session
@@ -560,6 +565,10 @@ enum ScanCommand {
         /// Project directory
         #[arg(long)]
         project: Option<String>,
+        /// Transcript path from the hook payload (model id and refire window
+        /// for fired ways; see `scan prompt`).
+        #[arg(long)]
+        transcript: Option<String>,
     },
     /// Scan ways against a file path
     File {
@@ -572,6 +581,10 @@ enum ScanCommand {
         /// Project directory
         #[arg(long)]
         project: Option<String>,
+        /// Transcript path from the hook payload (model id and refire window
+        /// for fired ways; see `scan prompt`).
+        #[arg(long)]
+        transcript: Option<String>,
     },
     /// Scan ways for subagent/teammate injection (writes stash for SubagentStart)
     Task {
@@ -835,11 +848,17 @@ fn run() -> Result<()> {
         Commands::Scan { mode } => match mode {
             // ADR-184 item 6: a project (or user config) with `enabled: false`
             // injects nothing. Checked before any lane runs.
-            ScanCommand::Prompt { query, session, project, response_context } => {
+            ScanCommand::Prompt { query, session, project, response_context, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
                     return Ok(());
                 }
-                cmd::scan::prompt(&query, &session, project.as_deref(), response_context.as_deref())
+                cmd::scan::prompt(
+                    &query,
+                    &session,
+                    project.as_deref(),
+                    response_context.as_deref(),
+                    transcript.as_deref(),
+                )
             }
             ScanCommand::Messages { session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
@@ -847,17 +866,23 @@ fn run() -> Result<()> {
                 }
                 cmd::scan::messages(&session, project.as_deref(), transcript.as_deref())
             }
-            ScanCommand::Command { command, description, session, project } => {
+            ScanCommand::Command { command, description, session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
                     return Ok(());
                 }
-                cmd::scan::command(&command, description.as_deref(), &session, project.as_deref())
+                cmd::scan::command(
+                    &command,
+                    description.as_deref(),
+                    &session,
+                    project.as_deref(),
+                    transcript.as_deref(),
+                )
             }
-            ScanCommand::File { path, session, project } => {
+            ScanCommand::File { path, session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
                     return Ok(());
                 }
-                cmd::scan::file(&path, &session, project.as_deref())
+                cmd::scan::file(&path, &session, project.as_deref(), transcript.as_deref())
             }
             ScanCommand::Task { query, session, project, team } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {

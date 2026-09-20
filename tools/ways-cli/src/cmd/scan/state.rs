@@ -20,6 +20,9 @@ pub fn state(
     hook_event: &str,
     query: Option<&str>,
 ) -> Result<()> {
+    // The same transcript the context-threshold arm reads also carries the
+    // model id every fire on this lane is stamped with.
+    crate::cmd::show::set_firing_transcript(transcript);
     // A UserPromptSubmit that carries a harness envelope rather than an
     // operator turn does not advance the session's guidance. Measured over a
     // month of transcripts, 154 of 470 Prose Check fires landed on Monitor
