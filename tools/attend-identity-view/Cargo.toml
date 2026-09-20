@@ -1,0 +1,14 @@
+[package]
+name = "attend-identity-view"
+version = "0.1.0"
+edition = "2021"
+description = "One sender display form for every attend conduit: persona-plus-project labels over the ADR-171 identity tuple"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "attend_identity_view"
+path = "src/lib.rs"
+
+[dependencies]
+agent-identity = { path = "../agent-identity" }
+attend-instances = { path = "../attend-instances" }

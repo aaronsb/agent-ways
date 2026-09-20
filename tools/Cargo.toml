@@ -16,6 +16,7 @@ members = [
     "attend-chat",
     "attend-groups",
     "attend-heartbeat",
+    "attend-identity-view",
     "attend-instances",
     "attend-session",
     "attend-state",

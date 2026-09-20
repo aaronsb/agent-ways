@@ -317,7 +317,7 @@ impl PeerSensor {
                 // (git / process / peer-presence).
                 let signal_id = signal_id_from_filename(&filename).to_string();
 
-                if let Some((from, project, source_cwd, message)) = parse_signal(content) {
+                if let Some((from, _project, source_cwd, message)) = parse_signal(content) {
                     // Skip our own signals — check the from field, not filename.
                     // from is "claude:session-id" or "external:user@terminal"
                     if let Some((_kind, identity)) = from.split_once(':') {
@@ -327,13 +327,11 @@ impl PeerSensor {
                         }
                     }
 
-                    let (kind, identity) = from.split_once(':')
-                        .unwrap_or(("unknown", from));
-                    let sender = match kind {
-                        "claude" => format!("claude/{}", source_cwd),
-                        "external" => identity.to_string(),
-                        _ => format!("{} ({})", project, from),
-                    };
+                    // One display form on both conduits (#534): the same
+                    // persona-plus-project label the Stop-hook drain
+                    // renders, so a receiver correlates a Monitor
+                    // notification with a later drain row by name.
+                    let sender = sender_label(from, source_cwd);
 
                     // Directed messages (in own project dir) get highest priority.
                     // Broadcast and focus group messages are important but less urgent.
@@ -434,11 +432,7 @@ impl PeerSensor {
                 let chunks = chunk_message(&m.body, MAX_CHUNK_BODY, MAX_CHUNKS);
                 let total = chunks.len();
                 for (i, chunk) in chunks.into_iter().enumerate() {
-                    let header = if total == 1 {
-                        format!("message from {}: ", m.sender)
-                    } else {
-                        format!("message from {} ({}/{}): ", m.sender, i + 1, total)
-                    };
+                    let header = message_header(&m.sender, i, total);
                     let body = if i == 0 && include_reply_hint {
                         format!("{} (reply: attend send <msg>)", chunk)
                     } else {
@@ -895,6 +889,26 @@ pub fn find_own_session_id(own_pid: u32) -> Option<String> {
     attend_session::find_own_session_id(own_pid)
 }
 
+// ── Sender label and event header ───────────────────────────────
+
+/// The sender label the Monitor conduit shows: the persona-plus-project
+/// form (`Nickname-instance (project)`) the ADR-172 drain renders, from
+/// the same wire `from`/`cwd` pair (#534). Public so the drain side can
+/// assert the two conduits agree on one message.
+pub fn sender_label(from: &str, cwd: &str) -> String {
+    attend_identity_view::render_sender_label_plain(from, cwd)
+}
+
+/// The `message from …: ` prefix of one Monitor event line. Chunked
+/// messages carry an `(i/n)` counter after the sender.
+pub fn message_header(sender: &str, chunk_index: usize, total: usize) -> String {
+    if total == 1 {
+        format!("message from {sender}: ")
+    } else {
+        format!("message from {sender} ({}/{total}): ", chunk_index + 1)
+    }
+}
+
 // ── Message chunking ────────────────────────────────────────────
 
 /// Max body characters per chunk.
@@ -915,7 +929,7 @@ pub fn find_own_session_id(own_pid: u32) -> Option<String> {
 /// ```
 ///
 /// We use 260 to leave a defensible safety margin against prefix variation
-/// (longer sender paths, large (N/M) counters) and to ensure even a fully
+/// (longer sender labels, large (N/M) counters) and to ensure even a fully
 /// packed first chunk with reply hint stays clearly under the ceiling —
 /// 260 + 29 + 80 = 369, ~30 chars below 400.
 const MAX_CHUNK_BODY: usize = 260;
@@ -1110,11 +1124,23 @@ mod tests {
     fn pmsg(kind: MsgKind, age_secs: u64, magnitude: f64) -> PendingMsg {
         PendingMsg {
             magnitude,
-            sender: "claude/x".to_string(),
+            sender: "Peer (x)".to_string(),
             body: "hi".to_string(),
             kind,
             age_secs,
         }
+    }
+
+    #[test]
+    fn message_header_counts_only_chunked_messages() {
+        assert_eq!(
+            message_header("Jovan-alpha (ws)", 0, 1),
+            "message from Jovan-alpha (ws): "
+        );
+        assert_eq!(
+            message_header("Jovan-alpha (ws)", 1, 3),
+            "message from Jovan-alpha (ws) (2/3): "
+        );
     }
 
     #[test]

@@ -1,11 +1,18 @@
-//! Shared helpers that turn a signal's sender into an identity-styled
-//! label for attend's terminal output.
+//! One sender display form for every attend conduit.
+//!
+//! A message reaches a session over two conduits (ADR-172): the
+//! Monitor-hosted `peers` sensor and the Stop-hook drain. Both render
+//! the sender through this crate, so one message wears one name on
+//! both — `Nickname-instance (project)` — instead of a path on one
+//! and a persona on the other (issue #534). The canonical id stays the
+//! wire `from` field (`claude:<session-id>`, ADR-171); this crate is
+//! presentation over that key, never a substitute for it.
 //!
 //! attend-chat has its own renderer (targeting iocraft), and attend
 //! renders to raw ANSI via `agent_fmt::Table`. We keep the derivation
-//! identical by routing both sides through `agent_identity` — this
-//! module is just the glue that picks the right constructor (user vs.
-//! cwd) per sender kind.
+//! identical by routing every side through `agent_identity` — this
+//! crate is the glue that picks the right constructor (user vs. cwd)
+//! per sender kind and appends the ADR-129 instance suffix.
 
 use agent_identity::{ansi, Identity, TermCaps};
 
@@ -25,7 +32,7 @@ use agent_identity::{ansi, Identity, TermCaps};
 /// keep the code simple and ignore `project`. Production signals
 /// populate `cwd` either way — the divergence only manifests on
 /// hand-crafted signals, which shouldn't be a hot path.
-pub(crate) fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> String {
+pub fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> String {
     if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, caps);
         // Instance suffix (ADR-129). Always rendered when present so
@@ -50,7 +57,7 @@ pub(crate) fn render_sender_label(from: &str, cwd: &str, caps: TermCaps) -> Stri
 /// [`render_sender_label`], zero ANSI: `TermCaps::Mono` is NOT enough
 /// for these paths because Mono still emits style bits (dim/reset) by
 /// design — that leak is issue #388.
-pub(crate) fn render_sender_label_plain(from: &str, cwd: &str) -> String {
+pub fn render_sender_label_plain(from: &str, cwd: &str) -> String {
     // Caps only steer styling, which this path discards; Mono keeps
     // the identity derivation on its cheapest branch.
     let caps = TermCaps::Mono;

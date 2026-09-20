@@ -6,7 +6,7 @@
 //! the right direction of dependency: the parser owns what a valid id
 //! looks like, senders consult it.
 
-use crate::identity_view::{render_sender_label, render_sender_label_plain};
+use attend_identity_view::{render_sender_label, render_sender_label_plain};
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 use agent_identity::TermCaps;
 
@@ -353,6 +353,9 @@ struct Drained {
     mtime: std::time::SystemTime,
     when: String,
     sender: String,
+    /// The wire `from` field — the canonical sender id (ADR-171). The
+    /// display label is presentation over it, never a substitute.
+    sender_id: String,
     scope: String,
     id: String,
     body: String,
@@ -361,6 +364,7 @@ struct Drained {
 impl DrainedView for Drained {
     fn when(&self) -> &str { &self.when }
     fn sender(&self) -> &str { &self.sender }
+    fn sender_id(&self) -> &str { &self.sender_id }
     fn scope(&self) -> &str { &self.scope }
     fn id(&self) -> &str { &self.id }
     fn body(&self) -> &str { &self.body }
@@ -434,10 +438,13 @@ fn scan_pending(
             // Escape-free by construction: the drain's output is
             // hook-injection text (or a pipe), never a styled terminal.
             // Mono was not enough — it still emits style bits (#388).
+            // The label is the same form the peers sensor shows under
+            // Monitor (#534); the wire `from` rides along as the id.
             delivered.push(Drained {
                 when: agent_fmt::compact_time(mtime, std::time::SystemTime::now()),
                 mtime,
                 sender: render_sender_label_plain(sig.from, sig.cwd),
+                sender_id: sig.from.to_string(),
                 scope: scope.clone(),
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 body: sig.message.to_string(),
@@ -561,6 +568,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
             println!("[{}] {}", d.scope, d.sender);
             println!("  when:    {}", d.when);
             println!("  id:      {}", d.id);
+            println!("  from:    {}", d.sender_id);
             println!("  message: {}", d.body);
             println!();
         }
@@ -594,11 +602,12 @@ fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
     );
     for d in delivered.iter().take(DRAIN_RENDER_MAX) {
         out.push_str(&format!(
-            "\n[{}] {} ({}, id {}):\n{}\n",
+            "\n[{}] {} ({}, id {}, from {}):\n{}\n",
             d.when(),
             d.sender(),
             d.scope(),
             d.id(),
+            d.sender_id(),
             d.body()
         ));
     }
@@ -621,6 +630,8 @@ fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
 trait DrainedView {
     fn when(&self) -> &str;
     fn sender(&self) -> &str;
+    /// Canonical sender id — the wire `from` (`claude:<session-id>`).
+    fn sender_id(&self) -> &str;
     fn scope(&self) -> &str;
     fn id(&self) -> &str;
     fn body(&self) -> &str;
@@ -713,6 +724,7 @@ mod drain_tests {
     struct FakeMsg {
         when: String,
         sender: String,
+        sender_id: String,
         scope: String,
         id: String,
         body: String,
@@ -720,6 +732,7 @@ mod drain_tests {
     impl DrainedView for FakeMsg {
         fn when(&self) -> &str { &self.when }
         fn sender(&self) -> &str { &self.sender }
+        fn sender_id(&self) -> &str { &self.sender_id }
         fn scope(&self) -> &str { &self.scope }
         fn id(&self) -> &str { &self.id }
         fn body(&self) -> &str { &self.body }
@@ -728,6 +741,7 @@ mod drain_tests {
         FakeMsg {
             when: "11:4{}".replace("{}", &(n % 10).to_string()),
             sender: format!("peer-{n}"),
+            sender_id: format!("claude:session-{n}"),
             scope: "#open".into(),
             id: format!("id-{n}"),
             body: format!("body {n}"),
@@ -767,7 +781,7 @@ mod drain_tests {
         let msgs = vec![msg(1), msg(2)];
         let reason = render_drain_reason(&msgs);
         assert!(reason.contains("2 peer message(s)"));
-        assert!(reason.contains("peer-1 (#open, id id-1):"));
+        assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
         assert!(reason.contains("silence is a valid reply"));
     }
@@ -855,6 +869,44 @@ mod drain_tests {
         );
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue #534: one message, two conduits, one name. The Monitor line
+    /// the peers sensor emits and the drain row must render the sender
+    /// identically, or a receiver has to know both forms to correlate a
+    /// notification with a later drain row.
+    #[cfg(feature = "sensor-peers")]
+    #[test]
+    fn monitor_and_drain_render_the_same_sender() {
+        let dir = scan_fixture("conduits");
+        write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
+        let dirs = vec![(dir.clone(), "project".to_string())];
+
+        // Drain path: the scan core renders the row's sender.
+        let (delivered, _) =
+            scan_pending(&dirs, &Default::default(), "my-session", false, HOUR);
+        assert_eq!(delivered.len(), 1);
+        let drained = &delivered[0];
+
+        // Monitor path: the peers sensor renders its event header from
+        // the same parsed wire record.
+        let content = std::fs::read_to_string(dir.join("peer-1.signal")).unwrap();
+        let sig = parse_signal(content.trim()).unwrap();
+        let monitor = sensor_peers::message_header(
+            &sensor_peers::sender_label(sig.from, sig.cwd),
+            0,
+            1,
+        );
+
+        assert_eq!(monitor, format!("message from {}: ", drained.sender));
+        // Persona-plus-project form on both — not the pre-#534 Monitor
+        // form `claude//src/cwd`.
+        assert!(drained.sender.ends_with(" (cwd)"), "{:?}", drained.sender);
+        assert!(!drained.sender.contains('/'), "{:?}", drained.sender);
+        // The canonical id rides the row, so the label never has to be
+        // the key (ADR-171).
+        assert_eq!(drained.sender_id, "claude:other-session");
         std::fs::remove_dir_all(&dir).ok();
     }
 
