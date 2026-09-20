@@ -104,7 +104,11 @@ pub fn prompt(
     session_id: &str,
     project: Option<&str>,
     response_context: Option<&str>,
+    transcript: Option<&str>,
 ) -> Result<()> {
+    // The hook's transcript_path names the invoking agent's transcript; the
+    // firing path reads the model id (and the refire window) from it.
+    crate::cmd::show::set_firing_transcript(transcript);
     // A user prompt starts a turn: bump the epoch.
     //
     // A Monitor notification that wakes an idle session also arrives as a
@@ -135,6 +139,7 @@ pub fn messages(
     let Some(path) = transcript else {
         return Ok(()); // PostToolUse always supplies transcript_path; nothing to do without it.
     };
+    crate::cmd::show::set_firing_transcript(Some(path));
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Ok(()), // transcript not readable yet
@@ -492,7 +497,9 @@ pub fn command(
     description: Option<&str>,
     session_id: &str,
     project: Option<&str>,
+    transcript: Option<&str>,
 ) -> Result<()> {
+    crate::cmd::show::set_firing_transcript(transcript);
     let project_dir = project
         .map(|s| s.to_string())
         .unwrap_or_else(default_project);
@@ -632,7 +639,13 @@ pub fn command(
 
 // ── File scan ───────────────────────────────────────────────────
 
-pub fn file(filepath: &str, session_id: &str, project: Option<&str>) -> Result<()> {
+pub fn file(
+    filepath: &str,
+    session_id: &str,
+    project: Option<&str>,
+    transcript: Option<&str>,
+) -> Result<()> {
+    crate::cmd::show::set_firing_transcript(transcript);
     let project_dir = project
         .map(|s| s.to_string())
         .unwrap_or_else(default_project);

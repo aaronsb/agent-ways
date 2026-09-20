@@ -63,7 +63,7 @@ ways context --json
 
 **Run from:** The project directory to scope to that project. Add `--global` to see across all projects.
 
-**Tells you:** Top ways ranked by fire frequency with ASCII bar charts, trigger-type breakdown (keyword / semantic / state / file / bash / check-pull), check fire summary, and session count. Add `--days N` to narrow the time window.
+**Tells you:** Top ways ranked by fire frequency with ASCII bar charts, trigger-type breakdown (keyword / semantic / state / file / bash / check-pull), a per-model breakdown, ways per hook invocation, check fire summary, and session count. Add `--days N` to narrow the time window.
 
 ```
 ways stats
@@ -71,6 +71,12 @@ ways stats --days 7
 ways stats --global
 ways stats --json
 ```
+
+**By model:** fires and re-disclosures split by the model id stamped on each event at fire time (the `model` field, read from the transcript the invoking hook named). A second table shows the same top ten ways with one column per model. Two buckets are not model ids. `unknown` means no model was resolved for the fire: the scan ran without `--transcript` (a dry run, the task/SubagentStart lane, or a hook predating the flag), the named transcript could not be read, or it had no assistant turn yet. The model is never taken from a session-id or project lookup, since for a subagent those resolve the parent's or a sibling's transcript. `(unstamped)` means the row predates the field. This is identification only: no way is gated or presented differently by model.
+
+**Ways per hook invocation:** how many ways one hook call delivered, per channel (`prompt`, `bash`, `file`, `state`, ...). An invocation is approximated as the `way_fired` rows that share a session, an agent (`agent_id`, since subagent hooks report the parent's session id), a timestamp (one-second resolution), and a channel; the table gives the invocation count, how many fired 1, 2, 3, or 4+ ways, and the maximum. Rows written before `agent_id` existed still merge parallel agents under one session, so on historical data the 4+ tail is an upper bound. The prompt channel folds the keyword and semantic prompt matchers together, and the bash channel folds `bash` with `semantic:bash:*`.
+
+**`--json` output** adds `by_model` (`{model: {fires, redisclosures}}`), `by_way_model` (`{way: {model: fires}}`), and `ways_per_invocation` (`{channel: {invocations, "1", "2", "3", "4+", max}}`) beside the existing keys.
 
 ---
 
@@ -113,6 +119,8 @@ ways scan prompt --query "git commit" --session dummy --project ~/my-project
 ```
 
 > **Note:** `--session` is required — pass any string (e.g., `dummy`) for a dry-run that doesn't affect real session state.
+
+**`--transcript <path>`** (also on `scan command`, `scan file`, and `scan state`): the transcript the hook payload names as `transcript_path`. Fired ways read the invoking agent's model id from it and stamp the event with a `model` field (and an `agent_id`), and resolve their `refire:` window from the same read. The hooks pass it automatically. Without it the binary still locates a transcript by session id for the window, but stamps `model: unknown`: that lookup finds the parent's transcript for a subagent, so it is not trusted for the model.
 
 ---
 

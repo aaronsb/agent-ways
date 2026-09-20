@@ -22,6 +22,10 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(echo "$INPUT" | jq -r '.cwd // empty')}"
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
 [[ -n "$AGENT_ID" ]] && export CLAUDE_AGENT_ID="$AGENT_ID"
+# The invoking agent's transcript. The binary reads the session's model id
+# from it and stamps every fired way with it (`model` on the event), and
+# resolves the refire window from the same read.
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
 # Read Claude's last response from the Stop hook state (if available).
 # Path resolves through the binary so the writer (check-response.sh),
@@ -43,19 +47,31 @@ export CLAUDE_PROJECT_DIR="${PROJECT_DIR}"
 # The = form binds the value unambiguously even when it starts with a dash.
 #
 # Deploy-order skew guard: if the projected hooks are newer than the
-# installed binary (reconcile ran before a rebuild), clap rejects the
-# unknown --response-context flag with a non-zero exit — which the
-# UserPromptSubmit contract reads as "block the prompt". Degrade to the
-# flagless pre-ADR-155 invocation rather than blocking every prompt.
-if ! OUTPUT=$("${HOME}/.claude/bin/ways" scan prompt \
-  --query="$PROMPT" \
-  --session="$SESSION_ID" \
-  --project="$PROJECT_DIR" \
-  --response-context="$RESPONSE_CONTEXT" 2>/dev/null); then
-  OUTPUT=$("${HOME}/.claude/bin/ways" scan prompt \
+# installed binary (reconcile ran before a rebuild), clap rejects an
+# unknown flag with a usage error (exit 2) — which the UserPromptSubmit
+# contract reads as "block the prompt". Shed the newest flag first and
+# retry, so a binary that knows --response-context but not --transcript
+# keeps the response-context lane; only a binary that knows neither gets
+# the flagless pre-ADR-155 invocation. Only exit 2 retries: any other
+# failure has already run the scan (and stamped its ways), so re-running it
+# would suppress them and hide the first attempt's stderr.
+scan_prompt() {
+  "${HOME}/.claude/bin/ways" scan prompt \
     --query="$PROMPT" \
     --session="$SESSION_ID" \
-    --project="$PROJECT_DIR")
+    --project="$PROJECT_DIR" \
+    "$@"
+}
+FLAGS=(--response-context="$RESPONSE_CONTEXT")
+[[ -n "$TRANSCRIPT" ]] && FLAGS+=(--transcript="$TRANSCRIPT")
+OUTPUT=$(scan_prompt "${FLAGS[@]}" 2>/dev/null)
+STATUS=$?
+if [[ $STATUS -eq 2 && ${#FLAGS[@]} -gt 1 ]]; then
+  OUTPUT=$(scan_prompt "${FLAGS[0]}" 2>/dev/null)
+  STATUS=$?
+fi
+if [[ $STATUS -eq 2 ]]; then
+  OUTPUT=$(scan_prompt)
 fi
 [[ -n "$OUTPUT" ]] && printf '%s\n' "$OUTPUT"
 exit 0
