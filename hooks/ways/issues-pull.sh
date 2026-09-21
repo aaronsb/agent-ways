@@ -12,6 +12,11 @@
 #
 # SessionStart and UserPromptSubmit accept plain stdout as context.
 # PostToolUse needs hookSpecificOutput.additionalContext.
+#
+# PostToolUse also fires inside subagents, whose hook input carries the
+# parent's session_id plus an agent_id. The whisper is the head agent's: a
+# subagent that pulled would rotate the snapshot and consume the delta, so
+# the hook exits before touching the store when agent_id is set.
 
 MODE="${1:-prompt}"
 GH_TASKS="$(dirname "$0")/softwaredev/delivery/issues/gh-tasks"
@@ -21,6 +26,8 @@ command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || exit 0
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 [[ -n "$SESSION_ID" ]] || exit 0
+AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
+[[ -z "$AGENT_ID" ]] || exit 0
 SOURCE=$(echo "$INPUT" | jq -r '.source // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 [[ -n "$CWD" && -d "$CWD" ]] && cd "$CWD"
