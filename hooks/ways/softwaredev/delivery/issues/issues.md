@@ -10,7 +10,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Issues as Tasks
 
-Issues carrying the `tasklist` label are mirrored into this session's task list (ADR-180). GitHub is the shared truth. The task store is a cache. Hooks pull on session start, at a prompt when the snapshot is stale, and after any `gh issue` command run here. `/issues` is the on-demand path.
+Issues carrying the `tasklist` label are mirrored into this session's task list (ADR-180). GitHub is the shared truth. The task store is a cache. Hooks pull on session start, at a prompt when the snapshot is stale, and after any `gh issue` command run here. The hooks act for the head agent only; a subagent's `gh issue` command leaves the store and the whisper untouched. `/issues` is the on-demand path.
 
 ## What a mirrored task looks like
 

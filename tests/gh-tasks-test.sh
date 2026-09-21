@@ -6,9 +6,9 @@
 # in_progress, remote close and reopen move status, body change replaces
 # description, local description edit survives an unchanged body); id
 # conflict left untouched; unrecognized layout writes nothing; whisper
-# deltas; link; the TaskCreated guard; attach on a resume (fresh team by age
-# and cwd, carry-forward of open tasks, claimed and stale teams skipped);
-# refusal without a session id.
+# deltas; the hook skips subagent input; link; the TaskCreated guard;
+# attach on a resume (fresh team by age and cwd, carry-forward of open
+# tasks, claimed and stale teams skipped); refusal without a session id.
 
 set -euo pipefail
 
@@ -204,6 +204,21 @@ fixture "$GH_FIXTURE" "[$(issue 12 'Add widget v2' CLOSED 'Body twelve'), $(issu
 "$GH_TASKS" pull 2>/dev/null
 assert_has "full list shows the new issue" "$("$GH_TASKS" whisper --full)" "#31 Fresh"
 assert_empty "no second report on the next prompt" "$("$GH_TASKS" whisper)"
+
+# ── 9d2. the hook leaves the store alone for a subagent ────────
+HOOK="$REPO_ROOT/hooks/ways/issues-pull.sh"
+HOOK_CWD="$TMP/hookrepo"; git init -q "$HOOK_CWD"
+hook_input() { jq -n --arg s "$CLAUDE_CODE_SESSION_ID" --arg c "$HOOK_CWD" --arg a "${1:-}" \
+  '{session_id:$s, cwd:$c, tool_name:"Bash"} + (if $a == "" then {} else {agent_id:$a} end)'; }
+fixture "$GH_FIXTURE" "[$(issue 12 'Add widget v2' CLOSED 'Body twelve'), $(issue 14 'New one' OPEN 'x'), $(issue 30 'Odd' OPEN 'x'), $(issue 31 'Fresh' OPEN 'x'), $(issue 32 'Later' OPEN 'x')]"
+"$GH_TASKS" pull 2>/dev/null
+# #32 is pulled and unread; #33 is on GitHub and not yet pulled.
+fixture "$GH_FIXTURE" "[$(issue 12 'Add widget v2' CLOSED 'Body twelve'), $(issue 14 'New one' OPEN 'x'), $(issue 30 'Odd' OPEN 'x'), $(issue 31 'Fresh' OPEN 'x'), $(issue 32 'Later' OPEN 'x'), $(issue 33 'Head only' OPEN 'x')]"
+assert_empty "subagent input gets no whisper" "$(hook_input a512f45a8aee73bde | "$HOOK" post-gh)"
+assert_eq "subagent input does not pull" "$([[ -e "$STORE/gh-33.json" ]] && echo present || echo absent)" "absent"
+assert_eq "subagent input leaves the previous snapshot" "$([[ -e "$STATE/snapshot.prev.json" ]] && echo present || echo absent)" "present"
+assert_has "the unread delta is still the head agent's" "$("$GH_TASKS" whisper)" 'opened #32 "Later"'
+assert_has "head input still gets the PostToolUse whisper" "$(hook_input | "$HOOK" post-gh | jq -r .hookSpecificOutput.additionalContext)" 'opened #33 "Head only"'
 
 # ── 9e. blocks edges the session added survive ─────────────────
 jq '.blocks += ["gh-30"]' "$STORE/gh-14.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-14.json"
