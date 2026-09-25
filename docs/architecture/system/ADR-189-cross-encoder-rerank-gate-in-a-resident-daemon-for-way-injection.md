@@ -13,6 +13,7 @@ related:
   - ADR-156
   - ADR-158
   - ADR-160
+  - ADR-161
   - ADR-188
 ---
 
@@ -58,13 +59,24 @@ A daemon, working name `wayd`, holds the models and session context for one user
 
 ### 3. Rerank gate
 
-The gate runs once per scan, after the ADR-160 matcher and the refire engine, and before a fire is recorded.
+The gate runs once per scan, after the ADR-160 matcher and the refire engine, and before a fire is recorded. It applies to the lanes whose fires come from semantic matching, since those are the only fires a relevance model can judge.
 
-- **Placement.** `scan_prompt_surface` collects every `PromptMatch::Fired` way, drops the ways the refire engine would suppress (`way_fire_outcome`, ADR-126), and sends the survivors to the daemon in one batch. Only the ways that pass reach `record_way_fire` and body output in `show::way_scored`. A way the gate rejects does not spend its refire budget.
-- **Query.** The session context from stage 4, reduced to 384 tokens with the ADR-130 salience reducer. The current prompt is always kept whole when it fits.
+| Lane | Hook | Query | Gated |
+|---|---|---|---|
+| Prompt | UserPromptSubmit | Session context from stage 4 | Yes |
+| Task (subagent, teammate) | PreToolUse:Task stash, drained at SubagentStart | The delegation prompt | Yes |
+| Queued message (ADR-161) | PostToolUse | The queued message, then session context | Yes |
+| Tool (`commands:`, `files:`) | PostToolUse (ADR-188) | None | No |
+
+ADR-188 retires the semantic lane on the Bash surface, so tool-lane fires come from `commands:` and `files:` patterns. Their authors chose a deterministic trigger, and the gate leaves them alone. Checks that score through `description` and `vocabulary` are also out of scope here.
+
+The task lane is the first lane the gate turns on for (stage 7). Ways stashed for a subagent are emitted at SubagentStart without marker checks, so a false positive is paid in full on every spawn, into a fresh context where it is a large share of what the subagent reads. The delegation prompt is also the best query any lane produces: it is written to stand alone, and it needs no session context.
+
+- **Placement.** In `scan_prompt_surface`, the scan collects every `PromptMatch::Fired` way, drops the ways the refire engine would suppress (`way_fire_outcome`, ADR-126), and sends the survivors to the daemon in one batch. Only the ways that pass reach `record_way_fire` and body output in `show::way_scored`. A way the gate rejects does not spend its refire budget. In `scan::task`, the gate runs on the matched list before the stash file is written, so a rejected way never reaches the subagent. The queued lane follows the prompt lane.
+- **Query.** On the prompt and queued lanes, the session context from stage 4, reduced to 384 tokens with the ADR-130 salience reducer, with the current prompt kept whole when it fits. On the task lane, the delegation prompt reduced to 384 tokens.
 - **Document.** The way's `description`, followed by its body with frontmatter and macro output removed, truncated to 256 tokens.
 - **Score.** The reranker's raw logit is mapped to a probability with a logistic fit per model, `σ(a·logit + b)`, fitted on the eval set and stored in `embed-manifest.json` beside the existing embedder calibration (ADR-156). A way is injected when the probability is at least `τ_r`.
-- **Exemptions.** Ways with `pattern_strict` bypass the gate, since their authors chose a deterministic trigger. Tool-lane ways delivered on PostToolUse (ADR-188) are gated with the tool event as the query.
+- **Exemptions.** Ways with `pattern_strict` bypass the gate on every lane, since their authors chose a deterministic trigger.
 - **Telemetry.** Every gated candidate logs a `way_reranked` event carrying the raw logit, the probability, `τ_r`, and the outcome. `ways tune` (ADR-134) reads these events to refit `a`, `b` and `τ_r`.
 
 A reranker returns one scalar, and the only outcomes are inject or skip. A middle band that injects a one-line pointer in place of the full body was considered. It stays out of this ADR until the eval set shows a population of borderline cases where a pointer is the correct answer.
@@ -84,7 +96,7 @@ The model is chosen by measurement on the eval set. The candidate list, in order
 | `bge-reranker-v2-m3` | 568M | Multilingual |
 | `Qwen3-Reranker-0.6B` | 600M | Instruction-conditioned |
 
-The smallest model that meets the precision target on the eval set wins. The English lane and the multilingual lane may use different models, matching the embedder split in ADR-139. A candidate is eligible only if the pinned llama.cpp submodule loads its GGUF and returns scores matching the reference implementation to within 1e-3.
+The smallest model that meets the precision target on the eval set wins. The English lane and the multilingual lane may use different models, matching the embedder split in ADR-139. The pinned llama.cpp submodule (`ec2b787`, March 2026) implements rank pooling (`LLAMA_POOLING_TYPE_RANK`) for the BERT, XLM-RoBERTa, JinaBERT-v2, ModernBERT and Qwen3 architectures, and its converter handles their classifier heads. That covers every candidate's architecture. A candidate is still eligible only if its converted GGUF loads in `wayd` and returns scores matching the reference implementation to within 1e-3.
 
 The latency budget is 300 ms at p95 for six candidates on the reference CPU, measured warm. A model that exceeds it is not eligible, whatever its accuracy.
 
@@ -96,9 +108,10 @@ After the stock model is gated and measured, `ways tune rerank` fine-tunes the s
 
 1. Build the eval set and publish the ADR-160 baseline.
 2. Ship the daemon with the embedder only. This is a latency change with no behavior change, verified by identical fire sets on the eval replay.
-3. Ship the reranker in shadow mode. It scores and logs `way_reranked` and suppresses nothing.
-4. Turn the gate on once shadow data shows a precision gain on the eval set with recall loss under 5 points.
-5. Offer local fine-tuning.
+3. Ship the reranker in shadow mode on every gated lane. It scores and logs `way_reranked` and suppresses nothing.
+4. Turn the gate on for the task lane once shadow data shows a precision gain on that lane's eval rows with recall loss under 5 points.
+5. Turn it on for the prompt and queued lanes against the same criterion, measured on their own rows.
+6. Offer local fine-tuning.
 
 ## Consequences
 
