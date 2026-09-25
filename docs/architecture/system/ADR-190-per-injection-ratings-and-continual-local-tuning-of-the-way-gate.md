@@ -216,7 +216,11 @@ Every label record carries its source (section 2). The rule:
 - **Every model that generates or labels data for shipped weights is open-weight, with a licence that places no restriction on training from its output.** The release manifest records the licence chain. Qwen3, Qwen3-Reranker and the Ettin rerankers are Apache-2.0. A model under terms that restrict training on its output, including hosted models such as Jev, is not used for shipped weights.
 - **Batch judging with Claude is out of scope.** A hindsight judge over traces, if added later, runs on a local open-weight model. Claude-based batch judging would also need an API key; a Max subscription covers ordinary individual use of Claude Code.
 
-**Questions put to Anthropic.** The answers could relax this section, and the source field keeps that option open without re-collecting data.
+**Questions for Anthropic.** The answers could relax this section, and the source field keeps that option open without re-collecting data. The questions are held until the system has shown merit, because nothing in the rollout waits on them. They are sent when both of these hold:
+- The local loop has shown that Claude's flags reduce misfires, measured against the human anchor slice.
+- A base trained with Claude-derived labels, built and evaluated locally and never published, clearly beats the base built from open models and human labels on the anchor set across all ways.
+
+The draft question is kept outside the repository, since it addresses Anthropic directly.
 1. agent-ways is a method layer for Claude Code: human-authored guidance, statistics about when each piece fits, and one non-generative relevance classifier of 17–32M parameters that cannot produce text and exists only to choose which guidance reaches Claude. Does training that classifier on Claude's in-session relevance flags fall under "utilization of inputs and outputs to train an AI model"? If it does, can it be authorised for both local training and publicly released weights?
 2. May each user train such a classifier locally on Claude's in-session flags from their own sessions?
 3. May the maintainer publicly release weights whose labels include Claude flags from the maintainer's own sessions, and does the answer differ between a Max subscription and an API key?
