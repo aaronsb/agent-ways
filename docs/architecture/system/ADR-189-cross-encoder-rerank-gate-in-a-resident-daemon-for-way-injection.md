@@ -94,6 +94,7 @@ Latency decides the field before ranking quality does. A scan scores up to six p
 | Gate | `ettin-reranker-17m-v1`, `ettin-reranker-32m-v1` | 17.6M, 32.8M | Apache-2.0 | Needs a patch, below |
 | Gate baseline | `ms-marco-MiniLM-L6-v2`, `jina-reranker-v1-tiny-en` | 22.7M, 33M | Apache-2.0 | Supported |
 | Teacher | `Qwen3-Reranker-0.6B`, `Qwen3-Reranker-4B` | 0.6B, 4B | Apache-2.0 | Supported |
+| Generator and judge | A Qwen3 instruct model | varies | Apache-2.0 | Supported (Qwen3 architecture) |
 
 The Ettin rerankers are the lead candidates. On MTEB English retrieval, averaged over six first-stage retrievers, `ettin-reranker-32m-v1` scores 0.578 against 0.553 for `bge-reranker-v2-m3`, at about a seventeenth of its size, and it reads up to 8k tokens. The pinned llama.cpp hard-codes mean pooling for ModernBERT on the rank path, to match `gte-reranker-modernbert-base`, while Ettin uses CLS pooling followed by a two-layer head. Running Ettin needs a patch that selects pooling from the GGUF metadata, plus a repack of its Sentence Transformers head. The patch is offered upstream and carried on the submodule until it lands. If it cannot be carried, the baseline models ship, since they run on the pinned commit unchanged.
 
@@ -109,7 +110,9 @@ The latency budget is 300 ms at p95 for six candidates on the reference CPU, mea
 
 ### 6. Training
 
-Every gate candidate was trained on web-search pairs, and none of them follows an instruction, so the gate model is trained for this task before the gate turns on. How it is trained, how it keeps learning, and how weights ship and are adopted are governed by ADR-190. The first base is distilled from `Qwen3-Reranker-4B` on synthetic pairs built from the public corpus, as ADR-190 section 6 describes.
+Every gate candidate was trained on web-search pairs, and none of them follows an instruction, so the gate model is trained for this task before the gate turns on. How it is trained, how it keeps learning, and how weights ship and are adopted are governed by ADR-190. The first base is distilled from `Qwen3-Reranker-4B` on synthetic pairs built from the public corpus, as ADR-190 section 6 describes. A Qwen3 instruct model generates the turns and settles the pairs the teacher is unsure of.
+
+Every model that generates or labels data for a shipped checkpoint is open-weight, with a licence that places no restriction on training from its output, and the release manifest records that licence chain. Claude-derived labels train only local state (ADR-190 section 7).
 
 ### 7. Rollout
 
