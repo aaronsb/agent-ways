@@ -87,31 +87,41 @@ The daemon keeps a short rolling context for each `session_id`: the last three u
 
 ### 5. Model selection
 
-The model is chosen by measurement on the eval set. The candidate list, in order of cost:
+Latency decides the field before ranking quality does. A scan scores up to six pairs of about 640 tokens each, roughly 3,800 tokens per call. The one published CPU comparison across these models (the Ettin reranker release, Hugging Face, May 2026, a desktop i7 on short documents) measures 150M-parameter cross-encoders at about 15 pairs per second and `bge-reranker-v2-m3` at 6. Scaled to this input, that projects to about 2 s and 8 s per scan. Only models of about 35M parameters or fewer project inside the budget. These are estimates. Stage 5 replaces them with measurements on the reference CPU before any model is chosen.
 
-| Model | Parameters | Coverage |
-|---|---|---|
-| `gte-reranker-modernbert-base` | 149M | English, long context |
-| `jina-reranker-v2-base-multilingual` | 278M | Multilingual |
-| `bge-reranker-v2-m3` | 568M | Multilingual |
-| `Qwen3-Reranker-0.6B` | 600M | Instruction-conditioned |
+| Role | Model | Parameters | License | Pinned llama.cpp (`ec2b787`) |
+|---|---|---|---|---|
+| Gate | `ettin-reranker-17m-v1`, `ettin-reranker-32m-v1` | 17.6M, 32.8M | Apache-2.0 | Needs a patch, below |
+| Gate baseline | `ms-marco-MiniLM-L6-v2`, `jina-reranker-v1-tiny-en` | 22.7M, 33M | Apache-2.0 | Supported |
+| Teacher | `Qwen3-Reranker-0.6B`, `Qwen3-Reranker-4B` | 0.6B, 4B | Apache-2.0 | Supported |
 
-The smallest model that meets the precision target on the eval set wins. The English lane and the multilingual lane may use different models, matching the embedder split in ADR-139. The pinned llama.cpp submodule (`ec2b787`, March 2026) implements rank pooling (`LLAMA_POOLING_TYPE_RANK`) for the BERT, XLM-RoBERTa, JinaBERT-v2, ModernBERT and Qwen3 architectures, and its converter handles their classifier heads. That covers every candidate's architecture. A candidate is still eligible only if its converted GGUF loads in `wayd` and returns scores matching the reference implementation to within 1e-3.
+The Ettin rerankers are the lead candidates. On MTEB English retrieval, averaged over six first-stage retrievers, `ettin-reranker-32m-v1` scores 0.578 against 0.553 for `bge-reranker-v2-m3`, at about a seventeenth of its size, and it reads up to 8k tokens. The pinned llama.cpp hard-codes mean pooling for ModernBERT on the rank path, to match `gte-reranker-modernbert-base`, while Ettin uses CLS pooling followed by a two-layer head. Running Ettin needs a patch that selects pooling from the GGUF metadata, plus a repack of its Sentence Transformers head. The patch is offered upstream and carried on the submodule until it lands. If it cannot be carried, the baseline models ship, since they run on the pinned commit unchanged.
 
-The latency budget is 300 ms at p95 for six candidates on the reference CPU, measured warm. A model that exceeds it is not eligible, whatever its accuracy.
+Qwen3-Reranker is the only small reranker trained to follow a task instruction. It scores +5.4 (0.6B) and +14.8 (4B) on FollowIR, where BERT-family cross-encoders score about zero. It is too slow to gate on the prompt path at this input size, and it serves as the teacher in stage 6. Community GGUFs of it are often broken, so it is converted from source.
 
-### 6. Local fine-tuning
+Every gate candidate is English-only. The multilingual lane (ADR-139) keeps the ADR-160 matcher without a gate until a multilingual cross-encoder of this size exists.
 
-After the stock model is gated and measured, `ways tune rerank` fine-tunes the selected reranker on the user's own labels and writes a local GGUF that the daemon prefers when present. Fine-tuning is opt-in and runs on the user's machine. Shipping a checkpoint tuned on the maintainer's sessions is a separate decision, because weights can retain training text.
+Models under non-commercial licenses are excluded, because the corpus ships under MIT and adopters use it commercially. That removes `jina-reranker-v2-base-multilingual`, `jina-reranker-v3`, `jina-reranker-v3.5` and `jina-colbert-v2`.
+
+A candidate is eligible only if its converted GGUF loads in `wayd` and returns scores matching the reference implementation to within 1e-3.
+
+The latency budget is 300 ms at p95 for six candidates on the reference CPU, measured warm. A model that exceeds it is not eligible, whatever its accuracy. If no candidate meets the budget at the stage 3 token sizes, the query and document budgets shrink before a larger model is considered.
+
+### 6. Distillation and fine-tuning
+
+Every gate candidate was trained on web-search pairs, and none of them follows an instruction. Deciding whether a piece of guidance applies to a coding turn is a different task, so the gate model is fine-tuned before the gate turns on. Training uses the Sentence Transformers cross-encoder recipe, followed by GGUF conversion. There are two tiers.
+
+- **Shipped checkpoint, trained on the public corpus only.** For each way, a generator writes turns where the way applies, turns that use its vocabulary without needing it (negations included), and turns that belong to neighbouring ways. `Qwen3-Reranker-4B`, given a task instruction, labels the pairs, and a Claude judge settles the pairs where the teacher is unsure. ADR-158's hard negatives join the set. No transcript text enters these weights, so the checkpoint ships with the release and is retrained when the corpus changes enough to move the eval.
+- **Local checkpoint, trained on the user's own labels.** `ways tune rerank` continues training from the shipped checkpoint on the stage 1 eval set. It is opt-in, runs on the user's machine, and writes a local GGUF that `wayd` prefers when present. A checkpoint trained on session text is never shipped, because weights can retain training text.
 
 ### 7. Rollout
 
 1. Build the eval set and publish the ADR-160 baseline.
 2. Ship the daemon with the embedder only. This is a latency change with no behavior change, verified by identical fire sets on the eval replay.
-3. Ship the reranker in shadow mode on every gated lane. It scores and logs `way_reranked` and suppresses nothing.
+3. Ship the distilled reranker in shadow mode on every gated lane. It scores and logs `way_reranked` and suppresses nothing.
 4. Turn the gate on for the task lane once shadow data shows a precision gain on that lane's eval rows with recall loss under 5 points.
 5. Turn it on for the prompt and queued lanes against the same criterion, measured on their own rows.
-6. Offer local fine-tuning.
+6. Offer local fine-tuning (stage 6, second tier).
 
 ## Consequences
 
@@ -125,9 +135,12 @@ After the stock model is gated and measured, `ways tune rerank` fine-tunes the s
 
 ### Negative
 
-- **A resident process.** It holds roughly 0.3 to 1.2 GB of RAM while running, depending on the model chosen, and adds lifecycle code: startup, idle exit, version handshake, stale socket cleanup.
+- **A resident process.** It holds the embedders and a reranker of 35M parameters or fewer, on the order of a few hundred MB, and adds lifecycle code: startup, idle exit, version handshake, stale socket cleanup.
 - **Added latency on the prompt path.** Up to 300 ms at p95 per scan once the gate is on, against tens of milliseconds today.
 - **A labelling pipeline to maintain.** The eval set drifts as ways are added and rewritten, so it has to be refreshed, and its labels depend on a judge model whose agreement with a person must be rechecked.
+- **A training pipeline.** The shipped checkpoint depends on a synthetic-data generator, a teacher model and a conversion step, and it is retrained as the corpus changes.
+- **A carried llama.cpp patch** for Ettin's pooling, until upstream accepts it.
+- **An English-only gate.** The multilingual lane gets no reranker from this ADR.
 - **Another calibrated threshold.** `τ_r` joins τ_s and τ_k and needs the same telemetry discipline.
 
 ### Neutral
@@ -140,7 +153,11 @@ After the stock model is gated and measured, `ways tune rerank` fine-tunes the s
 
 - **Keep tuning the ADR-160 operating points.** Rejected as the main fix. Without a judged eval set each change is unmeasured, and the bi-encoder cannot represent the mention-versus-doing distinction at any threshold. The eval set from stage 1 is still worth building for this purpose alone.
 - **Small generative judge** (Qwen3-1.7B, Gemma-3-1B), reading the probability of a yes token. Rejected as too compute-heavy for the prompt path, at an estimated 0.5 to 1.5 s per scan on CPU. It is also nondeterministic across sampling settings and runtime versions.
-- **Laya typed-decision model** (Convai Innovations, 421M, Apache 2.0). Rejected. Its published zero-shot accuracy on typed decisions is 0.362 against a 0.318 random baseline. Its README reports that negated requests select the negated action, which is the failure this gate exists to catch, and that the act/escalate head carries no usable signal. It runs 193 to 464 ms warm on CPU and needs Python with torch or an ONNX Runtime. Fine-tuned, it would do the same job as a fine-tuned cross-encoder at about three times the size, outside the existing stack.
+- **Laya typed-decision model** (Convai Innovations, 421M, Apache 2.0). Rejected. Its published zero-shot accuracy on typed decisions is 0.362 against a 0.318 random baseline. Its README reports that negated requests select the negated action, which is the failure this gate exists to catch, and that the act/escalate head carries no usable signal. It runs 193 to 464 ms warm on CPU and needs Python with torch or an ONNX Runtime. Fine-tuned, it would do the same job as a fine-tuned cross-encoder at about three times the size, outside the existing stack. Used zero-shot as a reranker on NFCorpus (323 queries), both of its checkpoints ranked below plain BM25, and it ran 27 to 31 times slower per pair on CPU than a 22M MiniLM cross-encoder.
 - **Logistic head on existing MiniLM embeddings.** Kept as a baseline in the eval, and rejected as the gate. It is cheap and needs no daemon, and it inherits the bi-encoder's inability to model the interaction between query and document.
+- **Jev** (TypeSafe, hosted System One decision model). Rejected as the gate. Its request shape fits this gate well: one state holding the context and every candidate, one yes/no question per way, and a probability per way. In that shape it beat `bge-reranker-v2-m3` and monoT5-3B by 4 to 8 nDCG@10 points on three BEIR sets (S1Rank), and a per-turn skill router built on it loaded the correct skill 96% of the time. It fails the requirements on four counts. Weights are not released, so transcript text would leave the machine on every prompt, and no retention window is published below the enterprise tier. It takes no seed, and about half of all probabilities changed across byte-identical requests, so a way near the threshold would flip between identical prompts. Its client-side p95 is 1 to 2 s, and one run saw 5% of calls fail with HTTP 503. Its calibration also shifts with how often relevant items occur. Its one-call-for-all-candidates shape is adopted locally in stage 3's single batch.
+- **Larger local cross-encoders as the gate** (`bge-reranker-v2-m3`, `gte-reranker-modernbert-base`, `Qwen3-Reranker-0.6B`). Rejected for the prompt path on projected latency, at about 1 to 8 s per scan on CPU. Qwen3-Reranker is kept as the stage 6 teacher.
+- **Late interaction over pre-encoded way bodies** (`mxbai-edge-colbert-v0`, `answerai-colbert-small-v1`). Held as the fallback. Way bodies are static, so they can be encoded once at corpus build time, and a scan then encodes only the query, which should cost well under 100 ms. It is not the first choice because it scores token similarity without cross-attention, which is the limit this ADR is trying to get past, and because MaxSim scoring would run outside llama.cpp. It becomes the design if no cross-encoder meets the budget after the token budgets shrink.
+- **A classifier head per way on a frozen encoder** (the stuntd pattern). Rejected. It needs about 300 labelled examples per question, which is about 48,000 across 161 ways, and every new way needs its own head.
 - **Remote reranker (Haiku or an API reranker).** Rejected. The requirement is local operation, and ADR-160's probe already showed that a remote model given thin evidence does not help.
 - **Upstream `llama-server --reranking` as the daemon.** Rejected as the shipped form. It needs no new code, but it cannot hold session context, embedder calls and version checks in one process. It is a reasonable way to prototype model selection in stage 5.
