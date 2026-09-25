@@ -18,6 +18,7 @@ related:
   - ADR-184
   - ADR-185
 amends: ADR-169#1
+amended_by: ADR-190
 ---
 
 # ADR-187: Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook

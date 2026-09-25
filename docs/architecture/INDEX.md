@@ -104,6 +104,8 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 | [ADR-186](./system/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
 | [ADR-187](./system/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | Proposed |
 | [ADR-188](./system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | Proposed |
+| [ADR-189](./system/ADR-189-cross-encoder-rerank-gate-in-a-resident-daemon-for-way-injection.md) | Cross-encoder rerank gate in a resident daemon for way injection | Proposed |
+| [ADR-190](./system/ADR-190-per-injection-ratings-and-continual-local-tuning-of-the-way-gate.md) | Per-injection ratings and continual local tuning of the way gate | Proposed |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
