@@ -211,30 +211,35 @@ flowchart LR
 
 Every label record carries its source (section 2). The rule:
 
-- **Claude-derived labels stay local.** Rows whose source is `claude_flag` or `claude_silence` train only local state: per-way estimates, calibration, the last layer and the personal delta. They never leave the user's machine and never enter shipped weights.
+- **Claude-derived labels stay local.** Rows whose source is `claude_flag` or `claude_silence` never leave the user's machine and never enter shipped weights.
+- **Neural training on Claude-derived labels is opt-in.** Per-way estimates, offsets and calibration are statistics about the corpus, and they use every label by default. The Bayesian last layer and the personal delta are trained models, so they train on `claude_*` rows only when the user sets `rerank.train_on_claude_labels: true`. The default is `false`. Without it, they train on `human`, `qwen_judge` and exploration labels alone. agent-ways is free for anyone to use, so each adopter decides for their own account. The README explains the setting and the open policy question until Anthropic answers.
 - **A shippable training run refuses Claude-derived rows.** `ways tune rerank --release` reads the source field and fails if any `claude_*` row is present, unless a written authorisation from Anthropic is recorded in the release configuration.
 - **Every model that generates or labels data for shipped weights is open-weight, with a licence that places no restriction on training from its output.** The release manifest records the licence chain. Qwen3, Qwen3-Reranker and the Ettin rerankers are Apache-2.0. A model under terms that restrict training on its output, including hosted models such as Jev, is not used for shipped weights.
 - **Batch judging with Claude is out of scope.** A hindsight judge over traces, if added later, runs on a local open-weight model. Claude-based batch judging would also need an API key; a Max subscription covers ordinary individual use of Claude Code.
 
-**Questions for Anthropic.** The answers could relax this section, and the source field keeps that option open without re-collecting data. The questions are held until the system has shown merit, because nothing in the rollout waits on them. They are sent when both of these hold:
-- The local loop has shown that Claude's flags reduce misfires, measured against the human anchor slice.
-- A base trained with Claude-derived labels, built and evaluated locally and never published, clearly beats the base built from open models and human labels on the anchor set across all ways.
+**Questions for Anthropic.** The answers could relax this section, and the source field keeps that option open without re-collecting data. The questions go in two asks, timed to the step each one affects. The draft is kept outside the repository, since it addresses Anthropic directly.
 
-The draft question is kept outside the repository, since it addresses Anthropic directly.
-1. agent-ways is a method layer for Claude Code: human-authored guidance, statistics about when each piece fits, and one non-generative relevance classifier of 17–32M parameters that cannot produce text and exists only to choose which guidance reaches Claude. Does training that classifier on Claude's in-session relevance flags fall under "utilization of inputs and outputs to train an AI model"? If it does, can it be authorised for both local training and publicly released weights?
+**Ask A, local use: sent before rollout step 3,** the first step that could train a model on Claude-derived labels. Until an answer arrives, the opt-in stays off for the maintainer as well.
+1. agent-ways is a method layer for Claude Code: human-authored guidance, statistics about when each piece fits, and one non-generative relevance classifier of 17–32M parameters that cannot produce text and exists only to choose which guidance reaches Claude. Does training that classifier on Claude's in-session relevance flags fall under "utilization of inputs and outputs to train an AI model"?
 2. May each user train such a classifier locally on Claude's in-session flags from their own sessions?
-3. May the maintainer publicly release weights whose labels include Claude flags from the maintainer's own sessions, and does the answer differ between a Max subscription and an API key?
-4. Does Claude text used as input features, not labels, count as utilisation of outputs to train?
-5. Is using Claude-derived labels for evaluation or model selection only, with no gradient updates, outside "train"?
+3. Does Claude text used as input features, not labels, count as utilisation of outputs to train?
+4. Is using Claude-derived labels for evaluation or model selection only, with no gradient updates, outside "train"?
+5. If authorisation is needed, can it be granted through the maintainer's Select-tier partner relationship, and in what form?
+
+**Ask B, publishing: sent when the system has shown merit.** Nothing before rollout step 6 depends on it. It goes out when both of these hold:
+- The local loop has shown that Claude's flags reduce misfires, measured against the human anchor slice.
+- A base trained with Claude-derived labels, built and evaluated locally under a favourable answer to Ask A and never published, clearly beats the base built from open models and human labels on the anchor set across all ways.
+
+6. May the maintainer publicly release weights whose labels include Claude flags from the maintainer's own sessions? The maintainer works on a Max subscription. Would an API key or the partner agreement change the answer?
 
 ### 8. Rollout
 
 1. The nonce footer, `ways flag`, `/misfire`, canaries, the label records with their source field, and per-way offsets on the ADR-160 thresholds. This needs no reranker and no daemon.
 2. The human anchor slice, the ADR-160 baseline measured against it, and the local independent rater for r_near.
-3. ADR-189's daemon and gate in shadow, with the first base and the Bayesian last layer.
+3. Ask A sent to Anthropic. ADR-189's daemon and gate in shadow, with the first base and the Bayesian last layer, training on Claude-derived labels only where the opt-in is set.
 4. The gate on for the task lane, then the prompt and queued lanes, each when it passes the acceptance check on its own lane.
 5. Personal deltas with annealed α and averaging, once the minimum evidence is met.
-6. The first release delta folded into a base, and rebase on adoption.
+6. The first release delta folded into a base, and rebase on adoption. Ask B is sent once its conditions hold.
 7. The `flag` tool on `attend mcp` once ADR-187 ships.
 
 ## Consequences
@@ -260,6 +265,7 @@ The draft question is kept outside the repository, since it addresses Anthropic 
 - **Shipped bases learn less from real use** than they would with Claude-derived labels. Human labels and Qwen relabels are the only real-session signal they receive, until Anthropic's answer says otherwise.
 - **Shipped bases carry the maintainer's prompts through training.** The secret scan and hash manifest reduce that risk and do not remove it.
 - **Rebasing costs compute on every base release** for each adopter.
+- **Adopters who leave the opt-in off get less personalisation.** Their last layer and delta learn from human, independent-rater and exploration labels only, while their per-way offsets still use every flag.
 
 ### Neutral
 
