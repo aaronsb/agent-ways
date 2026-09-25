@@ -52,7 +52,25 @@ The ways binary never hosts an MCP server, which keeps hook start-up cost unchan
 
 If Claude misses half of the real misfires, every miss becomes a thumbs-up, and the gate learns that misfires are fine. How much silence counts has to be measured.
 
-About one scan in fifty injects a canary: a short way from the family the scan scored lowest, with the same footer and a nonce. A flagged canary shows the evaluator is paying attention, and an unflagged one shows it is not. The canary catch rate over the recent window is **r**. Canaries are logged as canaries, excluded from way statistics, and never used as training labels.
+About one scan in fifty injects a canary: a real way from the corpus that plainly does not fit the turn, with the same footer and a nonce. A flagged canary shows the evaluator is paying attention, and an unflagged one shows it is not. The canary catch rate over the recent window is **r**. Canaries are logged as canaries, excluded from way statistics, and never used as training labels.
+
+Canaries are drawn from the existing corpus so they cannot be told apart from real injections. A synthetic decoy would have its own style, and a model that learns the style stops being measured.
+
+**Canary pool.** A way is eligible when all of these hold:
+- It ships in the corpus. User-scope and project-scope ways are never canaries, so r stays comparable across users and base releases, and a person's own ways are never shown out of context.
+- It is not `flaggable: false`, since a canary needs the footer.
+- It has no `macro:`. A macro runs a script when the way is emitted, which adds cost and possible side effects to an injection that is known to be wrong.
+- Its `scope` includes the lane's scope (agent, subagent or teammate), so the canary looks like a normal injection for that lane.
+- Its domain is enabled.
+- Its body is 200 words or fewer, and it is injected whole. Truncating a body would mark it as a canary, so length is limited by choosing short ways. At the time of writing, 42 of the 161 shipped ways meet the length limit and 41 of those have no macro.
+
+**Selection for one scan.**
+- The canary comes from the way family that scored lowest in this scan. A family is the first two segments of the way path (`softwaredev/code`, `meta/trust`), or the domain alone for a single-level domain. The top-level domain is too coarse: `softwaredev` alone holds 77 of the 161 ways.
+- It is skipped if it, or any ancestor or descendant in the ADR-125 disclosure graph, fired or was shown in this session.
+- It is skipped if its ADR-160 probability falls inside the near-miss band or above it. Once ADR-189's gate ships, its rerank probability must also be below 0.05.
+- At most one canary per scan, and a way serves as a canary at most once per session. If no eligible way remains for the lane, the scan injects no canary.
+
+**A canary leaves no trace on the real ways.** It bypasses the refire engine, markers, engagement stamps and the ADR-125 parent boost, so it never makes its own way or that way's children fire more easily later in the session. Its only record is the canary event.
 
 | Outcome | Label | Weight |
 |---|---|---|
@@ -161,7 +179,7 @@ flowchart LR
 ### Negative
 
 - **A footer on every injection.** About 20 tokens each, and a line of meta-instruction in guidance text.
-- **Canaries add context noise**, at about one scan in fifty.
+- **Canaries add context noise.** A canary body is at most 200 words, about 250 tokens, at about one scan in fifty. That averages to about 5 tokens per scan, and an unflagged canary may occasionally be followed.
 - **More machinery.** A flag inbox, label records, per-way estimates, a Bayesian layer, LoRA training, averaging, and an acceptance check are each small, and together they are a real maintenance surface.
 - **Shipped bases carry the maintainer's sessions through training.** The secret scan and hash manifest reduce that risk and do not remove it.
 - **Rebasing costs compute on every base release** for each adopter.
