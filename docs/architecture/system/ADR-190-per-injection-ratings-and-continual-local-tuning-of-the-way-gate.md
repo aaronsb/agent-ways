@@ -50,7 +50,7 @@ Collect a rating on every injection into the main agent, learn from those rating
 - **Thumbs-up.** An injection that reaches the Stop hook without a flag is unflagged. Silence is weaker evidence than a flag, and section 2 sets how much it counts.
 - **Exempt ways.** A new frontmatter field, `flaggable: false`, marks ways whose job is to constrain, such as test gates, commit hygiene and governance. They get no footer, because a model asked to rate its own constraints will rate the inconvenient ones down.
 - **Subagents and teammates are not asked.** Ways injected at SubagentStart get no footer and no canaries. Rating would add work to a subagent's task and could change how it does that task, and a subagent cannot easily reach an MCP flag tool. Task-lane labels come from the independent rater (section 2), which samples stashed injections against their delegation prompts.
-- **Human thumbs-down.** `/misfire [way]` records a flag attributed to the person. It is intercepted at UserPromptSubmit and recorded by the hook, so it costs no model tokens and cannot be produced by the model. The implementation confirms that the hook sees the command before it is expanded.
+- **Human labels come from interviews, not a command.** A person working on a problem rarely notices a misfire, and when they do, Claude has usually flagged it already. Human labels therefore come from the checkpoint interview (section 5), where the person sees the turn and the way and answers deliberately. A person can run `ways flag <nonce>` in a terminal, but it is recorded as a model flag, because attribution comes from observing the call.
 
 **Transport.** The flag verb reaches the ways inbox by one of two paths, and both mark the sender from observation, never from a parameter.
 
@@ -113,7 +113,7 @@ Each label carries a weight. A flag is a positive (misfire) label. An unflagged 
 
 | Outcome | Label | Weight |
 |---|---|---|
-| Human flag | misfire | 1 |
+| Human label (interview) | as answered | 1 |
 | Model flag, corroborated | misfire | 1 |
 | Model flag, not corroborated | misfire | 0.5 |
 | Unflagged | split | misfire `w`, acceptable `1−w`, with r for its band |
@@ -123,7 +123,7 @@ Each label carries a weight. A flag is a positive (misfire) label. An unflagged 
 
 A model flag is corroborated when an independent signal agrees: the way goes unused for the rest of the turn, the gate's own score was below `τ_r`, or the independent rater agrees.
 
-**Reliability floor.** When either band's recall falls below 0.6, silence in that band is too noisy to learn from, and the Elkan–Noto weight grows unstable as r falls. Weight training and calibration refits pause for that band, and only human flags, independent-rater labels and exploration labels continue to update the per-way estimates. The loop learns less; it never learns from noise.
+**Reliability floor.** When either band's recall falls below 0.6, silence in that band is too noisy to learn from, and the Elkan–Noto weight grows unstable as r falls. Weight training and calibration refits pause for that band, and only human interview labels, independent-rater labels and exploration labels continue to update the per-way estimates. The loop learns less; it never learns from noise.
 
 **Label records** hold the nonce, session, way, lane, token position, score band, the gate's query text, the ADR-160 scores, the rerank logit, the checkpoint id, the outcome, the sender, the weight and the **source**: `human`, `qwen_judge`, `claude_flag`, `claude_silence` or `canary`. They contain session text, so they live under the local state directory and are pruned when they fall out of the largest training window. The source field is what section 7's shipping rule reads.
 
@@ -152,7 +152,7 @@ Production systems that learn context selection train on data pooled across user
 **Personal delta.** A LoRA adapter on the reranker, retrained from the current base on the window when the window turns over. It is applied as `θ = (1−α)·θ_base + α·θ_delta` (WiSE-FT, Wortsman et al., 2022; the closest federated analogue is Ditto, Li et al., 2021), and α is the control between the shipped behaviour and personal flavour. A reheat raises α, and α anneals back as the evidence settles.
 - **Minimum evidence.** No delta is trained until the window holds at least 2,000 ratings with both bands' recall above the floor, and at least 100 labels from humans or the independent rater. Until then the per-way estimates and the last layer carry all personalisation.
 - **Averaging.** Successive deltas trained from the same base are averaged, and a delta joins the average only if it improves results on a validation split (a greedy soup). That split is held apart from the acceptance check, because a few hundred labels used both to pick soup ingredients and to accept the result would overfit.
-- **Runtime.** Scaled LoRA on encoder architectures in the pinned llama.cpp is verified before this ships. If it does not work, the adapter is merged and the GGUF re-exported, which takes seconds at this model size.
+- **Runtime.** Scaled LoRA on encoder architectures in the pinned llama.cpp is verified before this ships (#557). If it does not work, the adapter is merged and the GGUF re-exported, which takes seconds at this model size.
 
 **Window.** The window is measured in ratings, with a floor of 500 and a ceiling of 5,000. ADWIN (Bifet & Gavaldà, 2007) shortens it when recent labels stop matching older ones and lets it grow while they agree. A single cycle never shortens it by more than half. ADWIN assumes observations from one fixed process, and here the label stream depends on the current policy and on the evaluator's recall. A policy change or a drop in recall would look like drift. ADWIN therefore runs only on exploration and independent-rater labels, per way family, and resets when either band's recall moves by more than a set margin.
 
@@ -243,7 +243,7 @@ Every label record carries its source (section 2). The rule:
 
 ### 8. Rollout
 
-1. The nonce footer, `ways flag`, `/misfire`, canaries, the label records with their source field, and per-way offsets on the ADR-160 thresholds. This needs no reranker and no daemon. Two conditions come with it:
+1. The nonce footer, `ways flag`, canaries, the label records with their source field, and per-way offsets on the ADR-160 thresholds. This needs no reranker and no daemon. Two conditions come with it:
     - **An authoring pass** marks constraining ways `flaggable: false` before the footer ships.
     - **A before-and-after comparison** checks whether the footer makes Claude quicker to set aside ways that apply. It compares how often injected ways are acted on, using the self-reference telemetry, and a drop counts as a regression.
 2. The first interview sessions, the human anchor slice, the ADR-160 baseline measured against it, and the local independent rater for r_near and task-lane labels.
@@ -284,7 +284,7 @@ Every label record carries its source (section 2). The rule:
 
 - Exploration adds bounded, logged randomness to gate decisions in the uncertain region. Strict mode removes it outside a fixed budget.
 - The frontmatter gains `flaggable:` and `misfire:`.
-- "Sub-harness", meaning agent-ways as a layer between Claude Code and the person using it, and the adopter and forker roles it implies, are left to a follow-up ADR that also touches installation (ADR-184) and releases.
+- "Sub-harness", meaning agent-ways as a layer between Claude Code and the person using it, and the adopter and forker roles it implies, are left to a follow-up ADR that also touches installation (ADR-184) and releases (#558).
 
 ## Prior Art
 
@@ -308,5 +308,6 @@ Methods cited above: Elkan & Noto (2008) and Bekker & Davis (2020) on positive-u
 - **Champion/challenger elections between checkpoints.** Replaced by interpolation and averaging. Repeated elections on one anchor set select for that set's quirks, and a population of challengers multiplies the chances of a lucky winner. One blended model, checked against anchors and an off-policy estimate, uses the same evidence without those failure modes.
 - **A standing "rate this way" instruction without a nonce.** Rejected. A flag that does not name its injection cannot be matched when a turn injects several ways.
 - **A marker in the response text, parsed by the Stop hook.** Rejected. It needs no tool call, but the marker lands in text the person reads.
+- **A `/misfire` command for the person.** Rejected. It assumes the person notices misfires while working, which is the attention this design avoids asking for, and catching a slash command before it expands was never verified. The checkpoint interview supplies human labels at full weight instead.
 - **Explicit thumbs-up.** Rejected. It doubles the calls for the common case and adds little once per-band recall measures what silence is worth.
 - **Jev as the rater.** Rejected for the reasons in ADR-189: hosted, nondeterministic, and it would see transcript text on every prompt. Its terms on training from its output were not verified, which also rules it out as a labeller for shipped weights.

@@ -96,7 +96,7 @@ Latency decides the field before ranking quality does. A scan scores up to six p
 | Teacher | `Qwen3-Reranker-0.6B`, `Qwen3-Reranker-4B` | 0.6B, 4B | Apache-2.0 | Supported |
 | Generator and judge | A Qwen3 instruct model | varies | Apache-2.0 | Supported (Qwen3 architecture) |
 
-The Ettin rerankers are the lead candidates. On MTEB English retrieval, averaged over six first-stage retrievers, `ettin-reranker-32m-v1` scores 0.578 against 0.553 for `bge-reranker-v2-m3`, at about a seventeenth of its size, and it reads up to 8k tokens. The pinned llama.cpp hard-codes mean pooling for ModernBERT on the rank path, to match `gte-reranker-modernbert-base`, while Ettin uses CLS pooling followed by a two-layer head. Running Ettin needs a patch that selects pooling from the GGUF metadata, plus a repack of its Sentence Transformers head. The patch is offered upstream and carried on the submodule until it lands. If it cannot be carried, the baseline models ship, since they run on the pinned commit unchanged.
+The Ettin rerankers are the lead candidates. On MTEB English retrieval, averaged over six first-stage retrievers, `ettin-reranker-32m-v1` scores 0.578 against 0.553 for `bge-reranker-v2-m3`, at about a seventeenth of its size, and it reads up to 8k tokens. The pinned llama.cpp hard-codes mean pooling for ModernBERT on the rank path, to match `gte-reranker-modernbert-base`, while Ettin uses CLS pooling followed by a two-layer head. Running Ettin needs a patch that selects pooling from the GGUF metadata, plus a repack of its Sentence Transformers head. The patch is offered upstream and carried on the submodule until it lands (#556). If it cannot be carried, the baseline models ship, since they run on the pinned commit unchanged.
 
 Qwen3-Reranker is the only small reranker trained to follow a task instruction. It scores +5.4 (0.6B) and +14.8 (4B) on FollowIR, where BERT-family cross-encoders score about zero. It is too slow to gate on the prompt path at this input size, and it serves as the teacher in stage 6. Community GGUFs of it are often broken, so it is converted from source.
 
@@ -106,7 +106,7 @@ Models under non-commercial licenses are excluded, because the corpus ships unde
 
 A candidate is eligible only if its converted GGUF loads in `wayd` and returns scores matching the reference implementation to within 1e-3.
 
-The latency budget is 300 ms at p95 for six candidates on the reference CPU, measured warm. A model that exceeds it is not eligible, whatever its accuracy. If no candidate meets the budget at the stage 3 token sizes, the query and document budgets shrink before a larger model is considered.
+The latency budget is 300 ms at p95 for six candidates on the reference CPU, measured warm. A model that exceeds it is not eligible, whatever its accuracy. If no candidate meets the budget at the stage 3 token sizes, the query and document budgets shrink before a larger model is considered. The latency figures above are projections until the benchmark in #555 replaces them.
 
 ### 6. Training
 
