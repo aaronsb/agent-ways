@@ -23,7 +23,7 @@ ADR-189 adds a cross-encoder gate behind the ADR-160 matcher. A gate is only as 
 
 1. **Nobody watches which ways fire.** Seeing a turn's fires means running `ways introspect` and reading its output. A developer working on a problem does not have attention to spare for that, so human labels arrive rarely.
 2. **A one-off label set goes stale.** Ways are added and rewritten, and each person's work has its own character. A label set built once and a checkpoint trained once drift away from both.
-3. **The model that reads each way is never asked about it.** Claude reads every injected way with the full turn in front of it. It is the best-placed judge of whether that way applied, and nothing records its judgement.
+3. **The model that reads each way is never asked about it.** Claude reads every injected way with the full turn in front of it. It is the best-placed judge of whether that way applied, and nothing records its judgement. Ad hoc interviews with agents show the judgement already happens: Claude sets poorly fitting ways aside, and sometimes tells the person that a way was injected that does not fit. The judgement is made and then lost, or it surfaces as a remark the person has to read.
 
 A thumbs-up or thumbs-down from Claude on each injection, collected cheaply and at the moment Claude reads the way, answers all three. The rest of this ADR is how to collect that rating, what learns from it, how to keep the learning from becoming confidently wrong, and how weights move between the maintainer and everyone else.
 
@@ -71,6 +71,10 @@ Canaries are drawn from the existing corpus so they cannot be told apart from re
 - At most one canary per scan, and a way serves as a canary at most once per session. If no eligible way remains for the lane, the scan injects no canary.
 
 **A canary leaves no trace on the real ways.** It bypasses the refire engine, markers, engagement stamps and the ADR-125 parent boost, so it never makes its own way or that way's children fire more easily later in the session. Its only record is the canary event.
+
+**Unflagged canaries are recall probes.** A low score is the matcher's opinion, and the matcher is what this loop is correcting. An unflagged canary is either a lapse by the evaluator or a way the matcher scored far too low for a turn it fits. The second case is a missed fire, which ratings cannot otherwise reveal, because only injected ways are rated. Two things follow.
+- **r is conservative.** A canary that truly applied and went unflagged counts as a miss, so r reads slightly low and silence is weighted slightly less than it has earned, never more. The family distance and the near-miss exclusion keep these cases rare.
+- **The digest lists unflagged canaries as possible misses**, with the turn context. Spot-checks during the human anchor-slice pass (section 5) separate lapses from misses. A confirmed miss becomes a positive anchor row for that way and lowers its threshold through the per-way estimate, so the loop can raise recall as well as cut misfires.
 
 | Outcome | Label | Weight |
 |---|---|---|
@@ -157,7 +161,7 @@ flowchart LR
 ### 7. Rollout
 
 1. The nonce footer, `ways flag`, `/misfire`, canaries, and the label records. Per-way offsets adjust the ADR-160 thresholds. This needs no reranker and no daemon.
-2. The human anchor slice and the ADR-160 baseline measured against it.
+2. The human anchor slice and the ADR-160 baseline measured against it. Existing transcripts where Claude remarked that an injected way did not fit are candidate seed rows for the slice.
 3. ADR-189's daemon and gate in shadow, with the first base and the Bayesian last layer.
 4. The gate on for the task lane, then the prompt and queued lanes, each when it passes the acceptance check on its own lane.
 5. Personal deltas with annealed α and averaging.
@@ -168,7 +172,7 @@ flowchart LR
 
 ### Positive
 
-- **Every injection is rated** by the model that read it with the full turn, for about 20 tokens, with no human attention required.
+- **Every injection is rated** by the model that read it with the full turn, for about 20 tokens, with no human attention required. The flag replaces the remark Claude sometimes makes today about a poorly fitting way, so the judgement is recorded and the person no longer has to read it.
 - **Silence has a measured value.** Canaries turn "unflagged means fine" from an assumption into a number that sets its own weight and can pause learning.
 - **Learning is continuous and cheap.** The last layer and per-way estimates update on every rating. Heavier training runs only at window turnover, while the machine is idle.
 - **The loop starts before the reranker.** Per-way offsets on the ADR-160 matcher deliver value at rollout step 1.
