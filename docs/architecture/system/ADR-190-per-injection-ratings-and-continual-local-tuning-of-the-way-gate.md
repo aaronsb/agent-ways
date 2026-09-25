@@ -32,6 +32,13 @@ Two constraints shape the design beyond the engineering.
 - **A self-report needs an outside check.** A model rating the context it was given drifts toward what it already believes when nothing independent checks it. Feedback loops of this kind are documented for language models (Pan et al., 2024), and model self-reports of what context they used are often rationalised after the fact. Every signal the loop learns from is either measured against an independent rater or anchored to human labels.
 - **Anthropic's Usage Policy restricts training on Claude's outputs.** The policy (effective 15 September 2025) prohibits "utilization of inputs and outputs to train an AI model (e.g., "model scraping" or "model distillation") without prior authorization from Anthropic". It applies on every plan, and it is broader than the "competing models" wording of the Commercial Terms. A private relevance gate tuned by a user's own in-session flags is a narrow use, far from the capability extraction Anthropic's enforcement has targeted. Publicly released weights are a different matter. This ADR therefore keeps every Claude-derived label local, and builds shipped weights only from human labels and open-weight models whose licences place no restriction on output use (section 7). This is a reading of the policy, not legal advice, and section 7 lists the questions put to Anthropic.
 
+**What is being built.** agent-ways is a method layer, a way of doing things that Claude Code lacks on its own. Its substance is the ways corpus, which people write and review. The learning in this ADR tunes when that layer speaks.
+- **The corpus is authored.** Ways are guidance people write and edit. No model generates them, and no model is trained to produce them.
+- **Most of the tuning is not a model.** Per-way misfire estimates, offsets, temperatures and thresholds are statistics about the corpus. They learn which guidance fits which work, not how to do the work.
+- **The one learned component serves Claude.** The gate is a non-generative relevance classifier of 17–32M parameters. It cannot produce text or answer a question. Its only output is whether a piece of guidance reaches Claude. It adds to Claude and does not compete with it or copy what it can do.
+
+That is the case this project makes to Anthropic (question 1 below). The Usage Policy's text still reads on any trained model, so section 7 keeps shipped weights free of Claude-derived labels until Anthropic answers.
+
 ## Decision
 
 Collect a rating on every injection, learn from those ratings continuously on the user's machine, check the ratings against canaries and an independent rater, and ship a base checkpoint built without Claude-derived labels that each user personalises locally. This ADR replaces the labelling plan and the fine-tuning stage of the ADR-189 draft. ADR-189 keeps the daemon, the gate, the lanes and model selection.
@@ -210,7 +217,7 @@ Every label record carries its source (section 2). The rule:
 - **Batch judging with Claude is out of scope.** A hindsight judge over traces, if added later, runs on a local open-weight model. Claude-based batch judging would also need an API key; a Max subscription covers ordinary individual use of Claude Code.
 
 **Questions put to Anthropic.** The answers could relax this section, and the source field keeps that option open without re-collecting data.
-1. Does the Usage Policy clause cover a non-generative relevance classifier of 17–32M parameters whose only job is to choose what guidance a Claude Code harness injects?
+1. agent-ways is a method layer for Claude Code: human-authored guidance, statistics about when each piece fits, and one non-generative relevance classifier of 17–32M parameters that cannot produce text and exists only to choose which guidance reaches Claude. Does training that classifier on Claude's in-session relevance flags fall under "utilization of inputs and outputs to train an AI model"? If it does, can it be authorised for both local training and publicly released weights?
 2. May each user train such a classifier locally on Claude's in-session flags from their own sessions?
 3. May the maintainer publicly release weights whose labels include Claude flags from the maintainer's own sessions, and does the answer differ between a Max subscription and an API key?
 4. Does Claude text used as input features, not labels, count as utilisation of outputs to train?
