@@ -70,7 +70,7 @@ The gate runs once per scan, after the ADR-160 matcher and the refire engine, an
 
 ADR-188 retires the semantic lane on the Bash surface, so tool-lane fires come from `commands:` and `files:` patterns. Their authors chose a deterministic trigger, and the gate leaves them alone. Checks that score through `description` and `vocabulary` are also out of scope here.
 
-The task lane is the first lane the gate turns on for (stage 7). Ways stashed for a subagent are emitted at SubagentStart without marker checks, so a false positive is paid in full on every spawn, into a fresh context where it is a large share of what the subagent reads. The delegation prompt is also the best query any lane produces: it is written to stand alone, and it needs no session context.
+The task lane has the most to gain. Ways stashed for a subagent are emitted at SubagentStart without marker checks, so a false positive is paid in full on every spawn, into a fresh context where it is a large share of what the subagent reads. The delegation prompt is also the best query any lane produces: it is written to stand alone, and it needs no session context. It is still the last lane the gate turns on for (stage 7). Subagents are not asked to rate their injections (ADR-190 section 1), so task-lane labels come only from the independent rater, and they accumulate more slowly than ratings on the prompt lane.
 
 - **Placement.** In `scan_prompt_surface`, the scan collects every `PromptMatch::Fired` way, drops the ways the refire engine would suppress (`way_fire_outcome`, ADR-126), and sends the survivors to the daemon in one batch. Only the ways that pass reach `record_way_fire` and body output in `show::way_scored`. A way the gate rejects does not spend its refire budget. In `scan::task`, the gate runs on the matched list before the stash file is written, so a rejected way never reaches the subagent. The queued lane follows the prompt lane.
 - **Query.** On the prompt and queued lanes, the session context from stage 4, reduced to 384 tokens with the ADR-130 salience reducer, with the current prompt kept whole when it fits. On the task lane, the delegation prompt reduced to 384 tokens.
@@ -119,8 +119,8 @@ Every model that generates or labels data for a shipped checkpoint is open-weigh
 1. Measure the ADR-160 baseline (stage 1). ADR-190's per-way offsets can already ship at this step.
 2. Ship the daemon with the embedder only. This is a latency change with no behavior change, verified by identical fire sets on the eval replay.
 3. Ship the distilled reranker in shadow mode on every gated lane. It scores and logs `way_reranked` and suppresses nothing.
-4. Turn the gate on for the task lane once shadow data shows a precision gain on that lane's eval rows with recall loss under 5 points.
-5. Turn it on for the prompt and queued lanes against the same criterion, measured on their own rows.
+4. Turn the gate on for the prompt and queued lanes once shadow data shows a precision gain on each lane's own rows with recall loss under 5 points.
+5. Turn it on for the task lane against the same criterion, measured on independent-rater labels for that lane.
 6. Continual local tuning, per ADR-190.
 
 ## Consequences
