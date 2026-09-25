@@ -14,7 +14,9 @@ related:
   - ADR-158
   - ADR-160
   - ADR-161
+  - ADR-187
   - ADR-188
+  - ADR-190
 ---
 
 # ADR-189: Cross-encoder rerank gate in a resident daemon for way injection
@@ -36,16 +38,14 @@ ADR-160 deferred a resident daemon as "relevant only if a larger model is later 
 
 ## Decision
 
-Add a cross-encoder rerank gate as the last stage before a way is injected. Host it, together with the embedder, in a resident per-user daemon. Measure and calibrate it against a judged eval set built from real fires before it is allowed to suppress anything.
+Add a cross-encoder rerank gate as the last stage before a way is injected. Host it, together with the embedder, in a resident per-user daemon. The gate learns from, and is measured against, the ratings defined in ADR-190. ADR-190 owns labels, training and the weight lifecycle; this ADR owns the daemon, the gate, the lanes and model selection.
 
-### 1. Judged eval set (prerequisite)
+### 1. Evaluation baseline (prerequisite)
 
-Build the judged eval set that ADR-160 names as its missing follow-up. Every other stage in this ADR is measured against it.
+Before the gate suppresses anything, the ADR-160 matcher is measured against the human anchor slice and the per-injection ratings from ADR-190. Every stage below is compared against that baseline.
 
-- **Source.** Replay logged `way_fired`, `way_nearmiss` and `way_keyword_gated` events from `events.jsonl`, extending `ways introspect fires`. For each event, rebuild the turn context at its logged token position from the transcript and pair it with the way's body.
-- **Labels.** Each pair is labelled `relevant` or `irrelevant`. Labelling runs offline and in batch, using Claude as the judge, and a person reviews a random sample. The agreement rate on that sample is reported with the set, and a set below 90% agreement is not used for calibration.
-- **Storage.** Pairs built from transcripts contain private session text. They stay under the user's local state directory and are never committed. Curated, de-identified cases graduate into `calibration_probes.jsonl` as regression rows, as ADR-158 already does with hard negatives.
-- **Metric.** Precision and recall of injected ways against the labels, reported per lane (prompt, task, tool) and per way family. ADR-160's current matcher is the baseline every change is compared against.
+- **Metric.** Precision and recall of injected ways, reported per lane and per way family.
+- **Storage.** Rated contexts contain private session text. They stay under the user's local state directory and are never committed (ADR-190 section 2).
 
 ### 2. Resident daemon
 
@@ -75,11 +75,11 @@ The task lane is the first lane the gate turns on for (stage 7). Ways stashed fo
 - **Placement.** In `scan_prompt_surface`, the scan collects every `PromptMatch::Fired` way, drops the ways the refire engine would suppress (`way_fire_outcome`, ADR-126), and sends the survivors to the daemon in one batch. Only the ways that pass reach `record_way_fire` and body output in `show::way_scored`. A way the gate rejects does not spend its refire budget. In `scan::task`, the gate runs on the matched list before the stash file is written, so a rejected way never reaches the subagent. The queued lane follows the prompt lane.
 - **Query.** On the prompt and queued lanes, the session context from stage 4, reduced to 384 tokens with the ADR-130 salience reducer, with the current prompt kept whole when it fits. On the task lane, the delegation prompt reduced to 384 tokens.
 - **Document.** The way's `description`, followed by its body with frontmatter and macro output removed, truncated to 256 tokens.
-- **Score.** The reranker's raw logit is mapped to a probability with a logistic fit per model, `σ(a·logit + b)`, fitted on the eval set and stored in `embed-manifest.json` beside the existing embedder calibration (ADR-156). A way is injected when the probability is at least `τ_r`.
+- **Score.** The reranker's raw logit is mapped to a probability with a logistic fit per model, `σ(a·logit + b)`, fitted on ADR-190's rated injections and stored in `embed-manifest.json` beside the existing embedder calibration (ADR-156). A way is injected when the probability is at least `τ_r`.
 - **Exemptions.** Ways with `pattern_strict` bypass the gate on every lane, since their authors chose a deterministic trigger.
 - **Telemetry.** Every gated candidate logs a `way_reranked` event carrying the raw logit, the probability, `τ_r`, and the outcome. `ways tune` (ADR-134) reads these events to refit `a`, `b` and `τ_r`.
 
-A reranker returns one scalar, and the only outcomes are inject or skip. A middle band that injects a one-line pointer in place of the full body was considered. It stays out of this ADR until the eval set shows a population of borderline cases where a pointer is the correct answer.
+A reranker returns one scalar, and the only outcomes are inject or skip. A middle band that injects a one-line pointer in place of the full body was considered. It stays out of this ADR until the ratings show a population of borderline cases where a pointer is the correct answer.
 
 ### 4. Session context
 
@@ -107,28 +107,25 @@ A candidate is eligible only if its converted GGUF loads in `wayd` and returns s
 
 The latency budget is 300 ms at p95 for six candidates on the reference CPU, measured warm. A model that exceeds it is not eligible, whatever its accuracy. If no candidate meets the budget at the stage 3 token sizes, the query and document budgets shrink before a larger model is considered.
 
-### 6. Distillation and fine-tuning
+### 6. Training
 
-Every gate candidate was trained on web-search pairs, and none of them follows an instruction. Deciding whether a piece of guidance applies to a coding turn is a different task, so the gate model is fine-tuned before the gate turns on. Training uses the Sentence Transformers cross-encoder recipe, followed by GGUF conversion. There are two tiers.
-
-- **Shipped checkpoint, trained on the public corpus only.** For each way, a generator writes turns where the way applies, turns that use its vocabulary without needing it (negations included), and turns that belong to neighbouring ways. `Qwen3-Reranker-4B`, given a task instruction, labels the pairs, and a Claude judge settles the pairs where the teacher is unsure. ADR-158's hard negatives join the set. No transcript text enters these weights, so the checkpoint ships with the release and is retrained when the corpus changes enough to move the eval.
-- **Local checkpoint, trained on the user's own labels.** `ways tune rerank` continues training from the shipped checkpoint on the stage 1 eval set. It is opt-in, runs on the user's machine, and writes a local GGUF that `wayd` prefers when present. A checkpoint trained on session text is never shipped, because weights can retain training text.
+Every gate candidate was trained on web-search pairs, and none of them follows an instruction, so the gate model is trained for this task before the gate turns on. How it is trained, how it keeps learning, and how weights ship and are adopted are governed by ADR-190. The first base is distilled from `Qwen3-Reranker-4B` on synthetic pairs built from the public corpus, as ADR-190 section 6 describes.
 
 ### 7. Rollout
 
-1. Build the eval set and publish the ADR-160 baseline.
+1. Measure the ADR-160 baseline (stage 1). ADR-190's per-way offsets can already ship at this step.
 2. Ship the daemon with the embedder only. This is a latency change with no behavior change, verified by identical fire sets on the eval replay.
 3. Ship the distilled reranker in shadow mode on every gated lane. It scores and logs `way_reranked` and suppresses nothing.
 4. Turn the gate on for the task lane once shadow data shows a precision gain on that lane's eval rows with recall loss under 5 points.
 5. Turn it on for the prompt and queued lanes against the same criterion, measured on their own rows.
-6. Offer local fine-tuning (stage 6, second tier).
+6. Continual local tuning, per ADR-190.
 
 ## Consequences
 
 ### Positive
 
 - **Precision gains come from evidence the matcher lacks.** The gate reads the way's body and the session's recent turns together, which is the evidence ADR-160 identified as the lever.
-- **Tuning becomes measurable.** A judged eval set replaces tuning against individual fires. It also finally calibrates the ADR-160 constants, which remain in the pipeline as the recall stage.
+- **Tuning becomes measurable.** ADR-190's ratings and anchor slice replace tuning against individual fires. They also calibrate the ADR-160 constants, which remain in the pipeline as the recall stage.
 - **Scans get cheaper.** Resident models remove the separate `way-embed` process spawns and model loads a scan makes today, which reach ten on a surface that admits six candidates.
 - **A rejected way keeps its refire budget**, so the next turn that does warrant it still gets it.
 - **The stack does not grow a new runtime.** The daemon links the llama.cpp submodule already in the tree.
@@ -137,8 +134,7 @@ Every gate candidate was trained on web-search pairs, and none of them follows a
 
 - **A resident process.** It holds the embedders and a reranker of 35M parameters or fewer, on the order of a few hundred MB, and adds lifecycle code: startup, idle exit, version handshake, stale socket cleanup.
 - **Added latency on the prompt path.** Up to 300 ms at p95 per scan once the gate is on, against tens of milliseconds today.
-- **A labelling pipeline to maintain.** The eval set drifts as ways are added and rewritten, so it has to be refreshed, and its labels depend on a judge model whose agreement with a person must be rechecked.
-- **A training pipeline.** The shipped checkpoint depends on a synthetic-data generator, a teacher model and a conversion step, and it is retrained as the corpus changes.
+- **A training dependency.** The gate needs a trained base before it can turn on, and ADR-190's loop to stay current.
 - **A carried llama.cpp patch** for Ettin's pooling, until upstream accepts it.
 - **An English-only gate.** The multilingual lane gets no reranker from this ADR.
 - **Another calibrated threshold.** `τ_r` joins τ_s and τ_k and needs the same telemetry discipline.
@@ -151,7 +147,7 @@ Every gate candidate was trained on web-search pairs, and none of them follows a
 
 ## Alternatives Considered
 
-- **Keep tuning the ADR-160 operating points.** Rejected as the main fix. Without a judged eval set each change is unmeasured, and the bi-encoder cannot represent the mention-versus-doing distinction at any threshold. The eval set from stage 1 is still worth building for this purpose alone.
+- **Keep tuning the ADR-160 operating points.** Rejected as the main fix. Without judged labels each change is unmeasured, and the bi-encoder cannot represent the mention-versus-doing distinction at any threshold. ADR-190's per-way offsets tune the ADR-160 thresholds from ratings, which is the measured version of this alternative.
 - **Small generative judge** (Qwen3-1.7B, Gemma-3-1B), reading the probability of a yes token. Rejected as too compute-heavy for the prompt path, at an estimated 0.5 to 1.5 s per scan on CPU. It is also nondeterministic across sampling settings and runtime versions.
 - **Laya typed-decision model** (Convai Innovations, 421M, Apache 2.0). Rejected. Its published zero-shot accuracy on typed decisions is 0.362 against a 0.318 random baseline. Its README reports that negated requests select the negated action, which is the failure this gate exists to catch, and that the act/escalate head carries no usable signal. It runs 193 to 464 ms warm on CPU and needs Python with torch or an ONNX Runtime. Fine-tuned, it would do the same job as a fine-tuned cross-encoder at about three times the size, outside the existing stack. Used zero-shot as a reranker on NFCorpus (323 queries), both of its checkpoints ranked below plain BM25, and it ran 27 to 31 times slower per pair on CPU than a 22M MiniLM cross-encoder.
 - **Logistic head on existing MiniLM embeddings.** Kept as a baseline in the eval, and rejected as the gate. It is cheap and needs no daemon, and it inherits the bi-encoder's inability to model the interaction between query and document.
