@@ -3,6 +3,7 @@
 header.py
 config.py
 model.py
+rules.py
 parse.py
 refs.py
 cmd_list.py

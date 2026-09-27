@@ -10,36 +10,10 @@ def cmd_lint(args):
     else:
         adrs = get_all_adrs(include_archived=True)
 
-    # Cross-file supersession checks resolve against the full corpus, even
-    # when linting an explicit subset of paths.
+    # Cross-file rules resolve against the full corpus, even when linting an
+    # explicit subset of paths.
     corpus = adrs if not args.paths else get_all_adrs(include_archived=True)
-    by_number = {}
-    for adr in corpus:
-        if adr.number:
-            by_number.setdefault(adr.number.lstrip('0') or '0', adr)
-        # Filename fallback: a target with a malformed H1 should still resolve
-        fn_number = filename_number(adr.path)
-        if fn_number:
-            by_number.setdefault(fn_number, adr)
-
-    for adr in adrs:
-        for field_name in ('supersedes', 'superseded_by'):
-            for entry in getattr(adr, field_name):
-                number, _ = norm_ref(entry)
-                target = by_number.get(number)
-                if target is None:
-                    adr.issues.append(Issue(
-                        f"{field_name}: '{entry}' resolves to no known ADR", 'error'))
-                    continue
-                # Reciprocity: A superseded_by B ⟺ B supersedes A (sections ignored)
-                if adr.number:
-                    own = adr.number.lstrip('0') or '0'
-                    reverse = 'supersedes' if field_name == 'superseded_by' else 'superseded_by'
-                    reverse_numbers = {norm_ref(e)[0] for e in getattr(target, reverse)}
-                    if own not in reverse_numbers:
-                        adr.issues.append(Issue(
-                            f"{field_name}: ADR-{number} does not declare the reciprocal "
-                            f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
+    run_corpus_rules(adrs, LintContext.from_corpus(corpus))
 
     total_errors = 0
     total_warnings = 0

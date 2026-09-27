@@ -14,6 +14,7 @@ class ADRInfo:
     supersedes: list = field(default_factory=list)
     superseded_by: list = field(default_factory=list)
     domain: Optional[str] = None
+    has_frontmatter: bool = False
     issues: list = field(default_factory=list)
 
 @dataclass

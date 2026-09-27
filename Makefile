@@ -367,6 +367,7 @@ test-smoke: ways
 
 test-adr:
 	@echo "Running adr tool tests (lint, archive, golden output)..."
+	@python3 hooks/ways/documentation/adr/assemble --check
 	@bash tests/adr-lint-test.sh
 	@bash tests/adr-archive-test.sh
 	@bash tests/adr-golden-test.sh

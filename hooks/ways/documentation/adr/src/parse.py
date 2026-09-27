@@ -18,6 +18,7 @@ def parse_adr(path: Path) -> ADRInfo:
 
     # Parse YAML frontmatter
     has_frontmatter = lines and lines[0].strip() == '---'
+    info.has_frontmatter = bool(has_frontmatter)
     if has_frontmatter:
         end_idx = None
         for i, line in enumerate(lines[1:], 1):
@@ -88,20 +89,7 @@ def parse_adr(path: Path) -> ADRInfo:
                 info.domain = domain
                 break
 
-    # Validation
-    if not info.number:
-        info.issues.append(Issue("Missing ADR number in title", 'error'))
-    # Skip field-level checks if no frontmatter — root cause already reported
-    if has_frontmatter:
-        valid_statuses = get_statuses()
-        if not info.status:
-            info.issues.append(Issue("Missing status in frontmatter", 'error'))
-        elif info.status not in valid_statuses:
-            info.issues.append(Issue(f"Invalid status: {info.status} (valid: {', '.join(sorted(valid_statuses))})", 'warning'))
-        if not info.date:
-            info.issues.append(Issue("Missing date in frontmatter", 'error'))
-        if not info.deciders:
-            info.issues.append(Issue("Missing deciders in frontmatter", 'warning'))
+    run_file_rules(info)
 
     return info
 
