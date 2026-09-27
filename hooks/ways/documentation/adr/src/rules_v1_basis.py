@@ -189,7 +189,7 @@ def rule_v1_concern(adr, ctx):
                     or not _text(answer.get('said')) or not _text(answer.get('via'))):
                 v1_issue(adr, f"{where}: an answer records 'said' and 'via' (keys: {', '.join(V1_ANSWER_KEYS)})")
         else:
-            v1_issue(adr, f"open concern: {_first_line(entry.get('said'))}", 'warning')
+            adr.issues.append(Issue(f"open concern: {_first_line(entry.get('said'))}", 'warning', 'open-concern'))
 
 # --- against the corpus: grounding -------------------------------------------------
 #
@@ -301,7 +301,7 @@ def rule_v1_basis_chain(adr, ctx):
             if allowed_kinds is not None and kind not in allowed_kinds:
                 v1_issue(adr, f"basis: precedent ADR-{target.number} is a {kind}, expected {' or '.join(allowed_kinds)}")
             if status == 'proposed':
-                v1_issue(adr, f"basis: precedent ADR-{target.number} is still proposed", 'warning')
+                adr.issues.append(Issue(f"basis: precedent ADR-{target.number} is still proposed", 'warning', 'precedent-proposed'))
             elif status not in V1_GROUNDING_STATUSES:
                 v1_issue(adr, f"basis: precedent ADR-{target.number} is {status or 'without a status'}, so it grounds nothing")
             elif 'basis' not in target.frontmatter and not target.frontmatter.get('decided_by'):

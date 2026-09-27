@@ -218,6 +218,7 @@ capture defects-lint        lint
 capture defects-lint-check  lint --check
 capture defects-list        list
 capture defects-view-dup    view 150
+capture defects-accept-dup  accept 150
 
 # --- adr/v1 (ADR-304): a clean corpus with one unmigrated v0 record, and a
 # corpus with one defect per v1 rule plus a malformed adr.yaml -----------------
@@ -289,11 +290,28 @@ capture v1-accept-dry-run       accept 106 --dry-run
 worktree v1-accept-dry-run-status.txt
 capture v1-accept-concern       accept 114
 keep v1-accept-concern-file.md docs/architecture/system/ADR-114-open-concern.md
+capture v1-accept-then-lint     lint --check docs/architecture/system/ADR-114-open-concern.md
 
 fresh v1
 capture v1-reject               reject 107 --reason "Superseded by the batching work before it landed"
 keep v1-reject-file.md docs/architecture/system/ADR-107-ingest-notes.md
 capture v1-abandon-no-reason    abandon 108 --reason "  "
+capture v1-reject-then-lint     lint --check docs/architecture/system/ADR-107-ingest-notes.md
+capture v1-abandon-no-flag      abandon 108
+
+# A record another record rests on: rejecting it is refused, naming the
+# dependent, and the dependent cannot be accepted while its precedent is
+# still proposed.
+fresh v1
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: ingest\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-16\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - precedent: ADR-114\n---\n\n# ADR-116: Rests on ADR-114\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-rests-on-114.md)
+capture v1-reject-precedent     reject 114 --reason "Not needed"
+capture v1-accept-pending-precedent accept 116
+
+# Line endings survive a status rewrite.
+fresh v1
+edit docs/architecture/system/ADR-114-open-concern.md "s.replace(chr(10), chr(13)+chr(10))"
+capture v1-accept-crlf          accept 114
+(cd "$WORK/repo" && python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print('crlf kept' if b'\\r\\n' in d and d.count(b'\\n')==d.count(b'\\r\\n') else 'crlf lost', '|', [l for l in d.split(b'\\r\\n') if l.startswith(b'status:')])" docs/architecture/system/ADR-114-open-concern.md) > "$ACTUAL/v1-accept-crlf-file.txt"
 
 fresh v1-defects
 capture v1-defects-lint        lint
