@@ -3,6 +3,9 @@ contract: adr/v1
 kind: decision
 verb: add
 capability: adr
+basis:
+  - operator: aaronsb, directed over attend and in PR #559
+  - evidence: kg triage of 108 records; agent-ways citation audit
 status: Proposed
 date: 2026-09-26
 deciders:
@@ -58,14 +61,27 @@ Adopt a versioned record contract, `adr/v1`, declared in `adr.yaml`. Records
 declare which contract they follow. `adr lint` enforces the grammar over each
 record. `doclint` enforces citations from code against the grammar.
 
-### 1. Two record kinds in one number space
+### 1. Record kinds are declared, and v1 seeds two
+
+Kinds are data in the contract. Each kind declares its lifecycle, its
+fields, and the edges it may carry to other kinds (§4). The tool lints any
+record against its kind's declaration, so adding a kind is a contract change
+and needs no tool change. The contract is a graph schema: kinds are node
+types, and fields such as `supersedes`, `decided_by` and `basis` are edge
+types. The corpus is the graph ADR-302 describes.
+
+v1 seeds two kinds:
 
 | Kind | Meaning | Body after acceptance |
 |---|---|---|
 | `decision` | why a choice was made | append-only |
 | `spec` | how the thing works now | rewritten in place |
 
-Both kinds share the `ADR-N` number space, so existing citations keep
+Likely later kinds include an evidence kind for #491 notes, if those move
+into the number space. Each one arrives as a `change` decision on
+`capability: adr`.
+
+All kinds share the `ADR-N` number space, so existing citations keep
 resolving. A spec record is the ADR-numbered counterpart of an ADR-302
 reference or explanation page. It stays in the ADR series because code cites
 it.
@@ -90,13 +106,14 @@ The decision half gets a new number and keeps the original `date`. It is
 accepted on creation, because it transcribes a decision that was already
 accepted. The spec links to it with `decided_by:`.
 
-### 2. Three vocabulary layers that share no word
+### 2. Vocabulary layers that share no word
 
 | Layer | Holds | Words |
 |---|---|---|
 | L1 record lifecycle | `status`, set by tool operations | proposed, accepted, rejected, abandoned, superseded, archived |
 | L2 decision verbs | what a decision does | add, cut, change, retire, constrain |
 | L3 product state | derived, never written by hand | capability active/absent, surface present/gone, spec living/historical |
+| L4 basis sources | what a decision rests on (§11) | operator, evidence, standard, upstream, precedent |
 
 Rejected means considered and declined. Abandoned means dropped before
 acceptance, the PEP "Withdrawn". The L1 operations (accept, reject, abandon,
@@ -107,8 +124,8 @@ v0 `Accepted` needs no rewrite.
 
 No word or stem may appear in two layers. `adr lint` checks `adr.yaml` for
 this, so a later contract version cannot reintroduce a collision. The check
-covers the three vocabulary layers only: the status set, the verbs and the
-derived state words. Other `adr.yaml` keys are outside it, for example kg's
+covers the vocabulary layers only: the status set, the verbs, the derived
+state words and the basis sources. Other `adr.yaml` keys are outside it, for example kg's
 legacy `retired: true` range flag.
 
 **Spec state.** A spec is living while its capability is active and nothing
@@ -144,8 +161,17 @@ capability ledger. Nobody maintains the ledger by hand.
 ```yaml
 contract: adr/v1
 kinds:
-  decision: { mutable_after_accept: [status, enacted, superseded_by] }
-  spec:     { mutable_after_accept: all }
+  decision:
+    mutable_after_accept: [status, enacted, superseded_by]
+    verb: required
+    requires: [capability, basis]
+    edges: { supersedes: decision, basis: [decision, spec] }
+  spec:
+    mutable_after_accept: all
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+basis_sources: [operator, evidence, standard, upstream, precedent]
 capabilities:
   adr: Decision records, their contract, and the tooling that enforces it
   ingest: Document ingestion and extraction into the graph
@@ -155,6 +181,11 @@ surfaces:
   mcp:   {}
 ```
 
+- **kinds** declares each record kind: which fields may change after
+  acceptance, whether a verb is required or forbidden, which fields are
+  required, and which kinds each edge field may point at. The lint rules in
+  §6 read this declaration and do not hard-code the two seeded kinds.
+- **basis_sources** is the closed set of grounds a decision may cite (§11).
 - **capabilities** is a closed vocabulary with one line per capability. That
   line is the capability's only hand-written description. `adr` is seeded in
   v1, so a contract change is itself a decision with `capability: adr`.
@@ -175,6 +206,8 @@ kind: decision
 verb: retire
 capability: ingest
 targets: [cli:ingest-legacy, route:/v1/upload]
+basis:
+  - operator: aaronsb, PR #612
 status: accepted
 enacted: 3f9c2a1
 ---
@@ -284,6 +317,47 @@ declares `adr/v1`. Contract-specific prose lives in the macro's output or in
 files the macro selects, never in the always-on way body, so a v0 project is
 never told to write `verb:` fields its tool rejects.
 
+### 11. Basis: every decision grounds outside the corpus
+
+A decision corpus that justifies itself only by citing its own records can
+drift anywhere and still look consistent. Each decision therefore carries a
+`basis:` naming what it rests on, and the chain has to reach something
+outside the corpus.
+
+| Source | Grounds the decision in | Reference |
+|---|---|---|
+| `operator` | the human who directed or approved it | who, and where: PR, issue or session |
+| `evidence` | a measurement, benchmark or research note (#491) | the note or data |
+| `standard` | an external specification, governance control or upstream behaviour | the citation (`governance-cite`) |
+| `upstream` | another repository's accepted record under a shared contract | repo and record |
+| `precedent` | another accepted decision in this corpus | `ADR-N` |
+
+`operator`, `evidence`, `standard` and `upstream` are external. `precedent`
+is internal. A decision may rest on precedent, but following its precedent
+edges must reach a decision with an external basis. `adr lint` fails a
+decision whose basis chain loops or stays inside the corpus.
+
+Some decisions need the human:
+
+- `add`, `cut` and `retire` change what the product is. They need an
+  `operator` basis before acceptance. An agent may propose them, and they
+  stay proposed until the operator's approval is recorded.
+- A decision the record calls one-way, or irreversible, needs an `operator`
+  basis whatever its verb.
+- `change` and `constrain` may be accepted on `evidence`, `standard` or
+  `upstream` alone. The ADR way tells the agent to raise them with the
+  operator when the evidence is thin or contested.
+
+The v1 ADR way discloses these rules and tells the agent when to stop and
+ask. `adr accept` refuses a decision whose basis does not meet them.
+
+The model follows Beer's Viable System Model. Records under a shared contract
+form one system, and the operator is the external identity and policy
+function that system cannot supply for itself. Repositories that share a
+contract regulate each other through `upstream` edges, without either one
+absorbing the other. `basis` sources form a fourth vocabulary layer, and the
+no-shared-word check covers it.
+
 ### Rollout
 
 This repo adopts first. It owns `adr-tool` and `doclint`, and its own corpus
@@ -330,6 +404,12 @@ is the migration test.
 - A split produces a decision record written after the fact. Its date and
   content come from the original, but its number is new.
 
+- Every decision needs a `basis`, and `add`, `cut` and `retire` wait on the
+  operator. Agents can no longer accept product-shaping decisions alone.
+- The basis-chain check needs the whole corpus loaded, and a v0 record in a
+  chain has no basis to follow. Until migration ends, the chain check treats
+  a v0 record as external basis and warns.
+
 ### Neutral
 
 - ADR-303's archive operation stays. It becomes one of the L1 operations and
@@ -343,6 +423,11 @@ is the migration test.
 
 ## Alternatives Considered
 
+- **Hard-code the two kinds in the tool.** Rejected: each new kind would
+  need a tool release, and repos could not add kinds of their own. Declaring
+  kinds in the contract costs one schema reader.
+- **Basis as free prose in the Context section.** Rejected: prose cannot be
+  checked, and nothing would stop a corpus that justifies itself.
 - **Capability as a third record kind.** Rejected: kg has no record that is
   purely a capability. Capabilities show up as the scope of decisions and
   specs, so a tag with a derived ledger fits the data.
