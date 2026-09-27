@@ -70,6 +70,9 @@ if [[ "$TIER" == "2" ]]; then
   # source as root, and the container user then cannot write to it.
   mkdir -p "$TIER2_OUT"
   [[ -w "$TIER2_OUT" ]] || { echo "TIER2_OUT is not writable: $TIER2_OUT" >&2; exit 2; }
+  # The container user is uid 1000, and the host user may not be (a CI runner
+  # is 1001). The dir holds only this run's transcripts, so open it to all.
+  chmod 0777 "$TIER2_OUT"
   echo "tier 2 transcripts: $TIER2_OUT"
 fi
 
