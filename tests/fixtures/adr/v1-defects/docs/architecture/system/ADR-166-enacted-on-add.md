@@ -1,17 +1,18 @@
 ---
 contract: adr/v1
-kind: [decision]
+kind: decision
 verb: add
 capability: adr
 status: accepted
+enacted: 3f9c2a1
 date: 2025-06-01
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
 basis:
-  - evidence: fixture measurement
+  - evidence: data
 ---
 
-# ADR-138: Kind written as a list
+# ADR-166: Enacted on an add
 
 ## Summary
 

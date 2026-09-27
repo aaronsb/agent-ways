@@ -201,6 +201,15 @@ capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
 
+# A frozen decision edited after acceptance: a changed capability (an error),
+# a body edited mid-text (a warning), and a mutable field (allowed).
+fresh v1
+(cd "$WORK/repo" \
+  && sed -i.bak -e 's/^capability: ingest$/capability: search/' -e 's/^The decision\.$/The decision, rewritten./' \
+       -e 's/^date: 2025-05-02$/date: 2025-05-02\nconsidered: [{operator: developer, said: ok, via: PR 2}]/' \
+       docs/architecture/system/ADR-101-ingest.md && rm docs/architecture/system/ADR-101-ingest.md.bak)
+capture v1-frozen-lint lint docs/architecture/system/ADR-101-ingest.md
+
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check

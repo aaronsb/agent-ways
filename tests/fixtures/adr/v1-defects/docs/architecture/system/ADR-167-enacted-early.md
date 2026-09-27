@@ -1,17 +1,19 @@
 ---
 contract: adr/v1
-kind: [decision]
-verb: add
-capability: adr
-status: accepted
+kind: decision
+verb: retire
+capability: ingest
+targets: [cli:old]
+status: proposed
+enacted: soon
 date: 2025-06-01
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
 basis:
-  - evidence: fixture measurement
+  - evidence: data
 ---
 
-# ADR-138: Kind written as a list
+# ADR-167: Enacted before acceptance, not a hash
 
 ## Summary
 

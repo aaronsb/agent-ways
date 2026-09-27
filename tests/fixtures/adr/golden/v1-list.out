@@ -6,7 +6,7 @@ ADR v1 Fixture — Architecture Decision Records (13 total)
   ✅ ADR-102      How ingestion works
   ✅ ADR-103      Batch ingestion  (partially superseded by ADR-109)
   ✅ ADR-104      No network calls in hooks
-  💡 ADR-105      Retire the legacy ingest surface
+  ✅ ADR-105      Retire the legacy ingest surface
   💡 ADR-106      Search result caps
   💡 ADR-107      Ingest notes, by slug reference
   💡 ADR-108      Change against a v0 record

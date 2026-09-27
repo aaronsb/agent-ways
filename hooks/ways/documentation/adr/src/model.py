@@ -20,6 +20,8 @@ class ADRInfo:
     frontmatter: dict = field(default_factory=dict)
     contract: Optional[str] = None
     sections: list = field(default_factory=list)
+    section_text: dict = field(default_factory=dict)  # heading -> its body text
+    body: str = ''
     issues: list = field(default_factory=list)
 
 @dataclass
