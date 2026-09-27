@@ -22,7 +22,6 @@ kinds:
     requires: [capability]
     edges: {supersedes: spec, decided_by: decision}
 capabilities:
-  adr: Decision records and the tooling that enforces them
   cache: The response cache
 YAML
 cat > docs/architecture/system/ADR-100-add-response-cache.md <<'MD'
