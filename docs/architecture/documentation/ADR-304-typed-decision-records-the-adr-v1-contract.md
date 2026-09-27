@@ -6,7 +6,7 @@ capability: adr
 basis:
   - operator: aaronsb
     said: "agent ways should lead the champagne here and once it works, that where agent ways can interrupt and do the adr housekeeping"
-    where: session 2026-09-26, PR #559
+    via: session 2026-09-26, PR #559
   - evidence: kg triage of 108 records; agent-ways citation audit
 status: Proposed
 date: 2026-09-26
@@ -211,7 +211,7 @@ targets: [cli:ingest-legacy, route:/v1/upload]
 basis:
   - operator: aaronsb
     said: "drop the legacy upload path"
-    where: PR #612
+    via: PR #612
 status: accepted
 enacted: 3f9c2a1
 ---
@@ -367,23 +367,27 @@ ask. `adr accept` refuses a decision whose basis does not meet them.
 CLI under the operator's identity. Commit authorship, PR reviews and comments
 therefore cannot tell the operator's approval from the agent's. kg's last 200
 merged PRs show 197 authored and merged under the operator's account. Text
-in the record fails the same way, because the agent writes the file. So an
-`operator` basis carries the operator's words, quoted, and where they were
-said:
+in the record fails the same way, because the agent writes the file.
+
+The coupling to the operator is deliberately loose. Approval arrives through
+whatever channel the operator used: a session, a GitHub issue, a Slack
+message, a phone call. An `operator` basis records what was said and where:
 
 ```yaml
 basis:
   - operator: aaronsb
-    said: "an operator quote goes here, verbatim"
-    where: session 2026-09-26, PR #559
+    said: "the operator's words, verbatim where written"
+    via: slack #kg-dev, 2026-09-26
 ```
 
-The ADR way forbids writing an `operator` basis without a quote the operator
-actually gave. `adr accept` checks that the quote and location are present,
-and it cannot check that they are genuine. A signed-acceptance scheme could
-make the basis verifiable later: a commit signed by an operator key listed
-in `adr.yaml`, with the key behind a touch or passphrase prompt. Adopting one
-would be a `change` decision on `capability: adr`.
+`via` names the channel and enough to find the exchange again. Written
+channels are quoted verbatim. A spoken channel, such as a call, gets a
+summary written by whoever recorded it, marked `paraphrase: true`.
+
+The ADR way forbids writing an `operator` basis without an operator
+communication behind it. `adr accept` checks that `said` and `via` are
+present, and it cannot check that they are genuine. The basis is an audit
+trail that the operator can read and dispute, not a credential.
 
 The model follows Beer's Viable System Model. Records under a shared contract
 form one system, and the operator is the external identity and policy
@@ -460,10 +464,10 @@ is the migration test.
 - **Hard-code the two kinds in the tool.** Rejected: each new kind would
   need a tool release, and repos could not add kinds of their own. Declaring
   kinds in the contract costs one schema reader.
-- **Signed acceptance for operator basis now.** Deferred: it needs a signing
-  key held behind a touch or passphrase prompt, and commit signing is off in
-  this repo today. v1 ships the policy form. A signed form can follow as a
-  `change` decision.
+- **Signed acceptance for operator basis.** Rejected: a key-based proof is
+  too brittle for the human coupling. Approval arrives through issues, chat
+  and phone calls, and a scheme that accepts only a signed commit would force
+  every one of those through one tool.
 - **Seed operator basis from forge metadata.** Rejected: the agent acts under
   the operator's forge identity, so reviews and merges prove nothing.
 - **Basis as free prose in the Context section.** Rejected: prose cannot be
