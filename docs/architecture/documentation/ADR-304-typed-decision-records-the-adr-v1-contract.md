@@ -21,6 +21,24 @@ related:
 
 # ADR-304: Typed decision records: the adr/v1 contract
 
+## Summary
+
+- **Decided:** ADR now means Agent Decision Record. Records have declared
+  kinds, starting with decision (append-only) and spec (living), all in one
+  `ADR-N` number space. Decisions carry a verb (add, cut, change, retire,
+  constrain), a capability from a closed list, and a basis that must reach
+  outside the corpus. `adr lint` and `doclint` enforce this and tie code
+  citations back to the records.
+- **Trades away:** splitting mixed records costs manual work, and every
+  decision now needs frontmatter and a summary. Agents can no longer accept
+  decisions grounded only in other decisions.
+- **One-way?** No. The contract is opt-in per repository (`contract:` in
+  `adr.yaml`), v0 records keep working, and this repo adopts first as the
+  test.
+- **For the operator:** Is the operator's involvement modelled right, as
+  levels plus a separate `considered` (§11, §12)? Is agent-ways migrating its
+  own corpus first the right proving ground (Rollout)?
+
 ## Context
 
 In a project where ADRs replace a tracker and a product team, one record does
@@ -165,9 +183,10 @@ capability ledger. Nobody maintains the ledger by hand.
 contract: adr/v1
 kinds:
   decision:
-    mutable_after_accept: [status, enacted, superseded_by]
+    mutable_after_accept: [status, enacted, superseded_by, considered]
     verb: required
     requires: [capability, basis]
+    sections: [Summary]
     edges: { supersedes: decision, basis: [decision, spec] }
   spec:
     mutable_after_accept: all
@@ -411,6 +430,64 @@ contract regulate each other through `upstream` edges, without either one
 absorbing the other. `basis` sources form a fourth vocabulary layer, and the
 no-shared-word check covers it.
 
+### 12. Legibility and consideration
+
+The working flow between agent and operator runs like this:
+
+1. The operator floats an idea, often as an example.
+2. Both debate and expand it.
+3. The agent writes and proposes the decision.
+4. The operator considers it.
+
+The two tracks run in parallel. The agent reasons at a depth and in a
+detail the operator cannot match. The operator works in judgement, taste,
+and value to concerns outside the repository that the agent cannot see. The
+agent owes the operator a decision they can understand. The operator owes
+the agent a decision that was not accepted blindly.
+
+**Summary section.** Every decision opens with `## Summary`, written for the
+operator's lanes:
+
+- what is decided, in plain terms;
+- what it trades away and what it forecloses;
+- whether it is one-way, stated first when it is;
+- the questions that need the operator's judgement, taste or outside
+  knowledge.
+
+The bar is that someone who did not take part in the debate can judge the
+decision from the summary alone. `adr lint` checks that the section exists.
+The ADR way holds the bar.
+
+**Consideration is recorded separately from shaping.** `level` (§11) records
+how the operator shaped a decision. `considered:` records that the operator
+weighed the proposal before acceptance:
+
+```yaml
+considered:
+  - operator: aaronsb
+    said: "looks good"
+    via: PR #559
+```
+
+A short response is a full consideration. Human review is asymmetric: the
+operator reads the summary, skims the body, and answers briefly. The brevity
+reflects the effort a deep written reply would cost. It does not mean the
+operator did no thinking. Humans discriminate well, and the summary exists
+so a brief answer rests on the questions that matter. Pushback, when there
+is any, goes in `said`.
+
+**If the operator started it, the operator considers it.** A decision with
+an `operator` basis at any level is proposed and waits for `considered`
+before acceptance. A decision with no operator basis, grounded in `evidence`,
+`standard` or `upstream`, may be accepted by the agent directly.
+
+**Accepted risk.** The flow fails when an operator believes they have skill
+they lack and accepts without real judgement. That failure seldom causes
+immediate harm, and the corpus keeps it recoverable. The decision stays
+append-only and citable, and a later `change` can supersede it. The summary's
+one-way flag is the mitigation: the decisions a rubber-stamp would hurt most
+are the ones marked most prominently.
+
 ### Rollout
 
 This repo adopts first. It owns `adr-tool` and `doclint`, and its own corpus
@@ -457,6 +534,8 @@ is the migration test.
 - A split produces a decision record written after the fact. Its date and
   content come from the original, but its number is new.
 
+- Every decision needs a `## Summary` that the operator can judge alone.
+  Writing one takes effort, and a weak one lets a rubber-stamp through.
 - Every decision needs a `basis` whose chain leaves the corpus. An agent
   cannot accept a decision grounded only in other decisions.
 - The basis-chain check needs the whole corpus loaded, and a v0 record in a
