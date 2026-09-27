@@ -15,7 +15,10 @@ basis:
 
 ## Summary
 
-Context for the record.
+- **Decided:** the decision in plain terms.
+- **Trades away:** what it gives up.
+- **Probes:** *Confident:* the main point holds. *Not confident:* the edge case.
+- **Inversion:** one end, the other end; is the middle right?
 
 ## 1. Decision
 

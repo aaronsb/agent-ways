@@ -4,7 +4,8 @@ kind: decision
 verb: retire
 capability: ingest
 targets: [cli:ingest-legacy, route:/v1/upload]
-status: proposed
+status: accepted
+enacted: 3f9c2a1
 date: 2025-05-06
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
@@ -16,7 +17,10 @@ basis:
 
 ## Summary
 
-Context for the record.
+- **Decided:** the decision in plain terms.
+- **Trades away:** what it gives up.
+- **Probes:** *Confident:* the main point holds. *Not confident:* the edge case.
+- **Inversion:** one end, the other end; is the middle right?
 
 ## 1. Decision
 

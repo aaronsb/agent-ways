@@ -125,9 +125,12 @@ def rule_v1_config_shape(ctx):
         verb = schema.get('verb', 'forbidden')
         if verb not in ('required', 'forbidden'):
             bad(f"kinds.{name}.verb: '{verb}' is not required or forbidden")
-        for key in ('requires', 'statuses'):
+        for key in ('requires', 'statuses', 'sections'):
             if key in schema and _str_list(schema[key]) is None:
                 bad(f"kinds.{name}.{key}: expected a list of names")
+        mutable = schema.get('mutable_after_accept')
+        if mutable is not None and mutable != 'all' and _str_list(mutable) is None:
+            bad(f"kinds.{name}.mutable_after_accept: expected a list of fields or 'all'")
         if 'edges' in schema:
             edges = schema['edges']
             if not isinstance(edges, dict):

@@ -1,24 +1,20 @@
 
-Scanned: 13 ADRs
+Scanned: 1 ADRs
 
 Status distribution:
-  accepted: 8
-  proposed: 5
+  accepted: 1
 
-Contract: adr/v1 (1 v0 records remain)
+Contract: adr/v1 (0 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 2 files:
+Issues found in 1 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
-  ⚠️ capability 'search' has no accepted add decision
-
-docs/architecture/system/ADR-108-ingest-over-v0.md
-  ⚠️ cannot confirm the prior decision on 'ingest': ADR-110 is still v0
+  ❌ capability 'search' has no accepted add decision
 
 ════════════════════════════════════════════════════════════
-Summary: 0 errors, 2 warnings
+Summary: 1 errors, 0 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

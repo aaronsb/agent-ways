@@ -6,14 +6,17 @@ TITLE_PATTERN = re.compile(r'^# ADR-(\d+(?:\.\d+)?): (.+)$')
 
 def parse_adr(path: Path) -> ADRInfo:
     """Parse an ADR file and extract metadata."""
-    info = ADRInfo(path=path)
-
     try:
         content = path.read_text()
     except Exception as e:
+        info = ADRInfo(path=path)
         info.issues.append(Issue(f"Cannot read: {e}", 'error'))
         return info
+    return parse_text(content, path)
 
+def parse_text(content: str, path: Path) -> ADRInfo:
+    """Parse ADR text; path places it (domain by folder) and names it."""
+    info = ADRInfo(path=path)
     lines = content.split('\n')
 
     # Parse YAML frontmatter
@@ -73,12 +76,27 @@ def parse_adr(path: Path) -> ADRInfo:
             if line.strip() == '---':
                 body_start = i + 1
                 break
+    # A ### heading is a section of its own, and its text also belongs to the
+    # enclosing ## section, so a Summary with ### Probes still reads whole.
     in_fence = False
+    current = parent = None
+    info.body = '\n'.join(lines[body_start:])
     for line in lines[body_start:]:
         if line.lstrip().startswith(('```', '~~~')):
             in_fence = not in_fence
         elif not in_fence and (line.startswith('## ') or line.startswith('### ')):
-            info.sections.append(line.lstrip('#').strip())
+            current = line.lstrip('#').strip()
+            info.sections.append(current)
+            info.section_text.setdefault(current, '')
+            if line.startswith('## '):
+                parent = current
+            elif parent is not None:
+                info.section_text[parent] += line + '\n'
+            continue
+        if current is not None:
+            info.section_text[current] += line + '\n'
+        if parent is not None and parent != current:
+            info.section_text[parent] += line + '\n'
 
     # Find title
     for line in lines:
