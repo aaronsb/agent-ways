@@ -91,6 +91,21 @@ capture() {
   mv "$ACTUAL/$name.tmp" "$ACTUAL/$name.out"
 }
 
+# edit PATH PY — rewrite a fixture-repo file with a Python expression over s.
+# Portable where GNU and BSD sed disagree (newlines in replacements).
+edit() {
+  python3 - "$WORK/repo/$1" "$2" <<'PY'
+import sys
+path, expr = sys.argv[1], sys.argv[2]
+s = open(path).read()
+s = eval(expr)
+open(path, 'w').write(s)
+PY
+}
+
+# commit_all MSG — commit the fixture repo's working tree
+commit_all() { (cd "$WORK/repo" && git add -A && git commit -qm "$1"); }
+
 # keep NAME PATH — keep a file the tool wrote, normalized
 keep() {
   if [[ -n "$2" && -f "$WORK/repo/$2" ]]; then
@@ -204,11 +219,35 @@ capture v1-view-spec   view 102
 # A frozen decision edited after acceptance: a changed capability (an error),
 # a body edited mid-text (a warning), and a mutable field (allowed).
 fresh v1
-(cd "$WORK/repo" \
-  && sed -i.bak -e 's/^capability: ingest$/capability: search/' -e 's/^The decision\.$/The decision, rewritten./' \
-       -e 's/^date: 2025-05-02$/date: 2025-05-02\nconsidered: [{operator: developer, said: ok, via: PR 2}]/' \
-       docs/architecture/system/ADR-101-ingest.md && rm docs/architecture/system/ADR-101-ingest.md.bak)
+edit docs/architecture/system/ADR-101-ingest.md "s.replace('capability: ingest\n', 'capability: search\n').replace('The decision.\n', 'The decision, rewritten.\n').replace('date: 2025-05-02\n', 'date: 2025-05-02\nconsidered: [{operator: developer, said: ok, via: PR 2}]\n')"
 capture v1-frozen-lint lint docs/architecture/system/ADR-101-ingest.md
+
+# The freeze follows a rename: renamed, committed, then edited.
+fresh v1
+(cd "$WORK/repo" && git mv docs/architecture/system/ADR-101-ingest.md docs/architecture/system/ADR-101-ingest-renamed.md)
+commit_all rename
+edit docs/architecture/system/ADR-101-ingest-renamed.md "s.replace('capability: ingest\n', 'capability: search\n')"
+capture v1-frozen-renamed lint docs/architecture/system/ADR-101-ingest-renamed.md
+
+# Proposed, then accepted in a later commit: accepting is not an edit.
+fresh v1
+edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('status: proposed\n', 'status: accepted\nconsidered: [{operator: developer, said: \"yes\", via: PR 13}]\n')"
+commit_all accept
+capture v1-frozen-accepted lint docs/architecture/system/ADR-113-operator-proposed.md
+
+# An accepted v0 record migrated to v1 adds the v1 fields: the migration,
+# not an edit of a frozen decision (ADR-304 §7).
+fresh v1
+edit docs/architecture/system/ADR-110-old-v0-record.md "s.replace('status: Accepted\n', 'contract: adr/v1\nkind: decision\nverb: add\ncapability: ingest\nstatus: accepted\nagent: {name: Claude, model: fixture-model}\nbasis:\n  - evidence: migrated from v0\n').replace('# ADR-110: An unmigrated v0 record\n', '# ADR-110: An unmigrated v0 record\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n')"
+capture v1-frozen-migrated lint docs/architecture/system/ADR-110-old-v0-record.md
+
+# A non-UTF-8 blob in a record's history does not stop lint.
+fresh v1
+printf 'binary \377\376 junk\n' > "$WORK/repo/docs/architecture/system/ADR-102-ingest-spec.md"
+commit_all "non-utf8"
+cp "$FIXTURES/v1/docs/architecture/system/ADR-102-ingest-spec.md" "$WORK/repo/docs/architecture/system/ADR-102-ingest-spec.md"
+commit_all restore
+capture v1-frozen-nonutf8 lint docs/architecture/system/ADR-102-ingest-spec.md
 
 fresh v1-defects
 capture v1-defects-lint        lint

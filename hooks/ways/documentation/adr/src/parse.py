@@ -76,8 +76,10 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             if line.strip() == '---':
                 body_start = i + 1
                 break
+    # A ### heading is a section of its own, and its text also belongs to the
+    # enclosing ## section, so a Summary with ### Probes still reads whole.
     in_fence = False
-    current = None
+    current = parent = None
     info.body = '\n'.join(lines[body_start:])
     for line in lines[body_start:]:
         if line.lstrip().startswith(('```', '~~~')):
@@ -86,9 +88,15 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             current = line.lstrip('#').strip()
             info.sections.append(current)
             info.section_text.setdefault(current, '')
+            if line.startswith('## '):
+                parent = current
+            elif parent is not None:
+                info.section_text[parent] += line + '\n'
             continue
         if current is not None:
             info.section_text[current] += line + '\n'
+        if parent is not None and parent != current:
+            info.section_text[parent] += line + '\n'
 
     # Find title
     for line in lines:

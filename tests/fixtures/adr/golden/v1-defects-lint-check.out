@@ -1,18 +1,18 @@
 
-Scanned: 57 ADRs
+Scanned: 59 ADRs
 
 Status distribution:
   Unknown: 1
   accepted: 28
   draft: 1
-  proposed: 25
+  proposed: 27
   rejected: 1
   superseded: 1
 
 Contract: adr/v1 (0 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 48 files:
+Issues found in 49 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
@@ -165,8 +165,11 @@ docs/architecture/system/ADR-166-enacted-on-add.md
   ❌ enacted belongs to a cut or retire decision (this one is 'add')
 
 docs/architecture/system/ADR-167-enacted-early.md
-  ❌ enacted marks an accepted decision done; this one is not accepted
+  ❌ enacted marks an accepted decision done; this one is proposed
   ❌ enacted: 'soon' is not a commit hash
+
+docs/architecture/system/ADR-169-summary-less-confident.md
+  ⚠️ Summary lacks a probe labelled 'confident' (ADR-304 §12)
 
 docs/architecture/system/ADR-172-dangling-beside-grounded.md
   ❌ basis: precedent 'ADR-196' resolves to no known ADR
@@ -199,7 +202,7 @@ docs/architecture/system/ADR-182-precedent-list.md
   ❌ basis entry 2: evidence needs a reference
 
 ════════════════════════════════════════════════════════════
-Summary: 78 errors, 9 warnings
+Summary: 78 errors, 10 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 1]
