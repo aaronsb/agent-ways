@@ -9,10 +9,11 @@ if [[ "$(cd "$PROJ" && git rev-list --count HEAD)" == "2" ]]; then
 else
   fail "one new commit" "log: $(cd "$PROJ" && git log --oneline | paste -sd'|')"
 fi
-if [[ -z "$(cd "$PROJ" && git status --porcelain)" ]]; then
+# agent-ways scaffolds .claude/ into the project on its own; ignore it here.
+if [[ -z "$(grep -v '^?? \.claude/' "$OUT/worktree.txt" || true)" ]]; then
   ok "working tree clean"
 else
-  fail "working tree clean"
+  fail "working tree clean" "$(cat "$OUT/worktree.txt")"
 fi
 if [[ "$SUBJECT" =~ ^(docs|chore|feat|fix)(\([a-z0-9-]+\))?:\ .+ ]]; then
   ok "subject is conventional: $SUBJECT"

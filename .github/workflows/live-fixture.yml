@@ -17,6 +17,12 @@ on:
       claude_installer:
         description: native or npm
         default: native
+      tier2_model:
+        description: model for tier 2 scenarios (empty for the runner's default)
+        default: ''
+      tier2_scenarios:
+        description: space-separated tier 2 scenario names (empty runs all)
+        default: ''
 
 jobs:
   tier1-release:
@@ -32,3 +38,33 @@ jobs:
           CLAUDE_VERSION: ${{ inputs.claude_version || 'latest' }}
           CLAUDE_INSTALLER: ${{ inputs.claude_installer || 'native' }}
         run: make test-live TIER=1
+
+  # ADR-186 items 3 and 4: tier 2 spends tokens, so it runs only here, on the
+  # schedule and on dispatch, never on a pull request. It fails, rather than
+  # passing, when the secret is missing, so absence of a key never reads green.
+  tier2-release:
+    name: tier 2, release flavor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run tier 2 against the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FLAVOR: release
+          CLAUDE_VERSION: ${{ inputs.claude_version || 'latest' }}
+          CLAUDE_INSTALLER: ${{ inputs.claude_installer || 'native' }}
+          TIER2_MODEL: ${{ inputs.tier2_model }}
+          TIER2_SCENARIOS: ${{ inputs.tier2_scenarios }}
+          TIER2_OUT: ${{ runner.temp }}/tier2-out
+        run: make test-live TIER=2
+
+      - name: Keep the transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier2-transcripts
+          path: ${{ runner.temp }}/tier2-out
+          if-no-files-found: ignore

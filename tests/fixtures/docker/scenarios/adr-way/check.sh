@@ -11,8 +11,11 @@ rubric "covers alternatives considered"  'alternative'
 rubric "mentions ADR tooling or scaffold" 'docs/scripts/adr|adr new|scaffold|tooling'
 rubric_threshold 4
 
-if [[ -z "$(cd "$PROJ" && git status --porcelain)" ]]; then
+# agent-ways scaffolds .claude/ into the project on its own; that is not the
+# model creating files.
+CREATED=$(grep -v '^?? \.claude/' "$OUT/worktree.txt" || true)
+if [[ -z "$CREATED" ]]; then
   ok "no files created, as the prompt asked"
 else
-  fail "no files created, as the prompt asked" "$(cd "$PROJ" && git status --porcelain)"
+  fail "no files created, as the prompt asked" "$CREATED"
 fi
