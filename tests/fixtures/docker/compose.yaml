@@ -33,6 +33,9 @@ services:
     command: bash /fixture/run-tier1.sh
 
   # Tier 2 reuses the tier 1 image and runs tier 1 first as its precondition.
+  # Compose interpolates every service even when it runs only tier 1, so the
+  # tier 2 variables carry defaults here. test-live.sh refuses tier 2 without
+  # a key or a writable TIER2_OUT, and run-tier2.sh checks both again.
   # The key reaches the container through the environment only: it is not a
   # build arg, so no image layer carries it.
   tier2:
@@ -46,7 +49,7 @@ services:
       FLAVOR: ${FLAVOR:-branch}
       CLAUDE_VERSION: ${CLAUDE_VERSION}
       GH_TOKEN: ${GH_TOKEN:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?tier 2 needs a key}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TIER2_MODEL: ${TIER2_MODEL:-}
       TIER2_SCENARIOS: ${TIER2_SCENARIOS:-}
       TIER2_MAX_TURNS: ${TIER2_MAX_TURNS:-}
@@ -54,5 +57,5 @@ services:
       - ../../..:/src:ro
       - ${WAYS_BINARIES:?set by test-live.sh}:/binaries:ro
       - .:/fixture:ro
-      - ${TIER2_OUT:?set by test-live.sh}:/out
+      - ${TIER2_OUT:-/tmp/agent-ways-tier2-unset}:/out
     command: bash /fixture/run-tier2.sh
