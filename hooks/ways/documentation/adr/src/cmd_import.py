@@ -158,13 +158,15 @@ def _uncommitted(path: Path) -> bool:
         return False
     return bool((_git(['status', '--porcelain', '--', rel], root) or '').strip())
 
-def _apply_one(sheet: dict, force: bool) -> tuple:
+def _apply_one(sheet: dict, force: bool, undo: Optional[dict] = None) -> tuple:
     """Write one sheet as a v1 record through render_record and return
     (path, whether it changed). A non-v1 source gains `imported: {from,
     format}`, plus `unmapped` when the source had keys with no v1 field, so
     the record keeps them whatever happens to the todo (ADR-306 §1, §4).
     Refused: a source changed since the scan, a source with a body whose
-    sheet has none, and a source with uncommitted changes unless --force."""
+    sheet has none, and a source with uncommitted changes unless --force.
+    With `undo`, the destination's prior bytes (None when it did not exist)
+    are kept there so a dry run can put them back."""
     source = sheet.get('source')
     source_file = None
     record = dict(sheet['record'])
@@ -186,6 +188,8 @@ def _apply_one(sheet: dict, force: bool) -> tuple:
     if dest.is_file() and not force and _uncommitted(dest):
         raise SheetError(f"{relative_path(dest)} has uncommitted changes; commit them, "
                          f"or --force to overwrite")
+    if undo is not None and dest not in undo:
+        undo[dest] = dest.read_bytes() if dest.is_file() else None
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text)
     return dest, True
@@ -216,12 +220,15 @@ def _import_apply(args):
     (ADR-306 §3). A sheet with open todo items is skipped. --partial writes
     it anyway, unless an item is one lint could not find again afterwards
     (BLOCKING_TODO). An applied sheet is removed: the record is what is
-    kept. One bad sheet is reported and the rest still apply."""
+    kept. One bad sheet is reported and the rest still apply. --dry-run
+    writes the records, lints them inside the corpus, prints each issue,
+    then restores every file it wrote and keeps every sheet."""
     if args.sheets:
         paths = [Path(p) for p in args.sheets]
     else:
         paths = sorted(import_dir().glob('ADR-*.yaml')) if import_dir().is_dir() else []
     lines, written = [], []
+    undo = {} if args.dry_run else None
     applied = skipped = refused = 0
     for path in paths:
         shown = relative_path(path.resolve())
@@ -234,36 +241,52 @@ def _import_apply(args):
                 lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
                 skipped += 1
                 continue
-            dest, changed = _apply_one(sheet, args.force)
+            dest, changed = _apply_one(sheet, args.force, undo)
         except (SheetError, OSError, ValueError, TypeError, AttributeError, KeyError) as e:
             lines.append((f"Refused: {shown}: {e}", None))
             refused += 1
             continue
-        try:
-            path.unlink()
-        except OSError as e:
-            lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
+        if not args.dry_run:
+            try:
+                path.unlink()
+            except OSError as e:
+                lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
         applied += 1
         written.append(dest.resolve())
         partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
         lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
-    counts = _lint_counts(written)
+    try:
+        counts, issues = _lint_counts(written)
+    finally:
+        for dest, before in (undo or {}).items():
+            if before is None:
+                dest.unlink(missing_ok=True)
+            else:
+                dest.write_bytes(before)
     for text, dest in lines:
         if dest is not None:
             errors, warnings = counts.get(dest, (0, 0))
             text += f" (lint: {errors} errors, {warnings} warnings)"
+            if args.dry_run:
+                text = text.replace('Applied: ', 'Would apply: ', 1)
+                text += ''.join(f"\n    {'error' if i.severity == 'error' else 'warning'}: {i.message}"
+                                for i in issues.get(dest, []))
         print(text)
-    print(f"Import: {applied} applied, {skipped} skipped, {refused} refused")
+    verb = 'would apply' if args.dry_run else 'applied'
+    print(f"Import: {applied} {verb}, {skipped} skipped, {refused} refused"
+          + (' (dry run: nothing written)' if args.dry_run else ''))
     return 1 if refused else 0
 
 def _lint_counts(paths: list) -> dict:
-    """(errors, warnings) per written record, from the full rule set."""
+    """(errors, warnings) per written record, and the issues themselves,
+    from the full rule set."""
     if not paths:
-        return {}
+        return {}, {}
     corpus = get_all_adrs(include_archived=True)
     ctx = LintContext.from_corpus(corpus)
     targets = [adr for adr in corpus if adr.path.resolve() in set(paths)]
     run_rules(targets, ctx)
-    return {adr.path.resolve(): (sum(i.severity == 'error' for i in adr.issues),
-                                 sum(i.severity != 'error' for i in adr.issues))
-            for adr in targets}
+    counts = {adr.path.resolve(): (sum(i.severity == 'error' for i in adr.issues),
+                                   sum(i.severity != 'error' for i in adr.issues))
+              for adr in targets}
+    return counts, {adr.path.resolve(): list(adr.issues) for adr in targets}

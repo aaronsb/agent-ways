@@ -493,6 +493,14 @@ edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + '
 capture import-apply-observable import apply docs/architecture/.import/ADR-110.yaml
 keep import-apply-observable-file.md docs/architecture/system/ADR-110-old-v0-record.md
 
+# A dry run lints what it would write inside the corpus, prints each issue,
+# then restores every file and keeps every sheet.
+import_fresh
+capture import-scan-dryrun import scan docs/architecture/system/ADR-110-old-v0-record.md
+edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + 'todo: []\n' + t[t.index('candidates:'):])(s.replace('verb: ~', 'verb: change').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n    - evidence: migrated from v0').replace('name: ~', 'name: Claude'))"
+capture import-apply-dryrun import apply --dry-run
+worktree import-apply-dryrun-status.txt
+
 # A source edited after the scan is refused, and the sheet is kept.
 import_fresh
 capture import-scan-changed import scan docs/architecture/system/ADR-110-old-v0-record.md
