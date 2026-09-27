@@ -1,0 +1,29 @@
+---
+status: Accepted
+date: 2025-08-01
+deciders:
+  - developer
+  - agent
+supersedes:
+  - ADR-102#2
+---
+
+# ADR-104: Hook priorities
+
+## Context
+
+Replaces one section of ADR-102.
+
+## Decision
+
+The decision for ADR-104: Hook priorities.
+
+## Consequences
+
+### Positive
+
+- It works.
+
+## 2. Priority bands
+
+Hooks run in three bands.

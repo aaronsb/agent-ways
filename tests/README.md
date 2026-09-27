@@ -18,6 +18,19 @@ make test-live TIER=1 FLAVOR=release   # the one-liner against the latest releas
 
 Needs Docker and the four suite binaries under `tools/target/release`. See `tests/fixtures/docker/README.md` for the assertion list. Runs in CI as the `live fixture (tier 1)` job of `portability.yml`; the release flavor runs nightly from `live-fixture.yml`.
 
+## adr Tool Tests
+
+```bash
+make test-adr
+```
+
+Three scripts cover the vendored `adr` tool. `adr-lint-test.sh` checks frontmatter detection, and `adr-archive-test.sh` checks `adr archive`. `adr-golden-test.sh` runs the read and write commands against two fixture corpora and diffs each output against `fixtures/adr/golden`. `fixtures/adr/corpus` is well-formed apart from two lint defects. `fixtures/adr/defects` carries the lint findings the main corpus lacks, plus a duplicate number. The ADR-304 rollout rewrites the tool in steps, and every step keeps v0 output byte-identical to those goldens.
+
+- `ADR_TOOL=path tests/adr-golden-test.sh` checks another build of the tool against the same goldens.
+- `tests/adr-golden-test.sh --update` rewrites the goldens. Use it only when an output change is intended, and review the diff.
+- The corpus pins `deciders` in its `adr.yaml`, so `adr new` never calls `gh`. Git reads no host config. The test replaces the temp path with `<ROOT>`, the tool's path with `<ADR_TOOL>` and today's date with `<TODAY>`. Fixture dates must be in the past, and the test refuses to run if one is today.
+- `--help` output is not captured, because argparse formats it differently across Python versions.
+
 ## Way Matching Tests
 
 Three layers, from fast/automated to slow/interactive.

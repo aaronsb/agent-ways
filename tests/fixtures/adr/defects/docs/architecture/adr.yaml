@@ -1,0 +1,43 @@
+# Fixture ADR configuration for the golden-output test (tests/adr-golden-test.sh).
+project_name: ADR Defects Fixture
+
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Runtime, hooks and storage
+    folder: system
+
+  ops:
+    range: [200, 299]
+    name: Operations
+    description: Deployment and runbooks, split across two folders
+    folder:
+      - operations
+      - runbooks
+
+  docs:
+    range: [300, 399]
+    name: Documentation
+    description: Documentation structure and tooling
+    folder: documentation
+
+statuses:
+  - Draft
+  - Proposed
+  - Accepted
+  - Superseded
+  - Deprecated
+  - Rejected
+
+defaults:
+  deciders:
+    - developer
+    - agent
+  status: Draft
+
+legacy:
+  range: [1, 99]
+  label: "Legacy (Pre-Domain Numbering)"
+
+viewer: cat {file}

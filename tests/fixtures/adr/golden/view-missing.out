@@ -1,0 +1,3 @@
+Error: ADR not found: 999
+Use `adr list` to see available ADRs.
+[exit 1]

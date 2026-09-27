@@ -1,0 +1,3 @@
+Error: Unknown domain 'nosuchdomain'
+Valid domains: system, ops, docs
+[exit 1]

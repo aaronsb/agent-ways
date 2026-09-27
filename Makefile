@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-lang test-locales test-multilingual test-live release purge-attend-state
+.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-lang test-locales test-multilingual test-live release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -49,9 +49,10 @@ help:
 	@echo "  make attend       Build attend binary"
 	@echo "  make attend-rebuild Force rebuild attend from source"
 	@echo "  make lint         Run clippy on Rust workspace (warnings = errors)"
-	@echo "  make test         Run all tests (lint + smoke + unit + sim + lang)"
+	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr)"
 	@echo "  make test-unit    Run Rust unit tests"
 	@echo "  make test-sim     Run session simulator (8 scenarios)"
+	@echo "  make test-adr     Run adr tool tests (lint, archive, golden output)"
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
@@ -348,7 +349,7 @@ way-embed-rebuild:
 
 # --- Test ---
 
-test: lint test-smoke test-unit test-sim
+test: lint test-smoke test-unit test-sim test-adr
 	@echo "All tests passed."
 
 lint:
@@ -363,6 +364,13 @@ test-smoke: ways
 	@$(WAYS_BIN) match "write a unit test" >/dev/null && echo "  match: PASS"
 	@$(WAYS_BIN) graph --output /dev/null && echo "  graph: PASS"
 	@echo "Smoke tests passed."
+
+test-adr:
+	@echo "Running adr tool tests (lint, archive, golden output)..."
+	@bash tests/adr-lint-test.sh
+	@bash tests/adr-archive-test.sh
+	@bash tests/adr-golden-test.sh
+	@echo "adr tool tests passed."
 
 test-unit:
 	@echo "Running Rust unit tests..."
