@@ -17,24 +17,6 @@
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 UNIVERSAL="${ADR_UNIVERSAL_TOOL:-${HOME}/.claude/hooks/ways/documentation/adr/adr-tool}"
 
-# Outside a work tree there is nothing to vendor into; say nothing.
-git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree &>/dev/null || exit 0
-
-# State 1: Declined
-if [[ -f "$PROJECT_DIR/.claude/no-adr-tooling" ]]; then
-  echo "ADR tooling declined for this project. Remove \`.claude/no-adr-tooling\` to enable."
-  exit 0
-fi
-
-# State 2: Installed — check common locations
-ADR_SCRIPT=""
-for path in "docs/scripts/adr" "scripts/adr" "tools/adr"; do
-  if [[ -x "$PROJECT_DIR/$path" ]]; then
-    ADR_SCRIPT="$path"
-    break
-  fi
-done
-
 # Capture is shape-restricted: a stamp that isn't a plain version string is
 # treated as unversioned rather than echoed into disclosed context (ADR-177).
 # sed -E rather than grep -P, which BSD grep (macOS) lacks.
@@ -42,7 +24,7 @@ tool_version() {
   sed -nE 's/^TOOL_VERSION = "([0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?)"$/\1/p' "$1" 2>/dev/null | head -1
 }
 
-print_v0_guide() {
+print_v0_commands() {
   local s="$1"
   echo "## ADR Tooling"
   echo ""
@@ -59,14 +41,22 @@ print_v0_guide() {
   echo "| \`$s domains\` | Show domain series |"
   echo ""
   echo "**Always use \`$s new\` to create ADRs.** It handles numbering, domain routing, and templates."
-  echo ""
+}
+
+print_v0_format() {
   echo "### Record format (adr/v0)"
   echo ""
   echo "YAML frontmatter carries \`status\`, \`date\`, \`deciders\` and \`related\`. The body has Context, Decision (with a reversibility grade), Consequences (Positive, Negative, Neutral) and Alternatives Considered. Statuses: \`Draft\` | \`Proposed\` | \`Accepted\` | \`Superseded\` | \`Deprecated\`."
   echo ""
   echo "A clarification to an accepted ADR lands in place: a fixed typo, a sharper sentence, a link. A change in what the project does gets a new ADR that supersedes the old one; flip the old status to Superseded and leave its body alone."
   echo ""
-  echo "Workflow: debate, then \`$s new\`, then a PR for review. The ADR is accepted when the PR merges; regenerate the index with \`$s index -y\`."
+  echo "Workflow: debate, then create the record, then a PR for review. The ADR is accepted when the PR merges, and the index is regenerated."
+}
+
+print_v0_guide() {
+  print_v0_commands "$1"
+  echo ""
+  print_v0_format
 }
 
 print_v1_guide() {
@@ -87,12 +77,15 @@ print_v1_guide() {
   echo ""
   echo "### Record format"
   echo ""
-  echo "- **Frontmatter:** \`contract: adr/v1\`, \`kind\` (decision or spec, or what adr.yaml declares), \`capability\` from the vocabulary, \`status\` (proposed, accepted, rejected, abandoned, superseded, archived)."
-  echo "- **A decision** also carries a \`verb\` (add, cut, change, retire, constrain), a \`basis\`, and \`agent: {name, model}\`."
-  echo "- **Basis** entries name one source each: operator, evidence, standard, upstream, or precedent. Following precedent must reach an external source."
-  echo "- **An operator basis** records \`level\` (authored, directed, guided), \`said\` and \`via\`. Write one only when the operator actually said it; quote written channels verbatim and mark a spoken one \`paraphrase: true\`."
-  echo "- **A decision the operator started** waits for a \`considered\` entry before \`accept\`."
-  echo "- **Edges:** \`supersedes\`, \`amends: ADR-N#section\`, \`extends\`, \`decided_by\`. A change against a broader decision amends it."
+  echo "Every record declares \`contract: adr/v1\`, a \`kind\` (decision or spec, or what adr.yaml declares), a \`capability\` from the vocabulary, and a \`status\` (proposed, accepted, rejected, abandoned, superseded, archived)."
+  echo ""
+  echo "A decision also carries a \`verb\` (add, cut, change, retire, constrain), a \`basis\`, and \`agent: {name, model}\`. Each basis entry names one source: operator, evidence, standard, upstream, or precedent. Following precedent must reach an external source."
+  echo ""
+  echo "An operator basis records \`level\` (authored, directed, guided), \`said\` and \`via\`. Write one only when the operator actually said it: quote written channels verbatim and mark a spoken one \`paraphrase: true\`. A decision the operator started waits for a \`considered\` entry before \`accept\`."
+  echo ""
+  echo "Records link through \`supersedes\`, \`amends: ADR-N#section\`, \`extends\` and \`decided_by\`. A change against a broader decision amends it."
+  echo ""
+  echo "A cut or retire is enacted once the removal lands: set \`enacted: \"<commit>\"\` (a quoted hash) on the accepted decision. Until then, \`cite\` warns on what still depends on it; after, it fails."
   echo ""
   echo "### Summary"
   echo ""
@@ -103,22 +96,48 @@ print_v1_guide() {
   echo "After a decision leaves proposed, only its kind's \`mutable_after_accept\` fields change, and the body grows only by appending. A change in what the project does is a new decision that amends or supersedes the old one."
 }
 
+# Outside a work tree there is nothing to vendor into; say nothing.
+git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree &>/dev/null || exit 0
+
+# State 1: Declined
+if [[ -f "$PROJECT_DIR/.claude/no-adr-tooling" ]]; then
+  echo "ADR tooling declined for this project. Remove \`.claude/no-adr-tooling\` to enable."
+  echo ""
+  print_v0_format
+  exit 0
+fi
+
+# State 2: Installed — check common locations
+ADR_SCRIPT=""
+for path in "docs/scripts/adr" "scripts/adr" "tools/adr"; do
+  if [[ -x "$PROJECT_DIR/$path" ]]; then
+    ADR_SCRIPT="$path"
+    break
+  fi
+done
+
 if [[ -n "$ADR_SCRIPT" ]]; then
   local_ver=$(tool_version "$PROJECT_DIR/$ADR_SCRIPT")
   univ_ver=""
   [[ -f "$UNIVERSAL" ]] && univ_ver=$(tool_version "$UNIVERSAL")
-  contract=$(sed -nE 's/^contract:[[:space:]]*([A-Za-z0-9/._-]+).*/\1/p' \
+  # contract: adr/v1, optionally quoted, optionally followed by a comment
+  contract=$(sed -nE "s/^contract:[[:space:]]*[\"']?([A-Za-z0-9/._-]+)[\"']?[[:space:]]*(#.*)?\$/\\1/p" \
     "$PROJECT_DIR/docs/architecture/adr.yaml" 2>/dev/null | head -1)
   v1_tool=0
-  [[ -n "$local_ver" && "${local_ver%%.*}" -ge 2 ]] 2>/dev/null && v1_tool=1
+  major=${local_ver%%[!0-9]*}
+  [[ -n "$major" ]] && (( 10#$major >= 2 )) && v1_tool=1
+  version_label=${local_ver:+v$local_ver}
+  version_label=${version_label:-unversioned}
 
   # The four tool/contract combinations (ADR-304 §10)
   if [[ "$contract" == "adr/v1" && $v1_tool -eq 1 ]]; then
     print_v1_guide "$ADR_SCRIPT"
   elif [[ "$contract" == "adr/v1" ]]; then
-    echo "## ADR Tooling"
+    echo "**\`docs/architecture/adr.yaml\` declares \`contract: adr/v1\`, but \`$ADR_SCRIPT\` is $version_label and cannot enforce it.** Re-vendor the tool (the \`adr\` skill) before writing records."
     echo ""
-    echo "**\`docs/architecture/adr.yaml\` declares \`contract: adr/v1\`, but \`$ADR_SCRIPT\` is v${local_ver:-unversioned} and cannot enforce it.** Re-vendor the tool (the \`adr\` skill) before writing records."
+    print_v0_commands "$ADR_SCRIPT"
+  elif [[ -n "$contract" ]]; then
+    echo "**\`docs/architecture/adr.yaml\` declares \`contract: $contract\`, which this guidance does not know.** Check the value; the known contract is adr/v1. Until then the v0 guidance below applies."
     echo ""
     print_v0_guide "$ADR_SCRIPT"
   else
@@ -134,7 +153,7 @@ if [[ -n "$ADR_SCRIPT" ]]; then
   if [[ -f "$UNIVERSAL" ]]; then
     if [[ -z "$local_ver" && -n "$univ_ver" ]]; then
       echo ""
-      echo "_The project's copy predates tool versioning (ways ships v${univ_ver}) — it is out of date. Re-vendor via the \`adr\` skill; if it was customized, diff first and carry the changes forward._"
+      echo "_The project's copy predates tool versioning (ways ships v${univ_ver}) — it is out of date. Re-vendor via the \`adr\` skill; if it was customized, diff first and carry the changes forward. Re-vendoring does not change the contract: v0 records keep working._"
     elif [[ -n "$local_ver" && -z "$univ_ver" ]]; then
       echo ""
       echo "_The project's copy is v${local_ver} but the installed template is unversioned — the agent-ways install is stale. Update it (\`/ways-update\`)._"
@@ -168,3 +187,5 @@ echo ""
 echo "To vendor it, use the \`adr\` skill — it carries the install steps and \`adr.yaml\` setup. Or run \`/project-init\` to scaffold it alongside the rest of the repo."
 echo ""
 echo "To decline permanently: \`mkdir -p .claude && touch .claude/no-adr-tooling\`"
+echo ""
+print_v0_format

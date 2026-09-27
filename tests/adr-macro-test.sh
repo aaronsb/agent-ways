@@ -31,7 +31,7 @@ project() {
   mkdir -p "$dir/docs/scripts" "$dir/docs/architecture"
   sed "s/^TOOL_VERSION = .*/TOOL_VERSION = \"$version\"/" "$TOOL" > "$dir/docs/scripts/adr"  # BSD and GNU alike
   chmod +x "$dir/docs/scripts/adr"
-  { [[ -n "$contract" ]] && echo "contract: $contract"; echo "domains: {}"; } > "$dir/docs/architecture/adr.yaml"
+  { [[ -n "$contract" ]] && printf 'contract: %s\n' "$contract"; echo "domains: {}"; } > "$dir/docs/architecture/adr.yaml"
   git -C "$dir" init -q
   echo "$dir"
 }
@@ -43,9 +43,13 @@ echo "Not a git repo, declined, not installed"
 out=$(mkdir -p "$WORK/plain" && run_macro "$WORK/plain")
 check "outside git: silent" lacks "ADR" "$out"
 mkdir -p "$WORK/declined/.claude" && git -C "$WORK/declined" init -q && touch "$WORK/declined/.claude/no-adr-tooling"
-check "declined: one line" contains "ADR tooling declined" "$(run_macro "$WORK/declined")"
+out=$(run_macro "$WORK/declined")
+check "declined: says so" contains "ADR tooling declined" "$out"
+check "declined: still gets the v0 format" contains "Record format (adr/v0)" "$out"
 mkdir -p "$WORK/bare" && git -C "$WORK/bare" init -q
-check "not installed: offers the adr skill" contains "ADR Tooling Available" "$(run_macro "$WORK/bare")"
+out=$(run_macro "$WORK/bare")
+check "not installed: offers the adr skill" contains "ADR Tooling Available" "$out"
+check "not installed: still gets the v0 format" contains "Record format (adr/v0)" "$out"
 
 echo "Legacy tool, no contract"
 out=$(run_macro "$(project legacy-v0 1.2.0 '')")
@@ -69,8 +73,36 @@ check "no v0 format" lacks "Record format (adr/v0)" "$out"
 echo "Legacy tool, adr/v1 contract"
 out=$(run_macro "$(project legacy-v1 1.2.0 adr/v1)")
 check "warns the tool cannot enforce it" contains "cannot enforce it" "$out"
-check "falls back to the v0 commands" contains "Record format (adr/v0)" "$out"
+check "gives the v0 commands" contains "| Command | Purpose |" "$out"
+check "no v0 record format under a v1 contract" lacks "Record format (adr/v0)" "$out"
 check "no v1 guide" lacks "ADR Tooling (adr/v1)" "$out"
+
+echo "Quoted and commented contract values"
+check "double-quoted" contains "ADR Tooling (adr/v1)" "$(run_macro "$(project q2 "$CURRENT" '"adr/v1"')")"
+check "single-quoted" contains "ADR Tooling (adr/v1)" "$(run_macro "$(project q1 "$CURRENT" "'adr/v1'")")"
+check "trailing comment" contains "ADR Tooling (adr/v1)" "$(run_macro "$(project qc "$CURRENT" 'adr/v1  # adopted 2025-06')")"
+
+echo "Unknown contract"
+out=$(run_macro "$(project unknown "$CURRENT" adr/v2)")
+check "names the unknown value" contains "contract: adr/v2" "$out"
+check "falls back to v0" contains "Record format (adr/v0)" "$out"
+
+echo "Odd version stamps"
+check "prerelease 2.0.0-rc1 is v1-capable" contains "ADR Tooling (adr/v1)" "$(run_macro "$(project rc 2.0.0-rc1 adr/v1)")"
+check "leading zero 08.1.0 is v1-capable" contains "ADR Tooling (adr/v1)" "$(run_macro "$(project oct 08.1.0 adr/v1)")"
+dir=$(project unversioned 1.0.0 '')
+sed -i.bak '/^TOOL_VERSION = /d' "$dir/docs/scripts/adr" && rm "$dir/docs/scripts/adr.bak"
+out=$(run_macro "$dir")
+check "unversioned copy: predates versioning" contains "predates tool versioning" "$out"
+check "unversioned copy: re-vendor is safe" contains "Re-vendoring does not change the contract" "$out"
+dir=$(project unversioned-v1 1.0.0 adr/v1)
+sed -i.bak '/^TOOL_VERSION = /d' "$dir/docs/scripts/adr" && rm "$dir/docs/scripts/adr.bak"
+check "unversioned under v1: labelled unversioned" contains "is unversioned and cannot enforce it" "$(run_macro "$dir")"
+
+echo "v1 guide content"
+out=$(run_macro "$(project content "$CURRENT" adr/v1)")
+check "enactment" contains "enacted:" "$out"
+check "no bold-label bullets" lacks "- **" "$out"
 
 echo ""
 echo "=== ADR Macro Tests: $PASS passed, $FAIL failed ==="
