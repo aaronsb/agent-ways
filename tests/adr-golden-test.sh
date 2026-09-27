@@ -263,6 +263,26 @@ keep v1-new-custom-kind-file.md docs/architecture/system/ADR-115-retention-polic
 fresh v1-empty
 capture v1-empty-new new system "Anything"
 
+# Observables (ADR-307): loose shapes pass, malformed ones fail; adding one to
+# an accepted decision is allowed where the kind lists it as mutable.
+fresh v1
+edit docs/architecture/system/ADR-101-ingest.md "s.replace('date: 2025-05-02\n', 'date: 2025-05-02\nobservable:\n  - ingest of a 10 MB file finishes under a second\n  - see: the queue drains\n    run: make drain-check\n  - url: https://example.com/dashboard\n', 1)"
+capture v1-observable-added-not-listed lint docs/architecture/system/ADR-101-ingest.md
+edit docs/architecture/adr.yaml "s.replace('mutable_after_accept: [status, enacted, superseded_by, considered, concern]', 'mutable_after_accept: [status, enacted, superseded_by, considered, concern, observable]', 1)"
+capture v1-observable-added-listed lint docs/architecture/system/ADR-101-ingest.md
+edit docs/architecture/system/ADR-101-ingest.md "s.replace('  - url: https://example.com/dashboard\n', '  - \"\"\n  - {}\n  - 42\n', 1)"
+capture v1-observable-malformed lint docs/architecture/system/ADR-101-ingest.md
+edit docs/architecture/system/ADR-101-ingest.md "__import__('re').sub(r'observable:\n(?:  .*\n)+', 'observable: soon\n', s, count=1)"
+capture v1-observable-not-list lint docs/architecture/system/ADR-101-ingest.md
+edit docs/architecture/system/ADR-101-ingest.md "s.replace('observable: soon\n', 'observable: []\n', 1)"
+capture v1-observable-empty lint docs/architecture/system/ADR-101-ingest.md
+# A kind with no mutable_after_accept list falls back to the default, which
+# includes observable.
+fresh v1
+edit docs/architecture/adr.yaml "s.replace('    mutable_after_accept: [status, enacted, superseded_by, considered, concern]\n', '', 1)"
+edit docs/architecture/system/ADR-101-ingest.md "s.replace('date: 2025-05-02\n', 'date: 2025-05-02\nobservable:\n  - ingest of a 10 MB file finishes under a second\n', 1)"
+capture v1-observable-default-mutable lint docs/architecture/system/ADR-101-ingest.md
+
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
 baseline_fresh() {
@@ -466,6 +486,12 @@ edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + '
 capture import-apply-complete import apply docs/architecture/.import/ADR-110.yaml
 keep import-apply-complete-file.md docs/architecture/system/ADR-110-old-v0-record.md
 capture import-apply-complete-lint lint docs/architecture/system/ADR-110-old-v0-record.md
+# An observable on the sheet is written in its place in the key order.
+import_fresh
+capture import-scan-observable import scan docs/architecture/system/ADR-110-old-v0-record.md
+edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + 'todo: []\n' + t[t.index('candidates:'):])(s.replace('verb: ~', 'verb: add').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n    - evidence: migrated from v0').replace('name: ~', 'name: Claude').replace('  status: accepted', '  observable:\n    - the record lints clean\n  status: accepted', 1))"
+capture import-apply-observable import apply docs/architecture/.import/ADR-110.yaml
+keep import-apply-observable-file.md docs/architecture/system/ADR-110-old-v0-record.md
 
 # A source edited after the scan is refused, and the sheet is kept.
 import_fresh

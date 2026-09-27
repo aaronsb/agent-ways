@@ -19,6 +19,7 @@ The agent writes and proposes a decision; the operator considers it (ADR-304 §1
 - Open with a Summary the operator can judge alone: what is decided, what it trades away and forecloses, whether it is one-way (said first when it is), the probes, and an inversion.
 - Probes are specific points put to the operator. Mix points you are confident on with points you are not, and label each. The mix is deliberate: probes prime the operator's judgement, and priming can bias it.
 - The inversion names the two ends the decision sits between and asks whether the answer lies outside your framing.
+- When the decision carries `observable` entries, demonstrate them before asking, where you can: run the command, show the output or a screenshot, open the page. Say in `via` what the operator was shown (ADR-307).
 - Ask the probes in the conversation, one question each, with enough context to answer without opening the record, and label which ones you are confident on. A probe that exists only in the record was never asked, so the answer to "looks good" covers none of them. With more than one probe or decision pending, ask them through the choice tool as one batch, one question each (choices(meta)).
 - A probe may be a canary: a point that is deliberately wrong, harmless if accepted, and a little whimsical. Reveal it right after the operator answers. It never stays in the record and is never about safety.
 

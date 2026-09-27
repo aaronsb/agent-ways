@@ -1,0 +1,25 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-101-ingest.md
+  ❌ observable entry 3: expected a line of words or a non-empty mapping
+  ❌ observable entry 4: expected a line of words or a non-empty mapping
+  ❌ observable entry 5: expected a line of words or a non-empty mapping
+
+════════════════════════════════════════════════════════════
+Summary: 3 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

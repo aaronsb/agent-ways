@@ -83,6 +83,8 @@ print_v1_guide() {
   echo ""
   echo "An operator basis records \`level\` (authored, directed, guided), \`said\` and \`via\`. Write one only when the operator actually said it: quote written channels verbatim and mark a spoken one \`paraphrase: true\`. A decision the operator started waits for a \`considered\` entry before \`accept\`. When you ask the operator for either, use plain words, not the field names (adr/consider)."
   echo ""
+  echo "A decision may carry \`observable\`: a list of what should be seen, run or tried when it holds, as plain lines or mappings with whatever keys suit (ADR-307). It is optional, and may be added after acceptance where the kind's \`mutable_after_accept\` lists it (the default list does). When drafting an add or change, ask the operator what should be observable; they may name it, decline, or leave the observing to you, in which case run the work and iterate until you can show it, then record what you used."
+  echo ""
   echo "Records link through \`supersedes\`, \`amends: ADR-N#section\`, \`extends\` and \`decided_by\`. A change against a broader decision amends it."
   echo ""
   echo "A cut or retire is enacted once the removal lands: set \`enacted: \"<commit>\"\` (a quoted hash) on the accepted decision. Until then, \`cite\` warns on what still depends on it; after, it fails."
