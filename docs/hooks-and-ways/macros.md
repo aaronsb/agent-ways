@@ -25,15 +25,15 @@ Static way content handles the universal guidance ("here's how to write good com
 
 ## Examples
 
-### ADR Tooling Detection (softwaredev/adr)
+### ADR Tooling Detection (documentation/adr)
 
 Implements tri-state detection:
 
-1. **Declined**: `.claude/no-adr-tooling` exists - outputs a one-liner noting the project opted out, stops suggesting installation
-2. **Installed**: `docs/scripts/adr` exists - outputs a command reference table for the installed ADR tool
-3. **Available**: Neither file exists - suggests installing ADR tooling with setup instructions
+1. **Declined**: `.claude/no-adr-tooling` exists. The macro outputs a one-liner noting the project opted out, then the v0 record format, and stops suggesting installation.
+2. **Installed**: `docs/scripts/adr` exists. The macro reads the vendored tool's `TOOL_VERSION` and the `contract:` in `docs/architecture/adr.yaml`, and outputs the guidance for that combination (ADR-304 §10): the v0 commands and record format, the same plus a note that adopting adr/v1 is a decision, the adr/v1 guide, or a warning that the tool cannot enforce the declared contract.
+3. **Available**: Neither file exists. The macro suggests installing ADR tooling, with setup instructions, and outputs the v0 record format.
 
-This prevents the way from repeatedly suggesting tooling the user has already decided against.
+The way body stays contract-neutral; everything that depends on the contract comes from the macro. `tests/adr-macro-test.sh` covers each state.
 
 ### Team Detection (softwaredev/github)
 
