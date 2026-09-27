@@ -338,7 +338,7 @@ outside the corpus.
 
 | Source | Grounds the decision in | Reference |
 |---|---|---|
-| `operator` | the human who directed or approved it | who, and where: PR, issue or session |
+| `operator` | the human who directed or approved it | who, what was said, and via which channel: session, issue, chat or call |
 | `evidence` | a measurement, benchmark or research note (#491) | the note or data |
 | `standard` | an external specification, governance control or upstream behaviour | the citation (`governance-cite`) |
 | `upstream` | another repository's accepted record under a shared contract | repo and record |
