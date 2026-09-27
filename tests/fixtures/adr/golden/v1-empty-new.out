@@ -1,0 +1,2 @@
+Error: adr.yaml declares contract adr/v1 but no kinds; `adr lint` reports the config
+[exit 1]

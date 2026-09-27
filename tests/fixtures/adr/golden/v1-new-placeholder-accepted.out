@@ -1,0 +1,25 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-115-stream-exports.md
+  ❌ a decision record requires 'basis'
+  ❌ 12 placeholder line(s) from `adr new` still to fill, first: - **Decided:** [what is decided, in plain terms]
+  ❌ a change decision supersedes or amends a prior decision on 'ingest'
+
+════════════════════════════════════════════════════════════
+Summary: 3 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

@@ -45,8 +45,20 @@ def cmd_new(args):
         print(f"Error: File already exists: {filepath}", file=sys.stderr)
         return 1
 
-    # Generate content
     today = date.today().isoformat()
+    if get_config().get('contract') == V1:
+        content = _v1_content(args, next_num, domain, today, defaults)
+        if content is None:
+            return 1
+        folder.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(content)
+        print(f"Created: {relative_path(filepath)}")
+        print(f"  Domain: {config['name']} ({domain})")
+        print(f"  Number: ADR-{next_num:03d}")
+        print("  Contract: adr/v1 (fill the empty fields; `adr lint` lists them)")
+        return 0
+
+    # Generate content
     default_status = defaults.get('status', 'Draft')
     default_deciders = defaults.get('deciders', [])
 
@@ -68,33 +80,7 @@ related: []
 
 # ADR-{next_num:03d}: {args.title}
 
-## Context
-
-[What is the issue that we're seeing that is motivating this decision or change?]
-
-## Decision
-
-[What is the change that we're proposing and/or doing?]
-
-## Consequences
-
-### Positive
-
-- [What becomes easier?]
-
-### Negative
-
-- [What becomes harder?]
-
-### Neutral
-
-- [What other changes does this enable or require?]
-
-## Alternatives Considered
-
-- [What other options were evaluated?]
-- [Why were they rejected?]
-'''
+'''  + BODY_SKELETON
 
     # Write file
     folder.mkdir(parents=True, exist_ok=True)
@@ -105,3 +91,48 @@ related: []
     print(f"  Number: ADR-{next_num:03d}")
     return 0
 
+
+def _v1_content(args, number: int, domain: str, today: str, defaults: dict) -> Optional[str]:
+    """A v1 record from an empty sheet (ADR-306 §3). The kind's schema decides
+    which fields the record carries; fields the arguments do not give stay
+    empty, and lint names each one. Arguments the kind cannot take are refused."""
+    config = get_config()
+    kinds = {k: v for k, v in _mapping(config.get('kinds')).items() if isinstance(v, dict)}
+    if not kinds:
+        print("Error: adr.yaml declares contract adr/v1 but no kinds; `adr lint` reports the config", file=sys.stderr)
+        return None
+    wanted = (args.kind or 'decision').lower()
+    kind = next((k for k in kinds if str(k).lower() == wanted), None)
+    if kind is None:
+        print(f"Error: Unknown kind '{args.kind or 'decision'}'. Kinds: {', '.join(map(str, kinds))}", file=sys.stderr)
+        return None
+    schema = kinds[kind]
+    problems = []
+    takes_verb = schema.get('verb') == 'required'
+    if args.verb and not takes_verb:
+        problems.append(f"a {kind} record takes no verb")
+    verbs = _str_list(config.get('verbs')) or list(V1_VERBS)
+    if args.verb and takes_verb and args.verb not in verbs:
+        problems.append(f"verb '{args.verb}' is not one of: {', '.join(verbs)}")
+    vocabulary = _mapping(config.get('capabilities'))
+    if args.capability and args.capability not in vocabulary:
+        problems.append(f"capability '{args.capability}' is not in the adr.yaml vocabulary")
+    if (args.agent or args.model) and 'agent' not in v1_requires(schema):
+        problems.append(f"a {kind} record carries no agent")
+    for problem in problems:
+        print(f"Error: {problem}", file=sys.stderr)
+    if problems:
+        return None
+    deciders = list(defaults.get('deciders') or [])
+    if not deciders:
+        git_user = _detect_git_user()
+        if git_user:
+            deciders = [git_user]
+    given = {'verb': args.verb, 'capability': args.capability, 'agent': args.agent, 'model': args.model}
+    record = empty_record(kind, schema, given, defaults)
+    record.update({'date': today, 'deciders': deciders, 'related': []})
+    sections = _str_list(schema.get('sections')) or []
+    summary = V1_SUMMARY_SKELETON if 'Summary' in sections else None
+    sheet = new_sheet(number, domain, args.title, record, summary=summary,
+                      body=BODY_SKELETON if takes_verb else '')
+    return render_record(sheet)

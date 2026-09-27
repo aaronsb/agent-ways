@@ -206,3 +206,16 @@ def rule_v1_frozen(adr, ctx):
             v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
     if not adr.body.rstrip().startswith(body_then.rstrip()):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
+
+@file_rule(contract=V1)
+def rule_v1_no_placeholders(adr, ctx):
+    """A record still holding a prompt from `adr new`'s skeleton is unfinished:
+    a warning while proposed, an error once it has left proposed. The prompts
+    live in sheet.py, which assembles after this module."""
+    if not is_v1_record(adr, ctx):
+        return
+    left = placeholder_lines(adr.body)
+    if not left:
+        return
+    level = 'warning' if str(adr.status or '').lower() == 'proposed' else 'error'
+    v1_issue(adr, f"{len(left)} placeholder line(s) from `adr new` still to fill, first: {left[0]}", level)

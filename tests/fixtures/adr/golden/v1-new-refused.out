@@ -1,0 +1,4 @@
+Error: a spec record takes no verb
+Error: capability 'nosuch' is not in the adr.yaml vocabulary
+Error: a spec record carries no agent
+[exit 1]
