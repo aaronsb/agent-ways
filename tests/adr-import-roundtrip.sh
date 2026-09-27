@@ -42,7 +42,8 @@ export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 
 mkdir -p "$WORK/repo/docs"
 # The corpus is a frozen snapshot of agent-ways' records from before they
-# were converted, so the test keeps its 96 v0 records whatever the live tree holds.
+# were converted, so the test keeps its 96 real v0 records (97 with the synthetic one) whatever
+# the live tree holds.
 cp -r "$REPO_ROOT/tests/fixtures/adr/v0-corpus/docs/architecture" "$WORK/repo/docs/architecture"
 rm -rf "$WORK/repo/docs/architecture/.import"
 

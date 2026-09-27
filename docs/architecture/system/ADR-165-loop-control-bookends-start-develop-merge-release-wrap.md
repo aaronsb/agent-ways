@@ -1,7 +1,7 @@
 ---
 contract: adr/v1
 kind: decision
-verb: change
+verb: add
 capability: loop
 basis:
   - evidence: outside a /goal loop the review-fix-merge tail was hand-typed many times a day with no named invocation, and wrap had no opening counterpart

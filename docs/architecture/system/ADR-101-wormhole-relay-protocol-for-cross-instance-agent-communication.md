@@ -7,7 +7,6 @@ superseded_by:
   - ADR-113
 basis:
   - standard: 'magic-wormhole: NAT-transparent, credential-free file transfer with single-use codes'
-  - evidence: 'experimental results 2026-02-26: 6 of 10 turns completed, 3 failed with ServerError: crowded from role collisions; led to the deprecation'
 agent:
   name: Claude
   model: unrecorded

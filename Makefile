@@ -373,6 +373,7 @@ test-adr:
 	@bash tests/adr-golden-test.sh
 	@bash tests/adr-import-roundtrip.sh
 	@bash tests/adr-macro-test.sh
+	@bash tests/adr-conversion-check.sh
 	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
 	@echo "adr tool tests passed."
 

@@ -1,7 +1,7 @@
 ---
 contract: adr/v1
 kind: decision
-verb: change
+verb: add
 capability: cli
 basis:
   - evidence: ways config show prints a Rust debug rendering, and three of the binary's forty verbs take --json

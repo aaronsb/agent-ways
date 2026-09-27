@@ -293,6 +293,8 @@ capture v1-change-list lint docs/architecture/system/ADR-116-shared-queue.md
 fresh v1
 edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary\n', '## Summary Nudge\n', 1)"
 capture v1-summary-prefix-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
+edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary Nudge\n', '## Summary: the short version\n', 1)"
+capture v1-summary-colon-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
 
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
@@ -311,6 +313,11 @@ capture v1-lint-baseline lint
 baseline_fresh
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, export]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-09\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and export\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
 capture v1-change-list-baseline lint docs/architecture/system/ADR-116-shared-queue.md
+baseline_fresh
+# A single-capability change whose only edge names a prior on another
+# capability does not fall back to the baseline.
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-09\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: exports reuse the ingest batcher\n---\n\n# ADR-116: Export batching\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-export-batching.md)
+capture v1-change-single-mismatched-edge lint docs/architecture/system/ADR-116-export-batching.md
 baseline_fresh
 # Malformed baseline config: a bare list, then an unknown name and a bad date.
 edit docs/architecture/adr.yaml "s.replace('baseline:\\n  adopted: 2025-05-10\\n  capabilities: [export]', 'baseline: [export]')"
@@ -559,6 +566,9 @@ capture import-scan-foreign import scan "$WORK/outside/ADR-042-foreign-record.md
 edit docs/architecture/.import/ADR-042.yaml "s.replace('  domain: legacy', '  domain: system')"
 capture import-apply-out-of-range import apply --partial docs/architecture/.import/ADR-042.yaml
 edit docs/architecture/.import/ADR-042.yaml "s.replace(\"  number: '42'\", \"  number: '150'\")"
+# A dry run that would write a new file removes it again.
+capture import-apply-foreign-dryrun import apply --partial --dry-run docs/architecture/.import/ADR-042.yaml
+worktree import-apply-foreign-dryrun-status.txt
 capture import-apply-foreign import apply --partial docs/architecture/.import/ADR-042.yaml
 worktree import-apply-foreign-status.txt
 keep import-apply-foreign-file.md docs/architecture/system/ADR-150-foreign-record.md

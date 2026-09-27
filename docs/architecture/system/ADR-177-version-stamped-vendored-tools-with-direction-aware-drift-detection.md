@@ -3,9 +3,9 @@ contract: adr/v1
 kind: decision
 verb: change
 capability:
-  - install
   - adr
   - docs
+  - disclosure
 basis:
   - evidence: 'the adr way''s macro diff -q is direction-blind: a stale copy and a customized copy produce the same byte difference, and its note reassures in the stale case'
   - evidence: 'issue #438: vendored copies fall behind upstream tool features such as adr archive'

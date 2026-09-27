@@ -6,7 +6,6 @@ capability:
   - install
   - authoring
   - matching
-  - cli
 basis:
   - evidence: tooling spread across C, C++, Bash and Python (tool inventory table); every tool re-walks the tree and re-parses frontmatter, and the bash carries macOS bash 3.2 constraints
   - standard: 'the gh, aws and gcloud CLIs: one binary with subcommands and shared infrastructure'

@@ -3,7 +3,7 @@ contract: adr/v1
 kind: decision
 verb: constrain
 capability:
-  - authoring
+  - method
   - loop
 basis:
   - evidence: the heron_brook section in Claude Code 2.1.219+ ("Do not call the AgentTool unless the user requested it"), confirmed live in two sessions; meta/subagents ranked fifth at 0.3 on a query naming delegation

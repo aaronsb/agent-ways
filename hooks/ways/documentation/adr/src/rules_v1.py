@@ -359,14 +359,22 @@ def rule_v1_change_replaces(adr, ctx):
             if target is None:
                 return  # a dangling edge is already reported by the edge rules
             edges.append((field_name, target))
-    for capability in [c for c in capability_scope(adr) if c != '*']:
+    scope = [c for c in capability_scope(adr) if c != '*']
+    listed = len(scope) > 1
+    for capability in scope:
         v0_priors = [t for _, t in edges if not is_v1_record(t, ctx)]
         fits = [(f, t) for f, t in edges if is_v1_record(t, ctx) and covers(t, capability)]
         if any(f == 'amends' or not broader_than(t, capability) for f, t in fits):
             continue
         if fits:
             v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
-        elif _stands_on_baseline(capability, adr, ctx):
+        elif v0_priors and not listed:
+            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
+            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
+        elif (listed or not edges) and _stands_on_baseline(capability, adr, ctx):
+            # A single-capability change whose edges name no prior on it
+            # does not fall back to the baseline; a listed change's edges
+            # may cover its other capabilities (ADR-308 §2).
             continue
         elif v0_priors:
             numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)

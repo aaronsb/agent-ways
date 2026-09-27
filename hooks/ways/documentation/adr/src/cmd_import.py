@@ -190,6 +190,11 @@ def _apply_one(sheet: dict, force: bool, undo: Optional[dict] = None) -> tuple:
                          f"or --force to overwrite")
     if undo is not None and dest not in undo:
         undo[dest] = dest.read_bytes() if dest.is_file() else None
+        made = undo.setdefault('__dirs__', [])
+        folder = dest.parent
+        while not folder.exists():
+            made.append(folder)
+            folder = folder.parent
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text)
     return dest, True
@@ -230,39 +235,38 @@ def _import_apply(args):
     lines, written = [], []
     undo = {} if args.dry_run else None
     applied = skipped = refused = 0
-    for path in paths:
-        shown = relative_path(path.resolve())
-        try:
-            sheet = load_sheet(path)
-            todo = sheet.get('todo') or []
-            held = blocking_todo(todo) if args.partial else todo
-            if held:
-                why = "todo item(s) --partial does not write past" if args.partial else 'open todo item(s)'
-                lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
-                skipped += 1
-                continue
-            dest, changed = _apply_one(sheet, args.force, undo)
-        except (SheetError, OSError, ValueError, TypeError, AttributeError, KeyError) as e:
-            lines.append((f"Refused: {shown}: {e}", None))
-            refused += 1
-            continue
-        if not args.dry_run:
-            try:
-                path.unlink()
-            except OSError as e:
-                lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
-        applied += 1
-        written.append(dest.resolve())
-        partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
-        lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
+    counts, issues = {}, {}
     try:
+        for path in paths:
+            shown = relative_path(path.resolve())
+            try:
+                sheet = load_sheet(path)
+                todo = sheet.get('todo') or []
+                held = blocking_todo(todo) if args.partial else todo
+                if held:
+                    why = "todo item(s) --partial does not write past" if args.partial else 'open todo item(s)'
+                    lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
+                    skipped += 1
+                    continue
+                dest, changed = _apply_one(sheet, args.force, undo)
+            except (SheetError, OSError, ValueError, TypeError, AttributeError, KeyError) as e:
+                lines.append((f"Refused: {shown}: {e}", None))
+                refused += 1
+                continue
+            if not args.dry_run:
+                try:
+                    path.unlink()
+                except OSError as e:
+                    lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
+            applied += 1
+            written.append(dest.resolve())
+            partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
+            lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
         counts, issues = _lint_counts(written)
     finally:
-        for dest, before in (undo or {}).items():
-            if before is None:
-                dest.unlink(missing_ok=True)
-            else:
-                dest.write_bytes(before)
+        if undo is not None:
+            for failed in _restore(undo):
+                lines.append((f"Note: dry run could not restore {failed}", None))
     for text, dest in lines:
         if dest is not None:
             errors, warnings = counts.get(dest, (0, 0))
@@ -275,7 +279,30 @@ def _import_apply(args):
     verb = 'would apply' if args.dry_run else 'applied'
     print(f"Import: {applied} {verb}, {skipped} skipped, {refused} refused"
           + (' (dry run: nothing written)' if args.dry_run else ''))
-    return 1 if refused else 0
+    lint_errors = sum(e for e, _ in counts.values())
+    return 1 if refused or (args.dry_run and lint_errors) else 0
+
+def _restore(undo: dict) -> list:
+    """Put back every file a dry run wrote, and remove the directories it
+    made that are left empty. Each file is restored on its own, so one
+    failure doesn't stop the rest; the paths that failed are returned."""
+    failed = []
+    for dest, before in undo.items():
+        if dest == '__dirs__':
+            continue
+        try:
+            if before is None:
+                dest.unlink(missing_ok=True)
+            else:
+                dest.write_bytes(before)
+        except OSError:
+            failed.append(relative_path(dest))
+    for folder in sorted(undo.get('__dirs__', []), key=lambda d: len(d.parts), reverse=True):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
+    return failed
 
 def _lint_counts(paths: list) -> dict:
     """(errors, warnings) per written record, and the issues themselves,

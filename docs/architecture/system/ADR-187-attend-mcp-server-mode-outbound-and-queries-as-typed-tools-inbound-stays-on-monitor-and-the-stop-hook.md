@@ -32,6 +32,8 @@ imported:
   from: docs/architecture/system/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md
   format: v0
   status: Proposed
+  unmapped:
+    amends: ADR-169#1
 ---
 
 # ADR-187: Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook

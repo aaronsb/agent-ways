@@ -5,7 +5,6 @@ verb: change
 capability:
   - disclosure
   - method
-  - authoring
 basis:
   - evidence: an 11,500-word draft ran 3.4 significance clauses per thousand words against 0.5 in reviewed prose, with eleven banned antitheses and 118 em-dashes, after core.md and the writing way had both fired
   - evidence: scan/state.rs re-shows core only when the transcript since summary is under 5000 bytes, so core never re-discloses on distance

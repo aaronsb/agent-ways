@@ -43,7 +43,7 @@ def _find_section(adr, name: str) -> Optional[str]:
     """The heading that is this section: the name alone, or the name followed
     by punctuation ("Summary: …", "Summary (draft)"). "Summary Nudge" is a
     different section."""
-    pattern = re.compile(rf'{re.escape(name)}(\s*[:(\u2014\u2013-].*)?', re.IGNORECASE)
+    pattern = re.compile(rf'{re.escape(name)}(\s*[:(].*|\s+[\u2014\u2013-].*)?', re.IGNORECASE)
     for heading in adr.sections:
         if pattern.fullmatch(heading.strip()):
             return heading

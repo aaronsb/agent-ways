@@ -2,7 +2,7 @@
 contract: adr/v1
 kind: decision
 verb: retire
-capability: authoring
+capability: disclosure
 targets:
   - cli:ways-tune-curves
 basis:
