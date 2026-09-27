@@ -47,8 +47,10 @@ elsewhere: PEPs, Rust RFCs, KEPs, and IETF RFCs with `Obsoletes` headers.
 Conventional Commits with commitlint, and Kubernetes `apiVersion`/`kind`,
 show a small versioned grammar that a linter enforces.
 
-ADR here reads as Agent Decision Record. The code citation format `ADR-N`
-stays as it is.
+Under v1, ADR expands to Agent Decision Record. An architecture decision is
+one kind of agent decision, alongside product choices to add, cut or retire.
+The code citation format `ADR-N` stays as it is. The expansion changes in the
+tool's help text, the ADR way's description, and the generated index title.
 
 ## Decision
 
@@ -284,11 +286,22 @@ never told to write `verb:` fields its tool rejects.
 
 ### Rollout
 
-kg prototypes first. It triages its 108 records by kind and extends its
-`doclint` to read each cited record's kind, verb and enactment. Once the
-prototype holds, the grammar moves into `adr-tool` (version bump per ADR-177)
-and the shared `doclint`. This repo then migrates its own records under the
-v0 rules.
+This repo adopts first. It owns `adr-tool` and `doclint`, and its own corpus
+is the migration test.
+
+1. **Tool.** Implement the grammar in `adr-tool` (major bump per ADR-177) and
+   the shared `doclint`, and add the macro branches from §10. The gate is a
+   v0 regression test: on this repo's corpus with no `contract:`, the new tool
+   must produce the same output as the legacy tool. Golden and negative
+   fixtures cover each grammar rule.
+2. **Adoption.** Declare `contract: adr/v1` in this repo's `adr.yaml` and
+   accept this ADR. Accepting it is the `add` decision for `capability: adr`.
+3. **Housekeeping.** Migrate this repo's records to v1, with splits,
+   supersession chains, Deprecated mappings and at least one enacted cut or
+   retire. Friction found here is fixed as `change` decisions on
+   `capability: adr`, under the contract just adopted.
+4. **Other repos.** kg and other adopters re-vendor the proven tool and
+   declare v1 when ready. kg's triage and citation data inform steps 1-3.
 
 ## Consequences
 
