@@ -46,7 +46,12 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "i read the adr and it aligns with my understanding. let's accept and merge it"
+    via: session 2026-09-27, PR #587
+    covers: []
+status: accepted
 date: 2026-09-27
 deciders:
   - aaronsb
