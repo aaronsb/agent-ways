@@ -4,7 +4,9 @@ kind: decision
 verb: add
 capability: adr
 basis:
-  - operator: aaronsb, directed over attend and in PR #559
+  - operator: aaronsb
+    said: "agent ways should lead the champagne here and once it works, that where agent ways can interrupt and do the adr housekeeping"
+    where: session 2026-09-26, PR #559
   - evidence: kg triage of 108 records; agent-ways citation audit
 status: Proposed
 date: 2026-09-26
@@ -207,7 +209,9 @@ verb: retire
 capability: ingest
 targets: [cli:ingest-legacy, route:/v1/upload]
 basis:
-  - operator: aaronsb, PR #612
+  - operator: aaronsb
+    said: "drop the legacy upload path"
+    where: PR #612
 status: accepted
 enacted: 3f9c2a1
 ---
@@ -272,11 +276,11 @@ the migration stays visible. v0 statuses map as follows:
 
 A migrated decision needs a `basis` (§11). v0 `deciders` cannot seed an
 `operator` basis, because `adr new` fills it from the `adr.yaml` default,
-which names the operator on every record. An `operator` basis comes from a
-record of approval: an operator review or comment on the merging PR, or
-operator direction quoted in the record. A linked #491 note seeds `evidence`.
-A decision with neither migrates with no basis, and lint warns until a basis
-is found or the operator supplies one.
+which names the operator on every record. Forge metadata cannot seed it
+either (§11). An `operator` basis migrates only where the record already
+quotes operator direction. A linked #491 note seeds `evidence`. A decision
+with neither migrates with no basis, and lint warns until a basis is found
+or the operator supplies one.
 
 ### 8. What leaves the record corpus
 
@@ -359,6 +363,28 @@ Some decisions need the human:
 The v1 ADR way discloses these rules and tells the agent when to stop and
 ask. `adr accept` refuses a decision whose basis does not meet them.
 
+**An operator basis is policy, not proof.** The agent runs git and the forge
+CLI under the operator's identity. Commit authorship, PR reviews and comments
+therefore cannot tell the operator's approval from the agent's. kg's last 200
+merged PRs show 197 authored and merged under the operator's account. Text
+in the record fails the same way, because the agent writes the file. So an
+`operator` basis carries the operator's words, quoted, and where they were
+said:
+
+```yaml
+basis:
+  - operator: aaronsb
+    said: "an operator quote goes here, verbatim"
+    where: session 2026-09-26, PR #559
+```
+
+The ADR way forbids writing an `operator` basis without a quote the operator
+actually gave. `adr accept` checks that the quote and location are present,
+and it cannot check that they are genuine. A signed-acceptance scheme could
+make the basis verifiable later: a commit signed by an operator key listed
+in `adr.yaml`, with the key behind a touch or passphrase prompt. Adopting one
+would be a `change` decision on `capability: adr`.
+
 The model follows Beer's Viable System Model. Records under a shared contract
 form one system, and the operator is the external identity and policy
 function that system cannot supply for itself. Repositories that share a
@@ -434,6 +460,12 @@ is the migration test.
 - **Hard-code the two kinds in the tool.** Rejected: each new kind would
   need a tool release, and repos could not add kinds of their own. Declaring
   kinds in the contract costs one schema reader.
+- **Signed acceptance for operator basis now.** Deferred: it needs a signing
+  key held behind a touch or passphrase prompt, and commit signing is off in
+  this repo today. v1 ships the policy form. A signed form can follow as a
+  `change` decision.
+- **Seed operator basis from forge metadata.** Rejected: the agent acts under
+  the operator's forge identity, so reviews and merges prove nothing.
 - **Basis as free prose in the Context section.** Rejected: prose cannot be
   checked, and nothing would stop a corpus that justifies itself.
 - **Capability as a third record kind.** Rejected: kg has no record that is
