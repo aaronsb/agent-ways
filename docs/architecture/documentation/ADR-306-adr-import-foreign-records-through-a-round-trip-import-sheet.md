@@ -152,13 +152,13 @@ No reader ever writes an `operator` basis from `deciders`, an assignee or any ot
 ### 3. Commands
 
 - `adr import scan <paths> [--reader NAME | --map FILE]` writes sheets to `docs/architecture/.import/`. That directory is gitignored: sheets are working files, and only the records they produce are committed.
-- `adr import apply [sheets] [--partial]` writes each sheet whose `todo` is empty as a v1 record, then lints it. A sheet with open items is skipped. `--partial` writes it anyway, and lint reports what is missing.
+- `adr import apply [sheets] [--partial]` writes each sheet whose `todo` is empty as a v1 record, then lints it. A sheet with open items is skipped. `--partial` writes it anyway, and lint reports what is missing, except for items lint cannot detect afterwards: a Deprecated record's missing historical note, a status that maps to nothing, and a changed number or domain. Those block even `--partial`.
 - `adr new` builds an empty sheet from its arguments and applies it, so a new record and an imported record share one writer. In a v1 project it writes v1.
 - `adr supersede <old> --by <new>` writes both sides of the link. `adr enact <n> <commit>` sets `enacted` on an accepted cut or retire.
 
 ### 4. Imported records
 
-An imported record carries `imported: {from, format}` in its frontmatter. For an imported record, a missing Summary is a lint warning. The Summary may be written later, once the whole corpus has been imported and read together, and git history records when it was added.
+An imported record carries `imported: {from, format, status, unmapped}` in its frontmatter. `status` is the source's raw status, and `unmapped` holds every source field with no v1 home. No source value depends on a todo item being honoured to survive the import. Text found between a source's frontmatter and its title moves into the body, right under the title. For an imported record, a missing Summary is a lint warning. The Summary may be written later, once the whole corpus has been imported and read together, and git history records when it was added.
 
 ### 5. Numbering
 
