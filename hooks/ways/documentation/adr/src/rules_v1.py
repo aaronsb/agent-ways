@@ -265,6 +265,8 @@ def rule_v1_capability(adr, ctx):
     for name in scope:
         if name != '*' and name not in vocabulary:
             v1_issue(adr, f"capability '{name}' is not in the adr.yaml vocabulary")
+    if verb == 'change' and len(scope) > 3:
+        v1_issue(adr, f"a change lists {len(scope)} capabilities; list only those it alters, the rest belong in related (ADR-308 §3)", 'warning')
 
 @file_rule(contract=V1)
 def rule_v1_retire_targets(adr, ctx):

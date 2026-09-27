@@ -14,7 +14,12 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "Accept, and warn on long lists"
+    via: "session 2026-09-27, selected from agent-written options on PR #599; the operator chose the option that adds a lint warning past three capabilities"
+    covers: [list-inflation]
+status: accepted
 date: 2026-09-27
 deciders:
   - aaronsb
@@ -53,7 +58,7 @@ The ADR-304 §3 requirement that a change supersede or amend a prior decision ap
 
 ### 3. What a list claims
 
-A list claims that the decision alters each named capability. A capability the decision only mentions, or depends on without changing, belongs in `related`, not in the list.
+A list claims that the decision alters each named capability. A capability the decision only mentions, or depends on without changing, belongs in `related`, not in the list. Lint warns when a change lists more than three capabilities, as a prompt to check that each one is altered.
 
 ## Consequences
 
@@ -65,7 +70,7 @@ A list claims that the decision alters each named capability. A capability the d
 ### Negative
 
 - A change's frontmatter no longer shows a single place where its weight sits.
-- Lint checks that each listed capability has a prior. It can't check that the decision really alters each one.
+- Lint checks that each listed capability has a prior. It can't check that the decision really alters each one; the warning past three only prompts the check.
 
 ### Neutral
 

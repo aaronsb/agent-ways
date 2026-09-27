@@ -288,6 +288,10 @@ capture v1-observable-default-mutable lint docs/architecture/system/ADR-101-inge
 fresh v1
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, search]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and search\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
 capture v1-change-list lint docs/architecture/system/ADR-116-shared-queue.md
+# Past three capabilities, a listed change draws a warning (ADR-308 §3).
+edit docs/architecture/adr.yaml "s.replace('  search: Query over the store\n', '  search: Query over the store\n  export: Export from the store\n  audit: Audit trail\n', 1)"
+edit docs/architecture/system/ADR-116-shared-queue.md "s.replace('capability: [ingest, search]', 'capability: [ingest, search, export, audit]')"
+capture v1-change-list-long lint docs/architecture/system/ADR-116-shared-queue.md
 
 # A heading that only starts with "Summary" is another section, not the Summary.
 fresh v1
