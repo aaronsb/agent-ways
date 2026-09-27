@@ -13,7 +13,7 @@ status: Proposed
 date: 2026-09-26
 deciders:
   - aaronsb
-  - claude
+  - Claude
 related:
   - 302
   - 303
@@ -229,7 +229,7 @@ verb: retire
 capability: ingest
 targets: [cli:ingest-legacy, route:/v1/upload]
 basis:
-  - operator: aaronsb
+  - operator: developer
     level: directed
     said: "drop the legacy upload path"
     via: PR #612
@@ -299,7 +299,11 @@ A migrated decision needs a `basis` (§11). v0 `deciders` cannot seed an
 `operator` basis, because `adr new` fills it from the `adr.yaml` default,
 which names the operator on every record. Forge metadata cannot seed it
 either (§11). An `operator` basis migrates only where the record already
-quotes operator direction. A linked #491 note seeds `evidence`. A decision
+quotes operator direction. A linked #491 note seeds `evidence`.
+
+Examples and shipped templates use the role placeholders `developer` and
+`agent`. Real records carry real identities, such as `aaronsb` and `Claude`.
+No shared template hard-codes a person as a default decider. A decision
 with neither migrates with no basis, and lint warns until a basis is found
 or the operator supplies one.
 
@@ -408,7 +412,7 @@ message, a phone call. An `operator` basis records what was said and where:
 
 ```yaml
 basis:
-  - operator: aaronsb
+  - operator: developer
     level: guided
     said: "the operator's words, verbatim where written"
     via: slack #kg-dev, 2026-09-26
@@ -464,7 +468,7 @@ weighed the proposal before acceptance:
 
 ```yaml
 considered:
-  - operator: aaronsb
+  - operator: developer
     said: "looks good"
     via: PR #559
 ```
