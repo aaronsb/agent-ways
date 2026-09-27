@@ -25,6 +25,10 @@ basis:
     level: guided
     said: "we don't need to explicitly handle jira. all I'm saying is 'jira issues can be flattened to a record, just like any other record, and usually there's a description and a summary and various fields, and if we can selectively import jira issues, then we probably can take records from about anything'"
     via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "the domain layout shouldn't ever be set forever. things change over time, certain domains might merge or split. during import from v0 adr to v1 in-repo, it might make sense to add or combine domains. during a full foreign import, perhaps something like a jira or github issues, then these would expand over time."
+    via: session 2026-09-27
   - evidence: "kg (knowledge-graph-system) holds 123 records, all with v0 frontmatter (status, date, deciders, related); 60 Accepted, 28 Proposed, 16 Draft, 10 Rejected, 8 Superseded, 1 Deprecated"
   - evidence: "in a project that declares contract: adr/v1, `adr new` still writes a v0 record with no contract, kind, verb, capability, basis, agent or Summary"
 agent:
@@ -44,7 +48,7 @@ related:
 
 ## Summary
 
-- **Decided:** `adr import` is the canonical migration path into adr/v1. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands.
+- **Decided:** `adr import` is the canonical migration path into adr/v1. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows, and a record keeps its number wherever it moves.
 - **Trades away:** hand migration's freedom to restructure a record while moving it. Import carries the body over byte for byte. Splits and rewrites happen after import, as ordinary edits.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
 - **Probes:** *Confident:* v0 records (this repo's and kg's) import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
@@ -126,7 +130,18 @@ An imported record carries `imported: {from, format}` in its frontmatter. For an
 
 A source numbered inside the project's domain ranges keeps its number. Code, ways and other records cite these numbers, and nothing structural calls for new ones, so an import never renumbers them. This covers all of this repo's records and all of kg's. Any other source gets a number from `target`, which the reader proposes from the domain and the agent may change. `apply` rewrites references within the imported set to the new numbers, and `imported.from` keeps the original identifier.
 
-### 6. Round-trip guarantees
+### 6. Domains evolve
+
+The domain layout is not fixed. An import may add or combine domains, and a corpus fed from a tracker keeps growing new ones. Under adr/v1:
+
+- A record's number is its identity, and it never changes. A record's domain is the folder it sits in. The number range of a domain only allocates new numbers.
+- A domain may hold several ranges. A merged domain keeps the ranges of both, and a split hands ranges to the new domains. Either way, the records keep their numbers.
+- `adr domain add`, `merge`, `split` and `move` edit `adr.yaml`, move the files and regenerate the index. No number changes, so citations stay valid.
+- A sheet whose `target.domain` names a domain that does not exist yet creates it on `apply`, with a free range.
+
+Under adr/v0, the domain is still read from the number range, and v0 output is unchanged.
+
+### 7. Round-trip guarantees
 
 These are tested properties:
 
