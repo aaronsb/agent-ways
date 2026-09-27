@@ -47,7 +47,7 @@ docs/architecture/system/ADR-126-unknown-capability.md
   ❌ capability 'telepathy' is not in the adr.yaml vocabulary
 
 docs/architecture/system/ADR-127-list-capability.md
-  ❌ capability takes one name; only a constrain decision takes a list
+  ❌ capability takes one name; only change and constrain decisions take a list
 
 docs/architecture/system/ADR-128-star-on-add.md
   ❌ only a constrain decision may be scoped to '*'

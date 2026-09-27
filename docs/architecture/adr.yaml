@@ -66,7 +66,7 @@ capabilities:
 # declared after adoption needs an add (ADR-305).
 baseline:
   adopted: 2026-09-27
-  capabilities: [docs, method, matching, disclosure, authoring, cli, attend, install, config, governance, loop, testing]
+  capabilities: [adr, docs, method, matching, disclosure, authoring, cli, attend, install, config, governance, loop, testing]
 
 # Retire targets name a surface; these are agent-ways' namespaces.
 surfaces:

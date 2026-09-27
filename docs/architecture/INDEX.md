@@ -126,6 +126,7 @@ _Documentation structure, tooling, coherence_
 | [ADR-305](./documentation/ADR-305-capabilities-active-at-adoption-need-no-add-decision.md) | Capabilities active at adoption need no add decision | accepted |
 | [ADR-306](./documentation/ADR-306-adr-import-foreign-records-through-a-round-trip-import-sheet.md) | adr import: foreign records through a round-trip import sheet | accepted |
 | [ADR-307](./documentation/ADR-307-a-decision-names-what-should-be-observable-when-it-holds.md) | A decision names what should be observable when it holds | accepted |
+| [ADR-308](./documentation/ADR-308-a-change-decision-may-list-several-capabilities.md) | A change decision may list several capabilities | proposed |
 
 ## Legacy (Pre-Domain Numbering)
 
