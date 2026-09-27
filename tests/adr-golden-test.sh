@@ -144,6 +144,9 @@ capture lint                 lint
 capture lint-check           lint --check
 capture lint-one             lint docs/architecture/system/ADR-104-hook-priorities.md
 capture domains              domains
+capture cite                 cite
+capture cite-check           cite --check
+capture cite-one-path        cite src/storage.py
 capture config               config
 
 # --- write commands, each on a fresh corpus, keeping the files they write ------
@@ -215,6 +218,11 @@ capture v1-lint        lint
 capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
+capture v1-cite        cite
+# The cut on search, enacted: citations of search records now fail.
+(cd "$WORK/repo" && sed -i.bak 's/^verb: cut$/verb: cut\nenacted: abcdef1/' docs/architecture/system/ADR-111-cut-search.md \
+  && rm docs/architecture/system/ADR-111-cut-search.md.bak)
+capture v1-cite-enacted cite --check
 
 # A frozen decision edited after acceptance: a changed capability (an error),
 # a body edited mid-text (a warning), and a mutable field (allowed).

@@ -38,7 +38,10 @@ capabilities:
   search: Query over the store
 
 surfaces:
-  cli: {}
+  cli: { inventory: "printf 'ingest-legacy\\nquery\\n'" }
   route: {}
+
+cite:
+  exclude: [vendor/*]
 
 viewer: cat {file}

@@ -1,0 +1,10 @@
+  ⚠️ src/storage.py:4  ADR-005 is not in force (ADR-005 is superseded, see ADR-101)
+  ⚠️ src/storage.py:5  ADR-105 is not in force (ADR-105 is deprecated, no successor named)
+  ⚠️ src/storage.py:6  ADR-103 is still proposed; accept it or cite the record in force
+  ⚠️ src/storage.py:7  ADR-301 is still proposed; accept it or cite the record in force
+  ❌ src/storage.py:8  ADR-999 resolves to no record
+
+════════════════════════════════════════════════════════════
+Citations: 1 errors, 4 warnings
+════════════════════════════════════════════════════════════
+[exit 1]
