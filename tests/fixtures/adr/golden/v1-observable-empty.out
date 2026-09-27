@@ -14,7 +14,7 @@ docs/architecture/adr.yaml
   ⚠️ capability 'search' has no accepted add decision
 
 docs/architecture/system/ADR-101-ingest.md
-  ❌ 'observable' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change (to allow it, add observable to kinds.decision.mutable_after_accept; ADR-307 §2)
+  ❌ observable: empty; remove the key or add an entry
 
 ════════════════════════════════════════════════════════════
 Summary: 1 errors, 1 warnings

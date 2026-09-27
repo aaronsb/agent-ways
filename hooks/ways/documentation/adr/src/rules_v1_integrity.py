@@ -281,7 +281,9 @@ def rule_v1_frozen(adr, ctx):
         now = adr.frontmatter.get(key)
         if _same(frozen, now) or (fillable and _completes(frozen, now)):
             continue
-        v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
+        hint = (f" (to allow it, add observable to kinds.{v1_record_kind(adr)}.mutable_after_accept; ADR-307 §2)"
+                if key == 'observable' else '')
+        v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change{hint}")
     if not body_now.rstrip().startswith(body_then.rstrip()):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
 
@@ -301,11 +303,15 @@ def rule_v1_no_placeholders(adr, ctx):
 @file_rule(contract=V1)
 def rule_v1_observable(adr, ctx):
     """What should be observable when a decision holds (ADR-307): optional, a
-    list whose entries are plain words or mappings with keys the author chooses."""
+    list whose entries are plain words or mappings with keys the author chooses.
+    The check applies to any v1 kind that carries the field."""
     if not is_v1_record(adr, ctx) or 'observable' not in adr.frontmatter:
         return
     entries = adr.frontmatter.get('observable')
-    if not isinstance(entries, list) or not entries:
+    if entries is None or entries == []:
+        v1_issue(adr, "observable: empty; remove the key or add an entry")
+        return
+    if not isinstance(entries, list):
         v1_issue(adr, "observable: expected a list of entries, each a line of words or a mapping")
         return
     for i, entry in enumerate(entries, 1):
