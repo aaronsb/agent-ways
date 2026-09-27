@@ -20,27 +20,48 @@ SRC = HERE / "src"
 TARGET = HERE / "adr-tool"
 
 
+def fail(message: str) -> None:
+    sys.exit(f"assemble: {message}")
+
+
 def modules() -> list:
     names = []
-    for line in (SRC / "MANIFEST").read_text().splitlines():
+    for line in (SRC / "MANIFEST").read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line and not line.startswith("#"):
-            names.append(line)
+        if not line or line.startswith("#"):
+            continue
+        if line in names:
+            fail(f"{line} is listed twice in src/MANIFEST")
+        if not (SRC / line).is_file():
+            fail(f"src/MANIFEST lists {line}, which does not exist")
+        names.append(line)
     listed = set(names)
     unlisted = sorted(p.name for p in SRC.glob("*.py") if p.name not in listed)
     if unlisted:
-        sys.exit(f"assemble: modules missing from src/MANIFEST: {', '.join(unlisted)}")
+        fail(f"modules missing from src/MANIFEST: {', '.join(unlisted)}")
     return names
 
 
-def assembled() -> str:
-    return "".join((SRC / name).read_text() for name in modules())
+def assembled() -> bytes:
+    """The modules joined as bytes, so line endings and encoding pass through
+    untouched and --check sees exactly what would be written."""
+    parts = []
+    for name in modules():
+        data = (SRC / name).read_bytes()
+        if b"\r\n" in data:
+            fail(f"src/{name} has CRLF line endings")
+        if not data.endswith(b"\n"):
+            # Without a final newline, the module's last line would merge
+            # into the next module's first line.
+            fail(f"src/{name} does not end with a newline")
+        parts.append(data)
+    return b"".join(parts)
 
 
 def main() -> int:
-    text = assembled()
+    data = assembled()
     if sys.argv[1:] == ["--check"]:
-        if TARGET.read_text() != text:
+        if not TARGET.is_file() or TARGET.read_bytes() != data:
             print("adr-tool is out of date with src/. Run hooks/ways/documentation/adr/assemble.",
                   file=sys.stderr)
             return 1
@@ -48,7 +69,7 @@ def main() -> int:
     if sys.argv[1:]:
         print(__doc__, file=sys.stderr)
         return 2
-    TARGET.write_text(text)
+    TARGET.write_bytes(data)
     TARGET.chmod(0o755)
     return 0
 

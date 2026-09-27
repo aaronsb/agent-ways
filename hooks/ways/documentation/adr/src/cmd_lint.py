@@ -13,7 +13,7 @@ def cmd_lint(args):
     # Cross-file rules resolve against the full corpus, even when linting an
     # explicit subset of paths.
     corpus = adrs if not args.paths else get_all_adrs(include_archived=True)
-    run_corpus_rules(adrs, LintContext.from_corpus(corpus))
+    run_rules(adrs, LintContext.from_corpus(corpus))
 
     total_errors = 0
     total_warnings = 0

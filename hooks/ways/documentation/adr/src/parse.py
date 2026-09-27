@@ -89,8 +89,6 @@ def parse_adr(path: Path) -> ADRInfo:
                 info.domain = domain
                 break
 
-    run_file_rules(info)
-
     return info
 
 def is_archived(path: Path) -> bool:

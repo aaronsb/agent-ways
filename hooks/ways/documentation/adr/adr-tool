@@ -199,31 +199,43 @@ class Issue:
 # Lint rules
 # ============================================================================
 #
-# Checks are registered functions, run in registration order, so the order of
-# issues in lint output is the order rules appear below. Parse failures (an
-# unreadable file, bad YAML, missing or unclosed frontmatter) are not rules:
-# they stop parsing, so parse_adr reports them itself.
+# Checks are registered functions, run by `adr lint` in registration order, so
+# the order of issues in lint output is the order rules appear below. Every rule
+# is called as rule(adr, ctx) and appends Issues to adr.issues.
 #
-# A file rule sees one parsed ADR. A corpus rule also sees the whole corpus
-# through a LintContext. Each rule appends Issues to adr.issues.
+# parse_adr reports what it finds while reading: an unreadable file (which stops
+# parsing), bad YAML, unclosed or missing frontmatter. Only an unreadable file
+# stops the rules. `has_frontmatter` means the file opens with `---`, so after
+# bad YAML or an unclosed block the field rules still run and report the
+# fields as missing. The goldens depend on that.
+#
+# A file rule looks at one ADR. A corpus rule also resolves against the whole
+# corpus through ctx. A rule registered with contract="adr/v1" runs only when
+# adr.yaml declares that contract; an ungated rule always runs.
 
 FILE_RULES = []
 CORPUS_RULES = []
 
-def file_rule(fn):
-    """Register a rule over one parsed ADR: fn(adr)."""
-    FILE_RULES.append(fn)
-    return fn
+def _register(registry, fn=None, *, contract=None):
+    def add(f):
+        registry.append((f, contract))
+        return f
+    return add(fn) if fn is not None else add
 
-def corpus_rule(fn):
+def file_rule(fn=None, *, contract=None):
+    """Register a rule over one ADR: fn(adr, ctx)."""
+    return _register(FILE_RULES, fn, contract=contract)
+
+def corpus_rule(fn=None, *, contract=None):
     """Register a rule that resolves against the corpus: fn(adr, ctx)."""
-    CORPUS_RULES.append(fn)
-    return fn
+    return _register(CORPUS_RULES, fn, contract=contract)
 
 @dataclass
 class LintContext:
-    """What corpus rules resolve against."""
+    """What rules resolve against: the corpus index and the loaded config."""
     by_number: dict
+    config: dict
+    contract: str
 
     @classmethod
     def from_corpus(cls, corpus: list) -> 'LintContext':
@@ -235,21 +247,28 @@ class LintContext:
             fn_number = filename_number(adr.path)
             if fn_number:
                 by_number.setdefault(fn_number, adr)
-        return cls(by_number=by_number)
+        config = get_config()
+        return cls(by_number=by_number, config=config,
+                   contract=config.get('contract', 'adr/v0'))
 
-def run_file_rules(adr) -> None:
-    for rule in FILE_RULES:
-        rule(adr)
+def _active(registry, ctx):
+    return [rule for rule, contract in registry if contract in (None, ctx.contract)]
 
-def run_corpus_rules(adrs: list, ctx: 'LintContext') -> None:
+def run_rules(adrs: list, ctx: 'LintContext') -> None:
+    """File rules for every ADR, then corpus rules for every ADR."""
+    file_rules = _active(FILE_RULES, ctx)
+    corpus_rules = _active(CORPUS_RULES, ctx)
     for adr in adrs:
-        for rule in CORPUS_RULES:
+        for rule in file_rules:
+            rule(adr, ctx)
+    for adr in adrs:
+        for rule in corpus_rules:
             rule(adr, ctx)
 
 # --- file rules ---------------------------------------------------------------
 
 @file_rule
-def rule_title_number(adr):
+def rule_title_number(adr, ctx):
     if not adr.number:
         adr.issues.append(Issue("Missing ADR number in title", 'error'))
 
@@ -257,7 +276,7 @@ def rule_title_number(adr):
 # already reported by parse_adr.
 
 @file_rule
-def rule_status(adr):
+def rule_status(adr, ctx):
     if not adr.has_frontmatter:
         return
     valid_statuses = get_statuses()
@@ -267,12 +286,12 @@ def rule_status(adr):
         adr.issues.append(Issue(f"Invalid status: {adr.status} (valid: {', '.join(sorted(valid_statuses))})", 'warning'))
 
 @file_rule
-def rule_date(adr):
+def rule_date(adr, ctx):
     if adr.has_frontmatter and not adr.date:
         adr.issues.append(Issue("Missing date in frontmatter", 'error'))
 
 @file_rule
-def rule_deciders(adr):
+def rule_deciders(adr, ctx):
     if adr.has_frontmatter and not adr.deciders:
         adr.issues.append(Issue("Missing deciders in frontmatter", 'warning'))
 
@@ -389,8 +408,6 @@ def parse_adr(path: Path) -> ADRInfo:
             if folder_name in folders:
                 info.domain = domain
                 break
-
-    run_file_rules(info)
 
     return info
 
@@ -790,7 +807,7 @@ def cmd_lint(args):
     # Cross-file rules resolve against the full corpus, even when linting an
     # explicit subset of paths.
     corpus = adrs if not args.paths else get_all_adrs(include_archived=True)
-    run_corpus_rules(adrs, LintContext.from_corpus(corpus))
+    run_rules(adrs, LintContext.from_corpus(corpus))
 
     total_errors = 0
     total_warnings = 0
