@@ -700,12 +700,22 @@ def rule_v1_config_shape(ctx):
         bad("contract: adr/v1 declares no capabilities")
     if 'surfaces' in config and not isinstance(config['surfaces'], dict):
         bad("surfaces: expected a mapping of namespace to settings")
+    if 'baseline' in config:
+        baseline = _str_list(config['baseline'])
+        if baseline is None:
+            bad("baseline: expected a list of capability names")
+        elif isinstance(config.get('capabilities'), dict):
+            for name in baseline:
+                if name not in config['capabilities']:
+                    bad(f"baseline: '{name}' is not in the capabilities vocabulary")
 
 @config_rule(contract=V1)
 def rule_v1_capabilities_added(ctx):
-    """Every capability in the vocabulary has an accepted `add` decision. This
-    warns while v0 records remain, so a migrating corpus is not failed on every
-    capability, and fails once migration is done (ADR-304 §6)."""
+    """Every capability in the vocabulary has an accepted `add` decision, except
+    those in `baseline`: capabilities that were active when the project
+    adopted the contract, which no record added. This warns while v0 records
+    remain, so a migrating corpus is not failed on every capability, and fails
+    once migration is done (ADR-304 §6, amended by ADR-305)."""
     added = set()
     for adr in ctx.corpus:
         if (is_v1_record(adr, ctx)
@@ -716,8 +726,9 @@ def rule_v1_capabilities_added(ctx):
     # hold the check at warning.
     migrating = any(not is_v1_record(adr, ctx) and not is_archived(adr.path)
                     for adr in ctx.corpus)
+    baseline = set(_str_list(ctx.config.get('baseline')) or [])
     for name in v1_capabilities(ctx):
-        if name not in added:
+        if name not in added and name not in baseline:
             ctx.config_issues.append(Issue(
                 f"capability '{name}' has no accepted add decision",
                 'warning' if migrating else 'error'))
@@ -840,13 +851,30 @@ def rule_v1_edges(adr, ctx):
             if section and not section_exists(target, section):
                 v1_issue(adr, f"{field_name}: ADR-{number} has no section '{section}'")
 
+def decision_order(adr) -> tuple:
+    """Records in decision order: by date, then number (ADR-304 §3)."""
+    base, _, part = str(adr.number or '0').partition('.')
+    return (str(adr.date or ''), int(base or 0), int(part or 0))
+
+def _has_decision_on(capability: str, adr, ctx) -> bool:
+    """An earlier v1 decision, other than a constrain, is on this capability."""
+    return any(other is not adr and is_v1_record(other, ctx)
+               and other.frontmatter.get('kind') == 'decision'
+               and other.frontmatter.get('verb') != 'constrain'
+               and covers(other, capability)
+               and decision_order(other) < decision_order(adr)
+               for other in ctx.corpus)
+
 @corpus_rule(contract=V1)
 def rule_v1_change_replaces(adr, ctx):
     """A change decision supersedes or amends a prior decision on the same
     capability. When the prior covers more than this capability ('*' or a
-    list), the change amends it (ADR-304 §3)."""
+    list), the change amends it (ADR-304 §3). The first change on a baseline
+    capability has no prior record to name: the baseline stands in for it
+    until a decision on that capability exists (ADR-305)."""
     if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
         return
+    baseline = set(_str_list(ctx.config.get('baseline')) or [])
     edges = []
     for field_name in ('supersedes', 'amends'):
         for entry in as_entries(adr.frontmatter.get(field_name)):
@@ -861,6 +889,8 @@ def rule_v1_change_replaces(adr, ctx):
             continue
         if fits:
             v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
+        elif not edges and capability in baseline and not _has_decision_on(capability, adr, ctx):
+            continue
         elif v0_priors:
             numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
             v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
@@ -2220,7 +2250,7 @@ def cmd_cite(args):
             verb = adr.frontmatter.get('verb')
             if (is_v1_record(adr, ctx) and verb in ('add', 'cut')
                     and str(adr.status or '').lower() == 'accepted'):
-                order = (str(adr.date or ''), _number_order(adr.number))
+                order = decision_order(adr)
                 for capability in capability_scope(adr):
                     if capability not in latest or order >= latest[capability][0]:
                         latest[capability] = (order, adr)
@@ -2333,10 +2363,6 @@ def _cite_key(number: str) -> str:
     base, _, part = str(number).partition('.')
     base = base.lstrip('0') or '0'
     return f"{base}.{part.lstrip('0') or '0'}" if part else base
-
-def _number_order(number) -> tuple:
-    base, _, part = _cite_key(number or '0').partition('.')
-    return (int(base), int(part or 0))
 
 def _cite_files(root: Path) -> list:
     """Repository files, sorted: git's view when available (tracked and

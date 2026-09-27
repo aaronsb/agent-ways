@@ -74,7 +74,7 @@ def cmd_cite(args):
             verb = adr.frontmatter.get('verb')
             if (is_v1_record(adr, ctx) and verb in ('add', 'cut')
                     and str(adr.status or '').lower() == 'accepted'):
-                order = (str(adr.date or ''), _number_order(adr.number))
+                order = decision_order(adr)
                 for capability in capability_scope(adr):
                     if capability not in latest or order >= latest[capability][0]:
                         latest[capability] = (order, adr)
@@ -187,10 +187,6 @@ def _cite_key(number: str) -> str:
     base, _, part = str(number).partition('.')
     base = base.lstrip('0') or '0'
     return f"{base}.{part.lstrip('0') or '0'}" if part else base
-
-def _number_order(number) -> tuple:
-    base, _, part = _cite_key(number or '0').partition('.')
-    return (int(base), int(part or 0))
 
 def _cite_files(root: Path) -> list:
     """Repository files, sorted: git's view when available (tracked and

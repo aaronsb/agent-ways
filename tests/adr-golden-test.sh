@@ -229,6 +229,22 @@ capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
 capture v1-lint-precedent-relative lint docs/architecture/system/ADR-109-precedent-chain.md
+# A capability active at adoption needs no add (#582); a baseline name
+# outside the vocabulary fails.
+fresh v1
+edit docs/architecture/adr.yaml "s.replace('surfaces:', 'baseline: [search]\\n\\nsurfaces:', 1)"
+capture v1-lint-baseline lint
+edit docs/architecture/adr.yaml "s.replace('baseline: [search]', 'baseline: [search, serch]')"
+capture v1-lint-baseline-unknown lint
+# The first change on a baseline capability needs no prior; once a decision
+# on it exists, the next change names it.
+fresh v1
+edit docs/architecture/adr.yaml "s.replace('surfaces:', 'baseline: [export]\\n\\nsurfaces:', 1).replace('  search: Query over the store\\n', '  search: Query over the store\\n  export: Export from the store\\n')"
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: export was slow\n---\n\n# ADR-117: Stream exports\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-117-stream-exports.md)
+capture v1-lint-baseline-change lint
+(cd "$WORK/repo" && sed 's/ADR-117: Stream exports/ADR-118: Compress exports/' docs/architecture/system/ADR-117-stream-exports.md > docs/architecture/system/ADR-118-compress-exports.md)
+capture v1-lint-baseline-change-second lint
+fresh v1
 capture v1-cite        cite
 # The cut on search, enacted: citations of search records now fail.
 (cd "$WORK/repo" && sed -i.bak 's/^verb: cut$/verb: cut\nenacted: abcdef1/' docs/architecture/system/ADR-111-cut-search.md \
