@@ -560,8 +560,40 @@ to test the operator.
 reasoning that doesn't follow, or anything that seems off can be raised at
 any stage, including after the operator has considered the decision and
 accepted it. A raised concern goes in the record as a `concern:` entry with
-the agent's reasoning. It does not block acceptance. The operator answers
-it, and the answer is recorded next to it.
+the agent's reasoning. It does not block acceptance.
+
+Voice without a response dies out, and too many concerns turn collaboration
+into conflict that stops work. So concerns are few, actionable and never
+silent:
+
+- A concern names what would resolve it. Minor points are batched into one
+  concern or left out.
+- A concern is append-only. The agent cannot retract it, only mark it
+  answered or withdrawn with a stated reason. Language models concede under
+  sustained pressure, often while still holding the correct view, and a
+  silent withdrawal would erase that from the record.
+- An unanswered concern is listed when the decision is accepted, so the
+  operator sees it at that moment. It is shown, not failed.
+- The agent challenges once, constructively. If the operator still says go,
+  the agent proceeds and does its best. Answering the concern means hearing
+  it, and the operator need not agree with it.
+
+**Canary probes.** An agent may include a canary among the probes: a point
+that is deliberately wrong and harmless if accepted. It checks whether the
+operator's judgement is engaged. If the operator agrees with the canary,
+the agent says so constructively and offers a way through, such as fewer
+probes or a shorter summary. For example: "you agreed with the canary I put
+in, so I'm not sure this got your attention. Here is a smaller set. If it's
+still yes, I'll proceed." Then it proceeds on the operator's answer. The
+safeguards:
+
+- The agent reveals the canary right after the operator answers.
+- A canary never survives into the accepted record.
+- A canary is never about safety, and never something that would cause harm
+  if acted on.
+- `considered` notes `canary: caught` or `canary: missed`. Over time that
+  calibrates how far the agent leans on brief approvals, task by task, which
+  is the scoped trust the literature supports over flat trust.
 
 **If the operator started it, the operator considers it.** A decision with
 an `operator` basis at any level is proposed and waits for `considered`
@@ -718,6 +750,17 @@ and read. None is cited from memory.
 - Green, "The Flaws of Policies Requiring Human Oversight of Government Algorithms," CLSR, 2022. https://arxiv.org/abs/2109.05067
 - Santoni de Sio, van den Hoven, "Meaningful Human Control over Autonomous Systems," 2018. https://doi.org/10.3389/frobt.2018.00015
 - Chan et al., "Visibility into AI Agents," FAccT 2024. https://arxiv.org/abs/2401.13138
+
+**Trust, voice and sycophancy**
+- Lee, See, "Trust in Automation: Designing for Appropriate Reliance," Human Factors, 2004. https://journals.sagepub.com/doi/10.1518/hfes.46.1.50_30392
+- Azevedo-Sa et al., "A Unified Bi-directional Model for Natural and Artificial Trust in Human-Robot Collaboration," 2021. https://arxiv.org/abs/2106.02194
+- Edmondson, "Psychological Safety and Learning Behavior in Work Teams," ASQ, 1999. https://journals.sagepub.com/doi/10.2307/2666999
+- AHRQ TeamSTEPPS, "Two-Challenge Rule." https://www.ahrq.gov/teamstepps-program/curriculum/mutual/tools/rule.html
+- Graban, "No, One Toyota Worker Can't Stop the Whole Factory," 2026. https://www.leanblog.org/2026/06/andon-cord-stop-the-line-myth/
+- Sharma et al., "Towards Understanding Sycophancy in Language Models," 2023. https://arxiv.org/abs/2310.13548
+- Tang et al., "Measuring LLM Sycophancy under Sustained Multi-Turn Pressure," 2026. https://arxiv.org/abs/2609.09090
+- Dubois et al., "Ask don't tell: Reducing sycophancy in LLMs," 2026. https://arxiv.org/abs/2602.23971
+- Chromik et al., alarm fatigue review, Frontiers in Digital Health, 2022. https://pmc.ncbi.nlm.nih.gov/articles/PMC9424650/
 
 **Cybernetics and agent governance**
 - Jackson, "Critical systems thinking: Beyond the fragments," 1994. https://onlinelibrary.wiley.com/doi/10.1002/sdr.4260100209
