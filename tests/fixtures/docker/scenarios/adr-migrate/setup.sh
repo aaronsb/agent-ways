@@ -6,15 +6,13 @@ mkdir -p docs/scripts
 cp -r "$APP/docs/architecture" docs/
 cp "$HOME/.claude/hooks/ways/documentation/adr/adr-tool" docs/scripts/adr
 chmod +x docs/scripts/adr
-# The records under test start from their v0 form on main, so the rehearsal
-# migrates them even when the branch under test already has.
-base=$(git -C "$APP" merge-base HEAD origin/main 2>/dev/null || true)
-if [[ -n "$base" ]]; then
-  for n in 179 186; do
-    f=$(ls docs/architecture/system/ADR-$n-*.md)
-    git -C "$APP" show "$base:$f" > "$f" 2>/dev/null || true
-  done
-fi
+# The records under test start from their v0 form, snapshotted beside this
+# script from main before #581 migrated them. The release flavor clones with
+# --depth 1, so the history to restore them from is not there.
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+for f in "$here"/v0/ADR-*.md; do
+  cp "$f" docs/architecture/system/
+done
 if grep -q '^contract:' docs/architecture/system/ADR-179-*.md docs/architecture/system/ADR-186-*.md; then
   echo "setup: the records under test are already v1; the rehearsal would test nothing" >&2
   exit 1
