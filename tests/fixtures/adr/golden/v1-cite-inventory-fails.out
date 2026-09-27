@@ -1,0 +1,8 @@
+  ⚠️ src/search.py:1  ADR-106 is still proposed; accept it or cite the record in force
+  ⚠️ src/search.py:1  ADR-106 is on 'search', which ADR-111 cuts; remove before enacting
+  ⚠️ docs/architecture/system/ADR-105-retire-legacy-ingest.md  inventory for 'cli' did not run (exit 3): exit 3
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 3 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

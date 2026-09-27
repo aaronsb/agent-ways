@@ -144,6 +144,18 @@ capture lint                 lint
 capture lint-check           lint --check
 capture lint-one             lint docs/architecture/system/ADR-104-hook-priorities.md
 capture domains              domains
+capture cite                 cite
+capture cite-check           cite --check
+capture cite-one-path        cite src/storage.py
+capture cite-dir-path        cite src
+capture cite-outside-path    cite ../..
+
+# A family with one member in force and one superseded: a bare citation stays
+# quiet, an explicit citation of the superseded member warns.
+fresh corpus
+(cd "$WORK/repo" && printf -- '---\nstatus: Superseded\ndate: 2025-06-02\ndeciders: [developer]\nsuperseded_by: [ADR-101]\n---\n\n# ADR-101.2: Old storage detail\n' > docs/architecture/system/ADR-101.2-old-detail.md \
+  && printf '# ADR-101 as a family.\n# ADR-101.2 on its own.\n' > src/family.py)
+capture cite-family cite src/family.py
 capture config               config
 
 # --- write commands, each on a fresh corpus, keeping the files they write ------
@@ -215,6 +227,25 @@ capture v1-lint        lint
 capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
+capture v1-cite        cite
+# The cut on search, enacted: citations of search records now fail.
+(cd "$WORK/repo" && sed -i.bak 's/^verb: cut$/verb: cut\nenacted: abcdef1/' docs/architecture/system/ADR-111-cut-search.md \
+  && rm docs/architecture/system/ADR-111-cut-search.md.bak)
+capture v1-cite-enacted cite --check
+capture v1-cite-no-inventory cite --no-inventory
+
+# A cut undone by a later accepted add: search is present again.
+fresh v1
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: search\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: demand returned\n---\n\n# ADR-115: Add search back\n' > docs/architecture/system/ADR-115-add-search-back.md)
+capture v1-cite-readded cite --no-inventory
+
+# A retire before enactment, with one target misspelled; then an inventory
+# command that fails.
+fresh v1
+edit docs/architecture/system/ADR-105-retire-legacy-ingest.md "s.replace('enacted: 3f9c2a1\n', '').replace('cli:ingest-legacy', 'cli:ingest-legacy, cli:ingest-legcy')"
+capture v1-cite-retire-pending cite
+edit docs/architecture/adr.yaml "s[:s.index('  cli:')] + '  cli: { inventory: \"exit 3\" }' + s[s.index(chr(10), s.index('  cli:')):]"
+capture v1-cite-inventory-fails cite
 
 # A frozen decision edited after acceptance: a changed capability (an error),
 # a body edited mid-text (a warning), and a mutable field (allowed).

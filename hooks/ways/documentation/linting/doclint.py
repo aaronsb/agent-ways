@@ -443,6 +443,8 @@ def main():
     parser.add_argument("--enforce-adrs", action="store_true",
                         help="treat ADR issues as errors, not warnings")
     parser.add_argument("--quiet", action="store_true", help="suppress coverage matrix")
+    parser.add_argument("--citations", action="store_true",
+                        help="also check ADR citations in code, through the vendored adr tool's `cite`")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -487,6 +489,29 @@ def main():
             for rel, ln, ref in sorted(retired_hits):
                 print(f"  ERROR  {rel}:{ln}  {ref}")
             errors += len(retired_hits)
+
+    # Code citations belong to the adr tool (ADR-304 §6), which owns adr.yaml's
+    # contract. doclint hands off rather than reading the records a second way.
+    if args.citations:
+        adr_tool = REPO / "docs" / "scripts" / "adr"
+        if not adr_tool.exists():
+            print("\nCitations: docs/scripts/adr not found; vendor the adr tool to check them")
+            errors += 1
+        else:
+            # --no-inventory: doclint is a lint and runs no shell commands
+            # from adr.yaml. `adr cite` run directly checks the inventories.
+            print("\nCitations (adr cite --no-inventory):", flush=True)
+            result = subprocess.run([sys.executable, str(adr_tool), "cite", "--no-inventory"],
+                                    cwd=REPO, capture_output=True, text=True)
+            sys.stdout.write(result.stdout)
+            counts = re.search(r"Citations: (\d+) errors, (\d+) warnings", result.stdout)
+            if result.returncode not in (0, 1) or counts is None:
+                print(f"  ERROR  adr cite failed to run (exit {result.returncode}): "
+                      f"{(result.stderr.strip().splitlines() or [''])[-1]}")
+                errors += 1
+            else:
+                errors += int(counts.group(1))
+                warnings += int(counts.group(2))
 
     if not args.quiet and doc_nodes:
         print_coverage(doc_nodes, digits)

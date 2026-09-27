@@ -11,6 +11,7 @@ Usage:
     adr rename <number> [new-title] [--slug SLUG]
     adr archive <number> --reason "..." [--superseded-by ADR-N[,ADR-M]] [--status S] [--dry-run]
     adr lint [--check] [paths...]
+    adr cite [--check] [paths...]
     adr index [-y]
     adr domains
     adr config
@@ -23,6 +24,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 # customize (ADR-177).
 
 import argparse
+import os
 import re
 import subprocess
 import sys

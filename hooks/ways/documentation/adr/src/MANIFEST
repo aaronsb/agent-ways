@@ -18,4 +18,5 @@ cmd_index.py
 cmd_archive.py
 cmd_domains.py
 cmd_config.py
+cmd_cite.py
 main.py

@@ -1,0 +1,8 @@
+  ⚠️ src/search.py:1  ADR-106 is still proposed; accept it or cite the record in force
+  ⚠️ src/search.py:1  ADR-106 is on 'search', which ADR-111 cuts; remove before enacting
+  ❌ docs/architecture/system/ADR-105-retire-legacy-ingest.md  cli:ingest-legacy is still present after ADR-105 was enacted
+
+════════════════════════════════════════════════════════════
+Citations: 1 errors, 2 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

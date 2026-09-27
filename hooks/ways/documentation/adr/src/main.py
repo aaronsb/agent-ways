@@ -68,6 +68,13 @@ def main():
     # config
     subparsers.add_parser('config', help='Show configuration')
 
+    # cite
+    p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
+    p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
+    p_cite.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
+    p_cite.add_argument('--no-inventory', action='store_true',
+                        help="Skip surface inventories (they run shell commands from adr.yaml)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -87,6 +94,7 @@ def main():
         'archive': cmd_archive,
         'domains': cmd_domains,
         'config': cmd_config,
+        'cite': cmd_cite,
     }
 
     return commands[args.command](args)
