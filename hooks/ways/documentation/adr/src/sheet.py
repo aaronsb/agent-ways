@@ -6,7 +6,7 @@ SHEET_FORMAT = 'adr-import/v1'
 # that are not listed follow in the sheet's own order.
 V1_KEY_ORDER = ('contract', 'kind', 'verb', 'capability', 'targets', 'supersedes', 'amends',
                 'extends', 'decided_by', 'superseded_by', 'enacted', 'basis', 'agent',
-                'considered', 'concern', 'status', 'date', 'deciders', 'related', 'imported')
+                'considered', 'concern', 'observable', 'status', 'date', 'deciders', 'related', 'imported')
 
 V1_SUMMARY_SKELETON = '''## Summary
 

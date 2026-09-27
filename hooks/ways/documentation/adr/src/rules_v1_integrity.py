@@ -235,7 +235,7 @@ def _same(a, b) -> bool:
         return str(a) == str(b)
     return a == b
 
-V1_DEFAULT_MUTABLE = ('status', 'enacted', 'superseded_by', 'considered', 'concern')
+V1_DEFAULT_MUTABLE = ('status', 'enacted', 'superseded_by', 'considered', 'concern', 'observable')
 
 @file_rule(contract=V1)
 def rule_v1_frozen(adr, ctx):
@@ -297,3 +297,20 @@ def rule_v1_no_placeholders(adr, ctx):
         return
     level = 'warning' if str(adr.status or '').lower() == 'proposed' else 'error'
     v1_issue(adr, f"{len(left)} placeholder line(s) from `adr new` still to fill, first: {left[0]}", level)
+
+@file_rule(contract=V1)
+def rule_v1_observable(adr, ctx):
+    """What should be observable when a decision holds (ADR-307): optional, a
+    list whose entries are plain words or mappings with keys the author chooses."""
+    if not is_v1_record(adr, ctx) or 'observable' not in adr.frontmatter:
+        return
+    entries = adr.frontmatter.get('observable')
+    if not isinstance(entries, list) or not entries:
+        v1_issue(adr, "observable: expected a list of entries, each a line of words or a mapping")
+        return
+    for i, entry in enumerate(entries, 1):
+        if isinstance(entry, str) and entry.strip():
+            continue
+        if isinstance(entry, dict) and entry:
+            continue
+        v1_issue(adr, f"observable entry {i}: expected a line of words or a non-empty mapping")
