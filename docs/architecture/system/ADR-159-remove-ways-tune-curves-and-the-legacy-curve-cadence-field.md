@@ -1,5 +1,17 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: retire
+capability: disclosure
+targets:
+  - cli:ways-tune-curves
+basis:
+  - evidence: 'ways tune-curves --apply writes a curve: block that ways lint rejects as an UNKNOWN field, and no shipped way carries curve:'
+  - precedent: ADR-126
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-04
 deciders:
   - aaronsb
@@ -8,6 +20,10 @@ related:
   - ADR-123
   - ADR-126
   - ADR-134
+imported:
+  from: docs/architecture/system/ADR-159-remove-ways-tune-curves-and-the-legacy-curve-cadence-field.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-159: Remove ways tune-curves and the legacy curve: cadence field

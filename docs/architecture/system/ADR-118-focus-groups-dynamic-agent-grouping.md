@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: 'focus groups as static path lists were brittle in use: paths are implementation details, groups did not self-clean, and there was no middle ground between just me and everyone'
+  - precedent: ADR-113
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-10
 deciders:
   - aaronsb
@@ -9,6 +19,10 @@ related:
   - ADR-115
   - ADR-119
   - ADR-120
+imported:
+  from: docs/architecture/system/ADR-118-focus-groups-dynamic-agent-grouping.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-118: Focus Groups — Dynamic Agent Grouping

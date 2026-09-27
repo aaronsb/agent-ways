@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
+basis:
+  - evidence: 'the Cypress survey (docs/design-notes/cypress-survey.md, issue #465) proposed a second refusing hook ported from a timeout guard'
+  - evidence: 'the Bash tool already bounds every foreground command: 120 seconds by default, 600 at most'
+  - precedent: ADR-162
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-09-10
 deciders:
   - aaronsb
@@ -7,6 +18,10 @@ deciders:
 related:
   - ADR-162
   - ADR-178
+imported:
+  from: docs/architecture/system/ADR-181-guard-hooks-a-blocking-pretooluse-class-for-pattern-kills-and-interactive-prone-commands.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-181: Guard hooks: a blocking PreToolUse class, shipped deactivated

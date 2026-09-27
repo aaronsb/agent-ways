@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: orphan @name/ dirs with no _groups.yaml entry escaped cleanup_stale and stale test channels accumulated; attend send --focus rejected human-only groups as having no live peers
+  - precedent: ADR-118
+  - precedent: ADR-120
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-21
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-120
   - ADR-124
   - ADR-129
+imported:
+  from: docs/architecture/system/ADR-170-human-focus-group-membership-via-username-identity-and-a-shared-attend-groups-crate.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-170: Human focus-group membership via username identity and a shared attend-groups crate

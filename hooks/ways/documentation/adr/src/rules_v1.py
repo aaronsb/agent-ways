@@ -251,9 +251,12 @@ def rule_v1_capability(adr, ctx):
     if raw in (None, '', []):
         return  # reported by rule_v1_required_fields when the kind requires it
     scope = capability_scope(adr)
-    if adr.frontmatter.get('verb') != 'constrain':
-        if isinstance(raw, list):
-            v1_issue(adr, "capability takes one name; only a constrain decision takes a list")
+    verb = adr.frontmatter.get('verb')
+    if verb != 'constrain':
+        # A change may list the capabilities it alters (ADR-308); only a
+        # constrain may be scoped to '*'.
+        if isinstance(raw, list) and verb != 'change':
+            v1_issue(adr, "capability takes one name; only change and constrain decisions take a list")
             return
         if '*' in scope:
             v1_issue(adr, "only a constrain decision may be scoped to '*'")
@@ -262,6 +265,8 @@ def rule_v1_capability(adr, ctx):
     for name in scope:
         if name != '*' and name not in vocabulary:
             v1_issue(adr, f"capability '{name}' is not in the adr.yaml vocabulary")
+    if verb == 'change' and len(scope) > 3:
+        v1_issue(adr, f"a change lists {len(scope)} capabilities; list only those it alters, the rest belong in related (ADR-308 §3)", 'warning')
 
 @file_rule(contract=V1)
 def rule_v1_retire_targets(adr, ctx):
@@ -317,7 +322,7 @@ def decision_order(adr) -> tuple:
     return (str(adr.date or ''), int(base or 0), int(part or 0))
 
 def _stands_on_baseline(capability: str, adr, ctx) -> bool:
-    """A change with no prior edge stands on the baseline when the capability
+    """A change with no prior edge on this capability stands on the baseline when it
     is in it and either the change predates adoption, or no live decision on
     the capability has been made since adoption before it. Only decisions
     dated after adoption count: each was written as v1, so migrating an older
@@ -344,7 +349,9 @@ def rule_v1_change_replaces(adr, ctx):
     """A change decision supersedes or amends a prior decision on the same
     capability. When the prior covers more than this capability ('*' or a
     list), the change amends it (ADR-304 §3). A change on a baseline
-    capability with no prior record to name stands on the baseline (ADR-305)."""
+    capability with no prior record to name stands on the baseline (ADR-305).
+    Each capability of a listed change is checked on its own, the baseline
+    included: an edge covering one capability is no prior for another (ADR-308)."""
     if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
         return
     edges = []
@@ -354,14 +361,22 @@ def rule_v1_change_replaces(adr, ctx):
             if target is None:
                 return  # a dangling edge is already reported by the edge rules
             edges.append((field_name, target))
-    for capability in [c for c in capability_scope(adr) if c != '*']:
+    scope = [c for c in capability_scope(adr) if c != '*']
+    listed = len(scope) > 1
+    for capability in scope:
         v0_priors = [t for _, t in edges if not is_v1_record(t, ctx)]
         fits = [(f, t) for f, t in edges if is_v1_record(t, ctx) and covers(t, capability)]
         if any(f == 'amends' or not broader_than(t, capability) for f, t in fits):
             continue
         if fits:
             v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
-        elif not edges and _stands_on_baseline(capability, adr, ctx):
+        elif v0_priors and not listed:
+            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
+            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
+        elif (listed or not edges) and _stands_on_baseline(capability, adr, ctx):
+            # A single-capability change whose edges name no prior on it
+            # does not fall back to the baseline; a listed change's edges
+            # may cover its other capabilities (ADR-308 §2).
             continue
         elif v0_priors:
             numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)

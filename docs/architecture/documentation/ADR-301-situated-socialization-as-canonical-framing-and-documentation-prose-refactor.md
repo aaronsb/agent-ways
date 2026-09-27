@@ -1,10 +1,26 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - docs
+  - method
+basis:
+  - evidence: ablation testing without the ways system produces approval-seeking agents across model tiers
+  - evidence: project mechanisms are described only in invented vocabulary, defined by reference to each other
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-09
 deciders:
   - aaronsb
   - claude
 related: []
+imported:
+  from: docs/architecture/documentation/ADR-301-situated-socialization-as-canonical-framing-and-documentation-prose-refactor.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-301: Situated socialization as canonical framing and documentation prose refactor

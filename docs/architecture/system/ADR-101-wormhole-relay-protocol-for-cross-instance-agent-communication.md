@@ -1,10 +1,25 @@
 ---
-status: Deprecated
+contract: adr/v1
+kind: decision
+verb: add
+capability: attend
+superseded_by:
+  - ADR-113
+basis:
+  - standard: 'magic-wormhole: NAT-transparent, credential-free file transfer with single-use codes'
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-02-21
 deciders:
   - aaronsb
   - claude
 related: []
+imported:
+  from: docs/architecture/system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md
+  format: v0
+  status: Deprecated
 ---
 
 # ADR-101: Wormhole relay protocol for cross-instance agent communication

@@ -1,14 +1,29 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: install
+basis:
+  - standard: XDG Base Directory specification
+  - evidence: 'auto-update has never been safe: ~/.claude interleaves shipped files with the user''s settings, sessions and credentials with no manifest to tell them apart'
+  - precedent: ADR-140
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-29
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-140]]"
-  - "[[ADR-141]]"
-  - "[[ADR-112]]"
-  - "[[ADR-128]]"
+  - '[[ADR-140]]'
+  - '[[ADR-141]]'
+  - '[[ADR-112]]'
+  - '[[ADR-128]]'
+imported:
+  from: docs/architecture/system/ADR-142-agent-ways-1-0-xdg-application-distribution.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-142: agent-ways 1.0 — XDG application distribution

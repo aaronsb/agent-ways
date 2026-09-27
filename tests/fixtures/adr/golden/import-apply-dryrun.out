@@ -1,0 +1,5 @@
+Would apply: docs/architecture/.import/ADR-110.yaml -> docs/architecture/system/ADR-110-old-v0-record.md (lint: 1 errors, 1 warnings)
+    warning: Summary lacks probes, an inversion (ADR-304 §12)
+    error: a change decision supersedes or amends a prior decision on 'ingest'
+Import: 1 would apply, 0 skipped, 0 refused (dry run: nothing written)
+[exit 1]

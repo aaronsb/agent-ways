@@ -1,11 +1,29 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - method
+  - install
+  - disclosure
+basis:
+  - standard: 'Claude Code auto-memory behaviour (code.claude.com/docs/en/memory): MEMORY.md loads its first 200 lines or 25 KB at every session start'
+  - evidence: '2026-04-22: a memory entry pointed at a stale design note whose claim that Curve variants were unused would have led a session to delete live code'
+  - precedent: ADR-125
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-22
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-125
+imported:
+  from: docs/architecture/system/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-128: Memory as repo-portable ways — seed routing over accumulated snapshots

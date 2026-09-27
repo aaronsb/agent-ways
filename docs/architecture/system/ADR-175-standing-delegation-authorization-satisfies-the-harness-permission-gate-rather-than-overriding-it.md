@@ -1,11 +1,27 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: constrain
+capability:
+  - method
+  - loop
+basis:
+  - evidence: the heron_brook section in Claude Code 2.1.219+ ("Do not call the AgentTool unless the user requested it"), confirmed live in two sessions; meta/subagents ranked fifth at 0.3 on a query naming delegation
+  - standard: Claude Code 2.1.219+ system prompt, heron_brook section; upstream issue anthropics/claude-code#80988
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-31
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-155
+imported:
+  from: docs/architecture/system/ADR-175-standing-delegation-authorization-satisfies-the-harness-permission-gate-rather-than-overriding-it.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-175: Standing delegation authorization satisfies the harness permission gate rather than overriding it

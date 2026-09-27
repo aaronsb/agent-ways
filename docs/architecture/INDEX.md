@@ -20,121 +20,122 @@ _Ways architecture, matching, macros, hooks, session lifecycle_
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-100](./system/ADR-100-ways-scaffolding-wizard.md) | Ways Scaffolding Wizard | Accepted |
-| [ADR-101](./system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) | Wormhole relay protocol for cross-instance agent communication | Deprecated |
-| [ADR-102](./system/ADR-102-irc-based-local-agent-communication.md) | IRC-based local agent communication | Deprecated |
-| [ADR-103](./system/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) | Checks — Epoch-Distance-Aware Confidence Sensors for Ways | Accepted |
-| [ADR-104](./system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) | Token-Gated Way Re-Disclosure for Long Context Windows | Superseded (superseded by ADR-123) |
-| [ADR-105](./system/ADR-105-progressive-disclosure-for-way-trees.md) | Progressive Disclosure for Way Trees | Accepted |
-| [ADR-106](./system/ADR-106-project-pulse-epoch-mapped-project-awareness.md) | Project Pulse — Epoch-Mapped Project Awareness | Accepted |
-| [ADR-107](./system/ADR-107-way-match-corpus-batch-mode-and-locale-support.md) | Corpus, Matching Pipeline, and Locale Support | Accepted (partially superseded by ADR-125) |
-| [ADR-108](./system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) | Embedding-Based Way Matching with all-MiniLM-L6-v2 | Accepted |
-| [ADR-109](./system/ADR-109-project-scope-way-embedding-with-manifest-based-staleness-detection.md) | Project-Scope Way Embedding with Manifest-Based Staleness Detection | Accepted |
-| [ADR-110](./system/ADR-110-way-file-separation-and-graph-compatible-structure.md) | Way File Separation and Graph-Compatible Structure | Accepted |
-| [ADR-111](./system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) | Unified `ways` CLI — Single Binary Tool Consolidation | Accepted |
-| [ADR-113](./system/ADR-113-attend-active-awareness-module.md) | `attend` — Active Awareness Module | Accepted |
-| [ADR-114](./system/ADR-114-attend-as-insistent-way-trigger-type.md) | `attend` Events as an Insistent Way Trigger Type | Accepted |
-| [ADR-115](./system/ADR-115-declarative-config-with-project-scope-overlay.md) | Declarative Configuration with Project-Scope Overlay | Accepted |
-| [ADR-116](./system/ADR-116-declarative-permission-requirements.md) | Declarative Permission Requirements | Accepted |
-| [ADR-117](./system/ADR-117-sensor-crate-extraction-and-feature-flags.md) | Sensor Crate Extraction and Feature Flags | Accepted |
-| [ADR-118](./system/ADR-118-focus-groups-dynamic-agent-grouping.md) | Focus Groups — Dynamic Agent Grouping | Accepted |
-| [ADR-119](./system/ADR-119-action-potential-engagement-model.md) | Action Potential Engagement Model | Superseded (superseded by ADR-123) |
-| [ADR-120](./system/ADR-120-interactive-chat-tui-human-in-the-signal-loop.md) | Interactive Chat TUI — Human in the Signal Loop | Accepted |
-| [ADR-121](./system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) | Salience decay for signal presentation — turn-based exponential | Superseded (superseded by ADR-123) |
-| [ADR-122](./system/ADR-122-attend-disclosure-sensor-token-gated-affordance-reheat.md) | Attend disclosure sensor — token-gated affordance reheat | Accepted |
-| [ADR-123](./system/ADR-123-firing-dynamics-progression-axis-unification.md) | Firing dynamics — progression-axis unification for attend and ways | Accepted |
-| [ADR-124](./system/ADR-124-channel-bar-ordering-open-as-base.md) | TUI Legend Architecture — Base Channel, Liveness, and Ordering | Accepted |
-| [ADR-125](./system/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) | Authored Disclosure Graph and Removal of BM25 | Accepted |
-| [ADR-126](./system/ADR-126-window-relative-refire.md) | Window-relative refire with named presets | Accepted |
-| [ADR-127](./system/ADR-127-reject-full-body-embedding-corpus.md) | Full-body embedding corpus for way matching | Rejected |
-| [ADR-128](./system/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md) | Memory as repo-portable ways — seed routing over accumulated snapshots | Accepted |
-| [ADR-129](./system/ADR-129-instance-suffix-and-heartbeat-liveness.md) | Instance suffix and heartbeat liveness for attend identity | Accepted |
-| [ADR-130](./system/ADR-130-sentence-salience-input-reduction-for-embed-matching.md) | Sentence-salience input reduction for embed matching | Accepted |
-| [ADR-131](./system/ADR-131-project-scope-way-toggles.md) | Project-scope way toggles | Accepted |
-| [ADR-132](./system/ADR-132-collaboration-ways-domain.md) | Collaboration ways domain | Accepted |
-| [ADR-134](./system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) | Empirical auto-tuning from fire and near-miss telemetry | Accepted |
-| [ADR-135](./system/ADR-135-content-aware-write-time-over-build-gate-with-a-self-extending-pattern-corpus.md) | Content-aware write-time over-build gate with a self-extending pattern corpus | Accepted |
-| [ADR-136](./system/ADR-136-split-addressed-messaging-from-the-sensor-observation-bus.md) | Split addressed messaging from the sensor-observation bus | Accepted |
-| [ADR-137](./system/ADR-137-boundedness-bounded-work-per-cycle.md) | Boundedness — a unit of work must be bounded within its cycle | Accepted |
-| [ADR-138](./system/ADR-138-skills-own-the-how-ways-own-the-5w.md) | Skills own the how, ways own the 5W | Accepted |
-| [ADR-139](./system/ADR-139-shelve-maintainer-i18n-adopter-run-localization-via-ways-localize.md) | Shelve maintainer i18n; adopter-run localization via ways-localize | Accepted |
-| [ADR-140](./system/ADR-140-two-install-topologies-in-place-repo-and-subdirectory-projection.md) | Two install topologies: in-place repo and subdirectory projection | Accepted |
-| [ADR-141](./system/ADR-141-knowledge-graph-as-evidential-memory-backend.md) | Knowledge Graph as Evidential Memory Backend | Accepted |
-| [ADR-142](./system/ADR-142-agent-ways-1-0-xdg-application-distribution.md) | agent-ways 1.0 — XDG application distribution | Accepted |
-| [ADR-143](./system/ADR-143-three-root-way-runtime-core-user-project.md) | Three-root way runtime — core, user, project | Accepted |
-| [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | Accepted |
-| [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | Accepted |
-| [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | Superseded (superseded by ADR-169) |
-| [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | Accepted |
-| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | Superseded (superseded by ADR-169) |
-| [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | Accepted |
-| [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | Accepted |
-| [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | Accepted |
-| [ADR-153](./system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) | Session-introspection substrate — correlating fired ways to turns | Accepted |
-| [ADR-154](./system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) | `ways introspect` — one model, three front-ends | Accepted |
-| [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | Accepted (partially superseded by ADR-188 §3) |
-| [ADR-156](./system/ADR-156-calibrated-relevance-scoring-for-the-semantic-lane.md) | Calibrated relevance scoring for the semantic lane | Accepted |
-| [ADR-157](./system/ADR-157-case-insensitive-trigger-regex-compilation.md) | Case-insensitive trigger regex compilation | Accepted |
-| [ADR-158](./system/ADR-158-calibration-boundary-quality-hard-negatives-and-fire-breadth-ship-gate.md) | Calibration boundary quality — hard negatives and a fire-breadth ship gate | Accepted |
-| [ADR-159](./system/ADR-159-remove-ways-tune-curves-and-the-legacy-curve-cadence-field.md) | Remove ways tune-curves and the legacy curve: cadence field | Accepted |
-| [ADR-160](./system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) | Chunked late-interaction matching with softmax-share gating for way selection | Accepted |
-| [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | Accepted |
-| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | Superseded (superseded by ADR-167) |
-| [ADR-163](./system/ADR-163-config-separation-dotfiles-source-of-truth.md) | Config separation — dotfiles as source-of-truth feeding the settings fragment store | Accepted |
-| [ADR-164](./system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md) | File artifacts distributed across hosts must be carried by value not host-absolute reference | Accepted |
-| [ADR-165](./system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md) | Loop-control bookends: start, develop, merge, release, wrap | Accepted |
-| [ADR-166](./system/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | Accepted |
-| [ADR-167](./system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md) | Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop | Accepted |
-| [ADR-169](./system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md) | agent-ways relinquishes user-scoped settings.json; retains only its operational baseline | Accepted |
-| [ADR-170](./system/ADR-170-human-focus-group-membership-via-username-identity-and-a-shared-attend-groups-crate.md) | Human focus-group membership via username identity and a shared attend-groups crate | Accepted |
-| [ADR-171](./system/ADR-171-stable-session-identity-the-roster-enumerates-addressable-coordinating-units.md) | Stable session identity — the roster enumerates addressable coordinating units | Accepted |
-| [ADR-172](./system/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md) | Turn-boundary inbound delivery via a CLI-owned drain checkpoint | Accepted |
-| [ADR-173](./system/ADR-173-chat-idiom-convergence-for-the-attend-command-surfaces.md) | Chat-idiom convergence for the attend command surfaces | Accepted |
-| [ADR-174](./system/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | Accepted |
-| [ADR-175](./system/ADR-175-standing-delegation-authorization-satisfies-the-harness-permission-gate-rather-than-overriding-it.md) | Standing delegation authorization satisfies the harness permission gate rather than overriding it | Accepted |
-| [ADR-176](./system/ADR-176-contract-identification-as-the-develop-loop-front-gate.md) | Contract identification as the develop-loop front gate | Accepted |
-| [ADR-177](./system/ADR-177-version-stamped-vendored-tools-with-direction-aware-drift-detection.md) | Version-stamped vendored tools with direction-aware drift detection | Accepted |
-| [ADR-178](./system/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md) | Register transfers by demonstration - core.md carries policy | Accepted |
+| [ADR-100](./system/ADR-100-ways-scaffolding-wizard.md) | Ways Scaffolding Wizard | accepted |
+| [ADR-101](./system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) | Wormhole relay protocol for cross-instance agent communication | superseded (superseded by ADR-113) |
+| [ADR-102](./system/ADR-102-irc-based-local-agent-communication.md) | IRC-based local agent communication | superseded (superseded by ADR-113) |
+| [ADR-103](./system/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) | Checks — Epoch-Distance-Aware Confidence Sensors for Ways | accepted |
+| [ADR-104](./system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) | Token-Gated Way Re-Disclosure for Long Context Windows | superseded (superseded by ADR-123) |
+| [ADR-105](./system/ADR-105-progressive-disclosure-for-way-trees.md) | Progressive Disclosure for Way Trees | accepted |
+| [ADR-106](./system/ADR-106-project-pulse-epoch-mapped-project-awareness.md) | Project Pulse — Epoch-Mapped Project Awareness | accepted |
+| [ADR-107](./system/ADR-107-way-match-corpus-batch-mode-and-locale-support.md) | Corpus, Matching Pipeline, and Locale Support | accepted (partially superseded by ADR-125) |
+| [ADR-108](./system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) | Embedding-Based Way Matching with all-MiniLM-L6-v2 | accepted |
+| [ADR-109](./system/ADR-109-project-scope-way-embedding-with-manifest-based-staleness-detection.md) | Project-Scope Way Embedding with Manifest-Based Staleness Detection | accepted |
+| [ADR-110](./system/ADR-110-way-file-separation-and-graph-compatible-structure.md) | Way File Separation and Graph-Compatible Structure | accepted |
+| [ADR-111](./system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) | Unified `ways` CLI — Single Binary Tool Consolidation | accepted |
+| [ADR-113](./system/ADR-113-attend-active-awareness-module.md) | `attend` — Active Awareness Module | accepted |
+| [ADR-114](./system/ADR-114-attend-as-insistent-way-trigger-type.md) | `attend` Events as an Insistent Way Trigger Type | accepted |
+| [ADR-115](./system/ADR-115-declarative-config-with-project-scope-overlay.md) | Declarative Configuration with Project-Scope Overlay | accepted |
+| [ADR-116](./system/ADR-116-declarative-permission-requirements.md) | Declarative Permission Requirements | accepted |
+| [ADR-117](./system/ADR-117-sensor-crate-extraction-and-feature-flags.md) | Sensor Crate Extraction and Feature Flags | accepted |
+| [ADR-118](./system/ADR-118-focus-groups-dynamic-agent-grouping.md) | Focus Groups — Dynamic Agent Grouping | accepted |
+| [ADR-119](./system/ADR-119-action-potential-engagement-model.md) | Action Potential Engagement Model | superseded (superseded by ADR-123) |
+| [ADR-120](./system/ADR-120-interactive-chat-tui-human-in-the-signal-loop.md) | Interactive Chat TUI — Human in the Signal Loop | accepted |
+| [ADR-121](./system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) | Salience decay for signal presentation — turn-based exponential | superseded (superseded by ADR-123) |
+| [ADR-122](./system/ADR-122-attend-disclosure-sensor-token-gated-affordance-reheat.md) | Attend disclosure sensor — token-gated affordance reheat | accepted |
+| [ADR-123](./system/ADR-123-firing-dynamics-progression-axis-unification.md) | Firing dynamics — progression-axis unification for attend and ways | accepted |
+| [ADR-124](./system/ADR-124-channel-bar-ordering-open-as-base.md) | TUI Legend Architecture — Base Channel, Liveness, and Ordering | accepted |
+| [ADR-125](./system/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) | Authored Disclosure Graph and Removal of BM25 | accepted |
+| [ADR-126](./system/ADR-126-window-relative-refire.md) | Window-relative refire with named presets | accepted |
+| [ADR-127](./system/ADR-127-reject-full-body-embedding-corpus.md) | Full-body embedding corpus for way matching | rejected |
+| [ADR-128](./system/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md) | Memory as repo-portable ways — seed routing over accumulated snapshots | accepted |
+| [ADR-129](./system/ADR-129-instance-suffix-and-heartbeat-liveness.md) | Instance suffix and heartbeat liveness for attend identity | accepted |
+| [ADR-130](./system/ADR-130-sentence-salience-input-reduction-for-embed-matching.md) | Sentence-salience input reduction for embed matching | accepted |
+| [ADR-131](./system/ADR-131-project-scope-way-toggles.md) | Project-scope way toggles | accepted |
+| [ADR-132](./system/ADR-132-collaboration-ways-domain.md) | Collaboration ways domain | accepted |
+| [ADR-134](./system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) | Empirical auto-tuning from fire and near-miss telemetry | accepted |
+| [ADR-135](./system/ADR-135-content-aware-write-time-over-build-gate-with-a-self-extending-pattern-corpus.md) | Content-aware write-time over-build gate with a self-extending pattern corpus | accepted |
+| [ADR-136](./system/ADR-136-split-addressed-messaging-from-the-sensor-observation-bus.md) | Split addressed messaging from the sensor-observation bus | accepted |
+| [ADR-137](./system/ADR-137-boundedness-bounded-work-per-cycle.md) | Boundedness — a unit of work must be bounded within its cycle | accepted |
+| [ADR-138](./system/ADR-138-skills-own-the-how-ways-own-the-5w.md) | Skills own the how, ways own the 5W | accepted |
+| [ADR-139](./system/ADR-139-shelve-maintainer-i18n-adopter-run-localization-via-ways-localize.md) | Shelve maintainer i18n; adopter-run localization via ways-localize | accepted |
+| [ADR-140](./system/ADR-140-two-install-topologies-in-place-repo-and-subdirectory-projection.md) | Two install topologies: in-place repo and subdirectory projection | accepted |
+| [ADR-141](./system/ADR-141-knowledge-graph-as-evidential-memory-backend.md) | Knowledge Graph as Evidential Memory Backend | accepted |
+| [ADR-142](./system/ADR-142-agent-ways-1-0-xdg-application-distribution.md) | agent-ways 1.0 — XDG application distribution | accepted |
+| [ADR-143](./system/ADR-143-three-root-way-runtime-core-user-project.md) | Three-root way runtime — core, user, project | accepted |
+| [ADR-144](./system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) | Install / repair / migrate as one manifest reconciler | accepted |
+| [ADR-146](./system/ADR-146-installer-binary-verification-and-guided-build-fallback.md) | installer binary verification and guided build fallback | accepted |
+| [ADR-147](./system/ADR-147-composable-settings-json-config-fragments.md) | Composable settings.json — a store of YAML config fragments | superseded (superseded by ADR-169) |
+| [ADR-148](./system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md) | framework surface ships operator content; dev harness in project scope | accepted |
+| [ADR-149](./system/ADR-149-operator-config-interview-skill.md) | operator config interview skill | superseded (superseded by ADR-169) |
+| [ADR-150](./system/ADR-150-version-truth-and-downgrade-safe-self-update.md) | Version-truth and downgrade-safe self-update | accepted |
+| [ADR-151](./system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | accepted |
+| [ADR-152](./system/ADR-152-framework-default-secret-path-deny-baseline.md) | Framework-default secret-path deny baseline | accepted |
+| [ADR-153](./system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) | Session-introspection substrate — correlating fired ways to turns | accepted |
+| [ADR-154](./system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) | `ways introspect` — one model, three front-ends | accepted |
+| [ADR-155](./system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md) | Semantic gating of the keyword channel and reasoning-channel rebuild | accepted (partially superseded by ADR-188 §3) |
+| [ADR-156](./system/ADR-156-calibrated-relevance-scoring-for-the-semantic-lane.md) | Calibrated relevance scoring for the semantic lane | accepted |
+| [ADR-157](./system/ADR-157-case-insensitive-trigger-regex-compilation.md) | Case-insensitive trigger regex compilation | accepted |
+| [ADR-158](./system/ADR-158-calibration-boundary-quality-hard-negatives-and-fire-breadth-ship-gate.md) | Calibration boundary quality — hard negatives and a fire-breadth ship gate | accepted |
+| [ADR-159](./system/ADR-159-remove-ways-tune-curves-and-the-legacy-curve-cadence-field.md) | Remove ways tune-curves and the legacy curve: cadence field | accepted |
+| [ADR-160](./system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) | Chunked late-interaction matching with softmax-share gating for way selection | accepted |
+| [ADR-161](./system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | accepted |
+| [ADR-162](./system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md) | Mechanical session-link suppression as defense against transcript disclosure | superseded (superseded by ADR-167) |
+| [ADR-163](./system/ADR-163-config-separation-dotfiles-source-of-truth.md) | Config separation — dotfiles as source-of-truth feeding the settings fragment store | accepted |
+| [ADR-164](./system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md) | File artifacts distributed across hosts must be carried by value not host-absolute reference | accepted |
+| [ADR-165](./system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md) | Loop-control bookends: start, develop, merge, release, wrap | accepted |
+| [ADR-166](./system/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | accepted |
+| [ADR-167](./system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md) | Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop | accepted |
+| [ADR-169](./system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md) | agent-ways relinquishes user-scoped settings.json; retains only its operational baseline | accepted |
+| [ADR-170](./system/ADR-170-human-focus-group-membership-via-username-identity-and-a-shared-attend-groups-crate.md) | Human focus-group membership via username identity and a shared attend-groups crate | accepted |
+| [ADR-171](./system/ADR-171-stable-session-identity-the-roster-enumerates-addressable-coordinating-units.md) | Stable session identity — the roster enumerates addressable coordinating units | accepted |
+| [ADR-172](./system/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md) | Turn-boundary inbound delivery via a CLI-owned drain checkpoint | accepted |
+| [ADR-173](./system/ADR-173-chat-idiom-convergence-for-the-attend-command-surfaces.md) | Chat-idiom convergence for the attend command surfaces | accepted |
+| [ADR-174](./system/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | accepted |
+| [ADR-175](./system/ADR-175-standing-delegation-authorization-satisfies-the-harness-permission-gate-rather-than-overriding-it.md) | Standing delegation authorization satisfies the harness permission gate rather than overriding it | accepted |
+| [ADR-176](./system/ADR-176-contract-identification-as-the-develop-loop-front-gate.md) | Contract identification as the develop-loop front gate | accepted |
+| [ADR-177](./system/ADR-177-version-stamped-vendored-tools-with-direction-aware-drift-detection.md) | Version-stamped vendored tools with direction-aware drift detection | accepted |
+| [ADR-178](./system/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md) | Register transfers by demonstration - core.md carries policy | accepted |
 | [ADR-179](./system/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md) | Remove the pre-1.0 in-place migrator; keep the guards and the transition fallbacks | Accepted |
-| [ADR-180](./system/ADR-180-github-issues-as-the-shared-truth-for-the-session-task-list.md) | GitHub issues as the shared truth for the session task list | Accepted |
-| [ADR-181](./system/ADR-181-guard-hooks-a-blocking-pretooluse-class-for-pattern-kills-and-interactive-prone-commands.md) | Guard hooks: a blocking PreToolUse class, shipped deactivated | Accepted |
-| [ADR-182](./system/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md) | Keepwarm: attend keeps the prompt cache warm with a wake floor | Accepted |
-| [ADR-184](./system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md) | Installation and activation are separate states: targets as the unit of activation | Accepted |
-| [ADR-185](./system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | Accepted |
+| [ADR-180](./system/ADR-180-github-issues-as-the-shared-truth-for-the-session-task-list.md) | GitHub issues as the shared truth for the session task list | accepted |
+| [ADR-181](./system/ADR-181-guard-hooks-a-blocking-pretooluse-class-for-pattern-kills-and-interactive-prone-commands.md) | Guard hooks: a blocking PreToolUse class, shipped deactivated | accepted |
+| [ADR-182](./system/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md) | Keepwarm: attend keeps the prompt cache warm with a wake floor | accepted |
+| [ADR-184](./system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md) | Installation and activation are separate states: targets as the unit of activation | accepted |
+| [ADR-185](./system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | accepted |
 | [ADR-186](./system/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
-| [ADR-187](./system/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | Proposed |
-| [ADR-188](./system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | Proposed |
+| [ADR-187](./system/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | proposed |
+| [ADR-188](./system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | proposed |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-200](./governance/ADR-200-compliance-claims-and-session-derived-findings.md) | Compliance claims and session-derived findings | Accepted |
-| [ADR-201](./governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md) | Findings assembled as classifier-ready assessment records | Accepted |
+| [ADR-200](./governance/ADR-200-compliance-claims-and-session-derived-findings.md) | Compliance claims and session-derived findings | accepted |
+| [ADR-201](./governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md) | Findings assembled as classifier-ready assessment records | accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-300](./documentation/ADR-300-documentation-structure.md) | Documentation Structure | Accepted |
-| [ADR-301](./documentation/ADR-301-situated-socialization-as-canonical-framing-and-documentation-prose-refactor.md) | Situated socialization as canonical framing and documentation prose refactor | Accepted |
-| [ADR-302](./documentation/ADR-302-unified-documentation-model.md) | A unified documentation model — typed graph, ways packaging, cross-repo convergence | Accepted |
-| [ADR-303](./documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md) | Active-set semantics, adr archive, and supersession reading for the ADR corpus | Accepted |
+| [ADR-300](./documentation/ADR-300-documentation-structure.md) | Documentation Structure | accepted |
+| [ADR-301](./documentation/ADR-301-situated-socialization-as-canonical-framing-and-documentation-prose-refactor.md) | Situated socialization as canonical framing and documentation prose refactor | accepted |
+| [ADR-302](./documentation/ADR-302-unified-documentation-model.md) | A unified documentation model — typed graph, ways packaging, cross-repo convergence | accepted |
+| [ADR-303](./documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md) | Active-set semantics, adr archive, and supersession reading for the ADR corpus | accepted |
 | [ADR-304](./documentation/ADR-304-typed-decision-records-the-adr-v1-contract.md) | Typed decision records: the adr/v1 contract | Accepted |
 | [ADR-305](./documentation/ADR-305-capabilities-active-at-adoption-need-no-add-decision.md) | Capabilities active at adoption need no add decision | accepted |
 | [ADR-306](./documentation/ADR-306-adr-import-foreign-records-through-a-round-trip-import-sheet.md) | adr import: foreign records through a round-trip import sheet | accepted |
 | [ADR-307](./documentation/ADR-307-a-decision-names-what-should-be-observable-when-it-holds.md) | A decision names what should be observable when it holds | accepted |
+| [ADR-308](./documentation/ADR-308-a-change-decision-may-list-several-capabilities.md) | A change decision may list several capabilities | accepted |
 
 ## Legacy (Pre-Domain Numbering)
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-004](./legacy/ADR-004-way-macros.md) | Way Macros for Dynamic Context Injection | Accepted |
-| [ADR-005](./legacy/ADR-005-governance-traceability.md) | Governance Traceability for Ways | Superseded (superseded by ADR-200) |
-| [ADR-013](./legacy/ADR-013-ways-skills-governance-architecture.md) | Ways, Skills, and Governance Architecture | Accepted |
-| [ADR-014](./legacy/ADR-014-tfidf-semantic-matcher.md) | TF-IDF/BM25 Binary for Semantic Way Matching | Accepted |
+| [ADR-004](./legacy/ADR-004-way-macros.md) | Way Macros for Dynamic Context Injection | accepted |
+| [ADR-005](./legacy/ADR-005-governance-traceability.md) | Governance Traceability for Ways | superseded (superseded by ADR-200) |
+| [ADR-013](./legacy/ADR-013-ways-skills-governance-architecture.md) | Ways, Skills, and Governance Architecture | accepted |
+| [ADR-014](./legacy/ADR-014-tfidf-semantic-matcher.md) | TF-IDF/BM25 Binary for Semantic Way Matching | accepted |
 
 ## Archived
 

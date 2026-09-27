@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: add
+capability: cli
+basis:
+  - evidence: ways config show prints a Rust debug rendering, and three of the binary's forty verbs take --json
+  - precedent: ADR-111
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-09-17
 deciders:
   - aaronsb
@@ -7,6 +17,10 @@ deciders:
 related:
   - ADR-111
   - ADR-184
+imported:
+  from: docs/architecture/system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-185: CLI output contract: structured output for people, JSON for machines

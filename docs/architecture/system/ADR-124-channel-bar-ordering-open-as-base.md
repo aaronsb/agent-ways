@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: 'observed: stopping the claude in /home/aaron/temp left @Urban in the agent legend indefinitely'
+  - evidence: 'in use, #open looked like any other group and _broadcast/ and @open/ carried overlapping intent'
+  - precedent: ADR-118
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-16
 deciders:
   - aaronsb
@@ -7,6 +18,10 @@ deciders:
 related:
   - ADR-118
   - ADR-120
+imported:
+  from: docs/architecture/system/ADR-124-channel-bar-ordering-open-as-base.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-124: TUI Legend Architecture — Base Channel, Liveness, and Ordering

@@ -1,8 +1,22 @@
 ---
-status: Accepted
-date: 2026-04-02
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - matching
+  - disclosure
+  - config
 superseded_by:
   - ADR-125
+basis:
+  - evidence: a Japanese prompt produces zero BM25 tokens and low similarity under the English-only embedding model
+  - evidence: native-language stubs outperform cross-language matching, e.g. ja 0.93 vs 0.69, ar 0.96 vs 0.40 (evaluation table)
+  - precedent: ADR-111
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
+date: 2026-04-02
 deciders:
   - aaronsb
   - claude
@@ -11,6 +25,10 @@ related:
   - ADR-110
   - ADR-111
   - ADR-125
+imported:
+  from: docs/architecture/system/ADR-107-way-match-corpus-batch-mode-and-locale-support.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-107: Corpus, Matching Pipeline, and Locale Support

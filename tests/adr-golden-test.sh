@@ -283,6 +283,23 @@ edit docs/architecture/adr.yaml "s.replace('    mutable_after_accept: [status, e
 edit docs/architecture/system/ADR-101-ingest.md "s.replace('date: 2025-05-02\n', 'date: 2025-05-02\nobservable:\n  - ingest of a 10 MB file finishes under a second\n', 1)"
 capture v1-observable-default-mutable lint docs/architecture/system/ADR-101-ingest.md
 
+# A change may list the capabilities it alters (ADR-308); each one needs its
+# own prior. ADR-116 supersedes an ingest decision and names no search prior.
+fresh v1
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, search]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and search\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
+capture v1-change-list lint docs/architecture/system/ADR-116-shared-queue.md
+# Past three capabilities, a listed change draws a warning (ADR-308 §3).
+edit docs/architecture/adr.yaml "s.replace('  search: Query over the store\n', '  search: Query over the store\n  export: Export from the store\n  audit: Audit trail\n', 1)"
+edit docs/architecture/system/ADR-116-shared-queue.md "s.replace('capability: [ingest, search]', 'capability: [ingest, search, export, audit]')"
+capture v1-change-list-long lint docs/architecture/system/ADR-116-shared-queue.md
+
+# A heading that only starts with "Summary" is another section, not the Summary.
+fresh v1
+edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary\n', '## Summary Nudge\n', 1)"
+capture v1-summary-prefix-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
+edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary Nudge\n', '## Summary: the short version\n', 1)"
+capture v1-summary-colon-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
+
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
 baseline_fresh() {
@@ -295,6 +312,17 @@ export_change() {
 }
 baseline_fresh
 capture v1-lint-baseline lint
+# With export on the baseline, a listed change needs no export prior while its
+# ingest edge covers ingest.
+baseline_fresh
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, export]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-09\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and export\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
+capture v1-change-list-baseline lint docs/architecture/system/ADR-116-shared-queue.md
+baseline_fresh
+# A single-capability change whose only edge names a prior on another
+# capability does not fall back to the baseline.
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-09\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: exports reuse the ingest batcher\n---\n\n# ADR-116: Export batching\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-export-batching.md)
+capture v1-change-single-mismatched-edge lint docs/architecture/system/ADR-116-export-batching.md
+baseline_fresh
 # Malformed baseline config: a bare list, then an unknown name and a bad date.
 edit docs/architecture/adr.yaml "s.replace('baseline:\\n  adopted: 2025-05-10\\n  capabilities: [export]', 'baseline: [export]')"
 capture v1-lint-baseline-list lint
@@ -493,6 +521,14 @@ edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + '
 capture import-apply-observable import apply docs/architecture/.import/ADR-110.yaml
 keep import-apply-observable-file.md docs/architecture/system/ADR-110-old-v0-record.md
 
+# A dry run lints what it would write inside the corpus, prints each issue,
+# then restores every file and keeps every sheet.
+import_fresh
+capture import-scan-dryrun import scan docs/architecture/system/ADR-110-old-v0-record.md
+edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + 'todo: []\n' + t[t.index('candidates:'):])(s.replace('verb: ~', 'verb: change').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n    - evidence: migrated from v0').replace('name: ~', 'name: Claude'))"
+capture import-apply-dryrun import apply --dry-run
+worktree import-apply-dryrun-status.txt
+
 # A source edited after the scan is refused, and the sheet is kept.
 import_fresh
 capture import-scan-changed import scan docs/architecture/system/ADR-110-old-v0-record.md
@@ -534,6 +570,9 @@ capture import-scan-foreign import scan "$WORK/outside/ADR-042-foreign-record.md
 edit docs/architecture/.import/ADR-042.yaml "s.replace('  domain: legacy', '  domain: system')"
 capture import-apply-out-of-range import apply --partial docs/architecture/.import/ADR-042.yaml
 edit docs/architecture/.import/ADR-042.yaml "s.replace(\"  number: '42'\", \"  number: '150'\")"
+# A dry run that would write a new file removes it again.
+capture import-apply-foreign-dryrun import apply --partial --dry-run docs/architecture/.import/ADR-042.yaml
+worktree import-apply-foreign-dryrun-status.txt
 capture import-apply-foreign import apply --partial docs/architecture/.import/ADR-042.yaml
 worktree import-apply-foreign-status.txt
 keep import-apply-foreign-file.md docs/architecture/system/ADR-150-foreign-record.md

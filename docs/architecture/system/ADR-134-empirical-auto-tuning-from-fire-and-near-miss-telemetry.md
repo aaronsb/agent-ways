@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'a 2026-06-09 session readout: about 17 of 47 fires landed in a session whose work never touched their domain'
+  - evidence: 'near-misses were discarded, so recall was unmeasured; implemented and verified in PRs #117 to #121'
+  - precedent: ADR-123
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-09
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-125
   - ADR-130
   - ADR-135
+imported:
+  from: docs/architecture/system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-134: Empirical auto-tuning from fire and near-miss telemetry

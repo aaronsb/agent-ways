@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: a live session where 104 of 157 ways fired, one scan firing 35; the fire panel measured 8 fires (max 17) on adjacent prompts under the deployed calibration
+  - precedent: ADR-156
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-04
 deciders:
   - aaronsb
@@ -8,6 +18,10 @@ related:
   - ADR-156
   - ADR-155
   - ADR-125
+imported:
+  from: docs/architecture/system/ADR-158-calibration-boundary-quality-hard-negatives-and-fire-breadth-ship-gate.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-158: Calibration boundary quality — hard negatives and a fire-breadth ship gate

@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: agents misroute messages, e.g. sending --to /home/aaron/.claude instead of --broadcast to report to the operator
+  - evidence: prior-art survey of terminal chat clients (WeeChat, Matterhorn, iamb) and agent orchestration tools (Agent Deck, Agent of Empires)
+  - precedent: ADR-118
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-11
 deciders:
   - aaronsb
@@ -8,6 +19,10 @@ related:
   - ADR-113
   - ADR-118
   - ADR-119
+imported:
+  from: docs/architecture/system/ADR-120-interactive-chat-tui-human-in-the-signal-loop.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-120: Interactive Chat TUI — Human in the Signal Loop

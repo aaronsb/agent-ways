@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: governance
+basis:
+  - standard: 'NIST SP 800-53A: assessment findings, and the assessor as a role'
+  - standard: NIST OSCAL Assessment Results
+  - precedent: ADR-200
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -8,6 +19,10 @@ related:
   - ADR-110
   - ADR-151
   - ADR-200
+imported:
+  from: docs/architecture/governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-201: Findings assembled as classifier-ready assessment records

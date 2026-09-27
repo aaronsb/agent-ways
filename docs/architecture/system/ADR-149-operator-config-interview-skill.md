@@ -1,14 +1,28 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
 superseded_by: ADR-169
+basis:
+  - evidence: Claude Code's /insights report already carries configuration recommendations ("Where Things Go Wrong", "Suggested CLAUDE.md Additions", "Existing CC Features to Try")
+  - precedent: ADR-147
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-07-01
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-169]]"
-  - "[[ADR-147]]"
-  - "[[ADR-134]]"
+  - '[[ADR-169]]'
+  - '[[ADR-147]]'
+  - '[[ADR-134]]'
+imported:
+  from: docs/architecture/system/ADR-149-operator-config-interview-skill.md
+  format: v0
+  status: Superseded
 ---
 
 # ADR-149: operator config interview skill

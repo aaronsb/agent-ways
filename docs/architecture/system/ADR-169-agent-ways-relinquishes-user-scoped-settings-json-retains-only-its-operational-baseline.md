@@ -1,18 +1,36 @@
 ---
+contract: adr/v1
+kind: decision
+verb: retire
+capability: config
+targets:
+  - cli:ways-settings
+  - skill:ways-settings
 supersedes:
   - ADR-147
   - ADR-149
-status: Accepted
+basis:
+  - evidence: the inert Write(~/.claude/**) and Write(~/.ssh/**) entries raised a launch-time warning and were re-added by ways reconcile after deletion
+  - standard: 'Claude Code settings documentation (code.claude.com/docs/settings): no user-scope settings.local.json exists'
+  - precedent: ADR-163
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-18
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-142]]"
-  - "[[ADR-147]]"
-  - "[[ADR-149]]"
-  - "[[ADR-152]]"
-  - "[[ADR-163]]"
+  - '[[ADR-142]]'
+  - '[[ADR-147]]'
+  - '[[ADR-149]]'
+  - '[[ADR-152]]'
+  - '[[ADR-163]]'
+imported:
+  from: docs/architecture/system/ADR-169-agent-ways-relinquishes-user-scoped-settings-json-retains-only-its-operational-baseline.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-169: agent-ways relinquishes user-scoped settings.json; retains only its operational baseline

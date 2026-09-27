@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: 'issue #378: a live multi-session test rendered one human and two sessions as four-plus identities, with three root causes reproduced from one session''s history'
+  - precedent: ADR-129
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-21
 deciders:
   - aaronsb
@@ -9,6 +19,10 @@ related:
   - ADR-136
   - ADR-168
   - ADR-170
+imported:
+  from: docs/architecture/system/ADR-171-stable-session-identity-the-roster-enumerates-addressable-coordinating-units.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-171: Stable session identity — the roster enumerates addressable coordinating units

@@ -809,9 +809,12 @@ def rule_v1_capability(adr, ctx):
     if raw in (None, '', []):
         return  # reported by rule_v1_required_fields when the kind requires it
     scope = capability_scope(adr)
-    if adr.frontmatter.get('verb') != 'constrain':
-        if isinstance(raw, list):
-            v1_issue(adr, "capability takes one name; only a constrain decision takes a list")
+    verb = adr.frontmatter.get('verb')
+    if verb != 'constrain':
+        # A change may list the capabilities it alters (ADR-308); only a
+        # constrain may be scoped to '*'.
+        if isinstance(raw, list) and verb != 'change':
+            v1_issue(adr, "capability takes one name; only change and constrain decisions take a list")
             return
         if '*' in scope:
             v1_issue(adr, "only a constrain decision may be scoped to '*'")
@@ -820,6 +823,8 @@ def rule_v1_capability(adr, ctx):
     for name in scope:
         if name != '*' and name not in vocabulary:
             v1_issue(adr, f"capability '{name}' is not in the adr.yaml vocabulary")
+    if verb == 'change' and len(scope) > 3:
+        v1_issue(adr, f"a change lists {len(scope)} capabilities; list only those it alters, the rest belong in related (ADR-308 §3)", 'warning')
 
 @file_rule(contract=V1)
 def rule_v1_retire_targets(adr, ctx):
@@ -875,7 +880,7 @@ def decision_order(adr) -> tuple:
     return (str(adr.date or ''), int(base or 0), int(part or 0))
 
 def _stands_on_baseline(capability: str, adr, ctx) -> bool:
-    """A change with no prior edge stands on the baseline when the capability
+    """A change with no prior edge on this capability stands on the baseline when it
     is in it and either the change predates adoption, or no live decision on
     the capability has been made since adoption before it. Only decisions
     dated after adoption count: each was written as v1, so migrating an older
@@ -902,7 +907,9 @@ def rule_v1_change_replaces(adr, ctx):
     """A change decision supersedes or amends a prior decision on the same
     capability. When the prior covers more than this capability ('*' or a
     list), the change amends it (ADR-304 §3). A change on a baseline
-    capability with no prior record to name stands on the baseline (ADR-305)."""
+    capability with no prior record to name stands on the baseline (ADR-305).
+    Each capability of a listed change is checked on its own, the baseline
+    included: an edge covering one capability is no prior for another (ADR-308)."""
     if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
         return
     edges = []
@@ -912,14 +919,22 @@ def rule_v1_change_replaces(adr, ctx):
             if target is None:
                 return  # a dangling edge is already reported by the edge rules
             edges.append((field_name, target))
-    for capability in [c for c in capability_scope(adr) if c != '*']:
+    scope = [c for c in capability_scope(adr) if c != '*']
+    listed = len(scope) > 1
+    for capability in scope:
         v0_priors = [t for _, t in edges if not is_v1_record(t, ctx)]
         fits = [(f, t) for f, t in edges if is_v1_record(t, ctx) and covers(t, capability)]
         if any(f == 'amends' or not broader_than(t, capability) for f, t in fits):
             continue
         if fits:
             v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
-        elif not edges and _stands_on_baseline(capability, adr, ctx):
+        elif v0_priors and not listed:
+            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
+            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
+        elif (listed or not edges) and _stands_on_baseline(capability, adr, ctx):
+            # A single-capability change whose edges name no prior on it
+            # does not fall back to the baseline; a listed change's edges
+            # may cover its other capabilities (ADR-308 §2).
             continue
         elif v0_priors:
             numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
@@ -1296,8 +1311,12 @@ def _collide(a: str, b: str) -> bool:
     return sa == sb or (len(short) >= 4 and long_.startswith(short))
 
 def _find_section(adr, name: str) -> Optional[str]:
+    """The heading that is this section: the name alone, or the name followed
+    by punctuation ("Summary: …", "Summary (draft)"). "Summary Nudge" is a
+    different section."""
+    pattern = re.compile(rf'{re.escape(name)}(\s*[:(].*|\s+[\u2014\u2013-].*)?', re.IGNORECASE)
     for heading in adr.sections:
-        if heading.lower() == name.lower() or heading.lower().startswith(name.lower() + ' '):
+        if pattern.fullmatch(heading.strip()):
             return heading
     return None
 
@@ -3449,13 +3468,15 @@ def _uncommitted(path: Path) -> bool:
         return False
     return bool((_git(['status', '--porcelain', '--', rel], root) or '').strip())
 
-def _apply_one(sheet: dict, force: bool) -> tuple:
+def _apply_one(sheet: dict, force: bool, undo: Optional[dict] = None) -> tuple:
     """Write one sheet as a v1 record through render_record and return
     (path, whether it changed). A non-v1 source gains `imported: {from,
     format}`, plus `unmapped` when the source had keys with no v1 field, so
     the record keeps them whatever happens to the todo (ADR-306 §1, §4).
     Refused: a source changed since the scan, a source with a body whose
-    sheet has none, and a source with uncommitted changes unless --force."""
+    sheet has none, and a source with uncommitted changes unless --force.
+    With `undo`, the destination's prior bytes (None when it did not exist)
+    are kept there so a dry run can put them back."""
     source = sheet.get('source')
     source_file = None
     record = dict(sheet['record'])
@@ -3477,6 +3498,13 @@ def _apply_one(sheet: dict, force: bool) -> tuple:
     if dest.is_file() and not force and _uncommitted(dest):
         raise SheetError(f"{relative_path(dest)} has uncommitted changes; commit them, "
                          f"or --force to overwrite")
+    if undo is not None and dest not in undo:
+        undo[dest] = dest.read_bytes() if dest.is_file() else None
+        made = undo.setdefault('__dirs__', [])
+        folder = dest.parent
+        while not folder.exists():
+            made.append(folder)
+            folder = folder.parent
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text)
     return dest, True
@@ -3507,57 +3535,98 @@ def _import_apply(args):
     (ADR-306 §3). A sheet with open todo items is skipped. --partial writes
     it anyway, unless an item is one lint could not find again afterwards
     (BLOCKING_TODO). An applied sheet is removed: the record is what is
-    kept. One bad sheet is reported and the rest still apply."""
+    kept. One bad sheet is reported and the rest still apply. --dry-run
+    writes the records, lints them inside the corpus, prints each issue,
+    then restores every file it wrote and keeps every sheet."""
     if args.sheets:
         paths = [Path(p) for p in args.sheets]
     else:
         paths = sorted(import_dir().glob('ADR-*.yaml')) if import_dir().is_dir() else []
     lines, written = [], []
+    undo = {} if args.dry_run else None
     applied = skipped = refused = 0
-    for path in paths:
-        shown = relative_path(path.resolve())
-        try:
-            sheet = load_sheet(path)
-            todo = sheet.get('todo') or []
-            held = blocking_todo(todo) if args.partial else todo
-            if held:
-                why = "todo item(s) --partial does not write past" if args.partial else 'open todo item(s)'
-                lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
-                skipped += 1
+    counts, issues = {}, {}
+    try:
+        for path in paths:
+            shown = relative_path(path.resolve())
+            try:
+                sheet = load_sheet(path)
+                todo = sheet.get('todo') or []
+                held = blocking_todo(todo) if args.partial else todo
+                if held:
+                    why = "todo item(s) --partial does not write past" if args.partial else 'open todo item(s)'
+                    lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
+                    skipped += 1
+                    continue
+                dest, changed = _apply_one(sheet, args.force, undo)
+            except (SheetError, OSError, ValueError, TypeError, AttributeError, KeyError) as e:
+                lines.append((f"Refused: {shown}: {e}", None))
+                refused += 1
                 continue
-            dest, changed = _apply_one(sheet, args.force)
-        except (SheetError, OSError, ValueError, TypeError, AttributeError, KeyError) as e:
-            lines.append((f"Refused: {shown}: {e}", None))
-            refused += 1
-            continue
-        try:
-            path.unlink()
-        except OSError as e:
-            lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
-        applied += 1
-        written.append(dest.resolve())
-        partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
-        lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
-    counts = _lint_counts(written)
+            if not args.dry_run:
+                try:
+                    path.unlink()
+                except OSError as e:
+                    lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
+            applied += 1
+            written.append(dest.resolve())
+            partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
+            lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
+        counts, issues = _lint_counts(written)
+    finally:
+        if undo is not None:
+            for failed in _restore(undo):
+                lines.append((f"Note: dry run could not restore {failed}", None))
     for text, dest in lines:
         if dest is not None:
             errors, warnings = counts.get(dest, (0, 0))
             text += f" (lint: {errors} errors, {warnings} warnings)"
+            if args.dry_run:
+                text = text.replace('Applied: ', 'Would apply: ', 1)
+                text += ''.join(f"\n    {'error' if i.severity == 'error' else 'warning'}: {i.message}"
+                                for i in issues.get(dest, []))
         print(text)
-    print(f"Import: {applied} applied, {skipped} skipped, {refused} refused")
-    return 1 if refused else 0
+    verb = 'would apply' if args.dry_run else 'applied'
+    print(f"Import: {applied} {verb}, {skipped} skipped, {refused} refused"
+          + (' (dry run: nothing written)' if args.dry_run else ''))
+    lint_errors = sum(e for e, _ in counts.values())
+    return 1 if refused or (args.dry_run and lint_errors) else 0
+
+def _restore(undo: dict) -> list:
+    """Put back every file a dry run wrote, and remove the directories it
+    made that are left empty. Each file is restored on its own, so one
+    failure doesn't stop the rest; the paths that failed are returned."""
+    failed = []
+    for dest, before in undo.items():
+        if dest == '__dirs__':
+            continue
+        try:
+            if before is None:
+                dest.unlink(missing_ok=True)
+            else:
+                dest.write_bytes(before)
+        except OSError:
+            failed.append(relative_path(dest))
+    for folder in sorted(undo.get('__dirs__', []), key=lambda d: len(d.parts), reverse=True):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
+    return failed
 
 def _lint_counts(paths: list) -> dict:
-    """(errors, warnings) per written record, from the full rule set."""
+    """(errors, warnings) per written record, and the issues themselves,
+    from the full rule set."""
     if not paths:
-        return {}
+        return {}, {}
     corpus = get_all_adrs(include_archived=True)
     ctx = LintContext.from_corpus(corpus)
     targets = [adr for adr in corpus if adr.path.resolve() in set(paths)]
     run_rules(targets, ctx)
-    return {adr.path.resolve(): (sum(i.severity == 'error' for i in adr.issues),
-                                 sum(i.severity != 'error' for i in adr.issues))
-            for adr in targets}
+    counts = {adr.path.resolve(): (sum(i.severity == 'error' for i in adr.issues),
+                                   sum(i.severity != 'error' for i in adr.issues))
+              for adr in targets}
+    return counts, {adr.path.resolve(): list(adr.issues) for adr in targets}
 # ============================================================================
 # Main
 # ============================================================================
@@ -3624,6 +3693,9 @@ def main():
                               'note, a number or domain mismatch')
     p_apply.add_argument('--force', action='store_true',
                          help='Overwrite a record that has uncommitted changes')
+    p_apply.add_argument('--dry-run', action='store_true',
+                         help='Write, lint inside the corpus and print each issue, then restore '
+                              'every file and keep every sheet')
 
     # index
     index_parser = subparsers.add_parser('index', help='Generate ADR index')

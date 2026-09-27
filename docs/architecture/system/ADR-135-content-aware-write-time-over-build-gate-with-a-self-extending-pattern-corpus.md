@@ -1,5 +1,17 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - matching
+  - authoring
+basis:
+  - evidence: 'an external model-graded usage report (2026-05 to 2026-06, 92 sessions): Buggy Code 40, Wrong Approach 37, Excessive Changes 7, all at write time'
+  - precedent: ADR-134
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-12
 deciders:
   - aaronsb
@@ -8,6 +20,10 @@ related:
   - ADR-134
   - ADR-123
   - ADR-130
+imported:
+  from: docs/architecture/system/ADR-135-content-aware-write-time-over-build-gate-with-a-self-extending-pattern-corpus.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-135: Content-aware write-time over-build gate with a self-extending pattern corpus

@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+superseded_by: ADR-188#3
+basis:
+  - evidence: a live session fired five ways on one prompt, three by incidental keywords with embed scores 0.22, 0.15 and 0.09
+  - evidence: 42 of 136 way files carry a pattern:, many bare common words; 5,011 near-miss events show the semantic lane landing just below threshold
+  - precedent: ADR-125
+  - precedent: ADR-153
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-04
 deciders:
   - aaronsb
@@ -10,7 +23,10 @@ related:
   - 130
   - 134
   - 153
-superseded_by: ADR-188#3
+imported:
+  from: docs/architecture/system/ADR-155-semantic-gating-of-the-keyword-channel-and-reasoning-channel-rebuild.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-155: Semantic gating of the keyword channel and reasoning-channel rebuild

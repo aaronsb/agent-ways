@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'read-only diagnostics on session 56ebbbc1: no mid-turn queued operator message was scanned, and a lone fragment fell to the single-vector fallback while the concatenated burst fired documentation/mermaid (peak 0.477, share 0.190)'
+  - standard: 'Claude Code hook lifecycle: UserPromptSubmit fires once per turn, and mid-turn messages are recorded as queue-operation enqueue entries'
+  - precedent: ADR-160
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-05
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-155
   - ADR-130
   - ADR-123
+imported:
+  from: docs/architecture/system/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-161: Queued mid-turn operator messages as an aggregated scan surface

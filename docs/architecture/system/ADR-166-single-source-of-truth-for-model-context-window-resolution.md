@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - disclosure
+  - cli
+  - attend
+basis:
+  - evidence: three context-window resolvers disagreed; a claude-fable-5 session at 212,899 tokens showed tokens_total 200000 and pct_used 106, and ~78,000 local model records never carry the [1m] suffix
+  - precedent: ADR-126
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-12
 deciders:
   - aaronsb
@@ -8,6 +21,10 @@ related:
   - ADR-126
   - ADR-151
   - ADR-153
+imported:
+  from: docs/architecture/system/ADR-166-single-source-of-truth-for-model-context-window-resolution.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-166: Single source of truth for model context-window resolution

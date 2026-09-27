@@ -1,11 +1,26 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'gzip NCD is surface-level: ''optimize database queries'' and ''speed up SQL'' share no bytes; per-way NCD thresholds (0.52-0.58) are hand-tuned and length-sensitive'
+  - evidence: Anthropic's January 2026 restriction of programmatic claude -p subscription use makes model-match.sh an unreliable foundation (References)
+  - standard: BM25 with the standard literature defaults k1 = 1.2, b = 0.75
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-02-16
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-013
+imported:
+  from: docs/architecture/legacy/ADR-014-tfidf-semantic-matcher.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-014: TF-IDF/BM25 Binary for Semantic Way Matching

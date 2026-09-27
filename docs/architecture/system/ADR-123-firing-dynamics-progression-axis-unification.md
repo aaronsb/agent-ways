@@ -1,10 +1,24 @@
 ---
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - disclosure
+  - attend
+  - matching
 supersedes:
   - ADR-104
   - ADR-119
   - ADR-121
   - ADR-112
-status: Accepted
+basis:
+  - evidence: ways re-disclosure was a flat REDISCLOSE_PCT = 25 step function while attend used the same decay math on wall-clock time
+  - evidence: 'Phase F validation session: 92 turns, 212K tokens, zero operator redirections, reactive firing and decay verified in flight (docs/hooks-and-ways/observed-behavior.md)'
+  - precedent: ADR-119
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-14
 deciders:
   - aaronsb
@@ -15,6 +29,10 @@ related:
   - ADR-117
   - ADR-119
   - ADR-121
+imported:
+  from: docs/architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-123: Firing dynamics — progression-axis unification for attend and ways

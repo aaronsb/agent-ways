@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: adr
+basis:
+  - evidence: a manual audit found 8 of 12 ADRs with incorrect statuses
+  - evidence: the 200K to 1M context window change was discovered ad hoc rather than surfaced from upstream releases (ADR-103, ADR-104)
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-20
 deciders:
   - aaronsb
@@ -7,6 +17,10 @@ deciders:
 related:
   - ADR-103
   - ADR-104
+imported:
+  from: docs/architecture/system/ADR-106-project-pulse-epoch-mapped-project-awareness.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-106: Project Pulse — Epoch-Mapped Project Awareness

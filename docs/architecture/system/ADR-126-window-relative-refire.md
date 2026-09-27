@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: disclosure
+basis:
+  - evidence: in a 4.3-hour, 1M-token session on 2026-04-20 the softwaredev/code/quality way fired 5 times, re-injected roughly every 200k tokens
+  - evidence: '95 ways at half_life: 30000 calibrated for a 200k window; the narrow re-tune in PR #70'
+  - precedent: ADR-123
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-22
 deciders:
   - aaronsb
@@ -8,6 +19,10 @@ related:
   - ADR-115
   - ADR-121
   - ADR-123
+imported:
+  from: docs/architecture/system/ADR-126-window-relative-refire.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-126: Window-relative refire with named presets

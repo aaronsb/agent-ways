@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Round-trip test for `adr import` over this repo's own records (ADR-306 §7).
 #
-# Works on a copy of docs/architecture in a temporary git repo; the real tree
+# Works on a frozen snapshot of the pre-conversion corpus (tests/fixtures/adr/
+# v0-corpus) in a temporary git repo; the real tree
 # is never written. One synthetic v0 record joins the copy: it has text above
 # its H1 and a key with no v1 field, which no real record has yet. For every
 # v0 record, archived and legacy ones included:
@@ -40,7 +41,10 @@ export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 
 mkdir -p "$WORK/repo/docs"
-cp -r "$REPO_ROOT/docs/architecture" "$WORK/repo/docs/architecture"
+# The corpus is a frozen snapshot of agent-ways' records from before they
+# were converted, so the test keeps its 96 real v0 records (97 with the synthetic one) whatever
+# the live tree holds.
+cp -r "$REPO_ROOT/tests/fixtures/adr/v0-corpus/docs/architecture" "$WORK/repo/docs/architecture"
 rm -rf "$WORK/repo/docs/architecture/.import"
 
 # The synthetic record takes the first free number in the system range.

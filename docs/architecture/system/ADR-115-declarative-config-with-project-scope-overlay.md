@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: constrain
+capability: config
+basis:
+  - evidence: attend's user-scope config plus project-scope +/- overlay, introduced during implementation, proved clean enough to propose as the workspace standard
+  - standard: XDG Base Directory conventions ($XDG_CONFIG_HOME, $XDG_CACHE_HOME)
+  - precedent: ADR-113
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-10
 deciders:
   - aaronsb
@@ -7,6 +18,10 @@ deciders:
 related:
   - ADR-113
   - ADR-111
+imported:
+  from: docs/architecture/system/ADR-115-declarative-config-with-project-scope-overlay.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-115: Declarative Configuration with Project-Scope Overlay

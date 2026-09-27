@@ -1,7 +1,16 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: add
+capability: governance
 superseded_by:
   - ADR-200
+basis:
+  - evidence: the step from policy document to way.md is invisible; the link between policy source and compiled guidance exists only in the author's head (Context, The Compilation Gap)
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-02-05
 deciders:
   - aaronsb
@@ -9,6 +18,10 @@ deciders:
 related:
   - ADR-013
   - ADR-200
+imported:
+  from: docs/architecture/legacy/ADR-005-governance-traceability.md
+  format: v0
+  status: Superseded
 ---
 
 # ADR-005: Governance Traceability for Ways

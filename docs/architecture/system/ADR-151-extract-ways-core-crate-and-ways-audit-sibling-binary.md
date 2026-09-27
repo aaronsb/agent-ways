@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - governance
+  - install
+supersedes: []
+basis:
+  - evidence: the ~1,100-line governance/provenance engine lives inside the binary-only ways-cli crate with zero tests and no library seam to test against
+  - precedent: ADR-200
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -10,7 +23,10 @@ related:
   - ADR-142
   - ADR-200
   - ADR-201
-supersedes: []
+imported:
+  from: docs/architecture/system/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-151: Extract ways-core crate and ways-audit sibling binary

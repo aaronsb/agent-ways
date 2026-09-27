@@ -1,10 +1,25 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - disclosure
+  - authoring
+basis:
+  - evidence: static way text cannot adapt to the environment it lands in, e.g. solo vs team repo, which SSH tools are installed, AWS account and region (Context, The Limitation)
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2025-12-30
 deciders:
   - aaronsb
   - claude
 related: []
+imported:
+  from: docs/architecture/legacy/ADR-004-way-macros.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-004: Way Macros for Dynamic Context Injection

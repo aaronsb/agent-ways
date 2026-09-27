@@ -1,11 +1,27 @@
 ---
-status: Deprecated
+contract: adr/v1
+kind: decision
+verb: add
+capability: attend
+superseded_by:
+  - ADR-113
+basis:
+  - evidence: 'ADR-101''s wormhole experiment (2026-02-26): 6 of 10 turns succeeded, 3 collisions burned codes and needed out-of-band resync'
+  - precedent: ADR-101
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-02-26
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-101
+imported:
+  from: docs/architecture/system/ADR-102-irc-based-local-agent-communication.md
+  format: v0
+  status: Deprecated
 ---
 
 # ADR-102: IRC-based local agent communication

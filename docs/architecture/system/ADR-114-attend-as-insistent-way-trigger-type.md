@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - matching
+  - attend
+  - disclosure
+basis:
+  - standard: Claude Code's Monitor tool delivers stdout lines as one-line async notifications, too short for way-length guidance
+  - precedent: ADR-113
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-09
 deciders:
   - aaronsb
@@ -10,6 +23,10 @@ related:
   - ADR-108
   - ADR-112
   - ADR-113
+imported:
+  from: docs/architecture/system/ADR-114-attend-as-insistent-way-trigger-type.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-114: `attend` Events as an Insistent Way Trigger Type

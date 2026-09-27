@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - authoring
+  - matching
+basis:
+  - evidence: project-local ways got BM25 fallback matching (91%) while global ways got embedding matching (98%)
+  - evidence: embedding 58+ ways takes ~2 seconds, too slow to redo on every session start
+  - precedent: ADR-108
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-23
 deciders:
   - aaronsb
@@ -10,6 +23,10 @@ related:
   - ADR-105
   - ADR-111
   - ADR-125
+imported:
+  from: docs/architecture/system/ADR-109-project-scope-way-embedding-with-manifest-based-staleness-detection.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-109: Project-Scope Way Embedding with Manifest-Based Staleness Detection

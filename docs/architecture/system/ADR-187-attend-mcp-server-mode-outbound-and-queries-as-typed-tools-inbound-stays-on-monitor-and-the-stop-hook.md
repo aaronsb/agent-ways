@@ -1,5 +1,16 @@
 ---
-status: Proposed
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: 'issues #536 and #538: misuse classes seen in transcripts; the #538 audit found tool-description guidance had the highest adherence of any placement'
+  - standard: 'MCP protocol revision of 2026-07-28: no server path places content into the model''s turn'
+  - precedent: ADR-172
+agent:
+  name: Claude
+  model: unrecorded
+status: proposed
 date: 2026-09-19
 deciders:
   - aaronsb
@@ -17,7 +28,12 @@ related:
   - ADR-182
   - ADR-184
   - ADR-185
-amends: ADR-169#1
+imported:
+  from: docs/architecture/system/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md
+  format: v0
+  status: Proposed
+  unmapped:
+    amends: ADR-169#1
 ---
 
 # ADR-187: Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook

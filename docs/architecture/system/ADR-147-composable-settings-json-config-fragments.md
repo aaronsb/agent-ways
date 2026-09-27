@@ -1,15 +1,30 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
 superseded_by: ADR-169
+basis:
+  - standard: Claude Code's documented settings merge law and managed-settings.d drop-in directory
+  - standard: 'SchemaStore claude-code-settings.json schema (Anthropic publishes none: anthropics/claude-code#11795)'
+  - evidence: the managed settings console is a raw settings.json textarea whose only safety note is "Invalid settings may disable Claude Code for your organization"
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-07-01
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-169]]"
-  - "[[ADR-142]]"
-  - "[[ADR-143]]"
-  - "[[ADR-145]]"
+  - '[[ADR-169]]'
+  - '[[ADR-142]]'
+  - '[[ADR-143]]'
+  - '[[ADR-145]]'
+imported:
+  from: docs/architecture/system/ADR-147-composable-settings-json-config-fragments.md
+  format: v0
+  status: Superseded
 ---
 
 # ADR-147: Composable settings.json — a store of YAML config fragments

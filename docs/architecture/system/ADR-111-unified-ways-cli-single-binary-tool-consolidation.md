@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - install
+  - authoring
+  - matching
+basis:
+  - evidence: tooling spread across C, C++, Bash and Python (tool inventory table); every tool re-walks the tree and re-parses frontmatter, and the bash carries macOS bash 3.2 constraints
+  - standard: 'the gh, aws and gcloud CLIs: one binary with subcommands and shared infrastructure'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-30
 deciders:
   - aaronsb
@@ -9,6 +22,10 @@ related:
   - ADR-107
   - ADR-108
   - ADR-110
+imported:
+  from: docs/architecture/system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-111: Unified `ways` CLI — Single Binary Tool Consolidation

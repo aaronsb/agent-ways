@@ -1,0 +1,29 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  proposed: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+  ⚠️ capability 'export' has no accepted add decision
+  ⚠️ capability 'audit' has no accepted add decision
+
+docs/architecture/system/ADR-116-shared-queue.md
+  ⚠️ a change lists 4 capabilities; list only those it alters, the rest belong in related (ADR-308 §3)
+  ⚠️ supersedes: ADR-103 does not declare the reciprocal superseded_by: ADR-116 — one-directional links rot
+  ❌ a change decision supersedes or amends a prior decision on 'search'
+  ❌ a change decision supersedes or amends a prior decision on 'export'
+  ❌ a change decision supersedes or amends a prior decision on 'audit'
+
+════════════════════════════════════════════════════════════
+Summary: 3 errors, 5 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

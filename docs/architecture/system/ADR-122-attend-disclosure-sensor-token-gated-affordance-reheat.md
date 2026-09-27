@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: Claude learns attend's messaging affordances from SKILL.md at session start and may have forgotten them by turn 80, so peer messages go unanswered
+  - evidence: 'validation before promotion: 57 workspace unit tests pass, and live Monitor runs and a two-instance peer conversation confirmed the disclosure'
+  - precedent: ADR-104
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-13
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-113
   - ADR-117
   - ADR-119
+imported:
+  from: docs/architecture/system/ADR-122-attend-disclosure-sensor-token-gated-affordance-reheat.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-122: Attend disclosure sensor — token-gated affordance reheat

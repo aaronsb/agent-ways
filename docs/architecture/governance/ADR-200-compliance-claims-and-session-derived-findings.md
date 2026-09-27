@@ -1,5 +1,19 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: governance
+supersedes:
+  - ADR-005
+basis:
+  - evidence: 'nothing consumes the provenance subsystem: no CI job, hook, or reviewer runs it, and its claims were never assessed'
+  - standard: 'NIST SP 800-53A Rev. 5 (assessment findings: satisfied / other than satisfied)'
+  - standard: NIST OSCAL layered model (Component Definition, Assessment Results, POA&M)
+  - standard: AICPA SOC 2 Type I and Type II under SSAE 18
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -11,8 +25,10 @@ related:
   - ADR-111
   - ADR-151
   - ADR-201
-supersedes:
-  - ADR-005
+imported:
+  from: docs/architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-200: Compliance claims and session-derived findings

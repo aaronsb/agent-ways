@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: loop
+basis:
+  - evidence: a cross-check against socratic (m4vic/socratic) found no cheap gate at the front of a build that establishes what the build is bound to
+  - precedent: ADR-165
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-08-05
 deciders:
   - aaronsb
@@ -7,6 +17,10 @@ deciders:
 related:
   - 165
   - 128
+imported:
+  from: docs/architecture/system/ADR-176-contract-identification-as-the-develop-loop-front-gate.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-176: Contract identification as the develop-loop front gate

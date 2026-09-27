@@ -1,7 +1,20 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: add
+capability: attend
+supersedes:
+  - ADR-101
+  - ADR-102
+basis:
+  - standard: Claude Code's Monitor tool delivers each stdout line of a background process as an asynchronous notification
+  - evidence: 'notification rate experiment: 10+ notifications in 2 minutes caused confabulated user turns; 3 per 2 minutes was stable'
+  - evidence: ADR-101 and ADR-102 failed on external transports (wormhole fragility, IRC complexity)
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-09
-revised: 2026-04-10
 deciders:
   - aaronsb
   - claude
@@ -10,6 +23,12 @@ related:
   - ADR-111
   - ADR-112
   - ADR-114
+imported:
+  from: docs/architecture/system/ADR-113-attend-active-awareness-module.md
+  format: v0
+  status: Accepted
+  unmapped:
+    revised: 2026-04-10
 ---
 
 # ADR-113: `attend` — Active Awareness Module

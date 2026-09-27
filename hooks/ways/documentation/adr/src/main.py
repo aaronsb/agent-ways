@@ -64,6 +64,9 @@ def main():
                               'note, a number or domain mismatch')
     p_apply.add_argument('--force', action='store_true',
                          help='Overwrite a record that has uncommitted changes')
+    p_apply.add_argument('--dry-run', action='store_true',
+                         help='Write, lint inside the corpus and print each issue, then restore '
+                              'every file and keep every sheet')
 
     # index
     index_parser = subparsers.add_parser('index', help='Generate ADR index')

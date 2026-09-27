@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: the user reproduced same-cwd name collision by launching claude twice in one directory
+  - evidence: session_alive() in tools/attend/src/groups.rs:347 is a stub returning true, so ghost agents accumulate in _groups.yaml and the chat legend
+  - precedent: ADR-124
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-28
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-118
   - ADR-120
   - ADR-124
+imported:
+  from: docs/architecture/system/ADR-129-instance-suffix-and-heartbeat-liveness.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-129: Instance suffix and heartbeat liveness for attend identity

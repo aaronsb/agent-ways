@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: a cold rewrite of a 200k-token prefix under Fable 5.1 costs about four dollars against five cents for a warm turn
+  - evidence: the cache-tax mod (karanb192/claude-code-mods) keeps the cache warm only through early-access function hooks
+  - precedent: ADR-113
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-09-17
 deciders:
   - aaronsb
@@ -8,6 +19,10 @@ related:
   - ADR-113
   - ADR-136
   - ADR-172
+imported:
+  from: docs/architecture/system/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-182: Keepwarm: attend keeps the prompt cache warm with a wake floor

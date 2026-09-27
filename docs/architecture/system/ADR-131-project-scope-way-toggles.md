@@ -1,5 +1,17 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - config
+  - matching
+basis:
+  - evidence: the only enable/disable knob is disabled_domains in user-scope ways.json, which is domain-level and global, so per-project muting needs file deletion or JSON edits
+  - precedent: ADR-115
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-05-22
 deciders:
   - aaronsb
@@ -8,6 +20,10 @@ related:
   - ADR-115
   - ADR-105
   - ADR-111
+imported:
+  from: docs/architecture/system/ADR-131-project-scope-way-toggles.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-131: Project-scope way toggles

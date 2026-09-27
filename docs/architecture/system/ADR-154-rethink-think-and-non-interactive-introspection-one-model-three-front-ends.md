@@ -1,5 +1,17 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - matching
+  - cli
+basis:
+  - evidence: rethink silently globalizes when project detection returns None, and has no --list --json for an agent to enumerate sessions
+  - precedent: ADR-153
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -7,6 +19,10 @@ deciders:
 related:
   - ADR-153
   - ADR-111
+imported:
+  from: docs/architecture/system/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-154: `ways introspect` — one model, three front-ends
