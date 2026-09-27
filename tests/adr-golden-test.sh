@@ -237,12 +237,31 @@ keep v1-new-decision-file.md docs/architecture/system/ADR-115-stream-exports.md
 capture v1-new-decision-lint lint docs/architecture/system/ADR-115-stream-exports.md
 capture v1-new-spec new system "Export format" --kind spec --capability ingest
 keep v1-new-spec-file.md docs/architecture/system/ADR-116-export-format.md
+capture v1-new-spec-lint lint docs/architecture/system/ADR-116-export-format.md
 capture v1-new-bare new system "Bare decision"
+keep v1-new-bare-file.md docs/architecture/system/ADR-117-bare-decision.md
 capture v1-new-bare-lint lint docs/architecture/system/ADR-117-bare-decision.md
 capture v1-new-unknown-kind new system "Policy thing" --kind policy
+worktree v1-new-unknown-kind-status.txt
+capture v1-new-refused new system "Spec with a verb" --kind spec --verb add --agent Claude --capability nosuch
+# A value with a line that reads as the frontmatter fence is written on one
+# line and reads back intact.
+capture v1-new-multiline new system "Multiline model" --verb add --capability ingest --agent Claude --model "$(printf 'a\n---\nb')"
+keep v1-new-multiline-file.md docs/architecture/system/ADR-118-multiline-model.md
+capture v1-new-multiline-lint lint docs/architecture/system/ADR-118-multiline-model.md
 # A placeholder left in a record that has left proposed is an error.
 edit docs/architecture/system/ADR-115-stream-exports.md "s.replace('status: proposed', 'status: accepted')"
 capture v1-new-placeholder-accepted lint docs/architecture/system/ADR-115-stream-exports.md
+
+# The kind's schema, not its name, decides a new record's fields: a custom
+# kind that takes a verb, requires targets and has a Summary section.
+fresh v1
+edit docs/architecture/adr.yaml "s.replace('  spec:\n', '  policy:\n    verb: required\n    requires: [capability, targets]\n    sections: [Summary]\n  spec:\n', 1)"
+capture v1-new-custom-kind new system "Retention policy" --kind Policy --verb constrain --capability ingest
+keep v1-new-custom-kind-file.md docs/architecture/system/ADR-115-retention-policy.md
+# A v1 contract with no kinds: new says why it cannot write.
+fresh v1-empty
+capture v1-empty-new new system "Anything"
 
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.

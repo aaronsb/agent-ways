@@ -17,7 +17,8 @@ V1_SUMMARY_SKELETON = '''## Summary
 - **Inversion:** [the two ends this sits between; is the answer outside that framing?]
 '''
 
-V1_BODY_SKELETON = '''## Context
+# The body `adr new` writes, under v0 and v1 alike.
+BODY_SKELETON = '''## Context
 
 [What is the issue that we're seeing that is motivating this decision or change?]
 
@@ -45,23 +46,51 @@ V1_BODY_SKELETON = '''## Context
 - [Why were they rejected?]
 '''
 
+# The bracketed prompts in the skeletons. A line still holding one is unfinished.
+SKELETON_PROMPTS = tuple(dict.fromkeys(re.findall(r'\[[^\]\n]+\]', V1_SUMMARY_SKELETON + BODY_SKELETON)))
+
 class _RecordDumper(yaml.SafeDumper):
-    """Block-style YAML that indents list items under their key, as the
-    records in this corpus are written."""
+    """Block-style YAML as this corpus writes it: list items indented under
+    their key, an empty field as `~`, and a multi-line string on one
+    double-quoted line, so no line of it can read as the `---` fence."""
     def increase_indent(self, flow=False, indentless=False):
         return super().increase_indent(flow, False)
 
+def _represent_str(dumper, value):
+    style = '"' if '\n' in value else None
+    return dumper.represent_scalar('tag:yaml.org,2002:str', value, style=style)
+
+_RecordDumper.add_representer(str, _represent_str)
+_RecordDumper.add_representer(type(None),
+                              lambda dumper, _: dumper.represent_scalar('tag:yaml.org,2002:null', '~'))
+
 def _as_date(value):
-    """A YYYY-MM-DD string as a date, so it is written unquoted."""
+    """A valid YYYY-MM-DD string as a date, so it is written unquoted. An
+    invalid one stays a string for lint to report."""
     if isinstance(value, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
-        return date.fromisoformat(value)
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return value
     return value
 
-def placeholder_lines(text: str) -> list:
-    """Lines still holding a skeleton placeholder from `adr new`."""
-    marks = [line.strip() for line in (V1_SUMMARY_SKELETON + V1_BODY_SKELETON).splitlines()
-             if '[' in line and ']' in line]
-    return [line.strip() for line in text.splitlines() if line.strip() in marks]
+def empty_record(kind: str, schema: dict, given: dict, defaults: dict) -> dict:
+    """The frontmatter a record of this kind starts with: every field the kind
+    requires, from `given` where supplied and empty otherwise. The kind's
+    schema decides the fields, not its name (ADR-304 §1, §4)."""
+    record = {'contract': V1, 'kind': kind}
+    if schema.get('verb') == 'required':
+        record['verb'] = given.get('verb')
+    empty = {'basis': [], 'targets': []}
+    for name in v1_requires(schema):
+        if name == 'agent':
+            record['agent'] = {'name': given.get('agent'), 'model': given.get('model')}
+        else:
+            record[name] = given.get(name, empty.get(name))
+    lifecycle = v1_lifecycle(schema)
+    default_status = str(defaults.get('status') or '').lower()
+    record['status'] = default_status if default_status in lifecycle else lifecycle[0]
+    return record
 
 def new_sheet(number: int, domain: str, title: str, record: dict,
               summary: Optional[str] = None, body: str = '') -> dict:
@@ -76,33 +105,36 @@ def _ordered(record: dict) -> dict:
     return ordered
 
 def render_record(sheet: dict) -> str:
-    """The v1 record a sheet describes: frontmatter, title, Summary, body.
-    A sheet with no summary gets the skeleton when the record is a decision."""
+    """The v1 record a sheet describes. It writes only what the sheet holds:
+    the frontmatter, the title, the Summary if the sheet has one, then the
+    body verbatim. The frontmatter is read back before it is returned, and a
+    mismatch raises: the round trip is checked, not assumed (ADR-306 §7)."""
     target = sheet['target']
-    record = sheet['record']
-    fields = _ordered(record)
+    fields = _ordered(sheet['record'])
     if 'date' in fields:
         fields['date'] = _as_date(fields['date'])
     front = yaml.dump(fields, Dumper=_RecordDumper, sort_keys=False, allow_unicode=True,
                       default_flow_style=False, width=1000)
-    parts = [f"---\n{front}---\n", f"# ADR-{int(target['number']):03d}: {target['title']}\n"]
+    if yaml.safe_load(front) != fields:
+        raise ValueError(f"ADR-{target['number']}: frontmatter does not read back as written")
+    title = ' '.join(str(target['title']).split())
+    text = f"---\n{front}---\n\n# ADR-{int(target['number']):03d}: {title}\n"
     summary = sheet.get('summary')
     if summary:
-        parts.append(summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}")
-    elif record.get('kind') == 'decision':
-        parts.append(V1_SUMMARY_SKELETON)
+        summary = summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}"
+        text += '\n' + summary.rstrip('\n') + '\n'
     if sheet.get('body'):
-        parts.append(sheet['body'])
-    return '\n'.join(p.rstrip('\n') + '\n' for p in parts)
+        text += '\n' + sheet['body']
+    return text
 
-@file_rule(contract=V1)
-def rule_v1_no_placeholders(adr, ctx):
-    """A record still holding `adr new`'s placeholder text is unfinished: a
-    warning while proposed, an error once it has left proposed."""
-    if not is_v1_record(adr, ctx):
-        return
-    left = placeholder_lines(adr.body)
-    if not left:
-        return
-    level = 'warning' if str(adr.status or '').lower() == 'proposed' else 'error'
-    v1_issue(adr, f"{len(left)} placeholder line(s) from `adr new` still to fill, first: {left[0]}", level)
+def placeholder_lines(text: str) -> list:
+    """Lines outside fenced code that still hold a skeleton prompt."""
+    found, fence = [], None
+    for line in text.splitlines():
+        marker = re.match(r'\s*(```|~~~)', line)
+        if marker:
+            fence = None if fence == marker.group(1) else (fence or marker.group(1))
+            continue
+        if fence is None and any(prompt in line for prompt in SKELETON_PROMPTS):
+            found.append(line.strip())
+    return found

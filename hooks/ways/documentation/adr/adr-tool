@@ -1000,8 +1000,9 @@ def rule_v1_basis_shape(adr, ctx):
     if not is_v1_record(adr, ctx) or 'basis' not in adr.frontmatter:
         return
     basis = adr.frontmatter.get('basis')
-    if basis == []:
-        return  # empty: the requires rule reports it once
+    schema = v1_kind_schema(adr, ctx)
+    if basis == [] and schema is not None and 'basis' in v1_requires(schema):
+        return  # empty where the kind requires a basis: the requires rule reports it
     if not isinstance(basis, list):
         v1_issue(adr, "basis: expected a list of entries, each naming one source")
         return
@@ -1458,6 +1459,19 @@ def rule_v1_frozen(adr, ctx):
             v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
     if not adr.body.rstrip().startswith(body_then.rstrip()):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
+
+@file_rule(contract=V1)
+def rule_v1_no_placeholders(adr, ctx):
+    """A record still holding a prompt from `adr new`'s skeleton is unfinished:
+    a warning while proposed, an error once it has left proposed. The prompts
+    live in sheet.py, which assembles after this module."""
+    if not is_v1_record(adr, ctx):
+        return
+    left = placeholder_lines(adr.body)
+    if not left:
+        return
+    level = 'warning' if str(adr.status or '').lower() == 'proposed' else 'error'
+    v1_issue(adr, f"{len(left)} placeholder line(s) from `adr new` still to fill, first: {left[0]}", level)
 # --- import sheets and the v1 record writer (ADR-306) -------------------------------
 
 SHEET_FORMAT = 'adr-import/v1'
@@ -1477,7 +1491,8 @@ V1_SUMMARY_SKELETON = '''## Summary
 - **Inversion:** [the two ends this sits between; is the answer outside that framing?]
 '''
 
-V1_BODY_SKELETON = '''## Context
+# The body `adr new` writes, under v0 and v1 alike.
+BODY_SKELETON = '''## Context
 
 [What is the issue that we're seeing that is motivating this decision or change?]
 
@@ -1505,23 +1520,51 @@ V1_BODY_SKELETON = '''## Context
 - [Why were they rejected?]
 '''
 
+# The bracketed prompts in the skeletons. A line still holding one is unfinished.
+SKELETON_PROMPTS = tuple(dict.fromkeys(re.findall(r'\[[^\]\n]+\]', V1_SUMMARY_SKELETON + BODY_SKELETON)))
+
 class _RecordDumper(yaml.SafeDumper):
-    """Block-style YAML that indents list items under their key, as the
-    records in this corpus are written."""
+    """Block-style YAML as this corpus writes it: list items indented under
+    their key, an empty field as `~`, and a multi-line string on one
+    double-quoted line, so no line of it can read as the `---` fence."""
     def increase_indent(self, flow=False, indentless=False):
         return super().increase_indent(flow, False)
 
+def _represent_str(dumper, value):
+    style = '"' if '\n' in value else None
+    return dumper.represent_scalar('tag:yaml.org,2002:str', value, style=style)
+
+_RecordDumper.add_representer(str, _represent_str)
+_RecordDumper.add_representer(type(None),
+                              lambda dumper, _: dumper.represent_scalar('tag:yaml.org,2002:null', '~'))
+
 def _as_date(value):
-    """A YYYY-MM-DD string as a date, so it is written unquoted."""
+    """A valid YYYY-MM-DD string as a date, so it is written unquoted. An
+    invalid one stays a string for lint to report."""
     if isinstance(value, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
-        return date.fromisoformat(value)
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return value
     return value
 
-def placeholder_lines(text: str) -> list:
-    """Lines still holding a skeleton placeholder from `adr new`."""
-    marks = [line.strip() for line in (V1_SUMMARY_SKELETON + V1_BODY_SKELETON).splitlines()
-             if '[' in line and ']' in line]
-    return [line.strip() for line in text.splitlines() if line.strip() in marks]
+def empty_record(kind: str, schema: dict, given: dict, defaults: dict) -> dict:
+    """The frontmatter a record of this kind starts with: every field the kind
+    requires, from `given` where supplied and empty otherwise. The kind's
+    schema decides the fields, not its name (ADR-304 §1, §4)."""
+    record = {'contract': V1, 'kind': kind}
+    if schema.get('verb') == 'required':
+        record['verb'] = given.get('verb')
+    empty = {'basis': [], 'targets': []}
+    for name in v1_requires(schema):
+        if name == 'agent':
+            record['agent'] = {'name': given.get('agent'), 'model': given.get('model')}
+        else:
+            record[name] = given.get(name, empty.get(name))
+    lifecycle = v1_lifecycle(schema)
+    default_status = str(defaults.get('status') or '').lower()
+    record['status'] = default_status if default_status in lifecycle else lifecycle[0]
+    return record
 
 def new_sheet(number: int, domain: str, title: str, record: dict,
               summary: Optional[str] = None, body: str = '') -> dict:
@@ -1536,36 +1579,39 @@ def _ordered(record: dict) -> dict:
     return ordered
 
 def render_record(sheet: dict) -> str:
-    """The v1 record a sheet describes: frontmatter, title, Summary, body.
-    A sheet with no summary gets the skeleton when the record is a decision."""
+    """The v1 record a sheet describes. It writes only what the sheet holds:
+    the frontmatter, the title, the Summary if the sheet has one, then the
+    body verbatim. The frontmatter is read back before it is returned, and a
+    mismatch raises: the round trip is checked, not assumed (ADR-306 §7)."""
     target = sheet['target']
-    record = sheet['record']
-    fields = _ordered(record)
+    fields = _ordered(sheet['record'])
     if 'date' in fields:
         fields['date'] = _as_date(fields['date'])
     front = yaml.dump(fields, Dumper=_RecordDumper, sort_keys=False, allow_unicode=True,
                       default_flow_style=False, width=1000)
-    parts = [f"---\n{front}---\n", f"# ADR-{int(target['number']):03d}: {target['title']}\n"]
+    if yaml.safe_load(front) != fields:
+        raise ValueError(f"ADR-{target['number']}: frontmatter does not read back as written")
+    title = ' '.join(str(target['title']).split())
+    text = f"---\n{front}---\n\n# ADR-{int(target['number']):03d}: {title}\n"
     summary = sheet.get('summary')
     if summary:
-        parts.append(summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}")
-    elif record.get('kind') == 'decision':
-        parts.append(V1_SUMMARY_SKELETON)
+        summary = summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}"
+        text += '\n' + summary.rstrip('\n') + '\n'
     if sheet.get('body'):
-        parts.append(sheet['body'])
-    return '\n'.join(p.rstrip('\n') + '\n' for p in parts)
+        text += '\n' + sheet['body']
+    return text
 
-@file_rule(contract=V1)
-def rule_v1_no_placeholders(adr, ctx):
-    """A record still holding `adr new`'s placeholder text is unfinished: a
-    warning while proposed, an error once it has left proposed."""
-    if not is_v1_record(adr, ctx):
-        return
-    left = placeholder_lines(adr.body)
-    if not left:
-        return
-    level = 'warning' if str(adr.status or '').lower() == 'proposed' else 'error'
-    v1_issue(adr, f"{len(left)} placeholder line(s) from `adr new` still to fill, first: {left[0]}", level)
+def placeholder_lines(text: str) -> list:
+    """Lines outside fenced code that still hold a skeleton prompt."""
+    found, fence = [], None
+    for line in text.splitlines():
+        marker = re.match(r'\s*(```|~~~)', line)
+        if marker:
+            fence = None if fence == marker.group(1) else (fence or marker.group(1))
+            continue
+        if fence is None and any(prompt in line for prompt in SKELETON_PROMPTS):
+            found.append(line.strip())
+    return found
 # ============================================================================
 # Commands
 # ============================================================================
@@ -1760,33 +1806,7 @@ related: []
 
 # ADR-{next_num:03d}: {args.title}
 
-## Context
-
-[What is the issue that we're seeing that is motivating this decision or change?]
-
-## Decision
-
-[What is the change that we're proposing and/or doing?]
-
-## Consequences
-
-### Positive
-
-- [What becomes easier?]
-
-### Negative
-
-- [What becomes harder?]
-
-### Neutral
-
-- [What other changes does this enable or require?]
-
-## Alternatives Considered
-
-- [What other options were evaluated?]
-- [Why were they rejected?]
-'''
+'''  + BODY_SKELETON
 
     # Write file
     folder.mkdir(parents=True, exist_ok=True)
@@ -1799,28 +1819,48 @@ related: []
 
 
 def _v1_content(args, number: int, domain: str, today: str, defaults: dict) -> Optional[str]:
-    """A v1 record from an empty sheet (ADR-306 §3). Fields the arguments do
-    not give are left empty for the author to fill; lint names each one."""
-    kinds = {k: v for k, v in _mapping(get_config().get('kinds')).items() if isinstance(v, dict)}
-    kind = (args.kind or 'decision').lower()
-    if kind not in kinds:
-        print(f"Error: Unknown kind '{kind}'. Kinds: {', '.join(kinds)}", file=sys.stderr)
+    """A v1 record from an empty sheet (ADR-306 §3). The kind's schema decides
+    which fields the record carries; fields the arguments do not give stay
+    empty, and lint names each one. Arguments the kind cannot take are refused."""
+    config = get_config()
+    kinds = {k: v for k, v in _mapping(config.get('kinds')).items() if isinstance(v, dict)}
+    if not kinds:
+        print("Error: adr.yaml declares contract adr/v1 but no kinds; `adr lint` reports the config", file=sys.stderr)
+        return None
+    wanted = (args.kind or 'decision').lower()
+    kind = next((k for k in kinds if str(k).lower() == wanted), None)
+    if kind is None:
+        print(f"Error: Unknown kind '{args.kind or 'decision'}'. Kinds: {', '.join(map(str, kinds))}", file=sys.stderr)
+        return None
+    schema = kinds[kind]
+    problems = []
+    takes_verb = schema.get('verb') == 'required'
+    if args.verb and not takes_verb:
+        problems.append(f"a {kind} record takes no verb")
+    verbs = _str_list(config.get('verbs')) or list(V1_VERBS)
+    if args.verb and takes_verb and args.verb not in verbs:
+        problems.append(f"verb '{args.verb}' is not one of: {', '.join(verbs)}")
+    vocabulary = _mapping(config.get('capabilities'))
+    if args.capability and args.capability not in vocabulary:
+        problems.append(f"capability '{args.capability}' is not in the adr.yaml vocabulary")
+    if (args.agent or args.model) and 'agent' not in v1_requires(schema):
+        problems.append(f"a {kind} record carries no agent")
+    for problem in problems:
+        print(f"Error: {problem}", file=sys.stderr)
+    if problems:
         return None
     deciders = list(defaults.get('deciders') or [])
     if not deciders:
         git_user = _detect_git_user()
         if git_user:
             deciders = [git_user]
-    record = {'contract': V1, 'kind': kind}
-    is_decision = kinds[kind].get('verb') == 'required'
-    if is_decision:
-        record['verb'] = args.verb
-    record['capability'] = args.capability
-    if is_decision:
-        record['basis'] = []
-        record['agent'] = {'name': args.agent, 'model': args.model}
-    record.update({'status': 'proposed', 'date': today, 'deciders': deciders, 'related': []})
-    sheet = new_sheet(number, domain, args.title, record, body=V1_BODY_SKELETON if is_decision else '')
+    given = {'verb': args.verb, 'capability': args.capability, 'agent': args.agent, 'model': args.model}
+    record = empty_record(kind, schema, given, defaults)
+    record.update({'date': today, 'deciders': deciders, 'related': []})
+    sections = _str_list(schema.get('sections')) or []
+    summary = V1_SUMMARY_SKELETON if 'Summary' in sections else None
+    sheet = new_sheet(number, domain, args.title, record, summary=summary,
+                      body=BODY_SKELETON if takes_verb else '')
     return render_record(sheet)
 def cmd_rename(args):
     """Rename an ADR's title and/or file slug. Number and domain are unchanged.

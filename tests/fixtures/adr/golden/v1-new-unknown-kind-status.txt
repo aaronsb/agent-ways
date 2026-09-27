@@ -1,0 +1,3 @@
+A  docs/architecture/system/ADR-115-stream-exports.md
+A  docs/architecture/system/ADR-116-export-format.md
+A  docs/architecture/system/ADR-117-bare-decision.md

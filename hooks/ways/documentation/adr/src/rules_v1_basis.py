@@ -75,8 +75,9 @@ def rule_v1_basis_shape(adr, ctx):
     if not is_v1_record(adr, ctx) or 'basis' not in adr.frontmatter:
         return
     basis = adr.frontmatter.get('basis')
-    if basis == []:
-        return  # empty: the requires rule reports it once
+    schema = v1_kind_schema(adr, ctx)
+    if basis == [] and schema is not None and 'basis' in v1_requires(schema):
+        return  # empty where the kind requires a basis: the requires rule reports it
     if not isinstance(basis, list):
         v1_issue(adr, "basis: expected a list of entries, each naming one source")
         return
