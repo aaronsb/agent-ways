@@ -1,3 +1,4 @@
+path: docs/architecture/INDEX.md
 # Architecture Decision Records
 
 This directory contains Architecture Decision Records (ADRs) for ADR Fixture.
@@ -21,11 +22,19 @@ _Runtime, hooks and storage_
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-101](./system/ADR-101-structured-storage.md) | Structured storage | Accepted |
+| [ADR-101.1](./system/ADR-101.1-storage-migration.md) | Storage migration | Accepted |
 | [ADR-102](./system/ADR-102-hook-ordering.md) | Hook ordering | Accepted (partially superseded by ADR-104 §2) |
 | [ADR-103](./system/ADR-103-cache-layer.md) | Cache layer | Proposed |
 | [ADR-104](./system/ADR-104-hook-priorities.md) | Hook priorities | Accepted |
 | [ADR-105](./system/ADR-105-telemetry.md) | Telemetry export | Deprecated |
 | [ADR-106](./system/ADR-106-one-sided.md) | One-sided supersession | Accepted |
+
+## Operations
+_Deployment and runbooks, split across two folders_
+
+| ADR | Title | Status |
+|-----|-------|--------|
+| [ADR-200](./runbooks/ADR-200-restart-procedure.md) | Restart procedure | Accepted |
 
 ## Documentation
 _Documentation structure and tooling_

@@ -1,8 +1,5 @@
-
-Config file: <ROOT>/docs/architecture/adr.yaml
-------------------------------------------------------------
 # Fixture ADR configuration for the golden-output test (tests/adr-golden-test.sh).
-project_name: ADR Fixture
+project_name: ADR Defects Fixture
 
 domains:
   system:
@@ -44,5 +41,3 @@ legacy:
   label: "Legacy (Pre-Domain Numbering)"
 
 viewer: cat {file}
-
-[exit 0]

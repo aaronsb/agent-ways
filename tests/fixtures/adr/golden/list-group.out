@@ -1,15 +1,20 @@
 
-ADR Fixture — Architecture Decision Records (12 total)
+ADR Fixture — Architecture Decision Records (14 total)
 =======================================================
 
 ## System (system)
 --------------------------------------------------
   ✅ ADR-101      Structured storage
+  ✅ ADR-101.1    Storage migration
   ✅ ADR-102      Hook ordering  (partially superseded by ADR-104 §2)
   💡 ADR-103      Cache layer
   ✅ ADR-104      Hook priorities
   🗑️ ADR-105      Telemetry export
   ✅ ADR-106      One-sided supersession
+
+## Operations (ops)
+--------------------------------------------------
+  ✅ ADR-200      Restart procedure
 
 ## Documentation (docs)
 --------------------------------------------------
@@ -23,5 +28,5 @@ ADR Fixture — Architecture Decision Records (12 total)
   📦 ADR-005      Legacy storage format  (superseded by ADR-101)
   ✅ ADR-012      Plain-text logging
 
-Total: 12 ADRs
+Total: 14 ADRs
 [exit 0]

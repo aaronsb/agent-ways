@@ -1,0 +1,5 @@
+Would archive ADR-105: Telemetry export
+  move:   docs/architecture/system/ADR-105-telemetry.md -> docs/architecture/archive/system/ADR-105-telemetry.md
+  status: Deprecated -> Superseded
+  banner: date <TODAY>, reason: Folded into storage, superseded by: ADR-101
+[exit 0]

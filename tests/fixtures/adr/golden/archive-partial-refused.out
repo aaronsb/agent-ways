@@ -1,0 +1,2 @@
+Error: ADR-102 is partially superseded by ADR-104 §2 while status is 'Accepted' — it is partially superseded, and mostly-live documents do not belong in the archive. Either supersede it fully (set status accordingly) or leave it active.
+[exit 1]

@@ -1,0 +1,17 @@
+
+ADR Defects Fixture — Architecture Decision Records (11 total)
+=======================================================
+  ❓ ADR-140      YAML error
+  ❓ ADR-141      Unclosed frontmatter
+  ❓ ADR-142      No frontmatter at all
+  ❓ ADR-144      Missing status
+  ✅ ADR-145      Missing date
+  ✅ ADR-146      Missing deciders
+  ❓ ADR-147      Invalid status
+  ✅ ADR-149      Filename says 148
+  ✅ ADR-150      Duplicate one
+  💡 ADR-150      Duplicate two
+  ✅ ADR-???      (no title)
+
+Total: 11 ADRs
+[exit 0]

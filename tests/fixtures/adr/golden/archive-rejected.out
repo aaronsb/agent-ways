@@ -1,0 +1,6 @@
+Archived ADR-103: Cache layer
+  docs/architecture/system/ADR-103-cache-layer.md -> docs/architecture/archive/system/ADR-103-cache-layer.md
+  status: Rejected
+
+Regenerate the index: <ADR_TOOL> index -y
+[exit 0]

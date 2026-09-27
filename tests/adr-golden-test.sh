@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Golden-output test for the adr tool (#560, the ADR-304 rollout baseline).
 #
-# Runs the tool's read and write commands against the fixture corpus in
-# tests/fixtures/adr/corpus and diffs each output against
-# tests/fixtures/adr/golden. Later steps in the rollout (#561 onward) must keep
-# these outputs byte-identical for v0 corpora.
+# Runs the tool's read and write commands against two fixture corpora and diffs
+# each output against tests/fixtures/adr/golden. Later steps in the rollout
+# (#561 onward) must keep these outputs byte-identical for v0 corpora, and that
+# guarantee reaches only the paths exercised here.
+#
+#   corpus/   a well-formed corpus: three domains (one with two folders), a
+#             legacy range, a decimal sub-part, an archive, every lifecycle
+#             status, whole and section-level supersession, two lint defects
+#   defects/  lint findings the main corpus does not carry, and a duplicate
+#             number for the multiple-match branch of view
 #
 # Usage:
 #   tests/adr-golden-test.sh            diff against the goldens
@@ -12,58 +18,105 @@
 #
 # ADR_TOOL overrides the tool under test (default: docs/scripts/adr), so an
 # assembled or rewritten tool can be checked against the same goldens.
+#
+# `--help` output is deliberately absent: argparse formats it differently
+# across Python versions.
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ADR_TOOL="${ADR_TOOL:-$REPO_ROOT/docs/scripts/adr}"
-CORPUS="$SCRIPT_DIR/fixtures/adr/corpus"
-GOLDEN="$SCRIPT_DIR/fixtures/adr/golden"
+# capture runs the tool from inside the fixture repo, so a relative path
+# given by the caller has to be resolved first.
+[[ "$ADR_TOOL" = /* ]] || ADR_TOOL="$PWD/$ADR_TOOL"
+[[ -x "$ADR_TOOL" ]] || { echo "ADR_TOOL is not executable: $ADR_TOOL" >&2; exit 2; }
+FIXTURES="$SCRIPT_DIR/fixtures/adr"
+GOLDEN="$FIXTURES/golden"
+TODAY="$(date +%Y-%m-%d)"
 UPDATE=0
 [[ "${1:-}" == "--update" ]] && UPDATE=1
 
-WORK="$(mktemp -d)"
+# The date normalization below replaces today's date wherever it appears. It is
+# safe only while no fixture carries today's date as content.
+if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects"; then
+  echo "a fixture file contains today's date ($TODAY); fixture dates must be in the past" >&2
+  exit 2
+fi
+
+# The physical path: on macOS mktemp returns /var/..., while git reports the
+# resolved /private/var/..., and <ROOT> has to match what the tool prints.
+WORK="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$WORK"' EXIT
 ACTUAL="$WORK/actual"
 mkdir -p "$ACTUAL"
 
-# A fresh git repo per run: the tool finds its root through git, and archive
-# uses git mv. Commit identity is fixed so nothing reads the host's config.
-fresh_corpus() {
+# Git reads nothing from the host: no global or system config (signing,
+# hooks, rename detection, excludes), and a fixed identity.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
+export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+
+# fresh CORPUS — a clean git repo holding a copy of the named corpus. The tool
+# finds its root through git, and archive and rename use git mv.
+fresh() {
   rm -rf "$WORK/repo"
-  cp -r "$CORPUS" "$WORK/repo"
-  (cd "$WORK/repo" && git init -q && git add -A \
-    && git -c user.name=fixture -c user.email=fixture@example.invalid commit -qm fixture)
+  cp -r "$FIXTURES/$1" "$WORK/repo" \
+    && (cd "$WORK/repo" && git init -q && git add -A && git commit -qm fixture) \
+    || { echo "could not set up the $1 fixture repo" >&2; exit 2; }
 }
 
 # Replace what varies between machines and days with fixed tokens.
+# The tool prints its own invocation path in some hints, and a rebuilt tool
+# lives at a different path, so that path is normalized too.
 normalize() {
-  sed -e "s#$WORK/repo#<ROOT>#g" -e "s#$(date +%Y-%m-%d)#<TODAY>#g"
+  sed -e "s#$ADR_TOOL#<ADR_TOOL>#g" -e "s#$WORK/repo#<ROOT>#g" -e "s#$TODAY#<TODAY>#g"
 }
 
-# capture NAME CMD...  — run the tool in the corpus, keep stdout+stderr and
-# the exit code, both normalized
+# capture NAME CMD... — run the tool in the fixture repo and keep its stdout,
+# stderr and exit code, normalized. Stdin is empty, so a prompt reads EOF.
 capture() {
   local name="$1"; shift
   local rc
-  (cd "$WORK/repo" && "$ADR_TOOL" "$@") > "$ACTUAL/$name.out" 2>&1
+  (cd "$WORK/repo" && "$ADR_TOOL" "$@") < /dev/null > "$ACTUAL/$name.out" 2>&1
   rc=$?
   { cat "$ACTUAL/$name.out"; printf '[exit %d]\n' "$rc"; } | normalize > "$ACTUAL/$name.tmp"
   mv "$ACTUAL/$name.tmp" "$ACTUAL/$name.out"
 }
 
+# keep NAME PATH — keep a file the tool wrote, normalized
+keep() {
+  if [[ -n "$2" && -f "$WORK/repo/$2" ]]; then
+    { echo "path: $2"; normalize < "$WORK/repo/$2"; } > "$ACTUAL/$1"
+  else
+    echo "missing: $2" > "$ACTUAL/$1"
+  fi
+}
+
+# worktree NAME — keep git's view of what the command changed
+worktree() {
+  (cd "$WORK/repo" && git add -A && git status --porcelain | normalize) > "$ACTUAL/$1"
+}
+
 # --- read commands on the untouched corpus ------------------------------------
 
-fresh_corpus
+fresh corpus
+capture version              --version
 capture list                 list
+capture list-alias-ls        ls
 capture list-group           list --group
 capture list-all             list --all
 capture list-archived        list --archived
 capture list-status-accepted list --status Accepted
 capture list-domain-system   list --domain system
+capture list-domain-ops      list --domain ops
 capture view-101             view 101
+capture view-alias-v         v 101
+capture view-alias-show      show ADR-012
+capture view-decimal         view 101.1
+capture view-section         view ADR-104#2
 capture view-legacy-005      view 005
+capture view-archived        view 107
 capture view-missing         view 999
 capture lint                 lint
 capture lint-check           lint --check
@@ -71,37 +124,77 @@ capture lint-one             lint docs/architecture/system/ADR-104-hook-prioriti
 capture domains              domains
 capture config               config
 
-# --- write commands, each on a fresh corpus, capturing the files they write --
+# --- write commands, each on a fresh corpus, keeping the files they write ------
 
-fresh_corpus
-capture index-write index -y
-normalize < "$WORK/repo/docs/architecture/INDEX.md" > "$ACTUAL/index-file.md"
+fresh corpus
+capture index-new index -y
+keep index-new-file.md docs/architecture/INDEX.md
+capture index-current index
+capture rename-for-index rename 103 "Read-through cache layer"
+capture index-stale-skipped index
+capture index-stale-updated index -y
 
-fresh_corpus
+fresh corpus
 capture new-system new system "Queue backpressure"
+worktree new-system-status.txt
 # The tool numbers from the lowest free slot in the domain (#549 tracks that),
-# so find the file it wrote rather than assuming a number.
-created=$(cd "$WORK/repo" && git ls-files --others --exclude-standard -- docs/architecture)
-if [[ $(wc -w <<<"$created") -eq 1 ]]; then
-  { echo "path: $created"; normalize < "$WORK/repo/$created"; } > "$ACTUAL/new-system-file.md"
-else
-  echo "adr new wrote $(wc -w <<<"$created") files, expected 1: $created" > "$ACTUAL/new-system-file.md"
-fi
+# so keep whichever file it wrote rather than assuming a number.
+created=$(cd "$WORK/repo" && git diff --cached --name-only --diff-filter=A)
+keep new-system-file.md "$created"
 
-fresh_corpus
+fresh corpus
+capture new-docs new docs "Glossary conventions"
+worktree new-docs-status.txt
+
+fresh corpus
+capture new-ops new ops "Rollback drill"
+worktree new-ops-status.txt
+
+fresh corpus
 capture new-unknown-domain new nosuchdomain "Nowhere"
 
-fresh_corpus
-capture rename-103 rename 103 "Read-through cache layer"
-(cd "$WORK/repo" && git status --porcelain | normalize) > "$ACTUAL/rename-103-status.txt"
+fresh corpus
+capture rename-title rename 103 "Read-through cache layer"
+worktree rename-title-status.txt
+keep rename-title-file.md docs/architecture/system/ADR-103-read-through-cache-layer.md
+
+fresh corpus
+capture rename-slug rename 103 --slug cache
+worktree rename-slug-status.txt
+
+fresh corpus
+capture rename-no-change rename 103
+capture rename-missing rename 999 "Nothing"
+
+fresh corpus
+capture archive-rejected archive 103 --status Rejected --reason "Never built"
+worktree archive-rejected-status.txt
+keep archive-rejected-file.md docs/architecture/archive/system/ADR-103-cache-layer.md
+
+fresh corpus
+capture archive-superseded-dry archive 105 --superseded-by ADR-101 --reason "Folded into storage" --dry-run
+worktree archive-superseded-dry-status.txt
+capture archive-partial-refused archive 102 --reason "Only part of it is replaced"
+capture archive-bad-successor archive 105 --superseded-by ADR-199 --reason "No such successor"
+
+# --- the defects corpus ---------------------------------------------------------
+
+fresh defects
+capture defects-lint        lint
+capture defects-lint-check  lint --check
+capture defects-list        list
+capture defects-view-dup    view 150
 
 # --- compare or update ----------------------------------------------------------
 
 if [[ $UPDATE -eq 1 ]]; then
+  for f in "$GOLDEN"/*; do
+    [[ -e "$f" && ! -e "$ACTUAL/$(basename "$f")" ]] && echo "removed golden: $(basename "$f")"
+  done
   rm -rf "$GOLDEN"
   mkdir -p "$GOLDEN"
   cp "$ACTUAL"/* "$GOLDEN/"
-  echo "goldens written: $(ls "$GOLDEN" | wc -l) files in tests/fixtures/adr/golden"
+  echo "goldens written: $(ls "$GOLDEN" | wc -l | tr -d ' ') files in tests/fixtures/adr/golden"
   exit 0
 fi
 

@@ -27,3 +27,4 @@ The decision for ADR-104: Hook priorities.
 ## 2. Priority bands
 
 Hooks run in three bands.
+[exit 0]

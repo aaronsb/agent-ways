@@ -1,0 +1,4 @@
+Renamed: ADR-103
+  File:  docs/architecture/system/ADR-103-cache-layer.md → docs/architecture/system/ADR-103-cache.md
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

@@ -8,6 +8,14 @@ domains:
     description: Runtime, hooks and storage
     folder: system
 
+  ops:
+    range: [200, 299]
+    name: Operations
+    description: Deployment and runbooks, split across two folders
+    folder:
+      - operations
+      - runbooks
+
   docs:
     range: [300, 399]
     name: Documentation

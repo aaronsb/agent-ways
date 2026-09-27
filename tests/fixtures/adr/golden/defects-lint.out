@@ -1,0 +1,55 @@
+
+Scanned: 11 ADRs
+
+Status distribution:
+  Accepted: 5
+  Pondering: 1
+  Proposed: 1
+  Unknown: 4
+
+────────────────────────────────────────────────────────────
+Issues found in 8 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-140-yaml-error.md
+  ❌ YAML error: while parsing a flow sequence
+  in "<unicode string>", line 3, column 11:
+    deciders: [developer
+              ^
+expected ',' or ']', but got '<stream end>'
+  in "<unicode string>", line 3, column 21:
+    deciders: [developer
+                        ^
+  ❌ Missing status in frontmatter
+  ❌ Missing date in frontmatter
+  ⚠️ Missing deciders in frontmatter
+
+docs/architecture/system/ADR-141-unclosed.md
+  ❌ Opening --- found but no closing --- for frontmatter
+  ❌ Missing status in frontmatter
+  ❌ Missing date in frontmatter
+  ⚠️ Missing deciders in frontmatter
+
+docs/architecture/system/ADR-142-no-frontmatter.md
+  ❌ No YAML frontmatter found
+
+docs/architecture/system/ADR-143-no-number.md
+  ❌ Missing ADR number in title
+
+docs/architecture/system/ADR-144-no-status.md
+  ❌ Missing status in frontmatter
+
+docs/architecture/system/ADR-145-no-date.md
+  ❌ Missing date in frontmatter
+
+docs/architecture/system/ADR-146-no-deciders.md
+  ⚠️ Missing deciders in frontmatter
+
+docs/architecture/system/ADR-147-invalid-status.md
+  ⚠️ Invalid status: Pondering (valid: Accepted, Deprecated, Draft, Proposed, Rejected, Superseded)
+
+════════════════════════════════════════════════════════════
+Summary: 10 errors, 4 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]
