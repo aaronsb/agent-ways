@@ -1,4 +1,14 @@
 ---
+contract: adr/v1
+kind: decision
+verb: retire
+capability: install
+targets: [cli:ways-migrate]
+enacted: "b4f63aa6"
+agent: {name: Claude, model: unrecorded}
+basis:
+  - evidence: the release history, where the migrator still shipped two deferral windows after ADR-144 scheduled its removal (tags ways-v1.2.0 through ways-v1.8.3)
+  - precedent: ADR-144
 status: Accepted
 date: 2026-08-17
 deciders:
@@ -11,6 +21,14 @@ related:
 ---
 
 # ADR-179: Remove the pre-1.0 in-place migrator; keep the guards and the transition fallbacks
+
+## Summary
+
+- **Decided:** remove the pre-1.0 `ways migrate` command and its code. Keep the in-place guards and the path fallbacks.
+- **Trades away:** an in-place upgrade from a pre-1.0 install. Those installs are pointed at the release tag where the migrator still lives.
+- **One-way?** No. The migrator stays reachable at its tag, and the guards name where.
+- **Probes:** *Confident:* the guards still catch a legacy install, since they were kept. *Not confident:* whether any pre-1.0 install is still in use and would hit the escape hatch.
+- **Inversion:** one end keeps the migrator forever, compiled in. The other end also removes the guards and fallbacks. This removes the command and keeps the safety net. Is that the right cut line?
 
 ## Context
 

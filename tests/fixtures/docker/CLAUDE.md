@@ -53,7 +53,8 @@ TIER2_SCENARIOS="adr-way" TIER2_MODEL=claude-sonnet-5 ANTHROPIC_API_KEY_FILE=...
 
 - The key comes from `ANTHROPIC_API_KEY` or from the file named by `ANTHROPIC_API_KEY_FILE`. It reaches the container through the environment only. It is not a build arg, so no image layer holds it, and nothing prints it.
 - `test-live.sh` creates `TIER2_OUT` (a temp dir by default) as the host user and prints its path. Each scenario leaves `result.json`, `introspect.json`, `fired.txt`, `worktree.txt` and `claude.err` there. A rootful daemon would create a missing bind source as root, which the container user cannot write, so the wrapper creates the directory first.
-- A two-scenario run costs about $0.11 on `claude-sonnet-5`.
+- The branch flavor clones the committed HEAD, but `/fixture` (this directory: runners, scenarios, checks) is mounted live from the working tree. Stay on the branch until the run finishes; switching branches mid-run swaps the checks out from under it.
+- A scenario's `max_turns` file raises its turn cap. The adr scenarios need 20 to 40 turns and cost $0.30 to $1 each on `claude-sonnet-5`; the way-firing scenarios cost about $0.06.
 
 **To add a scenario**, make a directory under `scenarios/` with a `prompt.txt`, an optional `setup.sh` that runs in the fresh project first, and a `check.sh` that `run-tier2.sh` sources. `check.sh` asserts with:
 

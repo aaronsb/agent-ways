@@ -18,6 +18,10 @@ considered:
     said: "I think we have put as much effort into this adr as we need to."
     via: session 2026-09-26, PR #559
     covers: []
+  - operator: aaronsb
+    said: "I read the entire adr as it finally sat and it was an enjoyable read that captures the intent and spirit. The negatives are mostly mechanical impacts of needing to migrate other adr systems"
+    via: session 2026-09-27, after merging PR #559
+    covers: []
 status: Accepted
 date: 2026-09-26
 deciders:

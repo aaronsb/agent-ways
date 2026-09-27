@@ -44,7 +44,7 @@ Existing ADRs like `docs/adr/0001-use-postgres.md` with sequential numbering.
 mkdir -p docs/architecture/legacy
 git mv docs/adr/0001-*.md docs/architecture/legacy/
 # Rename to ADR-NNN format if needed:
-git mv docs/architecture/legacy/0001-use-postgres.md docs/architecture/legacy/ADR-001-use-postgres.md
+git mv docs/architecture/legacy/0001-use-postgres.md docs/architecture/legacy/ADR-001-use-postgres.md  # adr-cite-ignore: example number
 ```
 
 3. **Set the legacy range** in `adr.yaml` to cover existing numbers:

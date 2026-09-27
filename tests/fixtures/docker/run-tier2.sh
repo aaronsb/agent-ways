@@ -15,6 +15,7 @@
 # A scenario is a directory under scenarios/ holding:
 #   prompt.txt   the prompt passed to `claude -p`
 #   setup.sh     optional; runs in the scenario's fresh project before the prompt
+#   max_turns    optional; this scenario's turn cap (default TIER2_MAX_TURNS)
 #   check.sh     sourced after the run; asserts with the helpers below
 #
 # check.sh sees $PROJ (the project dir), $ANSWER (the model's final text),
@@ -101,9 +102,13 @@ run_scenario() {
 
   # The container is disposable and holds nothing but this run, so the model
   # gets tools without prompts. The turn cap bounds cost.
+  # A scenario may raise the turn cap with a max_turns file.
+  local turns="$MAX_TURNS"
+  [[ -f "$dir/max_turns" ]] && turns=$(tr -dc '0-9' < "$dir/max_turns")
+  turns=${turns:-$MAX_TURNS}
   (cd "$PROJ" && claude -p "$(cat "$dir/prompt.txt")" \
       --model "$MODEL" \
-      --max-turns "$MAX_TURNS" \
+      --max-turns "$turns" \
       --output-format json \
       --dangerously-skip-permissions) > "$OUT/result.json" 2> "$OUT/claude.err"
   local rc=$?
