@@ -80,7 +80,6 @@ The tool also has lifecycle gaps. `adr new` writes a v0 record in a v1 project. 
 
 Import accepts a record. It does not restrict what happens to the record before it's accepted. A record can be split, merged or rewritten before `scan`, or its sheet edited before `apply`. The importer itself never changes content: whatever the sheet says is what `apply` writes.
 
-
 One YAML file per record is the round-trip object between a source and a v1 record:
 
 ```yaml
