@@ -1,0 +1,1 @@
+I've read the Summary of ADR-100 in docs/architecture. Looks good — go ahead and accept it. Use docs/scripts/adr for any record changes.
