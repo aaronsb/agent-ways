@@ -229,6 +229,21 @@ capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
 capture v1-lint-precedent-relative lint docs/architecture/system/ADR-109-precedent-chain.md
+# adr new under adr/v1 (ADR-306 §3): a decision with its fields given, a spec,
+# a bare decision whose empty fields lint names, and an unknown kind.
+fresh v1
+capture v1-new-decision new system "Stream exports" --verb change --capability ingest --agent Claude --model fixture-model
+keep v1-new-decision-file.md docs/architecture/system/ADR-115-stream-exports.md
+capture v1-new-decision-lint lint docs/architecture/system/ADR-115-stream-exports.md
+capture v1-new-spec new system "Export format" --kind spec --capability ingest
+keep v1-new-spec-file.md docs/architecture/system/ADR-116-export-format.md
+capture v1-new-bare new system "Bare decision"
+capture v1-new-bare-lint lint docs/architecture/system/ADR-117-bare-decision.md
+capture v1-new-unknown-kind new system "Policy thing" --kind policy
+# A placeholder left in a record that has left proposed is an error.
+edit docs/architecture/system/ADR-115-stream-exports.md "s.replace('status: proposed', 'status: accepted')"
+capture v1-new-placeholder-accepted lint docs/architecture/system/ADR-115-stream-exports.md
+
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
 baseline_fresh() {

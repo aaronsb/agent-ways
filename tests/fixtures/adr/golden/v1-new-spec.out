@@ -1,0 +1,5 @@
+Created: docs/architecture/system/ADR-116-export-format.md
+  Domain: System (system)
+  Number: ADR-116
+  Contract: adr/v1 (fill the empty fields; `adr lint` lists them)
+[exit 0]

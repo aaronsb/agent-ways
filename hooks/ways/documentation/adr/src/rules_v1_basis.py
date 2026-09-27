@@ -75,7 +75,9 @@ def rule_v1_basis_shape(adr, ctx):
     if not is_v1_record(adr, ctx) or 'basis' not in adr.frontmatter:
         return
     basis = adr.frontmatter.get('basis')
-    if not isinstance(basis, list) or not basis:
+    if basis == []:
+        return  # empty: the requires rule reports it once
+    if not isinstance(basis, list):
         v1_issue(adr, "basis: expected a list of entries, each naming one source")
         return
     allowed = v1_basis_sources(ctx)

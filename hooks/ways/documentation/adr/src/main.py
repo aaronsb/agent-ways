@@ -32,6 +32,11 @@ def main():
     p_new = subparsers.add_parser('new', help='Create new ADR')
     p_new.add_argument('domain', help='Domain (see `adr domains` for list)')
     p_new.add_argument('title', help='ADR title')
+    p_new.add_argument('--kind', help='adr/v1: record kind (default: decision)')
+    p_new.add_argument('--verb', help='adr/v1: decision verb (add, cut, change, retire, constrain)')
+    p_new.add_argument('--capability', help='adr/v1: capability from the adr.yaml vocabulary')
+    p_new.add_argument('--agent', help='adr/v1: the agent writing the record (e.g. Claude)')
+    p_new.add_argument('--model', help='adr/v1: the model the agent runs on')
 
     # rename
     p_rename = subparsers.add_parser('rename', help='Rename an ADR title and/or file slug')
