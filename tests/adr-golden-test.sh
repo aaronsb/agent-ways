@@ -289,6 +289,11 @@ fresh v1
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, search]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and search\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
 capture v1-change-list lint docs/architecture/system/ADR-116-shared-queue.md
 
+# A heading that only starts with "Summary" is another section, not the Summary.
+fresh v1
+edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary\n', '## Summary Nudge\n', 1)"
+capture v1-summary-prefix-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
+
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
 baseline_fresh() {
