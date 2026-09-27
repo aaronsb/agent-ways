@@ -41,7 +41,7 @@ basis:
     level: guided
     said: "yes we trade away hand migrations freedom to restructure a record, but that feels like a forced decision. there's nothing stopping us from transforming the record before import. import is just the acceptance model for a foreign record"
     via: session 2026-09-27, reviewing ADR-306
-  - evidence: "kg (knowledge-graph-system) holds 123 records, all with v0 frontmatter (status, date, deciders, related); 60 Accepted, 28 Proposed, 16 Draft, 10 Rejected, 8 Superseded, 1 Deprecated"
+  - evidence: "this repo holds 93 v0 records, each with v0 frontmatter (status, date, deciders, related) that a reader can map without judgement"
   - evidence: "in a project that declares contract: adr/v1, `adr new` still writes a v0 record with no contract, kind, verb, capability, basis, agent or Summary"
 agent:
   name: Claude
@@ -63,12 +63,12 @@ related:
 - **Decided:** `adr import` is the acceptance model for a foreign record: whatever shape a record arrives in, it becomes an adr/v1 record through an import sheet. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
 - **Trades away:** a direct edit from source to record. Every record passes through a sheet, a staging format with its own schema, and other sources through field maps. Both have to be documented and kept stable.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
-- **Probes:** *Confident:* v0 records (this repo's and kg's) import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
+- **Probes:** *Confident:* v0 records from agent-ways, here or in any repo that adopted them, import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
 - **Inversion:** at one end, a reader written in code for every format: exact, but never finished. At the other end, an agent reads each foreign record and writes v1 by hand: flexible, but manual across a hundred records. This decision maps structured fields mechanically and leaves only the judgement fields to the agent.
 
 ## Context
 
-ADR-304 §7 moves a v0 record to v1 "when someone next edits it". That works for a trickle of edits, and it doesn't work for a corpus. kg holds 123 v0 records, and other projects hold records in adr-tools, MADR or tracker formats. #581 migrated two records here by hand, and the tier 2 rehearsal showed an agent can do it without inventing anything, but record by record.
+ADR-304 §7 moves a v0 record to v1 "when someone next edits it". That works for a trickle of edits, and it doesn't work for a corpus. This repo holds 93 v0 records. Any repo using a file-based record system, or v0 records from agent-ways, holds a corpus of its own, in v0, adr-tools, MADR or tracker formats. #581 migrated two records here by hand, and the tier 2 rehearsal showed an agent can do it without inventing anything, but record by record.
 
 Most of a migration is mechanical. Status maps by the §7 table, and date, deciders and links carry over. The body stays as written. A few fields need judgement: the verb, the capability, the basis, and a Summary. Those are the only fields an agent should have to touch.
 
@@ -142,7 +142,7 @@ An imported record carries `imported: {from, format}` in its frontmatter. For an
 
 ### 5. Numbering
 
-A source numbered inside the project's domain ranges keeps its number. Code, ways and other records cite these numbers, and nothing structural calls for new ones, so an import never renumbers them. This covers all of this repo's records and all of kg's. Any other source gets a number from `target`, which the reader proposes from the domain and the agent may change. `apply` rewrites references within the imported set to the new numbers, and `imported.from` keeps the original identifier.
+A source numbered inside the project's domain ranges keeps its number. Code, ways and other records cite these numbers, and nothing structural calls for new ones, so an import never renumbers them. This covers every v0 record from agent-ways, in this repo or any other. Any other source gets a number from `target`, which the reader proposes from the domain and the agent may change. `apply` rewrites references within the imported set to the new numbers, and `imported.from` keeps the original identifier.
 
 ### 6. Domains evolve
 
@@ -168,7 +168,7 @@ These are tested properties:
 
 ### Positive
 
-- Migrating a corpus becomes one scan, one cleanup pass over small structured files, and one apply. Both this repo's 93 v0 records and kg's 123 go through the same path.
+- Migrating a corpus becomes one scan, one cleanup pass over small structured files, and one apply. This repo's 93 v0 records and any other repo's file-based records go through the same path.
 - A new source needs a field map, not a code change, whenever it flattens to fields and a body.
 - `adr new` produces a v1 record in a v1 project.
 
@@ -185,6 +185,6 @@ These are tested properties:
 
 ## Alternatives Considered
 
-- **An agent migrates each record by hand.** The #581 rehearsal shows this works, but across 123 records the mechanical fields would be retyped each time, and nothing would check the result the way a round trip does.
+- **An agent migrates each record by hand.** The #581 rehearsal shows this works, but across a corpus of a hundred records the mechanical fields would be retyped each time, and nothing would check the result the way a round trip does.
 - **A code reader per format, with no field maps.** This is exact for known formats, but every tracker and template needs code in the vendored tool.
 - **Migrate in place with no intermediate object.** A migration writes the record directly. Without a sheet there is no place to stage what needs judgement, and no object to test the round trip against.
