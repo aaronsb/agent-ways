@@ -1,0 +1,2 @@
+A  docs/architecture/system/ADR-150-foreign-record.md
+A  foreign/ADR-042-foreign-record.md

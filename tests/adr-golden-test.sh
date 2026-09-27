@@ -414,20 +414,26 @@ worktree import-scan-corpus-status.txt
 keep import-scan-corpus-gitignore docs/architecture/.import/.gitignore
 keep_sheets import-scan-corpus
 
-# In the v1 fixture: a v1 record scanned as itself, a v0 record, and a
-# Deprecated v0 record with no successor and no Summary.
+# In the v1 fixture: a v1 record scanned as itself, a v0 record, a v0 record
+# with a preamble above its H1, an unmapped key and no Summary, and a
+# Deprecated v0 record with no successor.
 import_fresh() {
   fresh v1
-  (cd "$WORK/repo" && printf -- '---\nstatus: Deprecated\ndate: 2025-04-01\ndeciders: [developer]\nrevised: 2025-04-02\n---\n\n# ADR-115: Nightly ingest window\n\n## Context\n\nIngest ran nightly.\n\n## Decision\n\nIngest runs in a nightly window.\n' > docs/architecture/system/ADR-115-nightly-ingest-window.md)
-  commit_all "a deprecated v0 record"
+  (cd "$WORK/repo" && printf -- '---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\nrevised: 2025-04-02\n---\n\n> Moved here from the ops wiki.\n\n# ADR-115: Nightly ingest window\n\n## Context\n\nIngest ran nightly.\n\n## Decision\n\nIngest runs in a nightly window.\n' > docs/architecture/system/ADR-115-nightly-ingest-window.md \
+    && printf -- '---\nstatus: Deprecated\ndate: 2025-04-05\ndeciders: [developer]\n---\n\n# ADR-116: Hourly ingest\n\n## Context\n\nIngest ran hourly.\n' > docs/architecture/system/ADR-116-hourly-ingest.md)
+  commit_all "v0 records to import"
 }
+IMPORTED="docs/architecture/system/ADR-101-ingest.md docs/architecture/system/ADR-110-old-v0-record.md docs/architecture/system/ADR-115-nightly-ingest-window.md docs/architecture/system/ADR-116-hourly-ingest.md"
 import_fresh
-capture import-scan-v1 import scan docs/architecture/system/ADR-101-ingest.md docs/architecture/system/ADR-110-old-v0-record.md docs/architecture/system/ADR-115-nightly-ingest-window.md
+# shellcheck disable=SC2086
+capture import-scan-v1 import scan $IMPORTED
 keep_sheets import-scan-v1
 # Unedited sheets: the v1 record applies unchanged, the v0 ones are skipped.
 capture import-apply-open import apply
 worktree import-apply-open-status.txt
-# --partial writes them anyway, and lint names what is missing.
+# --partial writes them anyway, and lint names what is missing. The
+# preamble and the unmapped key are carried; the Deprecated record's note is
+# one lint cannot find again, so --partial does not write past it.
 capture import-apply-partial import apply --partial
 worktree import-apply-partial-status.txt
 keep import-apply-partial-110.md docs/architecture/system/ADR-110-old-v0-record.md
@@ -435,13 +441,20 @@ keep import-apply-partial-115.md docs/architecture/system/ADR-115-nightly-ingest
 # An imported record with no Summary warns rather than fails (ADR-306 §4).
 capture import-lint-no-summary lint docs/architecture/system/ADR-115-nightly-ingest-window.md
 # Committed with empty fields, then completed: filling what the import left
-# empty and adding the Summary is not an edit of a frozen decision.
+# empty and adding an opening Summary is not an edit of a frozen decision.
 commit_all "partial import"
 edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('verb: ~', 'verb: add').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n  - evidence: ingest logs').replace('name: ~', 'name: Claude').replace('# ADR-115: Nightly ingest window\n', '# ADR-115: Nightly ingest window\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n')"
 capture import-lint-completed lint docs/architecture/system/ADR-115-nightly-ingest-window.md
-# Changing a field the import did fill is still an edit.
-edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('date: 2025-04-01', 'date: 2025-04-03')"
+# Fill once: after the fill is committed, changing it is an edit.
+commit_all "complete the import"
+edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('capability: ingest', 'capability: search').replace('name: Claude', 'name: Other')"
+capture import-lint-refilled lint docs/architecture/system/ADR-115-nightly-ingest-window.md
+# Changing a field the import did fill is an edit.
+edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('capability: search', 'capability: ingest').replace('name: Other', 'name: Claude').replace('date: 2025-04-01', 'date: 2025-04-03')"
 capture import-lint-completed-edited lint docs/architecture/system/ADR-115-nightly-ingest-window.md
+# A Summary added anywhere but first is still a body edit.
+edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('date: 2025-04-03', 'date: 2025-04-01').replace('## Decision\n', '## Summary\n\nLate.\n\n## Decision\n')"
+capture import-lint-summary-not-opening lint docs/architecture/system/ADR-115-nightly-ingest-window.md
 
 # A completed sheet applies without --partial.
 import_fresh
@@ -457,6 +470,45 @@ capture import-scan-changed import scan docs/architecture/system/ADR-110-old-v0-
 edit docs/architecture/system/ADR-110-old-v0-record.md "s.replace('They follow.', 'They follow, mostly.')"
 capture import-apply-changed import apply --partial
 worktree import-apply-changed-status.txt
+# A rescan keeps a sheet that differs from a fresh scan; --force replaces it.
+capture import-rescan-kept import scan docs/architecture/system/ADR-110-old-v0-record.md
+capture import-rescan-forced import scan --force docs/architecture/system/ADR-110-old-v0-record.md
+# The source now has uncommitted changes: refused unless --force.
+capture import-apply-uncommitted import apply --partial docs/architecture/.import/ADR-110.yaml
+capture import-apply-uncommitted-forced import apply --partial --force docs/architecture/.import/ADR-110.yaml
+
+# Sheets apply cannot use: each is refused and the batch goes on.
+# Among them: in-tree records renumbered or moved to another domain, and
+# the Deprecated ADR-116, which --partial does not write past.
+import_fresh
+capture import-scan-bad import scan $IMPORTED
+edit docs/architecture/.import/ADR-115.yaml "s.replace('  number: 115', '  number: 117')"
+(cd "$WORK/repo/docs/architecture/.import" \
+  && sed 's/^  number: 110$/  number: 101.10/' ADR-110.yaml > float.yaml \
+  && sed 's#^  number: 110$#  number: "110.1/../../x"#' ADR-110.yaml > escape.yaml \
+  && sed 's/^  domain: system$/  domain: legacy/' ADR-110.yaml > domain.yaml \
+  && sed 's/^  domain: system$/  domain: storage/' ADR-110.yaml > nodomain.yaml \
+  && python3 -c "s=open('ADR-110.yaml').read(); open('listbody.yaml','w').write(s[:s.index('body: |')] + 'body: [not, text]\n')" \
+  && python3 -c "s=open('ADR-110.yaml').read(); open('nobody.yaml','w').write(s[:s.index('body: |')] + 'body: \"\"\n')" \
+  && printf 'sheet: adr-import/v1\n  bad: [\n' > broken.yaml)
+capture import-apply-bad import apply --partial docs/architecture/.import/float.yaml docs/architecture/.import/escape.yaml docs/architecture/.import/listbody.yaml docs/architecture/.import/nobody.yaml docs/architecture/.import/broken.yaml docs/architecture/.import/domain.yaml docs/architecture/.import/nodomain.yaml docs/architecture/.import/ADR-115.yaml docs/architecture/.import/ADR-116.yaml docs/architecture/.import/ADR-101.yaml
+worktree import-apply-bad-status.txt
+
+# A foreign source numbered outside its target domain's range is refused.
+fresh v1
+mkdir -p "$WORK/repo/foreign"
+printf -- '---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-042: Foreign record\n\n## Context\n\nFrom elsewhere.\n' > "$WORK/repo/foreign/ADR-042-foreign-record.md"
+capture import-scan-foreign import scan foreign/ADR-042-foreign-record.md
+edit docs/architecture/.import/ADR-042.yaml "s.replace('  domain: legacy', '  domain: system')"
+capture import-apply-out-of-range import apply --partial docs/architecture/.import/ADR-042.yaml
+edit docs/architecture/.import/ADR-042.yaml "s.replace('  number: 42', '  number: 150')"
+capture import-apply-foreign import apply --partial docs/architecture/.import/ADR-042.yaml
+worktree import-apply-foreign-status.txt
+
+# A byte order mark is named as one.
+fresh v1
+printf '\357\273\277---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-117: With a BOM\n' > "$WORK/repo/docs/architecture/system/ADR-117-with-a-bom.md"
+capture import-scan-bom import scan docs/architecture/system/ADR-117-with-a-bom.md
 
 fresh v1-defects
 capture v1-defects-lint        lint

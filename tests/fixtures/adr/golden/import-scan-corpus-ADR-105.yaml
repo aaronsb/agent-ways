@@ -30,7 +30,7 @@ todo:
   - capability
   - basis
   - agent.name
-  - 'status: Deprecated with no successor maps to accepted with a note that the decision is historical (ADR-304 §7); add the note'
+  - 'status note: Deprecated with no successor maps to accepted with a note that the decision is historical (ADR-304 §7); add the note to the body'
 candidates:
   capability: []
 provenance:

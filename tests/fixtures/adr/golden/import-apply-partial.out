@@ -1,4 +1,5 @@
 Applied: docs/architecture/.import/ADR-110.yaml -> docs/architecture/system/ADR-110-old-v0-record.md, 4 todo left (lint: 4 errors, 0 warnings)
 Applied: docs/architecture/.import/ADR-115.yaml -> docs/architecture/system/ADR-115-nightly-ingest-window.md, 6 todo left (lint: 4 errors, 1 warnings)
-Import: 2 applied, 0 skipped, 0 refused
+Skipped: docs/architecture/.import/ADR-116.yaml: 1 todo item(s) --partial does not write past, since lint cannot find them again: status note
+Import: 2 applied, 1 skipped, 0 refused
 [exit 0]

@@ -14,10 +14,10 @@ docs/architecture/adr.yaml
   ⚠️ capability 'search' has no accepted add decision
 
 docs/architecture/system/ADR-115-nightly-ingest-window.md
-  ❌ 'date' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
+  ⚠️ body edited after the decision left proposed; a decision grows by appending
 
 ════════════════════════════════════════════════════════════
-Summary: 1 errors, 1 warnings
+Summary: 0 errors, 2 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

@@ -15,9 +15,13 @@ deciders:
 imported:
   from: docs/architecture/system/ADR-115-nightly-ingest-window.md
   format: v0
+  unmapped:
+    revised: 2025-04-02
 ---
 
 # ADR-115: Nightly ingest window
+
+> Moved here from the ops wiki.
 
 ## Context
 
