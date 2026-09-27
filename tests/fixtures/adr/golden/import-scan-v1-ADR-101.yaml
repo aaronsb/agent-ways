@@ -7,7 +7,7 @@ source:
   format: v1
   sha256: ffe57ae56e9cb8c103ade235a59e6aad873b5fc8f0d599235ad29c9214064a5f
 target:
-  number: 101
+  number: '101'
   domain: system
   title: Add ingestion
 record:

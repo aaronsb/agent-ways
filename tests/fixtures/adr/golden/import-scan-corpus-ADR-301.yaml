@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 2186faab4d9ee1b286a7ae27aae803af58909c4b4f4c1208f3a58f6ce6bca32a
 target:
-  number: 301
+  number: '301'
   domain: docs
   title: Draft style guide
 record:

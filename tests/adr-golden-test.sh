@@ -76,7 +76,7 @@ fresh() {
 # A run that crosses midnight sees two dates, so both the date the run
 # started on and the current one become <TODAY>.
 normalize() {
-  sed -e "s#$ADR_TOOL#<ADR_TOOL>#g" -e "s#$WORK/repo#<ROOT>#g" \
+  sed -e "s#$ADR_TOOL#<ADR_TOOL>#g" -e "s#$WORK/repo#<ROOT>#g" -e "s#$WORK#<WORK>#g" \
       -e "s#$TODAY#<TODAY>#g" -e "s#$(date +%Y-%m-%d)#<TODAY>#g"
 }
 
@@ -455,6 +455,9 @@ capture import-lint-completed-edited lint docs/architecture/system/ADR-115-night
 # A Summary added anywhere but first is still a body edit.
 edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('date: 2025-04-03', 'date: 2025-04-01').replace('## Decision\n', '## Summary\n\nLate.\n\n## Decision\n')"
 capture import-lint-summary-not-opening lint docs/architecture/system/ADR-115-nightly-ingest-window.md
+# A key absent at import gets no fill allowance.
+edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('## Summary\n\nLate.\n\n## Decision\n', '## Decision\n').replace('status: accepted\n', 'status: accepted\nsupersedes:\n  - ADR-110\n')"
+capture import-lint-added-key lint docs/architecture/system/ADR-115-nightly-ingest-window.md
 
 # A completed sheet applies without --partial.
 import_fresh
@@ -482,28 +485,42 @@ capture import-apply-uncommitted-forced import apply --partial --force docs/arch
 # the Deprecated ADR-116, which --partial does not write past.
 import_fresh
 capture import-scan-bad import scan $IMPORTED
-edit docs/architecture/.import/ADR-115.yaml "s.replace('  number: 115', '  number: 117')"
+edit docs/architecture/.import/ADR-115.yaml "s.replace(\"  number: '115'\", '  number: 117')"
 (cd "$WORK/repo/docs/architecture/.import" \
-  && sed 's/^  number: 110$/  number: 101.10/' ADR-110.yaml > float.yaml \
-  && sed 's#^  number: 110$#  number: "110.1/../../x"#' ADR-110.yaml > escape.yaml \
+  && sed "s/^  number: '110'$/  number: 101.10/" ADR-110.yaml > float.yaml \
+  && sed "s#^  number: '110'\$#  number: '110.1/../../x'#" ADR-110.yaml > escape.yaml \
+  && sed "s/^  number: '110'$/  number: 0156/" ADR-110.yaml > octal.yaml \
+  && sed "s/^  number: '110'$/  number: 0x6E/" ADR-110.yaml > hex.yaml \
   && sed 's/^  domain: system$/  domain: legacy/' ADR-110.yaml > domain.yaml \
   && sed 's/^  domain: system$/  domain: storage/' ADR-110.yaml > nodomain.yaml \
   && python3 -c "s=open('ADR-110.yaml').read(); open('listbody.yaml','w').write(s[:s.index('body: |')] + 'body: [not, text]\n')" \
   && python3 -c "s=open('ADR-110.yaml').read(); open('nobody.yaml','w').write(s[:s.index('body: |')] + 'body: \"\"\n')" \
   && printf 'sheet: adr-import/v1\n  bad: [\n' > broken.yaml)
-capture import-apply-bad import apply --partial docs/architecture/.import/float.yaml docs/architecture/.import/escape.yaml docs/architecture/.import/listbody.yaml docs/architecture/.import/nobody.yaml docs/architecture/.import/broken.yaml docs/architecture/.import/domain.yaml docs/architecture/.import/nodomain.yaml docs/architecture/.import/ADR-115.yaml docs/architecture/.import/ADR-116.yaml docs/architecture/.import/ADR-101.yaml
+capture import-apply-bad import apply --partial docs/architecture/.import/float.yaml docs/architecture/.import/escape.yaml docs/architecture/.import/octal.yaml docs/architecture/.import/hex.yaml docs/architecture/.import/listbody.yaml docs/architecture/.import/nobody.yaml docs/architecture/.import/broken.yaml docs/architecture/.import/domain.yaml docs/architecture/.import/nodomain.yaml docs/architecture/.import/ADR-115.yaml docs/architecture/.import/ADR-116.yaml docs/architecture/.import/ADR-101.yaml
 worktree import-apply-bad-status.txt
 
-# A foreign source numbered outside its target domain's range is refused.
+# A source outside the repo, numbered outside its target domain's range, is
+# refused; renumbered into the range it is written, named by its file name.
 fresh v1
-mkdir -p "$WORK/repo/foreign"
-printf -- '---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-042: Foreign record\n\n## Context\n\nFrom elsewhere.\n' > "$WORK/repo/foreign/ADR-042-foreign-record.md"
-capture import-scan-foreign import scan foreign/ADR-042-foreign-record.md
+rm -rf "$WORK/outside" && mkdir -p "$WORK/outside"
+printf -- '---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-042: Foreign record\n\n## Context\n\nFrom elsewhere.\n' > "$WORK/outside/ADR-042-foreign-record.md"
+capture import-scan-foreign import scan "$WORK/outside/ADR-042-foreign-record.md"
 edit docs/architecture/.import/ADR-042.yaml "s.replace('  domain: legacy', '  domain: system')"
 capture import-apply-out-of-range import apply --partial docs/architecture/.import/ADR-042.yaml
-edit docs/architecture/.import/ADR-042.yaml "s.replace('  number: 42', '  number: 150')"
+edit docs/architecture/.import/ADR-042.yaml "s.replace(\"  number: '42'\", \"  number: '150'\")"
 capture import-apply-foreign import apply --partial docs/architecture/.import/ADR-042.yaml
 worktree import-apply-foreign-status.txt
+keep import-apply-foreign-file.md docs/architecture/system/ADR-150-foreign-record.md
+
+# A status with no v1 mapping, or none at all, holds the sheet back even
+# under --partial: lint could not tell what it was once written.
+fresh v1
+(cd "$WORK/repo" && printf -- '---\nstatus: WIP pending review\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-117: Work in progress\n\n## Context\n\nText.\n' > docs/architecture/system/ADR-117-work-in-progress.md \
+  && printf -- '---\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-118: No status\n\n## Context\n\nText.\n' > docs/architecture/system/ADR-118-no-status.md)
+commit_all "records with odd statuses"
+capture import-scan-status import scan docs/architecture/system/ADR-117-work-in-progress.md docs/architecture/system/ADR-118-no-status.md
+keep_sheets import-scan-status
+capture import-apply-status import apply --partial
 
 # A byte order mark is named as one.
 fresh v1

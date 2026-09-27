@@ -1,15 +1,15 @@
-path: docs/architecture/.import/ADR-103.yaml
+path: docs/architecture/.import/ADR-117.yaml
 # adr import sheet (ADR-306). Fill or clear each todo item, then run
 # `adr import apply`. Sheets are working files; only records are committed.
 sheet: adr-import/v1
 source:
-  path: docs/architecture/system/ADR-103-cache-layer.md
+  path: docs/architecture/system/ADR-117-work-in-progress.md
   format: v0
-  sha256: 749d6dfb413359c4cd382b60a47bb0b71663b07518e7c309812912f51ed73636
+  sha256: 16414c4ee208ce121714f95185dc09a51b3eafc58823c9c873e04f5734a61ee0
 target:
-  number: '103'
+  number: '117'
   domain: system
-  title: Cache layer
+  title: Work in progress
 record:
   contract: adr/v1
   kind: decision
@@ -19,17 +19,17 @@ record:
   agent:
     name: ~
     model: unrecorded
-  status: proposed
-  date: 2025-07-01
+  status: ~
+  date: 2025-04-01
   deciders:
     - developer
-    - agent
 summary: ~
 todo:
   - verb
   - capability
   - basis
   - agent.name
+  - 'status: ''WIP pending review'' has no v1 mapping; set one (ADR-304 §7)'
 candidates:
   capability: []
 provenance:
@@ -39,21 +39,10 @@ provenance:
   record.contract: v0 reader
   record.kind: 'v0 reader: every v0 record is a decision'
   record.agent.model: 'v0 reader: the model was not recorded'
-  record.status: 'frontmatter status: Proposed'
   record.date: frontmatter date
   record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
 unmapped: {}
 body: |
   ## Context
 
-  A proposal not yet accepted.
-
-  ## Decision
-
-  The decision for ADR-103: Cache layer.
-
-  ## Consequences
-
-  ### Positive
-
-  - It works.
+  Text.

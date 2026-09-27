@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: c2e846dd0d87c89d9d0f24bc4514305bf8de95e1149b776e3f7e966e90bc48a6
 target:
-  number: 12
+  number: '12'
   domain: legacy
   title: Plain-text logging
 record:

@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 1b1c93891a8152b926668171c667bfecc5613257a7cf68ce8283aecd2ccb8744
 target:
-  number: 116
+  number: '116'
   domain: system
   title: Hourly ingest
 record:

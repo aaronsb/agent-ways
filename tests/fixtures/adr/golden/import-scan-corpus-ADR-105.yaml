@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 4e9ad147766a709dff5ff17c4ab420886f7cacbf2b74d937536047e167ff534a
 target:
-  number: 105
+  number: '105'
   domain: system
   title: Telemetry export
 record:

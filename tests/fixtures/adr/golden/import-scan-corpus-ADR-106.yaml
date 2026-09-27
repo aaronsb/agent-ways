@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: ebeb4d2c085c416f7bcf0cdf9f433ca4c7d00babb962b2f6771fb60b216f5897
 target:
-  number: 106
+  number: '106'
   domain: system
   title: One-sided supersession
 record:

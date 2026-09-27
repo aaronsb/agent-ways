@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 764672969aebec723f87be38b80fa653e5b45713282259b13bc115860732cd07
 target:
-  number: 303
+  number: '303'
   domain: docs
   title: Dangling reference
 record:

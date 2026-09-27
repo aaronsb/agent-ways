@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 6fc5e998597b02af3cc0481cfb32ed884f500017b69fec37348401813d865cb3
 target:
-  number: 115
+  number: '115'
   domain: system
   title: Nightly ingest window
 record:

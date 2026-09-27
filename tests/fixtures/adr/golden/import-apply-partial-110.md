@@ -17,6 +17,7 @@ deciders:
 imported:
   from: docs/architecture/system/ADR-110-old-v0-record.md
   format: v0
+  status: Accepted
 ---
 
 # ADR-110: An unmigrated v0 record

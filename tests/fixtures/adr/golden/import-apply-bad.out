@@ -1,12 +1,14 @@
 Refused: docs/architecture/.import/float.yaml: target.number 101.1 reads as a decimal; quote a sub-part number, as in number: '101.10'
 Refused: docs/architecture/.import/escape.yaml: target.number '110.1/../../x' is not a record number
+Refused: docs/architecture/.import/octal.yaml: target.number 0156 is not a plain decimal, and YAML reads it as 110; quote it, as in number: '0156'
+Refused: docs/architecture/.import/hex.yaml: target.number 0x6E is not a plain decimal, and YAML reads it as 110; quote it, as in number: '0x6E'
 Refused: docs/architecture/.import/listbody.yaml: body is not text
 Refused: docs/architecture/.import/nobody.yaml: the source has a body and the sheet has none; scan it again
 Refused: docs/architecture/.import/broken.yaml: the sheet is not valid YAML: mapping values are not allowed here at line 2
 Refused: docs/architecture/.import/domain.yaml: the source is ADR-110 in system; the sheet says ADR-110 in legacy. Moving a record to another number or domain is `adr domain move` (ADR-306 §6), not built yet; restore target.number and target.domain
 Refused: docs/architecture/.import/nodomain.yaml: the source is ADR-110 in system; the sheet says ADR-110 in storage. Moving a record to another number or domain is `adr domain move` (ADR-306 §6), not built yet; restore target.number and target.domain
 Refused: docs/architecture/.import/ADR-115.yaml: the source is ADR-115 in system; the sheet says ADR-117 in system. Moving a record to another number or domain is `adr domain move` (ADR-306 §6), not built yet; restore target.number and target.domain
-Skipped: docs/architecture/.import/ADR-116.yaml: 1 todo item(s) --partial does not write past, since lint cannot find them again: status note
+Skipped: docs/architecture/.import/ADR-116.yaml: 1 todo item(s) --partial does not write past: status note
 Applied: docs/architecture/.import/ADR-101.yaml -> docs/architecture/system/ADR-101-ingest.md, unchanged (lint: 0 errors, 0 warnings)
-Import: 1 applied, 1 skipped, 8 refused
+Import: 1 applied, 1 skipped, 10 refused
 [exit 1]

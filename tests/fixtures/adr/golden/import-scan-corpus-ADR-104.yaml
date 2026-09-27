@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: b188a9282e21030785b3079d66039ecac3a78197e88169be7c9233dd785706cc
 target:
-  number: 104
+  number: '104'
   domain: system
   title: Hook priorities
 record:

@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: c269e6d03fa2eeed8b36fb366124d4dcc8220b53f38ba95334353d834295b4b8
 target:
-  number: 200
+  number: '200'
   domain: ops
   title: Restart procedure
 record:

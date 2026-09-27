@@ -12,9 +12,10 @@
 #   2. The record is rewritten in place, and the text after its H1 is
 #      byte-identical to the source's, with any text from above the H1
 #      moved to just below it.
-#   3. Every source frontmatter key is in the written record with the same
-#      value, or under imported.unmapped with the same value. status is
-#      checked against the ADR-304 §7 table.
+#   3. Every source frontmatter key is carried with its value: the keys v1
+#      shares with v0 in the frontmatter, any other key under
+#      imported.unmapped. status is checked against the ADR-304 §7 table,
+#      and imported.status keeps the source status as written.
 #   4. Scanning the written v1 records and applying them again gives the
 #      same files (idempotence).
 #
@@ -69,7 +70,8 @@ tool, root = sys.argv[1], Path(sys.argv[2])
 arch = root / 'docs' / 'architecture'
 sheets_dir = arch / '.import'
 TITLE = re.compile(r'^# ADR-\d+(?:\.\d+)?: .+$', re.M)
-BLOCKING = ('status note', 'target.number', 'target.domain')
+BLOCKING = ('status', 'status note', 'target.number', 'target.domain')
+CARRIED = ('date', 'deciders', 'related', 'supersedes', 'superseded_by', 'amends')
 V0_STATUS = {'draft': 'proposed', 'proposed': 'proposed', 'accepted': 'accepted',
              'superseded': 'superseded', 'rejected': 'rejected'}
 failures = []
@@ -150,13 +152,18 @@ for path in v0:
         failures.append(f"{rel(path)}: text after the H1 differs from the source")
     else:
         bodies += 1
-    unmapped = (written.get('imported') or {}).get('unmapped') or {}
+    imported = written.get('imported') or {}
+    unmapped = imported.get('unmapped') or {}
     wrong = []
+    if 'status' not in imported or imported['status'] != source.get('status'):
+        wrong.append('imported.status')
     for key, value in source.items():
         if key == 'status':
             ok = written.get('status') == expected_status(source)
+        elif key in CARRIED:
+            ok = key in written and written[key] == value
         else:
-            ok = (key in written and written[key] == value) or (key in unmapped and unmapped[key] == value)
+            ok = key in unmapped and unmapped[key] == value and key not in written
         if not ok:
             wrong.append(key)
     if wrong:

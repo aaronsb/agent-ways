@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 830a504e9de8be0c3aedbaa254ae85b884f5405c60a21941e60cc4d5b7de21c5
 target:
-  number: 5
+  number: '5'
   domain: legacy
   title: Legacy storage format
 record:

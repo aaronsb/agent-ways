@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 5fbfe7e263da32fb0a7d49dc620e989feb6c9283465df2f66c2d9632ab7969a4
 target:
-  number: 110
+  number: '110'
   domain: system
   title: An unmigrated v0 record
 record:

@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 5e949a1d29573a66bbfbbdcbe112f25311fce67c9ed53560a1e94bb068644326
 target:
-  number: 101
+  number: '101'
   domain: system
   title: Structured storage
 record:

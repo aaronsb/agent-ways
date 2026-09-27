@@ -15,6 +15,7 @@ deciders:
 imported:
   from: docs/architecture/system/ADR-115-nightly-ingest-window.md
   format: v0
+  status: Accepted
   unmapped:
     revised: 2025-04-02
 ---

@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 289375931298167da605ebce441d9378a0216597464298440c64ffc46719f8b7
 target:
-  number: 102
+  number: '102'
   domain: system
   title: Hook ordering
 record:

@@ -7,7 +7,7 @@ source:
   format: v0
   sha256: 936ae33576633b0120d147dad661e0df50aa2f462ad66869f4e56700353bdeb7
 target:
-  number: 300
+  number: '300'
   domain: docs
   title: Documentation structure
 record:
