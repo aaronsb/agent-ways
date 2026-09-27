@@ -7,11 +7,11 @@ project_name: Claude Code Configuration
 
 # Domain Number Series
 domains:
-  system:
+  ways:
     range: [100, 199]
-    name: System
-    description: Ways architecture, matching, macros, hooks, session lifecycle
-    folder: system
+    name: Ways
+    description: "The ways engine: how ways are matched, disclosed and re-disclosed"
+    folder: ways
 
   governance:
     range: [200, 299]
@@ -24,6 +24,24 @@ domains:
     name: Documentation
     description: Documentation structure, tooling, coherence
     folder: documentation
+
+  attend:
+    range: [400, 499]
+    name: Attend
+    description: "Session awareness: sensors, peers, messaging, keepwarm"
+    folder: attend
+
+  platform:
+    range: [500, 599]
+    name: Platform
+    description: Install, update, configuration, permissions, the CLI contract, testing
+    folder: platform
+
+  practice:
+    range: [600, 699]
+    name: Practice
+    description: The ways method, way authoring, the development loop
+    folder: practice
 
 # The record contract (ADR-304). Records that declare `contract: adr/v1`
 # follow the kinds below; a record without it is adr/v0 and keeps the v0

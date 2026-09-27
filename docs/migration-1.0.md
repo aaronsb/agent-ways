@@ -8,7 +8,7 @@
 
 The move is performed by one gated, backup-first command — `ways migrate`.
 
-> **The migrator was removed in 1.9.0** ([ADR-179](architecture/system/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md)).
+> **The migrator was removed in 1.9.0** ([ADR-179](architecture/ways/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md)).
 > It ships forever at **`ways-v1.8.3`**, the last tag that carries it. Migrating today means
 > building the binary from that tag and running it against your install — the steps are in
 > [Migrate](#migrate) below. Your current install is untouched by this; the tagged binary
@@ -32,8 +32,8 @@ The headline consequences:
 - **Your session history is preserved in place.** `~/.claude/projects/` is Claude-Code-owned; the migrator never moves or rewrites it.
 - **Your `settings.json` is merged, not replaced.** A three-way merge manages only the hooks block and ways permissions; your model, theme, plugins, and credentials are left exactly as they are.
 
-Background: [ADR-142](architecture/system/ADR-142-agent-ways-1-0-xdg-application-distribution.md)
-(the XDG layout), [ADR-144](architecture/system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)
+Background: [ADR-142](architecture/ways/ADR-142-agent-ways-1-0-xdg-application-distribution.md)
+(the XDG layout), [ADR-144](architecture/ways/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)
 (the reconciler and migrator).
 
 ## Do I need to migrate?
@@ -129,7 +129,7 @@ would ship as a note here rather than as a new release of the command.
 | Version | `ways migrate` |
 |---|---|
 | **1.0.0 → 1.8.3** | Present in the binary. |
-| **1.9.0 and later** | **Removed** ([ADR-179](architecture/system/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md)). Migration runs from the `ways-v1.8.3` tag. |
+| **1.9.0 and later** | **Removed** ([ADR-179](architecture/ways/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md)). Migration runs from the `ways-v1.8.3` tag. |
 
 The removal was slated for 1.1, deferred to 1.3, and executed at 1.9.0. Removing it took the
 assisted path, not the capability: the tag is immutable, so the command is always reachable.
@@ -146,9 +146,9 @@ Your mental model for developing on and updating agent-ways changes with the lay
 
 ## See also
 
-- [ADR-142](architecture/system/ADR-142-agent-ways-1-0-xdg-application-distribution.md) — the XDG application distribution
-- [ADR-143](architecture/system/ADR-143-three-root-way-runtime-core-user-project.md) — core / user / project way roots
-- [ADR-144](architecture/system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) — the reconciler, migrator, and deprecation lifecycle
-- [ADR-179](architecture/system/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md) — the migrator's removal, and what was kept
+- [ADR-142](architecture/ways/ADR-142-agent-ways-1-0-xdg-application-distribution.md) — the XDG application distribution
+- [ADR-143](architecture/ways/ADR-143-three-root-way-runtime-core-user-project.md) — core / user / project way roots
+- [ADR-144](architecture/ways/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) — the reconciler, migrator, and deprecation lifecycle
+- [ADR-179](architecture/ways/ADR-179-remove-the-pre-1-0-in-place-migrator-keep-the-guards-and-the-transition-fallbacks.md) — the migrator's removal, and what was kept
 - [development.md](development.md) — developing agent-ways after the 1.0 shift
 - [install-guide.md](install-guide.md) — installation paths (being updated for the 1.0 layout)

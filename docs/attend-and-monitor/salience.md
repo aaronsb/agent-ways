@@ -2,7 +2,7 @@
 
 This page covers the **presentation-layer aging** mechanism: how a signal's visibility in the conversation fades as the progression axis advances, even while the signal file remains on disk. The shape is the forgetting curve applied to notifications — relevance decays exponentially with quiet, and re-engagement resets it, the same spacing logic spaced-repetition systems use to decide when something needs showing again. It's the cousin — not the opposite — of attend's inward-gate engagement model in [`engagement.md`](engagement.md). Both sides of the gate share a single engine; this page is the outward-side explainer.
 
-**Status.** The framing comes from [ADR-121](../architecture/system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md). The mechanism it describes was unified with attend's inward gate in [ADR-123](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md): both now consume the same `sensor_trait::Curve` type with the same `salience_at(delta)` query. **Ways was the first concrete implementation**, shipping cross-tool via ADR-123. **Attend's sensor-peers application now ships too** (issue #22) — each peer signal passes through a per-id `EngagementState<Curve::Exponential>` before emitting, so aged backlog fades without being deleted and threaded replies (`re:<id>`) reset the parent's salience. This page describes the decision and points at both production implementations as canonical references. <!-- adr-cite-ignore -->
+**Status.** The framing comes from [ADR-121](../architecture/ways/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md). The mechanism it describes was unified with attend's inward gate in [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md): both now consume the same `sensor_trait::Curve` type with the same `salience_at(delta)` query. **Ways was the first concrete implementation**, shipping cross-tool via ADR-123. **Attend's sensor-peers application now ships too** (issue #22) — each peer signal passes through a per-id `EngagementState<Curve::Exponential>` before emitting, so aged backlog fades without being deleted and threaded replies (`re:<id>`) reset the parent's salience. This page describes the decision and points at both production implementations as canonical references. <!-- adr-cite-ignore -->
 
 ## The problem the outward gate solves
 
@@ -59,7 +59,7 @@ Callers compare this against a **re-fire floor**. Different callers pick differe
 
 Ways is the first tool that consumes the outward gate in production. The surface:
 
-- Every way declares an explicit `curve:` in its frontmatter. Most declare `Curve::Exponential { half_life: N }` in tokens. See [ADR-123 §7](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md#7-frontmatter-schema-migration--no-shims).
+- Every way declares an explicit `curve:` in its frontmatter. Most declare `Curve::Exponential { half_life: N }` in tokens. See [ADR-123 §7](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#7-frontmatter-schema-migration--no-shims).
 - On each match, `session::way_fire_outcome(way, session, curve)` asks the engine whether the way should re-fire. Under the hood:
 
 ```rust
@@ -79,7 +79,7 @@ match state.current_salience(current_tick) {
 
 For ways with `Curve::Exponential { half_life: H }` and the 0.5 floor, re-fire happens at exactly delta `H` — the half-life *is* the re-fire distance. Ways' "20–30K intervals" footer in `ways list` is exactly this: the range of `half_life` values across the active way set.
 
-Per-way visualization in `ways list` and `ways rethink` uses `Curve::refire_delta(floor)` to render each row's bar and forecast position from its own threshold, not a shared global. See [ADR-123 §2](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md#2-pluggable-curve-as-first-class-parameter) for the curve types and [`engagement.md`](engagement.md) for the engine's other queries.
+Per-way visualization in `ways list` and `ways rethink` uses `Curve::refire_delta(floor)` to render each row's bar and forecast position from its own threshold, not a shared global. See [ADR-123 §2](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#2-pluggable-curve-as-first-class-parameter) for the curve types and [`engagement.md`](engagement.md) for the engine's other queries.
 
 ## Attend's concrete application (shipping now)
 
@@ -168,7 +168,7 @@ In ways' case, "re-engagement" is structurally different: a way re-fires when a 
 
 Salience decay is a **curve shape** concern; what delta the curve is evaluated against is an **axis choice** concern. They're orthogonal:
 
-- Attend's axis is wall-clock seconds because attend coordinates events across multiple peers. Each peer has its own internal progression, but wall clock is the only axis guaranteed common across all peers. This is the multi-observer dimensionality argument in [ADR-123 Decision 4](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory).
+- Attend's axis is wall-clock seconds because attend coordinates events across multiple peers. Each peer has its own internal progression, but wall clock is the only axis guaranteed common across all peers. This is the multi-observer dimensionality argument in [ADR-123 Decision 4](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory).
 - Ways' axis is token position because ways steers a single-observer host (one session, one monotonic token stream) and token position is the unit the host uses internally to address content. The model can observe it directly via RoPE; wall clock is external to the model's attention.
 
 The salience curve doesn't care which axis it's running against. A `Curve::Exponential { half_life: 30000 }` is 30000 whatever-the-caller-supplies. Attend reads 30000 as seconds (half an hour); ways reads 30000 as tokens (roughly one medium interaction). Both are correct for their domain because the engine is unit-agnostic.
@@ -185,7 +185,7 @@ Preserved here for posterity. The arguments didn't change when the engine unifie
 
 ## What this page is not
 
-- **Not the canonical architecture.** That's [ADR-123](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md), with [ADR-121](../architecture/system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) as the original outward-gate decision. <!-- adr-cite-ignore -->
+- **Not the canonical architecture.** That's [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md), with [ADR-121](../architecture/ways/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) as the original outward-gate decision. <!-- adr-cite-ignore -->
 - **Not the engine documentation.** That's `sensor_trait::curve::Curve` in source, with unit tests as the executable spec.
 - **Not a parameter-tuning guide for attend.** Attend's outward-gate parameters don't exist in production yet — `attend config lint` will surface them alongside engagement parameters when sensor-peers consumes them.
 

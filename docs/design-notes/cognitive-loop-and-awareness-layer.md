@@ -264,18 +264,18 @@ To be explicit about what this framing *does not* propose:
 
 **ADRs motivating this note or cited within it:**
 
-- [ADR-103](../architecture/system/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) — Checks: epoch-distance-aware confidence sensors for ways
-- [ADR-104](../architecture/system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Token-gated way re-disclosure
-- [ADR-105](../architecture/system/ADR-105-progressive-disclosure-for-way-trees.md) — Progressive disclosure for way trees
-- [ADR-106](../architecture/system/ADR-106-project-pulse-epoch-mapped-project-awareness.md) — Project Pulse: epoch-mapped project awareness
-- [ADR-108](../architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — Embedding-based way matching
-- [ADR-111](../architecture/system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) — Unified ways CLI
-- [ADR-112](../architecture/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — Session ledger and knowledge graph integration
+- [ADR-103](../architecture/ways/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) — Checks: epoch-distance-aware confidence sensors for ways
+- [ADR-104](../architecture/ways/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Token-gated way re-disclosure
+- [ADR-105](../architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md) — Progressive disclosure for way trees
+- [ADR-106](../architecture/ways/ADR-106-project-pulse-epoch-mapped-project-awareness.md) — Project Pulse: epoch-mapped project awareness
+- [ADR-108](../architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — Embedding-based way matching
+- [ADR-111](../architecture/ways/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) — Unified ways CLI
+- [ADR-112](../architecture/ways/ADR-112-session-ledger-and-knowledge-graph-integration.md) — Session ledger and knowledge graph integration
 
 **Prior attempts at adjacent capabilities (for context on why the awareness layer is different):**
 
-- [ADR-101](../architecture/system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) — Wormhole relay protocol (Deprecated)
-- [ADR-102](../architecture/system/ADR-102-irc-based-local-agent-communication.md) — IRC-based local agent communication (Abandoned)
+- [ADR-101](../architecture/ways/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) — Wormhole relay protocol (Deprecated)
+- [ADR-102](../architecture/ways/ADR-102-irc-based-local-agent-communication.md) — IRC-based local agent communication (Abandoned)
 
 **ADRs that cite this note:**
 

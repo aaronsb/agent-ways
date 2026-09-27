@@ -369,7 +369,7 @@ fn detect_legacy_burst_window(yaml_str: &str) -> Result<(), String> {
                  under ADR-123 the burst window is implicit in multiplier_half_life \
                  (derived from decay_per_minute). Run `attend config lint --fix` \
                  to remove the key from your config. See \
-                 docs/architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md \
+                 docs/architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md \
                  for migration guidance."
                     .to_string(),
             );

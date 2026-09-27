@@ -10,10 +10,10 @@ This guide is for the paths that aren't straight: an existing `~/.claude` you ca
 
 ## The 1.0 model (why there's no "clobber" anymore)
 
-Before 1.0, this repo *was* `~/.claude/` — installing meant cloning over the directory Claude Code already used, so the installer had to detect existing files and stop rather than destroy them. **1.0 dissolves that.** `~/.claude` is now a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways` (see [ADR-142](architecture/system/ADR-142-agent-ways-1-0-xdg-application-distribution.md)). Installing only:
+Before 1.0, this repo *was* `~/.claude/` — installing meant cloning over the directory Claude Code already used, so the installer had to detect existing files and stop rather than destroy them. **1.0 dissolves that.** `~/.claude` is now a thin **projection** of an XDG application whose source lives in `$XDG_DATA_HOME/agent-ways` (see [ADR-142](architecture/ways/ADR-142-agent-ways-1-0-xdg-application-distribution.md)). Installing only:
 
 - symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, and
-- three-way-merges its owned slices into your `settings.json`: the hooks block, its `permissions.allow` entries (its own binaries), and a `permissions.deny` secret-path baseline (`~/.ssh`, `~/.aws`, `.env`, … — [ADR-152](architecture/system/ADR-152-framework-default-secret-path-deny-baseline.md); opt out with `secret_path_deny: false`).
+- three-way-merges its owned slices into your `settings.json`: the hooks block, its `permissions.allow` entries (its own binaries), and a `permissions.deny` secret-path baseline (`~/.ssh`, `~/.aws`, `.env`, … — [ADR-152](architecture/ways/ADR-152-framework-default-secret-path-deny-baseline.md); opt out with `secret_path_deny: false`).
 
 Everything else you have in `~/.claude` (`settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md`) is **preserved by construction**, because the install never replaces your directory. There is no clobber prompt. (`scripts/` and `tools/` and the rest of the app stay in `$XDG_DATA` and are deliberately *not* projected.)
 
@@ -21,7 +21,7 @@ The one case that needs your attention: if a projected root path (`~/.claude/ski
 
 ## Activation is separate from installation
 
-Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways reconcile` or `ways update` records it, and the install is explicit from then on.
+Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/ways/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways reconcile` or `ways update` records it, and the install is explicit from then on.
 
 Before activating a directory, ask what it would do:
 

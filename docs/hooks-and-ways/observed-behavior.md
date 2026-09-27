@@ -6,7 +6,7 @@
 
 ## Why this file exists
 
-The theoretical scaffolding in [`context-decay.md`](context-decay.md) and [`ADR-123`](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) describes *why* ways should help with long-context instruction adherence. It does not, on its own, show *that* ways help. This note closes the empirical grounding gap so the theory is not resting entirely on internal plausibility.
+The theoretical scaffolding in [`context-decay.md`](context-decay.md) and [`ADR-123`](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) describes *why* ways should help with long-context instruction adherence. It does not, on its own, show *that* ways help. This note closes the empirical grounding gap so the theory is not resting entirely on internal plausibility.
 
 This is a single observation, not a controlled benchmark. It's n=1, the operator is the author of the system, and there is no blind condition. Treat it as a lab notebook entry, not a study. The value is that the observation is specific enough to be testable by anyone else running the same comparison, and specific enough to discriminate between mechanistic hypotheses.
 
@@ -54,7 +54,7 @@ The mechanism in short form: **task hierarchy preservation under redirection.** 
 
 ### What the observation does not test
 
-1. **Parameter calibration.** The observation says "ways helped"; it says nothing about whether the specific curve shapes, half-lives, or firing thresholds in the current implementation are optimal. Those are still empirical questions for [`ways tune`](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) to answer.
+1. **Parameter calibration.** The observation says "ways helped"; it says nothing about whether the specific curve shapes, half-lives, or firing thresholds in the current implementation are optimal. Those are still empirical questions for [`ways tune`](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) to answer.
 
 2. **Which ways were load-bearing.** The full stack was active on Machine B. This observation cannot discriminate between "quality.md was load-bearing" and "github.md was load-bearing" and "it was all of them together." Ablation by individual way would be needed for that.
 
@@ -138,7 +138,7 @@ This clears the gate for ADR-123 Draft → Accepted.
 
 ## Why this is worth keeping
 
-This note is the only place in the project where the empirical grounding for the entire firing-dynamics scaffolding is written down rather than held in the operator's memory. Every time future-us reads [`context-decay.md`](context-decay.md) or [`ADR-123`](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) and wonders whether the theoretical elaboration is justified, the answer should be traceable to a concrete observation with a concrete mechanism — not "I remember noticing once that it helped."
+This note is the only place in the project where the empirical grounding for the entire firing-dynamics scaffolding is written down rather than held in the operator's memory. Every time future-us reads [`context-decay.md`](context-decay.md) or [`ADR-123`](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) and wonders whether the theoretical elaboration is justified, the answer should be traceable to a concrete observation with a concrete mechanism — not "I remember noticing once that it helped."
 
 It is also protection against theory-drift. If we later change the implementation in a way that would not have produced the effect observed here, this note is a pre-registered target: the new implementation should still, in principle, pass the same A/B test. If it wouldn't, that's a signal something load-bearing has been lost.
 
@@ -146,6 +146,6 @@ It is also protection against theory-drift. If we later change the implementatio
 
 - [`context-decay.md`](context-decay.md) — the presentation-economics model this observation grounds.
 - [`context-decay-formal-foundations.md`](context-decay-formal-foundations.md) — the mathematical scaffolding, tempered to distinguish baseline attention prior from trained retrieval behavior.
-- [`ADR-123`](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) — the firing-dynamics architecture informed by this model.
+- [`ADR-123`](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) — the firing-dynamics architecture informed by this model.
 - [`model-context-decay/README.md`](../reference/model-context-decay/README.md) — the empirical retention benchmarks across Claude models.
 - **Convergent external work.** As of April 2026, several independent communities are describing the same underlying pattern from different angles — security ("safety heartbeat" constraint re-injection for long-running agents), prompt engineering (strategic repetition to counter the recency bias), agent research (identity stabilization failures in agent-to-agent conversation without human grounding signals), and memory systems (prune-and-decay architectures with selective top-N injection). These are separate discoveries, not one crowd citing each other. Ways sits in the same shape of the design space but earlier in the calibration cycle.

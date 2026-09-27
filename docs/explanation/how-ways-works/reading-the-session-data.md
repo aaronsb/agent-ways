@@ -1,6 +1,6 @@
 ---
 id: 01.019.E
-domain: system
+domain: ways
 mode: explanation
 related:
   - "[[ADR-123]]"

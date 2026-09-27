@@ -84,7 +84,7 @@ Files marked **planned** are part of the ongoing documentation pass.
 ## Related docs
 
 - [`../vocabulary.md`](../vocabulary.md) — terminology anchors mapping the project's coined terms to their established concepts (ADR-301)
-- **ADR-113** (`docs/architecture/system/`) — the original decision to build attend as an active awareness module
+- **ADR-113** (`docs/architecture/ways/`) — the original decision to build attend as an active awareness module
 - **ADR-114** — attend as an insistent trigger type for ways
 - **ADR-115** — declarative config with project-scope overlay
 - **ADR-116** — permission requirements

@@ -424,7 +424,7 @@ ways-audit report --json
 
 **Tells you:** Which projection roots it linked or relinked, one line each, plus a one-line summary unless `--quiet`. Stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is already a real directory or file rather than a symlink; the message lists the paths. It never deletes a real path.
 
-With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)): each enabled target is converged, and each disabled one is withdrawn, meaning our symlinks are unlinked and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. With no `targets` key the one target is `~/.claude`, enabled. An explicit `--dest` is a single-target run and leaves the list alone.
+With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/ways/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)): each enabled target is converged, and each disabled one is withdrawn, meaning our symlinks are unlinked and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. With no `targets` key the one target is `~/.claude`, enabled. An explicit `--dest` is a single-target run and leaves the list alone.
 
 ```
 ways reconcile                       # every target in config.yaml; default: ~/.claude
@@ -472,7 +472,7 @@ ways enable itops/incident
 
 **Run from:** Anywhere.
 
-**Tells you:** The resolved configuration as a table: language, scope, the project switch, disabled collections, matching thresholds, refire presets, and the targets. `--json` prints the stored user file as one document; `--json --effective` prints the resolved state with defaults applied ([ADR-185](../architecture/system/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md)). Only the stored form is meant to be written back.
+**Tells you:** The resolved configuration as a table: language, scope, the project switch, disabled collections, matching thresholds, refire presets, and the targets. `--json` prints the stored user file as one document; `--json --effective` prints the resolved state with defaults applied ([ADR-185](../architecture/ways/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md)). Only the stored form is meant to be written back.
 
 ```
 ways config show
@@ -486,7 +486,7 @@ ways config init                   # create config at XDG path if missing
 
 ### `ways config targets`
 
-**When:** Finding out where agent-ways is active on this machine, or activating and deactivating it for a Claude Code config directory ([ADR-184](../architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)).
+**When:** Finding out where agent-ways is active on this machine, or activating and deactivating it for a Claude Code config directory ([ADR-184](../architecture/ways/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)).
 
 **Run from:** Anywhere.
 

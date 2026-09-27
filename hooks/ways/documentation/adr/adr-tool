@@ -1713,7 +1713,7 @@ class Relocation:
                     return None  # a real path that stays
         # A path written from the repo root, or inside a URL: the longest run
         # of its segments that ends a moved path. A directory needs two
-        # segments (architecture/system), so a bare folder name in prose is
+        # segments (architecture/ways), so a bare folder name in prose is
         # never taken for a path; a moved file matches on its name alone.
         parts = core.split('/')
         best = None

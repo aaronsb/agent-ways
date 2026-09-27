@@ -63,7 +63,7 @@ This is also why scoring is done iteratively during way creation rather than aft
 
 ## The Tool
 
-The `ways` binary includes embedding-based semantic scoring as a built-in subcommand (see [ADR-108](../architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) for the embedding engine, [ADR-111](../architecture/system/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation, and [ADR-125](../architecture/system/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) for the embedding-only decision). It scores a prompt against the entire way corpus using cosine similarity and ranks the results.
+The `ways` binary includes embedding-based semantic scoring as a built-in subcommand (see [ADR-108](../architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) for the embedding engine, [ADR-111](../architecture/ways/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation, and [ADR-125](../architecture/ways/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) for the embedding-only decision). It scores a prompt against the entire way corpus using cosine similarity and ranks the results.
 
 ```bash
 # Score a prompt against all ways (query is positional; there is no --threshold flag)
@@ -239,7 +239,7 @@ See the [ways-tests skill](/skills/ways-tests/SKILL.md) for the testing skill an
 
 ## Empirical Signals: Tuning From What Actually Fired
 
-The worked example above tunes a way against prompts you write by hand. But once a way ships, the firing engine itself becomes the evidence. [ADR-134](../architecture/system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) extends the telemetry in `$XDG_STATE/agent-ways/events.jsonl` so that hand-tuning gets a record to revise from — three report-first signals:
+The worked example above tunes a way against prompts you write by hand. But once a way ships, the firing engine itself becomes the evidence. [ADR-134](../architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) extends the telemetry in `$XDG_STATE/agent-ways/events.jsonl` so that hand-tuning gets a record to revise from — three report-first signals:
 
 - **Near-misses.** When a way's calibrated probability lands in the band just below the semantic bar — `τ_s − near_miss_margin ≤ g(s) < τ_s`, `near_miss_margin` default 0.05 (a live config key, `config.rs`) — but nothing fires, the matcher logs a `way_nearmiss` event. It carries `prob_en`, `prob_multi`, `tau_s`, `margin`, `trigger`, `query_tokens` (plus `way`, `corpus_id`, `domain`, `scope`, `project`, `session`) — the already-computed probabilities against the *same* global `τ_s` the fire path uses, no per-lane thresholds and no new embedding work (`scan/mod.rs`). These are the false silences the precision-first discipline can't otherwise see — a way that consistently lands just under the bar on prompts whose sessions then do that way's kind of work is a candidate to widen, the recall counterpart to the 0-FP constraint.
 - **Fire scores.** A `way_fired` event carries `fire_score`: the calibrated probability `g(s)` that cleared `τ_s`, recorded on first-fires only (not redisclosures, and `None`/absent for deterministic keyword fires) — `show/mod.rs`. This is the fire-score population that `tune-precision` reads and that feeds the **deferred** ADR-134 auto-tune; the `g(s)` calibration itself is fit at corpus-generation from the committed `calibration_probes.jsonl`, **not** from this stream.

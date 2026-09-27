@@ -113,7 +113,7 @@ The naive approach would be: at session start, inject every way that's possibly 
 2. **Attention dilution.** Claude reads what's nearest the current conversation most carefully. Guidance injected at startup becomes guidance buried under forty turns of later content. See [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) for the formal model.
 3. **Habituation.** If every way fires on every possible trigger, Claude's context becomes a soup of guidance that doesn't map to what's happening right now.
 
-**Progressive disclosure** ([ADR-105](architecture/system/ADR-105-progressive-disclosure-for-way-trees.md)) and **token-gated re-disclosure** ([ADR-123](architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)) address this together. The rules:
+**Progressive disclosure** ([ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md)) and **token-gated re-disclosure** ([ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)) address this together. The rules:
 
 - Ways only fire when their triggers match the current situation, never speculatively
 - Once a way has fired, it is marked as "disclosed" and will not fire again until its re-disclosure cooldown expires
@@ -126,7 +126,7 @@ The mental model: **ways are a rate-limited stream of premises**. Claude does no
 
 ## Empirical tuning: letting telemetry revise the thresholds
 
-The thresholds, half-lives, and vocabularies above were all set by authorial judgment. **Empirical auto-tuning** ([ADR-134](architecture/system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)) closes the loop by feeding the matcher's own firing record back into those settings. This is optional operational tooling, not part of the per-turn loop — but it is what keeps the precision-first discipline honest over time.
+The thresholds, half-lives, and vocabularies above were all set by authorial judgment. **Empirical auto-tuning** ([ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)) closes the loop by feeding the matcher's own firing record back into those settings. This is optional operational tooling, not part of the per-turn loop — but it is what keeps the precision-first discipline honest over time.
 
 Two signals accumulate in `$XDG_STATE/agent-ways/events.jsonl` (the legacy `~/.claude/stats/events.jsonl` is migrated forward), both written by the cheap substrate at fire time:
 
@@ -161,7 +161,7 @@ The pieces described so far are *reactive*: they respond to things Claude is doi
 
 But some things happen *outside* Claude's loop. A background build finishes. A peer Claude Code session modifies a file Claude is editing. Context pressure approaches a critical threshold five turns from now. These are events Claude cannot observe without burning reasoning tokens to check, and that the hook system cannot surface because they do not correspond to Claude's own actions.
 
-The **awareness layer** ([ADR-113](architecture/system/ADR-113-attend-active-awareness-module.md), [ADR-114](architecture/system/ADR-114-attend-as-insistent-way-trigger-type.md)) closes this gap. It has two components:
+The **awareness layer** ([ADR-113](architecture/ways/ADR-113-attend-active-awareness-module.md), [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md)) closes this gap. It has two components:
 
 1. **`attend`** — a background Rust binary that observes Claude's session state and environment via small sensor scripts, tracks approaching mechanical consequences using turn-based arithmetic, and emits single-line observations when something is worth surfacing.
 2. **`Monitor`** — Claude Code's async-notification tool that delivers background-script stdout as notifications in Claude's chat.
@@ -258,7 +258,7 @@ Stage by stage:
 - **Wake.** A new session begins. Project pulse surfaces recent ledger entries to orient Claude. `attend` is invoked via `Monitor` at session start and restores its prior state from disk. Claude reads the orientation context and begins working.
 - **Perception.** `attend` runs its sensors in the background, watching Claude's context state, workspace files, peer sessions, and approaching consequences. Most observations are silent; only state transitions worth surfacing reach stdout.
 - **Delivery.** Two paths operate in parallel. `Monitor` delivers `attend`'s stdout lines as asynchronous notifications. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, etc.). Both paths land on Claude's attention surface.
-- **Attention.** The disclosure gate ([ADR-123](architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)) applies habituation rules. Recently-disclosed ways are suppressed or re-surfaced tersely. Fresh signals get full weight. The cheap substrate decides what reaches Claude's reasoning in what form.
+- **Attention.** The disclosure gate ([ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)) applies habituation rules. Recently-disclosed ways are suppressed or re-surfaced tersely. Fresh signals get full weight. The cheap substrate decides what reaches Claude's reasoning in what form.
 - **Reasoning.** Claude integrates observations and guidance into its working model and decides what to do.
 - **Action.** Claude acts — edits files, runs tools, responds to the user.
 - **Capture.** At context-threshold boundaries, the reflection way fires. Claude writes a short prose reflection. The Stop hook captures it and appends to the ledger. If a memory projection is configured, the entry is also handed off to it. Separately, every fire and near-miss this turn is logged as cheap telemetry; offline, that record drives the empirical tuning of thresholds and half-lives (ADR-134) without touching the loop.
@@ -276,7 +276,7 @@ Worth naming explicitly, because the architecture can be misread if these aren't
 - **Not consciousness.** The substrate is text replay through an inference model. The composition is novel; the substrate is not. agent-ways does not claim or produce sentience. Any language about "presence" or "continuity" in the design note refers to structural properties of the composition, not metaphysical claims about the substrate.
 - **Not surveillance.** The awareness layer's scope of observation never exceeds the session that owns it. All observations are local. Sensors emit metadata, not content (a presence sensor might emit "user at desk," never a camera frame). The person observed and the person the observations serve are the same person — mirror, not camera.
 - **Not required.** `attend` is opt-in. Ways with `trigger.type: attend` are dormant when `attend` is not running. The baseline Claude Code experience is unchanged if you do not install the awareness layer. `ways` itself is additive too — Claude Code works without it. agent-ways is a composition you can opt into at whatever depth makes sense for your workflow.
-- **Not C2.** Despite superficial resemblance to command-and-control patterns, the architecture points *inward*, not outward. One session, one user, one machine. No inter-instance protocols. No central servers. [ADR-101](architecture/system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) and [ADR-102](architecture/system/ADR-102-irc-based-local-agent-communication.md) tried outward-facing designs and were abandoned for good reasons; the awareness layer points the other direction. <!-- adr-cite-ignore -->
+- **Not C2.** Despite superficial resemblance to command-and-control patterns, the architecture points *inward*, not outward. One session, one user, one machine. No inter-instance protocols. No central servers. [ADR-101](architecture/ways/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) and [ADR-102](architecture/ways/ADR-102-irc-based-local-agent-communication.md) tried outward-facing designs and were abandoned for good reasons; the awareness layer points the other direction. <!-- adr-cite-ignore -->
 - **Not automatic guidance injection at the awareness layer.** Even at critical salience, `attend` does not inject ways directly. It suggests affordances; Claude decides whether to invoke them. The "Claude retains agency" invariant is load-bearing.
 
 ## Where to dig deeper
@@ -289,13 +289,13 @@ Ordered roughly by how specific the topic is to your interest:
 - [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) — the attention-decay model underlying progressive disclosure
 
 **If you want to understand specific decisions:**
-- [ADR-123](architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) — firing dynamics, including token-gated re-disclosure
-- [ADR-105](architecture/system/ADR-105-progressive-disclosure-for-way-trees.md) — progressive disclosure for way trees
-- [ADR-108](architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — embedding-based way matching
+- [ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) — firing dynamics, including token-gated re-disclosure
+- [ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md) — progressive disclosure for way trees
+- [ADR-108](architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — embedding-based way matching
 - [ADR-112](architecture/archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — session ledger and optional KG integration (archived) <!-- adr-cite-ignore -->
-- [ADR-113](architecture/system/ADR-113-attend-active-awareness-module.md) — the `attend` binary
-- [ADR-114](architecture/system/ADR-114-attend-as-insistent-way-trigger-type.md) — the way trigger schema for `attend` signals
-- [ADR-134](architecture/system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) — empirical auto-tuning from fire and near-miss telemetry
+- [ADR-113](architecture/ways/ADR-113-attend-active-awareness-module.md) — the `attend` binary
+- [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md) — the way trigger schema for `attend` signals
+- [ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) — empirical auto-tuning from fire and near-miss telemetry
 
 **If you want to build ways or operate the system:**
 - [hooks-and-ways/README.md](hooks-and-ways/README.md) — start here for way authoring
