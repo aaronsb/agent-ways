@@ -28,3 +28,5 @@ The decision.
 ## 2. Consequences
 
 They follow.
+
+See [the chain](../system/ADR-109-precedent-chain.md).

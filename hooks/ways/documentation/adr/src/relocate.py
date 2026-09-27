@@ -97,8 +97,15 @@ class Relocation:
     def word(self, token: str, old_dir: str, new_dir: str) -> tuple:
         """One run of path characters rewritten; (text, count)."""
         stripped = token.rstrip('.')  # sentence punctuation is not the path
-        if not stripped or ('/' not in stripped and stripped not in self.basenames):
+        if not stripped:
             return token, 0
+        if '/' not in stripped and stripped not in self.basenames:
+            # A bare sibling name is a path only when the file holding it
+            # moved and the name resolves to a tracked file: the link must be
+            # re-based even though its target stays put.
+            sibling = posixpath.normpath(posixpath.join(old_dir, stripped))
+            if old_dir == new_dir or sibling not in self.known:
+                return token, 0
         new = self._path(stripped, old_dir, new_dir)
         if new is None:
             return token, 0

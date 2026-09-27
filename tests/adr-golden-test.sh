@@ -658,6 +658,8 @@ move_fresh() {
   printf -- '---\ndomain: system\n---\n\n# Hooks guide\n\nSee [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104#1.\n' > "$WORK/repo/docs/guide/hooks.md"
   edit docs/architecture/system/ADR-109-precedent-chain.md "s + '\n## 3. Notes\n\nADR-104 applies; see [the constraint](ADR-104-no-network-in-hooks.md) and [ingest](./ADR-101-ingest.md).\n'"
   edit docs/architecture/system/ADR-111-cut-search.md "s + '\nSee [ADR-104](ADR-104-no-network-in-hooks.md).\n'"
+  # The record that moves links to a sibling that stays, by bare file name.
+  edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s + '\nSee [the chain](ADR-109-precedent-chain.md).\n'"
   edit src/search.py "s + '# ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md\n# ADR-1040 and ADR-104.1 are other numbers.\n'"
   commit_all "references"
 }

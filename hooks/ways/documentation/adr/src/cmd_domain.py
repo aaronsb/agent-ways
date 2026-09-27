@@ -51,8 +51,11 @@ def _relocation_scope(root: Path) -> tuple:
             elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
                 return True
         return False
-    # INDEX.md is regenerated after the move, so it is not rewritten.
-    return [n for n in tracked if not excluded(n) and n != 'docs/architecture/INDEX.md'], known
+    # INDEX.md is regenerated after the move, so it is not rewritten. A
+    # symlink is skipped: writing through it would edit its target, which is
+    # in scope (or excluded) in its own right. docs/scripts/adr is one.
+    return [n for n in tracked if not excluded(n) and n != 'docs/architecture/INDEX.md'
+            and not (root / n).is_symlink()], known
 
 
 def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:

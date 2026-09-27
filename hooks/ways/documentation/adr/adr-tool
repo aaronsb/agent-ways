@@ -1713,7 +1713,7 @@ class Relocation:
                     return None  # a real path that stays
         # A path written from the repo root, or inside a URL: the longest run
         # of its segments that ends a moved path. A directory needs two
-        # segments (architecture/ways), so a bare folder name in prose is
+        # segments (architecture/system), so a bare folder name in prose is
         # never taken for a path; a moved file matches on its name alone.
         parts = core.split('/')
         best = None
@@ -1736,8 +1736,15 @@ class Relocation:
     def word(self, token: str, old_dir: str, new_dir: str) -> tuple:
         """One run of path characters rewritten; (text, count)."""
         stripped = token.rstrip('.')  # sentence punctuation is not the path
-        if not stripped or ('/' not in stripped and stripped not in self.basenames):
+        if not stripped:
             return token, 0
+        if '/' not in stripped and stripped not in self.basenames:
+            # A bare sibling name is a path only when the file holding it
+            # moved and the name resolves to a tracked file: the link must be
+            # re-based even though its target stays put.
+            sibling = posixpath.normpath(posixpath.join(old_dir, stripped))
+            if old_dir == new_dir or sibling not in self.known:
+                return token, 0
         new = self._path(stripped, old_dir, new_dir)
         if new is None:
             return token, 0
@@ -3157,8 +3164,11 @@ def _relocation_scope(root: Path) -> tuple:
             elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
                 return True
         return False
-    # INDEX.md is regenerated after the move, so it is not rewritten.
-    return [n for n in tracked if not excluded(n) and n != 'docs/architecture/INDEX.md'], known
+    # INDEX.md is regenerated after the move, so it is not rewritten. A
+    # symlink is skipped: writing through it would edit its target, which is
+    # in scope (or excluded) in its own right. docs/scripts/adr is one.
+    return [n for n in tracked if not excluded(n) and n != 'docs/architecture/INDEX.md'
+            and not (root / n).is_symlink()], known
 
 
 def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:

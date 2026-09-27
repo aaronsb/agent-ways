@@ -1,6 +1,7 @@
 Moved: ADR-104 system → docs
   docs/architecture/system/ADR-104-no-network-in-hooks.md → docs/architecture/documentation/ADR-104-no-network-in-hooks.md
-Rewrote 4 paths in 4 files
+Rewrote 5 paths in 5 files
+  docs/architecture/system/ADR-104-no-network-in-hooks.md: 1
   docs/architecture/system/ADR-109-precedent-chain.md: 1
   docs/architecture/system/ADR-111-cut-search.md: 1
   docs/guide/hooks.md: 1
