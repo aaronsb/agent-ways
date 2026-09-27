@@ -1,5 +1,14 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'the PR #301 review: lowercase patterns such as \bssh\b missed the uppercase acronyms users type, and five patterns were patched with inline (?i)'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-04
 deciders:
   - aaronsb
@@ -7,6 +16,10 @@ deciders:
 related:
   - ADR-155
   - ADR-156
+imported:
+  from: docs/architecture/system/ADR-157-case-insensitive-trigger-regex-compilation.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-157: Case-insensitive trigger regex compilation

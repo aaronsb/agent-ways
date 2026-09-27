@@ -1,5 +1,19 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - disclosure
+  - authoring
+  - matching
+basis:
+  - evidence: a 173-line docs way injected everything on one trigger; overlapping vocabulary degraded BM25 discrimination across 48+ ways
+  - evidence: the supplychain tree (11 files, 3 levels, thresholds 1.8 to 2.5, sibling Jaccard < 0.06) showed the pattern; integration test accuracy rose from 87% to 94% after the refactor
+  - evidence: comparison with obra/superpowers, whose skills lazy-load through the Skill tool
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-17
 deciders:
   - aaronsb
@@ -8,6 +22,10 @@ related:
   - ADR-014
   - ADR-103
   - ADR-104
+imported:
+  from: docs/architecture/system/ADR-105-progressive-disclosure-for-way-trees.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-105: Progressive Disclosure for Way Trees

@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'a fit of g(s) over 96 intent/noise probes across six ways: one global calibration separates at pooled AUC 0.956; the default embed_threshold 0.40 sits at P≈0.95 and the gate floor 0.16 at P≈0.03'
+  - precedent: ADR-155
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-04
 deciders:
   - aaronsb
@@ -8,6 +18,10 @@ related:
   - ADR-155
   - ADR-125
   - ADR-134
+imported:
+  from: docs/architecture/system/ADR-156-calibrated-relevance-scoring-for-the-semantic-lane.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-156: Calibrated relevance scoring for the semantic lane

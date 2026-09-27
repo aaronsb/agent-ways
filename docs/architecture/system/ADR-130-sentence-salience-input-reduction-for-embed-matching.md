@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 600+ way-embed SIGABRT crashes between 2026-05-06 and 2026-05-21, peaking at 136/day, from inputs past the 128-token position window
+  - evidence: 'the lossy truncation mitigations shipped in PRs #94, #95 and #96'
+  - precedent: ADR-125
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-05-21
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-108
   - ADR-125
   - ADR-127
+imported:
+  from: docs/architecture/system/ADR-130-sentence-salience-input-reduction-for-embed-matching.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-130: Sentence-salience input reduction for embed matching

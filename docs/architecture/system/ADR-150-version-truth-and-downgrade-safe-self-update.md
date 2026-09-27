@@ -1,11 +1,25 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: install
+basis:
+  - evidence: 'ways update silently downgraded a live install: main was 78 commits ahead of ways-v1.0.0 with the same version string, the stale release binary replaced it, and ways update and ways settings vanished'
+  - precedent: ADR-142
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-01
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-142
+imported:
+  from: docs/architecture/system/ADR-150-version-truth-and-downgrade-safe-self-update.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-150: Version-truth and downgrade-safe self-update

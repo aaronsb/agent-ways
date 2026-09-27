@@ -1,5 +1,15 @@
 ---
-status: Rejected
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'experiment on a 90-way corpus with 18 prompts: all variants tie at 11/16 top-1, and full-body costs 6.89x to 9.23x rebuild time'
+  - precedent: ADR-108
+agent:
+  name: Claude
+  model: unrecorded
+status: rejected
 date: 2026-04-22
 deciders:
   - aaronsb
@@ -9,6 +19,10 @@ related:
   - ADR-107
   - ADR-108
   - ADR-125
+imported:
+  from: docs/architecture/system/ADR-127-reject-full-body-embedding-corpus.md
+  format: v0
+  status: Rejected
 ---
 
 # ADR-127: Full-body embedding corpus for way matching

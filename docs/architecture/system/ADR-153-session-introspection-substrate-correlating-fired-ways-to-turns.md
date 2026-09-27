@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'research pass 2026-07-02: session_start is written by shell hooks to the legacy ~/.claude/stats/events.jsonl while readers prefer the $XDG_STATE log, so new sessions are invisible'
+  - evidence: way_fired carries no transcript uuid or turn index, and its trigger field records the channel, not the matched term
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -8,6 +18,10 @@ related:
   - ADR-142
   - ADR-134
   - ADR-201
+imported:
+  from: docs/architecture/system/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-153: Session-introspection substrate — correlating fired ways to turns

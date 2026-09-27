@@ -1,5 +1,17 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - install
+  - config
+basis:
+  - evidence: 'a first install on a CLAUDE_CONFIG_DIR machine replaced a real skills directory and dropped the user''s hooks; PRs #501 and #502 fixed the data-loss paths'
+  - precedent: ADR-142
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-09-17
 deciders:
   - aaronsb
@@ -9,6 +21,10 @@ related:
   - ADR-142
   - ADR-144
   - ADR-185
+imported:
+  from: docs/architecture/system/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-184: Installation and activation are separate states: targets as the unit of activation

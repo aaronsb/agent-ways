@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - authoring
+  - governance
+basis:
+  - evidence: provenance adds 10-15 lines of nested YAML to frontmatter that only the governance pipeline reads; 84 way files all named way.md are hard to navigate
+  - evidence: 'Anthropic''s harness design research (2025): every harness component encodes an assumption about what the model can''t do'
+  - standard: 'Unix man pages, man(7) and mandb(8): one-line metadata, conventional body sections, derived indexes'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-29
 deciders:
   - aaronsb
@@ -11,6 +24,10 @@ related:
   - ADR-111
   - ADR-151
   - ADR-200
+imported:
+  from: docs/architecture/system/ADR-110-way-file-separation-and-graph-compatible-structure.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-110: Way File Separation and Graph-Compatible Structure

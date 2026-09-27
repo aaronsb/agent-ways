@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: loop
+basis:
+  - evidence: each session re-derives its task list from the issue body by hand, and nothing carries completion back
+  - evidence: task store behaviour verified in-session on 2026-09-08 and read from the Claude Code 2.1.263 and 2.1.276 bundles
+  - evidence: feature request anthropics/claude-code#79096 is open with no response
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-09-08
 deciders:
   - aaronsb
@@ -9,6 +20,10 @@ related:
   - ADR-114
   - ADR-152
   - ADR-172
+imported:
+  from: docs/architecture/system/ADR-180-github-issues-as-the-shared-truth-for-the-session-task-list.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-180: GitHub issues as the shared truth for the session task list

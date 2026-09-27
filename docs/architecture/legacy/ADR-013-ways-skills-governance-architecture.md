@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: constrain
+capability:
+  - method
+  - governance
+basis:
+  - evidence: an evaluation of Anthropic's Claude Code skills system against the ways system, prompted by doubt that ways duplicate the official primitives
+  - standard: 'Claude Code skills and hooks primitives: skills cannot fire on PreToolUse, file patterns or session state, or session-gate'
+  - evidence: governance matrix covers 12 ways with 37 control claims and 93 justifications across NIST, OWASP, ISO, SOC 2, CIS and IEEE (Decision §4)
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-02-09
 deciders:
   - aaronsb
@@ -8,6 +21,10 @@ related:
   - ADR-004
   - ADR-005
   - ADR-200
+imported:
+  from: docs/architecture/legacy/ADR-013-ways-skills-governance-architecture.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-013: Ways, Skills, and Governance Architecture

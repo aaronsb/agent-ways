@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: the four built-in sensors compile into the attend binary with no isolation, no selective compilation and a blurred Sensor trait boundary
+  - evidence: 'the crate extraction pattern already proven by agent-fmt (PR #3) and the ScriptSensor runner (PR #4)'
+  - precedent: ADR-115
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-10
 deciders:
   - aaronsb
@@ -7,6 +18,10 @@ deciders:
 related:
   - ADR-113
   - ADR-115
+imported:
+  from: docs/architecture/system/ADR-117-sensor-crate-extraction-and-feature-flags.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-117: Sensor Crate Extraction and Feature Flags

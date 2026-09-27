@@ -1,7 +1,18 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+superseded_by: ADR-123
+basis:
+  - evidence: 'the party problem: agents burn context on extended peer conversations with no natural disengagement signal under flat thresholds and linear cooldowns'
+  - evidence: Game AI Pro chapter 2, Informing Game AI Through the Study of Neurology, for the action potential model
+  - precedent: ADR-113
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-04-12
-revised: 2026-04-14
 deciders:
   - aaronsb
   - claude
@@ -9,7 +20,12 @@ related:
   - ADR-113
   - ADR-118
   - ADR-123
-superseded_by: ADR-123
+imported:
+  from: docs/architecture/system/ADR-119-action-potential-engagement-model.md
+  format: v0
+  status: Superseded
+  unmapped:
+    revised: 2026-04-14
 ---
 
 # ADR-119: Action Potential Engagement Model

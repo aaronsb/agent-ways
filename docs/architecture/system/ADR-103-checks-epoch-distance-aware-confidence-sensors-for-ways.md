@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - disclosure
+  - matching
+  - authoring
+basis:
+  - evidence: 'landscape analysis of Claude Code''s extension points (PreToolUse hooks, ways, skills, CLAUDE.md, permissions, agents): none gives decay-modulated, domain-coupled injection at the moment of action'
+  - evidence: '''four-foot circle'' failures: confident action on interpolated rather than verified knowledge, while a way injected 20 turns earlier has faded'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-13
 deciders:
   - aaronsb
@@ -8,6 +21,10 @@ related:
   - ADR-004
   - ADR-013
   - ADR-014
+imported:
+  from: docs/architecture/system/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-103: Checks — Epoch-Distance-Aware Confidence Sensors for Ways

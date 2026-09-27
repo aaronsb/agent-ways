@@ -1,11 +1,30 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - disclosure
+  - method
+  - authoring
+basis:
+  - evidence: an 11,500-word draft ran 3.4 significance clauses per thousand words against 0.5 in reviewed prose, with eleven banned antitheses and 118 em-dashes, after core.md and the writing way had both fired
+  - evidence: scan/state.rs re-shows core only when the transcript since summary is under 5000 bytes, so core never re-discloses on distance
+  - evidence: 'research: Bohr (arXiv:2511.13972) on expansion discipline; IFEval-style negative constraints fail at 22-30% on frontier models'
+  - precedent: ADR-123
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-30
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-123
+imported:
+  from: docs/architecture/system/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-174: Progressive core — decoration guidance and the core re-disclosure gap

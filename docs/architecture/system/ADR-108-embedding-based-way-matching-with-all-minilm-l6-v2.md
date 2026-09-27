@@ -1,7 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'test 2026-03-21: a creative-writing prompt fired 4 ways after the corpus and vocabulary audit with 1 true positive; the remaining false positives are BM25 stem collisions (''agent'', ''document'')'
+  - evidence: 'timing: the BM25 path spawns 58 processes per prompt (~120ms); the embedding path measures ~22ms'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-03-21
-amended_by: ADR-125
 deciders:
   - aaronsb
   - claude
@@ -9,6 +18,12 @@ related:
   - ADR-014
   - ADR-107
   - ADR-125
+imported:
+  from: docs/architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md
+  format: v0
+  status: Accepted
+  unmapped:
+    amended_by: ADR-125
 ---
 
 # ADR-108: Embedding-Based Way Matching with all-MiniLM-L6-v2

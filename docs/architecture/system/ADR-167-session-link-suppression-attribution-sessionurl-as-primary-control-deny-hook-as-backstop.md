@@ -1,15 +1,30 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
+supersedes: ADR-162
+basis:
+  - evidence: 'a single-variable experiment on 2026-07-16 (v2.1.212): with attribution.sessionUrl true the system prompt carried the Claude-Session trailer instruction, with false it was absent'
+  - standard: 'Claude Code v2.1.183 changelog: added the attribution.sessionUrl setting; upstream issues #41873 and #18253'
+  - precedent: ADR-162
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-16
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-104]]"
-  - "[[ADR-147]]"
-  - "[[ADR-162]]"
-  - "[[ADR-163]]"
-supersedes: ADR-162
+  - '[[ADR-104]]'
+  - '[[ADR-147]]'
+  - '[[ADR-162]]'
+  - '[[ADR-163]]'
+imported:
+  from: docs/architecture/system/ADR-167-session-link-suppression-attribution-sessionurl-as-primary-control-deny-hook-as-backstop.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-167: Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop

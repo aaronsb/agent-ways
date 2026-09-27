@@ -1,5 +1,19 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - config
+  - authoring
+  - attend
+basis:
+  - evidence: the trusted-project-macros file is a binary, opaque, all-or-nothing trust model that attend sensors cannot use, and missing permissions fail silently or prompt mid-session
+  - standard: Claude Code settings.json permissions.allow and its permission evaluation, which the audit matches
+  - precedent: ADR-115
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-10
 deciders:
   - aaronsb
@@ -8,6 +22,10 @@ related:
   - ADR-004
   - ADR-113
   - ADR-115
+imported:
+  from: docs/architecture/system/ADR-116-declarative-permission-requirements.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-116: Declarative Permission Requirements

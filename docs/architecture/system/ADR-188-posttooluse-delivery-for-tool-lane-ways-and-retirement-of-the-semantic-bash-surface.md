@@ -1,10 +1,24 @@
 ---
-status: Proposed
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - matching
+  - disclosure
+supersedes: ADR-155#4
+basis:
+  - evidence: 'issue #528: 3,132 PreToolUse way outputs across 115 transcripts, zero delivered; PostToolUse paired 145 to 144'
+  - evidence: 'anthropics/claude-code#19432, closed as not planned on 2026-02-28: PreToolUse additionalContext is logged and never injected'
+  - evidence: 'spike-branch probe (commit e2e53243): a next-prompt stash delivers, with four findings against it'
+  - precedent: ADR-155
+agent:
+  name: Claude
+  model: unrecorded
+status: proposed
 date: 2026-09-19
 deciders:
   - aaronsb
   - claude
-supersedes: ADR-155#4
 related:
   - ADR-123
   - ADR-125
@@ -15,6 +29,10 @@ related:
   - ADR-172
   - ADR-181
   - ADR-303
+imported:
+  from: docs/architecture/system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md
+  format: v0
+  status: Proposed
 ---
 
 # ADR-188: PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface

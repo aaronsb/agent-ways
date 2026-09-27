@@ -1,10 +1,24 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: authoring
+basis:
+  - evidence: the new onboarding-share way had no natural home, and collaboration ways (meta/teams, meta/trust, meta/subagents) were filed under meta
+  - precedent: ADR-131
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-04
 deciders:
   - aaronsb
   - claude
 related: []
+imported:
+  from: docs/architecture/system/ADR-132-collaboration-ways-domain.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-132: Collaboration ways domain

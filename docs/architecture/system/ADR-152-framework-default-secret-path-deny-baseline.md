@@ -1,5 +1,18 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
+supersedes: []
+basis:
+  - standard: 'Claude Code permissions: permissions.deny rule syntax and deny-over-allow precedence (code.claude.com/docs/en/permissions)'
+  - evidence: permissions.deny was empty, so nothing stopped Read/Edit/Write from reaching ~/.ssh keys, ~/.aws/credentials or a project .env
+  - precedent: ADR-142
+  - precedent: ADR-147
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-02
 deciders:
   - aaronsb
@@ -7,7 +20,10 @@ deciders:
 related:
   - ADR-142
   - ADR-147
-supersedes: []
+imported:
+  from: docs/architecture/system/ADR-152-framework-default-secret-path-deny-baseline.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-152: Framework-default secret-path deny baseline

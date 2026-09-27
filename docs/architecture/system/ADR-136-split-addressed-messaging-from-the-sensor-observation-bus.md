@@ -1,15 +1,29 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: 'live report: a #open message reached one peer but not another; the retention sweep deleted the stale signal file from the shared dir during the recipient''s Monitor-down gap'
+  - evidence: '@multi addressed only the first agent: parse_addressed returns one Addressed (fixed in PR #137)'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-20
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-120]]"
-  - "[[ADR-121]]"
-  - "[[ADR-123]]"
-  - "[[ADR-124]]"
-  - "[[ADR-129]]"
+  - '[[ADR-120]]'
+  - '[[ADR-121]]'
+  - '[[ADR-123]]'
+  - '[[ADR-124]]'
+  - '[[ADR-129]]'
+imported:
+  from: docs/architecture/system/ADR-136-split-addressed-messaging-from-the-sensor-observation-bus.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-136: Split addressed messaging from the sensor-observation bus

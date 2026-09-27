@@ -1,13 +1,27 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: constrain
+capability: config
+basis:
+  - evidence: the statusline.sh artifact ADR-163 called distributed was a symlink to /home/<authoring-user>/.local/share/agent-ways/statusline.sh, which dangled on a host with a different $HOME
+  - precedent: ADR-163
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-07
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-163]]"
-  - "[[ADR-147]]"
-  - "[[ADR-142]]"
+  - '[[ADR-163]]'
+  - '[[ADR-147]]'
+  - '[[ADR-142]]'
+imported:
+  from: docs/architecture/system/ADR-164-file-artifacts-distributed-across-hosts-must-be-carried-by-value-not-host-absolute-reference.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-164: File artifacts distributed across hosts must be carried by value not host-absolute reference

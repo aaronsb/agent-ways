@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: disclosure
+basis:
+  - evidence: 'usage data: 222 sessions / 10,019 way fires over ~4.5 months, one English speaker'
+  - evidence: 'scout inventory 2026-06-22: 91 .locales.jsonl files, ~3,094 entries, a second 127MB model, a 17x-per-way authoring tax, 3 CI targets (issue #160)'
+  - precedent: ADR-138
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-22
 deciders:
   - aaronsb
@@ -8,7 +19,12 @@ related:
   - ADR-107
   - ADR-125
   - ADR-138
-supersedes_in_part: ADR-125
+imported:
+  from: docs/architecture/system/ADR-139-shelve-maintainer-i18n-adopter-run-localization-via-ways-localize.md
+  format: v0
+  status: Accepted
+  unmapped:
+    supersedes_in_part: ADR-125
 ---
 
 # ADR-139: Shelve maintainer i18n; adopter-run localization via ways-localize

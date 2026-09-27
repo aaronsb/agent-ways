@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+basis:
+  - evidence: 'prototyping and live trials: a mean-of-max confirm over-pruned multi-topic surfaces, and the share gate alone fired nothing on topic-diverse prompts (documentation/adr at peak 0.54 diluted below it)'
+  - precedent: ADR-156
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-05
 deciders:
   - aaronsb
@@ -10,6 +20,10 @@ related:
   - ADR-125
   - ADR-155
   - ADR-156
+imported:
+  from: docs/architecture/system/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-160: Chunked late-interaction matching with softmax-share gating for way selection

@@ -1,12 +1,27 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: install
+basis:
+  - evidence: 'PR #182 (external contributor) packaged the subdirectory copy approach; its settings.json merge shipped broken because it lived in untestable command prose'
+  - evidence: check-config-updates.sh runs git against ~/.claude, so update detection goes dark when ~/.claude is not a repo
+  - precedent: ADR-138
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-22
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-138]]"
-  - "[[ADR-139]]"
+  - '[[ADR-138]]'
+  - '[[ADR-139]]'
+imported:
+  from: docs/architecture/system/ADR-140-two-install-topologies-in-place-repo-and-subdirectory-projection.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-140: Two install topologies: in-place repo and subdirectory projection

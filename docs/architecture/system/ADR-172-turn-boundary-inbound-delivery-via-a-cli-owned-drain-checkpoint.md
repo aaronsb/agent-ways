@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: during the ADR-171 identity work, authored messages to an active session were observed waiting for the next peers-sensor poll
+  - precedent: ADR-136
+  - precedent: ADR-171
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-22
 deciders:
   - aaronsb
@@ -11,6 +22,10 @@ related:
   - ADR-168
   - ADR-170
   - ADR-171
+imported:
+  from: docs/architecture/system/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-172: Turn-boundary inbound delivery via a CLI-owned drain checkpoint

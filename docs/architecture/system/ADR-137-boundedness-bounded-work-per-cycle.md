@@ -1,11 +1,24 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: constrain
+capability: attend
+basis:
+  - evidence: a unit that scanned an external collection took time proportional to its size plus serial network latency, blew its cycle budget, and was killed without a trace
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-20
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-113
+imported:
+  from: docs/architecture/system/ADR-137-boundedness-bounded-work-per-cycle.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-137: Boundedness — a unit of work must be bounded within its cycle

@@ -1,10 +1,25 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: constrain
+capability:
+  - method
+  - authoring
+basis:
+  - evidence: 'an agent vendoring adr/doc tooling hit a dead end: the cp procedure was copied into four places (two macros, the migration way, project-init) and the adr and docs skills carried none of it'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-21
 deciders:
   - aaronsb
   - claude
 related: []
+imported:
+  from: docs/architecture/system/ADR-138-skills-own-the-how-ways-own-the-5w.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-138: Skills own the how, ways own the 5W

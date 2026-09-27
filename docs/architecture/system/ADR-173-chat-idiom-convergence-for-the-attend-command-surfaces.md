@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+basis:
+  - evidence: corpus-aligned verbs (send, reply, @name, inbox) are used correctly by agents on first contact while the bespoke focus verbs need disclosure every session; clear is a cross-surface homonym
+  - precedent: ADR-124
+  - precedent: ADR-170
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-22
 deciders:
   - aaronsb
@@ -10,6 +21,10 @@ related:
   - ADR-136
   - ADR-170
   - ADR-172
+imported:
+  from: docs/architecture/system/ADR-173-chat-idiom-convergence-for-the-attend-command-surfaces.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-173: Chat-idiom convergence for the attend command surfaces

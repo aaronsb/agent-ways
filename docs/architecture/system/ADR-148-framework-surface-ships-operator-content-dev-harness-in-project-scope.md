@@ -1,13 +1,31 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: retire
+capability: install
+targets:
+  - skill:project-pulse
+  - way:meta/project-health
+basis:
+  - evidence: 'the project-pulse skill and meta/project-health way are maintainer tools that sat in projected roots and symlinked into every install; project-health''s `project: ~/.claude` gate went dead under the 1.0 projection'
+  - precedent: ADR-142
+  - precedent: ADR-143
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-01
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-142]]"
-  - "[[ADR-143]]"
-  - "[[ADR-106]]"
+  - '[[ADR-142]]'
+  - '[[ADR-143]]'
+  - '[[ADR-106]]'
+imported:
+  from: docs/architecture/system/ADR-148-framework-surface-ships-operator-content-dev-harness-in-project-scope.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-148: framework surface ships operator content; dev harness in project scope

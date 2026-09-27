@@ -1,13 +1,27 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: install
+basis:
+  - evidence: download success is not launch success, and a way-embed source build without a C++ toolchain aborts mid-install so 100+ ways silently degrade to keyword-only matching
+  - precedent: ADR-144
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-30
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-142]]"
-  - "[[ADR-144]]"
-  - "[[ADR-125]]"
+  - '[[ADR-142]]'
+  - '[[ADR-144]]'
+  - '[[ADR-125]]'
+imported:
+  from: docs/architecture/system/ADR-146-installer-binary-verification-and-guided-build-fallback.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-146: installer binary verification and guided build fallback

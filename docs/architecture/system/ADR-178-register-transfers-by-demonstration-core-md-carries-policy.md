@@ -1,11 +1,26 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: method
+basis:
+  - evidence: core.md uses the antithesis construction it bans at 11 per thousand words against a corpus baseline of 4, and passes the density postcheck
+  - standard: ASD-STE100, via the operator's simplified-modified-technical output style
+  - precedent: ADR-174
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-08-13
 deciders:
   - aaronsb
   - claude
 related:
   - ADR-174
+imported:
+  from: docs/architecture/system/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-178: Register transfers by demonstration - core.md carries policy

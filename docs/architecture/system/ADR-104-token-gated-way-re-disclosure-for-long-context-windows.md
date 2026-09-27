@@ -1,7 +1,17 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: change
+capability: disclosure
+superseded_by: ADR-123
+basis:
+  - evidence: 'long-context benchmarks: Opus 4.6 retrieval (MRCR v2) 91.9% at 256K to 78.3% at 1M; Sonnet 4.6 90.6% to 65.1% (docs/reference/model-context-decay/)'
+  - precedent: ADR-004
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-03-13
-revised: 2026-04-14
 deciders:
   - aaronsb
   - claude
@@ -9,7 +19,12 @@ related:
   - ADR-103
   - ADR-004
   - ADR-123
-superseded_by: ADR-123
+imported:
+  from: docs/architecture/system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md
+  format: v0
+  status: Superseded
+  unmapped:
+    revised: 2026-04-14
 ---
 
 # ADR-104: Token-Gated Way Re-Disclosure for Long Context Windows

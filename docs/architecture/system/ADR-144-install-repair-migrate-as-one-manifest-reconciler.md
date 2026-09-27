@@ -1,16 +1,31 @@
 ---
+contract: adr/v1
+kind: decision
+verb: change
+capability: install
 supersedes:
   - ADR-145
-status: Accepted
+basis:
+  - evidence: 'install.sh, update.sh and sync-to-home.sh duplicate backup, projection and settings-merge logic, which is how the broken settings-merge shipped in #182'
+  - evidence: sync-to-home.sh's .claude-source-manifest is copy-mode-only and built from hardcoded subtrees, not git
+  - precedent: ADR-142
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-29
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-142]]"
-  - "[[ADR-140]]"
-  - "[[ADR-133]]"
-  - "[[ADR-128]]"
+  - '[[ADR-142]]'
+  - '[[ADR-140]]'
+  - '[[ADR-133]]'
+  - '[[ADR-128]]'
+imported:
+  from: docs/architecture/system/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-144: Install / repair / migrate as one manifest reconciler

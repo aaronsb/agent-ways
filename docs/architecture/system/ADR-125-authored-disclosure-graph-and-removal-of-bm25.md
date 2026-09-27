@@ -1,5 +1,19 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: matching
+supersedes:
+  - ADR-107
+amends: ADR-108
+basis:
+  - evidence: Russian-locale feedback and six failing languages in make test-multilingual, traced to 1411 uncalibrated per-locale embed_threshold entries
+  - evidence: BM25 uses an English-only stemmer (Algorithm::English in bm25.rs) and bypasses the graph
+  - precedent: ADR-107
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-04-17
 deciders:
   - aaronsb
@@ -9,9 +23,10 @@ related:
   - ADR-107
   - ADR-108
   - ADR-110
-supersedes:
-  - ADR-107
-amends: ADR-108
+imported:
+  from: docs/architecture/system/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-125: Authored Disclosure Graph and Removal of BM25

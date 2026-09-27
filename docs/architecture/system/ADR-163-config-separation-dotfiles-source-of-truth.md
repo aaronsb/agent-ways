@@ -1,13 +1,28 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
+basis:
+  - evidence: 'an audit of two hosts: statusline.sh missing on slab while settings.json referenced it, a permissions.deny for gh/docker credentials absent on slab, and the session link leaking on slab'
+  - evidence: 'PR #347 removed the inert statusLine key from the repo-tracked settings.json'
+  - precedent: ADR-147
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-06
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-142]]"
-  - "[[ADR-147]]"
-  - "[[ADR-162]]"
+  - '[[ADR-142]]'
+  - '[[ADR-147]]'
+  - '[[ADR-162]]'
+imported:
+  from: docs/architecture/system/ADR-163-config-separation-dotfiles-source-of-truth.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-163: Config separation — dotfiles as source-of-truth feeding the settings fragment store

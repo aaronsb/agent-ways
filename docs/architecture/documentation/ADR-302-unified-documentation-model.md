@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: docs
+basis:
+  - upstream: knowledge-graph-system ADR-908 (documentation strategy) and ADR-900 (domain numbering), with its running doclint.py
+  - standard: 'Diátaxis: four modes, closed 2x2'
+  - precedent: ADR-300
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-19
 deciders:
   - aaronsb
@@ -7,6 +18,10 @@ deciders:
 related:
   - ADR-300
   - ADR-301
+imported:
+  from: docs/architecture/documentation/ADR-302-unified-documentation-model.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-302: A unified documentation model — typed graph, ways packaging, cross-repo convergence

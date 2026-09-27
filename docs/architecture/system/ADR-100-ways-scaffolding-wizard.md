@@ -1,5 +1,14 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: authoring
+basis:
+  - evidence: 'cold-start problem: creating a project-local way needs knowledge spread across extending.md, matching.md and authoring/way.md, with no guided path from intent to working way; /ways only listed fired ways'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-02-17
 deciders:
   - aaronsb
@@ -7,6 +16,10 @@ deciders:
 related:
   - ADR-013
   - ADR-014
+imported:
+  from: docs/architecture/system/ADR-100-ways-scaffolding-wizard.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-100: Ways Scaffolding Wizard

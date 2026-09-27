@@ -1,5 +1,16 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: method
+basis:
+  - evidence: native auto-memory exposes no programmatic integration hooks and its compaction rewrites contradictions away; the session ledger is a flat stream with no cross-session relationships
+  - precedent: ADR-112
+  - precedent: ADR-128
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-29
 deciders:
   - aaronsb
@@ -7,6 +18,10 @@ deciders:
 related:
   - ADR-112
   - ADR-128
+imported:
+  from: docs/architecture/system/ADR-141-knowledge-graph-as-evidential-memory-backend.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-141: Knowledge Graph as Evidential Memory Backend

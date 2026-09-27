@@ -1,7 +1,16 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: change
+capability: config
+superseded_by: ADR-167
+basis:
+  - evidence: a PR in an unrelated repository with no local .claude/settings.json still carried the session link in its body; commit 3b7f04c's attribution.commit/pr settings did not govern the link
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-07-06
-revised: 2026-07-16
 deciders:
   - aaronsb
   - claude
@@ -9,7 +18,12 @@ related:
   - 152
   - 163
   - 167
-superseded_by: ADR-167
+imported:
+  from: docs/architecture/system/ADR-162-mechanical-session-link-suppression-as-defense-against-transcript-disclosure.md
+  format: v0
+  status: Superseded
+  unmapped:
+    revised: 2026-07-16
 ---
 
 # ADR-162: Mechanical session-link suppression as defense against transcript disclosure

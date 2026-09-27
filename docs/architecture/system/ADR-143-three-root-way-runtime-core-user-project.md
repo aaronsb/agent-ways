@@ -1,13 +1,29 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - authoring
+  - matching
+basis:
+  - evidence: 'the runtime scans only global and project roots (live ways status: "Global ways: 115 total, 107 semantic"), so a shipped way cannot be shadowed without editing it in place'
+  - precedent: ADR-142
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-06-29
 deciders:
   - aaronsb
   - claude
 related:
-  - "[[ADR-142]]"
-  - "[[ADR-140]]"
-  - "[[ADR-111]]"
+  - '[[ADR-142]]'
+  - '[[ADR-140]]'
+  - '[[ADR-111]]'
+imported:
+  from: docs/architecture/system/ADR-143-three-root-way-runtime-core-user-project.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-143: Three-root way runtime — core, user, project

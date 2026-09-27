@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: loop
+basis:
+  - evidence: outside a /goal loop the review-fix-merge tail was hand-typed many times a day with no named invocation, and wrap had no opening counterpart
+  - precedent: ADR-138
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-07-07
 deciders:
   - aaronsb
@@ -8,6 +18,10 @@ related:
   - 128
   - 138
   - 143
+imported:
+  from: docs/architecture/system/ADR-165-loop-control-bookends-start-develop-merge-release-wrap.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-165: Loop-control bookends: start, develop, merge, release, wrap

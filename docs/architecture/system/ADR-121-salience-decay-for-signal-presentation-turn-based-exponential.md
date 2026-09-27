@@ -1,7 +1,17 @@
 ---
-status: Superseded
+contract: adr/v1
+kind: decision
+verb: change
+capability: attend
+superseded_by: ADR-123
+basis:
+  - evidence: 'a survey of 18 recent active sessions: median 12 turns, p75 45, p90 84, max 133, with early signals still presented 40 to 80 turns later'
+  - precedent: ADR-119
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
 date: 2026-04-12
-revised: 2026-04-14
 deciders:
   - aaronsb
   - claude
@@ -10,7 +20,12 @@ related:
   - ADR-114
   - ADR-119
   - ADR-123
-superseded_by: ADR-123
+imported:
+  from: docs/architecture/system/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md
+  format: v0
+  status: Superseded
+  unmapped:
+    revised: 2026-04-14
 ---
 
 # ADR-121: Salience decay for signal presentation — turn-based exponential
