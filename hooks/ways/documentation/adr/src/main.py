@@ -60,7 +60,8 @@ def main():
     p_apply.add_argument('sheets', nargs='*', help='Sheets to apply (default: every sheet in .import/)')
     p_apply.add_argument('--partial', action='store_true',
                          help='Apply sheets with open todo items too, except items lint cannot '
-                              'find again afterwards: a status note, a number or domain mismatch')
+                              'find again afterwards: a status with no mapping, a Deprecated '
+                              'note, a number or domain mismatch')
     p_apply.add_argument('--force', action='store_true',
                          help='Overwrite a record that has uncommitted changes')
 

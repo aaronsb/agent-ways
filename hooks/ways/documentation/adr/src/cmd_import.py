@@ -133,6 +133,22 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     slug = re.sub(r'[^a-z0-9]+', '-', str(target['title']).lower()).strip('-')
     return get_project_root() / 'docs' / 'architecture' / folder / f"ADR-{number}-{slug}.md"
 
+def _imported(source: dict, sheet: dict, raw: bytes) -> dict:
+    """`imported` for a record from a non-v1 source (ADR-306 §4): where it
+    came from, the source's own status as written, and the source keys with
+    no v1 field. The record keeps them whatever happens to the todo items.
+    A source outside the repo is named by its file name, so no machine's
+    path lands in the record."""
+    path = source['path']
+    imported = {'from': Path(path).name if Path(path).is_absolute() else path,
+                'format': source.get('format')}
+    front = split_record(raw.decode('utf-8'))[0]
+    data = yaml.safe_load(front or '') or {}
+    imported['status'] = data.get('status') if isinstance(data, dict) else None
+    if sheet.get('unmapped'):
+        imported['unmapped'] = dict(sheet['unmapped'])
+    return imported
+
 def _uncommitted(path: Path) -> bool:
     """The file has changes git has not committed. False outside git."""
     root = get_project_root()
@@ -160,10 +176,7 @@ def _apply_one(sheet: dict, force: bool) -> tuple:
         if hashlib.sha256(raw).hexdigest() != source.get('sha256'):
             raise SheetError(f"source {source['path']} changed since the scan; scan it again")
         if source.get('format') != 'v1' and 'imported' not in record:
-            imported = {'from': source['path'], 'format': source.get('format')}
-            if sheet.get('unmapped'):
-                imported['unmapped'] = dict(sheet['unmapped'])
-            record['imported'] = imported
+            record['imported'] = _imported(source, sheet, raw)
         if read_record(source_file)['body'].strip() and not (sheet.get('body') or '').strip():
             raise SheetError('the source has a body and the sheet has none; scan it again')
     dest = _destination(sheet, source_file)
@@ -217,8 +230,7 @@ def _import_apply(args):
             todo = sheet.get('todo') or []
             held = blocking_todo(todo) if args.partial else todo
             if held:
-                why = ("todo item(s) --partial does not write past, since lint cannot find them again"
-                       if args.partial else 'open todo item(s)')
+                why = "todo item(s) --partial does not write past" if args.partial else 'open todo item(s)'
                 lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
                 skipped += 1
                 continue
@@ -227,7 +239,10 @@ def _import_apply(args):
             lines.append((f"Refused: {shown}: {e}", None))
             refused += 1
             continue
-        path.unlink()
+        try:
+            path.unlink()
+        except OSError as e:
+            lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
         applied += 1
         written.append(dest.resolve())
         partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')

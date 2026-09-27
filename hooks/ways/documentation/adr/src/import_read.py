@@ -19,7 +19,7 @@ V0_CARRIED = ('date', 'deciders', 'related', 'supersedes', 'superseded_by', 'ame
 
 # Todo items that lint cannot detect once the record is written. They block
 # --partial; every other item is advisory (ADR-306 §3).
-BLOCKING_TODO = ('status note', 'target.number', 'target.domain')
+BLOCKING_TODO = ('status', 'status note', 'target.number', 'target.domain')
 
 # The v1 default decision (ADR-304 §1), for a project whose adr.yaml declares no kinds.
 IMPORT_DECISION_SCHEMA = {'verb': 'required', 'requires': ['capability', 'basis', 'agent'],
@@ -42,10 +42,11 @@ def import_dir() -> Path:
 def sheet_filename(number) -> str:
     return f"ADR-{format_number(number)}.yaml"
 
-def _number_value(text: str):
-    """A record number as the sheet holds it: an int, or '101.1' for a sub-part."""
-    text = text.lstrip('0') or '0'
-    return text if '.' in text else int(text)
+def _number_value(text: str) -> str:
+    """A record number as the sheet holds it: a string, '42' or '101.1', so
+    YAML never reads a zero-padded number as octal."""
+    base, _, part = text.partition('.')
+    return (base.lstrip('0') or '0') + (f".{part}" if part else '')
 
 # --- splitting a record into frontmatter, title, Summary and body -------------------
 
@@ -317,7 +318,10 @@ def _v0_status(data: dict, todo: list, provenance: dict) -> Optional[str]:
     if key in V0_STATUS_MAP:
         provenance['record.status'] = f"frontmatter status: {raw}"
         return V0_STATUS_MAP[key]
-    todo.append(f"status: '{raw}' has no v1 mapping (ADR-304 §7)")
+    if 'status' not in data:
+        todo.append('status: the source has no status; set one (ADR-304 §7)')
+    else:
+        todo.append(f"status: '{raw}' has no v1 mapping; set one (ADR-304 §7)")
     return None
 
 # --- the sheet file ----------------------------------------------------------------
@@ -339,6 +343,23 @@ def dump_sheet(sheet: dict) -> str:
         raise SheetError('the sheet does not read back as written')
     return SHEET_HEADER + text
 
+def _number_token(path: Path) -> Optional[str]:
+    """target.number as written, when YAML reads it as an unquoted int, so
+    042 (octal), 0x2A or 1_0 can be refused rather than read as another number."""
+    try:
+        node = yaml.compose(path.read_text(), Loader=yaml.SafeLoader)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    for mapping, name in ((node, 'target'), (None, 'number')):
+        if mapping is None:
+            mapping = node
+        if not isinstance(mapping, yaml.MappingNode):
+            return None
+        node = next((v for k, v in mapping.value if getattr(k, 'value', None) == name), None)
+    if isinstance(node, yaml.ScalarNode) and node.tag == 'tag:yaml.org,2002:int' and not node.style:
+        return node.value
+    return None
+
 def load_sheet(path: Path) -> dict:
     """A sheet file, checked for the fields apply needs."""
     try:
@@ -354,6 +375,10 @@ def load_sheet(path: Path) -> dict:
     if not isinstance(target, dict) or any(_empty(target.get(k)) for k in ('number', 'title')):
         raise SheetError('target needs a number and a title')
     number = target['number']
+    token = _number_token(path)
+    if token is not None and not re.fullmatch(r'0|[1-9][0-9]*', token):
+        raise SheetError(f"target.number {token} is not a plain decimal, and YAML reads it as "
+                         f"{number}; quote it, as in number: '{token}'")
     if isinstance(number, float):
         raise SheetError(f"target.number {number} reads as a decimal; quote a sub-part number, "
                          f"as in number: '101.10'")

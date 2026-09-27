@@ -1347,7 +1347,8 @@ def rule_v1_required_sections(adr, ctx):
 @file_rule(contract=V1)
 def rule_v1_imported(adr, ctx):
     """`imported` records where the record came from: {from, format}, and
-    `unmapped`, the source keys with no v1 field (ADR-306 §1, §4)."""
+    optionally `status`, the source status as written, and `unmapped`, the
+    source keys with no v1 field (ADR-306 §1, §4, §7)."""
     if not is_v1_record(adr, ctx) or 'imported' not in adr.frontmatter:
         return
     imported = adr.frontmatter.get('imported')
@@ -1356,6 +1357,8 @@ def rule_v1_imported(adr, ctx):
         v1_issue(adr, "imported: expected {from: <source path>, format: <reader>}")
     elif 'unmapped' in imported and not isinstance(imported['unmapped'], dict):
         v1_issue(adr, "imported.unmapped: expected a mapping of source fields")
+    elif isinstance(imported.get('status'), (dict, list)):
+        v1_issue(adr, "imported.status: expected the source's status as written")
 
 @file_rule(contract=V1)
 def rule_v1_summary_legibility(adr, ctx):
@@ -1495,11 +1498,13 @@ def rule_v1_frozen(adr, ctx):
     """Once a decision leaves proposed, only the kind's mutable_after_accept
     fields may change, and the body grows only by appending (ADR-304 §1, §4).
 
-    An imported record may fill each field its import left empty, once: the
-    first committed value is then frozen like any other. It may also gain an
-    opening Summary when the import had none (ADR-306 §4). `imported` is
-    self-declared, so a record that adds it by hand gets the same allowance;
-    git history still shows who added it."""
+    An imported record may fill each field its import wrote empty, once: the
+    first committed value is then frozen like any other. A field absent at
+    import gets no allowance. It may also gain an opening Summary when the
+    import had none (ADR-306 §4), and that Summary stays editable: the
+    operator expects Summaries to change once the whole corpus is read.
+    `imported` is self-declared, so a record that adds it by hand gets the
+    same allowance; git history still shows who added it."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -1511,12 +1516,11 @@ def rule_v1_frozen(adr, ctx):
     if mutable == 'all':
         return
     mutable = set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-    probe = _frozen_versions(adr)
-    if not probe:
+    versions = _frozen_versions(adr, every=True)
+    if not versions:
         return
-    imported = 'imported' in probe[0][0] and 'imported' in adr.frontmatter
-    versions = _frozen_versions(adr, every=True) if imported else probe
     then, body_then = versions[0]
+    imported = 'imported' in then and 'imported' in adr.frontmatter
     body_now = adr.body
     if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
         body_now = _without_opening_summary(body_now, body_then)
@@ -1524,13 +1528,14 @@ def rule_v1_frozen(adr, ctx):
         if key in mutable:
             continue
         frozen = then.get(key)
-        if imported:
+        fillable = imported and key in then
+        if fillable:
             # Fill once: each committed fill of an empty part becomes frozen.
             for later, _ in versions[1:]:
                 if _completes(frozen, later.get(key)):
                     frozen = later.get(key)
         now = adr.frontmatter.get(key)
-        if _same(frozen, now) or (imported and _completes(frozen, now)):
+        if _same(frozen, now) or (fillable and _completes(frozen, now)):
             continue
         v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
     if not body_now.rstrip().startswith(body_then.rstrip()):
@@ -1714,7 +1719,7 @@ V0_CARRIED = ('date', 'deciders', 'related', 'supersedes', 'superseded_by', 'ame
 
 # Todo items that lint cannot detect once the record is written. They block
 # --partial; every other item is advisory (ADR-306 §3).
-BLOCKING_TODO = ('status note', 'target.number', 'target.domain')
+BLOCKING_TODO = ('status', 'status note', 'target.number', 'target.domain')
 
 # The v1 default decision (ADR-304 §1), for a project whose adr.yaml declares no kinds.
 IMPORT_DECISION_SCHEMA = {'verb': 'required', 'requires': ['capability', 'basis', 'agent'],
@@ -1737,10 +1742,11 @@ def import_dir() -> Path:
 def sheet_filename(number) -> str:
     return f"ADR-{format_number(number)}.yaml"
 
-def _number_value(text: str):
-    """A record number as the sheet holds it: an int, or '101.1' for a sub-part."""
-    text = text.lstrip('0') or '0'
-    return text if '.' in text else int(text)
+def _number_value(text: str) -> str:
+    """A record number as the sheet holds it: a string, '42' or '101.1', so
+    YAML never reads a zero-padded number as octal."""
+    base, _, part = text.partition('.')
+    return (base.lstrip('0') or '0') + (f".{part}" if part else '')
 
 # --- splitting a record into frontmatter, title, Summary and body -------------------
 
@@ -2012,7 +2018,10 @@ def _v0_status(data: dict, todo: list, provenance: dict) -> Optional[str]:
     if key in V0_STATUS_MAP:
         provenance['record.status'] = f"frontmatter status: {raw}"
         return V0_STATUS_MAP[key]
-    todo.append(f"status: '{raw}' has no v1 mapping (ADR-304 §7)")
+    if 'status' not in data:
+        todo.append('status: the source has no status; set one (ADR-304 §7)')
+    else:
+        todo.append(f"status: '{raw}' has no v1 mapping; set one (ADR-304 §7)")
     return None
 
 # --- the sheet file ----------------------------------------------------------------
@@ -2034,6 +2043,23 @@ def dump_sheet(sheet: dict) -> str:
         raise SheetError('the sheet does not read back as written')
     return SHEET_HEADER + text
 
+def _number_token(path: Path) -> Optional[str]:
+    """target.number as written, when YAML reads it as an unquoted int, so
+    042 (octal), 0x2A or 1_0 can be refused rather than read as another number."""
+    try:
+        node = yaml.compose(path.read_text(), Loader=yaml.SafeLoader)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    for mapping, name in ((node, 'target'), (None, 'number')):
+        if mapping is None:
+            mapping = node
+        if not isinstance(mapping, yaml.MappingNode):
+            return None
+        node = next((v for k, v in mapping.value if getattr(k, 'value', None) == name), None)
+    if isinstance(node, yaml.ScalarNode) and node.tag == 'tag:yaml.org,2002:int' and not node.style:
+        return node.value
+    return None
+
 def load_sheet(path: Path) -> dict:
     """A sheet file, checked for the fields apply needs."""
     try:
@@ -2049,6 +2075,10 @@ def load_sheet(path: Path) -> dict:
     if not isinstance(target, dict) or any(_empty(target.get(k)) for k in ('number', 'title')):
         raise SheetError('target needs a number and a title')
     number = target['number']
+    token = _number_token(path)
+    if token is not None and not re.fullmatch(r'0|[1-9][0-9]*', token):
+        raise SheetError(f"target.number {token} is not a plain decimal, and YAML reads it as "
+                         f"{number}; quote it, as in number: '{token}'")
     if isinstance(number, float):
         raise SheetError(f"target.number {number} reads as a decimal; quote a sub-part number, "
                          f"as in number: '101.10'")
@@ -3371,6 +3401,22 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     slug = re.sub(r'[^a-z0-9]+', '-', str(target['title']).lower()).strip('-')
     return get_project_root() / 'docs' / 'architecture' / folder / f"ADR-{number}-{slug}.md"
 
+def _imported(source: dict, sheet: dict, raw: bytes) -> dict:
+    """`imported` for a record from a non-v1 source (ADR-306 §4): where it
+    came from, the source's own status as written, and the source keys with
+    no v1 field. The record keeps them whatever happens to the todo items.
+    A source outside the repo is named by its file name, so no machine's
+    path lands in the record."""
+    path = source['path']
+    imported = {'from': Path(path).name if Path(path).is_absolute() else path,
+                'format': source.get('format')}
+    front = split_record(raw.decode('utf-8'))[0]
+    data = yaml.safe_load(front or '') or {}
+    imported['status'] = data.get('status') if isinstance(data, dict) else None
+    if sheet.get('unmapped'):
+        imported['unmapped'] = dict(sheet['unmapped'])
+    return imported
+
 def _uncommitted(path: Path) -> bool:
     """The file has changes git has not committed. False outside git."""
     root = get_project_root()
@@ -3398,10 +3444,7 @@ def _apply_one(sheet: dict, force: bool) -> tuple:
         if hashlib.sha256(raw).hexdigest() != source.get('sha256'):
             raise SheetError(f"source {source['path']} changed since the scan; scan it again")
         if source.get('format') != 'v1' and 'imported' not in record:
-            imported = {'from': source['path'], 'format': source.get('format')}
-            if sheet.get('unmapped'):
-                imported['unmapped'] = dict(sheet['unmapped'])
-            record['imported'] = imported
+            record['imported'] = _imported(source, sheet, raw)
         if read_record(source_file)['body'].strip() and not (sheet.get('body') or '').strip():
             raise SheetError('the source has a body and the sheet has none; scan it again')
     dest = _destination(sheet, source_file)
@@ -3455,8 +3498,7 @@ def _import_apply(args):
             todo = sheet.get('todo') or []
             held = blocking_todo(todo) if args.partial else todo
             if held:
-                why = ("todo item(s) --partial does not write past, since lint cannot find them again"
-                       if args.partial else 'open todo item(s)')
+                why = "todo item(s) --partial does not write past" if args.partial else 'open todo item(s)'
                 lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
                 skipped += 1
                 continue
@@ -3465,7 +3507,10 @@ def _import_apply(args):
             lines.append((f"Refused: {shown}: {e}", None))
             refused += 1
             continue
-        path.unlink()
+        try:
+            path.unlink()
+        except OSError as e:
+            lines.append((f"Note: {shown}: applied, but the sheet could not be removed: {e}", None))
         applied += 1
         written.append(dest.resolve())
         partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
@@ -3552,7 +3597,8 @@ def main():
     p_apply.add_argument('sheets', nargs='*', help='Sheets to apply (default: every sheet in .import/)')
     p_apply.add_argument('--partial', action='store_true',
                          help='Apply sheets with open todo items too, except items lint cannot '
-                              'find again afterwards: a status note, a number or domain mismatch')
+                              'find again afterwards: a status with no mapping, a Deprecated '
+                              'note, a number or domain mismatch')
     p_apply.add_argument('--force', action='store_true',
                          help='Overwrite a record that has uncommitted changes')
 

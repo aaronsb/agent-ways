@@ -91,7 +91,8 @@ def rule_v1_required_sections(adr, ctx):
 @file_rule(contract=V1)
 def rule_v1_imported(adr, ctx):
     """`imported` records where the record came from: {from, format}, and
-    `unmapped`, the source keys with no v1 field (ADR-306 §1, §4)."""
+    optionally `status`, the source status as written, and `unmapped`, the
+    source keys with no v1 field (ADR-306 §1, §4, §7)."""
     if not is_v1_record(adr, ctx) or 'imported' not in adr.frontmatter:
         return
     imported = adr.frontmatter.get('imported')
@@ -100,6 +101,8 @@ def rule_v1_imported(adr, ctx):
         v1_issue(adr, "imported: expected {from: <source path>, format: <reader>}")
     elif 'unmapped' in imported and not isinstance(imported['unmapped'], dict):
         v1_issue(adr, "imported.unmapped: expected a mapping of source fields")
+    elif isinstance(imported.get('status'), (dict, list)):
+        v1_issue(adr, "imported.status: expected the source's status as written")
 
 @file_rule(contract=V1)
 def rule_v1_summary_legibility(adr, ctx):
@@ -239,11 +242,13 @@ def rule_v1_frozen(adr, ctx):
     """Once a decision leaves proposed, only the kind's mutable_after_accept
     fields may change, and the body grows only by appending (ADR-304 §1, §4).
 
-    An imported record may fill each field its import left empty, once: the
-    first committed value is then frozen like any other. It may also gain an
-    opening Summary when the import had none (ADR-306 §4). `imported` is
-    self-declared, so a record that adds it by hand gets the same allowance;
-    git history still shows who added it."""
+    An imported record may fill each field its import wrote empty, once: the
+    first committed value is then frozen like any other. A field absent at
+    import gets no allowance. It may also gain an opening Summary when the
+    import had none (ADR-306 §4), and that Summary stays editable: the
+    operator expects Summaries to change once the whole corpus is read.
+    `imported` is self-declared, so a record that adds it by hand gets the
+    same allowance; git history still shows who added it."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -255,12 +260,11 @@ def rule_v1_frozen(adr, ctx):
     if mutable == 'all':
         return
     mutable = set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-    probe = _frozen_versions(adr)
-    if not probe:
+    versions = _frozen_versions(adr, every=True)
+    if not versions:
         return
-    imported = 'imported' in probe[0][0] and 'imported' in adr.frontmatter
-    versions = _frozen_versions(adr, every=True) if imported else probe
     then, body_then = versions[0]
+    imported = 'imported' in then and 'imported' in adr.frontmatter
     body_now = adr.body
     if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
         body_now = _without_opening_summary(body_now, body_then)
@@ -268,13 +272,14 @@ def rule_v1_frozen(adr, ctx):
         if key in mutable:
             continue
         frozen = then.get(key)
-        if imported:
+        fillable = imported and key in then
+        if fillable:
             # Fill once: each committed fill of an empty part becomes frozen.
             for later, _ in versions[1:]:
                 if _completes(frozen, later.get(key)):
                     frozen = later.get(key)
         now = adr.frontmatter.get(key)
-        if _same(frozen, now) or (imported and _completes(frozen, now)):
+        if _same(frozen, now) or (fillable and _completes(frozen, now)):
             continue
         v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
     if not body_now.rstrip().startswith(body_then.rstrip()):
