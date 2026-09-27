@@ -297,5 +297,3 @@ Resolved during drafting: this ADR stays **ADR-302 / `documentation` domain** (i
 subject is documentation tooling); the file is renamed to
 `ADR-302-unified-documentation-model.md`; frontmatter adopts Obsidian-compatible
 wikilink edges + `aliases` (§2, §5, §6).
-</content>
-</invoke>
