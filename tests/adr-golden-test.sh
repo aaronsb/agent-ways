@@ -307,6 +307,20 @@ fresh v1
 edit docs/architecture/system/ADR-110-old-v0-record.md "s.replace('status: Accepted\n', 'contract: adr/v1\nkind: decision\nverb: add\ncapability: ingest\nstatus: accepted\nagent: {name: Claude, model: fixture-model}\nbasis:\n  - evidence: migrated from v0\n').replace('# ADR-110: An unmigrated v0 record\n', '# ADR-110: An unmigrated v0 record\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n')"
 capture v1-frozen-migrated lint docs/architecture/system/ADR-110-old-v0-record.md
 
+# A record accepted on a review branch and revised there freezes where it
+# merges, not at the branch's first accepted commit; editing it after the
+# merge still fails.
+fresh v1
+(cd "$WORK/repo" && git switch -q -c review)
+edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('status: proposed\n', 'status: accepted\nconsidered: [{operator: developer, said: \"yes\", via: PR 13}]\n')"
+commit_all accept
+edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('basis:\n', 'basis:\n  - evidence: a review fix\n', 1)"
+commit_all "review fix"
+(cd "$WORK/repo" && git switch -q - && git merge -q --no-ff -m "merge review" review)
+capture v1-frozen-merged-branch lint docs/architecture/system/ADR-113-operator-proposed.md
+edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('  - evidence: a review fix\n', '')"
+capture v1-frozen-merged-branch-edited lint docs/architecture/system/ADR-113-operator-proposed.md
+
 # A non-UTF-8 blob in a record's history does not stop lint.
 fresh v1
 printf 'binary \377\376 junk\n' > "$WORK/repo/docs/architecture/system/ADR-102-ingest-spec.md"

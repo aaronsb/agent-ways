@@ -372,6 +372,7 @@ test-adr:
 	@bash tests/adr-archive-test.sh
 	@bash tests/adr-golden-test.sh
 	@bash tests/adr-macro-test.sh
+	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
 	@echo "adr tool tests passed."
 
 test-unit:
