@@ -229,21 +229,38 @@ capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
 capture v1-lint-precedent-relative lint docs/architecture/system/ADR-109-precedent-chain.md
-# A capability active at adoption needs no add (#582); a baseline name
-# outside the vocabulary fails.
-fresh v1
-edit docs/architecture/adr.yaml "s.replace('surfaces:', 'baseline: [search]\\n\\nsurfaces:', 1)"
+# Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
+# capability adopted on 2025-05-10: it needs no add decision.
+baseline_fresh() {
+  fresh v1
+  edit docs/architecture/adr.yaml "s.replace('surfaces:', 'baseline:\\n  adopted: 2025-05-10\\n  capabilities: [export]\\n\\nsurfaces:', 1).replace('  search: Query over the store\\n', '  search: Query over the store\\n  export: Export from the store\\n')"
+}
+# export_change NUMBER SLUG DATE [EXTRA-FRONTMATTER-LINE]
+export_change() {
+  (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\n%sstatus: proposed\ndate: %s\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: export measured\n---\n\n# ADR-%s: %s\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' "${4:+$4\n}" "$3" "$1" "$2" > "docs/architecture/system/ADR-$1-$2.md")
+}
+baseline_fresh
 capture v1-lint-baseline lint
-edit docs/architecture/adr.yaml "s.replace('baseline: [search]', 'baseline: [search, serch]')"
+# Malformed baseline config: a bare list, then an unknown name and a bad date.
+edit docs/architecture/adr.yaml "s.replace('baseline:\\n  adopted: 2025-05-10\\n  capabilities: [export]', 'baseline: [export]')"
+capture v1-lint-baseline-list lint
+edit docs/architecture/adr.yaml "s.replace('baseline: [export]', 'baseline:\\n  adopted: May 2025\\n  capabilities: [export, exprt]')"
 capture v1-lint-baseline-unknown lint
-# The first change on a baseline capability needs no prior; once a decision
-# on it exists, the next change names it.
-fresh v1
-edit docs/architecture/adr.yaml "s.replace('surfaces:', 'baseline: [export]\\n\\nsurfaces:', 1).replace('  search: Query over the store\\n', '  search: Query over the store\\n  export: Export from the store\\n')"
-(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: export was slow\n---\n\n# ADR-117: Stream exports\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-117-stream-exports.md)
+# A change before adoption stands on the baseline, and so does the first
+# change after it. ADR-118 is numbered lower but dated later than ADR-119,
+# so it is the second post-adoption change and must name ADR-119.
+baseline_fresh
+export_change 117 pre-adoption-export 2025-05-09
+export_change 119 stream-exports 2025-05-20
+export_change 118 compress-exports 2025-05-22
 capture v1-lint-baseline-change lint
-(cd "$WORK/repo" && sed 's/ADR-117: Stream exports/ADR-118: Compress exports/' docs/architecture/system/ADR-117-stream-exports.md > docs/architecture/system/ADR-118-compress-exports.md)
-capture v1-lint-baseline-change-second lint
+edit docs/architecture/system/ADR-118-compress-exports.md "s.replace('capability: export\n', 'capability: export\nsupersedes: [ADR-119]\n')"
+capture v1-lint-baseline-change-names-prior lint
+# A rejected post-adoption change is no prior.
+edit docs/architecture/system/ADR-118-compress-exports.md "s.replace('supersedes: [ADR-119]\n', '')"
+edit docs/architecture/system/ADR-119-stream-exports.md "s.replace('status: proposed', 'status: rejected')"
+capture v1-lint-baseline-change-rejected-prior lint
+fresh v1
 fresh v1
 capture v1-cite        cite
 # The cut on search, enacted: citations of search records now fail.

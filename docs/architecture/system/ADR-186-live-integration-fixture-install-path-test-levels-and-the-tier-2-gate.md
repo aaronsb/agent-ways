@@ -22,10 +22,10 @@ related:
 
 ## Summary
 
-- **Decided:** the install path is tested at two levels. Tier 1 installs and configures with no API key on every pull request that touches the path. Tier 2 exercises a model with a key, on dispatch or a schedule only.
+- **Decided:** the install path is tested in a container, at two levels. Tier 1 installs and configures with no API key, on every pull request that touches the path. Tier 2 exercises a model with a key, on dispatch or a schedule only.
 - **Trades away:** job time and network dependence on tier 1, and tokens on a fixed cadence for tier 2.
 - **One-way?** No. The fixture is additive, and removing the job removes the gate and nothing else.
-- **Probes:** *Confident:* the #501 shape (the refusal, the recovery and the kept hooks) is asserted on every pull request. *Not confident:* whether a network fault in tier 1 gets read as a regression.
+- **Probes:** *Confident:* the #501 shape (the refusal, the recovery and the kept hooks) is asserted on every pull request. *Not confident:* none stated in the original record.
 - **Inversion:** at one end, a model runs on every pull request, so a fork's check passes with no secret and every pull request spends tokens. At the other end nothing runs a clean install and reviews keep finding install defects by reading code. The two tiers sit between them.
 
 ## Context

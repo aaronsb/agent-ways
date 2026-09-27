@@ -60,10 +60,13 @@ capabilities:
   loop: The development loop skills (start, develop, merge, release, wrap)
   testing: The test suites and the live install fixture
 
-# Capabilities that were active when agent-ways adopted adr/v1. No record
-# added them, so none needs an add decision; any capability declared after
-# adoption does (ADR-305).
-baseline: [docs, method, matching, disclosure, authoring, cli, attend, install, config, governance, loop, testing]
+# Capabilities that were active when agent-ways adopted adr/v1 on the
+# adopted date. No record added them, so none needs an add decision. A change
+# on one with no prior record to name stands on the baseline. Any capability
+# declared after adoption needs an add (ADR-305).
+baseline:
+  adopted: 2026-09-27
+  capabilities: [docs, method, matching, disclosure, authoring, cli, attend, install, config, governance, loop, testing]
 
 # Retire targets name a surface; these are agent-ways' namespaces.
 surfaces:

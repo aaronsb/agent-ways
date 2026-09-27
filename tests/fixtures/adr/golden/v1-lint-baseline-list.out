@@ -1,18 +1,20 @@
 
-Scanned: 17 ADRs
+Scanned: 15 ADRs
 
 Status distribution:
   accepted: 9
-  proposed: 8
+  proposed: 6
 
 Contract: adr/v1 (1 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 4 files:
+Issues found in 3 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
+  ❌ baseline: expected 'adopted' (a YYYY-MM-DD date) and 'capabilities' (a list of names)
   ⚠️ capability 'search' has no accepted add decision
+  ⚠️ capability 'export' has no accepted add decision
 
 docs/architecture/system/ADR-108-ingest-over-v0.md
   ⚠️ cannot confirm the prior decision on 'ingest': ADR-110 is still v0
@@ -20,11 +22,8 @@ docs/architecture/system/ADR-108-ingest-over-v0.md
 docs/architecture/system/ADR-114-open-concern.md
   ⚠️ open concern: Batch size may starve small tenants
 
-docs/architecture/system/ADR-118-compress-exports.md
-  ❌ a change decision supersedes or amends a prior decision on 'export'
-
 ════════════════════════════════════════════════════════════
-Summary: 1 errors, 3 warnings
+Summary: 1 errors, 4 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

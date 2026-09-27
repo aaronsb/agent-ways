@@ -1,9 +1,10 @@
 
-Scanned: 15 ADRs
+Scanned: 18 ADRs
 
 Status distribution:
   accepted: 9
-  proposed: 6
+  proposed: 8
+  rejected: 1
 
 Contract: adr/v1 (1 v0 records remain)
 
@@ -12,8 +13,6 @@ Issues found in 3 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
-  ❌ baseline.adopted: expected a YYYY-MM-DD date
-  ❌ baseline: 'exprt' is not in the capabilities vocabulary
   ⚠️ capability 'search' has no accepted add decision
 
 docs/architecture/system/ADR-108-ingest-over-v0.md
@@ -23,7 +22,7 @@ docs/architecture/system/ADR-114-open-concern.md
   ⚠️ open concern: Batch size may starve small tenants
 
 ════════════════════════════════════════════════════════════
-Summary: 2 errors, 3 warnings
+Summary: 0 errors, 3 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

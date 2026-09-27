@@ -37,6 +37,17 @@ def _str_list(value) -> Optional[list]:
 def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
+def _iso_date(value) -> Optional[str]:
+    """value as a YYYY-MM-DD string, or None. YAML may load a date as one."""
+    text = str(value) if value is not None else ''
+    return text if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text) else None
+
+def v1_baseline(ctx) -> tuple:
+    """(adoption date or None, set of baseline capability names)."""
+    baseline = _mapping(ctx.config.get('baseline'))
+    return (_iso_date(baseline.get('adopted')),
+            set(_str_list(baseline.get('capabilities')) or []))
+
 def v1_kinds(ctx) -> dict:
     return _mapping(ctx.config.get('kinds'))
 
@@ -146,13 +157,17 @@ def rule_v1_config_shape(ctx):
     if 'surfaces' in config and not isinstance(config['surfaces'], dict):
         bad("surfaces: expected a mapping of namespace to settings")
     if 'baseline' in config:
-        baseline = _str_list(config['baseline'])
-        if baseline is None:
-            bad("baseline: expected a list of capability names")
-        elif isinstance(config.get('capabilities'), dict):
-            for name in baseline:
-                if name not in config['capabilities']:
-                    bad(f"baseline: '{name}' is not in the capabilities vocabulary")
+        baseline = config['baseline']
+        names = _str_list(baseline.get('capabilities')) if isinstance(baseline, dict) else None
+        if names is None:
+            bad("baseline: expected 'adopted' (a YYYY-MM-DD date) and 'capabilities' (a list of names)")
+        else:
+            if not _iso_date(baseline.get('adopted')):
+                bad("baseline.adopted: expected a YYYY-MM-DD date")
+            if isinstance(config.get('capabilities'), dict):
+                for name in names:
+                    if name not in config['capabilities']:
+                        bad(f"baseline: '{name}' is not in the capabilities vocabulary")
 
 @config_rule(contract=V1)
 def rule_v1_capabilities_added(ctx):
@@ -171,7 +186,7 @@ def rule_v1_capabilities_added(ctx):
     # hold the check at warning.
     migrating = any(not is_v1_record(adr, ctx) and not is_archived(adr.path)
                     for adr in ctx.corpus)
-    baseline = set(_str_list(ctx.config.get('baseline')) or [])
+    _, baseline = v1_baseline(ctx)
     for name in v1_capabilities(ctx):
         if name not in added and name not in baseline:
             ctx.config_issues.append(Issue(
@@ -301,25 +316,37 @@ def decision_order(adr) -> tuple:
     base, _, part = str(adr.number or '0').partition('.')
     return (str(adr.date or ''), int(base or 0), int(part or 0))
 
-def _has_decision_on(capability: str, adr, ctx) -> bool:
-    """An earlier v1 decision, other than a constrain, is on this capability."""
-    return any(other is not adr and is_v1_record(other, ctx)
-               and other.frontmatter.get('kind') == 'decision'
-               and other.frontmatter.get('verb') != 'constrain'
-               and covers(other, capability)
-               and decision_order(other) < decision_order(adr)
-               for other in ctx.corpus)
+def _stands_on_baseline(capability: str, adr, ctx) -> bool:
+    """A change with no prior edge stands on the baseline when the capability
+    is in it and either the change predates adoption, or no live decision on
+    the capability has been made since adoption before it. Only decisions
+    dated after adoption count: each was written as v1, so migrating an older
+    record never moves the answer (ADR-305)."""
+    adopted, baseline = v1_baseline(ctx)
+    when = _iso_date(adr.date)
+    if capability not in baseline or not adopted or not when:
+        return False
+    if when <= adopted:
+        return True
+    for other in ctx.corpus:
+        other_when = _iso_date(other.date)
+        if (other is not adr and is_v1_record(other, ctx)
+                and other.frontmatter.get('verb') not in (None, 'constrain')
+                and str(other.status or '').lower() not in ('rejected', 'abandoned')
+                and covers(other, capability)
+                and other_when and other_when > adopted
+                and decision_order(other) < decision_order(adr)):
+            return False
+    return True
 
 @corpus_rule(contract=V1)
 def rule_v1_change_replaces(adr, ctx):
     """A change decision supersedes or amends a prior decision on the same
     capability. When the prior covers more than this capability ('*' or a
-    list), the change amends it (ADR-304 §3). The first change on a baseline
-    capability has no prior record to name: the baseline stands in for it
-    until a decision on that capability exists (ADR-305)."""
+    list), the change amends it (ADR-304 §3). A change on a baseline
+    capability with no prior record to name stands on the baseline (ADR-305)."""
     if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
         return
-    baseline = set(_str_list(ctx.config.get('baseline')) or [])
     edges = []
     for field_name in ('supersedes', 'amends'):
         for entry in as_entries(adr.frontmatter.get(field_name)):
@@ -334,7 +361,7 @@ def rule_v1_change_replaces(adr, ctx):
             continue
         if fits:
             v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
-        elif not edges and capability in baseline and not _has_decision_on(capability, adr, ctx):
+        elif not edges and _stands_on_baseline(capability, adr, ctx):
             continue
         elif v0_priors:
             numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
