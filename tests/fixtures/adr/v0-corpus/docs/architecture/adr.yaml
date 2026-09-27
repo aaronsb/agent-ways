@@ -1,0 +1,116 @@
+# ADR Configuration
+# Defines domain numbering and validation rules.
+# Used by: docs/scripts/adr
+
+# Project name (used in generated index)
+project_name: Claude Code Configuration
+
+# Domain Number Series
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Ways architecture, matching, macros, hooks, session lifecycle
+    folder: system
+
+  governance:
+    range: [200, 299]
+    name: Governance
+    description: Provenance, traceability, controls, compliance mapping
+    folder: governance
+
+  docs:
+    range: [300, 399]
+    name: Documentation
+    description: Documentation structure, tooling, coherence
+    folder: documentation
+
+# The record contract (ADR-304). Records that declare `contract: adr/v1`
+# follow the kinds below; a record without it is adr/v0 and keeps the v0
+# statuses and checks until someone migrates it.
+contract: adr/v1
+
+kinds:
+  decision:
+    mutable_after_accept: [status, enacted, superseded_by, considered, concern, observable]
+    verb: required
+    requires: [capability, basis, agent]
+    sections: [Summary]
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec] }
+  spec:
+    mutable_after_accept: all
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+
+# What agent-ways does, one line each: the only hand-written description of
+# a capability. A decision adds, cuts, changes or constrains these.
+capabilities:
+  adr: Decision records, their contract, and the adr tool that enforces it
+  docs: The documentation model, catalog pages and doclint
+  method: The ways method itself, what a way is for, its epistemic posture and its register
+  matching: How a prompt, tool call or file edit selects ways, the scoring behind it, and the fire telemetry and calibration data that tune it
+  disclosure: How a selected way reaches the model, when it re-fires, progressive disclosure, and localized way text
+  authoring: Way files, their frontmatter, the corpus build and the ways CLI for writing them
+  cli: The output contract the ways, attend and adr commands share with agents and scripts
+  attend: Session awareness through sensors, peers, messaging and keepwarm
+  install: Install, update, projection into targets, self-update, and how the binaries are built and laid out
+  config: Settings, configuration layers, permissions, guard hooks and the security baseline
+  governance: Provenance, controls and compliance findings
+  loop: The development loop skills (start, develop, merge, release, wrap)
+  testing: The test suites and the live install fixture
+
+# Capabilities that were active when agent-ways adopted adr/v1 on the
+# adopted date. No record added them, so none needs an add decision. A change
+# on one with no prior record to name stands on the baseline. Any capability
+# declared after adoption needs an add (ADR-305).
+baseline:
+  adopted: 2026-09-27
+  capabilities: [docs, method, matching, disclosure, authoring, cli, attend, install, config, governance, loop, testing]
+
+# Retire targets name a surface; these are agent-ways' namespaces.
+surfaces:
+  cli: {}
+  skill: {}
+  way: {}
+  hook: {}
+
+# The basis sources a decision may name (ADR-304 §11); the v1 default.
+basis_sources: [operator, evidence, standard, upstream, precedent]
+
+# adr cite skips these: fixtures, tool sources and subagent prompts carry
+# example numbers.
+cite:
+  exclude:
+    - agents/workflow-orchestrator.md
+    - agents/workspace-curator.md
+    - tests/fixtures
+    - tests/adr-lint-test.sh
+    - tests/adr-archive-test.sh
+    - tests/adr-golden-test.sh
+    - hooks/ways/documentation/adr/src
+    - hooks/ways/documentation/adr/adr-tool
+    - hooks/ways/documentation/linting
+
+# Valid ADR statuses (adr/v0 records)
+statuses:
+  - Draft
+  - Proposed
+  - Accepted
+  - Superseded
+  - Deprecated
+  - Rejected
+
+# Default values for new ADRs. No person is hard-coded as a decider: an
+# empty list lets the tool fill in the current git or GitHub user.
+defaults:
+  deciders: []
+  status: Draft
+
+# Legacy ADR range (pre-domain numbering)
+legacy:
+  range: [1, 99]
+  label: "Legacy (Pre-Domain Numbering)"
+
+# Viewer command for `adr view`
+viewer: cat {file}

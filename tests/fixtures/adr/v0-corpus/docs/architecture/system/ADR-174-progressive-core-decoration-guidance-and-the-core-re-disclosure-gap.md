@@ -1,0 +1,145 @@
+---
+status: Accepted
+date: 2026-07-30
+deciders:
+  - aaronsb
+  - claude
+related:
+  - ADR-123
+---
+
+# ADR-174: Progressive core — decoration guidance and the core re-disclosure gap
+
+## Context
+
+Two findings arrived together in one session. The second is the architectural one.
+
+### Claude's prose decorates, and the existing surfaces did not stop it
+
+An 11,500-word document drafted across a dozen turns was measured against the patterns that mark prose written to be admired rather than read. Significance clauses — a clause whose only job is telling the reader that the previous clause mattered — ran at **3.4 per thousand words** against **0.5** in prose that had already been reviewed. The document also carried **eleven** instances of the antithesis construction that `core.md` explicitly bans, and **118 em-dashes**, one per 98 words.
+
+Both governing surfaces had fired. `core.md` fired at session start and contains zero instances of the construction it bans. The writing way fired at epoch 4 carrying "use em dashes sparingly." The document was written at epochs 45–57.
+
+Two mechanisms explain the gap, and the supporting literature is consistent with both.
+
+**Detection, not compliance, is the failure.** Models score poorly on noticing their own negative-constraint violations; IFEval-style negative constraints fail at 22–30% on frontier models, and constraint-verification work finds low negative F1 across the board. A rule restated more forcefully does not help when the writer cannot see the violation while producing it.
+
+**Style rules decay across a long draft.** Bohr (arXiv:2511.13972) separates *initial control* from *expansion discipline* — whether a style survives a revision turn — and finds instruction-plus-example strongest on both, example-only carrying no expansion discipline at all. The observed pattern matches: the rule held while output was short and failed across an essay.
+
+A rule containing an adverb compounds this. "Sparingly" has no threshold, so there is no moment at which compliance can be tested. "Cut any clause that explains why the previous clause matters" is a search that can actually be run.
+
+### `core.md` is structurally excluded from re-disclosure
+
+Investigating where the guidance should live surfaced the larger issue.
+
+`tools/ways-cli/src/cmd/scan/state.rs` gates core on a boolean marker rather than a decay curve:
+
+```rust
+if !session::core_is_shown(session_id) {          // first time — show it
+} else if let Some(tp) = transcript {
+    let ctx_size = transcript_size_since_summary(tp);
+    if ctx_size < 5000 && age > 30 {              // context was cleared — re-show
+```
+
+Core re-injects on one condition: the transcript since last summary is under 5000 bytes, which is a safety net for a context clear. In a long growing session `ctx_size` passes 5000 within a couple of turns and never returns, so core lands at turn 1 and is never refreshed until compaction.
+
+Three consequences follow.
+
+`refire: 0.15` in `core.md`'s frontmatter is inert on this path. Core is gated by `stamp_core` / `core_is_shown`, never enters the firing ledger, and does not appear in `ways list` — 70 entries in the observed session, none of them core.
+
+The retention profile is inverted relative to the rest of the corpus. Every matched way gets a curve that *lowers* its suppression threshold as distance grows, so it becomes more eligible to re-fire the further the session runs. Core gets a gate that only opens when context is small. The file that applies to every turn has the weakest retention in the system.
+
+This is not a defect in the safety net, which does the job it was written for. It is a gap: no path was ever built for core to re-disclose on distance, because core predates the firing-dynamics work in ADR-123.
+
+> **Amendment (2026-08-20).** The transcript-size safety net quoted above is gone (PR #454). It mis-fired on the first prompt of any fresh session whose operator paused more than 30 seconds before typing: a new transcript is under 5000 bytes, so core was cleared and shown a second time. The `startup`, `compact`, and `clear` SessionStart matchers already run `clear-markers.sh`, which removes the core marker, so a missing marker is now the only condition under which `scan state` shows core. The gap this ADR addresses — no re-disclosure on distance — is unchanged by that removal.
+
+Placing new always-relevant guidance in `core.md` would therefore place it in the one location with no re-disclosure at all.
+
+## Decision
+
+Adopt **progressive disclosure for core content**, using the existing parent/child pattern rather than a new mechanism, and deliver the decoration guidance across three tiers.
+
+**Tier 1 — `core.md`.** Two bullets under Posture, sibling to the existing reasoning-tic rules, stating the rule in its shortest checkable form. Turn 1 only. This tier exists because posture shapes conversational output, which no artifact-boundary check can reach.
+
+**Tier 2 — `meta/trust/prose/prose.md`.** A fourth child alongside `autonomy`, `delegation`, and `voice`, carrying the expanded account with paired before/after examples. Semantic and vocabulary triggers, `refire: 0.15`, and the parent boost when `trust` fires. This tier re-discloses on distance, which is what core cannot do.
+
+**Tier 3 — `documentation/markdown/density/`.** A postcheck way, sibling to `documentation/markdown/reflow`, firing on the markdown just written. Its macro reports measured counts for that file rather than restating the rule. This tier exists because the failure is detection, and only a count closes that gap.
+
+Firing thresholds: significance clauses at ≥3 per thousand words, or em-dashes at ≥15 per thousand, over a 150-word floor, with per-file suppression for the session. Calibrated against measurements in this repository rather than chosen. Loose deliberately — a surface that nags trains its reader to ignore it.
+
+Two supporting changes. The writing way loses "use em dashes sparingly" as unmeasurable and gains a pointer to `trust/prose`. Em-dash count is **reported and not banned**: repository prose runs at 15.3 per thousand words against the draft's 10.7, so the punctuation is house style at volume rather than an anomaly, and only density is the tic.
+
+This ADR records the core re-disclosure gap as a **finding, not a fix**. Giving core a distance-based re-disclosure path is a separate decision with its own cost — core is roughly 900 words, and re-injecting it on a curve risks exactly the nagging the threshold discipline above avoids. The progressive-core pattern routes around the gap without deciding it.
+
+## First test: null result, and a trigger defect
+
+Tested 2026-07-30, same day, immediately after deploy. Two hosts, same two prompts, same model, fresh session each — a Kubernetes adoption assessment followed by a revision turn asking to expand one section. Arm A ran ways 1.6.0 without these changes; arm B ran 1.7.0 with them.
+
+| | words | significance | per 1k | em-dash | per 1k | antithesis |
+|---|---|---|---|---|---|---|
+| Arm A (control) | 4,477 | 4 | 0.9 | 46 | 10.3 | 0 |
+| Arm B (treatment) | 4,374 | 4 | 0.9 | 46 | 10.5 | 0 |
+
+Identical to one decimal, and identical in raw counts. The change produced no measurable difference.
+
+Three readings, in order of importance.
+
+**Tier 2 never fired, and could not have.** `ways list` on the treatment session showed one way triggered, and it was not this one. Measuring against the arm-B prompt with the EN calibration (`a=19.02`, `b=-6.05`, so `τ_s=0.5` is cosine 0.318 and `τ_k=0.15` is cosine 0.227):
+
+| alias | cosine | `g(s)` | outcome |
+|---|---|---|---|
+| as shipped in 1.7.0 | 0.188 | 0.078 | below `τ_k` — **gated out of both lanes** |
+| after vocabulary rewrite | 0.256 | 0.233 | clears `τ_k`; keyword lane only |
+
+The original way was unfirable on that prompt. The keyword lane is floor-gated, so a pattern hit would have been suppressed even if a pattern had existed. The null result was not the guidance failing to change behavior — the guidance never arrived.
+
+The deeper finding is structural. Measured across long-form prompts on varied topics, `g(s)` runs 0.02–0.24: a database migration analysis scores 0.022, an authentication write-up 0.039, the arm-B expansion turn 0.137. A prompt about writing scores 0.906. **The topic dominates the embedding**, so a way about how prose reads cannot reach a semantic bar on prompts about Kubernetes or MySQL. No vocabulary tuning bridges that distance.
+
+Two consequences. The way now carries `pattern_strict: true`, because the floor gate would otherwise suppress it on nearly every real long-form request. And the pattern had to be narrowed hard: a first attempt including expansion verbs (`expand the`, `go deeper`, `more detail`, `elaborate on`) produced 8 false positives out of 8 realistic coding prompts, since those are ordinary English in engineering chat. The shipped pattern is noun-gated — a depth adjective followed by an explicit document type — measuring 5/5 recall and 8/8 precision on a hand-built battery.
+
+**Tier 2 therefore fires only on an explicit long-form request, and not on the expansion turn.** The expansion turn is where expansion discipline fails, so the tier misses its highest-value moment. Closing that needs a trigger keyed to output volume, which no current trigger type provides for conversational output.
+
+A subsequent run confirmed the consequence: the way fired at epoch 1 and showed no re-disclosure across the following 25 epochs. Re-disclosure requires a re-match, and the strict pattern does not match ordinary continuation turns. Relaxing the `refire` cadence alone cannot close this, because the cadence gates a re-match that never arrives.
+
+The engine also forbids carrying both lanes on one file — `scan/mod.rs` skips state-triggered ways from the prompt, pattern, and semantic surfaces, on the stated grounds that "their trigger is a condition, not a topic." So tier 2 is split rather than widened: `meta/trust/prose` keeps the keyword lane for the first fire, and a sibling `meta/trust/prose/sustain` carries a ~70-token condensed form on `trigger: context-threshold` with a short `refire`, re-disclosing as context grows. Whether periodic re-disclosure changes the observed drift is under test and not yet answered here.
+
+**The condition could not discriminate.** 4,400 words in a fresh session is the short-output regime where the rules already held. `core.md` banned the antithesis construction before any of this, and both arms show zero. The failure this ADR addresses appeared at 11,500 words across a dozen turns.
+
+**Both arms were already at target.** 0.9 per 1k sits at the repository baseline. There was no decoration to remove, which means decoration is not a general property of the model's prose — it is specific to long multi-turn drafting.
+
+The near-zero between-arm variance is the one encouraging signal: two independent runs on different hosts produced identical counts, so the measurement has power. A real effect would show. The instrument is sound and was pointed at the wrong condition.
+
+Status of the central claim after this test: **unfalsified, not validated.** Nothing here supports asserting the change works.
+
+## Consequences
+
+### Positive
+
+- Always-relevant guidance gains a re-disclosing home without changing the core delivery contract.
+- The measurement tier reports numbers rather than intentions, addressing the detection failure directly.
+- Thresholds derive from measurements in this repository, so they can be re-derived and argued with.
+- The core re-disclosure gap is now written down rather than resident in one session's context.
+
+### Negative
+
+- Three tiers to keep coherent. Guidance that drifts between them will contradict itself.
+- The postcheck runs on every `Write`/`Edit`, adding a check to a hot path.
+- Regex detection of a rhetorical pattern carries false positives. A document *about* these patterns scores high for legitimate reasons; `density.md` names this case and the path self-exclusion covers the corpus.
+- The bare `, not X` form is unchecked. It over-fired on legitimate contrast in `core.md`, so narrowing it removed a real detection — the operator caught one by eye that the check misses.
+
+### Neutral
+
+- Core's `refire: 0.15` remains inert until the re-disclosure gap is separately decided. Leaving a field that does nothing is its own small debt.
+- The prose linter prototype used to calibrate these thresholds is not shipped. Promoting it to `doclint` or a `ways` subcommand is deferred until the postcheck proves too easy to ignore.
+
+## Alternatives Considered
+
+**Put everything in `core.md`.** Rejected on the finding above: core has no re-disclosure path, so the guidance most needing to survive to turn 50 would land where it survives worst.
+
+**Put everything in the writing way.** Rejected because that way fired at epoch 4 on a semantic mass-match rather than on writing, and never returned. Predictive matching picked the wrong moment, which is a routing failure the tier-3 reactive path avoids by construction.
+
+**Ship a lint gate at the commit boundary instead of a way.** Deferred rather than rejected. The postcheck teaches during the work and is reversible; a commit gate is deterministic but arrives after the session has moved on. Revisit if the way proves ignorable.
+
+**Give core a distance-based re-disclosure curve.** Deferred as a separate decision. It is the direct fix for the gap and it re-injects ~900 words per fire, which needs its own cost analysis and threshold work.
+
+**Ban em-dashes outright.** Rejected on measurement. Repository prose runs higher than the draft that prompted this, and `core.md` is the densest file sampled at 20.4 per thousand. A check that flags every file gates nothing. The operator's personal prose guidance does ban them; that is a register decision for personal correspondence and deliberately not inherited.
