@@ -34,6 +34,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "It has to be flexible; we are asking for a way of observing function which is not predictable."
+    via: session 2026-09-27, answering the probes on PR #596
+    covers: [flexible-shape]
+  - operator: aaronsb
+    said: "I think an ask for an observable is fair. This way the operator could decline or just tell the agent \"observe it yourself, you can loop and iterate\" - don't use that verbatim but that is adjacentto the develop skill"
+    via: session 2026-09-27, answering the probes on PR #596
+    covers: [optional-unused]
 status: proposed
 date: 2026-09-27
 deciders:
@@ -51,7 +60,7 @@ related:
 - **Decided:** a decision may carry `observable`: what someone should be able to see, run or try when the decision holds. Its shape is loose, because the work varies. It is optional on every decision, and it may be added or refined after acceptance. When a decision is handed to the operator, the agent demonstrates its observables, where that is possible, before asking.
 - **Trades away:** a checkable form. A loose field can't be verified by the tool, so an observable is only as good as its author makes it.
 - **One-way?** No. The field is optional, so removing it later changes no record's validity.
-- **Probes:** *Confident:* a free-form list fits the range of work, from a command's output to a page to click through. *Not confident:* whether an optional field gets used at all, or whether the handover guidance alone carries it.
+- **Probes:** *Confident (flexible-shape):* a free-form list fits the range of work, from a command's output to a page to click through. *Not confident (optional-unused):* whether an optional field gets used at all, or whether the handover guidance alone carries it.
 - **Inversion:** at one end the record is prose to be read, and consideration rests on reading. At the other end every decision carries a runnable check the tool enforces, which fits commands and misses everything seen by eye. This decision names what to observe, leaves its form open, and puts the demonstration in the conversation.
 
 ## Context
@@ -81,13 +90,15 @@ observable:
 
 No decision is required to carry an observable. `observable` joins the fields that may change after a decision leaves proposed (ADR-304 §4, `mutable_after_accept`), because what shows a decision holding often becomes clear only once it is built.
 
-### 3. Demonstration in the handover
+### 3. Asked for when drafting, demonstrated in the handover
+
+When an agent drafts an `add` or `change` decision, it asks the operator what should be observable once the decision holds. The operator can name an observable, decline, or hand the observing to the agent. In the last case the agent works out what to observe, runs the work and iterates until it can show the outcome, as the develop loop does, and then writes the observable it used into the record.
 
 When a decision with observables is handed to the operator, the agent demonstrates them, where possible, as one step of the flow: it runs the command, shows the output or a screenshot, or opens the page. It asks its questions afterwards. The consider way and the choices way carry this guidance. `considered.via` says what the operator was shown. No separate field records it.
 
 ### 4. The tool does not run observables
 
-`adr` does not execute `run` entries. The agent runs them during the handover. A command runner in the tool can be decided later, once there is evidence of how observables are written.
+`adr` does not execute `run` entries. The agent runs them during the handover, or while iterating on the work (§3). A command runner in the tool can be decided later, once there is evidence of how observables are written.
 
 ## Consequences
 
@@ -109,6 +120,6 @@ When a decision with observables is handed to the operator, the agent demonstrat
 ## Alternatives Considered
 
 - **A fixed shape: `see` plus an optional `run`.** Rejected by the operator as too narrow for the variety of work.
-- **Required on add and change, with a lint warning.** Rejected in favour of optional everywhere.
+- **Required on add and change, with a lint warning.** Rejected in favour of optional everywhere. The agent asks when drafting (§3), and the field itself stays optional.
 - **A `seen` list on `considered`.** Rejected: `via` already says what the operator was shown.
 - **`adr observe N` running a decision's commands.** Deferred until observables have been written in practice.
