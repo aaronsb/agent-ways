@@ -3,11 +3,11 @@ contract: adr/v1
 kind: decision
 verb: retire
 capability: install
-targets: [cli:migrate]
+targets: [cli:ways-migrate]
 enacted: "b4f63aa6"
 agent: {name: Claude, model: unrecorded}
 basis:
-  - evidence: the deferral audit in this record's Context (two deferral windows passed with the migrator still compiled in)
+  - evidence: the release history, where the migrator still shipped two deferral windows after ADR-144 scheduled its removal (tags ways-v1.2.0 through ways-v1.8.3)
   - precedent: ADR-144
 status: Accepted
 date: 2026-08-17

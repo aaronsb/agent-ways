@@ -67,9 +67,15 @@ surfaces:
   way: {}
   hook: {}
 
-# adr cite skips these: fixtures and tool sources carry example numbers.
+# The basis sources a decision may name (ADR-304 §11); the v1 default.
+basis_sources: [operator, evidence, standard, upstream, precedent]
+
+# adr cite skips these: fixtures, tool sources and subagent prompts carry
+# example numbers.
 cite:
   exclude:
+    - agents/workflow-orchestrator.md
+    - agents/workspace-curator.md
     - tests/fixtures
     - tests/adr-lint-test.sh
     - tests/adr-archive-test.sh

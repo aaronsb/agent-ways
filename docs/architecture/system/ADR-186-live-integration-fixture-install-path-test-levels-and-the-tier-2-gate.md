@@ -1,12 +1,4 @@
 ---
-contract: adr/v1
-kind: decision
-verb: add
-capability: testing
-agent: {name: Claude, model: unrecorded}
-basis:
-  - evidence: install-path defects found by reading code alone in four PR reviews, as this record's Context states
-  - precedent: ADR-184
 status: Accepted
 date: 2026-09-17
 deciders:
@@ -20,14 +12,6 @@ related:
 ---
 
 # ADR-186: Live integration fixture: install-path test levels and the tier 2 gate
-
-## Summary
-
-- **Decided:** test the install path in a container at two tiers. Tier 1 installs and configures with no key on every pull request. Tier 2 runs a model with a key, on dispatch and nightly only.
-- **Trades away:** CI minutes for tier 1, and API spend for tier 2.
-- **One-way?** No. The fixture is additive, and removing the job removes the gate and nothing else.
-- **Probes:** *Confident:* tier 1 catches install regressions no unit test reaches. *Not confident:* whether tier 2's scored scenarios stay stable enough to trust nightly.
-- **Inversion:** one end tests install by review alone, as before. The other end runs a model on every pull request. This keeps the key off pull requests. Is that the right boundary?
 
 ## Context
 

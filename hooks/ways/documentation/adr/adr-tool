@@ -1337,9 +1337,13 @@ def _frozen_snapshot(adr) -> Optional[tuple]:
         rel = adr.path.resolve().relative_to(root.resolve())
     except ValueError:
         return None
+    # A record freezes where it lands: history is read from the default
+    # branch when there is one, so a decision still in review on a feature
+    # branch can be revised. Without a remote default, HEAD's history counts.
+    ref = (_git(['rev-parse', '--abbrev-ref', 'origin/HEAD'], root) or '').strip() or 'HEAD'
     # --reverse drops pre-rename history under --follow, so read newest first
     # and reverse here. -z keeps names with spaces or non-ASCII intact.
-    log = _git(['log', '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
+    log = _git(['log', ref, '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
     if not log:
         return None
     entries, commit = [], None

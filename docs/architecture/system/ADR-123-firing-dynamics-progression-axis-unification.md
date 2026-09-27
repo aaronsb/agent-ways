@@ -1,12 +1,4 @@
 ---
-contract: adr/v1
-kind: decision
-verb: change
-capability: disclosure
-agent: {name: Claude, model: unrecorded}
-basis:
-  - evidence: the divergent decay models across attend and ways that this record's Context documents
-  - precedent: ADR-113
 supersedes:
   - ADR-104
   - ADR-119
@@ -26,14 +18,6 @@ related:
 ---
 
 # ADR-123: Firing dynamics — progression-axis unification for attend and ways
-
-## Summary
-
-- **Decided:** one progression axis drives firing for both attend and ways, replacing the separate decay and engagement models.
-- **Trades away:** the per-subsystem tuning that the superseded models allowed.
-- **One-way?** No. Firing curves are configuration over one axis.
-- **Probes:** *Confident:* one axis removes the drift between the attend and ways firing models. *Not confident:* whether a single axis fits every sensor's natural time scale.
-- **Inversion:** one end keeps a decay model per subsystem. The other end drives everything from one global clock. This shares an axis and tunes the curves on it. Right middle?
 
 ## Context
 

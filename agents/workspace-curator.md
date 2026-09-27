@@ -32,7 +32,7 @@ docs/
 ### 2. ADR Organization
 When user asks "where should this ADR go?":
 - **Location**: `docs/adr/ADR-NNN-description-of-thing.md`
-- **Numbering**: Sequential (ADR-001, ADR-002, ADR-003, ...) <!-- adr-cite-ignore -->
+- **Numbering**: Sequential (ADR-001, ADR-002, ADR-003, ...)
 - **Format**: ADR-NNN-kebab-case-description
 - **Never renumber** - deprecated decisions keep their numbers
 
@@ -88,7 +88,7 @@ You: "I see ADRs in docs/, root/, and notes/. Want me to consolidate them into d
 ### ADR Numbering Unclear
 ```
 User: "What number should this ADR be?"
-You: "Last ADR is ADR-003, so this would be ADR-004. For filename: ADR-004-oauth-integration.md" <!-- adr-cite-ignore -->
+You: "Last ADR is ADR-003, so this would be ADR-004. For filename: ADR-004-oauth-integration.md"
 ```
 
 ## What NOT to Do
