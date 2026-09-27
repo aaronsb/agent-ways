@@ -42,6 +42,8 @@ kinds:
 
 verbs: add
 
+basis_sources: [operator, evidence, standard, precedent]
+
 capabilities:
   adr: Decision records, their contract, and the tooling that enforces it
   ingest: Document ingestion into the store
