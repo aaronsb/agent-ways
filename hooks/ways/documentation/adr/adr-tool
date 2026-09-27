@@ -14,6 +14,8 @@ Usage:
     adr cite [--check] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
+    adr import scan <paths...>
+    adr import apply [sheets...] [--partial]
     adr index [-y]
     adr domains
     adr config
@@ -26,6 +28,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 # customize (ADR-177).
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -1573,6 +1576,11 @@ def new_sheet(number: int, domain: str, title: str, record: dict,
             'target': {'number': number, 'domain': domain, 'title': title},
             'record': record, 'summary': summary, 'body': body}
 
+def format_number(number) -> str:
+    """ADR-007, ADR-101.1: three digits, and a sub-part kept as written."""
+    base, _, part = str(number).partition('.')
+    return f"{int(base):03d}" + (f".{part}" if part else '')
+
 def _ordered(record: dict) -> dict:
     ordered = {k: record[k] for k in V1_KEY_ORDER if k in record}
     ordered.update({k: v for k, v in record.items() if k not in ordered})
@@ -1592,7 +1600,7 @@ def render_record(sheet: dict) -> str:
     if yaml.safe_load(front) != fields:
         raise ValueError(f"ADR-{target['number']}: frontmatter does not read back as written")
     title = ' '.join(str(target['title']).split())
-    text = f"---\n{front}---\n\n# ADR-{int(target['number']):03d}: {title}\n"
+    text = f"---\n{front}---\n\n# ADR-{format_number(target['number'])}: {title}\n"
     summary = sheet.get('summary')
     if summary:
         summary = summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}"
@@ -1612,6 +1620,334 @@ def placeholder_lines(text: str) -> list:
         if fence is None and any(prompt in line for prompt in SKELETON_PROMPTS):
             found.append(line.strip())
     return found
+# --- adr import: readers and the sheet file (ADR-306) ---------------------------------
+#
+# A reader turns one source record into one import sheet (ADR-306 §1, §2).
+# It fills what the source states and lists the rest in `todo`. It never
+# writes an operator basis, `considered` or `concern`: `deciders` names who
+# signed the record, not what they said (ADR-304 §7, §11).
+
+IMPORT_DIR = ('docs', 'architecture', '.import')
+
+SHEET_HEADER = ('# adr import sheet (ADR-306). Fill or clear each todo item, then run\n'
+                '# `adr import apply`. Sheets are working files; only records are committed.\n')
+
+# ADR-304 §7: the v0 status table. Deprecated depends on the record.
+V0_STATUS_MAP = {'draft': 'proposed', 'proposed': 'proposed', 'accepted': 'accepted',
+                 'superseded': 'superseded', 'rejected': 'rejected'}
+
+# v0 keys that carry over under the same name and meaning.
+V0_CARRIED = ('date', 'deciders', 'related', 'supersedes', 'superseded_by', 'amends')
+
+# The v1 default decision (ADR-304 §1), for a project whose adr.yaml declares no kinds.
+IMPORT_DECISION_SCHEMA = {'verb': 'required', 'requires': ['capability', 'basis', 'agent'],
+                          'sections': ['Summary']}
+
+_STOPWORDS = frozenset('''
+    the and for with that this from into over under onto are was were been being has have
+    had not but its it's our their them they these those which what when where who whom
+    why how all any each every one two per via than then there here also only more most
+    such can could should would will may might must shall does did doing done use used
+    using uses make makes made new adr record records decision decisions context
+'''.split())
+
+class SheetError(Exception):
+    """A source a reader cannot turn into a sheet, or a sheet apply cannot use."""
+
+def import_dir() -> Path:
+    return get_project_root().joinpath(*IMPORT_DIR)
+
+def sheet_filename(number) -> str:
+    return f"ADR-{format_number(number)}.yaml"
+
+def _number_value(text: str):
+    """A record number as the sheet holds it: an int, or '101.1' for a sub-part."""
+    text = text.lstrip('0') or '0'
+    return text if '.' in text else int(text)
+
+# --- splitting a record into frontmatter, title, Summary and body -------------------
+
+def split_record(text: str) -> tuple:
+    """(frontmatter text or None, text before the H1, H1 match or None, text
+    after the H1 line). Joined back with the H1 line, the parts are the file."""
+    lines = text.split('\n')
+    front, start = None, 0
+    if lines and lines[0].strip() == '---':
+        for i in range(1, len(lines)):
+            if lines[i].strip() == '---':
+                front, start = '\n'.join(lines[1:i]), i + 1
+                break
+    for j in range(start, len(lines)):
+        match = TITLE_PATTERN.match(lines[j])
+        if match:
+            return front, '\n'.join(lines[start:j]), match, '\n'.join(lines[j + 1:])
+    return front, '\n'.join(lines[start:]), None, ''
+
+def _render_tail(summary: Optional[str], body: str) -> str:
+    """What render_record writes after the H1 line for this summary and body."""
+    tail = ''
+    if summary:
+        summary = summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}"
+        tail += '\n' + summary.rstrip('\n') + '\n'
+    if body:
+        tail += '\n' + body
+    return tail
+
+def split_summary(after: str) -> tuple:
+    """(summary, body, note) for the text after the H1. A `## Summary` that
+    opens the body becomes the summary; the rest is the body, verbatim. The
+    split is kept only when render_record writes the same text back, so an
+    unedited sheet keeps the body byte-identical (ADR-306 §7). Otherwise the
+    Summary stays in the body and note says why."""
+    body = after[1:] if after.startswith('\n') else after
+    lines = body.split('\n')
+    if lines[0].strip() != '## Summary':
+        note = 'the Summary is not the first section; kept in the body' if re.search(
+            r'(?m)^## Summary\s*$', body) else None
+        return None, body, note
+    fence, end = None, len(lines)
+    for k in range(1, len(lines)):
+        marker = re.match(r'\s*(```|~~~)', lines[k])
+        if marker:
+            fence = None if fence == marker.group(1) else (fence or marker.group(1))
+        elif fence is None and lines[k].startswith('## '):
+            end = k
+            break
+    section = '\n'.join(lines[:end])
+    rest = '\n'.join(lines[end:])
+    summary = section[len('## Summary\n\n'):] if section.startswith('## Summary\n\n') else section
+    if summary.strip() and _render_tail(summary, rest) == after:
+        return summary, rest, None
+    return None, body, 'the Summary does not split cleanly from the body; kept in the body'
+
+# --- what a reader decides ------------------------------------------------------------
+
+def _empty(value) -> bool:
+    return value in (None, '', [], {})
+
+def open_fields(record: dict, schema: dict) -> list:
+    """The fields the kind requires that the record leaves empty, in the
+    order a record is written: the reader's part of `todo` (ADR-306 §1)."""
+    wanted = (['verb'] if schema.get('verb') == 'required' else []) + v1_requires(schema)
+    found = []
+    for name in wanted:
+        value = record.get(name)
+        if name == 'agent' and isinstance(value, dict):
+            found += [f"agent.{k}" for k in ('name', 'model') if _empty(value.get(k))]
+        elif _empty(value):
+            found.append(name)
+    return found
+
+def _words(text: str) -> set:
+    return {_stem(w) for w in re.findall(r"[a-z][a-z0-9']+", text.lower())
+            if len(w) >= 3 and w not in _STOPWORDS}
+
+def capability_candidates(text: str, vocabulary: dict, top: int = 3) -> list:
+    """Vocabulary names ranked by how many words the record's title and
+    Context share with each capability's name and description (ADR-306 §1).
+    A word counts less the more descriptions carry it, so a word every
+    capability mentions does not decide the ranking."""
+    words = _words(text)
+    described = [(str(name), _words(f"{name} {description or ''}"))
+                 for name, description in vocabulary.items()]
+    spread = {}
+    for _, found in described:
+        for word in found:
+            spread[word] = spread.get(word, 0) + 1
+    scored = []
+    for i, (name, found) in enumerate(described):
+        overlap = round(sum(1 / spread[w] for w in words & found), 6)
+        if overlap:
+            scored.append((-overlap, i, name))
+    return [name for _, _, name in sorted(scored)[:top]]
+
+def _folder_domain(path: Path) -> Optional[str]:
+    """The domain whose folder holds the file, or 'legacy' for the legacy folder."""
+    name = path.parent.name
+    for domain, config in get_domains().items():
+        folders = config.get('folder')
+        if name in (folders if isinstance(folders, list) else [folders]):
+            return domain
+    if name == 'legacy' and 'legacy' in get_config():
+        return 'legacy'
+    return None
+
+def _range_domain(number) -> Optional[str]:
+    base = int(str(number).split('.')[0])
+    for domain, config in get_domains().items():
+        low, high = config.get('range', (0, -1))
+        if low <= base <= high:
+            return domain
+    low, high = get_legacy_range()
+    return 'legacy' if 'legacy' in get_config() and low <= base <= high else None
+
+def _kind_schema(kind: str) -> dict:
+    kinds = _mapping(get_config().get('kinds'))
+    schema = kinds.get(kind)
+    return schema if isinstance(schema, dict) else IMPORT_DECISION_SCHEMA
+
+def _source_path(path: Path) -> str:
+    """The path a sheet records: repo-relative inside the repo, else absolute."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(get_project_root().resolve()))
+    except ValueError:
+        return str(resolved)
+
+def read_record(path: Path) -> dict:
+    """The sheet for one record file: the v0 reader, or a v1 record read as
+    itself (ADR-306 §2, §7). Raises SheetError for a source it cannot read."""
+    raw = path.read_bytes()
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        raise SheetError('not UTF-8 text')
+    if '\r' in text:
+        raise SheetError('CRLF line endings; convert the file to LF before scanning')
+    front, before, title, after = split_record(text)
+    if front is None:
+        raise SheetError('no YAML frontmatter; import reads structured records (ADR-306 §2)')
+    try:
+        data = yaml.safe_load(front) or {}
+    except yaml.YAMLError as e:
+        raise SheetError(f"frontmatter is not valid YAML: {e}")
+    if not isinstance(data, dict):
+        raise SheetError('frontmatter is not a mapping of fields')
+    if title is None:
+        raise SheetError("no '# ADR-NNN: title' heading")
+    contract = data.get('contract')
+    if contract and contract != V1:
+        raise SheetError(f"contract '{contract}' has no reader")
+    fmt = 'v1' if contract == V1 else 'v0'
+
+    todo, provenance = [], {}
+    from_file = filename_number(path)
+    number = _number_value(from_file or title.group(1))
+    provenance['target.number'] = 'file name' if from_file else 'H1'
+    if from_file and (title.group(1).lstrip('0') or '0') != from_file:
+        todo.append(f"target.number: the file name says ADR-{from_file}, the H1 says ADR-{title.group(1)}")
+    domain = _folder_domain(path)
+    if domain:
+        provenance['target.domain'] = f"folder {path.parent.name}"
+    else:
+        domain = _range_domain(number)
+        if domain:
+            provenance['target.domain'] = 'number range'
+        else:
+            todo.append('target.domain: neither the folder nor the number names a domain')
+    provenance['target.title'] = 'H1'
+    if before.strip():
+        todo.append('text between the frontmatter and the H1 is not carried; move it into the body')
+
+    summary, body, note = split_summary(after)
+    if summary is not None:
+        provenance['summary'] = '## Summary section'
+    elif note:
+        provenance['summary'] = note
+
+    unmapped = {}
+    if fmt == 'v1':
+        record = dict(data)
+        provenance['record'] = 'frontmatter (adr/v1)'
+        kind = record.get('kind')
+        schema = _kind_schema(kind) if isinstance(kind, str) else IMPORT_DECISION_SCHEMA
+    else:
+        schema = _kind_schema('decision')
+        record = empty_record('decision', schema, {'model': 'unrecorded'}, {})
+        provenance['record.contract'] = 'v0 reader'
+        provenance['record.kind'] = 'v0 reader: every v0 record is a decision'
+        provenance['record.agent.model'] = 'v0 reader: the model was not recorded'
+        record['status'] = _v0_status(data, todo, provenance)
+        for key in V0_CARRIED:
+            if key in data:
+                record[key] = data[key]
+                provenance[f"record.{key}"] = f"frontmatter {key}"
+        if 'deciders' in data:
+            provenance['record.deciders'] = 'frontmatter deciders (never an operator basis, ADR-304 §7)'
+        for key, value in data.items():
+            if key != 'status' and key not in V0_CARRIED:
+                unmapped[key] = value
+    todo[:0] = open_fields(record, schema)
+    todo += [f"unmapped: {key} has no v1 field; move it into the record or drop it" for key in unmapped]
+
+    candidates = {}
+    if 'capability' in todo:
+        context = parse_text(text, path).section_text.get('Context', '')
+        candidates['capability'] = capability_candidates(
+            f"{title.group(2)}\n{context}", _mapping(get_config().get('capabilities')))
+    return {
+        'sheet': SHEET_FORMAT,
+        'source': {'path': _source_path(path), 'format': fmt,
+                   'sha256': hashlib.sha256(raw).hexdigest()},
+        'target': {'number': number, 'domain': domain, 'title': ' '.join(title.group(2).split())},
+        'record': _ordered(record),
+        'summary': summary,
+        'todo': todo,
+        'candidates': candidates,
+        'provenance': provenance,
+        'unmapped': unmapped,
+        'body': body,
+    }
+
+def _v0_status(data: dict, todo: list, provenance: dict) -> Optional[str]:
+    """ADR-304 §7's table. Deprecated is superseded when something replaced
+    it, and otherwise accepted with a note, which needs judgement."""
+    raw = data.get('status')
+    key = str(raw or '').strip().lower()
+    if key == 'deprecated':
+        if data.get('superseded_by'):
+            provenance['record.status'] = f"frontmatter status: {raw}, with superseded_by (ADR-304 §7)"
+            return 'superseded'
+        provenance['record.status'] = f"frontmatter status: {raw}, with no successor (ADR-304 §7)"
+        todo.append('status: Deprecated with no successor maps to accepted with a note that '
+                    'the decision is historical (ADR-304 §7); add the note')
+        return 'accepted'
+    if key in V0_STATUS_MAP:
+        provenance['record.status'] = f"frontmatter status: {raw}"
+        return V0_STATUS_MAP[key]
+    todo.append(f"status: '{raw}' has no v1 mapping (ADR-304 §7)")
+    return None
+
+# --- the sheet file ----------------------------------------------------------------
+
+class _SheetDumper(_RecordDumper):
+    """A sheet is edited by hand, so multi-line text is a literal block."""
+
+def _represent_sheet_str(dumper, value):
+    style = '|' if '\n' in value else None
+    return dumper.represent_scalar('tag:yaml.org,2002:str', value, style=style)
+
+_SheetDumper.add_representer(str, _represent_sheet_str)
+
+def dump_sheet(sheet: dict) -> str:
+    """The sheet as YAML, read back before it is returned (ADR-306 §7)."""
+    text = yaml.dump(sheet, Dumper=_SheetDumper, sort_keys=False, allow_unicode=True,
+                     default_flow_style=False, width=1000)
+    if yaml.safe_load(text) != sheet:
+        raise SheetError('the sheet does not read back as written')
+    return SHEET_HEADER + text
+
+def load_sheet(path: Path) -> dict:
+    """A sheet file, checked for the fields apply needs."""
+    try:
+        sheet = yaml.safe_load(path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+        raise SheetError(f"cannot read the sheet: {e}")
+    if not isinstance(sheet, dict) or sheet.get('sheet') != SHEET_FORMAT:
+        raise SheetError(f"not an {SHEET_FORMAT} sheet")
+    target = sheet.get('target')
+    if not isinstance(target, dict) or any(_empty(target.get(k)) for k in ('number', 'title')):
+        raise SheetError('target needs a number and a title')
+    try:
+        format_number(target['number'])
+    except ValueError:
+        raise SheetError(f"target.number '{target['number']}' is not a record number")
+    if not isinstance(sheet.get('record'), dict):
+        raise SheetError('record is not a mapping of fields')
+    source = sheet.get('source')
+    if source is not None and not (isinstance(source, dict) and source.get('path')):
+        raise SheetError('source needs a path')
+    return sheet
 # ============================================================================
 # Commands
 # ============================================================================
@@ -2779,6 +3115,219 @@ def cmd_reject(args):
 def cmd_abandon(args):
     return _close(args, 'abandoned')
 
+def cmd_import(args):
+    """adr import scan | apply (ADR-306 §3)."""
+    if args.import_command == 'scan':
+        return _import_scan(args)
+    if args.import_command == 'apply':
+        return _import_apply(args)
+    print("Usage: adr import scan <paths...> | adr import apply [sheets...] [--partial]", file=sys.stderr)
+    return 2
+
+def _scan_inputs(paths: list) -> tuple:
+    """(record files, messages). A directory yields its ADR-*.md files,
+    leaving out the archive and the sheet directory; an archived record is
+    scanned when it is named."""
+    files, messages, archived = [], [], 0
+    for arg in paths:
+        path = Path(arg)
+        if path.is_dir():
+            for found in sorted(path.rglob('ADR-*.md')):
+                parts = found.relative_to(path).parts
+                if '.import' in parts:
+                    continue
+                if 'archive' in parts:
+                    archived += 1
+                    continue
+                files.append(found)
+        elif path.is_file():
+            files.append(path)
+        else:
+            messages.append(f"Skipped: {arg}: no such file or directory")
+    if archived:
+        messages.append(f"Note: {archived} archived record(s) left out; name a file to scan it")
+    return files, messages
+
+def _import_scan(args):
+    """Write one sheet per record to docs/architecture/.import/ (ADR-306 §1,
+    §3). The directory ignores itself, so the repo's .gitignore is untouched.
+    A source is only read, never written."""
+    files, messages = _scan_inputs(args.paths)
+    for message in messages:
+        print(message)
+    out = import_dir()
+    written = skipped = 0
+    claimed = {}
+    for path in files:
+        shown = relative_path(path.resolve()) if path.is_absolute() else path
+        try:
+            sheet = read_record(path)
+        except (SheetError, OSError) as e:
+            print(f"Skipped: {shown}: {e}")
+            skipped += 1
+            continue
+        name = sheet_filename(sheet['target']['number'])
+        dest = out / name
+        source = sheet['source']['path']
+        if name in claimed:
+            print(f"Skipped: {shown}: ADR-{format_number(sheet['target']['number'])} is also {claimed[name]}")
+            skipped += 1
+            continue
+        if dest.exists():
+            try:
+                previous = (load_sheet(dest).get('source') or {}).get('path')
+            except SheetError:
+                previous = None
+            if previous != source:
+                print(f"Skipped: {shown}: {relative_path(dest)} holds a sheet for {previous or 'another source'}")
+                skipped += 1
+                continue
+        try:
+            text = dump_sheet(sheet)
+        except SheetError as e:
+            print(f"Skipped: {shown}: {e}")
+            skipped += 1
+            continue
+        out.mkdir(parents=True, exist_ok=True)
+        ignore = out / '.gitignore'
+        if not ignore.exists():
+            ignore.write_text('*\n')
+        dest.write_text(text)
+        claimed[name] = source
+        written += 1
+        todo = len(sheet['todo'])
+        print(f"Scanned: {shown} -> {relative_path(dest)} ({sheet['source']['format']}, {todo} todo)")
+    print(f"Scan: {written} sheet(s) written, {skipped} skipped")
+    return 1 if skipped and not written else 0
+
+def _source_file(source: dict) -> Path:
+    path = Path(source['path'])
+    return path if path.is_absolute() else get_project_root() / path
+
+def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
+    """Where apply writes: over the source when it sits in the repo at the
+    path the target implies, otherwise a new file in the domain's folder
+    (ADR-306 §3, §5). Raises SheetError when neither works."""
+    target = sheet['target']
+    number = format_number(target['number'])
+    domain = target.get('domain')
+    arch = get_project_root() / 'docs' / 'architecture'
+    if source_file is not None:
+        try:
+            source_file.resolve().relative_to(arch.resolve())
+            inside = True
+        except ValueError:
+            inside = False
+        if (inside and filename_number(source_file) == number.lstrip('0')
+                and _folder_domain(source_file) == domain):
+            return source_file
+    if not domain:
+        raise SheetError('target.domain is empty')
+    if domain in get_domains():
+        folders = get_domains()[domain]['folder']
+        folder = folders[0] if isinstance(folders, list) else folders
+    elif domain == 'legacy' and 'legacy' in get_config():
+        folder = 'legacy'
+    else:
+        raise SheetError(f"domain '{domain}' is not in adr.yaml; add it first "
+                         f"(creating a domain on apply, ADR-306 §6, is not built yet)")
+    for existing in find_adrs(include_archived=True):
+        if filename_number(existing) == number.lstrip('0') and (
+                source_file is None or existing.resolve() != source_file.resolve()):
+            raise SheetError(f"ADR-{number} already exists: {relative_path(existing)}")
+    slug = re.sub(r'[^a-z0-9]+', '-', str(target['title']).lower()).strip('-')
+    return arch / folder / f"ADR-{number}-{slug}.md"
+
+def _apply_one(sheet: dict) -> tuple:
+    """Write one sheet as a v1 record through render_record and return
+    (path, whether it changed). A non-v1 source gains `imported: {from,
+    format}` (ADR-306 §4). A source changed since the scan is refused."""
+    source = sheet.get('source')
+    source_file = None
+    record = dict(sheet['record'])
+    if source:
+        source_file = _source_file(source)
+        if not source_file.is_file():
+            raise SheetError(f"source {source['path']} is gone")
+        if hashlib.sha256(source_file.read_bytes()).hexdigest() != source.get('sha256'):
+            raise SheetError(f"source {source['path']} changed since the scan; scan it again")
+        if source.get('format') != 'v1':
+            record.setdefault('imported', {'from': source['path'], 'format': source.get('format')})
+    dest = _destination(sheet, source_file)
+    try:
+        text = render_record(dict(sheet, record=record))
+    except (ValueError, TypeError) as e:
+        raise SheetError(str(e))
+    if dest.is_file() and _same_record(dest.read_text(), text):
+        return dest, False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(text)
+    return dest, True
+
+def _same_record(old: str, new: str) -> bool:
+    """The same frontmatter data and the same text after it. A v1 record
+    applied unedited is left as its author formatted it (ADR-306 §7)."""
+    old_front, old_before, old_title, old_after = split_record(old)
+    new_front, new_before, new_title, new_after = split_record(new)
+    if old_front is None or old_title is None or new_title is None:
+        return False
+    try:
+        same_data = yaml.safe_load(old_front) == yaml.safe_load(new_front)
+    except yaml.YAMLError:
+        return False
+    return (same_data and old_before.strip() == new_before.strip()
+            and old_title.group(0) == new_title.group(0) and old_after == new_after)
+
+def _import_apply(args):
+    """Write each finished sheet as a v1 record, then lint what was written
+    (ADR-306 §3). A sheet with open todo items is skipped unless --partial.
+    An applied sheet is removed: the record is what is kept."""
+    if args.sheets:
+        paths = [Path(p) for p in args.sheets]
+    else:
+        paths = sorted(import_dir().glob('ADR-*.yaml')) if import_dir().is_dir() else []
+    lines, written = [], []
+    applied = skipped = refused = 0
+    for path in paths:
+        shown = relative_path(path.resolve())
+        try:
+            sheet = load_sheet(path)
+            todo = sheet.get('todo') or []
+            if todo and not args.partial:
+                lines.append((f"Skipped: {shown}: {len(todo)} open todo item(s): "
+                              f"{', '.join(str(t).split(':')[0] for t in todo)}", None))
+                skipped += 1
+                continue
+            dest, changed = _apply_one(sheet)
+        except SheetError as e:
+            lines.append((f"Refused: {shown}: {e}", None))
+            refused += 1
+            continue
+        path.unlink()
+        applied += 1
+        written.append(dest.resolve())
+        partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
+        lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
+    counts = _lint_counts(written)
+    for text, dest in lines:
+        if dest is not None:
+            errors, warnings = counts.get(dest, (0, 0))
+            text += f" (lint: {errors} errors, {warnings} warnings)"
+        print(text)
+    print(f"Import: {applied} applied, {skipped} skipped, {refused} refused")
+    return 1 if refused else 0
+
+def _lint_counts(paths: list) -> dict:
+    """(errors, warnings) per written record, from the full rule set."""
+    if not paths:
+        return {}
+    corpus = get_all_adrs(include_archived=True)
+    ctx = LintContext.from_corpus(corpus)
+    targets = [adr for adr in corpus if adr.path.resolve() in set(paths)]
+    run_rules(targets, ctx)
+    return {adr.path.resolve(): (sum(i.severity == 'error' for i in adr.issues),
+                                 sum(i.severity != 'error' for i in adr.issues))
+            for adr in targets}
 # ============================================================================
 # Main
 # ============================================================================
@@ -2829,6 +3378,16 @@ def main():
     p_lint = subparsers.add_parser('lint', help='Lint ADR files')
     p_lint.add_argument('paths', nargs='*', help='Specific files to lint')
     p_lint.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
+
+    # import (ADR-306)
+    p_import = subparsers.add_parser('import', help='Import records through import sheets')
+    import_sub = p_import.add_subparsers(dest='import_command')
+    p_scan = import_sub.add_parser('scan', help='Write an import sheet for each record')
+    p_scan.add_argument('paths', nargs='+', help='Record files or directories of records')
+    p_apply = import_sub.add_parser('apply', help='Write finished sheets as adr/v1 records')
+    p_apply.add_argument('sheets', nargs='*', help='Sheets to apply (default: every sheet in .import/)')
+    p_apply.add_argument('--partial', action='store_true',
+                         help='Apply sheets with open todo items too')
 
     # index
     index_parser = subparsers.add_parser('index', help='Generate ADR index')
@@ -2895,6 +3454,7 @@ def main():
         'accept': cmd_accept,
         'reject': cmd_reject,
         'abandon': cmd_abandon,
+        'import': cmd_import,
     }
 
     return commands[args.command](args)
