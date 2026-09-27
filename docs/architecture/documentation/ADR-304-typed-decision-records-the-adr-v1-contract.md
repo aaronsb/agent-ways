@@ -208,7 +208,7 @@ capability ledger. Nobody maintains the ledger by hand.
 contract: adr/v1
 kinds:
   decision:
-    mutable_after_accept: [status, enacted, superseded_by, considered]
+    mutable_after_accept: [status, enacted, superseded_by, considered, concern]
     verb: required
     requires: [capability, basis, agent]
     sections: [Summary]
@@ -549,6 +549,19 @@ considered:
 
 A bare "looks good" covers nothing specific. It is still recorded, and the
 record shows its scope.
+
+**Trust runs both ways.** Often the answer will be "yep, those look good."
+The agent takes that answer as given, the way the operator takes the
+agent's work as given, and does not re-ask the probes or treat brevity as a
+defect. The probes exist to offer the operator's judgement a foothold, not
+to test the operator.
+
+**The agent may always raise a concern.** A concern about safety, a line of
+reasoning that doesn't follow, or anything that seems off can be raised at
+any stage, including after the operator has considered the decision and
+accepted it. A raised concern goes in the record as a `concern:` entry with
+the agent's reasoning. It does not block acceptance. The operator answers
+it, and the answer is recorded next to it.
 
 **If the operator started it, the operator considers it.** A decision with
 an `operator` basis at any level is proposed and waits for `considered`
