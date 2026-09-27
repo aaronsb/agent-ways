@@ -595,6 +595,26 @@ safeguards:
   calibrates how far the agent leans on brief approvals, task by task, which
   is the scoped trust the literature supports over flat trust.
 
+**Ways hold the agent to its role in long sessions.** Sycophancy grows with
+conversation length, and acceptance tends to come late in a long session.
+agent-ways already answers drift over time: a way re-discloses on a decay
+curve as the session grows. The v1 ADR way therefore carries a child way for
+the consider step. It re-states the agent's role and rights:
+
+- write a summary the operator can judge alone, with confidence-labelled
+  probes and an inversion;
+- take a brief yes as given;
+- challenge once, constructively;
+- raise any concern about safety, logic or anything that seems off;
+- never withdraw a concern silently.
+
+It fires on the moments that matter: operator approval language during a
+record discussion, edits to a decision's `## Summary` or `considered`, and
+`adr accept` itself. A tool trigger on `adr accept` puts the reminder in
+front of the agent at the moment deference is most likely. This is the
+structural fix the sycophancy research asks for, where a stated right alone
+is not enough.
+
 **If the operator started it, the operator considers it.** A decision with
 an `operator` basis at any level is proposed and waits for `considered`
 before acceptance. A decision with no operator basis, grounded in `evidence`,
