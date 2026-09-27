@@ -23,6 +23,15 @@ def main():
                             help='List archived ADRs only')
     list_scope.add_argument('--all', action='store_true',
                             help='List active and archived ADRs')
+    p_list.add_argument('--field', action='append', metavar='KEY[=VALUE]',
+                        help='Filter by frontmatter: KEY present, or KEY equal to or listing VALUE (repeatable)')
+    p_list.add_argument('--kind', help='Filter by kind (same as --field kind=KIND)')
+    p_list.add_argument('--verb', help='Filter by verb (same as --field verb=VERB)')
+    p_list.add_argument('--capability', help='Filter by capability, listed or single (same as --field capability=NAME)')
+    p_list.add_argument('--group-by', dest='group_by', metavar='KEY',
+                        help='Group by a frontmatter field; a record listing several values is in each group')
+    p_list.add_argument('--json', action='store_true',
+                        help='Machine output: number, title, path, status and frontmatter for each record')
 
     # view
     p_view = subparsers.add_parser('view', aliases=['v', 'show'], help='View an ADR')
@@ -103,6 +112,37 @@ def main():
         p_close.add_argument('--reason', help='Why (required; appended as a Closure section)')
         p_close.add_argument('--dry-run', action='store_true', help='Report without writing')
 
+    # record edits (adr/v1): consider, set, supersede, enact
+    p_consider = subparsers.add_parser('consider', help="Append a considered entry: the operator's answer (ADR-304 §12)")
+    p_consider.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
+    p_consider.add_argument('--said', help='What the operator said, verbatim (required)')
+    p_consider.add_argument('--via', help='Where it was said, such as a PR or a session (required)')
+    p_consider.add_argument('--operator', help='Who said it (default: the gh or git user)')
+    p_consider.add_argument('--covers', nargs='*', metavar='PROBE',
+                            help='Probe names from the Summary the answer covers (none given writes covers: [])')
+    p_consider.add_argument('--paraphrase', action='store_true', help='said is a summary, not the words')
+    p_consider.add_argument('--canary', choices=['caught', 'missed'], help='Whether the operator caught the canary')
+    p_consider.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_set = subparsers.add_parser('set', help='Edit frontmatter fields: key=value, key+=item, key-=item')
+    p_set.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
+    p_set.add_argument('assignments', nargs='+', metavar='key=value',
+                       help='Values are YAML: status=superseded, capability=[a, b], related+=ADR-7')
+    p_set.add_argument('--force', action='store_true',
+                       help='Edit a frozen field anyway, for migration cleanup (lint still reports it)')
+    p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_supersede = subparsers.add_parser('supersede', help='Record a supersession on both records (ADR-304 §3)')
+    p_supersede.add_argument('adr', help='The record replaced (e.g., 101, ADR-101)')
+    p_supersede.add_argument('--by', required=True, help='The record that replaces it')
+    p_supersede.add_argument('--amends', metavar='SECTION',
+                             help='Replace one section only: amends: [OLD#SECTION] on the new record')
+    p_supersede.add_argument('--force', action='store_true',
+                             help="Write the edge on an accepted record whose kind freezes it")
+    p_supersede.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_enact = subparsers.add_parser('enact', help='Mark an accepted cut or retire done at a commit (ADR-304 §5)')
+    p_enact.add_argument('adr', help='ADR number (e.g., 111, ADR-111)')
+    p_enact.add_argument('commit', help='The commit hash that finished the removal')
+    p_enact.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+
     # cite
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
@@ -134,6 +174,10 @@ def main():
         'reject': cmd_reject,
         'abandon': cmd_abandon,
         'import': cmd_import,
+        'consider': cmd_consider,
+        'set': cmd_set,
+        'supersede': cmd_supersede,
+        'enact': cmd_enact,
     }
 
     return commands[args.command](args)
