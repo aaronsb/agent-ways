@@ -1,0 +1,4 @@
+Skipped: docs/architecture/.import/ADR-117.yaml: 1 todo item(s) --partial does not write past: status
+Skipped: docs/architecture/.import/ADR-118.yaml: 1 todo item(s) --partial does not write past: status
+Import: 0 applied, 2 skipped, 0 refused
+[exit 0]

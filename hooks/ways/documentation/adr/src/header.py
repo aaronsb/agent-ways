@@ -14,6 +14,8 @@ Usage:
     adr cite [--check] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
+    adr import scan <paths...> [--force]
+    adr import apply [sheets...] [--partial] [--force]
     adr index [-y]
     adr domains
     adr config
@@ -26,6 +28,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 # customize (ADR-177).
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess

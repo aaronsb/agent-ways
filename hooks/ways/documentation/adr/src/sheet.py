@@ -99,6 +99,11 @@ def new_sheet(number: int, domain: str, title: str, record: dict,
             'target': {'number': number, 'domain': domain, 'title': title},
             'record': record, 'summary': summary, 'body': body}
 
+def format_number(number) -> str:
+    """ADR-007, ADR-101.1: three digits, and a sub-part kept as written."""
+    base, _, part = str(number).partition('.')
+    return f"{int(base):03d}" + (f".{part}" if part else '')
+
 def _ordered(record: dict) -> dict:
     ordered = {k: record[k] for k in V1_KEY_ORDER if k in record}
     ordered.update({k: v for k, v in record.items() if k not in ordered})
@@ -118,7 +123,7 @@ def render_record(sheet: dict) -> str:
     if yaml.safe_load(front) != fields:
         raise ValueError(f"ADR-{target['number']}: frontmatter does not read back as written")
     title = ' '.join(str(target['title']).split())
-    text = f"---\n{front}---\n\n# ADR-{int(target['number']):03d}: {title}\n"
+    text = f"---\n{front}---\n\n# ADR-{format_number(target['number'])}: {title}\n"
     summary = sheet.get('summary')
     if summary:
         summary = summary if summary.startswith('## Summary') else f"## Summary\n\n{summary}"

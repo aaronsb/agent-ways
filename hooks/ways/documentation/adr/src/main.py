@@ -49,6 +49,22 @@ def main():
     p_lint.add_argument('paths', nargs='*', help='Specific files to lint')
     p_lint.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
 
+    # import (ADR-306)
+    p_import = subparsers.add_parser('import', help='Import records through import sheets')
+    import_sub = p_import.add_subparsers(dest='import_command')
+    p_scan = import_sub.add_parser('scan', help='Write an import sheet for each record')
+    p_scan.add_argument('paths', nargs='+', help='Record files or directories of records')
+    p_scan.add_argument('--force', action='store_true',
+                        help='Overwrite a sheet that differs from a fresh scan, discarding its edits')
+    p_apply = import_sub.add_parser('apply', help='Write finished sheets as adr/v1 records')
+    p_apply.add_argument('sheets', nargs='*', help='Sheets to apply (default: every sheet in .import/)')
+    p_apply.add_argument('--partial', action='store_true',
+                         help='Apply sheets with open todo items too, except items lint cannot '
+                              'find again afterwards: a status with no mapping, a Deprecated '
+                              'note, a number or domain mismatch')
+    p_apply.add_argument('--force', action='store_true',
+                         help='Overwrite a record that has uncommitted changes')
+
     # index
     index_parser = subparsers.add_parser('index', help='Generate ADR index')
     index_parser.add_argument('-y', '--yes', action='store_true',
@@ -114,6 +130,7 @@ def main():
         'accept': cmd_accept,
         'reject': cmd_reject,
         'abandon': cmd_abandon,
+        'import': cmd_import,
     }
 
     return commands[args.command](args)

@@ -78,9 +78,31 @@ def rule_v1_required_sections(adr, ctx):
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
+    imported = 'imported' in adr.frontmatter
     for name in _str_list(schema.get('sections')) or []:
         if _find_section(adr, name) is None:
-            v1_issue(adr, f"a {v1_record_kind(adr)} record opens with a '## {name}' section")
+            if imported and name == 'Summary':
+                # ADR-306 §4: an imported record may gain its Summary later,
+                # once the imported corpus has been read together.
+                v1_issue(adr, "imported record has no '## Summary' yet (ADR-306 §4)", 'warning')
+            else:
+                v1_issue(adr, f"a {v1_record_kind(adr)} record opens with a '## {name}' section")
+
+@file_rule(contract=V1)
+def rule_v1_imported(adr, ctx):
+    """`imported` records where the record came from: {from, format}, and
+    optionally `status`, the source status as written, and `unmapped`, the
+    source keys with no v1 field (ADR-306 §1, §4, §7)."""
+    if not is_v1_record(adr, ctx) or 'imported' not in adr.frontmatter:
+        return
+    imported = adr.frontmatter.get('imported')
+    if not isinstance(imported, dict) or not all(
+            isinstance(imported.get(k), str) and imported.get(k).strip() for k in ('from', 'format')):
+        v1_issue(adr, "imported: expected {from: <source path>, format: <reader>}")
+    elif 'unmapped' in imported and not isinstance(imported['unmapped'], dict):
+        v1_issue(adr, "imported.unmapped: expected a mapping of source fields")
+    elif isinstance(imported.get('status'), (dict, list)):
+        v1_issue(adr, "imported.status: expected the source's status as written")
 
 @file_rule(contract=V1)
 def rule_v1_summary_legibility(adr, ctx):
@@ -133,9 +155,10 @@ def _git(args: list, cwd: Path) -> Optional[str]:
         return None
     return result.stdout if result.returncode == 0 else None
 
-def _frozen_snapshot(adr) -> Optional[tuple]:
+def _frozen_versions(adr, every: bool = False) -> list:
     """(frontmatter, body) of the first committed version that was already
-    adr/v1 and past proposed, following renames. None outside git, for an
+    adr/v1 and past proposed, following renames, and with every=True each
+    committed version after it, oldest first. Empty outside git, for an
     untracked file, or when no such version exists. A version that was still
     v0 is never the snapshot: migrating an accepted v0 record to v1 adds the
     v1 fields, and that is the migration, not an edit (ADR-304 §7)."""
@@ -155,7 +178,7 @@ def _frozen_snapshot(adr) -> Optional[tuple]:
     # and reverse here. -z keeps names with spaces or non-ASCII intact.
     log = _git(['log', ref, '--first-parent', '-m', '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
     if not log:
-        return None
+        return []
     entries, commit = [], None
     for token in log.split('\0'):
         if token.startswith('commit:'):
@@ -163,14 +186,48 @@ def _frozen_snapshot(adr) -> Optional[tuple]:
         elif commit and token.lstrip('\n'):
             entries.append((commit, token.lstrip('\n')))
             commit = None
+    versions = []
     for commit, name in reversed(entries):
         text = _git(['show', f'{commit}:{name}'], root)
         if text is None:
             continue
         past = parse_text(text, adr.path)
-        if past.contract == V1 and past.status and str(past.status).lower() != 'proposed':
-            return past.frontmatter, past.body
-    return None
+        if versions or (past.contract == V1 and past.status and str(past.status).lower() != 'proposed'):
+            versions.append((past.frontmatter, past.body))
+            if not every:
+                break
+    return versions
+
+def _unfilled(value) -> bool:
+    return value in (None, '', [], {})
+
+def _completes(then, now) -> bool:
+    """now fills what was empty in then and changes nothing else. On an
+    imported record that is finishing the import, not an edit: a sheet applied
+    with --partial is committed with empty fields (ADR-306 §3, §4)."""
+    if _unfilled(then):
+        return True
+    if isinstance(then, dict) and isinstance(now, dict):
+        return all(_unfilled(then.get(k)) or _same(then.get(k), now.get(k))
+                   for k in set(then) | set(now))
+    return False
+
+def _without_opening_summary(body: str, body_then: str) -> str:
+    """body with a ## Summary inserted right after the H1 taken out, when
+    the rest of it still starts with what followed the H1 in body_then.
+    Otherwise body unchanged."""
+    title = re.match(r'\s*# ADR-[^\n]*\n', body)
+    title_then = re.match(r'\s*# ADR-[^\n]*\n', body_then)
+    if not title or not title_then:
+        return body
+    after, after_then = body[title.end():], body_then[title_then.end():].strip('\n')
+    if not re.match(r'\n*## Summary[ \t]*\n', after):
+        return body
+    at = after.find(after_then) if after_then else len(after)
+    inserted = after[:at]
+    if at <= 0 or re.search(r'(?m)^## (?!Summary[ \t]*$)', inserted):
+        return body
+    return body[:title.end()] + '\n' + after[at:]
 
 def _same(a, b) -> bool:
     """Equal, treating a date and its quoted string as the same value."""
@@ -183,7 +240,15 @@ V1_DEFAULT_MUTABLE = ('status', 'enacted', 'superseded_by', 'considered', 'conce
 @file_rule(contract=V1)
 def rule_v1_frozen(adr, ctx):
     """Once a decision leaves proposed, only the kind's mutable_after_accept
-    fields may change, and the body grows only by appending (ADR-304 §1, §4)."""
+    fields may change, and the body grows only by appending (ADR-304 §1, §4).
+
+    An imported record may fill each field its import wrote empty, once: the
+    first committed value is then frozen like any other. A field absent at
+    import gets no allowance. It may also gain an opening Summary when the
+    import had none (ADR-306 §4), and that Summary stays editable: the
+    operator expects Summaries to change once the whole corpus is read.
+    `imported` is self-declared, so a record that adds it by hand gets the
+    same allowance; git history still shows who added it."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -195,16 +260,29 @@ def rule_v1_frozen(adr, ctx):
     if mutable == 'all':
         return
     mutable = set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-    snapshot = _frozen_snapshot(adr)
-    if snapshot is None:
+    versions = _frozen_versions(adr, every=True)
+    if not versions:
         return
-    then, body_then = snapshot
+    then, body_then = versions[0]
+    imported = 'imported' in then and 'imported' in adr.frontmatter
+    body_now = adr.body
+    if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
+        body_now = _without_opening_summary(body_now, body_then)
     for key in sorted(set(then) | set(adr.frontmatter)):
         if key in mutable:
             continue
-        if not _same(then.get(key), adr.frontmatter.get(key)):
-            v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
-    if not adr.body.rstrip().startswith(body_then.rstrip()):
+        frozen = then.get(key)
+        fillable = imported and key in then
+        if fillable:
+            # Fill once: each committed fill of an empty part becomes frozen.
+            for later, _ in versions[1:]:
+                if _completes(frozen, later.get(key)):
+                    frozen = later.get(key)
+        now = adr.frontmatter.get(key)
+        if _same(frozen, now) or (fillable and _completes(frozen, now)):
+            continue
+        v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
+    if not body_now.rstrip().startswith(body_then.rstrip()):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
 
 @file_rule(contract=V1)

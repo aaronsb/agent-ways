@@ -52,7 +52,7 @@ help:
 	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr)"
 	@echo "  make test-unit    Run Rust unit tests"
 	@echo "  make test-sim     Run session simulator (8 scenarios)"
-	@echo "  make test-adr     Run adr tool tests (lint, archive, golden, macro)"
+	@echo "  make test-adr     Run adr tool tests (lint, archive, golden, import, macro)"
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
@@ -366,11 +366,12 @@ test-smoke: ways
 	@echo "Smoke tests passed."
 
 test-adr:
-	@echo "Running adr tool tests (lint, archive, golden output)..."
+	@echo "Running adr tool tests (lint, archive, golden output, import round trip)..."
 	@python3 hooks/ways/documentation/adr/assemble --check
 	@bash tests/adr-lint-test.sh
 	@bash tests/adr-archive-test.sh
 	@bash tests/adr-golden-test.sh
+	@bash tests/adr-import-roundtrip.sh
 	@bash tests/adr-macro-test.sh
 	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
 	@echo "adr tool tests passed."

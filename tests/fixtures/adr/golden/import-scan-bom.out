@@ -1,0 +1,3 @@
+Skipped: docs/architecture/system/ADR-117-with-a-bom.md: the file starts with a UTF-8 byte order mark; remove it before scanning
+Scan: 0 sheet(s) written, 1 skipped
+[exit 1]

@@ -1,0 +1,6 @@
+Applied: docs/architecture/.import/ADR-101.yaml -> docs/architecture/system/ADR-101-ingest.md, unchanged (lint: 0 errors, 0 warnings)
+Skipped: docs/architecture/.import/ADR-110.yaml: 4 open todo item(s): verb, capability, basis, agent.name
+Skipped: docs/architecture/.import/ADR-115.yaml: 6 open todo item(s): verb, capability, basis, agent.name, preamble, unmapped
+Skipped: docs/architecture/.import/ADR-116.yaml: 5 open todo item(s): verb, capability, basis, agent.name, status note
+Import: 1 applied, 3 skipped, 0 refused
+[exit 0]

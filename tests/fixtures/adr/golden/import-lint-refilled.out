@@ -1,0 +1,21 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-115-nightly-ingest-window.md
+  ❌ 'agent' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
+  ❌ 'capability' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
+
+════════════════════════════════════════════════════════════
+Summary: 2 errors, 0 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

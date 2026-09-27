@@ -1,0 +1,59 @@
+path: docs/architecture/.import/ADR-115.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-115-nightly-ingest-window.md
+  format: v0
+  sha256: 6fc5e998597b02af3cc0481cfb32ed884f500017b69fec37348401813d865cb3
+target:
+  number: '115'
+  domain: system
+  title: Nightly ingest window
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-04-01
+  deciders:
+    - developer
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+  - 'preamble: the text between the frontmatter and the H1 moved into the body, right after the H1; check where it belongs'
+  - 'unmapped: revised has no v1 field; apply keeps it under imported.unmapped. Move it into the record, or leave it there'
+candidates:
+  capability:
+    - ingest
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  body: text above the H1, then the text after it
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Accepted'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+unmapped:
+  revised: 2025-04-02
+body: |
+  > Moved here from the ops wiki.
+
+  ## Context
+
+  Ingest ran nightly.
+
+  ## Decision
+
+  Ingest runs in a nightly window.

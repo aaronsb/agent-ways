@@ -10,6 +10,7 @@ rules_v1.py
 rules_v1_basis.py
 rules_v1_integrity.py
 sheet.py
+import_read.py
 cmd_list.py
 cmd_view.py
 cmd_new.py
@@ -21,4 +22,5 @@ cmd_domains.py
 cmd_config.py
 cmd_cite.py
 cmd_lifecycle.py
+cmd_import.py
 main.py
