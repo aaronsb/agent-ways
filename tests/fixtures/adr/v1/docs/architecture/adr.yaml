@@ -42,6 +42,6 @@ surfaces:
   route: {}
 
 cite:
-  exclude: [vendor/*]
+  exclude: [vendor]
 
 viewer: cat {file}

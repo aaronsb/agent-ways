@@ -498,10 +498,20 @@ def main():
             print("\nCitations: docs/scripts/adr not found; vendor the adr tool to check them")
             errors += 1
         else:
-            print("\nCitations (adr cite):")
-            result = subprocess.run([sys.executable, str(adr_tool), "cite", "--check"], cwd=REPO)
-            if result.returncode != 0:
+            # --no-inventory: doclint is a lint and runs no shell commands
+            # from adr.yaml. `adr cite` run directly checks the inventories.
+            print("\nCitations (adr cite --no-inventory):", flush=True)
+            result = subprocess.run([sys.executable, str(adr_tool), "cite", "--no-inventory"],
+                                    cwd=REPO, capture_output=True, text=True)
+            sys.stdout.write(result.stdout)
+            counts = re.search(r"Citations: (\d+) errors, (\d+) warnings", result.stdout)
+            if result.returncode not in (0, 1) or counts is None:
+                print(f"  ERROR  adr cite failed to run (exit {result.returncode}): "
+                      f"{(result.stderr.strip().splitlines() or [''])[-1]}")
                 errors += 1
+            else:
+                errors += int(counts.group(1))
+                warnings += int(counts.group(2))
 
     if not args.quiet and doc_nodes:
         print_coverage(doc_nodes, digits)

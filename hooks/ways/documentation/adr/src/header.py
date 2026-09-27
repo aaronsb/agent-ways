@@ -24,6 +24,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 # customize (ADR-177).
 
 import argparse
+import os
 import re
 import subprocess
 import sys

@@ -24,6 +24,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 # customize (ADR-177).
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -2140,34 +2141,59 @@ def cmd_cite(args):
     ADR-304 §6 gives code citations a maintenance loop:
 
     - an ADR-N that resolves to no record is an error
-    - a citation whose records are all superseded warns and names successors
-    - a citation of a proposed record prompts acceptance
-    - under adr/v1, a citation of a capability that a cut decision removes
-      warns until the cut is enacted and fails after (§5)
-    - under adr/v1, a retire decision's targets are checked against the
-      surface inventory commands in adr.yaml, when a surface has one
+    - a citation whose records are all out of force (superseded, deprecated,
+      rejected, abandoned, archived) warns and names each status and successor
+    - a citation of a proposed or draft record prompts acceptance
+    - under adr/v1, a citation of a record on a capability whose latest
+      accepted add-or-cut is a cut warns until the cut is enacted and fails
+      after (§5)
+    - under adr/v1, an accepted retire's targets are checked against the
+      surface inventory commands in adr.yaml (§5). Inventory commands are
+      shell commands from adr.yaml; they run only on a whole-repo scan and
+      never with --no-inventory.
 
     A bare ADR-N resolves to its family {N, N.1, ...}. Files come from
     `git ls-files`, so ignored paths are never read. docs/architecture and the
-    paths in adr.yaml cite.exclude are skipped, and a line carrying
+    paths in adr.yaml cite.exclude are skipped (a glob, or a directory prefix
+    when the pattern has no glob character), and a line carrying
     `adr-cite-ignore` (or doclint's `doclint-allow-retired`) is skipped.
     """
     import fnmatch
 
-    root = get_project_root()
+    root = get_project_root().resolve()
     config = get_config()
     cite_config = config.get('cite') if isinstance(config.get('cite'), dict) else {}
-    excludes = ['docs/architecture/*'] + [str(p) for p in (cite_config.get('exclude') or [])]
+    excludes = ['docs/architecture/'] + [str(p) for p in (cite_config.get('exclude') or [])]
+
+    # Path arguments are resolved against the working directory and must sit
+    # inside the repository.
+    scopes = []
+    for raw in args.paths:
+        target = (Path.cwd() / raw).resolve()
+        if not target.exists():
+            print(f"Error: {raw} does not exist", file=sys.stderr)
+            return 2
+        try:
+            scopes.append(target.relative_to(root).as_posix())
+        except ValueError:
+            print(f"Error: {raw} is outside the repository ({root})", file=sys.stderr)
+            return 2
+
     records = get_all_adrs(include_archived=True)
     ctx = LintContext.from_corpus(records)
     v1 = ctx.contract == V1
 
-    def family(number: str) -> list:
-        base = number.split('.')[0]
-        if '.' in number:
-            return [a for a in records if a.number and a.number.lstrip('0') == number]
-        return [a for a in records if a.number and
-                (a.number.lstrip('0') == base or a.number.lstrip('0').startswith(base + '.'))]
+    # Lookup tables, built once: full number -> records, base -> family
+    by_full, by_base = {}, {}
+    for adr in records:
+        if not adr.number:
+            continue
+        key = _cite_key(adr.number)
+        by_full.setdefault(key, []).append(adr)
+        by_base.setdefault(key.split('.')[0], []).append(adr)
+
+    def family(key: str) -> list:
+        return by_full.get(key, []) if '.' in key else by_base.get(key, [])
 
     def successors(adr) -> str:
         named = ', '.join(f"ADR-{norm_ref(e)[0]}" for e in adr.superseded_by)
@@ -2176,35 +2202,45 @@ def cmd_cite(args):
     def is_proposed(adr) -> bool:
         return str(adr.status or '').lower() in ('proposed', 'draft')
 
-    # Capabilities removed by an accepted cut: capability -> (cut record, enacted?)
+    # The state of each capability is its latest accepted add or cut, by date
+    # then number (ADR-304 §3). Only a capability whose latest is a cut counts.
     cuts = {}
     if v1:
+        latest = {}
         for adr in records:
-            if (is_v1_record(adr, ctx) and adr.frontmatter.get('verb') == 'cut'
+            verb = adr.frontmatter.get('verb')
+            if (is_v1_record(adr, ctx) and verb in ('add', 'cut')
                     and str(adr.status or '').lower() == 'accepted'):
+                order = (str(adr.date or ''), _number_order(adr.number))
                 for capability in capability_scope(adr):
-                    cuts[capability] = (adr, bool(adr.frontmatter.get('enacted')))
+                    if capability not in latest or order >= latest[capability][0]:
+                        latest[capability] = (order, adr)
+        for capability, (_, adr) in latest.items():
+            if adr.frontmatter.get('verb') == 'cut':
+                cuts[capability] = (adr, bool(adr.frontmatter.get('enacted')))
+
+    def excluded(name: str) -> bool:
+        for pattern in excludes:
+            if any(c in pattern for c in '*?['):
+                if fnmatch.fnmatch(name, pattern):
+                    return True
+            elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
+                return True
+        return False
+
+    def in_scope(name: str) -> bool:
+        return not scopes or any(s in ('', '.') or name == s or name.startswith(s + '/') for s in scopes)
 
     findings = []  # (severity, location, message)
-
-    def scan_files():
-        out = _git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], root)
-        names = out.split('\0') if out is not None else [
-            str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()]
-        for name in names:
-            if not name or any(fnmatch.fnmatch(name, pattern) for pattern in excludes):
-                continue
-            path = root / name
-            if path.suffix not in CITE_EXTS or path.name in ('adr.yaml', 'INDEX.md'):
-                continue
-            yield name, path
-
-    for name, path in scan_files():
-        if args.paths and not any(name == p or name.startswith(p.rstrip('/') + '/') for p in args.paths):
+    for name in _cite_files(root):
+        if excluded(name) or not in_scope(name):
+            continue
+        path = root / name
+        if path.suffix not in CITE_EXTS or path.name in ('adr.yaml', 'INDEX.md'):
             continue
         try:
-            text = path.read_text()
-        except (OSError, UnicodeDecodeError):
+            text = path.read_text(encoding='utf-8', errors='replace')
+        except OSError:
             continue
         if 'ADR-' not in text:
             continue
@@ -2212,10 +2248,10 @@ def cmd_cite(args):
             if 'adr-cite-ignore' in line or 'doclint-allow-retired' in line:
                 continue
             for match in CITE_RE.finditer(line):
-                number = match.group(1).lstrip('0') + (match.group(2) or '')
+                key = _cite_key(match.group(1) + (match.group(2) or ''))
                 cited = match.group(0)  # as written, e.g. ADR-005
                 where = f"{name}:{ln}"
-                members = family(number)
+                members = family(key)
                 if not members:
                     findings.append(('error', where, f"{cited} resolves to no record"))
                     continue
@@ -2235,13 +2271,14 @@ def cmd_cite(args):
                             else:
                                 findings.append(('warning', where, f"{cited} is on '{capability}', which ADR-{cut.number} cuts; remove before enacting"))
 
-    # Retire targets against the surface inventories (§5)
-    if v1:
+    # Retire targets against the surface inventories (§5). Inventories run
+    # shell commands from adr.yaml, so only on a whole-repo scan.
+    if v1 and not scopes and not args.no_inventory:
         surfaces = v1_surfaces(ctx)
+        listed_by, failed = {}, set()
         for adr in records:
-            if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'retire':
-                continue
-            if str(adr.status or '').lower() != 'accepted':
+            if (not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'retire'
+                    or str(adr.status or '').lower() != 'accepted'):
                 continue
             enacted = bool(adr.frontmatter.get('enacted'))
             for target in as_entries(adr.frontmatter.get('targets')):
@@ -2249,16 +2286,21 @@ def cmd_cite(args):
                 command = _mapping(surfaces.get(namespace)).get('inventory')
                 if not command:
                     continue
-                listed = _inventory(command, root)
+                if namespace not in listed_by:
+                    listed_by[namespace] = _inventory(str(command), root)
+                listed, failure = listed_by[namespace]
+                where = str(relative_path(adr.path))
                 if listed is None:
-                    findings.append(('warning', relative_path(adr.path), f"inventory for '{namespace}' did not run: {command}"))
+                    if namespace not in failed:  # once per namespace, not per target
+                        failed.add(namespace)
+                        findings.append(('warning', where, f"inventory for '{namespace}' did not run ({failure}): {command}"))
                 elif target_name in listed:
                     if enacted:
-                        findings.append(('error', relative_path(adr.path), f"{target} is still present after ADR-{adr.number} was enacted"))
+                        findings.append(('error', where, f"{target} is still present after ADR-{adr.number} was enacted"))
                     else:
-                        findings.append(('warning', relative_path(adr.path), f"{target} is still present; ADR-{adr.number} retires it"))
-                elif not enacted and target_name not in listed:
-                    findings.append(('warning', relative_path(adr.path), f"{target} is not in the '{namespace}' inventory; check the name"))
+                        findings.append(('warning', where, f"{target} is still present; ADR-{adr.number} retires it"))
+                elif not enacted:
+                    findings.append(('warning', where, f"{target} is not in the '{namespace}' inventory; check the name"))
 
     errors = sum(1 for f in findings if f[0] == 'error')
     warnings = len(findings) - errors
@@ -2275,16 +2317,52 @@ def cmd_cite(args):
 # Files and patterns for adr cite (the extensions doclint's retired scan reads)
 CITE_EXTS = {".md", ".py", ".ts", ".tsx", ".js", ".mjs", ".rs", ".sh", ".yml", ".yaml", ".json", ".go", ".sql"}
 CITE_RE = re.compile(r"\bADR-0*(\d+)(\.\d+)?\b")
+CITE_SKIP_DIRS = {'.git', 'node_modules', '.venv', 'venv', 'dist', 'build', 'target', '__pycache__'}
 
-def _inventory(command: str, root: Path) -> Optional[set]:
-    """Run a surface inventory command from adr.yaml; one name per line."""
+def _cite_key(number: str) -> str:
+    """ADR-005 -> '5', ADR-101.01 -> '101.1'."""
+    base, _, part = str(number).partition('.')
+    base = base.lstrip('0') or '0'
+    return f"{base}.{part.lstrip('0') or '0'}" if part else base
+
+def _number_order(number) -> tuple:
+    base, _, part = _cite_key(number or '0').partition('.')
+    return (int(base), int(part or 0))
+
+def _cite_files(root: Path) -> list:
+    """Repository files, sorted: git's view when available (tracked and
+    untracked but not ignored), else a walk that prunes dependency and build
+    directories."""
+    out = _git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], root)
+    if out is not None:
+        return sorted(n for n in out.split('\0') if n)
+    names = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in CITE_SKIP_DIRS]
+        for filename in filenames:
+            names.append((Path(dirpath) / filename).relative_to(root).as_posix())
+    return sorted(names)
+
+def _inventory(command: str, root: Path) -> tuple:
+    """Run a surface inventory command from adr.yaml. Returns (names, None),
+    or (None, reason) when it failed. One name per line of output."""
+    import signal
     try:
-        result = subprocess.run(command, shell=True, cwd=root, capture_output=True, text=True, timeout=60)
+        proc = subprocess.Popen(command, shell=True, cwd=root, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+    except OSError as e:
+        return None, str(e)
+    try:
+        stdout, stderr = proc.communicate(timeout=60)
     except subprocess.TimeoutExpired:
-        return None
-    if result.returncode != 0:
-        return None
-    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+        os.killpg(proc.pid, signal.SIGKILL)  # the shell and anything it started
+        proc.communicate()
+        return None, 'timed out after 60s'
+    if proc.returncode != 0:
+        detail = (stderr.strip().splitlines() or [''])[-1][:120]
+        return None, f"exit {proc.returncode}" + (f": {detail}" if detail else '')
+    return {line.strip() for line in stdout.splitlines() if line.strip()}, None
 
 # ============================================================================
 # Main
@@ -2360,6 +2438,8 @@ def main():
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
     p_cite.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
+    p_cite.add_argument('--no-inventory', action='store_true',
+                        help="Skip surface inventories (they run shell commands from adr.yaml)")
 
     args = parser.parse_args()
 
