@@ -280,6 +280,21 @@ cp "$FIXTURES/v1/docs/architecture/system/ADR-102-ingest-spec.md" "$WORK/repo/do
 commit_all restore
 capture v1-frozen-nonutf8 lint docs/architecture/system/ADR-102-ingest-spec.md
 
+# Lifecycle commands (ADR-304 §2, §11, §12)
+fresh v1
+capture v1-accept-refused       accept 113
+capture v1-accept-not-proposed  accept 102
+capture v1-accept-v0            accept 110
+capture v1-accept-dry-run       accept 106 --dry-run
+worktree v1-accept-dry-run-status.txt
+capture v1-accept-concern       accept 114
+keep v1-accept-concern-file.md docs/architecture/system/ADR-114-open-concern.md
+
+fresh v1
+capture v1-reject               reject 107 --reason "Superseded by the batching work before it landed"
+keep v1-reject-file.md docs/architecture/system/ADR-107-ingest-notes.md
+capture v1-abandon-no-reason    abandon 108 --reason "  "
+
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check

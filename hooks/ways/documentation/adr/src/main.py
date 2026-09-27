@@ -68,6 +68,17 @@ def main():
     # config
     subparsers.add_parser('config', help='Show configuration')
 
+    # lifecycle (adr/v1, ADR-304 §2)
+    p_accept = subparsers.add_parser('accept', help='Accept a proposed adr/v1 record')
+    p_accept.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
+    p_accept.add_argument('--dry-run', action='store_true', help='Check and report without writing')
+    for verb, help_text in (('reject', 'Reject a proposed adr/v1 record: considered and declined'),
+                            ('abandon', 'Abandon a proposed adr/v1 record: dropped before a decision')):
+        p_close = subparsers.add_parser(verb, help=help_text)
+        p_close.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
+        p_close.add_argument('--reason', help='Why (required; appended as a Closure section)')
+        p_close.add_argument('--dry-run', action='store_true', help='Report without writing')
+
     # cite
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
@@ -95,6 +106,9 @@ def main():
         'domains': cmd_domains,
         'config': cmd_config,
         'cite': cmd_cite,
+        'accept': cmd_accept,
+        'reject': cmd_reject,
+        'abandon': cmd_abandon,
     }
 
     return commands[args.command](args)

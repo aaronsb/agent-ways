@@ -1,0 +1,3 @@
+Refused: ADR-113 would not lint clean as accepted:
+  ❌ accepted with an operator basis but no considered entry; the operator considers what they started
+[exit 1]

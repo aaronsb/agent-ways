@@ -1,0 +1,3 @@
+Marked ADR-107 rejected: Ingest notes, by slug reference
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

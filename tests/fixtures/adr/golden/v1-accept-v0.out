@@ -1,0 +1,2 @@
+Error: ADR-110 is not an adr/v1 record. A v0 record's status is edited by hand, as before (ADR-304 §7).
+[exit 1]

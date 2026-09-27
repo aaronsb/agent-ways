@@ -1,0 +1,5 @@
+Open concerns on ADR-114 at acceptance (shown, not blocking):
+  ⚠️ Batch size may starve small tenants
+Accepted ADR-114: Cap batch size
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]
