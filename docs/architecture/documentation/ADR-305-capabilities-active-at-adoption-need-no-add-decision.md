@@ -22,7 +22,12 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "ok. so basically, I think it's the correct direction and implements the change to adr as discussed."
+    via: session 2026-09-27, reviewing PR #583
+    covers: []
+status: accepted
 date: 2026-09-27
 deciders:
   - aaronsb
