@@ -1,0 +1,17 @@
+# Assembly order for adr-tool. `assemble` concatenates these files, in this
+# order, into the single vendorable script. Edit src/, then run assemble.
+header.py
+config.py
+model.py
+parse.py
+refs.py
+cmd_list.py
+cmd_view.py
+cmd_new.py
+cmd_rename.py
+cmd_lint.py
+cmd_index.py
+cmd_archive.py
+cmd_domains.py
+cmd_config.py
+main.py

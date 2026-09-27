@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Assemble adr-tool from its source modules.
+
+adr-tool is vendored into other repositories as one self-contained script
+(ADR-177). Its source lives in src/ as small modules, listed in src/MANIFEST
+in assembly order. This script concatenates them into adr-tool. The modules
+share one namespace once assembled, so they import nothing from each other.
+The standard-library imports live in header.py.
+
+Usage:
+    assemble           write adr-tool from src/
+    assemble --check   exit 1 if adr-tool differs from what src/ assembles to
+"""
+
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SRC = HERE / "src"
+TARGET = HERE / "adr-tool"
+
+
+def modules() -> list:
+    names = []
+    for line in (SRC / "MANIFEST").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            names.append(line)
+    listed = set(names)
+    unlisted = sorted(p.name for p in SRC.glob("*.py") if p.name not in listed)
+    if unlisted:
+        sys.exit(f"assemble: modules missing from src/MANIFEST: {', '.join(unlisted)}")
+    return names
+
+
+def assembled() -> str:
+    return "".join((SRC / name).read_text() for name in modules())
+
+
+def main() -> int:
+    text = assembled()
+    if sys.argv[1:] == ["--check"]:
+        if TARGET.read_text() != text:
+            print("adr-tool is out of date with src/. Run hooks/ways/documentation/adr/assemble.",
+                  file=sys.stderr)
+            return 1
+        return 0
+    if sys.argv[1:]:
+        print(__doc__, file=sys.stderr)
+        return 2
+    TARGET.write_text(text)
+    TARGET.chmod(0o755)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
