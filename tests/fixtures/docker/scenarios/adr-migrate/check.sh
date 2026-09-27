@@ -7,8 +7,9 @@ for n in 179 186; do
   cp "$f" "$OUT/" 2>/dev/null
   if grep -q '^contract: adr/v1' "$f"; then ok "ADR-$n declares adr/v1"; else fail "ADR-$n declares adr/v1"; fi
   lint=$(cd "$PROJ" && docs/scripts/adr lint --check "${f#$PROJ/}" 2>&1)
+  lint_rc=$?
   echo "$lint" > "$OUT/lint-$n.txt"
-  if [[ $? -eq 0 ]] && ! grep -q '❌' <<<"$lint"; then ok "ADR-$n lints clean"; else fail "ADR-$n lints clean" "$(grep '❌' <<<"$lint" | head -3)"; fi
+  if [[ $lint_rc -eq 0 ]] && ! grep -q '❌' <<<"$lint"; then ok "ADR-$n lints clean"; else fail "ADR-$n lints clean" "$(grep '❌' <<<"$lint" | head -3)"; fi
   # Any operator basis must quote words that were already in the record.
   before=$(cat "$HOME"/.migrate-before/ADR-$n-*.md)
   said=$(python3 - "$f" <<'PY'
