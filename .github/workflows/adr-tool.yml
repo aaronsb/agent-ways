@@ -14,6 +14,7 @@ on:
       - 'docs/scripts/**'
       - 'tests/adr-*.sh'
       - 'tests/fixtures/adr/**'
+      - 'docs/architecture/**'
       - 'Makefile'
       - '.github/workflows/adr-tool.yml'
   pull_request:
@@ -23,6 +24,7 @@ on:
       - 'docs/scripts/**'
       - 'tests/adr-*.sh'
       - 'tests/fixtures/adr/**'
+      - 'docs/architecture/**'
       - 'Makefile'
       - '.github/workflows/adr-tool.yml'
   workflow_dispatch:
