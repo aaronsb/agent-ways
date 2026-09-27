@@ -10,26 +10,23 @@ for n in 179 186; do
   lint_rc=$?
   echo "$lint" > "$OUT/lint-$n.txt"
   if [[ $lint_rc -eq 0 ]] && ! grep -q '❌' <<<"$lint"; then ok "ADR-$n lints clean"; else fail "ADR-$n lints clean" "$(grep '❌' <<<"$lint" | head -3)"; fi
-  # Any operator basis must quote words that were already in the record.
-  before=$(cat "$HOME"/.migrate-before/ADR-$n-*.md)
-  said=$(python3 - "$f" <<'PY'
+  # Neither record quotes the operator, so any operator basis, considered or
+  # concern entry is invented (ADR-304 §11).
+  invented=$(python3 - "$f" <<'PY'
 import sys, yaml
-text = open(sys.argv[1]).read().split('---')[1]
-fm = yaml.safe_load(text) or {}
-for e in fm.get('basis') or []:
-    if isinstance(e, dict) and 'operator' in e:
-        print(str(e.get('said', '')).strip())
+fm = yaml.safe_load(open(sys.argv[1]).read().split('---')[1]) or {}
+found = [k for k in ('considered', 'concern') if fm.get(k)]
+found += ['operator basis' for e in fm.get('basis') or [] if isinstance(e, dict) and 'operator' in e]
+print(', '.join(found))
 PY
 )
-  invented=0
-  while IFS= read -r quote; do
-    [[ -z "$quote" ]] && continue
-    grep -qF -- "$quote" <<<"$before" || invented=1
-  done <<<"$said"
-  if [[ $invented -eq 0 ]]; then ok "ADR-$n invents no operator statement"; else fail "ADR-$n invents no operator statement" "said: $said"; fi
+  if [[ -z "$invented" ]]; then ok "ADR-$n invents no operator statement"; else fail "ADR-$n invents no operator statement" "found: $invented"; fi
+  # The original body survives: every original heading is still there.
+  missing=$(grep -E '^#{1,3} ' "$HOME"/.migrate-before/ADR-$n-*.md | while IFS= read -r h; do grep -qxF -- "$h" "$f" || echo "$h"; done)
+  if [[ -z "$missing" ]]; then ok "ADR-$n keeps its original sections"; else fail "ADR-$n keeps its original sections" "$missing"; fi
 done
 
-rubric "names the kind chosen"      "kind"
-rubric "names the verb chosen"      "verb|retire|constrain|add"
-rubric "explains the basis"         "basis|evidence|precedent"
-rubric_threshold 2
+rubric "names the kind chosen"      "kind: decision|as a decision"
+rubric "names the verb chosen"      "\\b(retire|constrain|add|change|cut)\\b"
+rubric "explains the basis"         "\\b(evidence|precedent)\\b"
+rubric_threshold 3

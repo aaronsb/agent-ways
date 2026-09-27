@@ -228,6 +228,7 @@ capture v1-lint        lint
 capture v1-lint-check  lint --check
 capture v1-list        list
 capture v1-view-spec   view 102
+capture v1-lint-precedent-relative lint docs/architecture/system/ADR-109-precedent-chain.md
 capture v1-cite        cite
 # The cut on search, enacted: citations of search records now fail.
 (cd "$WORK/repo" && sed -i.bak 's/^verb: cut$/verb: cut\nenacted: abcdef1/' docs/architecture/system/ADR-111-cut-search.md \

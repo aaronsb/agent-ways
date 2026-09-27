@@ -1720,7 +1720,9 @@ def cmd_lint(args):
     able to hide by being moved.
     """
     if args.paths:
-        paths = [Path(p) for p in args.paths]
+        # Resolved, so records parsed from the arguments match the corpus's
+        # own paths (grounding and other corpus rules key on the path).
+        paths = [Path(p).resolve() for p in args.paths]
         adrs = [parse_adr(p) for p in paths]
     else:
         adrs = get_all_adrs(include_archived=True)

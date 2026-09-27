@@ -15,6 +15,10 @@ if [[ -n "$base" ]]; then
     git -C "$APP" show "$base:$f" > "$f" 2>/dev/null || true
   done
 fi
+if grep -q '^contract:' docs/architecture/system/ADR-179-*.md docs/architecture/system/ADR-186-*.md; then
+  echo "setup: the records under test are already v1; the rehearsal would test nothing" >&2
+  exit 1
+fi
 # Snapshot the two records the scenario migrates, to check nothing is invented.
 mkdir -p "$HOME/.migrate-before"
 cp docs/architecture/system/ADR-179-*.md docs/architecture/system/ADR-186-*.md "$HOME/.migrate-before/"

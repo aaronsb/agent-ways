@@ -105,6 +105,7 @@ run_scenario() {
   # A scenario may raise the turn cap with a max_turns file.
   local turns="$MAX_TURNS"
   [[ -f "$dir/max_turns" ]] && turns=$(tr -dc '0-9' < "$dir/max_turns")
+  turns=${turns:-$MAX_TURNS}
   (cd "$PROJ" && claude -p "$(cat "$dir/prompt.txt")" \
       --model "$MODEL" \
       --max-turns "$turns" \
