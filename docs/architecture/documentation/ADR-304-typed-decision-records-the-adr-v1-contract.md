@@ -249,6 +249,39 @@ Final decisions and all L3 state live in repo files. An issue tracker may
 mirror them, and ADR-180 issues still track work in flight. An issue tracks
 the work that moves a capability. It does not record what the capability is.
 
+### 10. Delivery: tool version and contract version are separate axes
+
+Projects vendor `adr-tool` and `doclint` through the installer (ADR-177). A
+project that vendored the legacy tool keeps working. The ADR way, however,
+ships to every project, including ones still on the legacy shape. So the
+guidance it discloses cannot assume v1.
+
+Two things vary independently:
+
+- **Tool version**: the vendored copy's `TOOL_VERSION`. The v1-capable tool
+  is a major bump, and it lints `adr/v0` records exactly as the legacy tool
+  does. Re-vendoring is therefore safe, and ADR-177's stale/customized/ahead
+  disclosure applies unchanged.
+- **Contract version**: `contract:` in the project's `adr.yaml`. When it is
+  absent the project is on `adr/v0`. A project adopts v1 by declaring it, and
+  a tool upgrade never adopts it on the project's behalf.
+
+The ADR way's body stays contract-neutral: when to write a record, and what
+belongs in one. The way's macro reads both axes and discloses the guidance
+that fits:
+
+| Vendored tool | `adr.yaml` contract | Disclosure |
+|---|---|---|
+| legacy | absent | v0 command reference; stale tool, re-vendor is safe |
+| v1-capable | absent | v0 command reference; v1 is available, and adopting it is a decision (`capability: adr`) |
+| v1-capable | `adr/v1` | v1 guidance: kinds, verbs, capabilities, enactment |
+| legacy | `adr/v1` | the project declares a contract its tool cannot enforce; re-vendor before writing records |
+
+`doclint` follows the same rule. Its v1 checks run only when `adr.yaml`
+declares `adr/v1`. Contract-specific prose lives in the macro's output or in
+files the macro selects, never in the always-on way body, so a v0 project is
+never told to write `verb:` fields its tool rejects.
+
 ### Rollout
 
 kg prototypes first. It triages its 108 records by kind and extends its
@@ -290,6 +323,10 @@ v0 rules.
   follows from a decision rather than needing its own.
 - Implemented-but-proposed records need a one-time accept or abandon pass.
   kg has about 20.
+- The ADR way's body currently carries v0 specifics: the status list, the
+  template frontmatter, and the Draft-to-Accepted workflow. Those move into
+  the macro's v0 branch, and the body keeps only contract-neutral guidance
+  (§10).
 
 ## Alternatives Considered
 
