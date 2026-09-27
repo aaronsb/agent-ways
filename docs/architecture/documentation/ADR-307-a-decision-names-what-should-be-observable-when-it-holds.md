@@ -43,7 +43,11 @@ considered:
     said: "I think an ask for an observable is fair. This way the operator could decline or just tell the agent \"observe it yourself, you can loop and iterate\" - don't use that verbatim but that is adjacentto the develop skill"
     via: session 2026-09-27, answering the probes on PR #596
     covers: [optional-unused]
-status: proposed
+  - operator: aaronsb
+    said: "I like the shape of the pr it tracks the minimum needed to state something was actually real. Let's accept and continue"
+    via: session 2026-09-27, PR #596
+    covers: []
+status: accepted
 date: 2026-09-27
 deciders:
   - aaronsb
