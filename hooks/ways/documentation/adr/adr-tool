@@ -592,6 +592,17 @@ def _str_list(value) -> Optional[list]:
 def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
+def _iso_date(value) -> Optional[str]:
+    """value as a YYYY-MM-DD string, or None. YAML may load a date as one."""
+    text = str(value) if value is not None else ''
+    return text if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text) else None
+
+def v1_baseline(ctx) -> tuple:
+    """(adoption date or None, set of baseline capability names)."""
+    baseline = _mapping(ctx.config.get('baseline'))
+    return (_iso_date(baseline.get('adopted')),
+            set(_str_list(baseline.get('capabilities')) or []))
+
 def v1_kinds(ctx) -> dict:
     return _mapping(ctx.config.get('kinds'))
 
@@ -700,12 +711,26 @@ def rule_v1_config_shape(ctx):
         bad("contract: adr/v1 declares no capabilities")
     if 'surfaces' in config and not isinstance(config['surfaces'], dict):
         bad("surfaces: expected a mapping of namespace to settings")
+    if 'baseline' in config:
+        baseline = config['baseline']
+        names = _str_list(baseline.get('capabilities')) if isinstance(baseline, dict) else None
+        if names is None:
+            bad("baseline: expected 'adopted' (a YYYY-MM-DD date) and 'capabilities' (a list of names)")
+        else:
+            if not _iso_date(baseline.get('adopted')):
+                bad("baseline.adopted: expected a YYYY-MM-DD date")
+            if isinstance(config.get('capabilities'), dict):
+                for name in names:
+                    if name not in config['capabilities']:
+                        bad(f"baseline: '{name}' is not in the capabilities vocabulary")
 
 @config_rule(contract=V1)
 def rule_v1_capabilities_added(ctx):
-    """Every capability in the vocabulary has an accepted `add` decision. This
-    warns while v0 records remain, so a migrating corpus is not failed on every
-    capability, and fails once migration is done (ADR-304 §6)."""
+    """Every capability in the vocabulary has an accepted `add` decision, except
+    those in `baseline`: capabilities that were active when the project
+    adopted the contract, which no record added. This warns while v0 records
+    remain, so a migrating corpus is not failed on every capability, and fails
+    once migration is done (ADR-304 §6, amended by ADR-305)."""
     added = set()
     for adr in ctx.corpus:
         if (is_v1_record(adr, ctx)
@@ -716,8 +741,9 @@ def rule_v1_capabilities_added(ctx):
     # hold the check at warning.
     migrating = any(not is_v1_record(adr, ctx) and not is_archived(adr.path)
                     for adr in ctx.corpus)
+    _, baseline = v1_baseline(ctx)
     for name in v1_capabilities(ctx):
-        if name not in added:
+        if name not in added and name not in baseline:
             ctx.config_issues.append(Issue(
                 f"capability '{name}' has no accepted add decision",
                 'warning' if migrating else 'error'))
@@ -840,11 +866,40 @@ def rule_v1_edges(adr, ctx):
             if section and not section_exists(target, section):
                 v1_issue(adr, f"{field_name}: ADR-{number} has no section '{section}'")
 
+def decision_order(adr) -> tuple:
+    """Records in decision order: by date, then number (ADR-304 §3)."""
+    base, _, part = str(adr.number or '0').partition('.')
+    return (str(adr.date or ''), int(base or 0), int(part or 0))
+
+def _stands_on_baseline(capability: str, adr, ctx) -> bool:
+    """A change with no prior edge stands on the baseline when the capability
+    is in it and either the change predates adoption, or no live decision on
+    the capability has been made since adoption before it. Only decisions
+    dated after adoption count: each was written as v1, so migrating an older
+    record never moves the answer (ADR-305)."""
+    adopted, baseline = v1_baseline(ctx)
+    when = _iso_date(adr.date)
+    if capability not in baseline or not adopted or not when:
+        return False
+    if when <= adopted:
+        return True
+    for other in ctx.corpus:
+        other_when = _iso_date(other.date)
+        if (other is not adr and is_v1_record(other, ctx)
+                and other.frontmatter.get('verb') not in (None, 'constrain')
+                and str(other.status or '').lower() not in ('rejected', 'abandoned')
+                and covers(other, capability)
+                and other_when and other_when > adopted
+                and decision_order(other) < decision_order(adr)):
+            return False
+    return True
+
 @corpus_rule(contract=V1)
 def rule_v1_change_replaces(adr, ctx):
     """A change decision supersedes or amends a prior decision on the same
     capability. When the prior covers more than this capability ('*' or a
-    list), the change amends it (ADR-304 §3)."""
+    list), the change amends it (ADR-304 §3). A change on a baseline
+    capability with no prior record to name stands on the baseline (ADR-305)."""
     if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
         return
     edges = []
@@ -861,6 +916,8 @@ def rule_v1_change_replaces(adr, ctx):
             continue
         if fits:
             v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
+        elif not edges and _stands_on_baseline(capability, adr, ctx):
+            continue
         elif v0_priors:
             numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
             v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
@@ -2220,7 +2277,7 @@ def cmd_cite(args):
             verb = adr.frontmatter.get('verb')
             if (is_v1_record(adr, ctx) and verb in ('add', 'cut')
                     and str(adr.status or '').lower() == 'accepted'):
-                order = (str(adr.date or ''), _number_order(adr.number))
+                order = decision_order(adr)
                 for capability in capability_scope(adr):
                     if capability not in latest or order >= latest[capability][0]:
                         latest[capability] = (order, adr)
@@ -2333,10 +2390,6 @@ def _cite_key(number: str) -> str:
     base, _, part = str(number).partition('.')
     base = base.lstrip('0') or '0'
     return f"{base}.{part.lstrip('0') or '0'}" if part else base
-
-def _number_order(number) -> tuple:
-    base, _, part = _cite_key(number or '0').partition('.')
-    return (int(base), int(part or 0))
 
 def _cite_files(root: Path) -> list:
     """Repository files, sorted: git's view when available (tracked and
