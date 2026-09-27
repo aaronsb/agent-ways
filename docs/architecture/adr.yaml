@@ -25,7 +25,60 @@ domains:
     description: Documentation structure, tooling, coherence
     folder: documentation
 
-# Valid ADR statuses
+# The record contract (ADR-304). Records that declare `contract: adr/v1`
+# follow the kinds below; a record without it is adr/v0 and keeps the v0
+# statuses and checks until someone migrates it.
+contract: adr/v1
+
+kinds:
+  decision:
+    mutable_after_accept: [status, enacted, superseded_by, considered, concern]
+    verb: required
+    requires: [capability, basis, agent]
+    sections: [Summary]
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec] }
+  spec:
+    mutable_after_accept: all
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+
+# What agent-ways does, one line each: the only hand-written description of
+# a capability. A decision adds, cuts, changes or constrains these.
+capabilities:
+  adr: Decision records, their contract, and the adr tool that enforces it
+  docs: The documentation model, catalog pages and doclint
+  matching: How a prompt, tool call or file edit selects ways, and the scoring behind it
+  disclosure: How a selected way reaches the model, when it re-fires, and progressive disclosure
+  authoring: Way files, their frontmatter, the corpus build and the ways CLI for writing them
+  attend: Session awareness through sensors, peers, messaging and keepwarm
+  install: Install, update, projection into targets, and self-update
+  config: Settings, configuration layers and permissions
+  introspection: Session introspection, fire telemetry and calibration data
+  governance: Provenance, controls and compliance findings
+  loop: The development loop skills (start, develop, merge, release, wrap)
+  guards: Guard hooks and the security baseline
+  testing: The test suites and the live install fixture
+
+# Retire targets name a surface; these are agent-ways' namespaces.
+surfaces:
+  cli: {}
+  skill: {}
+  way: {}
+  hook: {}
+
+# adr cite skips these: fixtures and tool sources carry example numbers.
+cite:
+  exclude:
+    - tests/fixtures
+    - tests/adr-lint-test.sh
+    - tests/adr-archive-test.sh
+    - tests/adr-golden-test.sh
+    - hooks/ways/documentation/adr/src
+    - hooks/ways/documentation/adr/adr-tool
+    - hooks/ways/documentation/linting
+
+# Valid ADR statuses (adr/v0 records)
 statuses:
   - Draft
   - Proposed
@@ -34,11 +87,10 @@ statuses:
   - Deprecated
   - Rejected
 
-# Default values for new ADRs
+# Default values for new ADRs. No person is hard-coded as a decider: an
+# empty list lets the tool fill in the current git or GitHub user.
 defaults:
-  deciders:
-    - aaronsb
-    - claude
+  deciders: []
   status: Draft
 
 # Legacy ADR range (pre-domain numbering)
