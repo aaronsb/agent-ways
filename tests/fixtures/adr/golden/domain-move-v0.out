@@ -1,0 +1,2 @@
+Error: under adr/v0 a record's number decides its domain, so a record cannot change domain by folder; declare contract: adr/v1 in adr.yaml first
+[exit 1]

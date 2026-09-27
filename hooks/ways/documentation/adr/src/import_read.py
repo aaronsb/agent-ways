@@ -237,7 +237,10 @@ def read_record(path: Path) -> dict:
         provenance['target.domain'] = 'number range'
     else:
         todo.append('target.domain: neither the folder nor the number names a domain')
-    span = number_range(domain) if domain else None
+    # Under adr/v1 a record in the tree keeps its number wherever its folder
+    # puts it (ADR-306 §6); the range only allocates new numbers.
+    moved_in_tree = repo_contract() == V1 and _in_tree(path)
+    span = number_range(domain) if domain and not moved_in_tree else None
     if span and not span[0] <= int(str(number).split('.')[0]) <= span[1]:
         todo.append(f"target.number: ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     provenance['target.title'] = 'H1'

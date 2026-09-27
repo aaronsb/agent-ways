@@ -101,8 +101,10 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     """Where apply writes. A source under docs/architecture is written in
     place and keeps its number and domain: an import never renumbers (§5),
     and moving a record is `adr domain move` (§6). Any other source becomes
-    a new file in the domain's folder. The number must sit in the domain's
-    range either way. Raises SheetError when none of this holds."""
+    a new file in the domain's folder, and its number must sit in the
+    domain's range; under adr/v0 an in-tree record's must too. Under adr/v1
+    an in-tree record keeps its number wherever its folder is. Raises
+    SheetError when none of this holds."""
     target = sheet['target']
     number = format_number(target['number'])
     domain = target.get('domain')
@@ -113,15 +115,15 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
         if was != number.lstrip('0') or was_domain != domain:
             raise SheetError(
                 f"the source is ADR-{was} in {was_domain}; the sheet says ADR-{number} in {domain}. "
-                f"Moving a record to another number or domain is `adr domain move` "
-                f"(ADR-306 §6), not built yet; restore target.number and target.domain")
+                f"A record keeps its number; moving it to another domain is `adr domain move` "
+                f"(ADR-306 §6). Restore target.number and target.domain")
     if not domain:
         raise SheetError('target.domain is empty')
     span = number_range(domain)
     if span is None:
         raise SheetError(f"domain '{domain}' is not in adr.yaml; add it first "
                          f"(creating a domain on apply, ADR-306 §6, is not built yet)")
-    if not span[0] <= int(number.split('.')[0]) <= span[1]:
+    if not (in_tree and repo_contract() == V1) and not span[0] <= int(number.split('.')[0]) <= span[1]:
         raise SheetError(f"ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     if in_tree:
         return source_file

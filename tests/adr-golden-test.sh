@@ -600,6 +600,106 @@ fresh v1
 printf '\357\273\277---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-117: With a BOM\n' > "$WORK/repo/docs/architecture/system/ADR-117-with-a-bom.md"
 capture import-scan-bom import scan docs/architecture/system/ADR-117-with-a-bom.md
 
+# --- adr domain (ADR-306 §6) ------------------------------------------------------
+# A record's number is its identity and never changes. Under adr/v1 its folder
+# decides its domain; a domain's range only allocates new numbers.
+
+# add: the entry is written into adr.yaml's domains block as text, so the
+# file's comments and layout stay. Overlapping ranges, a taken folder or name
+# and a backwards range are refused.
+fresh v1
+capture domain-add domain add docs --range 300-399 --folder documentation --label Documentation --description "Guides and references"
+keep domain-add-config.yaml docs/architecture/adr.yaml
+capture domain-add-overlap domain add ops --range 150-250 --folder operations
+capture domain-add-refused domain add docs --range 400-300 --folder system
+worktree domain-add-refused-status.txt
+fresh corpus
+capture domain-add-v0 domain add api --range 400-499 --folder api --label "API surface"
+keep domain-add-v0-config.yaml docs/architecture/adr.yaml
+capture domain-add-legacy-overlap domain add early --range 50-60 --folder early
+
+# rename: the domain key, its folder moved with git mv, every path into the
+# folder rewritten, and a catalog page's domain: key. Links between records
+# keep their shape, and lint sees no edit of a frozen decision.
+rename_fresh() {
+  fresh v1
+  mkdir -p "$WORK/repo/docs/guide"
+  printf -- '---\ndomain: system\n---\n\n# Hooks guide\n\nSee [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104.\nRecords live in docs/architecture/system/ and [the folder](../architecture/system/).\n' > "$WORK/repo/docs/guide/hooks.md"
+  edit docs/architecture/system/ADR-109-precedent-chain.md "s + '\n## 3. Notes\n\nSee [the constraint](../system/ADR-104-no-network-in-hooks.md).\n'"
+  edit src/search.py "s + '# ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md\n'"
+  commit_all "references"
+}
+rename_fresh
+capture domain-rename-dry domain rename system platform --dry-run
+worktree domain-rename-dry-status.txt
+capture domain-rename domain rename system platform
+worktree domain-rename-status.txt
+keep domain-rename-config.yaml docs/architecture/adr.yaml
+keep domain-rename-guide.md docs/guide/hooks.md
+keep domain-rename-109.md docs/architecture/platform/ADR-109-precedent-chain.md
+keep domain-rename-search.py src/search.py
+capture domain-rename-lint lint
+capture domain-rename-list list --group
+rename_fresh
+capture domain-rename-unknown domain rename nosuch other
+capture domain-rename-refused domain rename system system --folder archive
+capture domain-rename-same domain rename system system
+capture domain-rename-folder domain rename system core --folder kernel
+worktree domain-rename-folder-status.txt
+
+# move: the file goes to the target domain's folder with its number and slug;
+# path references are rewritten and ADR-N citations are not. ADR-104 then
+# sits outside the docs range, which is valid under adr/v1.
+move_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description "Guides" > /dev/null \
+    && "$ADR_TOOL" index -y > /dev/null)
+  mkdir -p "$WORK/repo/docs/guide"
+  printf -- '---\ndomain: system\n---\n\n# Hooks guide\n\nSee [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104#1.\n' > "$WORK/repo/docs/guide/hooks.md"
+  edit docs/architecture/system/ADR-109-precedent-chain.md "s + '\n## 3. Notes\n\nADR-104 applies; see [the constraint](ADR-104-no-network-in-hooks.md) and [ingest](./ADR-101-ingest.md).\n'"
+  edit docs/architecture/system/ADR-111-cut-search.md "s + '\nSee [ADR-104](ADR-104-no-network-in-hooks.md).\n'"
+  edit src/search.py "s + '# ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md\n# ADR-1040 and ADR-104.1 are other numbers.\n'"
+  commit_all "references"
+}
+move_fresh
+capture domain-move-dry domain move 104 docs --dry-run
+worktree domain-move-dry-status.txt
+capture domain-move domain move ADR-104 docs
+worktree domain-move-status.txt
+keep domain-move-104.md docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+keep domain-move-109.md docs/architecture/system/ADR-109-precedent-chain.md
+keep domain-move-guide.md docs/guide/hooks.md
+keep domain-move-search.py src/search.py
+keep domain-move-index.md docs/architecture/INDEX.md
+capture domain-move-lint lint docs/architecture/documentation/ADR-104-no-network-in-hooks.md docs/architecture/system/ADR-109-precedent-chain.md docs/architecture/system/ADR-111-cut-search.md
+capture domain-move-list list --group
+capture domain-move-cite cite --no-inventory src/search.py docs/guide
+capture domain-move-scan import scan docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+capture domain-move-again domain move 104 docs
+# Numbers stay allocated by range, across every record wherever it sits.
+capture domain-move-new-docs new docs "Style guide"
+capture domain-move-new-system new system "Queue limits"
+capture domain-move-refused domain move 999 nowhere
+
+# A plan applies several moves at once: ADR-104 and ADR-111 move together, so
+# ADR-111's link to ADR-104 stays a sibling link.
+move_fresh
+printf -- '- {record: 104, domain: docs}\n- {record: ADR-111, domain: docs}\n' > "$WORK/plan.yaml"
+capture domain-move-plan domain move --plan "$WORK/plan.yaml"
+worktree domain-move-plan-status.txt
+keep domain-move-plan-111.md docs/architecture/documentation/ADR-111-cut-search.md
+keep domain-move-plan-109.md docs/architecture/system/ADR-109-precedent-chain.md
+move_fresh
+printf -- '- {record: 104, domain: docs, number: 300}\n' > "$WORK/plan.yaml"
+capture domain-move-plan-number domain move --plan "$WORK/plan.yaml"
+printf -- '- {record: 104, domain: docs}\n- {record: ADR-104, domain: docs}\n' > "$WORK/plan.yaml"
+capture domain-move-plan-twice domain move --plan "$WORK/plan.yaml"
+worktree domain-move-plan-refused-status.txt
+
+# Under adr/v0 the number decides the domain, so a move is refused.
+fresh corpus
+capture domain-move-v0 domain move 104 docs
+
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check

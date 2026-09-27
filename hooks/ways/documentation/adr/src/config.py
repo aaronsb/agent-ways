@@ -74,6 +74,13 @@ def get_config() -> dict:
         _config = load_config()
     return _config
 
+def reload_config() -> dict:
+    """Drop the cached config and read adr.yaml again, after a command
+    edits it."""
+    global _config
+    _config = None
+    return get_config()
+
 def repo_contract() -> str:
     """The contract adr.yaml declares; adr/v0 when it declares none (ADR-304)."""
     return str(get_config().get('contract') or 'adr/v0')

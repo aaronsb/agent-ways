@@ -1,0 +1,18 @@
+M  docs/architecture/adr.yaml
+R  docs/architecture/system/ADR-100-adopt-v1.md -> docs/architecture/kernel/ADR-100-adopt-v1.md
+R  docs/architecture/system/ADR-101-ingest.md -> docs/architecture/kernel/ADR-101-ingest.md
+R  docs/architecture/system/ADR-102-ingest-spec.md -> docs/architecture/kernel/ADR-102-ingest-spec.md
+R  docs/architecture/system/ADR-103-ingest-batching.md -> docs/architecture/kernel/ADR-103-ingest-batching.md
+R  docs/architecture/system/ADR-104-no-network-in-hooks.md -> docs/architecture/kernel/ADR-104-no-network-in-hooks.md
+R  docs/architecture/system/ADR-105-retire-legacy-ingest.md -> docs/architecture/kernel/ADR-105-retire-legacy-ingest.md
+R  docs/architecture/system/ADR-106-search-change.md -> docs/architecture/kernel/ADR-106-search-change.md
+R  docs/architecture/system/ADR-107-ingest-notes.md -> docs/architecture/kernel/ADR-107-ingest-notes.md
+R  docs/architecture/system/ADR-108-ingest-over-v0.md -> docs/architecture/kernel/ADR-108-ingest-over-v0.md
+R  docs/architecture/system/ADR-109-precedent-chain.md -> docs/architecture/kernel/ADR-109-precedent-chain.md
+R  docs/architecture/system/ADR-110-old-v0-record.md -> docs/architecture/kernel/ADR-110-old-v0-record.md
+R  docs/architecture/system/ADR-111-cut-search.md -> docs/architecture/kernel/ADR-111-cut-search.md
+R  docs/architecture/system/ADR-112-authored.md -> docs/architecture/kernel/ADR-112-authored.md
+R  docs/architecture/system/ADR-113-operator-proposed.md -> docs/architecture/kernel/ADR-113-operator-proposed.md
+R  docs/architecture/system/ADR-114-open-concern.md -> docs/architecture/kernel/ADR-114-open-concern.md
+M  docs/guide/hooks.md
+M  src/search.py
