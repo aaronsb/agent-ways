@@ -54,10 +54,15 @@ def main():
     import_sub = p_import.add_subparsers(dest='import_command')
     p_scan = import_sub.add_parser('scan', help='Write an import sheet for each record')
     p_scan.add_argument('paths', nargs='+', help='Record files or directories of records')
+    p_scan.add_argument('--force', action='store_true',
+                        help='Overwrite a sheet that differs from a fresh scan, discarding its edits')
     p_apply = import_sub.add_parser('apply', help='Write finished sheets as adr/v1 records')
     p_apply.add_argument('sheets', nargs='*', help='Sheets to apply (default: every sheet in .import/)')
     p_apply.add_argument('--partial', action='store_true',
-                         help='Apply sheets with open todo items too')
+                         help='Apply sheets with open todo items too, except items lint cannot '
+                              'find again afterwards: a status note, a number or domain mismatch')
+    p_apply.add_argument('--force', action='store_true',
+                         help='Overwrite a record that has uncommitted changes')
 
     # index
     index_parser = subparsers.add_parser('index', help='Generate ADR index')

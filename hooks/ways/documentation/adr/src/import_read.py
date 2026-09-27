@@ -17,6 +17,10 @@ V0_STATUS_MAP = {'draft': 'proposed', 'proposed': 'proposed', 'accepted': 'accep
 # v0 keys that carry over under the same name and meaning.
 V0_CARRIED = ('date', 'deciders', 'related', 'supersedes', 'superseded_by', 'amends')
 
+# Todo items that lint cannot detect once the record is written. They block
+# --partial; every other item is advisory (ADR-306 §3).
+BLOCKING_TODO = ('status note', 'target.number', 'target.domain')
+
 # The v1 default decision (ADR-304 §1), for a project whose adr.yaml declares no kinds.
 IMPORT_DECISION_SCHEMA = {'verb': 'required', 'requires': ['capability', 'basis', 'agent'],
                           'sections': ['Summary']}
@@ -150,6 +154,25 @@ def _folder_domain(path: Path) -> Optional[str]:
         return 'legacy'
     return None
 
+def number_range(domain: str) -> Optional[tuple]:
+    """(low, high) for a domain in adr.yaml, or the legacy range."""
+    if domain in get_domains():
+        return tuple(get_domains()[domain].get('range', (0, -1)))
+    if domain == 'legacy' and 'legacy' in get_config():
+        return tuple(get_legacy_range())
+    return None
+
+def source_domain(path: Path, number) -> Optional[str]:
+    """The domain a record file sits in: its folder, else its number range."""
+    return _folder_domain(path) or _range_domain(number)
+
+def todo_label(item) -> str:
+    return str(item).split(':')[0]
+
+def blocking_todo(todo: list) -> list:
+    """The todo items --partial cannot write past (ADR-306 §3)."""
+    return [t for t in todo if todo_label(t) in BLOCKING_TODO]
+
 def _range_domain(number) -> Optional[str]:
     base = int(str(number).split('.')[0])
     for domain, config in get_domains().items():
@@ -180,6 +203,8 @@ def read_record(path: Path) -> dict:
         text = raw.decode('utf-8')
     except UnicodeDecodeError:
         raise SheetError('not UTF-8 text')
+    if text.startswith('\ufeff'):
+        raise SheetError('the file starts with a UTF-8 byte order mark; remove it before scanning')
     if '\r' in text:
         raise SheetError('CRLF line endings; convert the file to LF before scanning')
     front, before, title, after = split_record(text)
@@ -204,24 +229,32 @@ def read_record(path: Path) -> dict:
     provenance['target.number'] = 'file name' if from_file else 'H1'
     if from_file and (title.group(1).lstrip('0') or '0') != from_file:
         todo.append(f"target.number: the file name says ADR-{from_file}, the H1 says ADR-{title.group(1)}")
-    domain = _folder_domain(path)
-    if domain:
+    domain = source_domain(path, number)
+    if _folder_domain(path):
         provenance['target.domain'] = f"folder {path.parent.name}"
+    elif domain:
+        provenance['target.domain'] = 'number range'
     else:
-        domain = _range_domain(number)
-        if domain:
-            provenance['target.domain'] = 'number range'
-        else:
-            todo.append('target.domain: neither the folder nor the number names a domain')
+        todo.append('target.domain: neither the folder nor the number names a domain')
+    span = number_range(domain) if domain else None
+    if span and not span[0] <= int(str(number).split('.')[0]) <= span[1]:
+        todo.append(f"target.number: ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     provenance['target.title'] = 'H1'
-    if before.strip():
-        todo.append('text between the frontmatter and the H1 is not carried; move it into the body')
 
-    summary, body, note = split_summary(after)
-    if summary is not None:
-        provenance['summary'] = '## Summary section'
-    elif note:
-        provenance['summary'] = note
+    preamble = before.strip('\n')
+    if preamble.strip():
+        # A record is written H1 first, so text above the H1 moves to just
+        # below it. The body keeps it; nothing is dropped (ADR-306 §1).
+        summary, body = None, preamble + '\n' + after
+        provenance['body'] = 'text above the H1, then the text after it'
+        todo.append('preamble: the text between the frontmatter and the H1 moved into the body, '
+                    'right after the H1; check where it belongs')
+    else:
+        summary, body, note = split_summary(after)
+        if summary is not None:
+            provenance['summary'] = '## Summary section'
+        elif note:
+            provenance['summary'] = note
 
     unmapped = {}
     if fmt == 'v1':
@@ -246,7 +279,8 @@ def read_record(path: Path) -> dict:
             if key != 'status' and key not in V0_CARRIED:
                 unmapped[key] = value
     todo[:0] = open_fields(record, schema)
-    todo += [f"unmapped: {key} has no v1 field; move it into the record or drop it" for key in unmapped]
+    todo += [f"unmapped: {key} has no v1 field; apply keeps it under imported.unmapped. "
+             f"Move it into the record, or leave it there" for key in unmapped]
 
     candidates = {}
     if 'capability' in todo:
@@ -277,8 +311,8 @@ def _v0_status(data: dict, todo: list, provenance: dict) -> Optional[str]:
             provenance['record.status'] = f"frontmatter status: {raw}, with superseded_by (ADR-304 §7)"
             return 'superseded'
         provenance['record.status'] = f"frontmatter status: {raw}, with no successor (ADR-304 §7)"
-        todo.append('status: Deprecated with no successor maps to accepted with a note that '
-                    'the decision is historical (ADR-304 §7); add the note')
+        todo.append('status note: Deprecated with no successor maps to accepted with a note that '
+                    'the decision is historical (ADR-304 §7); add the note to the body')
         return 'accepted'
     if key in V0_STATUS_MAP:
         provenance['record.status'] = f"frontmatter status: {raw}"
@@ -309,6 +343,9 @@ def load_sheet(path: Path) -> dict:
     """A sheet file, checked for the fields apply needs."""
     try:
         sheet = yaml.safe_load(path.read_text())
+    except yaml.MarkedYAMLError as e:
+        where = f" at line {e.problem_mark.line + 1}" if e.problem_mark else ''
+        raise SheetError(f"the sheet is not valid YAML: {e.problem}{where}")
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
         raise SheetError(f"cannot read the sheet: {e}")
     if not isinstance(sheet, dict) or sheet.get('sheet') != SHEET_FORMAT:
@@ -316,13 +353,24 @@ def load_sheet(path: Path) -> dict:
     target = sheet.get('target')
     if not isinstance(target, dict) or any(_empty(target.get(k)) for k in ('number', 'title')):
         raise SheetError('target needs a number and a title')
-    try:
-        format_number(target['number'])
-    except ValueError:
-        raise SheetError(f"target.number '{target['number']}' is not a record number")
+    number = target['number']
+    if isinstance(number, float):
+        raise SheetError(f"target.number {number} reads as a decimal; quote a sub-part number, "
+                         f"as in number: '101.10'")
+    if isinstance(number, bool) or not re.fullmatch(r'\d+(\.\d+)?', str(number)):
+        raise SheetError(f"target.number '{number}' is not a record number")
     if not isinstance(sheet.get('record'), dict):
         raise SheetError('record is not a mapping of fields')
+    for key in ('summary', 'body'):
+        if sheet.get(key) is not None and not isinstance(sheet[key], str):
+            raise SheetError(f"{key} is not text")
+    todo = sheet.get('todo')
+    if todo is not None and not (isinstance(todo, list) and all(isinstance(t, str) for t in todo)):
+        raise SheetError('todo is not a list of items')
+    if sheet.get('unmapped') is not None and not isinstance(sheet['unmapped'], dict):
+        raise SheetError('unmapped is not a mapping of fields')
     source = sheet.get('source')
-    if source is not None and not (isinstance(source, dict) and source.get('path')):
+    if source is not None and not (isinstance(source, dict) and isinstance(source.get('path'), str)
+                                   and source['path']):
         raise SheetError('source needs a path')
     return sheet

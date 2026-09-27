@@ -14,8 +14,8 @@ Usage:
     adr cite [--check] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
-    adr import scan <paths...>
-    adr import apply [sheets...] [--partial]
+    adr import scan <paths...> [--force]
+    adr import apply [sheets...] [--partial] [--force]
     adr index [-y]
     adr domains
     adr config
@@ -1681,6 +1681,10 @@ V0_STATUS_MAP = {'draft': 'proposed', 'proposed': 'proposed', 'accepted': 'accep
 # v0 keys that carry over under the same name and meaning.
 V0_CARRIED = ('date', 'deciders', 'related', 'supersedes', 'superseded_by', 'amends')
 
+# Todo items that lint cannot detect once the record is written. They block
+# --partial; every other item is advisory (ADR-306 §3).
+BLOCKING_TODO = ('status note', 'target.number', 'target.domain')
+
 # The v1 default decision (ADR-304 §1), for a project whose adr.yaml declares no kinds.
 IMPORT_DECISION_SCHEMA = {'verb': 'required', 'requires': ['capability', 'basis', 'agent'],
                           'sections': ['Summary']}
@@ -1814,6 +1818,25 @@ def _folder_domain(path: Path) -> Optional[str]:
         return 'legacy'
     return None
 
+def number_range(domain: str) -> Optional[tuple]:
+    """(low, high) for a domain in adr.yaml, or the legacy range."""
+    if domain in get_domains():
+        return tuple(get_domains()[domain].get('range', (0, -1)))
+    if domain == 'legacy' and 'legacy' in get_config():
+        return tuple(get_legacy_range())
+    return None
+
+def source_domain(path: Path, number) -> Optional[str]:
+    """The domain a record file sits in: its folder, else its number range."""
+    return _folder_domain(path) or _range_domain(number)
+
+def todo_label(item) -> str:
+    return str(item).split(':')[0]
+
+def blocking_todo(todo: list) -> list:
+    """The todo items --partial cannot write past (ADR-306 §3)."""
+    return [t for t in todo if todo_label(t) in BLOCKING_TODO]
+
 def _range_domain(number) -> Optional[str]:
     base = int(str(number).split('.')[0])
     for domain, config in get_domains().items():
@@ -1844,6 +1867,8 @@ def read_record(path: Path) -> dict:
         text = raw.decode('utf-8')
     except UnicodeDecodeError:
         raise SheetError('not UTF-8 text')
+    if text.startswith('\ufeff'):
+        raise SheetError('the file starts with a UTF-8 byte order mark; remove it before scanning')
     if '\r' in text:
         raise SheetError('CRLF line endings; convert the file to LF before scanning')
     front, before, title, after = split_record(text)
@@ -1868,24 +1893,32 @@ def read_record(path: Path) -> dict:
     provenance['target.number'] = 'file name' if from_file else 'H1'
     if from_file and (title.group(1).lstrip('0') or '0') != from_file:
         todo.append(f"target.number: the file name says ADR-{from_file}, the H1 says ADR-{title.group(1)}")
-    domain = _folder_domain(path)
-    if domain:
+    domain = source_domain(path, number)
+    if _folder_domain(path):
         provenance['target.domain'] = f"folder {path.parent.name}"
+    elif domain:
+        provenance['target.domain'] = 'number range'
     else:
-        domain = _range_domain(number)
-        if domain:
-            provenance['target.domain'] = 'number range'
-        else:
-            todo.append('target.domain: neither the folder nor the number names a domain')
+        todo.append('target.domain: neither the folder nor the number names a domain')
+    span = number_range(domain) if domain else None
+    if span and not span[0] <= int(str(number).split('.')[0]) <= span[1]:
+        todo.append(f"target.number: ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     provenance['target.title'] = 'H1'
-    if before.strip():
-        todo.append('text between the frontmatter and the H1 is not carried; move it into the body')
 
-    summary, body, note = split_summary(after)
-    if summary is not None:
-        provenance['summary'] = '## Summary section'
-    elif note:
-        provenance['summary'] = note
+    preamble = before.strip('\n')
+    if preamble.strip():
+        # A record is written H1 first, so text above the H1 moves to just
+        # below it. The body keeps it; nothing is dropped (ADR-306 §1).
+        summary, body = None, preamble + '\n' + after
+        provenance['body'] = 'text above the H1, then the text after it'
+        todo.append('preamble: the text between the frontmatter and the H1 moved into the body, '
+                    'right after the H1; check where it belongs')
+    else:
+        summary, body, note = split_summary(after)
+        if summary is not None:
+            provenance['summary'] = '## Summary section'
+        elif note:
+            provenance['summary'] = note
 
     unmapped = {}
     if fmt == 'v1':
@@ -1910,7 +1943,8 @@ def read_record(path: Path) -> dict:
             if key != 'status' and key not in V0_CARRIED:
                 unmapped[key] = value
     todo[:0] = open_fields(record, schema)
-    todo += [f"unmapped: {key} has no v1 field; move it into the record or drop it" for key in unmapped]
+    todo += [f"unmapped: {key} has no v1 field; apply keeps it under imported.unmapped. "
+             f"Move it into the record, or leave it there" for key in unmapped]
 
     candidates = {}
     if 'capability' in todo:
@@ -1941,8 +1975,8 @@ def _v0_status(data: dict, todo: list, provenance: dict) -> Optional[str]:
             provenance['record.status'] = f"frontmatter status: {raw}, with superseded_by (ADR-304 §7)"
             return 'superseded'
         provenance['record.status'] = f"frontmatter status: {raw}, with no successor (ADR-304 §7)"
-        todo.append('status: Deprecated with no successor maps to accepted with a note that '
-                    'the decision is historical (ADR-304 §7); add the note')
+        todo.append('status note: Deprecated with no successor maps to accepted with a note that '
+                    'the decision is historical (ADR-304 §7); add the note to the body')
         return 'accepted'
     if key in V0_STATUS_MAP:
         provenance['record.status'] = f"frontmatter status: {raw}"
@@ -1973,6 +2007,9 @@ def load_sheet(path: Path) -> dict:
     """A sheet file, checked for the fields apply needs."""
     try:
         sheet = yaml.safe_load(path.read_text())
+    except yaml.MarkedYAMLError as e:
+        where = f" at line {e.problem_mark.line + 1}" if e.problem_mark else ''
+        raise SheetError(f"the sheet is not valid YAML: {e.problem}{where}")
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
         raise SheetError(f"cannot read the sheet: {e}")
     if not isinstance(sheet, dict) or sheet.get('sheet') != SHEET_FORMAT:
@@ -1980,14 +2017,25 @@ def load_sheet(path: Path) -> dict:
     target = sheet.get('target')
     if not isinstance(target, dict) or any(_empty(target.get(k)) for k in ('number', 'title')):
         raise SheetError('target needs a number and a title')
-    try:
-        format_number(target['number'])
-    except ValueError:
-        raise SheetError(f"target.number '{target['number']}' is not a record number")
+    number = target['number']
+    if isinstance(number, float):
+        raise SheetError(f"target.number {number} reads as a decimal; quote a sub-part number, "
+                         f"as in number: '101.10'")
+    if isinstance(number, bool) or not re.fullmatch(r'\d+(\.\d+)?', str(number)):
+        raise SheetError(f"target.number '{number}' is not a record number")
     if not isinstance(sheet.get('record'), dict):
         raise SheetError('record is not a mapping of fields')
+    for key in ('summary', 'body'):
+        if sheet.get(key) is not None and not isinstance(sheet[key], str):
+            raise SheetError(f"{key} is not text")
+    todo = sheet.get('todo')
+    if todo is not None and not (isinstance(todo, list) and all(isinstance(t, str) for t in todo)):
+        raise SheetError('todo is not a list of items')
+    if sheet.get('unmapped') is not None and not isinstance(sheet['unmapped'], dict):
+        raise SheetError('unmapped is not a mapping of fields')
     source = sheet.get('source')
-    if source is not None and not (isinstance(source, dict) and source.get('path')):
+    if source is not None and not (isinstance(source, dict) and isinstance(source.get('path'), str)
+                                   and source['path']):
         raise SheetError('source needs a path')
     return sheet
 # ============================================================================
@@ -3193,7 +3241,8 @@ def _scan_inputs(paths: list) -> tuple:
 def _import_scan(args):
     """Write one sheet per record to docs/architecture/.import/ (ADR-306 §1,
     §3). The directory ignores itself, so the repo's .gitignore is untouched.
-    A source is only read, never written."""
+    A source is only read, never written. A sheet that differs from what a
+    fresh scan writes may hold edits, so it is kept unless --force."""
     files, messages = _scan_inputs(args.paths)
     for message in messages:
         print(message)
@@ -3204,6 +3253,7 @@ def _import_scan(args):
         shown = relative_path(path.resolve()) if path.is_absolute() else path
         try:
             sheet = read_record(path)
+            text = dump_sheet(sheet)
         except (SheetError, OSError) as e:
             print(f"Skipped: {shown}: {e}")
             skipped += 1
@@ -3215,21 +3265,21 @@ def _import_scan(args):
             print(f"Skipped: {shown}: ADR-{format_number(sheet['target']['number'])} is also {claimed[name]}")
             skipped += 1
             continue
-        if dest.exists():
+        forced = ''
+        if dest.exists() and dest.read_text() != text:
             try:
                 previous = (load_sheet(dest).get('source') or {}).get('path')
             except SheetError:
                 previous = None
             if previous != source:
-                print(f"Skipped: {shown}: {relative_path(dest)} holds a sheet for {previous or 'another source'}")
+                problem = f"{relative_path(dest)} holds a sheet for {previous or 'another source'}"
+            else:
+                problem = f"{relative_path(dest)} differs from a fresh scan (edited, or the source changed)"
+            if not args.force:
+                print(f"Skipped: {shown}: {problem}; --force overwrites it and discards its edits")
                 skipped += 1
                 continue
-        try:
-            text = dump_sheet(sheet)
-        except SheetError as e:
-            print(f"Skipped: {shown}: {e}")
-            skipped += 1
-            continue
+            forced = '; replaced an edited sheet, its edits are gone'
         out.mkdir(parents=True, exist_ok=True)
         ignore = out / '.gitignore'
         if not ignore.exists():
@@ -3238,7 +3288,7 @@ def _import_scan(args):
         claimed[name] = source
         written += 1
         todo = len(sheet['todo'])
-        print(f"Scanned: {shown} -> {relative_path(dest)} ({sheet['source']['format']}, {todo} todo)")
+        print(f"Scanned: {shown} -> {relative_path(dest)} ({sheet['source']['format']}, {todo} todo{forced})")
     print(f"Scan: {written} sheet(s) written, {skipped} skipped")
     return 1 if skipped and not written else 0
 
@@ -3246,44 +3296,66 @@ def _source_file(source: dict) -> Path:
     path = Path(source['path'])
     return path if path.is_absolute() else get_project_root() / path
 
+def _in_tree(path: Path) -> bool:
+    arch = get_project_root() / 'docs' / 'architecture'
+    try:
+        path.resolve().relative_to(arch.resolve())
+        return True
+    except ValueError:
+        return False
+
 def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
-    """Where apply writes: over the source when it sits in the repo at the
-    path the target implies, otherwise a new file in the domain's folder
-    (ADR-306 §3, §5). Raises SheetError when neither works."""
+    """Where apply writes. A source under docs/architecture is written in
+    place and keeps its number and domain: an import never renumbers (§5),
+    and moving a record is `adr domain move` (§6). Any other source becomes
+    a new file in the domain's folder. The number must sit in the domain's
+    range either way. Raises SheetError when none of this holds."""
     target = sheet['target']
     number = format_number(target['number'])
     domain = target.get('domain')
-    arch = get_project_root() / 'docs' / 'architecture'
-    if source_file is not None:
-        try:
-            source_file.resolve().relative_to(arch.resolve())
-            inside = True
-        except ValueError:
-            inside = False
-        if (inside and filename_number(source_file) == number.lstrip('0')
-                and _folder_domain(source_file) == domain):
-            return source_file
+    in_tree = source_file is not None and _in_tree(source_file)
+    if in_tree:
+        was = filename_number(source_file)
+        was_domain = source_domain(source_file, was or number)
+        if was != number.lstrip('0') or was_domain != domain:
+            raise SheetError(
+                f"the source is ADR-{was} in {was_domain}; the sheet says ADR-{number} in {domain}. "
+                f"Moving a record to another number or domain is `adr domain move` "
+                f"(ADR-306 §6), not built yet; restore target.number and target.domain")
     if not domain:
         raise SheetError('target.domain is empty')
-    if domain in get_domains():
-        folders = get_domains()[domain]['folder']
-        folder = folders[0] if isinstance(folders, list) else folders
-    elif domain == 'legacy' and 'legacy' in get_config():
-        folder = 'legacy'
-    else:
+    span = number_range(domain)
+    if span is None:
         raise SheetError(f"domain '{domain}' is not in adr.yaml; add it first "
                          f"(creating a domain on apply, ADR-306 §6, is not built yet)")
+    if not span[0] <= int(number.split('.')[0]) <= span[1]:
+        raise SheetError(f"ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
+    if in_tree:
+        return source_file
     for existing in find_adrs(include_archived=True):
-        if filename_number(existing) == number.lstrip('0') and (
-                source_file is None or existing.resolve() != source_file.resolve()):
+        if filename_number(existing) == number.lstrip('0'):
             raise SheetError(f"ADR-{number} already exists: {relative_path(existing)}")
+    folders = get_domains()[domain]['folder'] if domain in get_domains() else 'legacy'
+    folder = folders[0] if isinstance(folders, list) else folders
     slug = re.sub(r'[^a-z0-9]+', '-', str(target['title']).lower()).strip('-')
-    return arch / folder / f"ADR-{number}-{slug}.md"
+    return get_project_root() / 'docs' / 'architecture' / folder / f"ADR-{number}-{slug}.md"
 
-def _apply_one(sheet: dict) -> tuple:
+def _uncommitted(path: Path) -> bool:
+    """The file has changes git has not committed. False outside git."""
+    root = get_project_root()
+    try:
+        rel = str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return False
+    return bool((_git(['status', '--porcelain', '--', rel], root) or '').strip())
+
+def _apply_one(sheet: dict, force: bool) -> tuple:
     """Write one sheet as a v1 record through render_record and return
     (path, whether it changed). A non-v1 source gains `imported: {from,
-    format}` (ADR-306 §4). A source changed since the scan is refused."""
+    format}`, plus `unmapped` when the source had keys with no v1 field, so
+    the record keeps them whatever happens to the todo (ADR-306 §1, §4).
+    Refused: a source changed since the scan, a source with a body whose
+    sheet has none, and a source with uncommitted changes unless --force."""
     source = sheet.get('source')
     source_file = None
     record = dict(sheet['record'])
@@ -3291,17 +3363,23 @@ def _apply_one(sheet: dict) -> tuple:
         source_file = _source_file(source)
         if not source_file.is_file():
             raise SheetError(f"source {source['path']} is gone")
-        if hashlib.sha256(source_file.read_bytes()).hexdigest() != source.get('sha256'):
+        raw = source_file.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != source.get('sha256'):
             raise SheetError(f"source {source['path']} changed since the scan; scan it again")
-        if source.get('format') != 'v1':
-            record.setdefault('imported', {'from': source['path'], 'format': source.get('format')})
+        if source.get('format') != 'v1' and 'imported' not in record:
+            imported = {'from': source['path'], 'format': source.get('format')}
+            if sheet.get('unmapped'):
+                imported['unmapped'] = dict(sheet['unmapped'])
+            record['imported'] = imported
+        if read_record(source_file)['body'].strip() and not (sheet.get('body') or '').strip():
+            raise SheetError('the source has a body and the sheet has none; scan it again')
     dest = _destination(sheet, source_file)
-    try:
-        text = render_record(dict(sheet, record=record))
-    except (ValueError, TypeError) as e:
-        raise SheetError(str(e))
+    text = render_record(dict(sheet, record=record))
     if dest.is_file() and _same_record(dest.read_text(), text):
         return dest, False
+    if dest.is_file() and not force and _uncommitted(dest):
+        raise SheetError(f"{relative_path(dest)} has uncommitted changes; commit them, "
+                         f"or --force to overwrite")
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text)
     return dest, True
@@ -3320,10 +3398,19 @@ def _same_record(old: str, new: str) -> bool:
     return (same_data and old_before.strip() == new_before.strip()
             and old_title.group(0) == new_title.group(0) and old_after == new_after)
 
+def _labels(todo: list) -> str:
+    """Todo items by label, counted: 'verb, basis, unmapped (2)'."""
+    counts = {}
+    for item in todo:
+        counts[todo_label(item)] = counts.get(todo_label(item), 0) + 1
+    return ', '.join(f"{label} ({n})" if n > 1 else label for label, n in counts.items())
+
 def _import_apply(args):
     """Write each finished sheet as a v1 record, then lint what was written
-    (ADR-306 §3). A sheet with open todo items is skipped unless --partial.
-    An applied sheet is removed: the record is what is kept."""
+    (ADR-306 §3). A sheet with open todo items is skipped. --partial writes
+    it anyway, unless an item is one lint could not find again afterwards
+    (BLOCKING_TODO). An applied sheet is removed: the record is what is
+    kept. One bad sheet is reported and the rest still apply."""
     if args.sheets:
         paths = [Path(p) for p in args.sheets]
     else:
@@ -3335,13 +3422,15 @@ def _import_apply(args):
         try:
             sheet = load_sheet(path)
             todo = sheet.get('todo') or []
-            if todo and not args.partial:
-                lines.append((f"Skipped: {shown}: {len(todo)} open todo item(s): "
-                              f"{', '.join(str(t).split(':')[0] for t in todo)}", None))
+            held = blocking_todo(todo) if args.partial else todo
+            if held:
+                why = ("todo item(s) --partial does not write past, since lint cannot find them again"
+                       if args.partial else 'open todo item(s)')
+                lines.append((f"Skipped: {shown}: {len(held)} {why}: {_labels(held)}", None))
                 skipped += 1
                 continue
-            dest, changed = _apply_one(sheet)
-        except SheetError as e:
+            dest, changed = _apply_one(sheet, args.force)
+        except (SheetError, OSError, ValueError, TypeError, AttributeError, KeyError) as e:
             lines.append((f"Refused: {shown}: {e}", None))
             refused += 1
             continue
@@ -3426,10 +3515,15 @@ def main():
     import_sub = p_import.add_subparsers(dest='import_command')
     p_scan = import_sub.add_parser('scan', help='Write an import sheet for each record')
     p_scan.add_argument('paths', nargs='+', help='Record files or directories of records')
+    p_scan.add_argument('--force', action='store_true',
+                        help='Overwrite a sheet that differs from a fresh scan, discarding its edits')
     p_apply = import_sub.add_parser('apply', help='Write finished sheets as adr/v1 records')
     p_apply.add_argument('sheets', nargs='*', help='Sheets to apply (default: every sheet in .import/)')
     p_apply.add_argument('--partial', action='store_true',
-                         help='Apply sheets with open todo items too')
+                         help='Apply sheets with open todo items too, except items lint cannot '
+                              'find again afterwards: a status note, a number or domain mismatch')
+    p_apply.add_argument('--force', action='store_true',
+                         help='Overwrite a record that has uncommitted changes')
 
     # index
     index_parser = subparsers.add_parser('index', help='Generate ADR index')
