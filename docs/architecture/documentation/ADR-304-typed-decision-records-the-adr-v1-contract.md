@@ -270,6 +270,14 @@ the migration stays visible. v0 statuses map as follows:
 | Rejected | rejected |
 | Deprecated | superseded if something replaced it, else accepted with the spec historical |
 
+A migrated decision needs a `basis` (§11). v0 `deciders` cannot seed an
+`operator` basis, because `adr new` fills it from the `adr.yaml` default,
+which names the operator on every record. An `operator` basis comes from a
+record of approval: an operator review or comment on the merging PR, or
+operator direction quoted in the record. A linked #491 note seeds `evidence`.
+A decision with neither migrates with no basis, and lint warns until a basis
+is found or the operator supplies one.
+
 ### 8. What leaves the record corpus
 
 - Runbooks and explanation essays go to ADR-302 catalog docs (how-to and
