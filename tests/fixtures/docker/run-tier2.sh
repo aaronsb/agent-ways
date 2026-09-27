@@ -114,7 +114,9 @@ run_scenario() {
   fi
 
   ANSWER=$(jq -r '.result // empty' "$OUT/result.json" 2>/dev/null)
-  (cd "$PROJ" && ways introspect dump) > "$OUT/introspect.json" 2>"$OUT/introspect.err"
+  SESSION=$(jq -r '.session_id // empty' "$OUT/result.json" 2>/dev/null)
+  (cd "$PROJ" && ways introspect dump --session "$SESSION" --all) > "$OUT/introspect.json" 2>"$OUT/introspect.err"
+  (cd "$PROJ" && git status --porcelain --untracked-files=all) > "$OUT/worktree.txt" 2>&1
   FIRED=$(jq -r '[.turns[].fired_ways[]?.way_id] | unique | .[]' "$OUT/introspect.json" 2>/dev/null)
   printf '%s\n' "$FIRED" > "$OUT/fired.txt"
 
