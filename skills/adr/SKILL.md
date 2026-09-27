@@ -30,6 +30,17 @@ docs/scripts/adr index -y                 # Regenerate INDEX.md from the active 
 # Archive (ADR-303) — not deletion: the file stays tracked, linted, linkable
 docs/scripts/adr archive <n> --reason "why" [--superseded-by ADR-N[,ADR-M#sec]] [--status S] [--dry-run]
 
+# Query by frontmatter (adr/v1); a list field matches when it lists the value
+docs/scripts/adr list --capability attend --verb change   # also --kind, --field KEY[=VALUE]
+docs/scripts/adr list --group-by capability               # a listed record appears in each group
+docs/scripts/adr list --json                              # number, title, path, status, frontmatter
+
+# Edit records (adr/v1): only the touched field's lines change; each lints the record after
+docs/scripts/adr consider <n> --said "..." --via "..." [--covers PROBE...] [--canary caught|missed]
+docs/scripts/adr set <n> key=value key+=item key-=item   # frozen fields refused once accepted
+docs/scripts/adr supersede <old> --by <new> [--amends SECTION]   # writes both sides
+docs/scripts/adr enact <n> <commit>                      # accepted cut or retire only
+
 # Config
 docs/scripts/adr config                   # Show current adr.yaml configuration
 ```
