@@ -1,0 +1,4 @@
+Error: '150' matches several records; resolve the duplicate number first:
+  docs/architecture/system/ADR-150-duplicate-one.md
+  docs/architecture/system/ADR-150-duplicate-two.md
+[exit 1]

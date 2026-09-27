@@ -28,4 +28,5 @@ class ADRInfo:
 class Issue:
     message: str
     severity: str = 'warning'
+    code: Optional[str] = None  # a stable tag for tools that act on issues
 

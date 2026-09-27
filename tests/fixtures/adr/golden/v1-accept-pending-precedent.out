@@ -1,0 +1,3 @@
+Refused: accepting ADR-116 would add errors:
+  ❌ docs/architecture/system/ADR-116-rests-on-114.md: basis: precedent ADR-114 is still proposed
+[exit 1]

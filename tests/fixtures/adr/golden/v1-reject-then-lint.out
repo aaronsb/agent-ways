@@ -1,27 +1,20 @@
 
-Scanned: 15 ADRs
+Scanned: 1 ADRs
 
 Status distribution:
-  accepted: 9
-  proposed: 6
+  rejected: 1
 
 Contract: adr/v1 (1 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 3 files:
+Issues found in 1 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
   ⚠️ capability 'search' has no accepted add decision
 
-docs/architecture/system/ADR-108-ingest-over-v0.md
-  ⚠️ cannot confirm the prior decision on 'ingest': ADR-110 is still v0
-
-docs/architecture/system/ADR-114-open-concern.md
-  ⚠️ open concern: Batch size may starve small tenants
-
 ════════════════════════════════════════════════════════════
-Summary: 0 errors, 3 warnings
+Summary: 0 errors, 1 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

@@ -12,6 +12,8 @@ Usage:
     adr archive <number> --reason "..." [--superseded-by ADR-N[,ADR-M]] [--status S] [--dry-run]
     adr lint [--check] [paths...]
     adr cite [--check] [paths...]
+    adr accept <number> [--dry-run]
+    adr reject|abandon <number> --reason "..." [--dry-run]
     adr index [-y]
     adr domains
     adr config

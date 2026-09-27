@@ -1,5 +1,5 @@
 
-ADR v1 Fixture — Architecture Decision Records (14 total)
+ADR v1 Fixture — Architecture Decision Records (15 total)
 =======================================================
   ✅ ADR-100      Adopt the adr/v1 contract
   ✅ ADR-101      Add ingestion
@@ -15,6 +15,7 @@ ADR v1 Fixture — Architecture Decision Records (14 total)
   ✅ ADR-111      Cut search
   ✅ ADR-112      Operator-authored constraint
   💡 ADR-113      Operator-started and still proposed
+  💡 ADR-114      Cap batch size
 
-Total: 14 ADRs
+Total: 15 ADRs
 [exit 0]
