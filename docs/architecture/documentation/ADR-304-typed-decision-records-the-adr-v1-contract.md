@@ -9,6 +9,10 @@ basis:
     said: "agent ways should lead the champagne here and once it works, that where agent ways can interrupt and do the adr housekeeping"
     via: session 2026-09-26, PR #559
   - evidence: kg triage of 108 records; agent-ways citation audit
+  - evidence: research survey, see References
+agent:
+  name: Claude
+  model: claude-opus-5-5
 status: Proposed
 date: 2026-09-26
 deciders:
@@ -35,9 +39,18 @@ related:
 - **One-way?** No. The contract is opt-in per repository (`contract:` in
   `adr.yaml`), v0 records keep working, and this repo adopts first as the
   test.
-- **For the operator:** Is the operator's involvement modelled right, as
-  levels plus a separate `considered` (§11, §12)? Is agent-ways migrating its
-  own corpus first the right proving ground (Rollout)?
+- **Probes for the operator** (§12):
+  - *Confident:* the decision/spec split and the closed verb list. PEP,
+    Rust RFC and Conventional Commits evidence backs them. Is there a record
+    in your repos that is neither a decision nor a spec?
+  - *Not confident:* the closed capability list. No study found says it holds
+    or drifts. Will naming every capability in `adr.yaml` feel like friction?
+  - *Not confident:* the challenge protocol in §12 steers your judgement.
+    Did these probes help, or did they narrow what you looked at?
+- **Inversion:** one end is AgDR-style free records, written by agents, with
+  no grammar and only citation lint. The other end is kernel-style human
+  sign-off on every decision. This design sits between them. Is the middle
+  right, or is it a compromise that neither end would choose?
 
 ## Context
 
@@ -67,11 +80,17 @@ ADR-119 and ADR-121 draw 29-33 each. `adr lint` checks only files under
 cites an archived record.
 
 Prior art keeps decision records append-only and puts current truth
-elsewhere: PEPs, Rust RFCs, KEPs, and IETF RFCs with `Obsoletes` headers.
+elsewhere: PEPs and Rust RFCs send final documentation to a reference and
+freeze the proposal. IETF `Obsoletes` works. Its untyped `Updates` edge did
+not, because nobody could say what an update meant (see §3 on typed amend
+edges).
 Conventional Commits with commitlint, and Kubernetes `apiVersion`/`kind`,
 show a small versioned grammar that a linter enforces.
 
-Under v1, ADR expands to Agent Decision Record. An architecture decision is
+Under v1, ADR expands to Agent Decision Record. The name is already used by
+AgDR, a format for agents to record their own decisions with model and
+session metadata. This contract keeps `ADR` because the `ADR-N` citations
+predate it, and it borrows AgDR's agent metadata (§11). An architecture decision is
 one kind of agent decision, alongside product choices to add, cut or retire.
 The code citation format `ADR-N` stays as it is. The expansion changes in the
 tool's help text, the ADR way's description, and the generated index title.
@@ -160,10 +179,16 @@ supersedes a spec.
 - **add**: brings a capability into the vocabulary as active.
 - **cut**: makes a capability absent.
 - **change**: alters an existing capability. It must supersede or partially
-  supersede (ADR-303 section references) a prior decision on the same
+  amend a prior decision on the same
   capability. A prior decision is on the same capability when its
   `capability:` equals it, lists it, or is `*`. Changing a `*` constraint for
-  one capability is a partial supersession, by section reference.
+  one capability amends it.
+
+Partial replacement uses a typed edge, not a bare section reference.
+`amends: ADR-167#4` replaces the named section and leaves the rest in force.
+`extends: ADR-167` adds to a decision without replacing any of it. These
+replace ADR-303's untyped `superseded_by: ADR-167#4` form, which repeats the
+IETF `Updates` failure. `adr lint` checks that the named section exists.
 - **retire**: removes surface while the capability stays active. It carries
   `targets:` naming the surface, such as `cli:ingest`, `route:/v1/jobs` or
   `mcp:search`.
@@ -185,9 +210,9 @@ kinds:
   decision:
     mutable_after_accept: [status, enacted, superseded_by, considered]
     verb: required
-    requires: [capability, basis]
+    requires: [capability, basis, agent]
     sections: [Summary]
-    edges: { supersedes: decision, basis: [decision, spec] }
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec] }
   spec:
     mutable_after_accept: all
     verb: forbidden
@@ -261,9 +286,12 @@ flow. `cut` and `retire` stay open until their removal is done.
 - Every capability in the vocabulary has an accepted `add` decision. This
   warns while any v0 record remains and fails after, so a corpus that is
   still migrating does not fail on every capability.
-- `change` supersedes or partially supersedes a prior decision on the same
+- `change` supersedes or amends a prior decision on the same
   capability.
 - `retire` carries `targets` in a declared surface namespace.
+- An `amends: ADR-N#k` edge names a section that exists.
+- A decision carries `agent`, and its `## Summary` carries probes and an
+  inversion.
 - A frozen decision's frontmatter changes only in `mutable_after_accept`
   fields.
 - `adr.yaml` itself has no cross-layer word or stem reuse.
@@ -427,12 +455,32 @@ communication behind it. `adr accept` checks that `said` and `via` are
 present, and it cannot check that they are genuine. The basis is an audit
 trail that the operator can read and dispute, not a credential.
 
-The model follows Beer's Viable System Model. Records under a shared contract
-form one system, and the operator is the external identity and policy
-function that system cannot supply for itself. Repositories that share a
-contract regulate each other through `upstream` edges, without either one
-absorbing the other. `basis` sources form a fourth vocabulary layer, and the
-no-shared-word check covers it.
+**Agent identity.** A decision also records the agent that wrote it:
+`agent: {name, model}`, and a session id where the repository's attribution
+policy allows one. This repo omits session ids (ADR-167). The agent runs
+under the operator's forge identity, so without this field the corpus cannot
+tell who wrote a record. The Linux kernel's `Assisted-by: AGENT:MODEL` tag
+and AgDR's metadata follow the same rule.
+
+**Fabrication risk.** Lint checks that `said` and `via` are present. It
+cannot check that they are faithful, and studies of LLM-written rationale
+find output that is enriched but unfaithful. An agent that learns to satisfy
+the field check has not satisfied the rule. The mitigations are
+traceability, since the record names its agent, and the operator's ability
+to dispute a quote. Neither one is verification.
+
+**Accountability** for what lands stays with whoever merges, under the
+repository's merge gate. This contract changes when a record is accepted. It
+does not change who merges.
+
+The Viable System Model inspired this design, loosely rather than as a
+formal mapping. The operator is the system's identity and policy function,
+System 5, inside the viable system and outside the record corpus. `evidence`,
+`standard` and `upstream` bring in the environment that grounds the system.
+Repositories sharing a contract coordinate as peers, which is System 2
+rather than recursion, through `upstream` edges, and neither absorbs the
+other. `basis` sources form a fourth vocabulary layer, and the no-shared-word
+check covers it.
 
 ### 12. Legibility and consideration
 
@@ -455,8 +503,12 @@ operator's lanes:
 - what is decided, in plain terms;
 - what it trades away and what it forecloses;
 - whether it is one-way, stated first when it is;
-- the questions that need the operator's judgement, taste or outside
-  knowledge.
+- **probes**: specific points the agent asks the operator to judge. They are
+  a deliberate mix of points the agent is highly confident on and points it
+  is not, each labelled with that confidence;
+- an **inversion**: the two ends of the spectrum the decision sits between.
+  The agent names both and asks the operator whether the answer lies outside
+  its framing, which the agent may be unable to see past on its own.
 
 The bar is that someone who did not take part in the debate can judge the
 decision from the summary alone. `adr lint` checks that the section exists.
@@ -473,12 +525,30 @@ considered:
     via: PR #559
 ```
 
-A short response is a full consideration. Human review is asymmetric: the
-operator reads the summary, skims the body, and answers briefly. The brevity
-reflects the effort a deep written reply would cost. It does not mean the
-operator did no thinking. Humans discriminate well, and the summary exists
-so a brief answer rests on the questions that matter. Pushback, when there
-is any, goes in `said`.
+Human review is asymmetric. The operator reads the summary, skims the body,
+and usually answers briefly, and a deep written reply costs more than it
+returns. A brief answer is a valid answer. It is not evidence of scrutiny on
+its own, though. Automation-bias research finds that experts approve flawed
+output as readily as novices, and that explanations raise acceptance of
+wrong answers.
+
+The probes and the inversion are the agent's part of the fix. They prime
+the operator's judgement on chosen points, the way a colleague asks "what
+did you think about x?" Priming can bias the operator too. So the probes mix
+high- and low-confidence items, and the inversion asks the operator to
+judge the agent's framing rather than its answer. `considered` records
+which probes and which inversion the answer covered:
+
+```yaml
+considered:
+  - operator: developer
+    said: "looks good; the capability list is fine for now"
+    via: PR #559
+    covers: [probe-2, inversion]
+```
+
+A bare "looks good" covers nothing specific. It is still recorded, and the
+record shows its scope.
 
 **If the operator started it, the operator considers it.** A decision with
 an `operator` basis at any level is proposed and waits for `considered`
@@ -488,9 +558,12 @@ before acceptance. A decision with no operator basis, grounded in `evidence`,
 **Accepted risk.** The flow fails when an operator believes they have skill
 they lack and accepts without real judgement. That failure seldom causes
 immediate harm, and the corpus keeps it recoverable. The decision stays
-append-only and citable, and a later `change` can supersede it. The summary's
-one-way flag is the mitigation: the decisions a rubber-stamp would hurt most
-are the ones marked most prominently.
+append-only and citable, and a later `change` can supersede it. The mitigations are
+the one-way flag, which marks the decisions a rubber-stamp would hurt most,
+and the probes, which ask for judgement on specific points. Recoverability
+also depends on someone noticing later. Supervisory-control research
+predicts that attention fades, and citation lint is the part that does not
+fade.
 
 ### Rollout
 
@@ -596,3 +669,47 @@ is the migration test.
 - **The decision keeps the number when a record splits.** Rejected: kg's
   citations point at spec content, so every one would need re-pointing by
   hand.
+
+## References
+
+Research run before acceptance, by three agents. Each source was retrieved
+and read. None is cited from memory.
+
+**Decision records and rationale**
+- Buchgeher et al., "Using ADRs in Open Source Projects: An MSR Study on GitHub," IEEE Access 11, 2023. https://ieeexplore.ieee.org/document/10155430/
+- Miccio, Tommasel, Diaz-Pace, "A Text Mining and Classification Approach for Analyzing ADRs," 2026. https://arxiv.org/html/2609.07375
+- PEP 1. https://peps.python.org/pep-0001/ ; Rust RFC 1636. https://rust-lang.github.io/rfcs/1636-document_all_features.html
+- Kühlewind et al., "Updates tag" draft, 2026. https://datatracker.ietf.org/doc/draft-kuehlewind-rswg-updates-tag/
+- Grudin, "Evaluating Opportunities for Design Capture," 1996. http://jonathangrudin.com/wp-content/uploads/2017/03/DesRat1996.pdf
+- Zhou et al., "Using LLMs in Generating Design Rationale for Software Architecture Decisions," 2025. https://arxiv.org/html/2504.20781
+- da Silva, Gama, "GADR," 2026. https://arxiv.org/html/2608.17694
+- Kruchten, "An Ontology of Architectural Design Decisions," 2004. https://philippe.kruchten.com/wp-content/uploads/2009/07/kruchten-2004-design-decisions.pdf
+- me2resh, "Agent Decision Records (AgDR)." https://github.com/me2resh/agent-decision-record
+
+**Traceability and contracts**
+- Rahimi, Cleland-Huang, "Evolving software trace links between requirements and source code," EMSE, 2018. https://link.springer.com/article/10.1007/s10664-017-9561-x
+- Tan, Wagner, Treude, "Detecting outdated code element references in software repository documentation," EMSE, 2023. https://arxiv.org/abs/2212.01479
+- Schlathölter, "ReqToCode," 2026. https://arxiv.org/html/2603.13999
+- Zeng et al., "A First Look at Conventional Commits Classification," ICSE 2025. https://conf.researchr.org/details/icse-2025/icse-2025-research-track/28/A-First-Look-at-Conventional-Commits-Classification
+- Kubernetes deprecation policy. https://kubernetes.io/docs/reference/using-api/deprecation-policy/
+
+**Human oversight of agent decisions**
+- Parasuraman, Sheridan, Wickens, "A model for types and levels of human interaction with automation," IEEE Trans. SMC-A, 2000. https://www.semanticscholar.org/paper/14ae6f2231e09e226b99002aa04b5c70f3c59f2b
+- Feng, McDonald, Zhang, "Levels of Autonomy for AI Agents," 2025. https://arxiv.org/abs/2506.12469
+- Parasuraman, Manzey, "Complacency and Bias in Human Use of Automation," Human Factors, 2010. https://journals.sagepub.com/doi/10.1177/0018720810376055
+- Bansal et al., "Does the Whole Exceed its Parts?", CHI 2021. https://dl.acm.org/doi/10.1145/3411764.3445717
+- Buçinca, Malaya, Gajos, "To Trust or to Think," CSCW 2021. https://arxiv.org/abs/2102.09692
+- Bainbridge, "Ironies of Automation," Automatica, 1983. https://www.sciencedirect.com/science/article/abs/pii/0005109883900468
+- Vaccaro, Almaatouq, Malone, "When combinations of humans and AI are useful," Nature Human Behaviour, 2024. https://www.nature.com/articles/s41562-024-02024-1
+- Elish, "Moral Crumple Zones," ESTS, 2019. https://estsjournal.org/index.php/ests/article/view/260
+- Green, "The Flaws of Policies Requiring Human Oversight of Government Algorithms," CLSR, 2022. https://arxiv.org/abs/2109.05067
+- Santoni de Sio, van den Hoven, "Meaningful Human Control over Autonomous Systems," 2018. https://doi.org/10.3389/frobt.2018.00015
+- Chan et al., "Visibility into AI Agents," FAccT 2024. https://arxiv.org/abs/2401.13138
+
+**Cybernetics and agent governance**
+- Jackson, "Critical systems thinking: Beyond the fragments," 1994. https://onlinelibrary.wiley.com/doi/10.1002/sdr.4260100209
+- Olsson, "Coherentist Theories of Epistemic Justification," SEP. https://plato.stanford.edu/entries/justep-coherence/
+- Manheim, Garrabrant, "Categorizing Variants of Goodhart's Law," 2018. https://arxiv.org/abs/1803.04585
+- Solozobov, "Decision Evidence Maturity Model for Agentic AI," 2026. https://arxiv.org/abs/2605.04093
+- Linux kernel, "AI Coding Assistants." https://docs.kernel.org/process/coding-assistants.html
+- GitHub, "Risks and mitigations for Copilot cloud agent." https://docs.github.com/en/copilot/concepts/agents/cloud-agent/risks-and-mitigations
