@@ -1,0 +1,1 @@
+I added a section to README.md describing how to run the tests. Commit that change with a good commit message.

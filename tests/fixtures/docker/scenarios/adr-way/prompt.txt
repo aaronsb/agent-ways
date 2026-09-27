@@ -1,0 +1,1 @@
+We need to decide whether this project stores its configuration in YAML or TOML, and I want the architecture decision recorded properly. Explain how decisions get recorded here and what the record should contain. Don't create any files yet.

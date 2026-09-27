@@ -3,7 +3,8 @@
 #
 # Builds the tier image and runs the tier's runner in a fresh container.
 #
-#   TIER              1 (install and configure, no key). 2 is not built yet.
+#   TIER              1 (install and configure, no key) or 2 (tier 1, then
+#                     model scenarios through `claude -p`; needs a key)
 #   FLAVOR            branch (default) or release
 #   CLAUDE_VERSION    Claude Code version for the image. The pin below is the
 #                     one place it is set; compose.yaml and the Dockerfile
@@ -11,6 +12,9 @@
 #   CLAUDE_INSTALLER  native (default) or npm
 #   WAYS_BINARIES     dir with ways, ways-audit, attend, attend-chat (branch flavor)
 #   GH_TOKEN          taken from `gh auth token` when unset
+#   ANTHROPIC_API_KEY       tier 2 key; or set ANTHROPIC_API_KEY_FILE to a file
+#   ANTHROPIC_API_KEY_FILE  holding it. The key is exported, never printed.
+#   TIER2_OUT         host dir for tier 2 transcripts (default: a fresh temp dir)
 
 set -euo pipefail
 
@@ -22,7 +26,7 @@ CLAUDE_VERSION_PIN="2.1.275"
 
 case "$TIER" in
   1) SERVICE=tier1 ;;
-  2) echo "tier 2 is not built yet (ADR-186 item 3)" >&2; exit 2 ;;
+  2) SERVICE=tier2 ;;
   *) echo "TIER must be 1 or 2" >&2; exit 2 ;;
 esac
 
@@ -52,6 +56,21 @@ else
   # compose never creates tools/target/release on the host (root-owned under
   # a rootful daemon, which then breaks the next cargo build).
   export WAYS_BINARIES="$(mktemp -d)"
+fi
+
+if [[ "$TIER" == "2" ]]; then
+  if [[ -z "${ANTHROPIC_API_KEY:-}" && -n "${ANTHROPIC_API_KEY_FILE:-}" ]]; then
+    [[ -r "$ANTHROPIC_API_KEY_FILE" ]] || { echo "cannot read ANTHROPIC_API_KEY_FILE" >&2; exit 2; }
+    ANTHROPIC_API_KEY="$(tr -d '[:space:]' < "$ANTHROPIC_API_KEY_FILE")"
+  fi
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "tier 2 needs ANTHROPIC_API_KEY or ANTHROPIC_API_KEY_FILE" >&2; exit 2; }
+  export ANTHROPIC_API_KEY
+  export TIER2_OUT="${TIER2_OUT:-$(mktemp -d -t agent-ways-tier2.XXXXXX)}"
+  # Create it as the host user. A rootful daemon creates a missing bind
+  # source as root, and the container user then cannot write to it.
+  mkdir -p "$TIER2_OUT"
+  [[ -w "$TIER2_OUT" ]] || { echo "TIER2_OUT is not writable: $TIER2_OUT" >&2; exit 2; }
+  echo "tier 2 transcripts: $TIER2_OUT"
 fi
 
 cd "$HERE"
