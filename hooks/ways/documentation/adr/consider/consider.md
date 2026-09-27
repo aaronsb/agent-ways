@@ -29,10 +29,11 @@ The agent writes and proposes a decision; the operator considers it (ADR-304 §1
 - A decision the operator started waits for their consideration before `adr accept`. A decision with no operator basis, grounded in evidence, a standard or upstream, may be accepted by the agent directly.
 
 ## Asking in plain words
-Field names such as `basis`, `considered` and `level` belong in the record, not in what you say to the operator. Ask the way a teammate would:
-- For an operator basis: "Why'd we go this way? Anything you said I can quote?"
-- For a considered entry: "Mind giving ADR-N a read? Tell me if it holds up."
-- Don't ask for a level. Work it out from who made the call.
+Field names such as `basis`, `considered` and `level` belong in the record, not in what you say to the operator. Ask the way a teammate would, and open with a sentence on what the record decided, so the question can be answered without opening the file. A bare record number is not enough.
+- Opaque: "What's the basis for ADR-186?"
+- Better: "Why did we go this way on ADR-186? Can I quote you?"
+- Best: "In ADR-186 we split install testing into two tiers, both in a Debian container: tier 1 needs no API key and runs on every PR, and tier 2 uses a key to run Claude for real, so it only runs on demand or nightly. Why did we go this way? Can I quote you on any of it?"
+For a considered entry, do the same: say what the record decides in a sentence or two, then ask whether it holds up. Don't ask for a level. Work it out from who made the call.
 ## Raising a concern
 
 - You may raise a concern at any stage, including after acceptance: a safety issue, reasoning that does not follow, or anything that seems off.
