@@ -566,6 +566,14 @@ is the migration test.
   too brittle for the human coupling. Approval arrives through issues, chat
   and phone calls, and a scheme that accepts only a signed commit would force
   every one of those through one tool.
+  In the operator's words (via session, relayed by the kg session): "the repo
+  holds contributor names, and the repo is not here to enforce cryptographic
+  traceability. Any sort of tie to real certs is just brittle. Old records
+  that are most valuable are ones that just have tokens and prove their
+  viability through replay rather than security integrity." That points to a
+  later extension. An `evidence` basis may cite a replayable check, such as a
+  test, a scenario id or a fixture query. A record whose checks still pass
+  shows its viability by rerunning them. No lint rule depends on this yet.
 - **Seed operator basis from forge metadata.** Rejected: the agent acts under
   the operator's forge identity, so reviews and merges prove nothing.
 - **Basis as free prose in the Context section.** Rejected: prose cannot be
