@@ -124,7 +124,7 @@ An imported record carries `imported: {from, format}` in its frontmatter. For an
 
 ### 5. Numbering
 
-A source numbered inside the project's domain ranges keeps its number. Any other source gets a number from `target`, which the reader proposes from the domain and the agent may change. `apply` rewrites references within the imported set to the new numbers, and `imported.from` keeps the original identifier.
+A source numbered inside the project's domain ranges keeps its number. Code, ways and other records cite these numbers, and nothing structural calls for new ones, so an import never renumbers them. This covers all of this repo's records and all of kg's. Any other source gets a number from `target`, which the reader proposes from the domain and the agent may change. `apply` rewrites references within the imported set to the new numbers, and `imported.from` keeps the original identifier.
 
 ### 6. Round-trip guarantees
 
