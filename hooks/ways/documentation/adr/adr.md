@@ -22,7 +22,7 @@ refire: 0.15
 
 The section above this way, when present, gives this project's ADR commands, record format and lifecycle. It depends on the tool the project vendored and the contract its `adr.yaml` declares (ADR-304 §10). Follow it over any habit from another project.
 
-Projects define their own domains and ranges in `adr.yaml`; `adr domains` shows them.
+Projects define their own domains and ranges in `adr.yaml`; `adr domains` shows them. A record's number is permanent. `adr domain add`, `rename` and `move` change the layout and rewrite every path to what moved, and they leave `ADR-N` citations as they are.
 
 ## Generalize the Decision
 

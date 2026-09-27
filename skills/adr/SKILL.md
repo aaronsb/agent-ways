@@ -30,9 +30,19 @@ docs/scripts/adr index -y                 # Regenerate INDEX.md from the active 
 # Archive (ADR-303) — not deletion: the file stays tracked, linted, linkable
 docs/scripts/adr archive <n> --reason "why" [--superseded-by ADR-N[,ADR-M#sec]] [--status S] [--dry-run]
 
+# Domains (ADR-306 §6) — a record's number never changes
+docs/scripts/adr domain add <name> --range A-B --folder F [--label L] [--description D]
+docs/scripts/adr domain rename <old> <new> [--folder F] [--dry-run]   # moves the folder, rewrites paths
+docs/scripts/adr domain move <n> <domain> [--dry-run]                 # adr/v1: moves the file, rewrites paths
+docs/scripts/adr domain move --plan moves.yaml [--dry-run]            # [{record, domain}, ...] at once
+
 # Config
 docs/scripts/adr config                   # Show current adr.yaml configuration
 ```
+
+Under adr/v1 a record's folder decides its domain, and its number is its
+permanent identity: a move keeps the number, and `ADR-N` citations stay valid.
+A domain's range only allocates numbers for new records.
 
 ## Workflow
 
