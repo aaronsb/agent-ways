@@ -122,7 +122,7 @@ _Documentation structure, tooling, coherence_
 | [ADR-301](./documentation/ADR-301-situated-socialization-as-canonical-framing-and-documentation-prose-refactor.md) | Situated socialization as canonical framing and documentation prose refactor | Accepted |
 | [ADR-302](./documentation/ADR-302-unified-documentation-model.md) | A unified documentation model — typed graph, ways packaging, cross-repo convergence | Accepted |
 | [ADR-303](./documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md) | Active-set semantics, adr archive, and supersession reading for the ADR corpus | Accepted |
-| [ADR-304](./documentation/ADR-304-typed-decision-records-the-adr-v1-contract.md) | Typed decision records: the adr/v1 contract | Proposed |
+| [ADR-304](./documentation/ADR-304-typed-decision-records-the-adr-v1-contract.md) | Typed decision records: the adr/v1 contract | Accepted |
 
 ## Legacy (Pre-Domain Numbering)
 

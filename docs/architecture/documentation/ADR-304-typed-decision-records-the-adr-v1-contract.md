@@ -13,7 +13,12 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: Proposed
+considered:
+  - operator: aaronsb
+    said: "I think we have put as much effort into this adr as we need to."
+    via: session 2026-09-26, PR #559
+    covers: []
+status: Accepted
 date: 2026-09-26
 deciders:
   - aaronsb
@@ -591,6 +596,10 @@ safeguards:
 - A canary never survives into the accepted record.
 - A canary is never about safety, and never something that would cause harm
   if acted on.
+- A canary carries a little whimsy. Working groups have long kept Easter
+  eggs, such as the IETF's April 1 RFCs and RFC 1149's IP over avian
+  carriers. Spotting the odd one out is a game people play readily, and a
+  playful canary turns the reveal into a shared joke rather than a gotcha.
 - `considered` notes `canary: caught` or `canary: missed`. Over time that
   calibrates how far the agent leans on brief approvals, task by task, which
   is the scoped trust the literature supports over flat trust.
@@ -610,8 +619,10 @@ the consider step. It re-states the agent's role and rights:
 
 It fires on the moments that matter: operator approval language during a
 record discussion, edits to a decision's `## Summary` or `considered`, and
-`adr accept` itself. A tool trigger on `adr accept` puts the reminder in
-front of the agent at the moment deference is most likely. This is the
+`adr accept` itself. Tool-triggered ways are delivered after the tool runs (ADR-188), so
+the reminder on `adr accept` lands just after acceptance. That is enough.
+Acceptance is an incremental step and easy to revisit, and the reminder
+still reaches the agent while the decision is fresh. This is the
 structural fix the sycophancy research asks for, where a stated right alone
 is not enough.
 
