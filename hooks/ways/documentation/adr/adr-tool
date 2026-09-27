@@ -1397,10 +1397,13 @@ def _frozen_snapshot(adr) -> Optional[tuple]:
     # A record freezes where it lands: history is read from the default
     # branch when there is one, so a decision still in review on a feature
     # branch can be revised. Without a remote default, HEAD's history counts.
+    # --first-parent keeps to the branch's own line, so a pull request merged
+    # with a merge commit lands at the merge, not at the first commit on its
+    # branch; -m lists the merge's files against that parent on older git.
     ref = (_git(['rev-parse', '--abbrev-ref', 'origin/HEAD'], root) or '').strip() or 'HEAD'
     # --reverse drops pre-rename history under --follow, so read newest first
     # and reverse here. -z keeps names with spaces or non-ASCII intact.
-    log = _git(['log', ref, '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
+    log = _git(['log', ref, '--first-parent', '-m', '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
     if not log:
         return None
     entries, commit = [], None
