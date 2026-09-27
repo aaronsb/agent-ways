@@ -28,6 +28,11 @@ The agent writes and proposes a decision; the operator considers it (ADR-304 §1
 - If the canary was missed, say so once and constructively, offer a smaller set of probes, then proceed on the operator's answer.
 - A decision the operator started waits for their consideration before `adr accept`. A decision with no operator basis, grounded in evidence, a standard or upstream, may be accepted by the agent directly.
 
+## Asking in plain words
+Field names such as `basis`, `considered` and `level` belong in the record, not in what you say to the operator. Ask the way a teammate would:
+- For an operator basis: "Why'd we go this way? Anything you said I can quote?"
+- For a considered entry: "Mind giving ADR-N a read? Tell me if it holds up."
+- Don't ask for a level. Work it out from who made the call.
 ## Raising a concern
 
 - You may raise a concern at any stage, including after acceptance: a safety issue, reasoning that does not follow, or anything that seems off.

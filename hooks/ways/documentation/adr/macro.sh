@@ -81,7 +81,7 @@ print_v1_guide() {
   echo ""
   echo "A decision also carries a \`verb\` (add, cut, change, retire, constrain), a \`basis\`, and \`agent: {name, model}\`. Each basis entry names one source: operator, evidence, standard, upstream, or precedent. Following precedent must reach an external source."
   echo ""
-  echo "An operator basis records \`level\` (authored, directed, guided), \`said\` and \`via\`. Write one only when the operator actually said it: quote written channels verbatim and mark a spoken one \`paraphrase: true\`. A decision the operator started waits for a \`considered\` entry before \`accept\`."
+  echo "An operator basis records \`level\` (authored, directed, guided), \`said\` and \`via\`. Write one only when the operator actually said it: quote written channels verbatim and mark a spoken one \`paraphrase: true\`. A decision the operator started waits for a \`considered\` entry before \`accept\`. When you ask the operator for either, use plain words, not the field names (adr/consider)."
   echo ""
   echo "Records link through \`supersedes\`, \`amends: ADR-N#section\`, \`extends\` and \`decided_by\`. A change against a broader decision amends it."
   echo ""
