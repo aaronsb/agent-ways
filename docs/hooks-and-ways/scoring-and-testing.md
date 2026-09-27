@@ -63,7 +63,7 @@ This is also why scoring is done iteratively during way creation rather than aft
 
 ## The Tool
 
-The `ways` binary includes embedding-based semantic scoring as a built-in subcommand (see [ADR-108](../architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) for the embedding engine, [ADR-111](../architecture/ways/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation, and [ADR-125](../architecture/ways/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) for the embedding-only decision). It scores a prompt against the entire way corpus using cosine similarity and ranks the results.
+The `ways` binary includes embedding-based semantic scoring as a built-in subcommand (see [ADR-108](../architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) for the embedding engine, [ADR-111](../architecture/platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation, and [ADR-125](../architecture/ways/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) for the embedding-only decision). It scores a prompt against the entire way corpus using cosine similarity and ranks the results.
 
 ```bash
 # Score a prompt against all ways (query is positional; there is no --threshold flag)

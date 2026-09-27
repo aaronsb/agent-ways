@@ -33,7 +33,7 @@ imported:
 
 ## Context
 
-[ADR-113](./ADR-113-attend-active-awareness-module.md) introduces `attend`, a sibling binary in the agent-ways workspace that implements the active awareness layer described in the [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md) design note. `attend` observes Claude Code session state and environmental signal, tracks approaching mechanical consequences (context pressure, reflection deferral, etc.), and produces emissions that need to reach Claude.
+[ADR-113](../attend/ADR-113-attend-active-awareness-module.md) introduces `attend`, a sibling binary in the agent-ways workspace that implements the active awareness layer described in the [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md) design note. `attend` observes Claude Code session state and environmental signal, tracks approaching mechanical consequences (context pressure, reflection deferral, etc.), and produces emissions that need to reach Claude.
 
 The question this ADR answers is: **how do those emissions become guidance Claude reads?**
 
@@ -251,5 +251,5 @@ It explicitly does not define:
   - [ADR-104](./ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Disclosure gate that this ADR reuses
   - [ADR-105](./ADR-105-progressive-disclosure-for-way-trees.md) — Progressive disclosure model
   - [ADR-108](./ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — Matcher that scores attend emission payloads
-  - [ADR-112](./ADR-112-session-ledger-and-knowledge-graph-integration.md) — Reflection and ledger ways that will be the first consumers of attend signals
-  - [ADR-113](./ADR-113-attend-active-awareness-module.md) — The attend binary whose emissions this ADR routes
+  - [ADR-112](../archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — Reflection and ledger ways that will be the first consumers of attend signals
+  - [ADR-113](../attend/ADR-113-attend-active-awareness-module.md) — The attend binary whose emissions this ADR routes

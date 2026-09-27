@@ -143,5 +143,5 @@ This is consistent with the existing XDG separation documented in project memory
 ## References
 
 - **attend config implementation**: `tools/attend/src/config.rs`
-- **attend ADR**: [ADR-113](./ADR-113-attend-active-awareness-module.md) — config section documents attend's implementation
+- **attend ADR**: [ADR-113](../attend/ADR-113-attend-active-awareness-module.md) — config section documents attend's implementation
 - **XDG separation**: project memory `xdg-separation.md`

@@ -5,7 +5,7 @@
 > thin **projection** of an XDG application, and the app source lives in
 > `$XDG_DATA_HOME/agent-ways`. So development now starts from a **separate checkout**,
 > and you *choose* when your changes reach your install — they no longer leak in by
-> default. (Background: [ADR-142](architecture/ways/ADR-142-agent-ways-1-0-xdg-application-distribution.md).)
+> default. (Background: [ADR-142](architecture/platform/ADR-142-agent-ways-1-0-xdg-application-distribution.md).)
 
 ## The three roles that used to be one directory
 
@@ -73,7 +73,7 @@ developing — **don't** put it ahead of your installed `ways` on `PATH` unless 
 
 ## See also
 
-- [ADR-142](architecture/ways/ADR-142-agent-ways-1-0-xdg-application-distribution.md) — the XDG application distribution (why dev changed)
-- [ADR-143](architecture/ways/ADR-143-three-root-way-runtime-core-user-project.md) — core / user / project way roots
-- [ADR-144](architecture/ways/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) — the reconciler, migrator, and deprecation lifecycle
+- [ADR-142](architecture/platform/ADR-142-agent-ways-1-0-xdg-application-distribution.md) — the XDG application distribution (why dev changed)
+- [ADR-143](architecture/practice/ADR-143-three-root-way-runtime-core-user-project.md) — core / user / project way roots
+- [ADR-144](architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md) — the reconciler, migrator, and deprecation lifecycle
 - `CONTRIBUTING.md` — contribution norms and the security bar for changes

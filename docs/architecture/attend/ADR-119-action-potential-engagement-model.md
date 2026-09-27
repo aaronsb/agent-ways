@@ -32,7 +32,7 @@ imported:
 
 ## Status: Superseded by ADR-123
 
-**Superseded 2026-04-14.** The underlying decision — model agent engagement on the neuronal action potential so refractory periods produce natural disengagement from diminishing-value stimuli — is still load-bearing and shipping in production attend. The specific implementation shape described below (linear per-minute decay, time-windowed burst detection, `EngagementState` owning `Instant` timestamps, `step_multiplier` that scales the peak multiplier per fire past threshold) has been replaced by the shared curve engine introduced in [ADR-123](ADR-123-firing-dynamics-progression-axis-unification.md).
+**Superseded 2026-04-14.** The underlying decision — model agent engagement on the neuronal action potential so refractory periods produce natural disengagement from diminishing-value stimuli — is still load-bearing and shipping in production attend. The specific implementation shape described below (linear per-minute decay, time-windowed burst detection, `EngagementState` owning `Instant` timestamps, `step_multiplier` that scales the peak multiplier per fire past threshold) has been replaced by the shared curve engine introduced in [ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md).
 
 Concretely, what changed:
 
@@ -42,7 +42,7 @@ Concretely, what changed:
 - **`Instant`/`Duration` → `Tick`/`TickDelta`.** The engine is now unit-agnostic. Attend interprets ticks as wall-clock seconds via `sensor_trait::epoch_secs()`; ways interprets them as token position. The engine does not know which.
 - **Shared crate.** The engine lives in `sensor-trait::engagement` (and `sensor-trait::curve`) and is consumed by both attend's `SensorSlot` and ways' `session::way_fire_outcome`. Pre-ADR-123, attend had its own `EngagementState` in `sensor-trait` and ways had nothing of the kind — firing was a flat `token_distance_exceeded` step. Now it's the same engine in both tools.
 
-The biology framing, the "party problem" motivation, the urgency-escape pattern, and the per-peer auto-grouping extension are all still load-bearing and carry over intact. The implementation details below are historical — they describe what was accepted on 2026-04-12, not what runs today. For the current implementation see `docs/attend-and-monitor/engagement.md` and [ADR-123](ADR-123-firing-dynamics-progression-axis-unification.md).
+The biology framing, the "party problem" motivation, the urgency-escape pattern, and the per-peer auto-grouping extension are all still load-bearing and carry over intact. The implementation details below are historical — they describe what was accepted on 2026-04-12, not what runs today. For the current implementation see `docs/attend-and-monitor/engagement.md` and [ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md).
 
 ## Context
 
@@ -108,7 +108,7 @@ The decision above stands. What changed is the shape of the state machine that i
 - The tick axis is supplied by the caller. Attend passes `sensor_trait::epoch_secs()` (wall-clock seconds); everything else the engine does is unit-agnostic.
 - Burst detection is event-count based, not tick-windowed. This costs nothing for attend and unlocks the entire ways integration.
 - The engine exposes `should_fire(tick, magnitude)`, `record_fire(tick, magnitude)`, `current_salience(tick)`, `current_multiplier(tick)`. Attend's `SensorSlot` calls these through `in_absolute_refractory(tick)` and `effective_threshold(base, tick)` helpers that preserve the pre-ADR-123 call-site shape.
-- A sibling outward-gate consumer (ways) runs the same engine with a different curve (`Curve::Exponential`) on a different axis (token position). The unification argument is in [ADR-123 Decision 4](ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory).
+- A sibling outward-gate consumer (ways) runs the same engine with a different curve (`Curve::Exponential`) on a different axis (token position). The unification argument is in [ADR-123 Decision 4](../ways/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory).
 
 ### Attend yaml ↔ runtime mapping
 
@@ -173,7 +173,7 @@ The ADR-119 acceptance landed in attend via the original `EngagementState` in `s
 
 ## References
 
-- **[ADR-123](ADR-123-firing-dynamics-progression-axis-unification.md)** — progression-axis unification, curve enum, shared engine.
+- **[ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md)** — progression-axis unification, curve enum, shared engine.
 - **ADR-113** — attend active awareness module; disclosure governor, emission thresholds.
 - **ADR-118** — focus groups; scoping which stimuli reach an agent.
 - **Game AI Pro Chapter 2**: "Informing Game AI Through the Study of Neurology" — action potential diagram and neurological grounding.

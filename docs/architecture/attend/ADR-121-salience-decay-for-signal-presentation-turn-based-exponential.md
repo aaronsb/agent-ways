@@ -32,7 +32,7 @@ imported:
 
 ## Status: Superseded by ADR-123
 
-**Superseded 2026-04-14** while the specific attend-side application remained deferred. This ADR introduced two ideas: (1) firing dynamics decompose into an **inward gate** ("should this new stimulus fire?") and an **outward gate** ("should this already-fired signal still be presented?"), and (2) the outward gate for attend's peer signals should be turn-based exponential salience decay with a configurable floor. The inward/outward gate framing became the load-bearing architectural contribution of [ADR-123](ADR-123-firing-dynamics-progression-axis-unification.md), which generalized both gates across tools via the shared curve engine.
+**Superseded 2026-04-14** while the specific attend-side application remained deferred. This ADR introduced two ideas: (1) firing dynamics decompose into an **inward gate** ("should this new stimulus fire?") and an **outward gate** ("should this already-fired signal still be presented?"), and (2) the outward gate for attend's peer signals should be turn-based exponential salience decay with a configurable floor. The inward/outward gate framing became the load-bearing architectural contribution of [ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md), which generalized both gates across tools via the shared curve engine.
 
 The outward-gate decision shipped first **on the ways side, not the attend side**:
 
@@ -175,7 +175,7 @@ Action potential already tracks engagement dynamics. Why not extend the refracto
 
 ## References
 
-- **[ADR-123](ADR-123-firing-dynamics-progression-axis-unification.md)** — progression-axis unification; where the inward/outward framing landed in code.
+- **[ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md)** — progression-axis unification; where the inward/outward framing landed in code.
 - **ADR-113** — attend active awareness module; the disclosure governor.
 - **ADR-114** — attend as insistent way trigger type; integration for signal handlers.
 - **ADR-119** — action potential engagement model; the inward gate.

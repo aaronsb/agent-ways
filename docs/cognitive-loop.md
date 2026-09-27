@@ -161,7 +161,7 @@ The pieces described so far are *reactive*: they respond to things Claude is doi
 
 But some things happen *outside* Claude's loop. A background build finishes. A peer Claude Code session modifies a file Claude is editing. Context pressure approaches a critical threshold five turns from now. These are events Claude cannot observe without burning reasoning tokens to check, and that the hook system cannot surface because they do not correspond to Claude's own actions.
 
-The **awareness layer** ([ADR-113](architecture/ways/ADR-113-attend-active-awareness-module.md), [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md)) closes this gap. It has two components:
+The **awareness layer** ([ADR-113](architecture/attend/ADR-113-attend-active-awareness-module.md), [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md)) closes this gap. It has two components:
 
 1. **`attend`** — a background Rust binary that observes Claude's session state and environment via small sensor scripts, tracks approaching mechanical consequences using turn-based arithmetic, and emits single-line observations when something is worth surfacing.
 2. **`Monitor`** — Claude Code's async-notification tool that delivers background-script stdout as notifications in Claude's chat.
@@ -276,7 +276,7 @@ Worth naming explicitly, because the architecture can be misread if these aren't
 - **Not consciousness.** The substrate is text replay through an inference model. The composition is novel; the substrate is not. agent-ways does not claim or produce sentience. Any language about "presence" or "continuity" in the design note refers to structural properties of the composition, not metaphysical claims about the substrate.
 - **Not surveillance.** The awareness layer's scope of observation never exceeds the session that owns it. All observations are local. Sensors emit metadata, not content (a presence sensor might emit "user at desk," never a camera frame). The person observed and the person the observations serve are the same person — mirror, not camera.
 - **Not required.** `attend` is opt-in. Ways with `trigger.type: attend` are dormant when `attend` is not running. The baseline Claude Code experience is unchanged if you do not install the awareness layer. `ways` itself is additive too — Claude Code works without it. agent-ways is a composition you can opt into at whatever depth makes sense for your workflow.
-- **Not C2.** Despite superficial resemblance to command-and-control patterns, the architecture points *inward*, not outward. One session, one user, one machine. No inter-instance protocols. No central servers. [ADR-101](architecture/ways/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) and [ADR-102](architecture/ways/ADR-102-irc-based-local-agent-communication.md) tried outward-facing designs and were abandoned for good reasons; the awareness layer points the other direction. <!-- adr-cite-ignore -->
+- **Not C2.** Despite superficial resemblance to command-and-control patterns, the architecture points *inward*, not outward. One session, one user, one machine. No inter-instance protocols. No central servers. [ADR-101](architecture/attend/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) and [ADR-102](architecture/attend/ADR-102-irc-based-local-agent-communication.md) tried outward-facing designs and were abandoned for good reasons; the awareness layer points the other direction. <!-- adr-cite-ignore -->
 - **Not automatic guidance injection at the awareness layer.** Even at critical salience, `attend` does not inject ways directly. It suggests affordances; Claude decides whether to invoke them. The "Claude retains agency" invariant is load-bearing.
 
 ## Where to dig deeper
@@ -293,7 +293,7 @@ Ordered roughly by how specific the topic is to your interest:
 - [ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md) — progressive disclosure for way trees
 - [ADR-108](architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — embedding-based way matching
 - [ADR-112](architecture/archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — session ledger and optional KG integration (archived) <!-- adr-cite-ignore -->
-- [ADR-113](architecture/ways/ADR-113-attend-active-awareness-module.md) — the `attend` binary
+- [ADR-113](architecture/attend/ADR-113-attend-active-awareness-module.md) — the `attend` binary
 - [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md) — the way trigger schema for `attend` signals
 - [ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) — empirical auto-tuning from fire and near-miss telemetry
 

@@ -365,10 +365,10 @@ Tracked in aaronsb/agent-ways#2:
 - **Design note:** [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md)
 - **Tracking issue:** [aaronsb/agent-ways#2](https://github.com/aaronsb/agent-ways/issues/2)
 - **Related ADRs:**
-  - [ADR-104](./ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Disclosure gate
-  - [ADR-111](./ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) — Sibling-crate pattern
-  - [ADR-112](./ADR-112-session-ledger-and-knowledge-graph-integration.md) — Session ledger
-  - [ADR-114](./ADR-114-attend-as-insistent-way-trigger-type.md) — Way trigger type for attend signals
+  - [ADR-104](../ways/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Disclosure gate
+  - [ADR-111](../platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) — Sibling-crate pattern
+  - [ADR-112](../archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — Session ledger
+  - [ADR-114](../ways/ADR-114-attend-as-insistent-way-trigger-type.md) — Way trigger type for attend signals
 - **Prior attempts:**
   - [ADR-101](./ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) — Wormhole relay (Deprecated)
   - [ADR-102](./ADR-102-irc-based-local-agent-communication.md) — IRC-based agent communication (Abandoned)

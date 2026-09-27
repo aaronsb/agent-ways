@@ -106,5 +106,5 @@ Work proceeds on the existing `feat/attend-messaging-reheat` branch as:
 ## References
 
 - [ADR-104](../architecture/ways/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Token-gated way re-disclosure (the model this note reuses)
-- [ADR-113](../architecture/ways/ADR-113-attend-active-awareness-module.md) — `attend`: active awareness module
+- [ADR-113](../architecture/attend/ADR-113-attend-active-awareness-module.md) — `attend`: active awareness module
 - [Cognitive loop and the awareness layer](./cognitive-loop-and-awareness-layer.md) — the broader frame this work sits within

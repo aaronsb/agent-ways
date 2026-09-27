@@ -2,7 +2,7 @@
 
 This page covers the **presentation-layer aging** mechanism: how a signal's visibility in the conversation fades as the progression axis advances, even while the signal file remains on disk. The shape is the forgetting curve applied to notifications — relevance decays exponentially with quiet, and re-engagement resets it, the same spacing logic spaced-repetition systems use to decide when something needs showing again. It's the cousin — not the opposite — of attend's inward-gate engagement model in [`engagement.md`](engagement.md). Both sides of the gate share a single engine; this page is the outward-side explainer.
 
-**Status.** The framing comes from [ADR-121](../architecture/ways/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md). The mechanism it describes was unified with attend's inward gate in [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md): both now consume the same `sensor_trait::Curve` type with the same `salience_at(delta)` query. **Ways was the first concrete implementation**, shipping cross-tool via ADR-123. **Attend's sensor-peers application now ships too** (issue #22) — each peer signal passes through a per-id `EngagementState<Curve::Exponential>` before emitting, so aged backlog fades without being deleted and threaded replies (`re:<id>`) reset the parent's salience. This page describes the decision and points at both production implementations as canonical references. <!-- adr-cite-ignore -->
+**Status.** The framing comes from [ADR-121](../architecture/attend/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md). The mechanism it describes was unified with attend's inward gate in [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md): both now consume the same `sensor_trait::Curve` type with the same `salience_at(delta)` query. **Ways was the first concrete implementation**, shipping cross-tool via ADR-123. **Attend's sensor-peers application now ships too** (issue #22) — each peer signal passes through a per-id `EngagementState<Curve::Exponential>` before emitting, so aged backlog fades without being deleted and threaded replies (`re:<id>`) reset the parent's salience. This page describes the decision and points at both production implementations as canonical references. <!-- adr-cite-ignore -->
 
 ## The problem the outward gate solves
 
@@ -185,7 +185,7 @@ Preserved here for posterity. The arguments didn't change when the engine unifie
 
 ## What this page is not
 
-- **Not the canonical architecture.** That's [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md), with [ADR-121](../architecture/ways/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) as the original outward-gate decision. <!-- adr-cite-ignore -->
+- **Not the canonical architecture.** That's [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md), with [ADR-121](../architecture/attend/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) as the original outward-gate decision. <!-- adr-cite-ignore -->
 - **Not the engine documentation.** That's `sensor_trait::curve::Curve` in source, with unit tests as the executable spec.
 - **Not a parameter-tuning guide for attend.** Attend's outward-gate parameters don't exist in production yet — `attend config lint` will surface them alongside engagement parameters when sensor-peers consumes them.
 
