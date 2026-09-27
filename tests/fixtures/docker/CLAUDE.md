@@ -11,7 +11,7 @@ make test-live TIER=1 FLAVOR=release     # the one-liner against the latest rele
 ```
 
 - The branch flavor clones the checkout inside the container, so it tests the committed HEAD. Commit a hook or script edit before running. The binaries are whatever sits under `tools/target/release`, so rebuild after a Rust change.
-- Exit code 2 means the wrapper stopped before Docker ran: no Docker, a missing binary, or `TIER=2`. Exit code 1 means assertions failed. The image is cached per installer and version, so a second run skips the build.
+- Exit code 2 means the wrapper stopped before Docker ran: no Docker, a missing binary, or for `TIER=2` a missing key or an unwritable `TIER2_OUT`. Exit code 1 means assertions failed. The image is cached per installer and version, so a second run skips the build.
 - `GH_TOKEN` comes from `gh auth token` when unset. The release-asset downloads fail without it.
 
 ## Read a failure
