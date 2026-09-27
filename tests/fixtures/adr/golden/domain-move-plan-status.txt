@@ -1,0 +1,6 @@
+M  docs/architecture/INDEX.md
+R  docs/architecture/system/ADR-104-no-network-in-hooks.md -> docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+R  docs/architecture/system/ADR-111-cut-search.md -> docs/architecture/documentation/ADR-111-cut-search.md
+M  docs/architecture/system/ADR-109-precedent-chain.md
+M  docs/guide/hooks.md
+M  src/search.py

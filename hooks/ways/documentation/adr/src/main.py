@@ -76,6 +76,26 @@ def main():
     # domains
     subparsers.add_parser('domains', help='List domain number series')
 
+    # domain (ADR-306 §6)
+    p_domain = subparsers.add_parser('domain', help='Add, rename or move domains')
+    domain_sub = p_domain.add_subparsers(dest='domain_command')
+    p_dadd = domain_sub.add_parser('add', help='Add a domain to adr.yaml')
+    p_dadd.add_argument('name', help='Domain key (e.g. ops)')
+    p_dadd.add_argument('--range', required=True, help='Number range for new records, A-B (e.g. 400-499)')
+    p_dadd.add_argument('--folder', required=True, help='Folder under docs/architecture')
+    p_dadd.add_argument('--label', help='Display name (default: the key, capitalized)')
+    p_dadd.add_argument('--description', help='One line on what the domain covers')
+    p_dren = domain_sub.add_parser('rename', help='Rename a domain, and its folder, in place')
+    p_dren.add_argument('old', help='Current domain key')
+    p_dren.add_argument('new', help='New domain key')
+    p_dren.add_argument('--folder', help='New folder (default: the new key when the folder was the old key)')
+    p_dren.add_argument('--dry-run', action='store_true', help='Report what would change without changing it')
+    p_dmove = domain_sub.add_parser('move', help='Move records to another domain; numbers never change')
+    p_dmove.add_argument('record', nargs='?', help='ADR number (e.g. 104, ADR-104)')
+    p_dmove.add_argument('domain', nargs='?', help='Target domain')
+    p_dmove.add_argument('--plan', help='YAML list of {record, domain} moves, applied together')
+    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and the rewrites per file; write nothing')
+
     # archive
     p_archive = subparsers.add_parser(
         'archive', help='Archive an ADR out of the active set')
@@ -128,6 +148,7 @@ def main():
         'index': cmd_index,
         'archive': cmd_archive,
         'domains': cmd_domains,
+        'domain': cmd_domain,
         'config': cmd_config,
         'cite': cmd_cite,
         'accept': cmd_accept,

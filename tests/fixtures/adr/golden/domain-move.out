@@ -1,0 +1,12 @@
+Moved: ADR-104 system → docs
+  docs/architecture/system/ADR-104-no-network-in-hooks.md → docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+Rewrote 4 paths in 4 files
+  docs/architecture/system/ADR-109-precedent-chain.md: 1
+  docs/architecture/system/ADR-111-cut-search.md: 1
+  docs/guide/hooks.md: 1
+  src/search.py: 1
+Index needs updating: docs/architecture/INDEX.md
+  15 ADRs across 2 domains
+  Changes: +3 -1 lines
+Updated: docs/architecture/INDEX.md
+[exit 0]

@@ -1,0 +1,1 @@
+M  docs/architecture/adr.yaml

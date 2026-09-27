@@ -252,7 +252,8 @@ def rule_v1_frozen(adr, ctx):
     import had none (ADR-306 §4), and that Summary stays editable: the
     operator expects Summaries to change once the whole corpus is read.
     `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it."""
+    same allowance; git history still shows who added it. Links compare by
+    file name, so moving a record or a domain's folder is not an edit."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -269,7 +270,11 @@ def rule_v1_frozen(adr, ctx):
         return
     then, body_then = versions[0]
     imported = 'imported' in then and 'imported' in adr.frontmatter
-    body_now = adr.body
+    # A path compares by its last segment: a record, or a record it links
+    # to, may have moved folder since, and its number did not change
+    # (ADR-306 §6).
+    body_then = canonical_paths(body_then)
+    body_now = canonical_paths(adr.body)
     if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
         body_now = _without_opening_summary(body_now, body_then)
     for key in sorted(set(then) | set(adr.frontmatter)):

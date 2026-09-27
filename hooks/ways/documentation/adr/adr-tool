@@ -18,6 +18,10 @@ Usage:
     adr import apply [sheets...] [--partial] [--force]
     adr index [-y]
     adr domains
+    adr domain add <name> --range A-B --folder F [--label L] [--description D]
+    adr domain rename <old> <new> [--folder F] [--dry-run]
+    adr domain move <number> <domain> [--dry-run]
+    adr domain move --plan <file.yaml> [--dry-run]
     adr config
 
 Configuration is loaded from docs/architecture/adr.yaml
@@ -30,6 +34,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 import argparse
 import hashlib
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -139,6 +144,13 @@ def get_config() -> dict:
     if _config is None:
         _config = load_config()
     return _config
+
+def reload_config() -> dict:
+    """Drop the cached config and read adr.yaml again, after a command
+    edits it."""
+    global _config
+    _config = None
+    return get_config()
 
 def repo_contract() -> str:
     """The contract adr.yaml declares; adr/v0 when it declares none (ADR-304)."""
@@ -466,29 +478,36 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             info.title = match.group(2)
             break
 
-    # Determine domain from number range (authoritative) or folder name (fallback)
-    # Range takes precedence: an ADR's number definitively places it in a domain,
-    # even if the file is physically in a different domain's folder.
-    if info.number:
-        try:
-            base_num = int(info.number.split('.')[0])
+    # Determine the domain. Under adr/v0 the number range is authoritative and
+    # the folder is the fallback: a number definitively places a record, even
+    # in another domain's folder. Under adr/v1 a number is only an identity,
+    # never renumbered (ADR-306 §6): the folder decides, and the range, which
+    # allocates new numbers, is the fallback for a folder no domain names.
+    def domain_by_range():
+        if info.number:
+            try:
+                base_num = int(info.number.split('.')[0])
+            except ValueError:
+                return None
             for domain, config in get_domains().items():
                 if config['range'][0] <= base_num <= config['range'][1]:
-                    info.domain = domain
-                    break
-        except ValueError:
-            pass
+                    return domain
+        return None
 
-    # Fallback: determine from folder name (for unnumbered or out-of-range ADRs)
-    if not info.domain:
+    def domain_by_folder():
         folder_name = path.parent.name
         for domain, config in get_domains().items():
             folders = config['folder']
             if isinstance(folders, str):
                 folders = [folders]
             if folder_name in folders:
-                info.domain = domain
-                break
+                return domain
+        return None
+
+    if repo_contract() == 'adr/v1':
+        info.domain = domain_by_folder() or domain_by_range()
+    else:
+        info.domain = domain_by_range() or domain_by_folder()
 
     return info
 
@@ -1523,7 +1542,8 @@ def rule_v1_frozen(adr, ctx):
     import had none (ADR-306 §4), and that Summary stays editable: the
     operator expects Summaries to change once the whole corpus is read.
     `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it."""
+    same allowance; git history still shows who added it. Links compare by
+    file name, so moving a record or a domain's folder is not an edit."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -1540,7 +1560,11 @@ def rule_v1_frozen(adr, ctx):
         return
     then, body_then = versions[0]
     imported = 'imported' in then and 'imported' in adr.frontmatter
-    body_now = adr.body
+    # A path compares by its last segment: a record, or a record it links
+    # to, may have moved folder since, and its number did not change
+    # (ADR-306 §6).
+    body_then = canonical_paths(body_then)
+    body_now = canonical_paths(adr.body)
     if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
         body_now = _without_opening_summary(body_now, body_then)
     for key in sorted(set(then) | set(adr.frontmatter)):
@@ -1595,6 +1619,160 @@ def rule_v1_observable(adr, ctx):
         if isinstance(entry, dict) and entry:
             continue
         v1_issue(adr, f"observable entry {i}: expected a line of words or a non-empty mapping")
+# ============================================================================
+# Path rewriting for records that change folder (ADR-306 §6)
+# ============================================================================
+#
+# A record's number is its identity and never changes. Under adr/v1 its
+# folder decides its domain, so moving a record to another domain moves its
+# file, and a domain renamed in place moves its folder. Either way every path
+# to what moved is rewritten: markdown links, paths written from the repo
+# root, and paths inside URLs. ADR-N citations are left alone: the number
+# still names the same record.
+
+# Frontmatter keys that record history and are never rewritten: an imported
+# record keeps the path it was imported from.
+RELOCATE_HISTORY_KEYS = ('imported',)
+
+_PATH_WORD_RE = re.compile(r'[\w./-]+')
+_FM_KEY_RE = re.compile(r'([A-Za-z_][\w-]*)\s*:')
+
+
+class Relocation:
+    """One simultaneous move: files (repo-relative old path -> new path),
+    directories (old dir -> new dir), and optionally a domain key rename for
+    catalog frontmatter (`domain: <key>`). `known` holds every tracked path
+    and directory, so a relative path is rewritten only when it names one."""
+
+    def __init__(self, files=None, dirs=None, known=None, domain=None):
+        self.files = dict(files or {})
+        self.dirs = dict(dirs or {})
+        self.known = set(known or ())
+        self.domain = domain  # (old key, new key) or None
+        self.basenames = {posixpath.basename(p) for p in self.files}
+        self._maps = ([(k.split('/'), v.split('/'), True) for k, v in self.files.items()]
+                      + [(k.split('/'), v.split('/'), False) for k, v in self.dirs.items()])
+
+    def target(self, rel: str) -> Optional[str]:
+        """Where a repo-relative path is after the move, or None if it stays."""
+        if rel in self.files:
+            return self.files[rel]
+        for old, new in self.dirs.items():
+            if rel == old or rel.startswith(old + '/'):
+                return new + rel[len(old):]
+        return None
+
+    def _path(self, token: str, old_dir: str, new_dir: str) -> Optional[str]:
+        """token rewritten as a path to something that moved, or None."""
+        slash = token.endswith('/') and len(token) > 1
+        core = token.rstrip('/') if slash else token
+        if not core:
+            return None
+        # Relative to the file that holds it, resolved from where that file
+        # was. A file that moves re-bases its links to paths that stay.
+        if not core.startswith('/'):
+            resolved = posixpath.normpath(posixpath.join(old_dir, core))
+            if not resolved.startswith('..'):
+                moved = self.target(resolved)
+                if moved is not None or (old_dir != new_dir and resolved in self.known):
+                    dest = moved or resolved
+                    if posixpath.normpath(posixpath.join(new_dir, core)) == dest:
+                        return None
+                    # Keep the link's shape where it still resolves: rename
+                    # only the segments that moved (../system/X -> ../platform/X).
+                    segments, walked = [], old_dir
+                    for segment in core.split('/'):
+                        walked = posixpath.normpath(posixpath.join(walked, segment)) if segment else walked
+                        after = self.target(walked) if segment not in ('', '.', '..') else None
+                        segments.append(posixpath.basename(after) if after else segment)
+                    new = '/'.join(segments)
+                    if posixpath.normpath(posixpath.join(new_dir, new)) != dest:
+                        new = posixpath.relpath(dest, new_dir or '.')
+                    if core.startswith('./') and not new.startswith('.'):
+                        new = './' + new
+                    return new + ('/' if slash else '')
+                if resolved in self.known:
+                    return None  # a real path that stays
+        # A path written from the repo root, or inside a URL: the longest run
+        # of its segments that ends a moved path. A directory needs two
+        # segments (architecture/system), so a bare folder name in prose is
+        # never taken for a path; a moved file matches on its name alone.
+        parts = core.split('/')
+        best = None
+        for old, new, is_file in self._maps:
+            ends = [len(parts)] if is_file else range(len(parts), 0, -1)
+            for end in ends:
+                for k in range(min(end, len(old)), 0, -1):
+                    if k < 2 and not is_file:
+                        break
+                    if parts[end - k:end] == old[-k:]:
+                        if best is None or k > best[0]:
+                            best = (k, end, new)
+                        break
+        if best is None:
+            return None
+        k, end, new = best
+        out = '/'.join(parts[:end - k] + (new[-k:] if len(new) >= k else new) + parts[end:])
+        return (out + ('/' if slash else '')) if out != core else None
+
+    def word(self, token: str, old_dir: str, new_dir: str) -> tuple:
+        """One run of path characters rewritten; (text, count)."""
+        stripped = token.rstrip('.')  # sentence punctuation is not the path
+        if not stripped or ('/' not in stripped and stripped not in self.basenames):
+            return token, 0
+        new = self._path(stripped, old_dir, new_dir)
+        if new is None:
+            return token, 0
+        return new + token[len(stripped):], 1
+
+    def text(self, content: str, rel: str) -> tuple:
+        """content of the file at rel with its paths rewritten; (text, count).
+        History keys in frontmatter are left alone, and a frontmatter
+        `domain:` follows a domain rename."""
+        old_dir = posixpath.dirname(rel)
+        moved = self.target(rel)
+        new_dir = posixpath.dirname(moved) if moved else old_dir
+        lines = content.split('\n')
+        fm_end = None
+        if lines and lines[0].rstrip('\r') == '---':
+            fm_end = next((i for i in range(1, len(lines)) if lines[i].rstrip('\r') == '---'), None)
+        total, key, out = 0, None, []
+
+        def swap(m):
+            nonlocal total
+            new, n = self.word(m.group(0), old_dir, new_dir)
+            total += n
+            return new
+
+        for i, line in enumerate(lines):
+            if fm_end is not None and 0 < i < fm_end:
+                m = _FM_KEY_RE.match(line)
+                if m:
+                    key = m.group(1)
+                if key in RELOCATE_HISTORY_KEYS:
+                    out.append(line)
+                    continue
+                if self.domain and m and key == 'domain':
+                    dm = re.fullmatch(r'(domain:\s*)([\w-]+)(\s*(?:#.*)?)', line.rstrip('\r'))
+                    if dm and dm.group(2) == self.domain[0]:
+                        out.append(dm.group(1) + self.domain[1] + dm.group(3)
+                                   + ('\r' if line.endswith('\r') else ''))
+                        total += 1
+                        continue
+            out.append(_PATH_WORD_RE.sub(swap, line))
+        return '\n'.join(out), total
+
+
+def canonical_paths(text: str) -> str:
+    """Every path in text cut to its last segment, so two versions of a body
+    compare equal when only the folders their links run through differ."""
+    def last(m):
+        token = m.group(0)
+        if '/' not in token:
+            return token
+        segments = [s for s in token.split('/') if s]
+        return segments[-1] if segments else token
+    return _PATH_WORD_RE.sub(last, text)
 # --- import sheets and the v1 record writer (ADR-306) -------------------------------
 
 SHEET_FORMAT = 'adr-import/v1'
@@ -1979,7 +2157,10 @@ def read_record(path: Path) -> dict:
         provenance['target.domain'] = 'number range'
     else:
         todo.append('target.domain: neither the folder nor the number names a domain')
-    span = number_range(domain) if domain else None
+    # Under adr/v1 a record in the tree keeps its number wherever its folder
+    # puts it (ADR-306 §6); the range only allocates new numbers.
+    moved_in_tree = repo_contract() == V1 and _in_tree(path)
+    span = number_range(domain) if domain and not moved_in_tree else None
     if span and not span[0] <= int(str(number).split('.')[0]) <= span[1]:
         todo.append(f"target.number: ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     provenance['target.title'] = 'H1'
@@ -2905,6 +3086,436 @@ def cmd_domains(args):
     print()
     return 0
 
+# ============================================================================
+# adr domain: add, rename, move (ADR-306 §6)
+# ============================================================================
+#
+# The domain layout changes as a corpus grows. A record's number is its
+# permanent identity: it is never renumbered and never reused. Under adr/v1 a
+# record's folder decides its domain, and a domain's range only allocates the
+# numbers of new records. So moving a record moves its file and rewrites every
+# path to it, and ADR-N citations stay as they are.
+#
+# adr.yaml is edited as text, so its comments and layout survive.
+
+DOMAIN_NAME_RE = re.compile(r'[a-z][a-z0-9_-]*')
+FOLDER_NAME_RE = re.compile(r'[A-Za-z0-9][\w.-]*')
+
+
+def cmd_domain(args):
+    handlers = {'add': _domain_add, 'rename': _domain_rename, 'move': _domain_move}
+    if args.domain_command not in handlers:
+        print("usage: adr domain {add,rename,move} ...", file=sys.stderr)
+        return 2
+    return handlers[args.domain_command](args)
+
+
+# --- the files a rewrite reaches ----------------------------------------------------
+
+def _relocation_scope(root: Path) -> tuple:
+    """(names in scope, every tracked path and directory). Scope is every file
+    git tracks except fixtures, import sheets, the archive (archived records
+    are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
+    import fnmatch
+    out = _git(['ls-files', '-z'], root)
+    tracked = sorted(n for n in (out or '').split('\0') if n)
+    known = set(tracked)
+    for name in tracked:
+        parent = posixpath.dirname(name)
+        while parent and parent not in known:
+            known.add(parent)
+            parent = posixpath.dirname(parent)
+    cite_config = get_config().get('cite')
+    patterns = ['tests/fixtures', 'docs/architecture/archive'] + [
+        str(p) for p in ((cite_config.get('exclude') if isinstance(cite_config, dict) else None) or [])]
+
+    def excluded(name: str) -> bool:
+        if '.import' in name.split('/'):
+            return True
+        for pattern in patterns:
+            if any(c in pattern for c in '*?['):
+                if fnmatch.fnmatch(name, pattern):
+                    return True
+            elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
+                return True
+        return False
+    # INDEX.md is regenerated after the move, so it is not rewritten.
+    return [n for n in tracked if not excluded(n) and n != 'docs/architecture/INDEX.md'], known
+
+
+def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:
+    """(name, count, new bytes) for each file whose text changes. Binary files
+    and files that are not UTF-8 are never touched."""
+    changes = []
+    for name in names:
+        path = root / name
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if b'\0' in raw[:8192]:
+            continue
+        try:
+            text = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            continue
+        new, count = relocation.text(text, name)
+        if count and new != text:
+            changes.append((name, count, new.encode('utf-8')))
+    return changes
+
+
+def _print_rewrites(changes: list, verb: str) -> None:
+    total = sum(c for _, c, _ in changes)
+    print(f"{verb} {total} path{'s' if total != 1 else ''} in {len(changes)} file{'s' if len(changes) != 1 else ''}")
+    for name, count, _ in changes:
+        print(f"  {name}: {count}")
+
+
+def _git_mv(root: Path, old: str, new: str) -> None:
+    (root / new).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(['git', 'mv', old, new], cwd=root,
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    (root / old).rename(root / new)
+
+
+def _write_rewrites(relocation: Relocation, root: Path, changes: list) -> None:
+    for name, _, data in changes:
+        (root / (relocation.target(name) or name)).write_bytes(data)
+
+
+def _refresh_index(root: Path) -> None:
+    """Regenerate INDEX.md when the project keeps one."""
+    if (root / 'docs' / 'architecture' / 'INDEX.md').exists():
+        cmd_index(argparse.Namespace(yes=True))
+
+
+# --- adr.yaml as text ---------------------------------------------------------------
+
+def _yaml_scalar(value: str) -> str:
+    if value and re.fullmatch(r'[A-Za-z0-9(][\w ,.()/+-]*', value) and value.strip() == value \
+            and value.lower() not in ('yes', 'no', 'true', 'false', 'on', 'off', 'null', '~'):
+        return value
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def _domains_block(lines: list) -> Optional[tuple]:
+    """(start, end) of the domains block: the `domains:` line and the index
+    just past its last indented line. None when there is no block form."""
+    start = next((i for i, line in enumerate(lines)
+                  if re.fullmatch(r'domains:\s*(#.*)?', line.rstrip('\r\n'))), None)
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end][0] in ' \t'):
+        end += 1
+    return start, end
+
+
+def _entry_indent(lines: list, start: int, end: int) -> tuple:
+    """(entry indent, field indent) used in the domains block."""
+    entry = field_ = None
+    for line in lines[start + 1:end]:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        indent = line[:len(line) - len(line.lstrip())]
+        if entry is None:
+            entry = indent
+        elif len(indent) > len(entry):
+            field_ = indent
+            break
+    entry = entry if entry is not None else '  '
+    return entry, field_ if field_ is not None else entry * 2
+
+
+def _save_config(text: str) -> bool:
+    """Write adr.yaml if the edited text still reads as YAML."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        print(f"Error: the edited adr.yaml does not parse ({e}); nothing written", file=sys.stderr)
+        return False
+    if not isinstance(data, dict) or not isinstance(data.get('domains'), dict):
+        print("Error: the edited adr.yaml lost its domains; nothing written", file=sys.stderr)
+        return False
+    get_config_path().write_text(text)
+    reload_config()
+    return True
+
+
+def _folders(config: dict) -> list:
+    folders = config.get('folder')
+    return list(folders) if isinstance(folders, list) else [folders]
+
+
+# --- add ----------------------------------------------------------------------------
+
+def _domain_add(args):
+    name, folder = args.name, args.folder
+    domains = get_domains()
+    problems = []
+    if not DOMAIN_NAME_RE.fullmatch(name) or name in ('legacy', 'archive'):
+        problems.append(f"'{name}' is not a usable domain name (lowercase letters, digits, - and _; not legacy or archive)")
+    elif name in domains:
+        problems.append(f"domain '{name}' already exists")
+    m = re.fullmatch(r'\s*(\d+)\s*-\s*(\d+)\s*', args.range or '')
+    low = high = None
+    if not m:
+        problems.append(f"--range '{args.range}' is not A-B")
+    else:
+        low, high = int(m.group(1)), int(m.group(2))
+        if low > high:
+            problems.append(f"--range {low}-{high} runs backwards")
+    if not FOLDER_NAME_RE.fullmatch(folder) or folder == 'archive':
+        problems.append(f"--folder '{folder}' is not a folder name under docs/architecture (and not archive)")
+    for other, config in domains.items():
+        if folder in _folders(config):
+            problems.append(f"folder '{folder}' already belongs to {other}")
+    if low is not None and low <= high:
+        spans = [(other, config['range']) for other, config in domains.items()]
+        if 'legacy' in get_config():
+            spans.append(('legacy', get_legacy_range()))
+        for other, (a, b) in spans:
+            if low <= b and a <= high:
+                problems.append(f"range {low}-{high} overlaps {other} ({a}-{b})")
+    if problems:
+        for problem in problems:
+            print(f"Error: {problem}", file=sys.stderr)
+        return 1
+
+    text = get_config_path().read_text()
+    lines = text.splitlines(keepends=True)
+    block = _domains_block(lines)
+    if block is None:
+        print("Error: adr.yaml has no block-style domains: section to add to; edit it by hand", file=sys.stderr)
+        return 1
+    start, end = block
+    entry, field_ = _entry_indent(lines, start, end)
+    last = max((i for i in range(start, end) if lines[i].strip()), default=start)
+    if not lines[last].endswith('\n'):
+        lines[last] += '\n'
+    label = args.label or name.capitalize()
+    new = ['\n', f"{entry}{name}:\n",
+           f"{field_}range: [{low}, {high}]\n",
+           f"{field_}name: {_yaml_scalar(label)}\n",
+           f"{field_}description: {_yaml_scalar(args.description or '')}\n",
+           f"{field_}folder: {_yaml_scalar(folder)}\n"]
+    if last == start:
+        new = new[1:]
+    lines[last + 1:last + 1] = new
+    if not _save_config(''.join(lines)):
+        return 1
+    print(f"Added domain: {name} ({low}-{high})")
+    print(f"  Name: {label}")
+    print(f"  Folder: docs/architecture/{folder}/")
+    return 0
+
+
+# --- rename -------------------------------------------------------------------------
+
+def _domain_rename(args):
+    old, new = args.old, args.new
+    domains = get_domains()
+    if old not in domains:
+        print(f"Error: Unknown domain '{old}'", file=sys.stderr)
+        print(f"Valid domains: {', '.join(domains.keys())}", file=sys.stderr)
+        return 1
+    config = domains[old]
+    folders = _folders(config)
+    problems = []
+    if new != old:
+        if not DOMAIN_NAME_RE.fullmatch(new) or new in ('legacy', 'archive'):
+            problems.append(f"'{new}' is not a usable domain name (lowercase letters, digits, - and _; not legacy or archive)")
+        elif new in domains:
+            problems.append(f"domain '{new}' already exists")
+    if args.folder and len(folders) > 1:
+        problems.append(f"{old} spans several folders ({', '.join(folders)}); rename them by hand")
+    # The folder follows the name when it matched the name; otherwise it
+    # stays, unless --folder names one.
+    folder_old = folders[0]
+    folder_new = args.folder or (new if len(folders) == 1 and folder_old == old else folder_old)
+    root = get_project_root()
+    arch = root / 'docs' / 'architecture'
+    if folder_new != folder_old:
+        if not FOLDER_NAME_RE.fullmatch(folder_new) or folder_new == 'archive':
+            problems.append(f"folder '{folder_new}' is not a folder name under docs/architecture (and not archive)")
+        for other, other_config in domains.items():
+            if other != old and folder_new in _folders(other_config):
+                problems.append(f"folder '{folder_new}' already belongs to {other}")
+        if (arch / folder_new).exists():
+            problems.append(f"docs/architecture/{folder_new} already exists")
+    if new == old and folder_new == folder_old:
+        problems.append("nothing to rename: give a new name or --folder")
+    if problems:
+        for problem in problems:
+            print(f"Error: {problem}", file=sys.stderr)
+        return 1
+
+    text = get_config_path().read_text()
+    lines = text.splitlines(keepends=True)
+    block = _domains_block(lines)
+    key_at = None
+    if block:
+        start, end = block
+        entry, _ = _entry_indent(lines, start, end)
+        key_re = re.compile(rf'{re.escape(entry)}{re.escape(old)}:(\s*(?:#.*)?)')
+        key_at = next((i for i in range(start + 1, end) if key_re.fullmatch(lines[i].rstrip('\r\n'))), None)
+    if key_at is None:
+        print(f"Error: cannot find the '{old}:' entry in adr.yaml's domains block; edit it by hand", file=sys.stderr)
+        return 1
+    ending = lines[key_at][len(lines[key_at].rstrip('\r\n')):]
+    lines[key_at] = f"{entry}{new}:" + key_re.fullmatch(lines[key_at].rstrip('\r\n')).group(1) + ending
+    if folder_new != folder_old:
+        stop = next((i for i in range(key_at + 1, end)
+                     if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= len(entry)), end)
+        folder_re = re.compile(r'(\s+folder:\s*)(\S+?)(\s*(?:#.*)?)')
+        for i in range(key_at + 1, stop):
+            fm = folder_re.fullmatch(lines[i].rstrip('\r\n'))
+            if fm:
+                ending_i = lines[i][len(lines[i].rstrip('\r\n')):]
+                lines[i] = fm.group(1) + _yaml_scalar(folder_new) + fm.group(3) + ending_i
+                break
+        else:
+            print(f"Error: cannot find {old}'s folder: line in adr.yaml; edit it by hand", file=sys.stderr)
+            return 1
+
+    names, known = _relocation_scope(root)
+    old_dir = f"docs/architecture/{folder_old}"
+    new_dir = f"docs/architecture/{folder_new}"
+    relocation = Relocation(dirs={old_dir: new_dir} if folder_new != folder_old else {},
+                            known=known, domain=(old, new) if new != old else None)
+    changes = _plan_rewrites(relocation, root, names)
+    # adr.yaml is written from its edited text, with its own paths rewritten.
+    config_rel = 'docs/architecture/adr.yaml'
+    config_text, config_count = relocation.text(''.join(lines), config_rel)
+    changes = [c for c in changes if c[0] != config_rel]
+    if config_count:
+        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'))])
+
+    verb = 'Would rename' if args.dry_run else 'Renamed'
+    print(f"{verb} domain: {old} → {new}")
+    if folder_new != folder_old:
+        print(f"  Folder: {old_dir}/ → {new_dir}/")
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    if args.dry_run:
+        print("Dry run: nothing written.")
+        return 0
+    if not _save_config(config_text):
+        return 1
+    if folder_new != folder_old and (root / old_dir).exists():
+        _git_mv(root, old_dir, new_dir)
+    _write_rewrites(relocation, root, [c for c in changes if c[0] != config_rel])
+    _refresh_index(root)
+    return 0
+
+
+# --- move ---------------------------------------------------------------------------
+
+def _load_plan(path: str) -> Optional[list]:
+    """The moves a plan file lists: [{record, domain}, ...]."""
+    try:
+        data = yaml.safe_load(Path(path).read_text())
+    except (OSError, yaml.YAMLError) as e:
+        print(f"Error: cannot read plan {path}: {e}", file=sys.stderr)
+        return None
+    if isinstance(data, dict) and 'moves' in data:
+        data = data['moves']
+    if not isinstance(data, list) or not data:
+        print(f"Error: plan {path}: expected a list of {{record, domain}} entries", file=sys.stderr)
+        return None
+    moves = []
+    for i, entry in enumerate(data, 1):
+        if not isinstance(entry, dict) or 'record' not in entry or 'domain' not in entry:
+            print(f"Error: plan entry {i}: expected {{record, domain}}", file=sys.stderr)
+            return None
+        extra = sorted(set(entry) - {'record', 'domain'})
+        if extra:
+            hint = '; a record keeps its number' if 'number' in extra else ''
+            print(f"Error: plan entry {i}: unknown key{'s' if len(extra) > 1 else ''} {', '.join(extra)}{hint}", file=sys.stderr)
+            return None
+        moves.append((str(entry['record']), str(entry['domain'])))
+    return moves
+
+
+def _domain_move(args):
+    if repo_contract() != 'adr/v1':
+        print("Error: under adr/v0 a record's number decides its domain, so a record cannot "
+              "change domain by folder; declare contract: adr/v1 in adr.yaml first", file=sys.stderr)
+        return 1
+    if args.plan:
+        if args.record or args.domain:
+            print("Error: give either <record> <domain> or --plan, not both", file=sys.stderr)
+            return 2
+        moves = _load_plan(args.plan)
+        if moves is None:
+            return 1
+    else:
+        if not args.record or not args.domain:
+            print("Error: adr domain move <record> <domain>, or --plan <file.yaml>", file=sys.stderr)
+            return 2
+        moves = [(args.record, args.domain)]
+
+    root = get_project_root()
+    domains = get_domains()
+    records = get_all_adrs(include_archived=True)
+    problems, files, lines_out, seen = [], {}, [], set()
+    for ref, domain in moves:
+        matches = find_by_ref(ref, records)
+        if not matches:
+            problems.append(f"ADR not found: {ref}")
+            continue
+        if len(matches) > 1:
+            problems.append(f"{ref} matches several records: " + ', '.join(str(relative_path(a.path, root)) for a in matches))
+            continue
+        adr = matches[0]
+        rel = relative_path(adr.path, root).as_posix()
+        if rel in seen:
+            problems.append(f"ADR-{adr.number} is listed twice")
+            continue
+        seen.add(rel)
+        if is_archived(adr.path):
+            problems.append(f"ADR-{adr.number} is archived ({rel}); archived records are kept as they are")
+            continue
+        if domain not in domains:
+            problems.append(f"unknown domain '{domain}' (valid: {', '.join(domains.keys())})")
+            continue
+        folders = _folders(domains[domain])
+        if adr.domain == domain and adr.path.parent.name in folders:
+            problems.append(f"ADR-{adr.number} is already in {domain} ({rel})")
+            continue
+        new_rel = f"docs/architecture/{folders[0]}/{adr.path.name}"
+        if (root / new_rel).exists():
+            problems.append(f"{new_rel} already exists")
+            continue
+        files[rel] = new_rel
+        lines_out.append((adr, adr.domain or 'legacy', domain, rel, new_rel))
+    if problems:
+        for problem in problems:
+            print(f"Error: {problem}", file=sys.stderr)
+        return 1
+
+    names, known = _relocation_scope(root)
+    relocation = Relocation(files=files, known=known)
+    changes = _plan_rewrites(relocation, root, names)
+
+    verb = 'Would move' if args.dry_run else 'Moved'
+    for adr, was, domain, rel, new_rel in lines_out:
+        print(f"{verb}: ADR-{adr.number} {was} → {domain}")
+        print(f"  {rel} → {new_rel}")
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    if args.dry_run:
+        print("Dry run: nothing written.")
+        return 0
+    for rel, new_rel in files.items():
+        _git_mv(root, rel, new_rel)
+    _write_rewrites(relocation, root, changes)
+    _refresh_index(root)
+    return 0
 def cmd_config(args):
     """Show current configuration."""
     config_path = get_config_path()
@@ -3411,8 +4022,10 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     """Where apply writes. A source under docs/architecture is written in
     place and keeps its number and domain: an import never renumbers (§5),
     and moving a record is `adr domain move` (§6). Any other source becomes
-    a new file in the domain's folder. The number must sit in the domain's
-    range either way. Raises SheetError when none of this holds."""
+    a new file in the domain's folder, and its number must sit in the
+    domain's range; under adr/v0 an in-tree record's must too. Under adr/v1
+    an in-tree record keeps its number wherever its folder is. Raises
+    SheetError when none of this holds."""
     target = sheet['target']
     number = format_number(target['number'])
     domain = target.get('domain')
@@ -3423,15 +4036,15 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
         if was != number.lstrip('0') or was_domain != domain:
             raise SheetError(
                 f"the source is ADR-{was} in {was_domain}; the sheet says ADR-{number} in {domain}. "
-                f"Moving a record to another number or domain is `adr domain move` "
-                f"(ADR-306 §6), not built yet; restore target.number and target.domain")
+                f"A record keeps its number; moving it to another domain is `adr domain move` "
+                f"(ADR-306 §6). Restore target.number and target.domain")
     if not domain:
         raise SheetError('target.domain is empty')
     span = number_range(domain)
     if span is None:
         raise SheetError(f"domain '{domain}' is not in adr.yaml; add it first "
                          f"(creating a domain on apply, ADR-306 §6, is not built yet)")
-    if not span[0] <= int(number.split('.')[0]) <= span[1]:
+    if not (in_tree and repo_contract() == V1) and not span[0] <= int(number.split('.')[0]) <= span[1]:
         raise SheetError(f"ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     if in_tree:
         return source_file
@@ -3705,6 +4318,26 @@ def main():
     # domains
     subparsers.add_parser('domains', help='List domain number series')
 
+    # domain (ADR-306 §6)
+    p_domain = subparsers.add_parser('domain', help='Add, rename or move domains')
+    domain_sub = p_domain.add_subparsers(dest='domain_command')
+    p_dadd = domain_sub.add_parser('add', help='Add a domain to adr.yaml')
+    p_dadd.add_argument('name', help='Domain key (e.g. ops)')
+    p_dadd.add_argument('--range', required=True, help='Number range for new records, A-B (e.g. 400-499)')
+    p_dadd.add_argument('--folder', required=True, help='Folder under docs/architecture')
+    p_dadd.add_argument('--label', help='Display name (default: the key, capitalized)')
+    p_dadd.add_argument('--description', help='One line on what the domain covers')
+    p_dren = domain_sub.add_parser('rename', help='Rename a domain, and its folder, in place')
+    p_dren.add_argument('old', help='Current domain key')
+    p_dren.add_argument('new', help='New domain key')
+    p_dren.add_argument('--folder', help='New folder (default: the new key when the folder was the old key)')
+    p_dren.add_argument('--dry-run', action='store_true', help='Report what would change without changing it')
+    p_dmove = domain_sub.add_parser('move', help='Move records to another domain; numbers never change')
+    p_dmove.add_argument('record', nargs='?', help='ADR number (e.g. 104, ADR-104)')
+    p_dmove.add_argument('domain', nargs='?', help='Target domain')
+    p_dmove.add_argument('--plan', help='YAML list of {record, domain} moves, applied together')
+    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and the rewrites per file; write nothing')
+
     # archive
     p_archive = subparsers.add_parser(
         'archive', help='Archive an ADR out of the active set')
@@ -3757,6 +4390,7 @@ def main():
         'index': cmd_index,
         'archive': cmd_archive,
         'domains': cmd_domains,
+        'domain': cmd_domain,
         'config': cmd_config,
         'cite': cmd_cite,
         'accept': cmd_accept,

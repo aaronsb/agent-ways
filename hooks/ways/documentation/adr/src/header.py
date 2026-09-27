@@ -18,6 +18,10 @@ Usage:
     adr import apply [sheets...] [--partial] [--force]
     adr index [-y]
     adr domains
+    adr domain add <name> --range A-B --folder F [--label L] [--description D]
+    adr domain rename <old> <new> [--folder F] [--dry-run]
+    adr domain move <number> <domain> [--dry-run]
+    adr domain move --plan <file.yaml> [--dry-run]
     adr config
 
 Configuration is loaded from docs/architecture/adr.yaml
@@ -30,6 +34,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 import argparse
 import hashlib
 import os
+import posixpath
 import re
 import subprocess
 import sys
