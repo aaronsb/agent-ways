@@ -5,6 +5,7 @@ verb: add
 capability: adr
 basis:
   - operator: aaronsb
+    level: guided
     said: "agent ways should lead the champagne here and once it works, that where agent ways can interrupt and do the adr housekeeping"
     via: session 2026-09-26, PR #559
   - evidence: kg triage of 108 records; agent-ways citation audit
@@ -210,6 +211,7 @@ capability: ingest
 targets: [cli:ingest-legacy, route:/v1/upload]
 basis:
   - operator: aaronsb
+    level: directed
     said: "drop the legacy upload path"
     via: PR #612
 status: accepted
@@ -338,7 +340,7 @@ outside the corpus.
 
 | Source | Grounds the decision in | Reference |
 |---|---|---|
-| `operator` | the human who directed or approved it | who, what was said, and via which channel: session, issue, chat or call |
+| `operator` | the human's involvement, at a declared level | who, the level, what was said, and via which channel: session, issue, chat or call |
 | `evidence` | a measurement, benchmark or research note (#491) | the note or data |
 | `standard` | an external specification, governance control or upstream behaviour | the citation (`governance-cite`) |
 | `upstream` | another repository's accepted record under a shared contract | repo and record |
@@ -349,19 +351,31 @@ is internal. A decision may rest on precedent, but following its precedent
 edges must reach a decision with an external basis. `adr lint` fails a
 decision whose basis chain loops or stays inside the corpus.
 
-Some decisions need the human:
+**These are agent decisions, and no verb waits on a human.** An agent may
+propose and accept any decision, including `add`, `cut` and `retire`, once
+its basis chain leaves the corpus. Gating decisions on human review would
+run them at human pace and lose the reason to have agent decision records
+at all.
 
-- `add`, `cut` and `retire` change what the product is. They need an
-  `operator` basis before acceptance. An agent may propose them, and they
-  stay proposed until the operator's approval is recorded.
-- A decision the record calls one-way, or irreversible, needs an `operator`
-  basis whatever its verb.
-- `change` and `constrain` may be accepted on `evidence`, `standard` or
-  `upstream` alone. The ADR way tells the agent to raise them with the
-  operator when the evidence is thin or contested.
+The operator can enter at any point along a range. An `operator` basis
+records where they entered with `level:`:
 
-The v1 ADR way discloses these rules and tells the agent when to stop and
-ask. `adr accept` refuses a decision whose basis does not meet them.
+| Level | The operator | The decision is |
+|---|---|---|
+| `authored` | wrote the record | the operator's, recorded in the agent corpus |
+| `directed` | made the call, and the agent wrote it up | the operator's, written by the agent |
+| `guided` | gave direction or a constraint, and the agent decided within it | the agent's |
+
+A decision with no `operator` entry is the agent's alone, grounded in
+`evidence`, `standard` or `upstream`. The level records how much a human
+shaped the decision. It does not rank the decision's authority. Guidance
+narrows the space the agent decides in, and a `guided` decision is still an
+agent decision.
+
+The ADR way tells the agent when to involve the operator: when the decision
+is one-way, when the basis is thin or contested, or when it changes what the
+product is and no guidance covers it. Involving the operator is advice to
+the agent. The tool does not enforce it.
 
 **An operator basis is policy, not proof.** The agent runs git and the forge
 CLI under the operator's identity. Commit authorship, PR reviews and comments
@@ -376,6 +390,7 @@ message, a phone call. An `operator` basis records what was said and where:
 ```yaml
 basis:
   - operator: aaronsb
+    level: guided
     said: "the operator's words, verbatim where written"
     via: slack #kg-dev, 2026-09-26
 ```
@@ -442,8 +457,8 @@ is the migration test.
 - A split produces a decision record written after the fact. Its date and
   content come from the original, but its number is new.
 
-- Every decision needs a `basis`, and `add`, `cut` and `retire` wait on the
-  operator. Agents can no longer accept product-shaping decisions alone.
+- Every decision needs a `basis` whose chain leaves the corpus. An agent
+  cannot accept a decision grounded only in other decisions.
 - The basis-chain check needs the whole corpus loaded, and a v0 record in a
   chain has no basis to follow. Until migration ends, the chain check treats
   a v0 record as external basis and warns.
