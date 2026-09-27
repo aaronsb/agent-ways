@@ -30,6 +30,10 @@ def parse_adr(path: Path) -> ADRInfo:
             yaml_content = '\n'.join(lines[1:end_idx])
             try:
                 data = yaml.safe_load(yaml_content) or {}
+                if isinstance(data, dict):
+                    info.frontmatter = data
+                    contract = data.get('contract')
+                    info.contract = str(contract) if contract else None
                 info.status = data.get('status')
                 info.date = str(data.get('date', '')) if data.get('date') else None
                 deciders = data.get('deciders', [])
@@ -56,6 +60,10 @@ def parse_adr(path: Path) -> ADRInfo:
                 'error'))
         else:
             info.issues.append(Issue("No YAML frontmatter found", 'error'))
+
+    # Heading texts below the title, for section references (ADR-104#2)
+    info.sections = [line.lstrip('#').strip() for line in lines
+                     if line.startswith('## ') or line.startswith('### ')]
 
     # Find title
     for line in lines:

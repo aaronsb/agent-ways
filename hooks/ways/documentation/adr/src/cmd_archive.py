@@ -38,7 +38,7 @@ def cmd_archive(args):
     # Refuse to archive a partially superseded document (ADR-303 part C):
     # superseded_by declared while the status is still in force means part of
     # it is live — the archive is for documents a reader no longer opens.
-    if adr.superseded_by and adr.status not in NON_ACTIVE_STATUSES:
+    if adr.superseded_by and not is_non_active(adr.status):
         note = supersession_note(adr)
         print(f"Error: ADR-{adr.number} is {note} while status is "
               f"'{adr.status}' — it is partially superseded, and mostly-live "

@@ -40,7 +40,7 @@ def cmd_list(args):
             'Accepted': '✅',
             'Superseded': '📦',
             'Deprecated': '🗑️'
-        }.get(status, '❓')
+        }.get(str(status).capitalize() if status else status, '❓')
 
     def print_adr(adr):
         note = supersession_note(adr)

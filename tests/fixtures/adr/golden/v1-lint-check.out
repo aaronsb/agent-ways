@@ -1,0 +1,25 @@
+
+Scanned: 8 ADRs
+
+Status distribution:
+  Accepted: 1
+  accepted: 5
+  proposed: 2
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-106-search-change.md
+  ⚠️ supersedes: ADR-104 does not declare the reciprocal superseded_by: ADR-106 — one-directional links rot
+
+════════════════════════════════════════════════════════════
+Summary: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

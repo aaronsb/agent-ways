@@ -11,6 +11,9 @@
 #             status, whole and section-level supersession, two lint defects
 #   defects/  lint findings the main corpus does not carry, and a duplicate
 #             number for the multiple-match branch of view
+#   v1/       an adr/v1 corpus (ADR-304): every kind and verb used correctly,
+#             and one record still on v0
+#   v1-defects/  one broken record per v1 rule, and a malformed adr.yaml
 #
 # Usage:
 #   tests/adr-golden-test.sh            diff against the goldens
@@ -39,7 +42,7 @@ UPDATE=0
 
 # The date normalization below replaces today's date wherever it appears. It is
 # safe only while no fixture carries today's date as content.
-if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects"; then
+if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects" "$FIXTURES/v1" "$FIXTURES/v1-defects"; then
   echo "a fixture file contains today's date ($TODAY); fixture dates must be in the past" >&2
   exit 2
 fi
@@ -69,8 +72,11 @@ fresh() {
 # Replace what varies between machines and days with fixed tokens.
 # The tool prints its own invocation path in some hints, and a rebuilt tool
 # lives at a different path, so that path is normalized too.
+# A run that crosses midnight sees two dates, so both the date the run
+# started on and the current one become <TODAY>.
 normalize() {
-  sed -e "s#$ADR_TOOL#<ADR_TOOL>#g" -e "s#$WORK/repo#<ROOT>#g" -e "s#$TODAY#<TODAY>#g"
+  sed -e "s#$ADR_TOOL#<ADR_TOOL>#g" -e "s#$WORK/repo#<ROOT>#g" \
+      -e "s#$TODAY#<TODAY>#g" -e "s#$(date +%Y-%m-%d)#<TODAY>#g"
 }
 
 # capture NAME CMD... — run the tool in the fixture repo and keep its stdout,
@@ -184,6 +190,19 @@ capture defects-lint        lint
 capture defects-lint-check  lint --check
 capture defects-list        list
 capture defects-view-dup    view 150
+
+# --- adr/v1 (ADR-304): a clean corpus with one unmigrated v0 record, and a
+# corpus with one defect per v1 rule plus a malformed adr.yaml -----------------
+
+fresh v1
+capture v1-lint        lint
+capture v1-lint-check  lint --check
+capture v1-list        list
+capture v1-view-spec   view 102
+
+fresh v1-defects
+capture v1-defects-lint        lint
+capture v1-defects-lint-check  lint --check
 
 # --- compare or update ----------------------------------------------------------
 

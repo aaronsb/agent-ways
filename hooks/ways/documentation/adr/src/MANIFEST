@@ -6,6 +6,7 @@ model.py
 rules.py
 parse.py
 refs.py
+rules_v1.py
 cmd_list.py
 cmd_view.py
 cmd_new.py

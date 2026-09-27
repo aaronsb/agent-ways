@@ -18,6 +18,7 @@
 
 FILE_RULES = []
 CORPUS_RULES = []
+CONFIG_RULES = []
 
 def _register(registry, fn=None, *, contract=None):
     def add(f):
@@ -33,12 +34,19 @@ def corpus_rule(fn=None, *, contract=None):
     """Register a rule that resolves against the corpus: fn(adr, ctx)."""
     return _register(CORPUS_RULES, fn, contract=contract)
 
+def config_rule(fn=None, *, contract=None):
+    """Register a rule over adr.yaml and the corpus as a whole: fn(ctx).
+    Its issues go to ctx.config_issues and print under adr.yaml."""
+    return _register(CONFIG_RULES, fn, contract=contract)
+
 @dataclass
 class LintContext:
     """What rules resolve against: the corpus index and the loaded config."""
     by_number: dict
     config: dict
     contract: str
+    corpus: list = field(default_factory=list)
+    config_issues: list = field(default_factory=list)
 
     @classmethod
     def from_corpus(cls, corpus: list) -> 'LintContext':
@@ -52,13 +60,16 @@ class LintContext:
                 by_number.setdefault(fn_number, adr)
         config = get_config()
         return cls(by_number=by_number, config=config,
-                   contract=config.get('contract', 'adr/v0'))
+                   contract=str(config.get('contract', 'adr/v0')), corpus=corpus)
 
 def _active(registry, ctx):
     return [rule for rule, contract in registry if contract in (None, ctx.contract)]
 
 def run_rules(adrs: list, ctx: 'LintContext') -> None:
-    """File rules for every ADR, then corpus rules for every ADR."""
+    """Config rules, then file rules for every ADR, then corpus rules for
+    every ADR."""
+    for rule in _active(CONFIG_RULES, ctx):
+        rule(ctx)
     file_rules = _active(FILE_RULES, ctx)
     corpus_rules = _active(CORPUS_RULES, ctx)
     for adr in adrs:
@@ -80,7 +91,7 @@ def rule_title_number(adr, ctx):
 
 @file_rule
 def rule_status(adr, ctx):
-    if not adr.has_frontmatter:
+    if not adr.has_frontmatter or is_v1_record(adr, ctx):
         return
     valid_statuses = get_statuses()
     if not adr.status:

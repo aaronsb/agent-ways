@@ -1,0 +1,47 @@
+# Fixture configuration for the adr/v1 contract (ADR-304).
+project_name: ADR v1 Defects Fixture
+contract: adr/v1
+
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Runtime and storage
+    folder: system
+
+statuses: [Draft, Proposed, Accepted, Superseded, Deprecated, Rejected]
+
+defaults:
+  deciders: [developer, agent]
+  status: proposed
+
+legacy:
+  range: [1, 99]
+  label: "Legacy (Pre-Domain Numbering)"
+
+kinds:
+  decision:
+    mutable_after_accept: [status, enacted, superseded_by, considered, concern]
+    verb: required
+    requires: [capability, basis, agent]
+    sections: [Summary]
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec] }
+  spec:
+    mutable_after_accept: all
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+  odd:
+    verb: sometimes
+  broken: notamapping
+
+capabilities:
+  adr: Decision records, their contract, and the tooling that enforces it
+  ingest: Document ingestion into the store
+  search: Query over the store
+
+surfaces:
+  cli: {}
+  route: {}
+
+viewer: cat {file}

@@ -24,7 +24,7 @@ Needs Docker and the four suite binaries under `tools/target/release`. See `test
 make test-adr
 ```
 
-Three scripts cover the vendored `adr` tool. `adr-lint-test.sh` checks frontmatter detection, and `adr-archive-test.sh` checks `adr archive`. `adr-golden-test.sh` runs the read and write commands against two fixture corpora and diffs each output against `fixtures/adr/golden`. `fixtures/adr/corpus` is well-formed apart from two lint defects. `fixtures/adr/defects` carries the lint findings the main corpus lacks, plus a duplicate number. The ADR-304 rollout rewrites the tool in steps, and every step keeps v0 output byte-identical to those goldens.
+Three scripts cover the vendored `adr` tool. `adr-lint-test.sh` checks frontmatter detection, and `adr-archive-test.sh` checks `adr archive`. `adr-golden-test.sh` runs the read and write commands against two fixture corpora and diffs each output against `fixtures/adr/golden`. `fixtures/adr/corpus` is well-formed apart from two lint defects. `fixtures/adr/defects` carries the lint findings the main corpus lacks, plus a duplicate number. `fixtures/adr/v1` and `fixtures/adr/v1-defects` cover the adr/v1 contract (ADR-304). The first is a clean corpus with one record still on v0. The second holds one broken record per v1 rule. The ADR-304 rollout rewrites the tool in steps, and every step keeps v0 output byte-identical to those goldens.
 
 - The tool's source is the modules in `hooks/ways/documentation/adr/src/`, assembled into the single vendored `adr-tool` by `assemble`. `make test-adr` first runs `assemble --check`, which fails if `adr-tool` was edited directly or not re-assembled.
 - `ADR_TOOL=path tests/adr-golden-test.sh` checks another build of the tool against the same goldens.

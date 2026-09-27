@@ -1,0 +1,81 @@
+
+Scanned: 20 ADRs
+
+Status distribution:
+  Draft: 1
+  accepted: 18
+  proposed: 1
+
+Contract: adr/v1 (0 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 19 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ❌ kinds.odd.verb: 'sometimes' is not required or forbidden
+  ❌ kinds.broken: expected a mapping
+  ❌ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-120-no-kind.md
+  ❌ adr/v1 record declares no kind
+
+docs/architecture/system/ADR-121-unknown-kind.md
+  ❌ kind 'memo' is not declared in adr.yaml (declared: broken, decision, odd, spec)
+
+docs/architecture/system/ADR-122-spec-with-verb.md
+  ❌ a spec record takes no verb (found 'add')
+
+docs/architecture/system/ADR-123-decision-no-verb.md
+  ❌ a decision record requires a verb (add, cut, change, retire, constrain)
+
+docs/architecture/system/ADR-124-bad-verb.md
+  ❌ verb 'deprecate' is not a decision verb (add, cut, change, retire, constrain)
+
+docs/architecture/system/ADR-125-missing-capability.md
+  ❌ a decision record requires 'capability'
+
+docs/architecture/system/ADR-126-unknown-capability.md
+  ❌ capability 'telepathy' is not in the adr.yaml vocabulary
+
+docs/architecture/system/ADR-127-list-capability.md
+  ❌ only a constrain decision may name several capabilities or '*'
+
+docs/architecture/system/ADR-128-star-on-add.md
+  ❌ only a constrain decision may name several capabilities or '*'
+
+docs/architecture/system/ADR-129-retire-no-targets.md
+  ❌ a retire decision names its targets (targets: [cli:..., route:...])
+
+docs/architecture/system/ADR-130-retire-bad-targets.md
+  ❌ target 'grpc:Upload': surface 'grpc' is not declared in adr.yaml
+  ❌ target 'plainname' is not namespace:name
+
+docs/architecture/system/ADR-131-spec-supersedes.md
+  ❌ a spec record takes no extends edge
+
+docs/architecture/system/ADR-132-decided-by-spec.md
+  ❌ decided_by: ADR-101 is a spec, expected decision
+
+docs/architecture/system/ADR-133-amends-no-section.md
+  ❌ amends: ADR-100 has no section '9'
+
+docs/architecture/system/ADR-134-amends-dangling.md
+  ❌ amends: 'ADR-199' resolves to no known ADR
+  ❌ a change decision supersedes or amends a prior decision on 'adr'
+
+docs/architecture/system/ADR-135-change-no-prior.md
+  ❌ a change decision supersedes or amends a prior decision on 'ingest'
+
+docs/architecture/system/ADR-136-v0-status.md
+  ❌ status 'Draft' is not in the decision lifecycle (proposed, accepted, rejected, abandoned, superseded, archived)
+
+docs/architecture/system/ADR-137-missing-basis.md
+  ❌ a decision record requires 'basis'
+  ❌ a decision record requires 'agent'
+
+════════════════════════════════════════════════════════════
+Summary: 24 errors, 0 warnings
+════════════════════════════════════════════════════════════
+
+[exit 1]
