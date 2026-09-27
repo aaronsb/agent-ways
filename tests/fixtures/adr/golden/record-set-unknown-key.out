@@ -1,0 +1,2 @@
+Refused: ADR-106 has no field 'capabilty', and it is not a v1 field (contract, kind, verb, capability, targets, supersedes, amends, extends, decided_by, superseded_by, enacted, basis, agent, considered, concern, observable, status, date, deciders, related, imported). --force adds it anyway.
+[exit 1]

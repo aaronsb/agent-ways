@@ -1,0 +1,3 @@
+Marked ADR-108 rejected: Change against a v0 record
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

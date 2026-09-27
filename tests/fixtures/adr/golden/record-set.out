@@ -1,0 +1,3 @@
+Set capability, related, extends, date on ADR-106: Search result caps
+Lint docs/architecture/system/ADR-106-search-change.md: clean
+[exit 0]

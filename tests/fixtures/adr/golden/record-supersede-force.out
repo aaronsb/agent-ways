@@ -1,0 +1,7 @@
+Warning: --force wrote frozen field 'supersedes' on ADR-104. Lint's frozen check still applies: it compares against the record as first accepted on the default branch's history.
+ADR-104 supersedes ADR-101; ADR-101 is superseded
+Lint docs/architecture/system/ADR-101-ingest.md: clean
+Lint docs/architecture/system/ADR-104-no-network-in-hooks.md:
+  ❌ 'supersedes' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

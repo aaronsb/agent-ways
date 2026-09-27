@@ -1,0 +1,37 @@
+{
+  "retire": [
+    {
+      "number": "105",
+      "title": "Retire the legacy ingest surface",
+      "path": "docs/architecture/system/ADR-105-retire-legacy-ingest.md",
+      "status": "accepted",
+      "frontmatter": {
+        "contract": "adr/v1",
+        "kind": "decision",
+        "verb": "retire",
+        "capability": "ingest",
+        "targets": [
+          "cli:ingest-legacy",
+          "route:/v1/upload"
+        ],
+        "status": "accepted",
+        "enacted": "3f9c2a1",
+        "date": "2025-05-06",
+        "deciders": [
+          "developer",
+          "agent"
+        ],
+        "agent": {
+          "name": "Claude",
+          "model": "fixture-model"
+        },
+        "basis": [
+          {
+            "evidence": "fixture measurement"
+          }
+        ]
+      }
+    }
+  ]
+}
+[exit 0]

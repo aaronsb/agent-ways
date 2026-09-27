@@ -1,0 +1,3 @@
+Refused: ADR-104: 'supersedes' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
+ADR-104 is accepted. Record the change as a new decision that supersedes or amends it, or pass --force for migration cleanup.
+[exit 1]

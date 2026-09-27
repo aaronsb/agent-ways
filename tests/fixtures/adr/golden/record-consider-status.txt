@@ -1,0 +1,3 @@
+M  docs/architecture/system/ADR-100-adopt-v1.md
+M  docs/architecture/system/ADR-113-operator-proposed.md
+M  docs/architecture/system/ADR-115-named-probes.md

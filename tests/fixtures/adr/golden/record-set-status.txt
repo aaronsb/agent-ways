@@ -1,0 +1,4 @@
+M  docs/architecture/system/ADR-103-ingest-batching.md
+M  docs/architecture/system/ADR-106-search-change.md
+M  docs/architecture/system/ADR-110-old-v0-record.md
+M  docs/architecture/system/ADR-114-open-concern.md

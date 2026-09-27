@@ -1,0 +1,2 @@
+M  docs/architecture/system/ADR-101-ingest.md
+M  docs/architecture/system/ADR-106-search-change.md
