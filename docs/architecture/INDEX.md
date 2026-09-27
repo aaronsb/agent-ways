@@ -123,6 +123,7 @@ _Documentation structure, tooling, coherence_
 | [ADR-302](./documentation/ADR-302-unified-documentation-model.md) | A unified documentation model — typed graph, ways packaging, cross-repo convergence | Accepted |
 | [ADR-303](./documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md) | Active-set semantics, adr archive, and supersession reading for the ADR corpus | Accepted |
 | [ADR-304](./documentation/ADR-304-typed-decision-records-the-adr-v1-contract.md) | Typed decision records: the adr/v1 contract | Accepted |
+| [ADR-305](./documentation/ADR-305-capabilities-active-at-adoption-need-no-add-decision.md) | Capabilities active at adoption need no add decision | proposed |
 
 ## Legacy (Pre-Domain Numbering)
 
