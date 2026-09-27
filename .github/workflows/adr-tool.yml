@@ -1,0 +1,41 @@
+name: adr tool
+
+# The adr tool is a Python script vendored into other repositories (ADR-177),
+# and the ADR-304 rollout rewrites it in steps. Every step must keep v0 output
+# byte-identical, which tests/adr-golden-test.sh checks against committed
+# goldens. Linux and macOS, because vendoring repos run it on both.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hooks/ways/documentation/adr/**'
+      - 'hooks/ways/documentation/linting/**'
+      - 'docs/scripts/**'
+      - 'tests/adr-*.sh'
+      - 'tests/fixtures/adr/**'
+      - '.github/workflows/adr-tool.yml'
+  pull_request:
+    paths:
+      - 'hooks/ways/documentation/adr/**'
+      - 'hooks/ways/documentation/linting/**'
+      - 'docs/scripts/**'
+      - 'tests/adr-*.sh'
+      - 'tests/fixtures/adr/**'
+      - '.github/workflows/adr-tool.yml'
+  workflow_dispatch:
+
+jobs:
+  adr-tests:
+    name: adr tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: PyYAML for the adr tool
+        run: python3 -m pip install --quiet pyyaml || python3 -m pip install --quiet --break-system-packages pyyaml
+      - name: adr lint, archive and golden-output tests
+        run: make test-adr

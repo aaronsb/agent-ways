@@ -1,0 +1,26 @@
+---
+status: Superseded
+date: 2025-01-10
+deciders:
+  - developer
+  - agent
+superseded_by:
+  - ADR-101
+---
+
+# ADR-005: Legacy storage format
+
+## Context
+
+A pre-domain decision, since replaced.
+
+## Decision
+
+The decision for ADR-005: Legacy storage format.
+
+## Consequences
+
+### Positive
+
+- It works.
+[exit 0]

@@ -1,0 +1,25 @@
+---
+status: Superseded
+date: 2025-03-01
+deciders:
+  - developer
+  - agent
+superseded_by:
+  - ADR-101
+---
+
+# ADR-107: Old queue
+
+## Context
+
+An archived decision.
+
+## Decision
+
+The decision for ADR-107: Old queue.
+
+## Consequences
+
+### Positive
+
+- It works.

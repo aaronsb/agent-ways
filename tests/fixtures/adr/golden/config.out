@@ -1,0 +1,40 @@
+
+Config file: <ROOT>/docs/architecture/adr.yaml
+------------------------------------------------------------
+# Fixture ADR configuration for the golden-output test (tests/adr-golden-test.sh).
+project_name: ADR Fixture
+
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Runtime, hooks and storage
+    folder: system
+
+  docs:
+    range: [300, 399]
+    name: Documentation
+    description: Documentation structure and tooling
+    folder: documentation
+
+statuses:
+  - Draft
+  - Proposed
+  - Accepted
+  - Superseded
+  - Deprecated
+  - Rejected
+
+defaults:
+  deciders:
+    - developer
+    - agent
+  status: Draft
+
+legacy:
+  range: [1, 99]
+  label: "Legacy (Pre-Domain Numbering)"
+
+viewer: cat {file}
+
+[exit 0]
