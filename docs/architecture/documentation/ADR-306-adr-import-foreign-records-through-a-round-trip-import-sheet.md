@@ -33,6 +33,10 @@ basis:
     level: guided
     said: "it might be more work to curate the records, but if an adr changes domains, then I think it needs to be changed in code."
     via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "or in references"
+    via: session 2026-09-27, following the message above
   - evidence: "kg (knowledge-graph-system) holds 123 records, all with v0 frontmatter (status, date, deciders, related); 60 Accepted, 28 Proposed, 16 Draft, 10 Rejected, 8 Superseded, 1 Deprecated"
   - evidence: "in a project that declares contract: adr/v1, `adr new` still writes a v0 record with no contract, kind, verb, capability, basis, agent or Summary"
 agent:
@@ -52,7 +56,7 @@ related:
 
 ## Summary
 
-- **Decided:** `adr import` is the canonical migration path into adr/v1. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every citation of it is rewritten.
+- **Decided:** `adr import` is the canonical migration path into adr/v1. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
 - **Trades away:** hand migration's freedom to restructure a record while moving it. Import carries the body over byte for byte. Splits and rewrites happen after import, as ordinary edits.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
 - **Probes:** *Confident:* v0 records (this repo's and kg's) import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
@@ -139,7 +143,7 @@ A source numbered inside the project's domain ranges keeps its number. Code, way
 The domain layout is not fixed. An import may add or combine domains, and a corpus fed from a tracker keeps growing new ones. A record's number tells you its domain, as it does under v0, so the number follows the domain:
 
 - A domain may hold several ranges. Merging two domains keeps both ranges, so no record is renumbered.
-- A record that moves to another domain, whether by a split or on its own, gets a new number from that domain's range. `adr domain move` rewrites every citation of the old number: in records (`related`, `supersedes` and the other edges), in ways, and in code. `adr cite` finds them. This is more curation work than keeping the number, and in exchange a number always names its domain.
+- A record that moves to another domain, whether by a split or on its own, gets a new number from that domain's range. `adr domain move` rewrites every reference to the record, whether by number (`ADR-N`) or by path (a link to the file, whose folder and name both change). That covers records (`related`, `supersedes` and the other edges, and links in the body), catalog docs, READMEs, ways and code. `adr cite` finds the number references, and the move finds the path references. This is more curation work than keeping the number, and in exchange a number always names its domain.
 - The old number is retired and never reused. The record carries `renumbered_from: [ADR-N]`, so a citation that can't be rewritten, such as one in a commit message or a closed pull request, can still be traced, and `adr cite` reports any left in the tree.
 - `adr domain add`, `merge`, `split` and `move` edit `adr.yaml`, move and renumber the files, rewrite citations and regenerate the index.
 - A sheet whose `target.domain` names a domain that does not exist yet creates it on `apply`, with a free range.
