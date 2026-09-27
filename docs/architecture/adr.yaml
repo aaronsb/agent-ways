@@ -48,16 +48,16 @@ kinds:
 capabilities:
   adr: Decision records, their contract, and the adr tool that enforces it
   docs: The documentation model, catalog pages and doclint
-  matching: How a prompt, tool call or file edit selects ways, and the scoring behind it
-  disclosure: How a selected way reaches the model, when it re-fires, and progressive disclosure
+  method: The ways method itself, what a way is for, its epistemic posture and its register
+  matching: How a prompt, tool call or file edit selects ways, the scoring behind it, and the fire telemetry and calibration data that tune it
+  disclosure: How a selected way reaches the model, when it re-fires, progressive disclosure, and localized way text
   authoring: Way files, their frontmatter, the corpus build and the ways CLI for writing them
+  cli: The output contract the ways, attend and adr commands share with agents and scripts
   attend: Session awareness through sensors, peers, messaging and keepwarm
-  install: Install, update, projection into targets, and self-update
-  config: Settings, configuration layers and permissions
-  introspection: Session introspection, fire telemetry and calibration data
+  install: Install, update, projection into targets, self-update, and how the binaries are built and laid out
+  config: Settings, configuration layers, permissions, guard hooks and the security baseline
   governance: Provenance, controls and compliance findings
   loop: The development loop skills (start, develop, merge, release, wrap)
-  guards: Guard hooks and the security baseline
   testing: The test suites and the live install fixture
 
 # Retire targets name a surface; these are agent-ways' namespaces.
