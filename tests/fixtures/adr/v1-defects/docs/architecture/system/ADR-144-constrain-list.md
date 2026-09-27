@@ -1,19 +1,17 @@
 ---
 contract: adr/v1
 kind: decision
-verb: change
-capability: search
-amends: [ADR-104#1]
-extends: [ADR-100]
-status: proposed
-date: 2025-05-07
+verb: constrain
+capability: [adr, ingest]
+status: accepted
+date: 2025-06-01
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
 basis:
   - evidence: fixture measurement
 ---
 
-# ADR-106: Search result caps
+# ADR-144: A valid constrain over two capabilities
 
 ## Summary
 

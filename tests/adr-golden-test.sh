@@ -14,6 +14,7 @@
 #   v1/       an adr/v1 corpus (ADR-304): every kind and verb used correctly,
 #             and one record still on v0
 #   v1-defects/  one broken record per v1 rule, and a malformed adr.yaml
+#   v1-empty/ adr/v1 declared with no kinds and no capabilities
 #
 # Usage:
 #   tests/adr-golden-test.sh            diff against the goldens
@@ -42,7 +43,7 @@ UPDATE=0
 
 # The date normalization below replaces today's date wherever it appears. It is
 # safe only while no fixture carries today's date as content.
-if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects" "$FIXTURES/v1" "$FIXTURES/v1-defects"; then
+if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects" "$FIXTURES/v1" "$FIXTURES/v1-defects" "$FIXTURES/v1-empty"; then
   echo "a fixture file contains today's date ($TODAY); fixture dates must be in the past" >&2
   exit 2
 fi
@@ -203,6 +204,9 @@ capture v1-view-spec   view 102
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check
+
+fresh v1-empty
+capture v1-empty-lint  lint
 
 # --- compare or update ----------------------------------------------------------
 

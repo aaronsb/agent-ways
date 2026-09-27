@@ -40,7 +40,7 @@ def cmd_list(args):
             'Accepted': '✅',
             'Superseded': '📦',
             'Deprecated': '🗑️'
-        }.get(str(status).capitalize() if status else status, '❓')
+        }.get(str(status).capitalize() if status and repo_contract() == 'adr/v1' else status, '❓')
 
     def print_adr(adr):
         note = supersession_note(adr)

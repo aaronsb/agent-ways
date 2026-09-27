@@ -23,6 +23,8 @@ def cmd_lint(args):
     status_counts = {}
     for adr in adrs:
         status = adr.status or 'Unknown'
+        if ctx.contract == V1 and adr.status:
+            status = str(status).lower()  # v1 lifecycle words are lowercase
         status_counts[status] = status_counts.get(status, 0) + 1
 
     print(f"\nScanned: {len(adrs)} ADRs")
@@ -32,7 +34,8 @@ def cmd_lint(args):
 
     # Under adr/v1, the records not yet migrated (ADR-304 §7)
     if ctx.contract == V1:
-        v0_count = sum(1 for adr in adrs if not is_v1_record(adr, ctx))
+        v0_count = sum(1 for adr in ctx.corpus
+                       if not is_v1_record(adr, ctx) and not is_archived(adr.path))
         print(f"\nContract: {V1} ({v0_count} v0 records remain)")
 
     # Issues. adr.yaml's own issues come first, under its path.

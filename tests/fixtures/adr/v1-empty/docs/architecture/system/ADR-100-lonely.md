@@ -2,10 +2,9 @@
 status: Accepted
 date: 2025-01-01
 deciders: [developer]
-superseded_by: [ADR-108]
 ---
 
-# ADR-110: An unmigrated v0 record
+# ADR-100: A v0 record in an empty v1 corpus
 
 ## Summary
 

@@ -1,5 +1,5 @@
 
-ADR v1 Fixture — Architecture Decision Records (8 total)
+ADR v1 Fixture — Architecture Decision Records (10 total)
 =======================================================
   ✅ ADR-100      Adopt the adr/v1 contract
   ✅ ADR-101      Add ingestion
@@ -8,7 +8,9 @@ ADR v1 Fixture — Architecture Decision Records (8 total)
   ✅ ADR-104      No network calls in hooks
   💡 ADR-105      Retire the legacy ingest surface
   💡 ADR-106      Search result caps
-  ✅ ADR-110      An unmigrated v0 record
+  💡 ADR-107      Ingest notes, by slug reference
+  💡 ADR-108      Change against a v0 record
+  ✅ ADR-110      An unmigrated v0 record  (partially superseded by ADR-108)
 
-Total: 8 ADRs
+Total: 10 ADRs
 [exit 0]

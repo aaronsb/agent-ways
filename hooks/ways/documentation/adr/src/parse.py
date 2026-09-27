@@ -30,10 +30,13 @@ def parse_adr(path: Path) -> ADRInfo:
             yaml_content = '\n'.join(lines[1:end_idx])
             try:
                 data = yaml.safe_load(yaml_content) or {}
-                if isinstance(data, dict):
-                    info.frontmatter = data
-                    contract = data.get('contract')
-                    info.contract = str(contract) if contract else None
+                if not isinstance(data, dict):
+                    info.issues.append(Issue(
+                        f"Frontmatter is a YAML {type(data).__name__}, not a mapping of fields", 'error'))
+                    data = {}
+                info.frontmatter = data
+                contract = data.get('contract')
+                info.contract = str(contract) if contract else None
                 info.status = data.get('status')
                 info.date = str(data.get('date', '')) if data.get('date') else None
                 deciders = data.get('deciders', [])
@@ -61,9 +64,21 @@ def parse_adr(path: Path) -> ADRInfo:
         else:
             info.issues.append(Issue("No YAML frontmatter found", 'error'))
 
-    # Heading texts below the title, for section references (ADR-104#2)
-    info.sections = [line.lstrip('#').strip() for line in lines
-                     if line.startswith('## ') or line.startswith('### ')]
+    # Heading texts in the body, for section references (ADR-104#2). The
+    # frontmatter and fenced code blocks are skipped: a heading inside a code
+    # sample is not a section.
+    body_start = 0
+    if has_frontmatter:
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == '---':
+                body_start = i + 1
+                break
+    in_fence = False
+    for line in lines[body_start:]:
+        if line.lstrip().startswith(('```', '~~~')):
+            in_fence = not in_fence
+        elif not in_fence and (line.startswith('## ') or line.startswith('### ')):
+            info.sections.append(line.lstrip('#').strip())
 
     # Find title
     for line in lines:

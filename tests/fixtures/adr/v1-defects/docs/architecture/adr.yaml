@@ -34,6 +34,13 @@ kinds:
   odd:
     verb: sometimes
   broken: notamapping
+  weird:
+    verb: forbidden
+    requires: capability
+    statuses: [1, 2]
+    edges: [supersedes, extends]
+
+verbs: add
 
 capabilities:
   adr: Decision records, their contract, and the tooling that enforces it

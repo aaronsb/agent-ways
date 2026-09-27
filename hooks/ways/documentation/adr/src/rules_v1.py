@@ -24,27 +24,56 @@ V1_EDGE_FIELDS = ('supersedes', 'amends', 'extends', 'decided_by')
 def is_v1_record(adr, ctx) -> bool:
     return ctx.contract == V1 and adr.contract == V1
 
+# Accessors return a safe default when adr.yaml or a record has the wrong
+# shape, so a malformed file becomes lint issues rather than a crash.
+# rule_v1_config_shape reports the malformed adr.yaml itself.
+
+def _str_list(value) -> Optional[list]:
+    """value as a list of strings, or None when it is not one."""
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return value
+    return None
+
+def _mapping(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
 def v1_kinds(ctx) -> dict:
-    kinds = ctx.config.get('kinds')
-    return kinds if isinstance(kinds, dict) else {}
+    return _mapping(ctx.config.get('kinds'))
+
+def v1_record_kind(adr) -> Optional[str]:
+    kind = adr.frontmatter.get('kind')
+    return kind if isinstance(kind, str) else None
 
 def v1_kind_schema(adr, ctx) -> Optional[dict]:
-    schema = v1_kinds(ctx).get(adr.frontmatter.get('kind'))
+    kind = v1_record_kind(adr)
+    schema = v1_kinds(ctx).get(kind) if kind else None
     return schema if isinstance(schema, dict) else None
 
 def v1_verbs(ctx) -> tuple:
-    return tuple(ctx.config.get('verbs') or V1_VERBS)
+    return tuple(_str_list(ctx.config.get('verbs')) or V1_VERBS)
 
-def v1_lifecycle(schema: dict) -> tuple:
-    return tuple(s.lower() for s in (schema.get('statuses') or V1_LIFECYCLE))
+def v1_lifecycle(schema: Optional[dict]) -> tuple:
+    statuses = _str_list((schema or {}).get('statuses')) or list(V1_LIFECYCLE)
+    return tuple(s.lower() for s in statuses)
+
+def v1_requires(schema: dict) -> list:
+    return _str_list(schema.get('requires')) or []
+
+def v1_edges(schema: dict) -> dict:
+    """field -> list of kinds it may point at; malformed entries are dropped."""
+    edges = {}
+    for name, kinds in _mapping(schema.get('edges')).items():
+        if isinstance(kinds, str):
+            edges[name] = [kinds]
+        elif _str_list(kinds) is not None:
+            edges[name] = kinds
+    return edges
 
 def v1_capabilities(ctx) -> dict:
-    caps = ctx.config.get('capabilities')
-    return caps if isinstance(caps, dict) else {}
+    return _mapping(ctx.config.get('capabilities'))
 
 def v1_surfaces(ctx) -> dict:
-    surfaces = ctx.config.get('surfaces')
-    return surfaces if isinstance(surfaces, dict) else {}
+    return _mapping(ctx.config.get('surfaces'))
 
 def as_entries(value) -> list:
     if value is None:
@@ -60,6 +89,11 @@ def covers(prior, capability: str) -> bool:
     or is scoped to '*' (ADR-304 §3)."""
     scope = capability_scope(prior)
     return '*' in scope or capability in scope
+
+def broader_than(prior, capability: str) -> bool:
+    """The prior covers more than this one capability: '*' or a list."""
+    scope = capability_scope(prior)
+    return '*' in scope or len(scope) > 1
 
 def section_exists(target, section: str) -> bool:
     """A section reference matches a heading that is numbered with it ('2.',
@@ -78,18 +112,36 @@ def v1_issue(adr, message, severity='error'):
 
 @config_rule(contract=V1)
 def rule_v1_config_shape(ctx):
-    if not v1_kinds(ctx):
-        ctx.config_issues.append(Issue("contract: adr/v1 declares no kinds", 'error'))
+    def bad(message):
+        ctx.config_issues.append(Issue(message, 'error'))
+
+    config = ctx.config
+    if not isinstance(config.get('kinds'), dict) or not config.get('kinds'):
+        bad("contract: adr/v1 declares no kinds")
     for name, schema in v1_kinds(ctx).items():
         if not isinstance(schema, dict):
-            ctx.config_issues.append(Issue(f"kinds.{name}: expected a mapping", 'error'))
+            bad(f"kinds.{name}: expected a mapping")
             continue
         verb = schema.get('verb', 'forbidden')
         if verb not in ('required', 'forbidden'):
-            ctx.config_issues.append(Issue(
-                f"kinds.{name}.verb: '{verb}' is not required or forbidden", 'error'))
-    if not v1_capabilities(ctx):
-        ctx.config_issues.append(Issue("contract: adr/v1 declares no capabilities", 'error'))
+            bad(f"kinds.{name}.verb: '{verb}' is not required or forbidden")
+        for key in ('requires', 'statuses'):
+            if key in schema and _str_list(schema[key]) is None:
+                bad(f"kinds.{name}.{key}: expected a list of names")
+        if 'edges' in schema:
+            edges = schema['edges']
+            if not isinstance(edges, dict):
+                bad(f"kinds.{name}.edges: expected a mapping of field to kind or kinds")
+            else:
+                for field_name, kinds in edges.items():
+                    if not isinstance(kinds, str) and _str_list(kinds) is None:
+                        bad(f"kinds.{name}.edges.{field_name}: expected a kind or a list of kinds")
+    if 'verbs' in config and _str_list(config['verbs']) is None:
+        bad("verbs: expected a list of names")
+    if not isinstance(config.get('capabilities'), dict) or not config.get('capabilities'):
+        bad("contract: adr/v1 declares no capabilities")
+    if 'surfaces' in config and not isinstance(config['surfaces'], dict):
+        bad("surfaces: expected a mapping of namespace to settings")
 
 @config_rule(contract=V1)
 def rule_v1_capabilities_added(ctx):
@@ -102,7 +154,10 @@ def rule_v1_capabilities_added(ctx):
                 and adr.frontmatter.get('verb') == 'add'
                 and str(adr.status or '').lower() == 'accepted'):
             added.update(capability_scope(adr))
-    migrating = any(not is_v1_record(adr, ctx) for adr in ctx.corpus)
+    # Archived records are never edited, so they never migrate and do not
+    # hold the check at warning.
+    migrating = any(not is_v1_record(adr, ctx) and not is_archived(adr.path)
+                    for adr in ctx.corpus)
     for name in v1_capabilities(ctx):
         if name not in added:
             ctx.config_issues.append(Issue(
@@ -118,26 +173,29 @@ def rule_v1_kind(adr, ctx):
     kind = adr.frontmatter.get('kind')
     if not kind:
         v1_issue(adr, "adr/v1 record declares no kind")
+    elif not isinstance(kind, str):
+        v1_issue(adr, "kind must be a single name")
     elif v1_kind_schema(adr, ctx) is None:
         v1_issue(adr, f"kind '{kind}' is not declared in adr.yaml (declared: {', '.join(sorted(v1_kinds(ctx)))})")
 
 @file_rule(contract=V1)
 def rule_v1_status(adr, ctx):
-    schema = v1_kind_schema(adr, ctx)
-    if not is_v1_record(adr, ctx) or schema is None:
+    if not is_v1_record(adr, ctx):
         return
+    schema = v1_kind_schema(adr, ctx)
     lifecycle = v1_lifecycle(schema)
+    label = f"the {v1_record_kind(adr)} lifecycle" if schema else "the v1 lifecycle"
     if not adr.status:
         v1_issue(adr, "Missing status in frontmatter")
     elif str(adr.status).lower() not in lifecycle:
-        v1_issue(adr, f"status '{adr.status}' is not in the {adr.frontmatter.get('kind')} lifecycle ({', '.join(lifecycle)})")
+        v1_issue(adr, f"status '{adr.status}' is not in {label} ({', '.join(lifecycle)})")
 
 @file_rule(contract=V1)
 def rule_v1_verb(adr, ctx):
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
-    kind = adr.frontmatter.get('kind')
+    kind = v1_record_kind(adr)
     verb = adr.frontmatter.get('verb')
     if schema.get('verb', 'forbidden') == 'required':
         if not verb:
@@ -152,21 +210,25 @@ def rule_v1_required_fields(adr, ctx):
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
-    for name in schema.get('requires') or []:
-        if adr.frontmatter.get(name) in (None, '', []):
-            v1_issue(adr, f"a {adr.frontmatter.get('kind')} record requires '{name}'")
+    for name in v1_requires(schema):
+        if adr.frontmatter.get(name) in (None, '', [], {}):
+            v1_issue(adr, f"a {v1_record_kind(adr)} record requires '{name}'")
 
 @file_rule(contract=V1)
 def rule_v1_capability(adr, ctx):
     if not is_v1_record(adr, ctx) or v1_kind_schema(adr, ctx) is None:
         return
     raw = adr.frontmatter.get('capability')
-    if raw is None:
+    if raw in (None, '', []):
         return  # reported by rule_v1_required_fields when the kind requires it
     scope = capability_scope(adr)
-    verb = adr.frontmatter.get('verb')
-    if (isinstance(raw, list) or '*' in scope) and verb != 'constrain':
-        v1_issue(adr, "only a constrain decision may name several capabilities or '*'")
+    if adr.frontmatter.get('verb') != 'constrain':
+        if isinstance(raw, list):
+            v1_issue(adr, "capability takes one name; only a constrain decision takes a list")
+            return
+        if '*' in scope:
+            v1_issue(adr, "only a constrain decision may be scoped to '*'")
+            return
     vocabulary = v1_capabilities(ctx)
     for name in scope:
         if name != '*' and name not in vocabulary:
@@ -196,8 +258,8 @@ def rule_v1_edges(adr, ctx):
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
-    kind = adr.frontmatter.get('kind')
-    allowed = schema.get('edges') or {}
+    kind = v1_record_kind(adr)
+    allowed = v1_edges(schema)
     for field_name in V1_EDGE_FIELDS:
         entries = as_entries(adr.frontmatter.get(field_name))
         if not entries:
@@ -206,7 +268,6 @@ def rule_v1_edges(adr, ctx):
             v1_issue(adr, f"a {kind} record takes no {field_name} edge")
             continue
         target_kinds = allowed[field_name]
-        target_kinds = target_kinds if isinstance(target_kinds, list) else [target_kinds]
         for entry in entries:
             number, section = norm_ref(entry)
             target = ctx.by_number.get(number)
@@ -224,13 +285,26 @@ def rule_v1_edges(adr, ctx):
 @corpus_rule(contract=V1)
 def rule_v1_change_replaces(adr, ctx):
     """A change decision supersedes or amends a prior decision on the same
-    capability (ADR-304 §3)."""
+    capability. When the prior covers more than this capability ('*' or a
+    list), the change amends it (ADR-304 §3)."""
     if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
         return
-    scope = [c for c in capability_scope(adr) if c != '*']
-    refs = as_entries(adr.frontmatter.get('supersedes')) + as_entries(adr.frontmatter.get('amends'))
-    priors = [ctx.by_number.get(norm_ref(r)[0]) for r in refs]
-    priors = [p for p in priors if p is not None]
-    for capability in scope:
-        if not any(covers(prior, capability) for prior in priors):
+    edges = []
+    for field_name in ('supersedes', 'amends'):
+        for entry in as_entries(adr.frontmatter.get(field_name)):
+            target = ctx.by_number.get(norm_ref(entry)[0])
+            if target is None:
+                return  # a dangling edge is already reported by the edge rules
+            edges.append((field_name, target))
+    for capability in [c for c in capability_scope(adr) if c != '*']:
+        v0_priors = [t for _, t in edges if not is_v1_record(t, ctx)]
+        fits = [(f, t) for f, t in edges if is_v1_record(t, ctx) and covers(t, capability)]
+        if any(f == 'amends' or not broader_than(t, capability) for f, t in fits):
+            continue
+        if fits:
+            v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
+        elif v0_priors:
+            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
+            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
+        else:
             v1_issue(adr, f"a change decision supersedes or amends a prior decision on '{capability}'")

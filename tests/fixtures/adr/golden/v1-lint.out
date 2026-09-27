@@ -1,10 +1,9 @@
 
-Scanned: 8 ADRs
+Scanned: 10 ADRs
 
 Status distribution:
-  Accepted: 1
-  accepted: 5
-  proposed: 2
+  accepted: 6
+  proposed: 4
 
 Contract: adr/v1 (1 v0 records remain)
 
@@ -15,8 +14,8 @@ Issues found in 2 files:
 docs/architecture/adr.yaml
   ⚠️ capability 'search' has no accepted add decision
 
-docs/architecture/system/ADR-106-search-change.md
-  ⚠️ supersedes: ADR-104 does not declare the reciprocal superseded_by: ADR-106 — one-directional links rot
+docs/architecture/system/ADR-108-ingest-over-v0.md
+  ⚠️ cannot confirm the prior decision on 'ingest': ADR-110 is still v0
 
 ════════════════════════════════════════════════════════════
 Summary: 0 errors, 2 warnings

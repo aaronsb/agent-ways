@@ -2,18 +2,17 @@
 contract: adr/v1
 kind: decision
 verb: change
-capability: search
-amends: [ADR-104#1]
-extends: [ADR-100]
+capability: ingest
+supersedes: [ADR-110]
 status: proposed
-date: 2025-05-07
+date: 2025-05-09
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
 basis:
   - evidence: fixture measurement
 ---
 
-# ADR-106: Search result caps
+# ADR-108: Change against a v0 record
 
 ## Summary
 

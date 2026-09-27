@@ -1,19 +1,17 @@
 ---
 contract: adr/v1
-kind: decision
-verb: change
-capability: search
-amends: [ADR-104#1]
-extends: [ADR-100]
-status: proposed
-date: 2025-05-07
+kind: [decision]
+verb: add
+capability: adr
+status: accepted
+date: 2025-06-01
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
 basis:
   - evidence: fixture measurement
 ---
 
-# ADR-106: Search result caps
+# ADR-138: Kind written as a list
 
 ## Summary
 
