@@ -18,76 +18,11 @@ refire: 0.15
 - Security or performance decisions
 - Anything you'll need to remember "why we did it this way"
 
-## ADR Tooling
+## Commands, Format and Lifecycle
 
-**Always use `docs/scripts/adr` to manage ADRs.** It handles numbering, domain routing, and templates.
+The section above this way, when present, gives this project's ADR commands, record format and lifecycle. It depends on the tool the project vendored and the contract its `adr.yaml` declares (ADR-304 §10). Follow it over any habit from another project.
 
-| Command | Purpose |
-|---------|---------|
-| `docs/scripts/adr new <domain> <title>` | Create new ADR |
-| `docs/scripts/adr list [--group]` | List all ADRs |
-| `docs/scripts/adr view <number>` | View an ADR |
-| `docs/scripts/adr lint [--check]` | Validate ADRs (incl. supersession links) |
-| `docs/scripts/adr index -y` | Regenerate index (active set) |
-| `docs/scripts/adr archive <n> --reason "..."` | Move an ADR out of the active set |
-| `docs/scripts/adr domains` | Show domain number series |
-
-## Directory Structure
-
-```
-docs/
-├── scripts/adr              # CLI tool (symlink to hooks/ways/documentation/adr/adr-tool)
-└── architecture/
-    ├── adr.yaml              # Domain config: number ranges, statuses, defaults
-    ├── INDEX.md              # Auto-generated index (adr index -y)
-    ├── system/               # ADR 100-199: Ways, matching, hooks, lifecycle
-    ├── governance/           # ADR 200-299: Provenance, controls, compliance
-    ├── documentation/        # ADR 300-399: Doc structure, tooling
-    └── legacy/               # ADR 1-99: Pre-domain numbering
-```
-
-Projects define their own domains and ranges in `adr.yaml`. Run `docs/scripts/adr domains` to see the active configuration.
-
-## ADR Format
-
-ADRs use **YAML frontmatter** for metadata and a standard body structure:
-
-```markdown
----
-status: Draft
-date: 2026-02-17
-deciders:
-  - aaronsb
-  - claude
-related: []
----
-
-# ADR-NNN: Decision Title
-
-## Context
-Why this decision is needed. What forces are at play.
-
-## Decision
-What we're doing and how.
-Reversibility: reversible | expensive | one-way, with the milestone that graduates it.
-
-## Consequences
-
-### Positive
-- Benefits and wins
-
-### Negative
-- Costs and risks
-
-### Neutral
-- Other implications
-
-## Alternatives Considered
-- Other options evaluated
-- Why they were rejected
-```
-
-Statuses: `Draft` | `Proposed` | `Accepted` | `Superseded` | `Deprecated`
+Projects define their own domains and ranges in `adr.yaml`; `adr domains` shows them.
 
 ## Generalize the Decision
 
@@ -111,27 +46,9 @@ A generalized ADR is reusable across everything that hits the same force. A disc
 
 Tag every ADR with one of three grades: reversible (changed in one session, no data migration), expensive (a multi-day project), one-way (a rewrite or a migration on live data). Let the tag graduate when the cost changes at a known point: "reversible now, expensive after the first production import". A one-way decision gets the fullest Alternatives section, with a concrete reason each alternative lost.
 
-## Editing an Accepted ADR
-
-A clarification lands in place: a fixed typo, a sharper sentence, a link. A change in what the project does gets a new ADR that supersedes the old one; flip the old status to Superseded and leave its body alone.
-
 ## Fixing ADR Issues
 
-**Run `docs/scripts/adr lint` before editing ADR files.** The linter identifies exactly what's wrong (missing frontmatter, invalid status, missing fields). Use its output to guide targeted fixes rather than opening files and guessing.
-
-The linter detects:
-- Missing YAML frontmatter (including inline metadata that needs conversion)
-- Missing or invalid status, date, deciders
-- Unclosed frontmatter delimiters
-- Invalid YAML syntax
-
-## ADR Workflow
-1. **Debate**: Discuss problem and potential solutions
-2. **Draft**: `docs/scripts/adr new <domain> <title>` — creates numbered ADR in correct subdirectory
-3. **PR**: Create pull request for ADR review
-4. **Review**: User reviews, comments, iterates
-5. **Merge**: ADR becomes accepted, update index with `docs/scripts/adr index -y`
-6. **Implement**: Create branch, reference ADR in work
+**Run `adr lint` before editing ADR files.** The linter names what is wrong: missing or unclosed frontmatter, invalid fields, dangling or one-sided links, and under adr/v1 the contract's own rules. Fix what it reports rather than opening files and guessing.
 
 ## See Also
 
