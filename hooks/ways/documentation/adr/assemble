@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Assemble adr-tool from its source modules.
+
+adr-tool is vendored into other repositories as one self-contained script
+(ADR-177). Its source lives in src/ as small modules, listed in src/MANIFEST
+in assembly order. This script concatenates them into adr-tool. The modules
+share one namespace once assembled, so they import nothing from each other.
+The standard-library imports live in header.py.
+
+Usage:
+    assemble           write adr-tool from src/
+    assemble --check   exit 1 if adr-tool differs from what src/ assembles to
+"""
+
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SRC = HERE / "src"
+TARGET = HERE / "adr-tool"
+
+
+def fail(message: str) -> None:
+    sys.exit(f"assemble: {message}")
+
+
+def modules() -> list:
+    names = []
+    for line in (SRC / "MANIFEST").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line in names:
+            fail(f"{line} is listed twice in src/MANIFEST")
+        if not (SRC / line).is_file():
+            fail(f"src/MANIFEST lists {line}, which does not exist")
+        names.append(line)
+    listed = set(names)
+    unlisted = sorted(p.name for p in SRC.glob("*.py") if p.name not in listed)
+    if unlisted:
+        fail(f"modules missing from src/MANIFEST: {', '.join(unlisted)}")
+    return names
+
+
+def assembled() -> bytes:
+    """The modules joined as bytes, so line endings and encoding pass through
+    untouched and --check sees exactly what would be written."""
+    parts = []
+    for name in modules():
+        data = (SRC / name).read_bytes()
+        if b"\r\n" in data:
+            fail(f"src/{name} has CRLF line endings")
+        if not data.endswith(b"\n"):
+            # Without a final newline, the module's last line would merge
+            # into the next module's first line.
+            fail(f"src/{name} does not end with a newline")
+        parts.append(data)
+    return b"".join(parts)
+
+
+def main() -> int:
+    data = assembled()
+    if sys.argv[1:] == ["--check"]:
+        if not TARGET.is_file() or TARGET.read_bytes() != data:
+            print("adr-tool is out of date with src/. Run hooks/ways/documentation/adr/assemble.",
+                  file=sys.stderr)
+            return 1
+        return 0
+    if sys.argv[1:]:
+        print(__doc__, file=sys.stderr)
+        return 2
+    TARGET.write_bytes(data)
+    TARGET.chmod(0o755)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

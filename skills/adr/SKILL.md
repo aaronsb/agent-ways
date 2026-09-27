@@ -115,6 +115,12 @@ saying the copy is *out of date* means ways ships a newer tool (ADR-177).
 diff docs/scripts/adr ~/.claude/hooks/ways/documentation/adr/adr-tool
 ```
 
+From 1.2.0, lint checks are registered rule functions in one "Lint rules"
+section, and `adr lint` runs them. They no longer run inline in
+`parse_adr`. A local check added to `parse_adr` in an older copy belongs there
+as a `@file_rule`, or as a `@corpus_rule` when it resolves against other
+ADRs.
+
 If the macro instead says the *installed template* is behind the project's
 copy, the agent-ways install is stale — update it (`/ways-update`), don't
 downgrade the project.
