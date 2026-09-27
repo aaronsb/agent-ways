@@ -29,6 +29,7 @@ The harness has a tool for this (`AskUserQuestion`): structured options with sho
 - **Keep it small.** Two to four options per question, a handful of questions at most. The goal is calibration.
 - **Carry the context in each question.** Say what was built or decided and what the answer changes, so the human can answer without opening the PR, file or record. "Merge #588?" sends them to look; "#588 makes CI run on records-only PRs; merge it?" does not.
 - **Batch what is pending.** When several decisions have stacked up, or the human asks what you are waiting on, put them through the tool together, one question each, not as a list in prose.
+- **Fit the format to the decision.** The tool suits a decision whose options each fit in a line; there it removes most of the friction. A complex decision, with interacting parts or a trade-off that needs argument, is laid out in prose or a doc first, and the tool closes it once the options are clear.
 - **Don't ask what you've been told.** If the human already decided, act on it.
 
 The bar is a *genuine* fork. Over-asking trains the human to rubber-stamp, which defeats the point — the same way a linter that nags on non-defects trains its reader to ignore it. Ask when their answer changes the work; otherwise decide, state it, and keep moving.
