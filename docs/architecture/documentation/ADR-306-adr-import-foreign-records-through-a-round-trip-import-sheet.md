@@ -51,6 +51,14 @@ considered:
     said: "i read the adr and it aligns with my understanding. let's accept and merge it"
     via: session 2026-09-27, PR #587
     covers: []
+  - operator: aaronsb
+    said: "my assumption is that everything needed is carried in the docs. but because reality can drift and is complex, its possible (and we should assume it happens) that the actual implementation nearly always has some drift from the record of desire."
+    via: session 2026-09-27, answering the probes after acceptance
+    covers: [frontmatter-carries-all]
+  - operator: aaronsb
+    said: "we import markdown for text. any complex formatting language needs to be markdown. we import a structured body for structured data - I'm not sure what the convention is right now, but yaml or json seems to be the right approach."
+    via: session 2026-09-27, answering the probes after acceptance
+    covers: [non-markdown-bodies]
 status: accepted
 date: 2026-09-27
 deciders:
@@ -68,7 +76,7 @@ related:
 - **Decided:** `adr import` is the acceptance model for a foreign record: whatever shape a record arrives in, it becomes an adr/v1 record through an import sheet. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
 - **Trades away:** a direct edit from source to record. Every record passes through a sheet, a staging format with its own schema, and other sources through field maps. Both have to be documented and kept stable.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
-- **Probes:** *Confident:* v0 records from agent-ways, here or in any repo that adopted them, import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
+- **Probes:** *Confident (frontmatter-carries-all):* v0 records from agent-ways, here or in any repo that adopted them, import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident (non-markdown-bodies):* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
 - **Inversion:** at one end, a reader written in code for every format: exact, but never finished. At the other end, an agent reads each foreign record and writes v1 by hand: flexible, but manual across a hundred records. This decision maps structured fields mechanically and leaves only the judgement fields to the agent.
 
 ## Context
@@ -131,6 +139,13 @@ fields:
   body: fields.description
   unmapped: [key, fields.labels]
 ```
+
+A body is one of two things:
+
+- **Text is markdown.** A source whose text is in another formatting language (HTML, a tracker's rich text, wiki markup) is converted to markdown before the sheet is written, by the reader or by a step run before `scan`.
+- **Structured data is YAML or JSON.** A source item whose content is data rather than prose keeps it as data: in the sheet, and in the record as a fenced `yaml` or `json` block.
+
+An import carries what the source says. A record states what was decided, and the implementation nearly always drifts from it to some degree, so an imported record is not evidence of what the code does. `adr cite` and review compare the two after import.
 
 No reader ever writes an `operator` basis from `deciders`, an assignee or any other metadata (ADR-304 §7, §11). A basis comes from what the record says, and it is filled during cleanup.
 
