@@ -44,7 +44,7 @@ flowchart LR
         Sensors["sensors<br/>(file, git, context, peers)"]:::cheap
         Attend["attend<br/>(salience, insistence, state)"]:::cheap
         Matcher["ways matcher<br/>(embedding)"]:::cheap
-        Gate["disclosure gate<br/>(ADR-104 habituation)"]:::cheap
+        Gate["disclosure gate<br/>(ADR-123 habituation)"]:::cheap
         Ledger["ledger writer"]:::cheap
         Memory["memory projection<br/>(optional, e.g. KG)"]:::cheap
     end
@@ -113,7 +113,7 @@ The naive approach would be: at session start, inject every way that's possibly 
 2. **Attention dilution.** Claude reads what's nearest the current conversation most carefully. Guidance injected at startup becomes guidance buried under forty turns of later content. See [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) for the formal model.
 3. **Habituation.** If every way fires on every possible trigger, Claude's context becomes a soup of guidance that doesn't map to what's happening right now.
 
-**Progressive disclosure** ([ADR-105](architecture/system/ADR-105-progressive-disclosure-for-way-trees.md)) and **token-gated re-disclosure** ([ADR-104](architecture/system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md)) address this together. The rules:
+**Progressive disclosure** ([ADR-105](architecture/system/ADR-105-progressive-disclosure-for-way-trees.md)) and **token-gated re-disclosure** ([ADR-123](architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)) address this together. The rules:
 
 - Ways only fire when their triggers match the current situation, never speculatively
 - Once a way has fired, it is marked as "disclosed" and will not fire again until its re-disclosure cooldown expires
@@ -143,11 +143,11 @@ Both report by default. Vocabulary is never auto-applied — it re-shapes the em
 
 Ways handle the *current* session. Memory handles what persists across sessions.
 
-The **session ledger** ([ADR-112](architecture/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) Tier 1) is a durable, chronological stream of epoch reflections. An epoch is a window of work between context-threshold boundaries: at roughly 30% context, Claude writes what it's orienting toward; at 50%, what has changed; at 70%, what has consolidated; at pre-compaction, a handoff note. The reflection way fires at these thresholds and Claude writes a short prose reflection. The Stop hook captures the prose and appends it to the ledger as one entry.
+The **session ledger** ([ADR-112](architecture/archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) Tier 1) is a durable, chronological stream of epoch reflections. An epoch is a window of work between context-threshold boundaries: at roughly 30% context, Claude writes what it's orienting toward; at 50%, what has changed; at 70%, what has consolidated; at pre-compaction, a handoff note. The reflection way fires at these thresholds and Claude writes a short prose reflection. The Stop hook captures the prose and appends it to the ledger as one entry. <!-- adr-cite-ignore -->
 
 The ledger is **what was understood**, not **what was observed**. Entries are small, hand-curated, high-signal. One ledger per project; sessions contribute to the same chronological stream. When a new session starts, the ledger is the project's history — Claude reads recent entries to orient, and the ledger represents lived experience of the project across all sessions.
 
-**Memory projections** (ADR-112 Tier 2, optional) are a second layer built on top of the ledger. The most developed example is knowledge-graph ingestion: ledger entries are copied via FUSE mount into a KG, which extracts concepts, deduplicates them against prior sessions, and builds associative structure. When a later session enters a new domain, the KG can surface concepts Claude learned in an earlier session that are relevant to the current work.
+**Memory projections** (ADR-112 Tier 2, optional) are a second layer built on top of the ledger. The most developed example is knowledge-graph ingestion: ledger entries are copied via FUSE mount into a KG, which extracts concepts, deduplicates them against prior sessions, and builds associative structure. When a later session enters a new domain, the KG can surface concepts Claude learned in an earlier session that are relevant to the current work. <!-- adr-cite-ignore -->
 
 Memory projections are **configurable and never required**. The KG is one example; a user could attach a different memory tool with the same general shape, or none at all. The system is memory-tool-agnostic: it works with whatever projection (or none) is configured, and the ledger is the stable foundation underneath.
 
@@ -209,7 +209,7 @@ sequenceDiagram
         M-->>C: notification delivered async
         C->>C: read, recognize stakes, decide to engage
         C->>W: ways show attend/<signal>
-        W->>W: matcher + ADR-104 disclosure gate
+        W->>W: matcher + ADR-123 disclosure gate
         W-->>C: way body injected
         C->>C: integrate guidance, act
     end
@@ -258,7 +258,7 @@ Stage by stage:
 - **Wake.** A new session begins. Project pulse surfaces recent ledger entries to orient Claude. `attend` is invoked via `Monitor` at session start and restores its prior state from disk. Claude reads the orientation context and begins working.
 - **Perception.** `attend` runs its sensors in the background, watching Claude's context state, workspace files, peer sessions, and approaching consequences. Most observations are silent; only state transitions worth surfacing reach stdout.
 - **Delivery.** Two paths operate in parallel. `Monitor` delivers `attend`'s stdout lines as asynchronous notifications. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, etc.). Both paths land on Claude's attention surface.
-- **Attention.** The disclosure gate ([ADR-104](architecture/system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md)) applies habituation rules. Recently-disclosed ways are suppressed or re-surfaced tersely. Fresh signals get full weight. The cheap substrate decides what reaches Claude's reasoning in what form.
+- **Attention.** The disclosure gate ([ADR-123](architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)) applies habituation rules. Recently-disclosed ways are suppressed or re-surfaced tersely. Fresh signals get full weight. The cheap substrate decides what reaches Claude's reasoning in what form.
 - **Reasoning.** Claude integrates observations and guidance into its working model and decides what to do.
 - **Action.** Claude acts — edits files, runs tools, responds to the user.
 - **Capture.** At context-threshold boundaries, the reflection way fires. Claude writes a short prose reflection. The Stop hook captures it and appends to the ledger. If a memory projection is configured, the entry is also handed off to it. Separately, every fire and near-miss this turn is logged as cheap telemetry; offline, that record drives the empirical tuning of thresholds and half-lives (ADR-134) without touching the loop.
@@ -276,7 +276,7 @@ Worth naming explicitly, because the architecture can be misread if these aren't
 - **Not consciousness.** The substrate is text replay through an inference model. The composition is novel; the substrate is not. agent-ways does not claim or produce sentience. Any language about "presence" or "continuity" in the design note refers to structural properties of the composition, not metaphysical claims about the substrate.
 - **Not surveillance.** The awareness layer's scope of observation never exceeds the session that owns it. All observations are local. Sensors emit metadata, not content (a presence sensor might emit "user at desk," never a camera frame). The person observed and the person the observations serve are the same person — mirror, not camera.
 - **Not required.** `attend` is opt-in. Ways with `trigger.type: attend` are dormant when `attend` is not running. The baseline Claude Code experience is unchanged if you do not install the awareness layer. `ways` itself is additive too — Claude Code works without it. agent-ways is a composition you can opt into at whatever depth makes sense for your workflow.
-- **Not C2.** Despite superficial resemblance to command-and-control patterns, the architecture points *inward*, not outward. One session, one user, one machine. No inter-instance protocols. No central servers. [ADR-101](architecture/system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) and [ADR-102](architecture/system/ADR-102-irc-based-local-agent-communication.md) tried outward-facing designs and were abandoned for good reasons; the awareness layer points the other direction.
+- **Not C2.** Despite superficial resemblance to command-and-control patterns, the architecture points *inward*, not outward. One session, one user, one machine. No inter-instance protocols. No central servers. [ADR-101](architecture/system/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) and [ADR-102](architecture/system/ADR-102-irc-based-local-agent-communication.md) tried outward-facing designs and were abandoned for good reasons; the awareness layer points the other direction. <!-- adr-cite-ignore -->
 - **Not automatic guidance injection at the awareness layer.** Even at critical salience, `attend` does not inject ways directly. It suggests affordances; Claude decides whether to invoke them. The "Claude retains agency" invariant is load-bearing.
 
 ## Where to dig deeper
@@ -289,10 +289,10 @@ Ordered roughly by how specific the topic is to your interest:
 - [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) — the attention-decay model underlying progressive disclosure
 
 **If you want to understand specific decisions:**
-- [ADR-104](architecture/system/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — token-gated re-disclosure
+- [ADR-123](architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) — firing dynamics, including token-gated re-disclosure
 - [ADR-105](architecture/system/ADR-105-progressive-disclosure-for-way-trees.md) — progressive disclosure for way trees
 - [ADR-108](architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — embedding-based way matching
-- [ADR-112](architecture/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — session ledger and optional KG integration
+- [ADR-112](architecture/archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — session ledger and optional KG integration (archived) <!-- adr-cite-ignore -->
 - [ADR-113](architecture/system/ADR-113-attend-active-awareness-module.md) — the `attend` binary
 - [ADR-114](architecture/system/ADR-114-attend-as-insistent-way-trigger-type.md) — the way trigger schema for `attend` signals
 - [ADR-134](architecture/system/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) — empirical auto-tuning from fire and near-miss telemetry

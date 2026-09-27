@@ -22,7 +22,7 @@ Before the loop begins, `cmd_run_with_catchup` builds up the context it needs:
 2. **Config** — load `~/.config/attend/config.yaml`, then overlay `<cwd>/.claude/attend.yaml` on top (ADR-115 pattern).
 3. **Groups manager** — construct a `Groups` handle for the signals base and the current session ID. This is what ADR-118 focus groups ride on.
 4. **Sensor registration** — `sensors::register_sensors()` walks the config and feature flags, instantiating each enabled sensor with its configured intervals and thresholds. The peers sensor receives a closure provider for focus-group directories so it can refresh membership on every scan (ADR-118 / issue #15).
-5. **Engagement state** — apply ADR-119 action-potential parameters to every slot. Refractory behavior is per-sensor but the parameters are shared.
+5. **Engagement state** — apply ADR-123 action-potential parameters to every slot. Refractory behavior is per-sensor but the parameters are shared.
 6. **State restore** — if `~/.cache/attend/state/<session>.checkpoint` exists from a previous run, import the saved seen-signals and disclosed-thresholds so restart is continuous.
 7. **Banner** — print a startup line unless the fingerprint (version + commit + sensor list + focus) matches the last one written to `_last_banner`, in which case print `[attend] restarted (unchanged)` to keep noisy Monitors quiet.
 8. **Governor** — build a `DisclosureGovernor` with the configured cooldown, rate window, and max disclosures per window.
@@ -147,7 +147,7 @@ stateDiagram-v2
 
 **Changed but below threshold** means the sensor saw something but the magnitude isn't high enough to emit yet. The event is accumulated in the sensor's `DeltaAccumulator` and will be combined with future events if they arrive before the accumulator decays.
 
-**Changed, above threshold, but held in absolute refractory** means ADR-119's action potential is actively suppressing this sensor after a recent burst. The magnitude stays on the accumulator but the sensor is not added to `ready_indices`. The log line `held in absolute refractory` marks this case.
+**Changed, above threshold, but held in absolute refractory** means the action potential (ADR-123) is actively suppressing this sensor after a recent burst. The magnitude stays on the accumulator but the sensor is not added to `ready_indices`. The log line `held in absolute refractory` marks this case.
 
 **Ready** means the sensor crossed threshold and engagement state permits disclosure. The sensor index is appended to `ready_indices`, which the loop processes in a batch after draining.
 
@@ -252,4 +252,4 @@ There's no graceful shutdown hook. The `attend run` process is meant to be start
 - **Engagement curve**: `engagement.md` covers the action potential model — why sensors go quiet after bursts.
 - **Signal format**: `signals.md` covers the wire format, on-disk layout, and lifecycle.
 - **Configuration**: `configuration.md` covers the YAML overlay and how to reshape any of the timers above.
-- **Salience decay**: `salience.md` covers ADR-121's presentation-layer aging — orthogonal to this loop, sitting in the emit path.
+- **Salience decay**: `salience.md` covers the ADR-123 presentation-layer aging — orthogonal to this loop, sitting in the emit path.

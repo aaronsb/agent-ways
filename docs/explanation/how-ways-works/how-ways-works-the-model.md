@@ -3,8 +3,8 @@ id: 01.017.E
 domain: system
 mode: explanation
 related:
-  - "[[ADR-104]]"
   - "[[ADR-123]]"
+  - "[[ADR-126]]"
   - "[[ADR-134]]"
   - "[[01.018.E]]"
   - "[[01.019.E]]"
@@ -103,7 +103,7 @@ physically doing.
 
 **Re-disclosure — habituation.** Once a way has fired, it is marked disclosed
 and won't fire again until its cooldown — measured in *tokens of context
-consumed*, not turns or wall-clock — expires ([[ADR-104]]). When the trigger
+consumed*, not turns or wall-clock — expires ([[ADR-123]], [[ADR-126]]). When the trigger
 recurs after the cooldown, the way re-surfaces fresh as a `way_redisclosed`
 event. This is the mechanism that keeps a long session from either drowning in
 repeated guidance or silently losing premises it surfaced eighty turns ago. The

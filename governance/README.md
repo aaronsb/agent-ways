@@ -165,6 +165,6 @@ Your compliance repo owns the policies. Your ways repo owns the guidance. This d
 
 ## Further Reading
 
-- [ADR-005: Governance Traceability](../docs/architecture/legacy/ADR-005-governance-traceability.md) — the design decision
+- [ADR-200: Compliance claims and session-derived findings](../docs/architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md) — the decision in force, superseding the original traceability design
 - [Provenance documentation](../docs/hooks-and-ways/provenance.md) — the full reference
 - [The Cost of Bad Instructions](../docs/hooks-and-ways/rationale.md) — why this matters economically and environmentally

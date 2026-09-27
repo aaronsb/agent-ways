@@ -249,7 +249,7 @@ pub fn epoch_distance(way_id: &str, session_id: &str) -> u64 {
     current.saturating_sub(way_ep)
 }
 
-// ── Token position (ADR-104 re-disclosure) ──────────────────────
+// ── Token position (ADR-123/126 re-disclosure) ──────────────────────
 
 /// Read the token position from the most recent transcript.
 pub fn get_token_position(_session_id: &str) -> u64 {

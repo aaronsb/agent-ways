@@ -63,7 +63,7 @@ Semantic matching (`description` + `vocabulary`) is additive with regex triggers
 | Event handler, fires often relative to session | `0.05` | `frequent` |
 | Disclose once per session | `1.0` | `once` |
 
-Numeric values between presets are valid — e.g., `refire: 0.2` sits between `normal` and `rare` and is what ADR-127's 1M-Opus-tuned ways migrated to.
+Numeric values between presets are valid — e.g., `refire: 0.2` sits between `normal` and `rare` and is what the PR #70 1M-Opus-tuned ways migrated to (ADR-126).
 
 Numeric form pins the cadence to today's model. Preset form tracks the project's `refire_presets` config for portability across model generations.
 

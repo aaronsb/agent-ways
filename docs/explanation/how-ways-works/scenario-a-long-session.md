@@ -3,7 +3,7 @@ id: 01.018.E
 domain: system
 mode: explanation
 related:
-  - "[[ADR-104]]"
+  - "[[ADR-123]]"
   - "[[ADR-134]]"
   - "[[01.017.E]]"
   - "[[01.019.E]]"
@@ -102,7 +102,7 @@ met where it is.
 
 `softwaredev/delivery/branching` fired once and then **re-disclosed 19 times**.
 Each refresh happened after roughly 100K tokens of context had passed since the
-last one — its token-gated cooldown ([[ADR-104]]). But the token positions where
+last one — its token-gated cooldown ([[ADR-126]]). But the token positions where
 it re-disclosed aren't a clean rising line; they sawtooth:
 
 ```

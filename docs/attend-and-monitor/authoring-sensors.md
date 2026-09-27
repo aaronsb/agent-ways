@@ -1,6 +1,6 @@
 # Authoring sensors
 
-Sensor authorship is a first-class design surface in attend. A sensor is not a log tail — it's a module that translates raw environmental change into *magnitude-weighted observations* that feed attend's engagement model (ADR-119) and disclosure governor. A well-designed sensor encodes how much each kind of change matters in the magnitude, and lets the loop handle when to fire, how often, and whether to suppress. This is the discipline alarm management (ISA-18.2) brings to control rooms, applied to agent notifications: a channel stays trustworthy only as long as its loudest tier is reserved for what is genuinely loud.
+Sensor authorship is a first-class design surface in attend. A sensor is not a log tail — it's a module that translates raw environmental change into *magnitude-weighted observations* that feed attend's engagement model (ADR-123) and disclosure governor. A well-designed sensor encodes how much each kind of change matters in the magnitude, and lets the loop handle when to fire, how often, and whether to suppress. This is the discipline alarm management (ISA-18.2) brings to control rooms, applied to agent notifications: a channel stays trustworthy only as long as its loudest tier is reserved for what is genuinely loud.
 
 This page is for people building sensors, in either of attend's two implementations.
 
@@ -40,7 +40,7 @@ Before you write a single line of code, understand what your events will encount
 
 1. **Accumulator.** Your `(magnitude, description)` pair is added to the sensor's `DeltaAccumulator`. Magnitudes accumulate across ticks until the sensor is drained or decays.
 2. **Emission threshold.** A per-sensor threshold — the accumulator has to exceed this before the sensor is a candidate to disclose. Low-magnitude events accumulate silently until several of them add up; a single high-magnitude event may cross threshold on its own.
-3. **Engagement / refractory (ADR-119).** After the sensor recently fired a disclosure, its effective threshold is temporarily elevated (relative refractory) or it's fully suppressed (absolute refractory, ~60s by default). During refractory, new events still accumulate but don't fire until the cooldown passes — unless their magnitude is high enough to break through the elevated threshold. This is how attend models "disengagement after a burst": low-magnitude follow-ups get swallowed, truly urgent events still get through.
+3. **Engagement / refractory (ADR-123).** After the sensor recently fired a disclosure, its effective threshold is temporarily elevated (relative refractory) or it's fully suppressed (absolute refractory, ~60s by default). During refractory, new events still accumulate but don't fire until the cooldown passes — unless their magnitude is high enough to break through the elevated threshold. This is how attend models "disengagement after a burst": low-magnitude follow-ups get swallowed, truly urgent events still get through.
 4. **Disclosure governor.** Even after the sensor is ready, a global governor rate-limits disclosures across the whole loop (default: 3 per 120s, with a 15s cooldown between them). If a burst of sensors all want to fire at once, some get held until the window rolls.
 5. **Monitor delivery.** Whatever survives all of the above gets printed as one stdout line per event and picked up by Monitor (or the `attend chat` TUI) as an async notification into the conversation.
 
@@ -252,7 +252,7 @@ Once the script's stdout reaches attend:
 1. Each valid `magnitude|description` line becomes one event.
 2. Events accumulate in the sensor's `DeltaAccumulator` between polls.
 3. When the accumulator exceeds the emission threshold (2.5 for this sensor), the sensor becomes a disclosure candidate.
-4. The disclosure governor decides whether to actually fire (respecting cooldown, rate window, and any active refractory from ADR-119).
+4. The disclosure governor decides whether to actually fire (respecting cooldown, rate window, and any active refractory from ADR-123).
 5. If fired, each event becomes one Monitor notification line delivered into the conversation (or rendered in `attend chat` if the consumer is a human).
 
 The sensor author never touches any of that machinery. They just write `gh`-CLI glue and pick magnitudes.
@@ -276,5 +276,5 @@ Written as heuristics, not commandments:
 - [`sensors.md`](sensors.md) *(planned)* — reference for the built-in sensors
 - [`configuration.md`](configuration.md) *(planned)* — config schema for declaring sensors
 - **ADR-117** — sensor crate extraction and feature flags
-- **ADR-119** — action potential engagement model
+- **ADR-123** — firing dynamics; the action potential engagement model in force
 - **ADR-116** — permission requirements for sensors

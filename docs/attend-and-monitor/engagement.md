@@ -228,7 +228,7 @@ For the ways-side equivalent of this page see [ADR-123 Decision 4](../architectu
 ## Related
 
 - **[ADR-123](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification and curve-as-parameter framing
-- **ADR-119** — the original action potential model (pre-unification; superseded by ADR-123 for the math, preserved for the biology-analogy framing)
+- **ADR-119** — the original action potential model (pre-unification; superseded by ADR-123 for the math, preserved for the biology-analogy framing) <!-- adr-cite-ignore -->
 - [`loop.md`](loop.md) — where engagement state sits in the loop iteration
 - [`authoring-sensors.md`](authoring-sensors.md) — how sensor authors design around engagement
 - [`configuration.md`](configuration.md) — full config schema for engagement parameters

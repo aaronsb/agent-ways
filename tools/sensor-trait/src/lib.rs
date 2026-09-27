@@ -265,7 +265,7 @@ pub fn epoch_secs() -> Tick {
 
 /// Default `Curve::ActionPotential` for sensor slots. Mirrors the defaults
 /// that the old `EngagementState::new()` shipped with, so sensors booted
-/// without config overrides preserve ADR-119 behavior.
+/// without config overrides preserve ADR-119 behavior. // adr-cite-ignore
 fn default_sensor_curve() -> Curve {
     Curve::ActionPotential {
         burst_threshold: 3,

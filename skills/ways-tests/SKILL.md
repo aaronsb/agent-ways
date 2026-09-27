@@ -126,7 +126,7 @@ floor.
 At *scan* time (not here), when an ancestor has fired this session a child's effective
 semantic bar is lowered from `τ_s` to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)`
 — by default `max(0.5×0.8, 0.30) = 0.40`, in probability space (the multiplier boosts, the floor
-caps) — the progressive-disclosure mechanism (ADR-104/105/126). For multilingual
+caps) — the progressive-disclosure mechanism (ADR-105/123/126). For multilingual
 stubs, `ways tune` reports locale fidelity/discrimination (see the
 `knowledge/optimization/tuning` way).
 

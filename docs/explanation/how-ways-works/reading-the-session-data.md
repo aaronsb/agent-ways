@@ -3,7 +3,7 @@ id: 01.019.E
 domain: system
 mode: explanation
 related:
-  - "[[ADR-112]]"
+  - "[[ADR-123]]"
   - "[[ADR-134]]"
   - "[[01.017.E]]"
   - "[[01.018.E]]"
@@ -124,7 +124,7 @@ A few readings that turn raw fields into judgement:
 
 - **Re-disclosures ≫ first-fires** is the signature of a *long* session — premises
   refreshed across context pressure and compaction, exactly as
-  [[ADR-104]] intends. A session that's nearly all first-fires was short.
+  [[ADR-123]] and [[ADR-126]] intend. A session that's nearly all first-fires was short.
 - **A trigger mix dominated by `semantic`** means the session was steered by
   *meaning* — Claude's intent matched ways without anyone having anticipated the
   keyword. A mix dominated by `bash`/`file` means it was steered by what Claude
@@ -146,7 +146,7 @@ A few readings that turn raw fields into judgement:
 
 The event log is the *telemetry* layer — fine-grained, per-fire, recent (it
 tail-compacts past ~32 MiB, so it forgets its oldest tail). It is not the durable
-memory of the project; that's the **session ledger** ([[ADR-112]]), which records
+memory of the project; that's the **session ledger** ([[ADR-112]]), which records <!-- adr-cite-ignore -->
 *what was understood* rather than *what fired*. The two are complementary: the
 ledger is the journal, the event log is the instrument trace. This cluster is
 about the instrument trace — for the journal and the rest of the architecture,

@@ -37,14 +37,14 @@ Large feature:
 ### For Multi-Step Implementation
 Suggest sequence:
 ```
-Implementing ADR-005 (new auth system):
-1. Branch: adr-005-auth-foundation
+Implementing ADR-NNN (new auth system):
+1. Branch: adr-nnn-auth-foundation
    - Database schema
    - Core auth models
-2. Branch: adr-005-auth-endpoints
+2. Branch: adr-nnn-auth-endpoints
    - API endpoints
    - Depends on: foundation branch
-3. Branch: adr-005-auth-ui
+3. Branch: adr-nnn-auth-ui
    - Login/logout UI
    - Depends on: endpoints branch
 ```
