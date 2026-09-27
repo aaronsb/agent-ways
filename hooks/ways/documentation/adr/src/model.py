@@ -15,6 +15,11 @@ class ADRInfo:
     superseded_by: list = field(default_factory=list)
     domain: Optional[str] = None
     has_frontmatter: bool = False
+    # adr/v1 (ADR-304): the raw frontmatter, the contract the record declares
+    # (None means adr/v0), and its heading texts for section references.
+    frontmatter: dict = field(default_factory=dict)
+    contract: Optional[str] = None
+    sections: list = field(default_factory=list)
     issues: list = field(default_factory=list)
 
 @dataclass

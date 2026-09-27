@@ -1,0 +1,21 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ❌ contract: adr/v1 declares no kinds
+  ❌ contract: adr/v1 declares no capabilities
+
+════════════════════════════════════════════════════════════
+Summary: 2 errors, 0 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

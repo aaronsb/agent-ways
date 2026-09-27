@@ -1,0 +1,15 @@
+# Fixture: adr/v1 declared with no kinds and no capabilities.
+project_name: ADR v1 Empty Fixture
+contract: adr/v1
+
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Runtime
+    folder: system
+
+defaults:
+  deciders: [developer, agent]
+
+viewer: cat {file}

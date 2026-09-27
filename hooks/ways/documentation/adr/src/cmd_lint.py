@@ -13,7 +13,8 @@ def cmd_lint(args):
     # Cross-file rules resolve against the full corpus, even when linting an
     # explicit subset of paths.
     corpus = adrs if not args.paths else get_all_adrs(include_archived=True)
-    run_rules(adrs, LintContext.from_corpus(corpus))
+    ctx = LintContext.from_corpus(corpus)
+    run_rules(adrs, ctx)
 
     total_errors = 0
     total_warnings = 0
@@ -22,6 +23,8 @@ def cmd_lint(args):
     status_counts = {}
     for adr in adrs:
         status = adr.status or 'Unknown'
+        if ctx.contract == V1 and adr.status:
+            status = str(status).lower()  # v1 lifecycle words are lowercase
         status_counts[status] = status_counts.get(status, 0) + 1
 
     print(f"\nScanned: {len(adrs)} ADRs")
@@ -29,8 +32,16 @@ def cmd_lint(args):
     for status, count in sorted(status_counts.items()):
         print(f"  {status}: {count}")
 
-    # Issues
+    # Under adr/v1, the records not yet migrated (ADR-304 §7)
+    if ctx.contract == V1:
+        v0_count = sum(1 for adr in ctx.corpus
+                       if not is_v1_record(adr, ctx) and not is_archived(adr.path))
+        print(f"\nContract: {V1} ({v0_count} v0 records remain)")
+
+    # Issues. adr.yaml's own issues come first, under its path.
     files_with_issues = [adr for adr in adrs if adr.issues]
+    if ctx.config_issues:
+        files_with_issues.insert(0, ADRInfo(path=get_config_path(), issues=ctx.config_issues))
 
     if files_with_issues:
         print(f"\n{'─'*60}")

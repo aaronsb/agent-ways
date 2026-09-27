@@ -33,7 +33,7 @@ def supersession_note(adr) -> str:
     for entry in adr.superseded_by:
         number, section = norm_ref(entry)
         parts.append(f"ADR-{number} §{section}" if section else f"ADR-{number}")
-    in_force = adr.status not in NON_ACTIVE_STATUSES
+    in_force = not is_non_active(adr.status)
     label = 'partially superseded by' if in_force else 'superseded by'
     return f"{label} {', '.join(parts)}"
 

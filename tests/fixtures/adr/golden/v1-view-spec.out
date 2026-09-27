@@ -1,0 +1,24 @@
+---
+contract: adr/v1
+kind: spec
+capability: ingest
+status: accepted
+date: 2025-05-03
+deciders: [developer, agent]
+decided_by: [ADR-101]
+---
+
+# ADR-102: How ingestion works
+
+## Summary
+
+Context for the record.
+
+## 1. Decision
+
+The decision.
+
+## 2. Consequences
+
+They follow.
+[exit 0]

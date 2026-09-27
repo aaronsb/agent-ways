@@ -46,4 +46,14 @@ TOOL_VERSION = "1.2.0"
 # Statuses that mean "no longer in force" — used by archive and the
 # partial-supersession convention (ADR-303 / issue #438 option C2).
 NON_ACTIVE_STATUSES = {'Superseded', 'Deprecated', 'Rejected'}
+# adr/v1's record lifecycle is lowercase and adds abandoned and archived
+# (ADR-304 §2). The v0 set above stays exact, so v0 repos see no change.
+V1_NON_ACTIVE_STATUSES = {'superseded', 'deprecated', 'rejected', 'abandoned', 'archived'}
+
+def is_non_active(status) -> bool:
+    if not status:
+        return False
+    if repo_contract() == 'adr/v1':
+        return str(status).lower() in V1_NON_ACTIVE_STATUSES
+    return status in NON_ACTIVE_STATUSES
 
