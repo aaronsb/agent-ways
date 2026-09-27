@@ -701,6 +701,107 @@ worktree domain-move-plan-refused-status.txt
 # Under adr/v0 the number decides the domain, so a move is refused.
 fresh corpus
 capture domain-move-v0 domain move 104 docs
+# --- record edits: consider, set, supersede, enact ----------------------------------
+#
+# Each edit keeps the file it wrote, so the goldens show that only the touched
+# field's lines changed.
+
+S="docs/architecture/system"
+# named_probes — an accepted record whose Summary names its probes
+named_probes() {
+  (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: adr\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer, agent]\nagent: {name: Claude, model: fixture-model}\nbasis:\n  - evidence: fixture measurement\n---\n\n# ADR-115: Named probes\n\n## Summary\n\n- **Decided:** the decision.\n- **Probes:** *Confident (identity-stable):* a. *Not confident (band-hint):* b.\n- **Inversion:** c.\n\n## 1. Decision\n\nThe decision.\n' > "$S/ADR-115-named-probes.md")
+  commit_all "named probes"
+}
+
+fresh v1
+named_probes
+capture record-consider         consider 115 --said '"Fine" (Recommended)' --via "session 2025-05-20, selected from agent-written options" --operator developer --covers band-hint inversion --canary caught
+keep record-consider-file.md "$S/ADR-115-named-probes.md"
+capture record-consider-append  consider 100 --said "ok, as it stands" --via "PR #2" --operator developer --covers
+keep record-consider-append-file.md "$S/ADR-100-adopt-v1.md"
+capture record-consider-new     consider 113 --said "add it back" --via call --operator developer --paraphrase
+keep record-consider-new-file.md "$S/ADR-113-operator-proposed.md"
+worktree record-consider-status.txt
+capture record-consider-unknown-probe consider 115 --said ok --via PR --operator developer --covers identity-stable no-such-probe
+capture record-consider-no-names      consider 101 --said ok --via PR --operator developer --covers edge-case
+capture record-consider-no-said       consider 115 --via PR --operator developer
+capture record-consider-no-via        consider 115 --said ok --via "  " --operator developer
+capture record-consider-v0            consider 110 --said ok --via PR --operator developer
+
+fresh v1
+capture record-set              set 106 "capability=[search, ingest]" "related=[ADR-100, ADR-101]" extends-=ADR-100 date=2025-05-17
+keep record-set-file.md "$S/ADR-106-search-change.md"
+capture record-set-remove-block set 106 related-=ADR-100
+keep record-set-remove-block-file.md "$S/ADR-106-search-change.md"
+capture record-set-append-block set 114 "basis+={evidence: a second load test}" "concern+={said: Retries may double, resolve: Count retries}"
+keep record-set-append-block-file.md "$S/ADR-114-open-concern.md"
+capture record-set-mutable      set 103 superseded_by+=ADR-107
+keep record-set-mutable-file.md "$S/ADR-103-ingest-batching.md"
+capture record-set-v0           set 110 status=Superseded
+keep record-set-v0-file.md "$S/ADR-110-old-v0-record.md"
+worktree record-set-status.txt
+capture record-set-frozen       set 101 capability=search "related=[ADR-100]"
+capture record-set-status-cmd   set 106 status=accepted
+capture record-set-remove-missing set 106 related-=ADR-9
+capture record-set-bad-yaml     set 106 "related=[ADR-1"
+capture record-set-bad-form     set 106 related
+capture record-set-unknown-key  set 106 capabilty=search
+
+fresh v1
+capture record-set-dry-run      set 106 verb=add --dry-run
+worktree record-set-dry-run-status.txt
+capture record-set-force       set 101 verb=change --force
+keep record-set-force-file.md "$S/ADR-101-ingest.md"
+
+# Line endings survive a field edit.
+fresh v1
+edit "$S/ADR-114-open-concern.md" "s.replace(chr(10), chr(13)+chr(10))"
+capture record-set-crlf         set 114 "basis+={evidence: a second load test}"
+(cd "$WORK/repo" && python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print('crlf kept' if b'\\r\\n' in d and d.count(b'\\n')==d.count(b'\\r\\n') else 'crlf lost')" "$S/ADR-114-open-concern.md") > "$ACTUAL/record-set-crlf-file.txt"
+
+fresh v1
+capture record-list-field       list --field capability=ingest
+capture record-list-capability  list --capability adr
+capture record-list-kind        list --kind spec
+capture record-list-verb        list --verb change --field status=proposed
+capture record-list-edge        list --field amends=ADR-101
+capture record-list-present     list --field supersedes
+capture record-list-group-by    list --group-by capability
+capture record-list-json        list --json --verb retire
+capture record-list-json-group  list --json --group-by verb --field enacted
+fresh corpus
+capture record-list-group-by-v0 list --group-by status
+
+fresh v1
+capture record-supersede        supersede 101 --by 106
+keep record-supersede-new-file.md "$S/ADR-106-search-change.md"
+keep record-supersede-old-file.md "$S/ADR-101-ingest.md"
+worktree record-supersede-status.txt
+
+fresh v1
+capture record-supersede-amends supersede 100 --by 107 --amends 2
+keep record-supersede-amends-file.md "$S/ADR-107-ingest-notes.md"
+worktree record-supersede-amends-status.txt
+capture record-supersede-no-section   supersede 100 --by 108 --amends 9
+capture record-supersede-kind         supersede 102 --by 106
+capture record-supersede-old-proposed supersede 113 --by 106
+capture record-supersede-frozen       supersede 101 --by 104
+capture reject-for-supersede          reject 108 --reason "Dropped"
+capture record-supersede-new-rejected supersede 101 --by 108
+
+fresh v1
+capture record-supersede-force  supersede 101 --by 104 --force
+keep record-supersede-force-file.md "$S/ADR-104-no-network-in-hooks.md"
+
+fresh v1
+capture record-enact            enact 111 ABC1234
+keep record-enact-file.md "$S/ADR-111-cut-search.md"
+capture record-enact-again      enact 105 3f9c2a1dead
+keep record-enact-again-file.md "$S/ADR-105-retire-legacy-ingest.md"
+capture record-enact-wrong-verb enact 101 abc1234
+capture record-enact-not-hash   enact 111 HEAD~1
+capture set-for-enact           set 111 status=superseded
+capture record-enact-wrong-status enact 111 abc1234
 
 fresh v1-defects
 capture v1-defects-lint        lint

@@ -35,6 +35,16 @@ docs/scripts/adr domain add <name> --range A-B --folder F [--label L] [--descrip
 docs/scripts/adr domain rename <old> <new> [--folder F] [--dry-run]   # moves the folder, rewrites paths
 docs/scripts/adr domain move <n> <domain> [--dry-run]                 # adr/v1: moves the file, rewrites paths
 docs/scripts/adr domain move --plan moves.yaml [--dry-run]            # [{record, domain}, ...] at once
+# Query by frontmatter (adr/v1); a list field matches when it lists the value
+docs/scripts/adr list --capability attend --verb change   # also --kind, --field KEY[=VALUE]
+docs/scripts/adr list --group-by capability               # a listed record appears in each group
+docs/scripts/adr list --json                              # number, title, path, status, frontmatter
+
+# Edit records (adr/v1): only the touched field's lines change; each lints the record after
+docs/scripts/adr consider <n> --said "..." --via "..." [--covers PROBE...] [--canary caught|missed]
+docs/scripts/adr set <n> key=value key+=item key-=item   # frozen fields refused once accepted
+docs/scripts/adr supersede <old> --by <new> [--amends SECTION]   # writes both sides
+docs/scripts/adr enact <n> <commit>                      # accepted cut or retire only
 
 # Config
 docs/scripts/adr config                   # Show current adr.yaml configuration

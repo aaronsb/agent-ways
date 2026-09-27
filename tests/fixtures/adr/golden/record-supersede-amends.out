@@ -1,0 +1,3 @@
+ADR-107 amends ADR-100 §2
+Lint docs/architecture/system/ADR-107-ingest-notes.md: clean
+[exit 0]

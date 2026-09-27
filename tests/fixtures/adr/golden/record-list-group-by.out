@@ -1,0 +1,37 @@
+
+ADR v1 Fixture — Architecture Decision Records (15 total)
+=======================================================
+
+## capability: * (1)
+--------------------------------------------------
+  ✅ ADR-104      No network calls in hooks
+
+## capability: adr (2)
+--------------------------------------------------
+  ✅ ADR-100      Adopt the adr/v1 contract
+  ✅ ADR-112      Operator-authored constraint
+
+## capability: ingest (9)
+--------------------------------------------------
+  ✅ ADR-101      Add ingestion
+  ✅ ADR-102      How ingestion works
+  ✅ ADR-103      Batch ingestion  (partially superseded by ADR-109)
+  ✅ ADR-105      Retire the legacy ingest surface
+  💡 ADR-107      Ingest notes, by slug reference
+  💡 ADR-108      Change against a v0 record
+  💡 ADR-109      Grounded through precedent, via a decision and a spec
+  ✅ ADR-112      Operator-authored constraint
+  💡 ADR-114      Cap batch size
+
+## capability: search (3)
+--------------------------------------------------
+  💡 ADR-106      Search result caps
+  ✅ ADR-111      Cut search
+  💡 ADR-113      Operator-started and still proposed
+
+## capability: (none) (1)
+--------------------------------------------------
+  ✅ ADR-110      An unmigrated v0 record  (partially superseded by ADR-108)
+
+Total: 15 ADRs
+[exit 0]

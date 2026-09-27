@@ -1,0 +1,3 @@
+Set status on ADR-111: Cut search
+Lint docs/architecture/system/ADR-111-cut-search.md: clean
+[exit 0]

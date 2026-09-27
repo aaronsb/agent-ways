@@ -6,6 +6,8 @@ A librarian for managing Architecture Decision Records.
 
 Usage:
     adr list [--domain DOMAIN] [--status STATUS] [--group] [--archived|--all]
+             [--field KEY[=VALUE]] [--kind K] [--verb V] [--capability C]
+             [--group-by KEY] [--json]
     adr view <number>          # View an ADR (aliases: v, show)
     adr new <domain> <title>
     adr rename <number> [new-title] [--slug SLUG]
@@ -14,6 +16,11 @@ Usage:
     adr cite [--check] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
+    adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
+                 [--paraphrase] [--canary caught|missed] [--dry-run]
+    adr set <number> key=value|key+=value|key-=value ... [--force] [--dry-run]
+    adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]
+    adr enact <number> <commit> [--dry-run]
     adr import scan <paths...> [--force]
     adr import apply [sheets...] [--partial] [--force]
     adr index [-y]
@@ -33,6 +40,7 @@ Configuration is loaded from docs/architecture/adr.yaml
 
 import argparse
 import hashlib
+import json
 import os
 import posixpath
 import re

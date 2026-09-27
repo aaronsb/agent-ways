@@ -1,0 +1,10 @@
+
+ADR v1 Fixture — Architecture Decision Records (4 total)
+=======================================================
+  💡 ADR-106      Search result caps
+  💡 ADR-107      Ingest notes, by slug reference
+  💡 ADR-108      Change against a v0 record
+  💡 ADR-109      Grounded through precedent, via a decision and a spec
+
+Total: 4 ADRs
+[exit 0]
