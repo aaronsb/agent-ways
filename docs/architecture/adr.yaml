@@ -36,12 +36,17 @@ kinds:
     verb: required
     requires: [capability, basis, agent]
     sections: [Summary]
-    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec] }
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec, evidence] }
   spec:
     mutable_after_accept: all
     verb: forbidden
     requires: [capability]
     edges: { supersedes: spec, decided_by: decision }
+  evidence:
+    mutable_after_accept: [status, superseded_by, related]
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: evidence }
 
 # What agent-ways does, one line each: the only hand-written description of
 # a capability. A decision adds, cuts, changes or constrains these.

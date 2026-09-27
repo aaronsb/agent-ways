@@ -1013,6 +1013,22 @@ def rule_v1_basis_config(ctx):
 
 # --- one record ----------------------------------------------------------------
 
+def _check_evidence_record(adr, ctx, where: str, ref: str) -> None:
+    """A basis `evidence: ADR-N` that names a record must resolve to one, and
+    under v1 to a kind the decision's basis edge accepts other than decision
+    (ADR-309 §2): a record cited as evidence is evidence or a spec."""
+    target = ctx.by_number.get(norm_ref(ref)[0])
+    if target is None:
+        v1_issue(adr, f"{where}: evidence {ref} resolves to no record")
+        return
+    if not is_v1_record(target, ctx):
+        return
+    schema = v1_kind_schema(adr, ctx) or {}
+    allowed = [k for k in (v1_edges(schema).get('basis') or []) if k != 'decision']
+    kind = target.frontmatter.get('kind')
+    if allowed and kind not in allowed:
+        v1_issue(adr, f"{where}: evidence {ref} is a {kind}; evidence cites a {' or '.join(allowed)} record")
+
 @file_rule(contract=V1)
 def rule_v1_basis_shape(adr, ctx):
     if not is_v1_record(adr, ctx) or 'basis' not in adr.frontmatter:
@@ -1048,6 +1064,8 @@ def rule_v1_basis_shape(adr, ctx):
                 v1_issue(adr, f"{where}: precedent takes one reference, such as ADR-101")
             elif not _text(value) and not (isinstance(value, int) and not isinstance(value, bool)):
                 v1_issue(adr, f"{where}: {source} needs a reference")
+            elif source == 'evidence' and re.fullmatch(r'ADR-\d+(\.\d+)?', str(value).strip()):
+                _check_evidence_record(adr, ctx, where, str(value).strip())
             continue
         # operator: who, the level, what was said and via which channel
         if not _text(value):

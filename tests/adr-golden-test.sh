@@ -300,6 +300,14 @@ capture v1-summary-prefix-heading lint docs/architecture/system/ADR-108-ingest-o
 edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary Nudge\n', '## Summary: the short version\n', 1)"
 capture v1-summary-colon-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
 
+# An evidence kind (ADR-309): a basis that cites a record as evidence must
+# reach an evidence or spec record.
+fresh v1
+edit docs/architecture/adr.yaml "s.replace('basis: [decision, spec] }', 'basis: [decision, spec, evidence] }').replace('    edges: { supersedes: spec, decided_by: decision }\n', '    edges: { supersedes: spec, decided_by: decision }\n  evidence:\n    mutable_after_accept: [status, superseded_by, related]\n    verb: forbidden\n    requires: [capability]\n    edges: { supersedes: evidence }\n', 1)"
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: evidence\ncapability: ingest\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer]\n---\n\n# ADR-117: Ingest throughput survey\n\nMeasured 40 MB/s on the reference host.\n' > docs/architecture/system/ADR-117-ingest-throughput-survey.md)
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: ingest\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: ADR-117\n  - evidence: ADR-101\n  - evidence: ADR-999\n---\n\n# ADR-118: Raise the ingest batch size\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md)
+capture v1-evidence-kind lint docs/architecture/system/ADR-117-ingest-throughput-survey.md docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md
+
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
 baseline_fresh() {
