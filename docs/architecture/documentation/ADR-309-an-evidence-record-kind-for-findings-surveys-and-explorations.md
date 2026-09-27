@@ -19,7 +19,16 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "Same kind for now (Recommended)"
+    via: "session 2026-09-27, selected from agent-written options when the probes were asked; the label was written by the agent"
+    covers: [exploration-fit]
+  - operator: aaronsb
+    said: "Accept both and proceed (Recommended)"
+    via: "session 2026-09-27, selected from agent-written options when the probes were asked; the label was written by the agent"
+    covers: []
+status: accepted
 date: 2026-09-27
 deciders:
   - aaronsb

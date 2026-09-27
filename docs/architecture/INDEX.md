@@ -127,8 +127,8 @@ _Documentation structure, tooling, coherence_
 | [ADR-306](./documentation/ADR-306-adr-import-foreign-records-through-a-round-trip-import-sheet.md) | adr import: foreign records through a round-trip import sheet | accepted |
 | [ADR-307](./documentation/ADR-307-a-decision-names-what-should-be-observable-when-it-holds.md) | A decision names what should be observable when it holds | accepted |
 | [ADR-308](./documentation/ADR-308-a-change-decision-may-list-several-capabilities.md) | A change decision may list several capabilities | accepted |
-| [ADR-309](./documentation/ADR-309-an-evidence-record-kind-for-findings-surveys-and-explorations.md) | An evidence record kind for findings, surveys and explorations | proposed |
-| [ADR-310](./documentation/ADR-310-record-numbers-are-permanent-identity-and-records-live-by-intent.md) | Record numbers are permanent identity, and records live by intent | proposed |
+| [ADR-309](./documentation/ADR-309-an-evidence-record-kind-for-findings-surveys-and-explorations.md) | An evidence record kind for findings, surveys and explorations | accepted |
+| [ADR-310](./documentation/ADR-310-record-numbers-are-permanent-identity-and-records-live-by-intent.md) | Record numbers are permanent identity, and records live by intent | accepted |
 
 ## Legacy (Pre-Domain Numbering)
 
