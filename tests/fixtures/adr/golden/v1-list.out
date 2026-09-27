@@ -1,5 +1,5 @@
 
-ADR v1 Fixture — Architecture Decision Records (11 total)
+ADR v1 Fixture — Architecture Decision Records (13 total)
 =======================================================
   ✅ ADR-100      Adopt the adr/v1 contract
   ✅ ADR-101      Add ingestion
@@ -12,6 +12,8 @@ ADR v1 Fixture — Architecture Decision Records (11 total)
   💡 ADR-108      Change against a v0 record
   💡 ADR-109      Grounded through precedent, via a decision and a spec
   ✅ ADR-110      An unmigrated v0 record  (partially superseded by ADR-108)
+  ✅ ADR-112      Operator-authored constraint
+  💡 ADR-113      Operator-started and still proposed
 
-Total: 11 ADRs
+Total: 13 ADRs
 [exit 0]
