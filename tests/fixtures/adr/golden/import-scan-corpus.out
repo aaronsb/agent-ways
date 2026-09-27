@@ -1,0 +1,17 @@
+Note: 1 archived record(s) left out; name a file to scan it
+Scanned: docs/architecture/documentation/ADR-300-doc-structure.md -> docs/architecture/.import/ADR-300.yaml (v0, 4 todo)
+Scanned: docs/architecture/documentation/ADR-301-draft-guide.md -> docs/architecture/.import/ADR-301.yaml (v0, 4 todo)
+Skipped: docs/architecture/documentation/ADR-302-inline-metadata.md: no YAML frontmatter; import reads structured records (ADR-306 §2)
+Scanned: docs/architecture/documentation/ADR-303-dangling.md -> docs/architecture/.import/ADR-303.yaml (v0, 4 todo)
+Scanned: docs/architecture/legacy/ADR-005-legacy-storage.md -> docs/architecture/.import/ADR-005.yaml (v0, 4 todo)
+Scanned: docs/architecture/legacy/ADR-012-plain-logging.md -> docs/architecture/.import/ADR-012.yaml (v0, 4 todo)
+Scanned: docs/architecture/runbooks/ADR-200-restart-procedure.md -> docs/architecture/.import/ADR-200.yaml (v0, 4 todo)
+Scanned: docs/architecture/system/ADR-101-structured-storage.md -> docs/architecture/.import/ADR-101.yaml (v0, 4 todo)
+Scanned: docs/architecture/system/ADR-101.1-storage-migration.md -> docs/architecture/.import/ADR-101.1.yaml (v0, 4 todo)
+Scanned: docs/architecture/system/ADR-102-hook-ordering.md -> docs/architecture/.import/ADR-102.yaml (v0, 4 todo)
+Scanned: docs/architecture/system/ADR-103-cache-layer.md -> docs/architecture/.import/ADR-103.yaml (v0, 4 todo)
+Scanned: docs/architecture/system/ADR-104-hook-priorities.md -> docs/architecture/.import/ADR-104.yaml (v0, 4 todo)
+Scanned: docs/architecture/system/ADR-105-telemetry.md -> docs/architecture/.import/ADR-105.yaml (v0, 5 todo)
+Scanned: docs/architecture/system/ADR-106-one-sided.md -> docs/architecture/.import/ADR-106.yaml (v0, 4 todo)
+Scan: 13 sheet(s) written, 1 skipped
+[exit 0]

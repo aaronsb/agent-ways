@@ -1,0 +1,57 @@
+path: docs/architecture/.import/ADR-110.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-110-old-v0-record.md
+  format: v0
+  sha256: 5fbfe7e263da32fb0a7d49dc620e989feb6c9283465df2f66c2d9632ab7969a4
+target:
+  number: 110
+  domain: system
+  title: An unmigrated v0 record
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  superseded_by:
+    - ADR-108
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-01-01
+  deciders:
+    - developer
+summary: |
+  Context for the record.
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+candidates:
+  capability: []
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  summary: '## Summary section'
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Accepted'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+  record.superseded_by: frontmatter superseded_by
+unmapped: {}
+body: |
+  ## 1. Decision
+
+  The decision.
+
+  ## 2. Consequences
+
+  They follow.

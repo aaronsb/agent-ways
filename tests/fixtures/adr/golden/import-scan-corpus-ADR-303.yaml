@@ -1,0 +1,62 @@
+path: docs/architecture/.import/ADR-303.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/documentation/ADR-303-dangling.md
+  format: v0
+  sha256: 764672969aebec723f87be38b80fa653e5b45713282259b13bc115860732cd07
+target:
+  number: 303
+  domain: docs
+  title: Dangling reference
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  supersedes:
+    - ADR-199
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-09-15
+  deciders:
+    - developer
+    - agent
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+candidates:
+  capability: []
+provenance:
+  target.number: file name
+  target.domain: folder documentation
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Accepted'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+  record.supersedes: frontmatter supersedes
+unmapped: {}
+body: |
+  ## Context
+
+  Supersedes an ADR that does not exist.
+
+  ## Decision
+
+  The decision for ADR-303: Dangling reference.
+
+  ## Consequences
+
+  ### Positive
+
+  - It works.

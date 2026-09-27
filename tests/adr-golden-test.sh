@@ -395,6 +395,69 @@ edit docs/architecture/system/ADR-114-open-concern.md "s.replace(chr(10), chr(13
 capture v1-accept-crlf          accept 114
 (cd "$WORK/repo" && python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print('crlf kept' if b'\\r\\n' in d and d.count(b'\\n')==d.count(b'\\r\\n') else 'crlf lost', '|', [l for l in d.split(b'\\r\\n') if l.startswith(b'status:')])" docs/architecture/system/ADR-114-open-concern.md) > "$ACTUAL/v1-accept-crlf-file.txt"
 
+# --- adr import (ADR-306) ---------------------------------------------------------
+
+# keep_sheets PREFIX — keep every sheet scan wrote, one golden each
+keep_sheets() {
+  local sheet
+  for sheet in "$WORK/repo/docs/architecture/.import/"ADR-*.yaml; do
+    [[ -e "$sheet" ]] && keep "$1-$(basename "$sheet")" "docs/architecture/.import/$(basename "$sheet")"
+  done
+}
+
+# Scan the v0 corpus: one sheet per record, the archive left out, a record
+# without frontmatter skipped. The sources stay untouched and the sheet
+# directory ignores itself, so git sees no change.
+fresh corpus
+capture import-scan-corpus import scan docs/architecture
+worktree import-scan-corpus-status.txt
+keep import-scan-corpus-gitignore docs/architecture/.import/.gitignore
+keep_sheets import-scan-corpus
+
+# In the v1 fixture: a v1 record scanned as itself, a v0 record, and a
+# Deprecated v0 record with no successor and no Summary.
+import_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && printf -- '---\nstatus: Deprecated\ndate: 2025-04-01\ndeciders: [developer]\nrevised: 2025-04-02\n---\n\n# ADR-115: Nightly ingest window\n\n## Context\n\nIngest ran nightly.\n\n## Decision\n\nIngest runs in a nightly window.\n' > docs/architecture/system/ADR-115-nightly-ingest-window.md)
+  commit_all "a deprecated v0 record"
+}
+import_fresh
+capture import-scan-v1 import scan docs/architecture/system/ADR-101-ingest.md docs/architecture/system/ADR-110-old-v0-record.md docs/architecture/system/ADR-115-nightly-ingest-window.md
+keep_sheets import-scan-v1
+# Unedited sheets: the v1 record applies unchanged, the v0 ones are skipped.
+capture import-apply-open import apply
+worktree import-apply-open-status.txt
+# --partial writes them anyway, and lint names what is missing.
+capture import-apply-partial import apply --partial
+worktree import-apply-partial-status.txt
+keep import-apply-partial-110.md docs/architecture/system/ADR-110-old-v0-record.md
+keep import-apply-partial-115.md docs/architecture/system/ADR-115-nightly-ingest-window.md
+# An imported record with no Summary warns rather than fails (ADR-306 §4).
+capture import-lint-no-summary lint docs/architecture/system/ADR-115-nightly-ingest-window.md
+# Committed with empty fields, then completed: filling what the import left
+# empty and adding the Summary is not an edit of a frozen decision.
+commit_all "partial import"
+edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('verb: ~', 'verb: add').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n  - evidence: ingest logs').replace('name: ~', 'name: Claude').replace('# ADR-115: Nightly ingest window\n', '# ADR-115: Nightly ingest window\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n')"
+capture import-lint-completed lint docs/architecture/system/ADR-115-nightly-ingest-window.md
+# Changing a field the import did fill is still an edit.
+edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('date: 2025-04-01', 'date: 2025-04-03')"
+capture import-lint-completed-edited lint docs/architecture/system/ADR-115-nightly-ingest-window.md
+
+# A completed sheet applies without --partial.
+import_fresh
+capture import-scan-complete import scan docs/architecture/system/ADR-110-old-v0-record.md
+edit docs/architecture/.import/ADR-110.yaml "(lambda t: t[:t.index('todo:')] + 'todo: []\n' + t[t.index('candidates:'):])(s.replace('verb: ~', 'verb: add').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n    - evidence: migrated from v0').replace('name: ~', 'name: Claude'))"
+capture import-apply-complete import apply docs/architecture/.import/ADR-110.yaml
+keep import-apply-complete-file.md docs/architecture/system/ADR-110-old-v0-record.md
+capture import-apply-complete-lint lint docs/architecture/system/ADR-110-old-v0-record.md
+
+# A source edited after the scan is refused, and the sheet is kept.
+import_fresh
+capture import-scan-changed import scan docs/architecture/system/ADR-110-old-v0-record.md
+edit docs/architecture/system/ADR-110-old-v0-record.md "s.replace('They follow.', 'They follow, mostly.')"
+capture import-apply-changed import apply --partial
+worktree import-apply-changed-status.txt
+
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check

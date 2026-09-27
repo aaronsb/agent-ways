@@ -1,0 +1,2 @@
+M  docs/architecture/system/ADR-110-old-v0-record.md
+M  docs/architecture/system/ADR-115-nightly-ingest-window.md

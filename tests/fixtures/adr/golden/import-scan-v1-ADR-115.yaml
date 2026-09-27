@@ -1,0 +1,56 @@
+path: docs/architecture/.import/ADR-115.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-115-nightly-ingest-window.md
+  format: v0
+  sha256: 268b87f8d1dd5d59cad4b9d8bdaa3f55b32e68257ce4ae72bf23455b92d1ba87
+target:
+  number: 115
+  domain: system
+  title: Nightly ingest window
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-04-01
+  deciders:
+    - developer
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+  - 'status: Deprecated with no successor maps to accepted with a note that the decision is historical (ADR-304 §7); add the note'
+  - 'unmapped: revised has no v1 field; move it into the record or drop it'
+candidates:
+  capability:
+    - ingest
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Deprecated, with no successor (ADR-304 §7)'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+unmapped:
+  revised: 2025-04-02
+body: |
+  ## Context
+
+  Ingest ran nightly.
+
+  ## Decision
+
+  Ingest runs in a nightly window.

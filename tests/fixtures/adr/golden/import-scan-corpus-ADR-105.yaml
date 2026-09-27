@@ -1,0 +1,60 @@
+path: docs/architecture/.import/ADR-105.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-105-telemetry.md
+  format: v0
+  sha256: 4e9ad147766a709dff5ff17c4ab420886f7cacbf2b74d937536047e167ff534a
+target:
+  number: 105
+  domain: system
+  title: Telemetry export
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-08-10
+  deciders:
+    - developer
+    - agent
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+  - 'status: Deprecated with no successor maps to accepted with a note that the decision is historical (ADR-304 §7); add the note'
+candidates:
+  capability: []
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Deprecated, with no successor (ADR-304 §7)'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+unmapped: {}
+body: |
+  ## Context
+
+  Deprecated with nothing replacing it.
+
+  ## Decision
+
+  The decision for ADR-105: Telemetry export.
+
+  ## Consequences
+
+  ### Positive
+
+  - It works.

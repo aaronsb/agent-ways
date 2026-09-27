@@ -1,0 +1,27 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (0 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ❌ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-115-nightly-ingest-window.md
+  ❌ a decision record requires a verb (add, cut, change, retire, constrain)
+  ❌ a decision record requires 'capability'
+  ❌ a decision record requires 'basis'
+  ❌ agent: records 'name'
+  ⚠️ imported record has no '## Summary' yet (ADR-306 §4)
+
+════════════════════════════════════════════════════════════
+Summary: 5 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]
