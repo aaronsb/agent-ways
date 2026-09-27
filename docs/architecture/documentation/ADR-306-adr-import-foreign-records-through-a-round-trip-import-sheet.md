@@ -37,6 +37,10 @@ basis:
     level: guided
     said: "or in references"
     via: session 2026-09-27, following the message above
+  - operator: aaronsb
+    level: guided
+    said: "yes we trade away hand migrations freedom to restructure a record, but that feels like a forced decision. there's nothing stopping us from transforming the record before import. import is just the acceptance model for a foreign record"
+    via: session 2026-09-27, reviewing ADR-306
   - evidence: "kg (knowledge-graph-system) holds 123 records, all with v0 frontmatter (status, date, deciders, related); 60 Accepted, 28 Proposed, 16 Draft, 10 Rejected, 8 Superseded, 1 Deprecated"
   - evidence: "in a project that declares contract: adr/v1, `adr new` still writes a v0 record with no contract, kind, verb, capability, basis, agent or Summary"
 agent:
@@ -56,8 +60,8 @@ related:
 
 ## Summary
 
-- **Decided:** `adr import` is the canonical migration path into adr/v1. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
-- **Trades away:** hand migration's freedom to restructure a record while moving it. Import carries the body over byte for byte. Splits and rewrites happen after import, as ordinary edits.
+- **Decided:** `adr import` is the acceptance model for a foreign record: whatever shape a record arrives in, it becomes an adr/v1 record through an import sheet. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
+- **Trades away:** a direct edit from source to record. Every record passes through a sheet, a staging format with its own schema, and other sources through field maps. Both have to be documented and kept stable.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
 - **Probes:** *Confident:* v0 records (this repo's and kg's) import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
 - **Inversion:** at one end, a reader written in code for every format: exact, but never finished. At the other end, an agent reads each foreign record and writes v1 by hand: flexible, but manual across a hundred records. This decision maps structured fields mechanically and leaves only the judgement fields to the agent.
@@ -73,6 +77,9 @@ The tool also has lifecycle gaps. `adr new` writes a v0 record in a v1 project. 
 ## Decision
 
 ### 1. The import sheet
+
+Import accepts a record. It does not restrict what happens to the record before it's accepted. A record can be split, merged or rewritten before `scan`, or its sheet edited before `apply`. The importer itself never changes content: whatever the sheet says is what `apply` writes.
+
 
 One YAML file per record is the round-trip object between a source and a v1 record:
 
@@ -101,7 +108,7 @@ body: |
 - `record` holds v1 frontmatter. The reader fills what the source states, and `provenance` says where each value came from.
 - `todo` lists what the reader could not fill. `candidates` ranks vocabulary matches to help whoever fills them.
 - `unmapped` keeps every source field that has no v1 home. Nothing is dropped.
-- `body` is the source body, verbatim.
+- `body` starts as the source body, verbatim. It can be edited like any other part of the sheet.
 
 ### 2. Readers
 
@@ -168,7 +175,7 @@ These are tested properties:
 
 ### Negative
 
-- Records are imported as they stand. A mixed record that should be split is imported whole and split afterwards.
+- The sheet schema and the field-map language are formats the tool must keep stable across versions, since sheets and maps outlive a single run.
 - Imported records may sit without a Summary, and lint keeps warning until they have one.
 - Field maps are a small configuration language that has to be documented and kept stable.
 
@@ -179,6 +186,6 @@ These are tested properties:
 
 ## Alternatives Considered
 
-- **An agent migrates each record by hand.** The #581 rehearsal shows this works, but across 123 records the mechanical fields would be retyped each time and the body could drift.
+- **An agent migrates each record by hand.** The #581 rehearsal shows this works, but across 123 records the mechanical fields would be retyped each time, and nothing would check the result the way a round trip does.
 - **A code reader per format, with no field maps.** This is exact for known formats, but every tracker and template needs code in the vendored tool.
 - **Migrate in place with no intermediate object.** A migration writes the record directly. Without a sheet there is no place to stage what needs judgement, and no object to test the round trip against.
