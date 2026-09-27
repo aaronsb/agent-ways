@@ -66,6 +66,10 @@ if [[ "$TIER" == "2" ]]; then
   [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "tier 2 needs ANTHROPIC_API_KEY or ANTHROPIC_API_KEY_FILE" >&2; exit 2; }
   export ANTHROPIC_API_KEY
   export TIER2_OUT="${TIER2_OUT:-$(mktemp -d -t agent-ways-tier2.XXXXXX)}"
+  # Create it as the host user. A rootful daemon creates a missing bind
+  # source as root, and the container user then cannot write to it.
+  mkdir -p "$TIER2_OUT"
+  [[ -w "$TIER2_OUT" ]] || { echo "TIER2_OUT is not writable: $TIER2_OUT" >&2; exit 2; }
   echo "tier 2 transcripts: $TIER2_OUT"
 fi
 

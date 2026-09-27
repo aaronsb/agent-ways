@@ -32,6 +32,12 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   exit 2
 fi
 
+if ! touch "$OUT_ROOT/.writable" 2>/dev/null; then
+  echo "/out is not writable by $(id -un); create TIER2_OUT on the host first" >&2
+  exit 2
+fi
+rm -f "$OUT_ROOT/.writable"
+
 # --- tier 1 is the precondition ----------------------------------------------
 # It installs agent-ways into this home and asserts the install. A tier 1
 # failure makes every scenario meaningless, so tier 2 stops there.
