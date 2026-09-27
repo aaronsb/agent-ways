@@ -1,4 +1,8 @@
 ---
+contract: adr/v1
+kind: decision
+verb: add
+capability: adr
 status: Proposed
 date: 2026-09-26
 deciders:
@@ -64,7 +68,25 @@ resolving. A spec record is the ADR-numbered counterpart of an ADR-302
 reference or explanation page. It stays in the ADR series because code cites
 it.
 
-The decision kind is the Agent Decision Record proper.
+The decision kind is the Agent Decision Record proper. A decision is frozen
+once it leaves proposed. That covers accepted, and also rejected, abandoned,
+superseded and archived. Only the lifecycle fields listed in §4 move after
+that point.
+
+**Sub-parts.** A record numbered `N.k` (kg has `304.1`, `305.2`, `715.1`) is
+its own record with its own kind, verb and status. A bare `ADR-N` resolves to
+the family `{N, N.1, N.2, ...}`. A family has no status of its own:
+supersession and enactment act on individual records. §6 says how a bare
+citation is checked against the family.
+
+**Splitting a mixed record.** The number stays with the half that code
+citations describe. In kg that is the spec. Sampled citations of ADR-200 and
+ADR-304 name DocumentMeta nodes and edge provenance metadata, not reasons.
+Keeping the number on the spec leaves the 2,230 existing citations valid, and
+keeping it on the decision would mean re-pointing nearly all of them by hand.
+The decision half gets a new number and keeps the original `date`. It is
+accepted on creation, because it transcribes a decision that was already
+accepted. The spec links to it with `decided_by:`.
 
 ### 2. Three vocabulary layers that share no word
 
@@ -76,10 +98,22 @@ The decision kind is the Agent Decision Record proper.
 
 Rejected means considered and declined. Abandoned means dropped before
 acceptance, the PEP "Withdrawn". The L1 operations (accept, reject, abandon,
-supersede, archive) are `adr` subcommands. An operation and its state
-sharing a stem is fine inside L1. No word or stem may appear in two layers,
-and `adr lint` checks `adr.yaml` itself for this, so a later contract version
-cannot reintroduce a collision.
+supersede, archive) are `adr` subcommands. `reject` and `abandon` require
+`--reason`, the same way `archive` does today. An operation and its state
+sharing a stem is fine inside L1. L1 states compare case-insensitively, so a
+v0 `Accepted` needs no rewrite.
+
+No word or stem may appear in two layers. `adr lint` checks `adr.yaml` for
+this, so a later contract version cannot reintroduce a collision. The check
+covers the three vocabulary layers only: the status set, the verbs and the
+derived state words. Other `adr.yaml` keys are outside it, for example kg's
+legacy `retired: true` range flag.
+
+**Spec state.** A spec is living while its capability is active and nothing
+has superseded it. It becomes historical when an enacted cut makes its
+capability absent, or when a newer spec supersedes it. A historical spec may
+then be archived. Specs use the same L1 operations as decisions, and a spec
+supersedes a spec.
 
 ### 3. Decision verbs
 
@@ -87,7 +121,9 @@ cannot reintroduce a collision.
 - **cut**: makes a capability absent.
 - **change**: alters an existing capability. It must supersede or partially
   supersede (ADR-303 section references) a prior decision on the same
-  capability.
+  capability. A prior decision is on the same capability when its
+  `capability:` equals it, lists it, or is `*`. Changing a `*` constraint for
+  one capability is a partial supersession, by section reference.
 - **retire**: removes surface while the capability stays active. It carries
   `targets:` naming the surface, such as `cli:ingest`, `route:/v1/jobs` or
   `mcp:search`.
@@ -122,10 +158,9 @@ surfaces:
   v1, so a contract change is itself a decision with `capability: adr`.
 - **surfaces** declares this project's target namespaces. The inventory
   command is optional. Without one, `retire` targets are checked for syntax
-  only. With one, the lint checks that targets exist before enactment and are
-  gone after it.
+  only. With one, the enactment rule in §5 applies to the inventory as well.
 - **mutable_after_accept** names the lifecycle fields that may still change
-  on an accepted decision. The rest of the frontmatter and the body stay
+  on a frozen decision (§1). The rest of the frontmatter and the body stay
   append-only. State lives in the file, so a squash, rebase or severed
   history cannot lose it.
 
@@ -151,6 +186,9 @@ flow. `cut` and `retire` stay open until their removal is done.
 - With no `enacted:`, citations of the cut capability's records, or of the
   retired targets, warn. The warnings are the removal worklist.
 - Once `enacted: <commit>` is set, the same citations fail.
+- Where the surface has an inventory command, the same rule applies to the
+  inventory. A retired target still listed warns before enactment and fails
+  after it. A target the inventory never listed warns as a likely typo.
 
 `enacted` uses a field, not a status, so L1 keeps its lifecycle unchanged.
 
@@ -160,11 +198,13 @@ flow. `cut` and `retire` stay open until their removal is done.
 
 - `kind` is declared. A decision requires a `verb`, and a spec forbids one.
 - `capability` is in the vocabulary. An unknown name fails.
-- Every capability in the vocabulary has an accepted `add` decision.
+- Every capability in the vocabulary has an accepted `add` decision. This
+  warns while any v0 record remains and fails after, so a corpus that is
+  still migrating does not fail on every capability.
 - `change` supersedes or partially supersedes a prior decision on the same
   capability.
 - `retire` carries `targets` in a declared surface namespace.
-- An accepted decision's frontmatter changes only in `mutable_after_accept`
+- A frozen decision's frontmatter changes only in `mutable_after_accept`
   fields.
 - `adr.yaml` itself has no cross-layer word or stem reuse.
 
@@ -172,9 +212,14 @@ flow. `cut` and `retire` stay open until their removal is done.
 
 - A number that resolves to nothing fails. This check exists today.
 - A citation of a superseded decision warns and names the successor.
-- A citation of a proposed decision prompts acceptance.
+- A citation of a proposed record prompts acceptance. This covers proposed
+  decisions, proposed specs, and v0 records in Draft or Proposed.
 - Citations governed by a cut or retire decision follow the enactment rule
   in §5.
+- A bare `ADR-N` citation is checked against its family (§1). It warns as
+  superseded only when every member is superseded or archived, and then it
+  names the successors. It prompts acceptance when any member is proposed.
+  Enactment applies through each member's capability.
 
 ### 7. Legacy records are adr/v0
 
@@ -234,6 +279,10 @@ v0 rules.
   projects will have none at first.
 - Two tools, `adr lint` and `doclint`, share the contract and must read
   `adr.yaml` the same way.
+- Family resolution makes bare citations lenient. A bare `ADR-N` stays quiet
+  while any member is in force, even if the cited content moved.
+- A split produces a decision record written after the fact. Its date and
+  content come from the original, but its number is new.
 
 ### Neutral
 
@@ -259,12 +308,6 @@ v0 rules.
   vocabulary makes an unknown name a lint failure.
 - **A separate citation tool.** Rejected: `doclint` already scans code for
   ADR citations and guards retired number ranges.
-
-## Open Questions
-
-- When a mixed record splits, which half keeps the original number? The
-  default proposal: the original keeps its number as the decision, and the
-  spec gets a new number. `doclint` then suggests the spec for citations that
-  describe behaviour.
-- Does `abandoned` need a reason field the way `adr archive` requires
-  `--reason`?
+- **The decision keeps the number when a record splits.** Rejected: kg's
+  citations point at spec content, so every one would need re-pointing by
+  hand.
