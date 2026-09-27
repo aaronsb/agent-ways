@@ -3,17 +3,17 @@ contract: adr/v1
 kind: decision
 verb: change
 capability: ingest
-amends: [ADR-101#1]
-superseded_by: [ADR-109]
-status: accepted
-date: 2025-05-04
+supersedes: [ADR-103]
+status: proposed
+date: 2025-05-10
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
 basis:
-  - evidence: fixture measurement
+  - precedent: ADR-101
+  - precedent: ADR-102
 ---
 
-# ADR-103: Batch ingestion
+# ADR-109: Grounded through precedent, via a decision and a spec
 
 ## Summary
 

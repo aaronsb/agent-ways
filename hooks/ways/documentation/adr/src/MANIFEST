@@ -7,6 +7,7 @@ rules.py
 parse.py
 refs.py
 rules_v1.py
+rules_v1_basis.py
 cmd_list.py
 cmd_view.py
 cmd_new.py

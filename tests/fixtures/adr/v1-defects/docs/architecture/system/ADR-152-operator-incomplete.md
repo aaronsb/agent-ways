@@ -1,19 +1,19 @@
 ---
 contract: adr/v1
 kind: decision
-verb: change
-capability: ingest
-amends: [ADR-101#1]
-superseded_by: [ADR-109]
-status: accepted
-date: 2025-05-04
+verb: add
+capability: adr
+date: 2025-06-01
 deciders: [developer, agent]
 agent: {name: Claude, model: fixture-model}
+status: proposed
 basis:
-  - evidence: fixture measurement
+  - operator: developer
+    level: vibes
+    paraphrase: sometimes
 ---
 
-# ADR-103: Batch ingestion
+# ADR-152: Operator basis missing said, via, a valid level
 
 ## Summary
 

@@ -1,17 +1,17 @@
 
-Scanned: 27 ADRs
+Scanned: 40 ADRs
 
 Status distribution:
   Unknown: 1
-  accepted: 23
+  accepted: 24
   draft: 1
-  proposed: 1
+  proposed: 13
   superseded: 1
 
 Contract: adr/v1 (0 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 24 files:
+Issues found in 37 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
@@ -96,8 +96,64 @@ docs/architecture/system/ADR-145-change-supersedes-broader.md
   ⚠️ supersedes: ADR-144 does not declare the reciprocal superseded_by: ADR-145 — one-directional links rot
   ❌ a change on 'adr' against a broader decision amends it rather than superseding it
 
+docs/architecture/system/ADR-150-basis-not-list.md
+  ❌ basis: expected a list of entries, each naming one source
+
+docs/architecture/system/ADR-151-basis-entry-shapes.md
+  ❌ basis entry 1: expected a mapping such as '- evidence: ...'
+  ❌ basis entry 2: names 2 sources; each entry names exactly one
+  ❌ basis entry 3: unknown key 'hunch' (sources: operator, evidence, standard, precedent)
+  ❌ basis entry 4: source 'upstream' is not in adr.yaml basis_sources
+  ❌ basis entry 5: said belong to an operator entry
+  ❌ basis entry 6: evidence needs a reference
+
+docs/architecture/system/ADR-152-operator-incomplete.md
+  ❌ basis entry 1: level is one of authored, directed, guided
+  ❌ basis entry 1: an operator basis records 'said'
+  ❌ basis entry 1: an operator basis records 'via'
+  ❌ basis entry 1: paraphrase is true or false
+
+docs/architecture/system/ADR-153-agent-bad.md
+  ❌ agent: expected {name, model}
+
+docs/architecture/system/ADR-154-agent-no-model.md
+  ❌ agent: records 'model'
+
+docs/architecture/system/ADR-155-considered-bad.md
+  ❌ considered entry 1: records 'said'
+  ❌ considered entry 1: records 'via'
+  ❌ considered entry 1: covers is a list of probe names
+  ❌ considered entry 1: canary is caught or missed
+  ❌ considered entry 2: expected a mapping with operator, said and via
+
+docs/architecture/system/ADR-156-operator-no-considered.md
+  ❌ accepted with an operator basis but no considered entry; the operator considers what they started
+
+docs/architecture/system/ADR-157-concern-bad.md
+  ❌ concern 1: names what would resolve it ('resolve')
+  ⚠️ open concern: No resolution named
+  ❌ concern 2: is either answered or withdrawn, not both
+  ❌ concern 3: a withdrawn concern states why
+  ❌ concern 4: an answer records 'said' and 'via'
+  ⚠️ open concern: Still open, about hook latency
+
+docs/architecture/system/ADR-158-precedent-dangling.md
+  ❌ basis: precedent 'ADR-197' resolves to no known ADR
+
+docs/architecture/system/ADR-159-precedent-loop-a.md
+  ❌ basis: precedent loops back through ADR-159
+
+docs/architecture/system/ADR-161-precedent-loop-b.md
+  ❌ basis: precedent loops back through ADR-161
+
+docs/architecture/system/ADR-162-precedent-internal.md
+  ❌ basis: following precedent never reaches an external source (operator, evidence, standard or upstream)
+
+docs/architecture/system/ADR-163-precedent-v0.md
+  ⚠️ basis: precedent reaches ADR-160, still v0; treated as external until it is migrated
+
 ════════════════════════════════════════════════════════════
-Summary: 32 errors, 2 warnings
+Summary: 59 errors, 5 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]
