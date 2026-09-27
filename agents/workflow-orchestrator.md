@@ -150,12 +150,12 @@ When asked for project status:
 ```markdown
 ## Current Work
 Branch: feature/oauth-integration
-Related: ADR-007 (OAuth Strategy)
+Related: ADR-007 (OAuth Strategy) <!-- adr-cite-ignore -->
 Todo Status: 3/7 tasks complete
 Blockers: Waiting on API key from vendor
 
 ## Recent Activity
-- ADR-007 merged yesterday
+- ADR-007 merged yesterday <!-- adr-cite-ignore -->
 - PR #45 in review (OAuth core impl)
 - 2 open issues (non-blocking)
 
