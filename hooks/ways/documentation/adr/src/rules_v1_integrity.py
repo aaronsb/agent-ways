@@ -78,9 +78,25 @@ def rule_v1_required_sections(adr, ctx):
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
+    imported = 'imported' in adr.frontmatter
     for name in _str_list(schema.get('sections')) or []:
         if _find_section(adr, name) is None:
-            v1_issue(adr, f"a {v1_record_kind(adr)} record opens with a '## {name}' section")
+            if imported and name == 'Summary':
+                # ADR-306 §4: an imported record may gain its Summary later,
+                # once the imported corpus has been read together.
+                v1_issue(adr, "imported record has no '## Summary' yet (ADR-306 §4)", 'warning')
+            else:
+                v1_issue(adr, f"a {v1_record_kind(adr)} record opens with a '## {name}' section")
+
+@file_rule(contract=V1)
+def rule_v1_imported(adr, ctx):
+    """`imported` records where the record came from: {from, format} (ADR-306 §4)."""
+    if not is_v1_record(adr, ctx) or 'imported' not in adr.frontmatter:
+        return
+    imported = adr.frontmatter.get('imported')
+    if not isinstance(imported, dict) or not all(
+            isinstance(imported.get(k), str) and imported.get(k).strip() for k in ('from', 'format')):
+        v1_issue(adr, "imported: expected {from: <source path>, format: <reader>}")
 
 @file_rule(contract=V1)
 def rule_v1_summary_legibility(adr, ctx):
@@ -172,6 +188,24 @@ def _frozen_snapshot(adr) -> Optional[tuple]:
             return past.frontmatter, past.body
     return None
 
+def _unfilled(value) -> bool:
+    return value in (None, '', [], {})
+
+def _completes(then, now) -> bool:
+    """now fills what was empty in then and changes nothing else. On an
+    imported record that is finishing the import, not an edit: a sheet applied
+    with --partial is committed with empty fields (ADR-306 §3, §4)."""
+    if _unfilled(then):
+        return True
+    if isinstance(then, dict) and isinstance(now, dict):
+        return all(_unfilled(then.get(k)) or _same(then.get(k), now.get(k))
+                   for k in set(then) | set(now))
+    return False
+
+def _without_summary(body: str) -> str:
+    """The body with its ## Summary section taken out."""
+    return re.sub(r'(?ms)^## Summary[ \t]*\n.*?(?=^## |\Z)', '', body)
+
 def _same(a, b) -> bool:
     """Equal, treating a date and its quoted string as the same value."""
     if isinstance(a, (str, int, float, date)) and isinstance(b, (str, int, float, date)):
@@ -199,12 +233,20 @@ def rule_v1_frozen(adr, ctx):
     if snapshot is None:
         return
     then, body_then = snapshot
+    body_now = adr.body
+    # An imported record may fill what its import left empty, and gain its
+    # Summary later (ADR-306 §4).
+    imported = 'imported' in then and 'imported' in adr.frontmatter
+    if imported:
+        body_then, body_now = _without_summary(body_then), _without_summary(body_now)
     for key in sorted(set(then) | set(adr.frontmatter)):
         if key in mutable:
             continue
+        if imported and _completes(then.get(key), adr.frontmatter.get(key)):
+            continue
         if not _same(then.get(key), adr.frontmatter.get(key)):
             v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change")
-    if not adr.body.rstrip().startswith(body_then.rstrip()):
+    if not body_now.rstrip().startswith(body_then.rstrip()):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
 
 @file_rule(contract=V1)
