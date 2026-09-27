@@ -21,6 +21,10 @@ basis:
     level: guided
     said: "I think optional, but always lint warnings. sometimes, the summary isn't obvious until the apparent motion of the complete dataset is visible. this means that adr record properties can be altered (like summaries). this is fine, because any alteration that gets tracked is a git commit. we don't have to overthink integrity here"
     via: session 2026-09-27, on whether imported records need a Summary
+  - operator: aaronsb
+    level: guided
+    said: "we don't need to explicitly handle jira. all I'm saying is 'jira issues can be flattened to a record, just like any other record, and usually there's a description and a summary and various fields, and if we can selectively import jira issues, then we probably can take records from about anything'"
+    via: session 2026-09-27
   - evidence: "kg (knowledge-graph-system) holds 123 records, all with v0 frontmatter (status, date, deciders, related); 60 Accepted, 28 Proposed, 16 Draft, 10 Rejected, 8 Superseded, 1 Deprecated"
   - evidence: "in a project that declares contract: adr/v1, `adr new` still writes a v0 record with no contract, kind, verb, capability, basis, agent or Summary"
 agent:
@@ -43,7 +47,7 @@ related:
 - **Decided:** `adr import` is the canonical migration path into adr/v1. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands.
 - **Trades away:** hand migration's freedom to restructure a record while moving it. Import carries the body over byte for byte. Splits and rewrites happen after import, as ordinary edits.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
-- **Probes:** *Confident:* v0 records (this repo's and kg's) import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a declarative field map is enough for a Jira export, whose description is rich text and whose fields are nested, or whether that source needs a small reader written in code.
+- **Probes:** *Confident:* v0 records (this repo's and kg's) import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
 - **Inversion:** at one end, a reader written in code for every format: exact, but never finished. At the other end, an agent reads each foreign record and writes v1 by hand: flexible, but manual across a hundred records. This decision maps structured fields mechanically and leaves only the judgement fields to the agent.
 
 ## Context
@@ -92,11 +96,11 @@ body: |
 A reader turns a source into sheets. Import assumes structured sources: frontmatter, a metadata block, or a structured export. Unstructured prose is out of scope.
 
 - **Built in:** v0 (this tool's frontmatter), MADR, and adr-tools (inline `## Status`, `0001-` numbering).
-- **Field maps:** for any other structured source, a declarative map names which source field fills which sheet field, and how values translate:
+- **Field maps:** any other structured source is flattened into fields and a body. A declarative map names which source field fills which sheet field, and how values translate. No source gets its own reader. The example is a tracker export, since a source like that flattening cleanly suggests most structured records will:
 
 ```yaml
-reader: jira
-items: issues                    # a JSON export: one sheet per item
+reader: tracker
+items: issues                    # a JSON export: one sheet per item, selected by --filter
 fields:
   title: fields.summary
   date: fields.created
@@ -135,7 +139,7 @@ These are tested properties:
 ### Positive
 
 - Migrating a corpus becomes one scan, one cleanup pass over small structured files, and one apply. Both this repo's 93 v0 records and kg's 123 go through the same path.
-- A new format needs a field map, not a code change, whenever its source is structured.
+- A new source needs a field map, not a code change, whenever it flattens to fields and a body.
 - `adr new` produces a v1 record in a v1 project.
 
 ### Negative
