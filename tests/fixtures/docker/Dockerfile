@@ -18,12 +18,13 @@ ARG CLAUDE_VERSION
 ARG CLAUDE_INSTALLER
 
 # Installer prerequisites (git, jq, make), the download helpers' tools (gh,
-# curl), and what docs/prerequisites-debian.md lists. No C++ toolchain: the
+# curl), what docs/prerequisites-debian.md lists, and PyYAML for the vendored
+# adr tool that tier 2 scenarios run. No C++ toolchain: the
 # way-embed binary has to arrive as a release download, and the runner
 # asserts that it did. A source-build fallback is the defect under test.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bash ca-certificates curl wget git jq make bc gzip python3 procps unzip gh \
+      bash ca-certificates curl wget git jq make bc gzip python3 python3-yaml procps unzip gh \
  && rm -rf /var/lib/apt/lists/*
 
 # The npm installer needs Node; the native one does not. Root installs it

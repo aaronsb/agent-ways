@@ -52,6 +52,7 @@ Tag every ADR with one of three grades: reversible (changed in one session, no d
 
 ## See Also
 
+- adr/consider(documentation) — handing a decision to the operator, their answer, and raising concerns
 - adr-context(documentation) — read existing ADRs before building
 - adr/migration(documentation) — adopting ADR tooling in existing projects
 - delivery/implement(softwaredev) — ADRs feed implementation planning
