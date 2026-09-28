@@ -3874,14 +3874,17 @@ def _domain_rename(args):
                             known=known, domain=(old, new) if new != old else None,
                             repos=origin_repos(root))
     changes = _plan_rewrites(relocation, root, names)
-    # adr.yaml is written from its edited text, with its own paths rewritten.
+    # adr.yaml is written from its edited text, with its own paths
+    # rewritten. Its listing is taken against the text as it was, so the
+    # key and folder lines show, and each counts as one rewrite.
     config_rel = 'docs/architecture/adr.yaml'
-    config_before = ''.join(lines)
-    config_text, config_count = relocation.text(config_before, config_rel)
+    config_edited = ''.join(lines)
+    config_text, config_count = relocation.text(config_edited, config_rel)
     changes = [c for c in changes if c[0] != config_rel]
-    if config_count:
-        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'),
-                                     _changed_lines(config_before, config_text))])
+    if config_text != text:
+        edited = sum(a != b for a, b in zip(text.split('\n'), config_edited.split('\n')))
+        changes = sorted(changes + [(config_rel, config_count + edited, config_text.encode('utf-8'),
+                                     _changed_lines(text, config_text))])
 
     verb = 'Would rename' if args.dry_run else 'Renamed'
     print(f"{verb} domain: {old} → {new}")

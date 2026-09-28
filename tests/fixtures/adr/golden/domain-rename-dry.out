@@ -1,6 +1,13 @@
 Would rename domain: system → platform
   Folder: docs/architecture/system/ → docs/architecture/platform/
-Would rewrite 6 paths in 3 files
+Would rewrite 8 paths in 4 files
+  docs/architecture/adr.yaml: 2
+    docs/architecture/adr.yaml:6
+          system:
+      →   platform:
+    docs/architecture/adr.yaml:10
+            folder: system
+      →     folder: platform
   docs/architecture/system/ADR-109-precedent-chain.md: 1
     docs/architecture/system/ADR-109-precedent-chain.md:35
         See [the constraint](../system/ADR-104-no-network-in-hooks.md).
