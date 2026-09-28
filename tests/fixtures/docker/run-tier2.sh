@@ -16,10 +16,14 @@
 #   prompt.txt   the prompt passed to `claude -p`
 #   setup.sh     optional; runs in the scenario's fresh project before the prompt
 #   max_turns    optional; this scenario's turn cap (default TIER2_MAX_TURNS)
+#   prompt2.txt  optional; a second operator turn, run with `claude -p --resume`
+#   check1.sh    optional, with prompt2.txt; sourced between the two turns
 #   check.sh     sourced after the run; asserts with the helpers below
 #
 # check.sh sees $PROJ (the project dir), $ANSWER (the model's final text),
 # $FIRED (fired way ids, one per line) and $OUT (this scenario's output dir).
+# With a second turn, check1.sh sees the first turn's $ANSWER, check.sh the
+# second's, and $FIRED holds the ways fired in either turn.
 
 set -uo pipefail
 
@@ -106,29 +110,51 @@ run_scenario() {
   local turns="$MAX_TURNS"
   [[ -f "$dir/max_turns" ]] && turns=$(tr -dc '0-9' < "$dir/max_turns")
   turns=${turns:-$MAX_TURNS}
-  (cd "$PROJ" && claude -p "$(cat "$dir/prompt.txt")" \
-      --model "$MODEL" \
-      --max-turns "$turns" \
-      --output-format json \
-      --dangerously-skip-permissions) > "$OUT/result.json" 2> "$OUT/claude.err"
-  local rc=$?
-  if [[ $rc -ne 0 ]]; then
-    fail "claude -p exited 0" "exit $rc; see $OUT/claude.err"
-  else
-    ok "claude -p exited 0"
+  SESSION=""
+  FIRED=""
+  run_turn "$dir/prompt.txt" ""
+  if [[ -f "$dir/prompt2.txt" ]]; then
+    if [[ -f "$dir/check1.sh" ]]; then
+      RUBRIC_HIT=0
+      RUBRIC_TOTAL=0
+      # shellcheck disable=SC1091
+      source "$dir/check1.sh"
+    fi
+    run_turn "$dir/prompt2.txt" 2
   fi
-
-  ANSWER=$(jq -r '.result // empty' "$OUT/result.json" 2>/dev/null)
-  SESSION=$(jq -r '.session_id // empty' "$OUT/result.json" 2>/dev/null)
-  (cd "$PROJ" && ways introspect dump --session "$SESSION" --all) > "$OUT/introspect.json" 2>"$OUT/introspect.err"
-  (cd "$PROJ" && git status --porcelain --untracked-files=all) > "$OUT/worktree.txt" 2>&1
-  FIRED=$(jq -r '[.turns[].fired_ways[]?.way_id] | unique | .[]' "$OUT/introspect.json" 2>/dev/null)
-  printf '%s\n' "$FIRED" > "$OUT/fired.txt"
 
   RUBRIC_HIT=0
   RUBRIC_TOTAL=0
   # shellcheck disable=SC1091
   source "$dir/check.sh"
+}
+
+# run_turn PROMPT_FILE SUFFIX — one `claude -p` call. An empty SUFFIX is the
+# first turn; a second turn (SUFFIX 2) resumes $SESSION, writes its files
+# with the suffix (result2.json, ...), and adds its fired ways to $FIRED.
+run_turn() {
+  local prompt="$1" sfx="$2" rc
+  local resume=()
+  [[ -n "$sfx" ]] && resume=(--resume "$SESSION")
+  (cd "$PROJ" && claude -p "$(cat "$prompt")" "${resume[@]}" \
+      --model "$MODEL" \
+      --max-turns "$turns" \
+      --output-format json \
+      --dangerously-skip-permissions) > "$OUT/result$sfx.json" 2> "$OUT/claude$sfx.err"
+  rc=$?
+  local label="claude -p exited 0${sfx:+ (turn $sfx)}"
+  if [[ $rc -ne 0 ]]; then
+    fail "$label" "exit $rc; see $OUT/claude$sfx.err"
+  else
+    ok "$label"
+  fi
+
+  ANSWER=$(jq -r '.result // empty' "$OUT/result$sfx.json" 2>/dev/null)
+  SESSION=$(jq -r '.session_id // empty' "$OUT/result$sfx.json" 2>/dev/null)
+  (cd "$PROJ" && ways introspect dump --session "$SESSION" --all) > "$OUT/introspect$sfx.json" 2>"$OUT/introspect$sfx.err"
+  (cd "$PROJ" && git status --porcelain --untracked-files=all) > "$OUT/worktree$sfx.txt" 2>&1
+  FIRED=$( { printf '%s\n' "$FIRED"; jq -r '[.turns[].fired_ways[]?.way_id] | unique | .[]' "$OUT/introspect$sfx.json" 2>/dev/null; } | sed '/^$/d' | sort -u)
+  printf '%s\n' "$FIRED" > "$OUT/fired$sfx.txt"
 }
 
 for dir in "$FIX"/scenarios/*/; do

@@ -67,4 +67,6 @@ TIER2_SCENARIOS="adr-way" TIER2_MODEL=claude-sonnet-5 ANTHROPIC_API_KEY_FILE=...
 
 Ways are asserted hard and the answer's wording is scored against a threshold, because wording varies run to run. `check.sh` sees `$PROJ`, `$ANSWER`, `$FIRED` and `$OUT`. agent-ways scaffolds `.claude/` into every project it opens, so a worktree check reads `$OUT/worktree.txt` and ignores lines under `.claude/`.
 
+A scenario that needs the operator to reply adds a `prompt2.txt`. The runner resumes the first turn's session with `claude -p --resume` and that prompt. An optional `check1.sh` is sourced between the turns and sees the first turn's `$ANSWER`; `check.sh` sees the second turn's. `$FIRED` holds the ways fired in either turn, and the second turn's files carry a `2` suffix (`result2.json`, `worktree2.txt`, ...). Each check file keeps its own rubric count.
+
 The attend peer test from ADR-186 item 3 is not built yet. Attend discovers peers through the local process table and cache, which two containers do not share.

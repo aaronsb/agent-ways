@@ -49,7 +49,7 @@ basis:
 - **Decided:** cache list-endpoint responses for 30 seconds.
 - **Trades away:** up to 30 seconds of staleness on lists.
 - **One-way?** No. The cache is behind a flag.
-- **Probes:** *Confident:* the latency win is real. *Not confident:* whether 30 seconds of staleness is acceptable to users.
+- **Probes:** *Confident (latency):* the latency win is real. *Not confident (staleness):* whether 30 seconds of staleness is acceptable to users.
 - **Inversion:** one end caches nothing and scales the database; the other caches everything with invalidation. This sits between. Is the middle right?
 
 ## 1. Decision
