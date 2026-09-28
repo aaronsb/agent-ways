@@ -1,7 +1,16 @@
-# Cognitive Loop and the Awareness Layer
+---
+contract: adr/v1
+kind: evidence
+capability: method
+status: accepted
+date: 2026-04-09
+deciders:
+  - aaronsb
+related: []
+---
 
-> **Type:** Design note (not an ADR)
-> **Status:** Working draft, subject to revision
+# ADR-600: Cognitive loop and the awareness layer
+
 > **Cites:** ADR-103, ADR-104, ADR-105, ADR-106, ADR-108, ADR-111, ADR-112
 > **Motivates:** ADR-113, ADR-114
 
@@ -264,18 +273,18 @@ To be explicit about what this framing *does not* propose:
 
 **ADRs motivating this note or cited within it:**
 
-- [ADR-103](../architecture/ways/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) — Checks: epoch-distance-aware confidence sensors for ways
-- [ADR-104](../architecture/ways/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Token-gated way re-disclosure
-- [ADR-105](../architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md) — Progressive disclosure for way trees
-- [ADR-106](../architecture/documentation/ADR-106-project-pulse-epoch-mapped-project-awareness.md) — Project Pulse: epoch-mapped project awareness
-- [ADR-108](../architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — Embedding-based way matching
-- [ADR-111](../architecture/platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) — Unified ways CLI
-- [ADR-112](../architecture/ways/ADR-112-session-ledger-and-knowledge-graph-integration.md) — Session ledger and knowledge graph integration
+- [ADR-103](../ways/ADR-103-checks-epoch-distance-aware-confidence-sensors-for-ways.md) — Checks: epoch-distance-aware confidence sensors for ways
+- [ADR-104](../ways/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Token-gated way re-disclosure
+- [ADR-105](../ways/ADR-105-progressive-disclosure-for-way-trees.md) — Progressive disclosure for way trees
+- [ADR-106](../documentation/ADR-106-project-pulse-epoch-mapped-project-awareness.md) — Project Pulse: epoch-mapped project awareness
+- [ADR-108](../ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — Embedding-based way matching
+- [ADR-111](../platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) — Unified ways CLI
+- [ADR-112](../archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — Session ledger and knowledge graph integration
 
 **Prior attempts at adjacent capabilities (for context on why the awareness layer is different):**
 
-- [ADR-101](../architecture/attend/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) — Wormhole relay protocol (Deprecated)
-- [ADR-102](../architecture/attend/ADR-102-irc-based-local-agent-communication.md) — IRC-based local agent communication (Abandoned)
+- [ADR-101](../attend/ADR-101-wormhole-relay-protocol-for-cross-instance-agent-communication.md) — Wormhole relay protocol (Deprecated)
+- [ADR-102](../attend/ADR-102-irc-based-local-agent-communication.md) — IRC-based local agent communication (Abandoned)
 
 **ADRs that cite this note:**
 

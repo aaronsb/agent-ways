@@ -1,4 +1,15 @@
-# Cypress Survey: What a Node-Routed Seed Teaches a Hook-Disclosed Corpus
+---
+contract: adr/v1
+kind: evidence
+capability: method
+status: accepted
+date: 2026-09-09
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-603: Cypress survey: what a node-routed seed teaches a hook-disclosed corpus
 
 A reading of [CYPRESS](https://github.com/llopresto87/Cypress) (Luigi Lopresto, MIT) against the ways corpus, taken 2026-09-09 at its 7.x line. The survey covers the method surface: postures, protocols, skills, delegation briefs, agents, and tooling. The harvested corpora (library, legal, tool, agent, skill) are project residue and were skipped.
 

@@ -47,7 +47,12 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-161](./ways/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md) | Queued mid-turn operator messages as an aggregated scan surface | accepted |
 | [ADR-166](./ways/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | accepted |
 | [ADR-174](./ways/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | accepted |
+| [ADR-183](./ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md) | Single-language localization tuning: the English anchor as a peer | accepted |
 | [ADR-188](./ways/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | proposed |
+| [ADR-189](./ways/ADR-189-session-introspection-implementation-plan.md) | Session introspection implementation plan | accepted |
+| [ADR-190](./ways/ADR-190-the-lexical-gate-as-a-conditional-threshold.md) | The lexical gate as a conditional threshold | accepted |
+| [ADR-191](./ways/ADR-191-the-tool-use-channel-is-a-signal-problem-lookbehind-chunk-spread-and-winner-confirmation.md) | The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation | accepted |
+| [ADR-192](./ways/ADR-192-late-interaction-matching-the-flow.md) | Late-interaction matching: the flow | accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
@@ -102,6 +107,8 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-173](./attend/ADR-173-chat-idiom-convergence-for-the-attend-command-surfaces.md) | Chat-idiom convergence for the attend command surfaces | accepted |
 | [ADR-182](./attend/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md) | Keepwarm: attend keeps the prompt cache warm with a wake floor | accepted |
 | [ADR-187](./attend/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | proposed |
+| [ADR-400](./attend/ADR-400-attend-messaging-disclosure-with-token-gated-reheat.md) | Attend messaging disclosure with token-gated reheat | accepted |
+| [ADR-401](./attend/ADR-401-attend-envelope-fields-sender-kind-principal-and-addressee-on-every-signal.md) | Attend envelope fields: sender kind, principal, and addressee on every signal | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
@@ -131,6 +138,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-184](./platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md) | Installation and activation are separate states: targets as the unit of activation | accepted |
 | [ADR-185](./platform/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | accepted |
 | [ADR-186](./platform/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
+| [ADR-500](./platform/ADR-500-settings-json-three-way-merge-spec-and-peer-writer-coexistence-contract.md) | settings.json three-way merge: spec and peer-writer coexistence contract | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
@@ -151,6 +159,10 @@ _The ways method, way authoring, the development loop_
 | [ADR-176](./practice/ADR-176-contract-identification-as-the-develop-loop-front-gate.md) | Contract identification as the develop-loop front gate | accepted |
 | [ADR-178](./practice/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md) | Register transfers by demonstration - core.md carries policy | accepted |
 | [ADR-180](./practice/ADR-180-github-issues-as-the-shared-truth-for-the-session-task-list.md) | GitHub issues as the shared truth for the session task list | accepted |
+| [ADR-600](./practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) | Cognitive loop and the awareness layer | accepted |
+| [ADR-601](./practice/ADR-601-autonomy-as-a-layered-system-goals-signposts-and-the-initiation-pattern.md) | Autonomy as a layered system: goals, signposts, and the initiation pattern | accepted |
+| [ADR-602](./practice/ADR-602-ways-functional-audit-117-ways-against-the-firing-contract.md) | Ways functional audit: 117 ways against the firing contract | accepted |
+| [ADR-603](./practice/ADR-603-cypress-survey-what-a-node-routed-seed-teaches-a-hook-disclosed-corpus.md) | Cypress survey: what a node-routed seed teaches a hook-disclosed corpus | accepted |
 
 ## Archived
 

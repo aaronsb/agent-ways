@@ -36,7 +36,7 @@ This is the same shape of problem ADR-104 solved for ways: instructional context
 
 The substrate separation principle from ADR-113 constrains the form of the answer. Sensing when Claude has drifted far enough from a teaching to need it again is cheap integer arithmetic — it does not need inference. The teaching itself, the thing that gets emitted into Claude's conversation, pays the token cost every time it fires, so it has to be terse by design. The cheap substrate (a sensor) decides when; the expensive substrate (Claude's next turn) only sees the result when surfacing is warranted.
 
-The design note at `docs/design-notes/attend-messaging-disclosure-reheat.md` walks through the full design iteration. This ADR captures the decision in the form the rest of the system can cite.
+The design note at `docs/architecture/attend/ADR-400-attend-messaging-disclosure-with-token-gated-reheat.md` walks through the full design iteration. This ADR captures the decision in the form the rest of the system can cite.
 
 ## Decision
 
@@ -83,7 +83,7 @@ The threshold is the same `REDISCLOSE_PCT = 25` value ways uses for its own re-d
 ### Neutral
 
 - **The `state.rs` persistence model is deliberately not extended.** Context-percentage tracking and git state stay persistent (they have different failure characteristics), but disclosure markers do not. Future components in this sensor inherit the in-memory constraint by default.
-- **Design note is retained as companion prose.** The design note at `docs/design-notes/attend-messaging-disclosure-reheat.md` stays as the detailed walkthrough of the four-way iteration that landed on the sensor-native framing. This ADR cites it rather than re-deriving its argument.
+- **Design note is retained as companion prose.** The design note at `docs/architecture/attend/ADR-400-attend-messaging-disclosure-with-token-gated-reheat.md` stays as the detailed walkthrough of the four-way iteration that landed on the sensor-native framing. This ADR cites it rather than re-deriving its argument.
 - **Governor interaction is unchanged.** The disclosure sensor participates in the existing disclosure governor the same way any other sensor does. No new rate-limiting knobs, no new cooldown windows, no new global budget.
 
 ## Alternatives Considered

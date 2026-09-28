@@ -1,4 +1,15 @@
-# settings.json three-way merge — spec and peer-writer coexistence contract
+---
+contract: adr/v1
+kind: spec
+capability: install
+status: accepted
+date: 2026-07-18
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-500: settings.json three-way merge: spec and peer-writer coexistence contract
 
 Status: reference for ADR-169. Portable specification of the algorithm implemented
 in `tools/ways-cli/src/cmd/settings_merge.rs`, extracted so an independent tool

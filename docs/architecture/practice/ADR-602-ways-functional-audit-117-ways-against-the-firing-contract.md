@@ -1,4 +1,15 @@
-# Ways Functional Audit — 117 ways
+---
+contract: adr/v1
+kind: evidence
+capability: authoring
+status: accepted
+date: 2026-07-05
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-602: Ways functional audit: 117 ways against the firing contract
 
 Assessed all 117 frontmatter ways against the functional firing contract (sonnet fan-out, 24 batches).
 

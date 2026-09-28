@@ -1,4 +1,15 @@
-# Late-interaction matching — the flow
+---
+contract: adr/v1
+kind: evidence
+capability: matching
+status: accepted
+date: 2026-07-06
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-192: Late-interaction matching: the flow
 
 A visual companion to **ADR-160** (chunked late-interaction matching with
 softmax-share gating). It diagrams two things this session settled by watching

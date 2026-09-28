@@ -1,7 +1,16 @@
-## Single-Language Localization Tuning — the English anchor as a peer
+---
+contract: adr/v1
+kind: evidence
+capability: disclosure
+status: accepted
+date: 2026-06-22
+deciders:
+  - aaronsb
+related: []
+---
 
-> **Type:** Design note (not an ADR)
-> **Status:** Working draft — core principle settled (English root as source of truth)
+# ADR-183: Single-language localization tuning: the English anchor as a peer
+
 > **Cites:** ADR-139 (adopter-run localization), ADR-125 (coordinate-alias model)
 > **Motivates:** `ways tune --lang` implementation; the `ways-localize` skill's acceptance gate
 

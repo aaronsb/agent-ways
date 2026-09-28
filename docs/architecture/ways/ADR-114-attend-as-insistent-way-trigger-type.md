@@ -33,7 +33,7 @@ imported:
 
 ## Context
 
-[ADR-113](../attend/ADR-113-attend-active-awareness-module.md) introduces `attend`, a sibling binary in the agent-ways workspace that implements the active awareness layer described in the [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md) design note. `attend` observes Claude Code session state and environmental signal, tracks approaching mechanical consequences (context pressure, reflection deferral, etc.), and produces emissions that need to reach Claude.
+[ADR-113](../attend/ADR-113-attend-active-awareness-module.md) introduces `attend`, a sibling binary in the agent-ways workspace that implements the active awareness layer described in the [Cognitive Loop and the Awareness Layer](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) design note. `attend` observes Claude Code session state and environmental signal, tracks approaching mechanical consequences (context pressure, reflection deferral, etc.), and produces emissions that need to reach Claude.
 
 The question this ADR answers is: **how do those emissions become guidance Claude reads?**
 
@@ -56,7 +56,7 @@ Every existing trigger is **reactive**: it keys off an event inside Claude's own
 
 `attend` produces exactly that class of event: externally-observed signals that occur between hook boundaries and need to surface into Claude's attention. The delivery primitive for those signals is already available in Claude Code — the `Monitor` tool, introduced in the same release wave that makes ADR-113 buildable. `Monitor` accepts a shell command, runs it as a background process, and delivers each line the command writes to stdout as an asynchronous notification in Claude's conversation. With `persistent: true`, a single invocation covers the session's lifetime. This is the mechanism by which `attend`'s stdout emissions reach Claude.
 
-`Monitor` is described in detail in the [design note](../../design-notes/cognitive-loop-and-awareness-layer.md) as the *delivery primitive*. ADR-113 commits `attend` to writing its observations as single-line stdout notifications that `Monitor` delivers. **That is the primary delivery channel for the awareness layer**, and it requires no involvement from the ways system at all.
+`Monitor` is described in detail in the [design note](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) as the *delivery primitive*. ADR-113 commits `attend` to writing its observations as single-line stdout notifications that `Monitor` delivers. **That is the primary delivery channel for the awareness layer**, and it requires no involvement from the ways system at all.
 
 ### Why ways integration still matters
 
@@ -246,7 +246,7 @@ It explicitly does not define:
 
 ## References
 
-- **Design note:** [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md)
+- **Design note:** [Cognitive Loop and the Awareness Layer](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md)
 - **Related ADRs:**
   - [ADR-104](./ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Disclosure gate that this ADR reuses
   - [ADR-105](./ADR-105-progressive-disclosure-for-way-trees.md) — Progressive disclosure model

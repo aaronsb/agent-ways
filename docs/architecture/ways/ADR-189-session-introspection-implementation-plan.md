@@ -1,4 +1,15 @@
-## Session Introspection — Implementation Plan
+---
+contract: adr/v1
+kind: evidence
+capability: matching
+status: accepted
+date: 2026-07-02
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-189: Session introspection implementation plan
 
 > *Written during the ADR-153/154 sequencing work, before ADR-156 shipped
 > (pre-156). The body below still treats a semantic fire as raw cosine
@@ -10,8 +21,6 @@
 > reasoning that led here; for the shipped model see ADR-156 and
 > `../hooks-and-ways/engine-reference.md`.*
 
-> **Type:** Design note (not an ADR)
-> **Status:** Working draft — sequencing for ADR-153 + ADR-154, deferred implementation
 > **Cites:** ADR-153 (introspection substrate), ADR-154 (three front-ends), ADR-201 (shared finding evidence), ADR-134 (near-miss telemetry)
 > **Motivates:** the `ways introspect <replay|live|dump>` surface (`ways rethink` fixes + a live monitor + non-interactive dump) and the why-fired drill-down
 

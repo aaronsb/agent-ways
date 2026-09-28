@@ -1,4 +1,15 @@
-# The Lexical Gate as a Conditional Threshold
+---
+contract: adr/v1
+kind: evidence
+capability: matching
+status: accepted
+date: 2026-07-04
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-190: The lexical gate as a conditional threshold
 
 > *Written 2026-07-04, during the ADR-156 exploration (pre-ship). The body treats
 > the `γ·T_w` gate on raw cosine, the per-way `embed_threshold`, and the global

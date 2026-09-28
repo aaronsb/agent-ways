@@ -1,7 +1,16 @@
-# Autonomy as a Layered System: Goals, Signposts, and the Initiation Pattern
+---
+contract: adr/v1
+kind: evidence
+capability: method
+status: accepted
+date: 2026-06-21
+deciders:
+  - aaronsb
+related: []
+---
 
-> **Type:** Design note (not an ADR)
-> **Status:** Working draft, subject to revision
+# ADR-601: Autonomy as a layered system: goals, signposts, and the initiation pattern
+
 > **Cites:** ADR-138
 > **Motivates:** a future signpost-convention way, a workflow way, the deliver workflow, and continuance guidance
 

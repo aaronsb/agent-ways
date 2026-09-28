@@ -95,7 +95,7 @@ Files marked **planned** are part of the ongoing documentation pass.
 - **ADR-121** — salience decay for signal presentation (superseded by ADR-123) <!-- adr-cite-ignore -->
 - **ADR-123** — firing dynamics unification; the engagement and salience engine in force
 - `docs/hooks-and-ways/` — sibling docs for the synchronous hook mechanism
-- `docs/design-notes/cognitive-loop-and-awareness-layer.md` — earlier design exploration that informed ADR-113
+- `docs/architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md` — earlier design exploration that informed ADR-113
 
 ## Where the code lives
 

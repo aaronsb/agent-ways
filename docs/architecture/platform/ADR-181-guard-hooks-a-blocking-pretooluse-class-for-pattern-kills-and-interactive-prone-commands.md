@@ -4,7 +4,7 @@ kind: decision
 verb: change
 capability: config
 basis:
-  - evidence: 'the Cypress survey (docs/design-notes/cypress-survey.md, issue #465) proposed a second refusing hook ported from a timeout guard'
+  - evidence: 'the Cypress survey (docs/architecture/practice/ADR-603-cypress-survey-what-a-node-routed-seed-teaches-a-hook-disclosed-corpus.md, issue #465) proposed a second refusing hook ported from a timeout guard'
   - evidence: 'the Bash tool already bounds every foreground command: 120 seconds by default, 600 at most'
   - precedent: ADR-162
 agent:
@@ -30,7 +30,7 @@ imported:
 
 Every hook this project ships injects context and exits zero. One departs from that: `strip-session-link-pre.sh` (ADR-162) exits 2 to refuse a commit that would publish a session link. It is the only hook that can stop a tool call, and nothing in the corpus names the class it belongs to.
 
-The Cypress survey (`docs/design-notes/cypress-survey.md`, issue #465) proposed a second refusing hook, ported from a guard that blocks any shell command lacking an explicit `timeout` or a detached launch. That guard was written for harnesses that run foreground commands unbounded. This harness is different on three points:
+The Cypress survey (`docs/architecture/practice/ADR-603-cypress-survey-what-a-node-routed-seed-teaches-a-hook-disclosed-corpus.md`, issue #465) proposed a second refusing hook, ported from a guard that blocks any shell command lacking an explicit `timeout` or a detached launch. That guard was written for harnesses that run foreground commands unbounded. This harness is different on three points:
 
 1. **Every foreground command is already bounded.** The Bash tool enforces a timeout, 120 seconds by default and 600 at most, and refuses a bare foreground `sleep`.
 2. **Detached work has a first-class form.** `run_in_background: true` on the Bash tool, and the Monitor tool for watching a condition. The hook sees `run_in_background` in `tool_input`.

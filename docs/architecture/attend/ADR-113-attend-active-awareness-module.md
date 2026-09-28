@@ -35,7 +35,7 @@ imported:
 
 ## Context
 
-The [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md) design note reads the agent-ways system as a cognitive loop with one missing stage: **active perception**. Every other stage is in place — reactive guidance (ADR-100, ADR-103, ADR-105, ADR-108), attention allocation via disclosure gating (ADR-104), episodic memory (ADR-112 ledger), associative recall (ADR-112 KG), consolidation (compaction plus compaction-checkpoint way), project-level awareness at session entry (ADR-106), and the scoring infrastructure that binds these together. What has been missing is a mechanism by which Claude gains cheap peripheral awareness of its own approaching consequences and the environment around it, without spending reasoning tokens to compute either.
+The [Cognitive Loop and the Awareness Layer](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) design note reads the agent-ways system as a cognitive loop with one missing stage: **active perception**. Every other stage is in place — reactive guidance (ADR-100, ADR-103, ADR-105, ADR-108), attention allocation via disclosure gating (ADR-104), episodic memory (ADR-112 ledger), associative recall (ADR-112 KG), consolidation (compaction plus compaction-checkpoint way), project-level awareness at session entry (ADR-106), and the scoring infrastructure that binds these together. What has been missing is a mechanism by which Claude gains cheap peripheral awareness of its own approaching consequences and the environment around it, without spending reasoning tokens to compute either.
 
 The consequence of that gap is well-defined: Claude operates in a partially blind configuration. Self-monitoring is expensive (costs tokens) and unreliable (can fail to fire). Environmental sensing requires explicit tool use (which consumes an entire turn for a single observation). Consequence tracking happens only when Claude chooses to check, by which point the consequence may be too near to respond to usefully.
 
@@ -362,7 +362,7 @@ Tracked in aaronsb/agent-ways#2:
 
 ## References
 
-- **Design note:** [Cognitive Loop and the Awareness Layer](../../design-notes/cognitive-loop-and-awareness-layer.md)
+- **Design note:** [Cognitive Loop and the Awareness Layer](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md)
 - **Tracking issue:** [aaronsb/agent-ways#2](https://github.com/aaronsb/agent-ways/issues/2)
 - **Related ADRs:**
   - [ADR-104](../ways/ADR-104-token-gated-way-re-disclosure-for-long-context-windows.md) — Disclosure gate

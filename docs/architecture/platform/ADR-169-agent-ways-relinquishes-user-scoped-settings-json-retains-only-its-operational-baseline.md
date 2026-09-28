@@ -151,7 +151,7 @@ retains only its own operational and security baseline in `settings.json`.**
    additive-union on shared lists with each writer removing only what its own base
    recorded, per-writer last-applied base, and self-audit hands-off — is the
    **peer-writer coexistence contract** specified in
-   `docs/design-notes/settings-json-merge-spec-and-peer-writer-contract.md`. The
+   `docs/architecture/platform/ADR-500-settings-json-three-way-merge-spec-and-peer-writer-coexistence-contract.md`. The
    dotfiles-side tool ports the same merge algorithm from that spec (shared design
    lineage, not a runtime dependency), so the two mergers behave identically without
    coupling.

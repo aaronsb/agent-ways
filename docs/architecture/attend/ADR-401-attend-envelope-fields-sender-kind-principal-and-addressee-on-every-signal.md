@@ -1,4 +1,15 @@
-# Attend envelope fields: sender kind, principal, and addressee on every signal
+---
+contract: adr/v1
+kind: spec
+capability: attend
+status: accepted
+date: 2026-09-19
+deciders:
+  - aaronsb
+related: []
+---
+
+# ADR-401: Attend envelope fields: sender kind, principal, and addressee on every signal
 
 A reading of the attend signal wire format, taken 2026-09-19, that settles the structured envelope fields issues #532 (sender kind and on-behalf-of) and #533 (addressee) ask for. The two issues share one on-disk change and one set of readers, so this note specifies them together for a single implementation. It then states what #535 (age- and party-aware drain) reads from the fields and which parts of ADR-172 that amends. Signing and cross-machine relay stay out of scope; the last section says why these fields are still their prerequisite. #538 (attend as an MCP server for outbound) is covered where the field design touches tool parameters.
 

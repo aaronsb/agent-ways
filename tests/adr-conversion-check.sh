@@ -34,8 +34,13 @@ live = root / 'docs/architecture'
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
     '302': 'stray tool-call text removed from the end of the body',
-    '113': 'a link to the archived ADR-112 now points into the archive',
-    '114': 'a link to the archived ADR-112 now points into the archive',
+    '113': 'a link to the archived session-ledger record now points into the archive',
+    '114': 'a link to the archived session-ledger record now points into the archive',
+    '122': 'a path to a design note now points at its record (ADR-309)',
+    '160': 'a path to a design note now points at its record (ADR-309)',
+    '169': 'a path to a design note now points at its record (ADR-309)',
+    '181': 'a path to a design note now points at its record (ADR-309)',
+    '187': 'a path to a design note now points at its record (ADR-309)',
 }
 
 TITLE = re.compile(r'^# ADR-[0-9.]+:.*$', re.M)

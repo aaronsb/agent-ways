@@ -1,8 +1,17 @@
-## The Tool-Use Channel is a Signal Problem: Lookbehind, Chunk-Spread, and Winner Confirmation
+---
+contract: adr/v1
+kind: evidence
+capability: matching
+status: accepted
+date: 2026-07-04
+deciders:
+  - aaronsb
+related: []
+---
 
-> **Type:** Design note (not an ADR)
-> **Status:** Exploratory — prototype findings from a 2026-07-05 probe session, pre-decision
-> **Cites:** ADR-125 (embedding as hard dependency), ADR-155 (the keyword gate), ADR-156 (calibrated fire in probability space, `g(s) ≥ τ_s`), and the sibling note [The Lexical Gate as a Conditional Threshold](./lexical-gate-as-conditional-threshold.md)
+# ADR-191: The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation
+
+> **Cites:** ADR-125 (embedding as hard dependency), ADR-155 (the keyword gate), ADR-156 (calibrated fire in probability space, `g(s) ≥ τ_s`), and the sibling note [The Lexical Gate as a Conditional Threshold](ADR-190-the-lexical-gate-as-a-conditional-threshold.md)
 > **Motivates:** a possible ADR for the tool-use (bash) channel — embedding the *intent behind* a command rather than the command string; a `way-embed match --batch` addition; a per-way body cross-similarity confirmation step; and a project/domain scope gate
 
 ## What this note is

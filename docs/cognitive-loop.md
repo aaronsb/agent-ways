@@ -2,7 +2,7 @@
 
 This document is a walk-through of the agent-ways cognitive architecture. It assumes you know what Claude Code is and nothing beyond that. It is the document to read when you want to understand how the pieces fit together — ways, progressive disclosure, the session ledger, optional memory projections, and the awareness layer — without diving into the individual ADRs.
 
-If you want to decide a specific tradeoff, read an ADR. If you want the theoretical framing, read the [cognitive loop and awareness layer design note](design-notes/cognitive-loop-and-awareness-layer.md). If you want to build a way, read the [hooks-and-ways guide](hooks-and-ways/README.md). This document sits one level above all of those: it tells the story of how the system composes.
+If you want to decide a specific tradeoff, read an ADR. If you want the theoretical framing, read the [cognitive loop and awareness layer design note](architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md). If you want to build a way, read the [hooks-and-ways guide](hooks-and-ways/README.md). This document sits one level above all of those: it tells the story of how the system composes.
 
 ## The problem this system addresses
 
@@ -284,7 +284,7 @@ Worth naming explicitly, because the architecture can be misread if these aren't
 Ordered roughly by how specific the topic is to your interest:
 
 **If you want the theoretical framing:**
-- [Design note: cognitive loop and awareness layer](design-notes/cognitive-loop-and-awareness-layer.md) — reads the system as an active-inference loop and names the invariants the ADRs preserve
+- [Design note: cognitive loop and awareness layer](architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) — reads the system as an active-inference loop and names the invariants the ADRs preserve
 - [hooks-and-ways/rationale.md](hooks-and-ways/rationale.md) — the rationale for the ways system
 - [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) — the attention-decay model underlying progressive disclosure
 
@@ -312,6 +312,6 @@ Ordered roughly by how specific the topic is to your interest:
 **If you are new to the whole thing and want the shortest reading path:**
 1. This document
 2. [hooks-and-ways/README.md](hooks-and-ways/README.md)
-3. [design-notes/cognitive-loop-and-awareness-layer.md](design-notes/cognitive-loop-and-awareness-layer.md)
+3. [architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md](architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md)
 
 Everything else is there when you need it.
