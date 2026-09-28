@@ -58,8 +58,8 @@ docs/scripts/adr list --json                              # number, title, path,
 # Edit records (adr/v1): only the touched field's lines change; each lints the record after
 docs/scripts/adr consider <n> --said "..." --via "..." [--covers PROBE...] [--canary caught|missed]
 docs/scripts/adr set <n> key=value key+=item key-=item [--force] [--dry-run]
-                                           # refuses status (use the lifecycle commands above) and frozen fields, without --force
-docs/scripts/adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]   # writes both sides
+                                           # refuses status (use the lifecycle commands above) without --force
+docs/scripts/adr supersede <old> --by <new> [--amends SECTION] [--dry-run]   # writes both sides
 docs/scripts/adr enact <n> <commit>                      # accepted cut or retire only
 
 # Import (ADR-306) — convert v0 or foreign records into adr/v1 through editable import sheets
@@ -94,9 +94,10 @@ than assumed:
 - **defaults**: default deciders and initial status for new ADRs
 - **legacy**: number range for pre-domain ADRs
 - **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0
-- **kinds** (adr/v1 only): `decision`, `spec`, `evidence`, each declaring its required fields, mutable-after-accept fields, and edges
+- **kinds** (adr/v1 only): `decision`, `spec`, `evidence`, each declaring its required fields, sections, and edges
 - **capabilities** (adr/v1 only): the closed vocabulary a record's `capability` field draws from
 - **basis_sources** (adr/v1 only): what a decision may ground itself in — operator, evidence, standard, upstream, precedent
+- **repository** (optional): this repository as URLs name it (host/owner/repo), so `adr domain` rewrites links into it when a record moves; the origin remote otherwise
 
 ## ADR Format
 
@@ -137,7 +138,7 @@ date: <YYYY-MM-DD>
 ## Consequences
 ## Alternatives Considered
 ```
-A `spec` record carries `capability` and no `verb`, and stays mutable in place. An `evidence` record carries no `verb`, is frozen once accepted, and is what a decision's `basis` cites for findings, surveys, audits or explorations (ADR-309).
+A `spec` record carries `capability` and no `verb`, and stays mutable in place. An `evidence` record carries no `verb`, is corrected by appending once accepted, and is what a decision's `basis` cites for findings, surveys, audits or explorations (ADR-309).
 
 **adr/v0** (the legacy contract, unchanged):
 ```markdown
@@ -174,15 +175,13 @@ mkdir -p docs/scripts docs/architecture
 cp ~/.claude/hooks/ways/documentation/adr/adr-tool docs/scripts/adr
 cp ~/.claude/hooks/ways/documentation/adr/adr.yaml.template docs/architecture/adr.yaml
 chmod +x docs/scripts/adr
-sed -i.bak "s/^  adopted: .*/  adopted: $(date +%F)/" docs/architecture/adr.yaml && rm docs/architecture/adr.yaml.bak
 ```
 
-The `sed` line dates the baseline to the day of adoption. Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
+Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
 validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template
 declares `contract: adr/v1` with the decision, spec and evidence kinds and a
-placeholder capability in its `baseline`: replace both with the project's
-capabilities, keeping in `baseline` the ones that already exist (ADR-305). To stay on adr/v0,
-delete the `contract` line and the v1 blocks under it.
+placeholder capability: replace it with the project's capabilities. To stay on
+adr/v0, delete the `contract` line and the v1 blocks under it.
 
 For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run
 `/project-init` instead — it vendors this tool as one step of a larger setup. The
@@ -225,6 +224,7 @@ downgrade the project.
 - **Always use the CLI** — never create `ADR-*.md` files by hand
 - **Run `domains` first** when working in an unfamiliar project — domain names and ranges vary
 - **Status changes through the tool** — adr/v0: edit the YAML `status:` field; adr/v1: `adr accept`/`reject`/`abandon`/`supersede`/`archive`, which `adr set` refuses without `--force`
+- **Correct by appending** — an accepted record is corrected by appending, a change in what the project does is a new decision that names what it replaces, and the operator is quoted in their own words. The tool checks shape and references, not these; review catches them, and git keeps every earlier version (ADR-311)
 - **Regenerate index** after any ADR changes with `docs/scripts/adr index -y`
 
 ## Not for
