@@ -39,6 +39,7 @@ ADR_TOOL="${ADR_TOOL:-$REPO_ROOT/docs/scripts/adr}"
 FIXTURES="$SCRIPT_DIR/fixtures/adr"
 GOLDEN="$FIXTURES/golden"
 TODAY="$(date +%Y-%m-%d)"
+TOOL_VERSION="$(sed -nE 's/^TOOL_VERSION = "([^"]+)"$/\1/p' "$ADR_TOOL" | head -1)"
 UPDATE=0
 [[ "${1:-}" == "--update" ]] && UPDATE=1
 
@@ -76,9 +77,12 @@ fresh() {
 # lives at a different path, so that path is normalized too.
 # A run that crosses midnight sees two dates, so both the date the run
 # started on and the current one become <TODAY>.
+# The tool's version, where `adr contract` prints it in parentheses, becomes
+# <VERSION>, so a version bump changes only version.out, which prints it bare.
 normalize() {
   sed -e "s#$ADR_TOOL#<ADR_TOOL>#g" -e "s#$WORK/repo#<ROOT>#g" -e "s#$WORK#<WORK>#g" \
-      -e "s#$TODAY#<TODAY>#g" -e "s#$(date +%Y-%m-%d)#<TODAY>#g"
+      -e "s#$TODAY#<TODAY>#g" -e "s#$(date +%Y-%m-%d)#<TODAY>#g" \
+      -e "s#(adr-tool $TOOL_VERSION)#(adr-tool <VERSION>)#g"
 }
 
 # capture NAME CMD... — run the tool in the fixture repo and keep its stdout,
@@ -810,6 +814,22 @@ worktree contract-upgrade-unknown-status.txt
 # A v1 config is current.
 fresh v1
 capture contract-v1 contract
+# adr/v1 declared by hand without kinds or capabilities (#589): contract
+# names what is missing, --upgrade appends it and leaves the contract line,
+# and a second --upgrade does nothing.
+fresh v1-empty
+capture contract-incomplete         contract
+capture contract-incomplete-upgrade contract --upgrade
+keep contract-incomplete-config.yaml docs/architecture/adr.yaml
+capture contract-incomplete-lint    lint
+commit_all "completed"
+capture contract-incomplete-noop    contract --upgrade
+worktree contract-incomplete-noop-status.txt
+# An empty contract line is filled with a space after the colon.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\ncontract:\n', 1)"
+capture contract-upgrade-empty contract --upgrade
+keep contract-upgrade-empty-config.yaml docs/architecture/adr.yaml
 # Records ahead of a v0 config: lint warns on adr.yaml and names the command.
 fresh corpus
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: core\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: a finding\n---\n\n# ADR-107: A v1 record in a v0 repo\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-107-a-v1-record.md)

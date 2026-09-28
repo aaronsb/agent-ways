@@ -1,4 +1,4 @@
 Declared: adr/v0 (no contract line)
-Current:  adr/v1 (adr-tool 2.2.0)
+Current:  adr/v1 (adr-tool <VERSION>)
 docs/architecture/adr.yaml is behind this tool. `adr contract --upgrade` brings it to adr/v1.
 [exit 0]

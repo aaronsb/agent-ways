@@ -32,6 +32,25 @@ tool_contract() {
   sed -nE 's/^CURRENT_CONTRACT = "(adr\/v[0-9]+)"$/\1/p' "$1" 2>/dev/null | head -1
 }
 
+# records_declaring DIR CONTRACT — prints "yes" when an ADR-*.md record under
+# DIR declares CONTRACT in its frontmatter. Only the leading block between the
+# first-line `---` and the next `---` is read, so a `contract:` line in a
+# record's body (a fenced example) does not count.
+records_declaring() {
+  [[ -d "$1" ]] || return 0
+  find "$1" -type f -name 'ADR-*.md' -exec awk -v want="$2" '
+    { sub(/\r$/, "") }
+    FNR == 1 { infm = ($0 == "---"); next }
+    !infm { nextfile }
+    /^---[ \t]*$/ { infm = 0; nextfile }
+    /^contract:/ {
+      v = $0
+      sub(/^contract:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v)
+      gsub(/["\047]/, "", v); sub(/[ \t]+$/, "", v)
+      if (v == want) { print "yes"; exit }
+    }' {} + 2>/dev/null | head -1
+}
+
 # contract_newer A B — true when contract A (adr/vN) is newer than B
 contract_newer() {
   local a=${1#adr/v} b=${2#adr/v}
@@ -173,8 +192,7 @@ if [[ -n "$ADR_SCRIPT" ]]; then
   # Records that already declare the tool's contract while adr.yaml does not
   records_ahead=0
   if [[ -z "$contract" && "$current" != "adr/v0" ]] \
-     && grep -rqE --include='ADR-*.md' "^contract:[[:space:]]*[\"']?${current}[\"']?[[:space:]]*(#.*)?\$" \
-          "$PROJECT_DIR/docs/architecture" 2>/dev/null; then
+     && [[ -n "$(records_declaring "$PROJECT_DIR/docs/architecture" "$current")" ]]; then
     records_ahead=1
   fi
 

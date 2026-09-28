@@ -6,7 +6,8 @@
 # writes. `--upgrade` brings adr.yaml to the current contract by editing
 # lines: the contract line is changed or appended, and each top-level key the
 # contract needs and the file lacks is appended as adr.yaml.template writes
-# it. Comments and every other line are left as they were.
+# it. A config already on the current contract gets only its missing blocks.
+# Comments and every other line are left as they were.
 
 # What adr.yaml needs for each contract past adr/v0, in the order it is
 # appended: (top-level key, block). The text matches adr.yaml.template, and
@@ -62,7 +63,11 @@ def cmd_contract(args):
         note = '' if get_config().get('contract') else ' (no contract line)'
         print(f"Declared: {declared}{note}")
         print(f"Current:  {CURRENT_CONTRACT} (adr-tool {TOOL_VERSION})")
-        if declared == CURRENT_CONTRACT:
+        missing = _missing_blocks(get_config())
+        if declared == CURRENT_CONTRACT and missing:
+            print(f"{config_path} declares {CURRENT_CONTRACT} but lacks {' and '.join(missing)}. "
+                  f"`adr contract --upgrade` adds {'it' if len(missing) == 1 else 'them'}.")
+        elif declared == CURRENT_CONTRACT:
             print(f"{config_path} is current.")
         else:
             print(f"{config_path} is behind this tool. "
@@ -71,11 +76,18 @@ def cmd_contract(args):
     return _contract_upgrade(declared)
 
 
+def _missing_blocks(config: dict) -> list:
+    """The top-level keys the current contract needs that config lacks,
+    other than the contract line itself."""
+    return [key for key, _ in CONTRACT_BLOCKS.get(CURRENT_CONTRACT, ())
+            if key != 'contract' and key not in config]
+
+
 def _contract_upgrade(declared: str) -> int:
     path = get_config_path()
     shown = relative_path(path)
-    if declared == CURRENT_CONTRACT:
-        print(f"{shown} already declares {CURRENT_CONTRACT}; nothing to do.")
+    if declared == CURRENT_CONTRACT and not _missing_blocks(get_config()):
+        print(f"{shown} already declares {CURRENT_CONTRACT} and has the blocks it needs; nothing to do.")
         return 0
     original = path.read_bytes()
     text = original.decode('utf-8')
@@ -85,14 +97,18 @@ def _contract_upgrade(declared: str) -> int:
     added = []
     replaced = False
     for i, line in enumerate(lines):
+        if declared == CURRENT_CONTRACT:
+            break
         match = CONTRACT_LINE_RE.match(line.rstrip('\r\n'))
         if match:
             ending = line[len(line.rstrip('\r\n')):]
             prefix, quote, _, suffix = match.groups()
+            if prefix == 'contract:':
+                prefix += ' '  # an empty `contract:` line has no space after the colon
             lines[i] = f"{prefix}{quote}{CURRENT_CONTRACT}{quote}{suffix}{ending}"
             replaced = True
             break
-    if 'contract' in config and not replaced:
+    if 'contract' in config and not replaced and declared != CURRENT_CONTRACT:
         print(f"Error: {shown} sets contract in a form this command does not edit; "
               f"change it to `contract: {CURRENT_CONTRACT}` by hand.", file=sys.stderr)
         return 1
@@ -101,6 +117,8 @@ def _contract_upgrade(declared: str) -> int:
         if key == 'contract':
             if replaced:
                 added.append(f"changed: contract: {declared} -> {CURRENT_CONTRACT}")
+                continue
+            if declared == CURRENT_CONTRACT:
                 continue
         elif key in config:
             continue
@@ -123,10 +141,13 @@ def _contract_upgrade(declared: str) -> int:
         print(f"Error: the upgraded {shown} does not read as {CURRENT_CONTRACT}; "
               "it is restored unchanged.", file=sys.stderr)
         return 1
-    print(f"{shown}: {declared} -> {CURRENT_CONTRACT}")
+    if declared == CURRENT_CONTRACT:
+        print(f"{shown}: {CURRENT_CONTRACT}, completed")
+    else:
+        print(f"{shown}: {declared} -> {CURRENT_CONTRACT}")
     for line in added:
         print(f"  {line}")
     if 'added: capabilities' in added:
         print("The capabilities list holds one placeholder. Replace it with the project's own list.")
-    print("Run `adr lint` to check the records against the new contract.")
+    print("Run `adr lint` to check the records against the contract.")
     return 0

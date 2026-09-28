@@ -1,5 +1,4 @@
-docs/architecture/adr.yaml: adr/v0 -> adr/v1
-  added: contract: adr/v1
+docs/architecture/adr.yaml: adr/v1, completed
   added: kinds
   added: capabilities
 The capabilities list holds one placeholder. Replace it with the project's own list.
