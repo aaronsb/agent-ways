@@ -61,7 +61,7 @@ except ImportError:
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "2.0.0"
+TOOL_VERSION = "2.1.0"
 
 # Statuses that mean "no longer in force" — used by archive and the
 # partial-supersession convention (ADR-303 / issue #438 option C2).
