@@ -248,7 +248,7 @@ ways suggest .claude/ways/myteam/deploy/deploy.md
 
 **Run from:** The project root directory.
 
-**Tells you:** Creates the `.claude/ways/` directory structure and seeds a `MEMORY.md` template for the project.
+**Tells you:** Creates the `.claude/ways/` directory structure and seeds a `MEMORY.md` template for the project. It writes `.claude/.gitignore` (keeps developer-local files out of git) and `.claude/ways/_template.md` (a starting point for a project way that never fires) when they are missing. SessionStart runs it on `startup` and `clear`, so a fresh repo gets both files without running it by hand. Projects may commit or ignore them.
 
 ```
 ways init
