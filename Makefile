@@ -376,6 +376,7 @@ test-adr:
 	@bash tests/adr-conversion-check.sh
 	@bash tests/adr-template-test.sh
 	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
+	@docs/scripts/adr cite --check >/dev/null || { docs/scripts/adr cite; exit 1; }
 	@echo "adr tool tests passed."
 
 test-unit:
