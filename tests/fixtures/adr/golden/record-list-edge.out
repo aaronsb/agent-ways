@@ -1,5 +1,5 @@
 
-ADR v1 Fixture — Architecture Decision Records (2 total)
+ADR v1 Fixture — Agent Decision Records (2 total)
 =======================================================
   ✅ ADR-103      Batch ingestion  (partially superseded by ADR-109)
   💡 ADR-107      Ingest notes, by slug reference

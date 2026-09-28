@@ -4,7 +4,7 @@
 
 def main():
     parser = argparse.ArgumentParser(
-        description='ADR - Architecture Decision Record CLI Tool',
+        description='ADR - Agent Decision Record CLI Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )

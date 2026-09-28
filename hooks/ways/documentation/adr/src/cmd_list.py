@@ -43,7 +43,7 @@ def cmd_list(args):
         return _list_json(adrs, getattr(args, 'group_by', None))
 
     project = get_config().get('project_name', 'Project')
-    print(f"\n{project} — Architecture Decision Records ({len(adrs)} total)")
+    print(f"\n{project} — Agent Decision Records ({len(adrs)} total)")
     print("=" * 55)
 
     def status_icon(status):

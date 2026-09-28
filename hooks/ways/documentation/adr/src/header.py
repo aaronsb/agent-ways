@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-ADR - Architecture Decision Record CLI Tool
+ADR - Agent Decision Record CLI Tool
 
-A librarian for managing Architecture Decision Records.
+A librarian for managing Agent Decision Records.
 
 Usage:
     adr list [--domain DOMAIN] [--status STATUS] [--group] [--archived|--all]

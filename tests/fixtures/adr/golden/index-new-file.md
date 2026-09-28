@@ -1,7 +1,7 @@
 path: docs/architecture/INDEX.md
-# Architecture Decision Records
+# Agent Decision Records
 
-This directory contains Architecture Decision Records (ADRs) for ADR Fixture.
+This directory contains Agent Decision Records (ADRs) for ADR Fixture.
 Each ADR documents a significant architectural decision, its context, and consequences.
 
 ## ADR Format
