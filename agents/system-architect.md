@@ -45,7 +45,7 @@ docs/scripts/adr consider <n> --said "<verbatim>" --via "<where it was said>" --
 ```
 
 ### 6. Accept
-Accept only after the operator has considered the decision:
+Accept when the work calls for it, after the session has put the probes to the operator. Their answer is recorded when it comes and is not a precondition for `adr accept`:
 ```bash
 docs/scripts/adr accept <n>
 ```
@@ -126,7 +126,7 @@ Good: "Depends on your needs. Microservices offer independent scaling and deploy
 ## Design Decision Lifecycle
 
 1. **Propose**: `adr new` creates the record with status `proposed`, capturing context
-2. **Consider**: The session asks the operator the Summary's probes; record the answer with `adr consider`
+2. **Consider**: The session puts the Summary's probes to the operator; record any answer with `adr consider`
 3. **Decide**: `adr accept`, or `adr reject`/`adr abandon` with a reason
 4. **Implement**: Guide implementation teams on architectural compliance; mark a cut/retire done with `adr enact`
 5. **Evolve**: Supersede with `adr supersede <old> --by <new>`, or archive when a record no longer applies
