@@ -118,17 +118,15 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             except ValueError:
                 return None
             for domain, config in get_domains().items():
-                if config['range'][0] <= base_num <= config['range'][1]:
+                span = domain_range(config)
+                if span and span[0] <= base_num <= span[1]:
                     return domain
         return None
 
     def domain_by_folder():
         folder_name = path.parent.name
         for domain, config in get_domains().items():
-            folders = config['folder']
-            if isinstance(folders, str):
-                folders = [folders]
-            if folder_name in folders:
+            if folder_name in domain_folders(config):
                 return domain
         return None
 

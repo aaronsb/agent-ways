@@ -42,8 +42,39 @@ def get_config_path() -> Path:
     """Get path to adr.yaml config file."""
     return get_project_root() / 'docs' / 'architecture' / 'adr.yaml'
 
+# YAML 1.1 reads a plain key such as `yes`, `on` or `2024` as a boolean, a
+# number or a date. Every key in adr.yaml is a name, so a plain key keeps the
+# text it was written with.
+_NAME_KEY_TAGS = {f'tag:yaml.org,2002:{t}' for t in ('bool', 'int', 'float', 'null', 'timestamp')}
+
+def _keys_as_names(node, seen=None) -> None:
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return
+    seen.add(id(node))
+    if isinstance(node, yaml.MappingNode):
+        for key, value in node.value:
+            if isinstance(key, yaml.ScalarNode) and key.style is None and key.tag in _NAME_KEY_TAGS:
+                key.tag = 'tag:yaml.org,2002:str'
+            _keys_as_names(value, seen)
+    elif isinstance(node, yaml.SequenceNode):
+        for item in node.value:
+            _keys_as_names(item, seen)
+
+def _read_config(stream):
+    """adr.yaml's content, its keys read as names; None for an empty file."""
+    loader = yaml.SafeLoader(stream)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None
+        _keys_as_names(node)
+        return loader.construct_document(node)
+    finally:
+        loader.dispose()
+
 def load_config() -> dict:
-    """Load configuration from adr.yaml."""
+    """Load configuration from adr.yaml. An empty file is an empty config."""
     config_path = get_config_path()
 
     if not config_path.exists():
@@ -53,24 +84,32 @@ def load_config() -> dict:
 
     try:
         with open(config_path) as f:
-            config = yaml.safe_load(f)
+            config = _read_config(f)
     except yaml.YAMLError as e:
         print(f"Error: Invalid YAML in config: {e}", file=sys.stderr)
         sys.exit(1)
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        print("Error: Config is not a mapping of keys to values", file=sys.stderr)
+        sys.exit(1)
 
     # Validate required fields
-    if 'domains' not in config:
+    if config.get('domains') is None:
         print("Error: Config missing 'domains' section", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(config['domains'], dict):
+        print("Error: Config 'domains' section is not a mapping of domain names", file=sys.stderr)
         sys.exit(1)
 
     # Convert range lists to tuples for easier use
-    for domain, cfg in config.get('domains', {}).items():
-        if 'range' in cfg and isinstance(cfg['range'], list):
+    for domain, cfg in config['domains'].items():
+        if isinstance(cfg, dict) and isinstance(cfg.get('range'), list):
             cfg['range'] = tuple(cfg['range'])
 
-    if 'legacy' in config and 'range' in config['legacy']:
-        if isinstance(config['legacy']['range'], list):
-            config['legacy']['range'] = tuple(config['legacy']['range'])
+    legacy = config.get('legacy')
+    if isinstance(legacy, dict) and isinstance(legacy.get('range'), list):
+        legacy['range'] = tuple(legacy['range'])
 
     return config
 
@@ -102,8 +141,24 @@ def contract_rank(contract) -> Optional[int]:
     return KNOWN_CONTRACTS.index(name) if name in KNOWN_CONTRACTS else None
 
 def get_domains() -> dict:
-    """Get domain configuration."""
-    return get_config().get('domains', {})
+    """Get domain configuration. An entry that is not a mapping reads as an
+    empty one; lint's domain-shape rule names it."""
+    return {name: cfg if isinstance(cfg, dict) else {}
+            for name, cfg in get_config().get('domains', {}).items()}
+
+def domain_range(cfg: dict) -> Optional[tuple]:
+    """A domain's (low, high), or None when adr.yaml gives no usable range."""
+    r = cfg.get('range')
+    if isinstance(r, (list, tuple)) and len(r) == 2 \
+            and all(isinstance(n, int) and not isinstance(n, bool) for n in r):
+        return tuple(r)
+    return None
+
+def domain_folders(cfg: dict) -> list:
+    """A domain's folders, first the primary; empty when adr.yaml names none."""
+    folders = cfg.get('folder')
+    folders = folders if isinstance(folders, list) else [folders]
+    return [f for f in folders if isinstance(f, str) and f]
 
 def get_statuses() -> set:
     """Get valid statuses."""
@@ -124,8 +179,8 @@ def get_defaults() -> dict:
 
 def get_legacy_range() -> tuple:
     """Get legacy ADR number range."""
-    legacy = get_config().get('legacy', {})
-    return legacy.get('range', (1, 99))
+    legacy = get_config().get('legacy')
+    return legacy.get('range', (1, 99)) if isinstance(legacy, dict) else (1, 99)
 
 def _detect_git_user() -> Optional[str]:
     """Detect current git user (GitHub username or git config name)."""

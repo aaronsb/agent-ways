@@ -1,0 +1,35 @@
+
+Scanned: 15 ADRs
+
+Status distribution:
+  Accepted: 9
+  Deprecated: 1
+  Draft: 1
+  Proposed: 1
+  Superseded: 2
+  Unknown: 1
+
+────────────────────────────────────────────────────────────
+Issues found in 5 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ❌ domains.ops: missing range
+
+docs/architecture/archive/system/ADR-107-old-queue.md
+  ⚠️ superseded_by: ADR-101 does not declare the reciprocal supersedes: ADR-107 — one-directional links rot
+
+docs/architecture/documentation/ADR-302-inline-metadata.md
+  ❌ No YAML frontmatter — found inline metadata (Status:/Date:/Deciders:). Convert to YAML frontmatter: wrap in --- delimiters, use lowercase keys
+
+docs/architecture/documentation/ADR-303-dangling.md
+  ❌ supersedes: 'ADR-199' resolves to no known ADR
+
+docs/architecture/system/ADR-106-one-sided.md
+  ⚠️ supersedes: ADR-12 does not declare the reciprocal superseded_by: ADR-106 — one-directional links rot
+
+════════════════════════════════════════════════════════════
+Summary: 3 errors, 2 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

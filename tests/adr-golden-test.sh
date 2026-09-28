@@ -938,6 +938,52 @@ capture v1-defects-lint-check  lint --check
 fresh v1-empty
 capture v1-empty-lint  lint
 
+# --- a malformed adr.yaml (#617): lint names what is missing, other commands
+# read what is there, nothing raises. `domains --shape` is the session macro's
+# path, which reads only stdout and treats a failure as no notice.
+
+# An empty file is an empty config: no domains, the error a config without
+# them gets.
+fresh corpus
+: > "$WORK/repo/docs/architecture/adr.yaml"
+capture config-empty-lint          lint
+capture config-empty-domains       domains
+capture config-empty-list          list
+capture config-empty-domains-shape domains --shape
+
+# A domain without a range places no records by range; its folder still does.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    range: [200, 299]\n', '', 1)"
+capture config-no-range-lint          lint
+capture config-no-range-domains       domains
+capture config-no-range-list          list --group
+capture config-no-range-domains-shape domains --shape
+capture config-no-range-new           new ops "Anything"
+
+# A domain without a name reads as its key; one without a description has none.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    name: Operations\n', '', 1).replace('    description: Documentation structure and tooling\n', '', 1)"
+capture config-no-name-lint          lint
+capture config-no-name-domains       domains
+capture config-no-name-list          list --group
+capture config-no-name-domains-shape domains --shape
+capture config-no-name-index         index -y
+keep config-no-name-index-file.md docs/architecture/INDEX.md
+
+# A domain entry with nothing under it, and a range that is not [low, high].
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    range: [300, 399]\n    name: Documentation\n    description: Documentation structure and tooling\n    folder: documentation\n', '', 1).replace('range: [100, 199]', 'range: 100', 1)"
+capture config-bare-domain-lint    lint
+capture config-bare-domain-domains domains
+capture config-bare-domain-list    list
+
+# YAML 1.1 reads a plain `yes` key as a boolean; a domain key keeps its text.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('  ops:\n', '  yes:\n', 1)"
+capture config-yes-key-domains domains
+capture config-yes-key-list    list --group
+capture config-yes-key-new     new yes "Anything"
+
 # --- compare or update ----------------------------------------------------------
 
 if [[ $UPDATE -eq 1 ]]; then

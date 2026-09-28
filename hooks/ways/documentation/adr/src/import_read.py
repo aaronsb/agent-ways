@@ -168,8 +168,7 @@ def _folder_domain(path: Path) -> Optional[str]:
     """The domain whose folder holds the file, or 'legacy' for the legacy folder."""
     name = path.parent.name
     for domain, config in get_domains().items():
-        folders = config.get('folder')
-        if name in (folders if isinstance(folders, list) else [folders]):
+        if name in domain_folders(config):
             return domain
     if name == 'legacy' and 'legacy' in get_config():
         return 'legacy'
@@ -178,7 +177,7 @@ def _folder_domain(path: Path) -> Optional[str]:
 def number_range(domain: str) -> Optional[tuple]:
     """(low, high) for a domain in adr.yaml, or the legacy range."""
     if domain in get_domains():
-        return tuple(get_domains()[domain].get('range', (0, -1)))
+        return domain_range(get_domains()[domain]) or (0, -1)
     if domain == 'legacy' and 'legacy' in get_config():
         return tuple(get_legacy_range())
     return None
@@ -197,7 +196,7 @@ def blocking_todo(todo: list) -> list:
 def _range_domain(number) -> Optional[str]:
     base = int(str(number).split('.')[0])
     for domain, config in get_domains().items():
-        low, high = config.get('range', (0, -1))
+        low, high = domain_range(config) or (0, -1)
         if low <= base <= high:
             return domain
     low, high = get_legacy_range()

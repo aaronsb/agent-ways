@@ -164,8 +164,10 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     for existing in find_adrs(include_archived=True):
         if filename_number(existing) == number.lstrip('0'):
             raise SheetError(f"ADR-{number} already exists: {relative_path(existing)}")
-    folders = get_domains()[domain]['folder'] if domain in get_domains() else 'legacy'
-    folder = folders[0] if isinstance(folders, list) else folders
+    folders = domain_folders(get_domains()[domain]) if domain in get_domains() else ['legacy']
+    if not folders:
+        raise SheetError(f"domain {domain} has no folder in adr.yaml; `adr lint` names what it is missing")
+    folder = folders[0]
     slug = re.sub(r'[^a-z0-9]+', '-', str(target['title']).lower()).strip('-')
     return get_project_root() / 'docs' / 'architecture' / folder / f"ADR-{number}-{slug}.md"
 

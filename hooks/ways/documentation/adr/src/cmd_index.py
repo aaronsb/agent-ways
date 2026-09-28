@@ -62,8 +62,9 @@ def cmd_index(args):
         if not domain_adrs:
             continue
 
-        lines.append(f"## {config['name']}")
-        lines.append(f"_{config['description']}_")
+        lines.append(f"## {config.get('name') or domain}")
+        if config.get('description'):
+            lines.append(f"_{config['description']}_")
         lines.append("")
         lines.append("| ADR | Title | Status |")
         lines.append("|-----|-------|--------|")

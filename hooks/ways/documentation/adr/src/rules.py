@@ -133,6 +133,31 @@ def rule_supersession_links(adr, ctx):
                         f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
 
 
+# --- adr.yaml -------------------------------------------------------------------
+
+DOMAIN_KEYS = ('range', 'name', 'description', 'folder')
+
+@config_rule
+def rule_domain_shape(ctx):
+    """Each domain in adr.yaml gives the keys the tool reads from it. Other
+    commands read a domain without them as placing no records by range, or
+    as named by its key (ADR-311)."""
+    def bad(message):
+        ctx.config_issues.append(Issue(message, 'error', code='domain-shape'))
+
+    domains = ctx.config.get('domains')
+    for name, cfg in (domains.items() if isinstance(domains, dict) else ()):
+        if not isinstance(cfg, dict):
+            bad(f"domains.{name}: expected a mapping of {', '.join(DOMAIN_KEYS)}")
+            continue
+        missing = [key for key in DOMAIN_KEYS if key not in cfg]
+        if missing:
+            bad(f"domains.{name}: missing {', '.join(missing)}")
+        if 'range' in cfg and domain_range(cfg) is None:
+            bad(f"domains.{name}.range: expected [low, high]")
+        if 'folder' in cfg and not domain_folders(cfg):
+            bad(f"domains.{name}.folder: expected a folder name or a list of them")
+
 # --- config against records ---------------------------------------------------
 
 @config_rule

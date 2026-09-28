@@ -171,8 +171,7 @@ def _save_config(text: str) -> bool:
 
 
 def _folders(config: dict) -> list:
-    folders = config.get('folder')
-    return list(folders) if isinstance(folders, list) else [folders]
+    return domain_folders(config)
 
 
 # --- add ----------------------------------------------------------------------------
@@ -199,7 +198,7 @@ def _domain_add(args):
         if folder in _folders(config):
             problems.append(f"folder '{folder}' already belongs to {other}")
     if low is not None and low <= high:
-        spans = [(other, config['range']) for other, config in domains.items()]
+        spans = [(other, domain_range(config)) for other, config in domains.items() if domain_range(config)]
         if 'legacy' in get_config():
             spans.append(('legacy', get_legacy_range()))
         for other, (a, b) in spans:
@@ -249,6 +248,9 @@ def _domain_rename(args):
         return 1
     config = domains[old]
     folders = _folders(config)
+    if not folders:
+        print(f"Error: domain '{old}' has no folder in adr.yaml; `adr lint` names what it is missing", file=sys.stderr)
+        return 1
     problems = []
     if new != old:
         if not DOMAIN_NAME_RE.fullmatch(new) or new in ('legacy', 'archive'):
@@ -413,6 +415,9 @@ def _domain_move(args):
             problems.append(f"unknown domain '{domain}' (valid: {', '.join(domains.keys())})")
             continue
         folders = _folders(domains[domain])
+        if not folders:
+            problems.append(f"domain '{domain}' has no folder in adr.yaml; `adr lint` names what it is missing")
+            continue
         if adr.domain == domain and adr.path.parent.name in folders:
             problems.append(f"ADR-{adr.number} is already in {domain} ({rel})")
             continue

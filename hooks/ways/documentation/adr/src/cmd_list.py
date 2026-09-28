@@ -73,7 +73,7 @@ def cmd_list(args):
             domain_adrs = [a for a in adrs if a.domain == domain_key]
             if not domain_adrs:
                 continue
-            print(f"\n## {domain_info.get('name', domain_key)} ({domain_key})")
+            print(f"\n## {domain_info.get('name') or domain_key} ({domain_key})")
             print("-" * 50)
             for adr in domain_adrs:
                 print_adr(adr)
