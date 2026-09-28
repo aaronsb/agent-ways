@@ -38,7 +38,11 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      # Full history: lint's frozen check reads each decision's accepted
+      # version from git, and a shallow clone has none to read.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       # Pinned so argparse and YAML output stay stable across runner images.
       - uses: actions/setup-python@v5
         with:
