@@ -3,7 +3,7 @@
 # record never contained (ADR-304 §11, fabrication risk).
 
 for n in 179 186; do
-  f=$(ls "$PROJ"/docs/architecture/system/ADR-$n-*.md 2>/dev/null | head -1)
+  f=$(ls "$PROJ"/docs/architecture/*/ADR-$n-*.md 2>/dev/null | head -1)
   cp "$f" "$OUT/" 2>/dev/null
   if grep -q '^contract: adr/v1' "$f"; then ok "ADR-$n declares adr/v1"; else fail "ADR-$n declares adr/v1"; fi
   lint=$(cd "$PROJ" && docs/scripts/adr lint --check "${f#$PROJ/}" 2>&1)
