@@ -96,7 +96,7 @@ than assumed:
 - **statuses**: valid v0 status values (Draft, Proposed, Accepted, Superseded, Deprecated); adr/v1 has a fixed status set (proposed, accepted, rejected, abandoned, superseded, archived)
 - **defaults**: default deciders and initial status for new ADRs
 - **legacy**: number range for pre-domain ADRs
-- **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0. `adr contract --upgrade` writes it, with `kinds` and `capabilities` when they are missing; the capabilities are seeded from the domains, plus `process` and `adr`
+- **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0. `adr contract --upgrade` writes it, with `kinds` and `capabilities` when they are missing; the capabilities are seeded from the domains, plus `process` and `adr` (ADR-312)
 - **kinds** (adr/v1 only): `decision`, `spec`, `evidence`, each declaring its required fields, sections, and edges
 - **capabilities** (adr/v1 only): the closed vocabulary a record's `capability` field draws from
 - **basis_sources** (adr/v1 only): what a decision may ground itself in — operator, evidence, standard, upstream, precedent

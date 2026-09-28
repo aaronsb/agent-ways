@@ -87,7 +87,7 @@ For adr-tools, MADR, Log4brains, or other foreign formats — no reader exists y
 
 ## Capabilities from domains
 
-`adr contract --upgrade` seeds one capability per v0 domain, using the domain's description as its line. The seeds are a starting point. Keep, split, rename or delete each one.
+`adr contract --upgrade` seeds one capability per v0 domain, using the domain's description as its line (ADR-312). The seeds are a starting point. Keep, split, rename or delete each one.
 
 - Split a seed when decisions change its parts independently.
 - A record may carry 2–3 capabilities when it changes several (ADR-308).
