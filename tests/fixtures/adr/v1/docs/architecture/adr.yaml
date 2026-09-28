@@ -21,13 +21,11 @@ legacy:
 
 kinds:
   decision:
-    mutable_after_accept: [status, enacted, superseded_by, considered, concern]
     verb: required
     requires: [capability, basis, agent]
     sections: [Summary]
     edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec] }
   spec:
-    mutable_after_accept: all
     verb: forbidden
     requires: [capability]
     edges: { supersedes: spec, decided_by: decision }
@@ -36,10 +34,6 @@ capabilities:
   adr: Decision records, their contract, and the tooling that enforces it
   ingest: Document ingestion into the store
   search: Query over the store
-
-surfaces:
-  cli: { inventory: "printf 'ingest-legacy\\nquery\\n'" }
-  route: {}
 
 cite:
   exclude: [vendor]

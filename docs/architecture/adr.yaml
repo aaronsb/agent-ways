@@ -50,18 +50,15 @@ contract: adr/v1
 
 kinds:
   decision:
-    mutable_after_accept: [status, enacted, superseded_by, considered, concern, observable]
     verb: required
     requires: [capability, basis, agent]
     sections: [Summary]
     edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec, evidence] }
   spec:
-    mutable_after_accept: all
     verb: forbidden
     requires: [capability]
     edges: { supersedes: spec, decided_by: decision }
   evidence:
-    mutable_after_accept: [status, superseded_by, related]
     verb: forbidden
     requires: [capability]
     edges: { supersedes: evidence }
@@ -82,21 +79,6 @@ capabilities:
   governance: Provenance, controls and compliance findings
   loop: The development loop skills (start, develop, merge, release, wrap)
   testing: The test suites and the live install fixture
-
-# Capabilities that were active when agent-ways adopted adr/v1 on the
-# adopted date. No record added them, so none needs an add decision. A change
-# on one with no prior record to name stands on the baseline. Any capability
-# declared after adoption needs an add (ADR-305).
-baseline:
-  adopted: 2026-09-27
-  capabilities: [adr, docs, method, matching, disclosure, authoring, cli, attend, install, config, governance, loop, testing]
-
-# Retire targets name a surface; these are agent-ways' namespaces.
-surfaces:
-  cli: {}
-  skill: {}
-  way: {}
-  hook: {}
 
 # The basis sources a decision may name (ADR-304 §11); the v1 default.
 basis_sources: [operator, evidence, standard, upstream, precedent]

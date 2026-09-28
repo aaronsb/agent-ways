@@ -1,4 +1,0 @@
-Refused: ADR-101: 'capability' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
-Refused: ADR-101: 'related' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
-ADR-101 is accepted. Record the change as a new decision that supersedes or amends it, or pass --force for migration cleanup.
-[exit 1]

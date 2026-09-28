@@ -1,0 +1,3 @@
+Accepted ADR-113: Operator-started and still proposed
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

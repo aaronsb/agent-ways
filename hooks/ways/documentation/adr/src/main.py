@@ -148,15 +148,13 @@ def main():
     p_set.add_argument('assignments', nargs='+', metavar='key=value',
                        help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
     p_set.add_argument('--force', action='store_true',
-                       help='Edit a frozen field anyway, for migration cleanup (lint still reports it)')
+                       help='Set status, or a field no v1 record carries, anyway')
     p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')
     p_supersede = subparsers.add_parser('supersede', help='Record a supersession on both records (ADR-304 §3)')
     p_supersede.add_argument('adr', help='The record replaced (e.g., 101, ADR-101)')
     p_supersede.add_argument('--by', required=True, help='The record that replaces it')
     p_supersede.add_argument('--amends', metavar='SECTION',
                              help='Replace one section only: amends: [OLD#SECTION] on the new record')
-    p_supersede.add_argument('--force', action='store_true',
-                             help="Write the edge on an accepted record whose kind freezes it")
     p_supersede.add_argument('--dry-run', action='store_true', help='Show the change without writing')
     p_enact = subparsers.add_parser('enact', help='Mark an accepted cut or retire done at a commit (ADR-304 §5)')
     p_enact.add_argument('adr', help='ADR number (e.g., 111, ADR-111)')
@@ -167,8 +165,9 @@ def main():
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
     p_cite.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
-    p_cite.add_argument('--no-inventory', action='store_true',
-                        help="Skip surface inventories (they run shell commands from adr.yaml)")
+    # Accepted and ignored: surface inventories are gone (ADR-311), and a
+    # script that still passes the flag keeps working.
+    p_cite.add_argument('--no-inventory', action='store_true', help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 

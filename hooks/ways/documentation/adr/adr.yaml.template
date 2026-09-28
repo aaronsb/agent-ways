@@ -43,18 +43,15 @@ contract: adr/v1
 
 kinds:
   decision:
-    mutable_after_accept: [status, enacted, superseded_by, considered, concern, observable]
     verb: required
     requires: [capability, basis, agent]
     sections: [Summary]
     edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec, evidence] }
   spec:
-    mutable_after_accept: all
     verb: forbidden
     requires: [capability]
     edges: { supersedes: spec, decided_by: decision }
   evidence:
-    mutable_after_accept: [status, superseded_by, related]
     verb: forbidden
     requires: [capability]
     edges: { supersedes: evidence }
@@ -64,16 +61,6 @@ kinds:
 # placeholder with the project's own list.
 capabilities:
   core: The project's core behaviour (placeholder; replace)
-
-# Capabilities the project already had when it adopted adr/v1 need no `add`
-# decision (ADR-305). Set `adopted` to the day the project adopts adr/v1 and
-# list the capabilities it had then; a capability declared later needs an add.
-baseline:
-  adopted: 2026-01-01
-  capabilities: [core]
-
-# Retire targets name a surface: the namespaces the project exposes.
-surfaces: {}
 
 # Valid ADR statuses (adr/v0 records)
 statuses:

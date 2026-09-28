@@ -19,7 +19,7 @@ Usage:
     adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
                  [--paraphrase] [--canary caught|missed] [--dry-run]
     adr set <number> key=value|key+=value|key-=value ... [--force] [--dry-run]
-    adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]
+    adr supersede <old> --by <new> [--amends SECTION] [--dry-run]
     adr enact <number> <commit> [--dry-run]
     adr import scan <paths...> [--force]
     adr import apply [sheets...] [--partial] [--force] [--dry-run]

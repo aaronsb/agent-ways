@@ -19,7 +19,7 @@ Usage:
     adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
                  [--paraphrase] [--canary caught|missed] [--dry-run]
     adr set <number> key=value|key+=value|key-=value ... [--force] [--dry-run]
-    adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]
+    adr supersede <old> --by <new> [--amends SECTION] [--dry-run]
     adr enact <number> <commit> [--dry-run]
     adr import scan <paths...> [--force]
     adr import apply [sheets...] [--partial] [--force] [--dry-run]
@@ -105,6 +105,16 @@ def get_project_root() -> Path:
 
     # Last resort: assume cwd
     return Path.cwd()
+
+
+def _git(args: list, cwd: Path) -> Optional[str]:
+    """git's output, or None when git is missing, fails or times out."""
+    try:
+        result = subprocess.run(['git', '-c', 'core.quotePath=false', *args], cwd=cwd,
+                                capture_output=True, encoding='utf-8', errors='replace', timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    return result.stdout if result.returncode == 0 else None
 
 
 def get_config_path() -> Path:
@@ -622,17 +632,6 @@ def _str_list(value) -> Optional[list]:
 def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
-def _iso_date(value) -> Optional[str]:
-    """value as a YYYY-MM-DD string, or None. YAML may load a date as one."""
-    text = str(value) if value is not None else ''
-    return text if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text) else None
-
-def v1_baseline(ctx) -> tuple:
-    """(adoption date or None, set of baseline capability names)."""
-    baseline = _mapping(ctx.config.get('baseline'))
-    return (_iso_date(baseline.get('adopted')),
-            set(_str_list(baseline.get('capabilities')) or []))
-
 def v1_kinds(ctx) -> dict:
     return _mapping(ctx.config.get('kinds'))
 
@@ -668,9 +667,6 @@ def v1_edges(schema: dict) -> dict:
 def v1_capabilities(ctx) -> dict:
     return _mapping(ctx.config.get('capabilities'))
 
-def v1_surfaces(ctx) -> dict:
-    return _mapping(ctx.config.get('surfaces'))
-
 def as_entries(value) -> list:
     if value is None:
         return []
@@ -679,17 +675,6 @@ def as_entries(value) -> list:
 def capability_scope(adr) -> list:
     """The capabilities a record covers: one name, a list, or ['*']."""
     return as_entries(adr.frontmatter.get('capability'))
-
-def covers(prior, capability: str) -> bool:
-    """A prior decision is on this capability when it names it, lists it,
-    or is scoped to '*' (ADR-304 §3)."""
-    scope = capability_scope(prior)
-    return '*' in scope or capability in scope
-
-def broader_than(prior, capability: str) -> bool:
-    """The prior covers more than this one capability: '*' or a list."""
-    scope = capability_scope(prior)
-    return '*' in scope or len(scope) > 1
 
 def section_exists(target, section: str) -> bool:
     """A section reference matches a heading that is numbered with it ('2.',
@@ -724,9 +709,6 @@ def rule_v1_config_shape(ctx):
         for key in ('requires', 'statuses', 'sections'):
             if key in schema and _str_list(schema[key]) is None:
                 bad(f"kinds.{name}.{key}: expected a list of names")
-        mutable = schema.get('mutable_after_accept')
-        if mutable is not None and mutable != 'all' and _str_list(mutable) is None:
-            bad(f"kinds.{name}.mutable_after_accept: expected a list of fields or 'all'")
         if 'edges' in schema:
             edges = schema['edges']
             if not isinstance(edges, dict):
@@ -739,44 +721,6 @@ def rule_v1_config_shape(ctx):
         bad("verbs: expected a list of names")
     if not isinstance(config.get('capabilities'), dict) or not config.get('capabilities'):
         bad("contract: adr/v1 declares no capabilities")
-    if 'surfaces' in config and not isinstance(config['surfaces'], dict):
-        bad("surfaces: expected a mapping of namespace to settings")
-    if 'baseline' in config:
-        baseline = config['baseline']
-        names = _str_list(baseline.get('capabilities')) if isinstance(baseline, dict) else None
-        if names is None:
-            bad("baseline: expected 'adopted' (a YYYY-MM-DD date) and 'capabilities' (a list of names)")
-        else:
-            if not _iso_date(baseline.get('adopted')):
-                bad("baseline.adopted: expected a YYYY-MM-DD date")
-            if isinstance(config.get('capabilities'), dict):
-                for name in names:
-                    if name not in config['capabilities']:
-                        bad(f"baseline: '{name}' is not in the capabilities vocabulary")
-
-@config_rule(contract=V1)
-def rule_v1_capabilities_added(ctx):
-    """Every capability in the vocabulary has an accepted `add` decision, except
-    those in `baseline`: capabilities that were active when the project
-    adopted the contract, which no record added. This warns while v0 records
-    remain, so a migrating corpus is not failed on every capability, and fails
-    once migration is done (ADR-304 §6, amended by ADR-305)."""
-    added = set()
-    for adr in ctx.corpus:
-        if (is_v1_record(adr, ctx)
-                and adr.frontmatter.get('verb') == 'add'
-                and str(adr.status or '').lower() == 'accepted'):
-            added.update(capability_scope(adr))
-    # Archived records are never edited, so they never migrate and do not
-    # hold the check at warning.
-    migrating = any(not is_v1_record(adr, ctx) and not is_archived(adr.path)
-                    for adr in ctx.corpus)
-    _, baseline = v1_baseline(ctx)
-    for name in v1_capabilities(ctx):
-        if name not in added and name not in baseline:
-            ctx.config_issues.append(Issue(
-                f"capability '{name}' has no accepted add decision",
-                'warning' if migrating else 'error'))
 
 # --- one record ------------------------------------------------------------------
 
@@ -853,21 +797,6 @@ def rule_v1_capability(adr, ctx):
     if verb == 'change' and len(scope) > 3:
         v1_issue(adr, f"a change lists {len(scope)} capabilities; list only those it alters, the rest belong in related (ADR-308 §3)", 'warning')
 
-@file_rule(contract=V1)
-def rule_v1_retire_targets(adr, ctx):
-    if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'retire':
-        return
-    targets = as_entries(adr.frontmatter.get('targets'))
-    if not targets:
-        v1_issue(adr, "a retire decision names its targets (targets: [cli:..., route:...])")
-    surfaces = v1_surfaces(ctx)
-    for target in targets:
-        namespace, sep, name = target.partition(':')
-        if not sep or not name:
-            v1_issue(adr, f"target '{target}' is not namespace:name")
-        elif namespace not in surfaces:
-            v1_issue(adr, f"target '{target}': surface '{namespace}' is not declared in adr.yaml")
-
 # --- against the corpus ------------------------------------------------------------
 
 @corpus_rule(contract=V1)
@@ -900,82 +829,14 @@ def rule_v1_edges(adr, ctx):
                     v1_issue(adr, f"{field_name}: ADR-{number} is a {target_kind}, expected {' or '.join(target_kinds)}")
             if section and not section_exists(target, section):
                 v1_issue(adr, f"{field_name}: ADR-{number} has no section '{section}'")
-
-def decision_order(adr) -> tuple:
-    """Records in decision order: by date, then number (ADR-304 §3)."""
-    base, _, part = str(adr.number or '0').partition('.')
-    return (str(adr.date or ''), int(base or 0), int(part or 0))
-
-def _stands_on_baseline(capability: str, adr, ctx) -> bool:
-    """A change with no prior edge on this capability stands on the baseline when it
-    is in it and either the change predates adoption, or no live decision on
-    the capability has been made since adoption before it. Only decisions
-    dated after adoption count: each was written as v1, so migrating an older
-    record never moves the answer (ADR-305)."""
-    adopted, baseline = v1_baseline(ctx)
-    when = _iso_date(adr.date)
-    if capability not in baseline or not adopted or not when:
-        return False
-    if when <= adopted:
-        return True
-    for other in ctx.corpus:
-        other_when = _iso_date(other.date)
-        if (other is not adr and is_v1_record(other, ctx)
-                and other.frontmatter.get('verb') not in (None, 'constrain')
-                and str(other.status or '').lower() not in ('rejected', 'abandoned')
-                and covers(other, capability)
-                and other_when and other_when > adopted
-                and decision_order(other) < decision_order(adr)):
-            return False
-    return True
-
-@corpus_rule(contract=V1)
-def rule_v1_change_replaces(adr, ctx):
-    """A change decision supersedes or amends a prior decision on the same
-    capability. When the prior covers more than this capability ('*' or a
-    list), the change amends it (ADR-304 §3). A change on a baseline
-    capability with no prior record to name stands on the baseline (ADR-305).
-    Each capability of a listed change is checked on its own, the baseline
-    included: an edge covering one capability is no prior for another (ADR-308)."""
-    if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
-        return
-    edges = []
-    for field_name in ('supersedes', 'amends'):
-        for entry in as_entries(adr.frontmatter.get(field_name)):
-            target = ctx.by_number.get(norm_ref(entry)[0])
-            if target is None:
-                return  # a dangling edge is already reported by the edge rules
-            edges.append((field_name, target))
-    scope = [c for c in capability_scope(adr) if c != '*']
-    listed = len(scope) > 1
-    for capability in scope:
-        v0_priors = [t for _, t in edges if not is_v1_record(t, ctx)]
-        fits = [(f, t) for f, t in edges if is_v1_record(t, ctx) and covers(t, capability)]
-        if any(f == 'amends' or not broader_than(t, capability) for f, t in fits):
-            continue
-        if fits:
-            v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
-        elif v0_priors and not listed:
-            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
-            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
-        elif (listed or not edges) and _stands_on_baseline(capability, adr, ctx):
-            # A single-capability change whose edges name no prior on it
-            # does not fall back to the baseline; a listed change's edges
-            # may cover its other capabilities (ADR-308 §2).
-            continue
-        elif v0_priors:
-            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
-            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
-        else:
-            v1_issue(adr, f"a change decision supersedes or amends a prior decision on '{capability}'")
 # ============================================================================
 # adr/v1: basis, agent, consideration and concerns (ADR-304 §11, §12)
 # ============================================================================
 #
 # A decision's basis names what it rests on. precedent points at another
-# record in the corpus; every other source is external. Following precedent
-# must reach an external source: a corpus that justifies itself only by citing
-# itself can drift anywhere and still look consistent.
+# record in the corpus, and must resolve to one; every other source is
+# external. Where a chain of precedent leads is for a reader to judge, not
+# lint (ADR-311).
 #
 # The operator basis and `considered` are an audit trail, not a credential.
 # Lint checks that `said` and `via` are present. It cannot check that they are
@@ -988,17 +849,11 @@ V1_CONSIDERED_KEYS = ('operator', 'said', 'via', 'paraphrase', 'covers', 'canary
 V1_CONCERN_KEYS = ('said', 'resolve', 'answer', 'withdrawn', 'raised')
 V1_ANSWER_KEYS = ('operator', 'said', 'via', 'paraphrase')
 V1_CANARY = ('caught', 'missed')
-# A precedent is "another accepted decision" (§11). These statuses ground;
-# proposed warns; anything else (rejected, abandoned) does not ground.
-V1_GROUNDING_STATUSES = ('accepted', 'superseded', 'archived')
 
 def v1_basis_sources(ctx) -> tuple:
     """adr.yaml may rename or extend the sources. precedent is the one
     internal source; every other declared source is external."""
     return tuple(_str_list(ctx.config.get('basis_sources')) or V1_BASIS_SOURCES)
-
-def v1_external_sources(ctx) -> tuple:
-    return tuple(s for s in v1_basis_sources(ctx) if s != 'precedent')
 
 def _text(value) -> bool:
     return isinstance(value, str) and value.strip() != ''
@@ -1019,9 +874,6 @@ def basis_entries(adr, ctx) -> list:
                 out.append((sources[0], entry[sources[0]], entry))
     return out
 
-def has_operator_basis(adr, ctx) -> bool:
-    return any(source == 'operator' for source, _, _ in basis_entries(adr, ctx))
-
 def _unknown_keys(entry: dict, allowed: tuple) -> list:
     return [k for k in entry if k not in allowed]
 
@@ -1032,11 +884,8 @@ def rule_v1_basis_config(ctx):
     raw = ctx.config.get('basis_sources')
     if raw is None:
         return
-    sources = _str_list(raw)
-    if sources is None:
+    if _str_list(raw) is None:
         ctx.config_issues.append(Issue("basis_sources: expected a list of names", 'error'))
-    elif not any(s != 'precedent' for s in sources):
-        ctx.config_issues.append(Issue("basis_sources: declares no external source, so no chain can leave the corpus", 'error'))
 
 # --- one record ----------------------------------------------------------------
 
@@ -1142,10 +991,6 @@ def rule_v1_considered(adr, ctx):
                 v1_issue(adr, f"{where}: covers is a list of probe names")
             if 'canary' in entry and entry['canary'] not in V1_CANARY:
                 v1_issue(adr, f"{where}: canary is caught or missed")
-    # ADR-304 §12: a decision the operator started waits for their consideration
-    if (has_operator_basis(adr, ctx) and str(adr.status or '').lower() == 'accepted'
-            and not adr.frontmatter.get('considered')):
-        v1_issue(adr, "accepted with an operator basis but no considered entry; the operator considers what they started")
 
 @file_rule(contract=V1)
 def rule_v1_concern(adr, ctx):
@@ -1182,178 +1027,35 @@ def rule_v1_concern(adr, ctx):
         else:
             adr.issues.append(Issue(f"open concern: {_first_line(entry.get('said'))}", 'warning', 'open-concern'))
 
-# --- against the corpus: grounding -------------------------------------------------
-#
-# Grounding is a least fixed point, so the verdict does not depend on the order
-# of basis entries and each record is visited a bounded number of times:
-#
-#   grounded(r) = r has an external source
-#              or some precedent of r points at a grounding-status record t
-#                 with grounded(t)
-#
-# A record with no basis but a decided_by (a spec) is grounded through the
-# records that decided it. A non-archived v0 record grounds provisionally: the
-# chain passes with a warning until the record is migrated. An archived v0
-# record grounds outright, since archived records never migrate.
-
-def _is_v0_ground(target, ctx) -> Optional[str]:
-    """'final' for an archived v0 record, 'provisional' for a live one."""
-    if is_v1_record(target, ctx):
-        return None
-    return 'final' if is_archived(target.path) else 'provisional'
-
-def _grounding_map(ctx) -> dict:
-    """path -> 'final' | 'provisional' for every grounded v1 record."""
-    cache = getattr(ctx, '_grounding', None)
-    if cache is not None:
-        return cache
-    records = [a for a in ctx.corpus if is_v1_record(a, ctx)]
-    external = v1_external_sources(ctx)
-    grounded = {}
-    for adr in records:
-        if any(source in external for source, _, _ in basis_entries(adr, ctx)):
-            grounded[adr.path] = 'final'
-
-    def level_of(target) -> Optional[str]:
-        v0 = _is_v0_ground(target, ctx)
-        if v0:
-            return v0
-        return grounded.get(target.path)
-
-    changed = True
-    while changed:
-        changed = False
-        for adr in records:
-            best = grounded.get(adr.path)
-            if best == 'final':
-                continue
-            candidates = []
-            entries = basis_entries(adr, ctx)
-            if entries:
-                for value in _precedent_values(adr, ctx):
-                    target = ctx.by_number.get(norm_ref(value)[0])
-                    if target is None or str(target.status or '').lower() not in V1_GROUNDING_STATUSES + ('proposed',):
-                        continue
-                    candidates.append(level_of(target))
-            elif 'basis' not in adr.frontmatter:
-                for ref in as_entries(adr.frontmatter.get('decided_by')):
-                    target = ctx.by_number.get(norm_ref(ref)[0])
-                    if target is not None:
-                        candidates.append(level_of(target))
-            new = 'final' if 'final' in candidates else ('provisional' if 'provisional' in candidates else None)
-            if new and new != best:
-                grounded[adr.path] = new
-                changed = True
-    ctx._grounding = grounded
-    return grounded
+# --- against the corpus ------------------------------------------------------------
 
 def _precedent_values(adr, ctx) -> list:
     """Precedent references of a usable shape; the shape rule reports others."""
     return [value for source, value, _ in basis_entries(adr, ctx)
             if source == 'precedent' and isinstance(value, (str, int)) and not isinstance(value, bool)]
 
-def _precedent_targets(adr, ctx) -> list:
-    return [ctx.by_number.get(norm_ref(value)[0]) for value in _precedent_values(adr, ctx)]
-
-def _cycle_through(adr, ctx) -> Optional[list]:
-    """The numbers on a precedent cycle that returns to adr, if any."""
-    stack = [(adr, [adr])]
-    visited = set()
-    while stack:
-        node, path = stack.pop()
-        for target in _precedent_targets(node, ctx):
-            if target is None or not is_v1_record(target, ctx):
-                continue
-            if target.path == adr.path:
-                return [n.number or n.path.name for n in path]
-            if target.path not in visited:
-                visited.add(target.path)
-                stack.append((target, path + [target]))
-    return None
-
 @corpus_rule(contract=V1)
-def rule_v1_basis_chain(adr, ctx):
-    """Every precedent resolves to an allowed, accepted record, and following
-    precedent reaches an external source (ADR-304 §11)."""
+def rule_v1_precedent(adr, ctx):
+    """Each precedent resolves to a record of a kind the basis edge accepts."""
     if not is_v1_record(adr, ctx):
         return
-    entries = basis_entries(adr, ctx)
-    precedents = [(value, ctx.by_number.get(norm_ref(value)[0]))
-                  for value in _precedent_values(adr, ctx)]
-    schema = v1_kind_schema(adr, ctx) or {}
-    allowed_kinds = v1_edges(schema).get('basis')
-    for value, target in precedents:
+    allowed_kinds = v1_edges(v1_kind_schema(adr, ctx) or {}).get('basis')
+    for value in _precedent_values(adr, ctx):
+        target = ctx.by_number.get(norm_ref(value)[0])
         if target is None:
             v1_issue(adr, f"basis: precedent '{value}' resolves to no known ADR")
-            continue
-        status = str(target.status or '').lower()
-        if is_v1_record(target, ctx):
-            kind = v1_record_kind(target)
-            if allowed_kinds is not None and kind not in allowed_kinds:
-                v1_issue(adr, f"basis: precedent ADR-{target.number} is a {kind}, expected {' or '.join(allowed_kinds)}")
-            if status == 'proposed':
-                adr.issues.append(Issue(f"basis: precedent ADR-{target.number} is still proposed", 'warning', 'precedent-proposed'))
-            elif status not in V1_GROUNDING_STATUSES:
-                v1_issue(adr, f"basis: precedent ADR-{target.number} is {status or 'without a status'}, so it grounds nothing")
-            elif 'basis' not in target.frontmatter and not target.frontmatter.get('decided_by'):
-                v1_issue(adr, f"basis: precedent ADR-{target.number} has neither a basis nor decided_by")
-    if not entries:
-        return
-    level = _grounding_map(ctx).get(adr.path)
-    if level == 'final':
-        return
-    if level == 'provisional':
-        v0s = sorted({t.number for _, t in precedents if t is not None and _is_v0_ground(t, ctx) == 'provisional'})
-        via = f" (ADR-{', ADR-'.join(v0s)})" if v0s else ''
-        v1_issue(adr, f"basis: grounded only through records still on v0{via}; migrate them to confirm the chain", 'warning')
-        return
-    if not precedents:
-        return  # no source at all: the shape rule reports the entries
-    cycle = _cycle_through(adr, ctx)
-    if cycle:
-        v1_issue(adr, f"basis: precedent loops back through ADR-{' -> ADR-'.join(str(n) for n in cycle)} without reaching an external source")
-    else:
-        v1_issue(adr, f"basis: following precedent never reaches an external source ({', '.join(v1_external_sources(ctx))})")
+        elif is_v1_record(target, ctx) and allowed_kinds is not None \
+                and v1_record_kind(target) not in allowed_kinds:
+            v1_issue(adr, f"basis: precedent ADR-{target.number} is a {v1_record_kind(target)}, "
+                          f"expected {' or '.join(allowed_kinds)}")
 # ============================================================================
-# adr/v1: legibility, enactment, the vocabulary layers, frozen decisions
+# adr/v1: sections, imports, enactment, placeholders, observables
 # ============================================================================
 #
-# ADR-304 §5 (enactment), §2 (no word shared across layers), §1 and §12 (a
-# decision is frozen once it leaves proposed, and opens with a Summary the
-# operator can judge alone).
+# Checks of one record's own shape. How records relate over time, and
+# whether an accepted one changed, is read from git (ADR-311).
 
-# L3, the derived product state, is fixed by the contract (ADR-304 §2).
-V1_DERIVED_STATES = ('active', 'absent', 'present', 'gone', 'living', 'historical')
 V1_ENACTING_VERBS = ('cut', 'retire')
-
-_STEM_SUFFIXES = ('ations', 'ation', 'ments', 'ment', 'ions', 'ion', 'ings', 'ing',
-                  'ives', 'ive', 'als', 'al', 'ors', 'or', 'ers', 'er', 'ted', 'ed',
-                  'ts', 'es', 't', 'e', 's')
-
-def _stem(word: str) -> str:
-    """A crude English stem: strip suffixes repeatedly and collapse a doubled
-    final consonant, enough to catch cut/cutting, retire/retirement,
-    constrain/constraint and propose/proposal."""
-    word = word.lower()
-    changed = True
-    while changed:
-        changed = False
-        for suffix in _STEM_SUFFIXES:
-            if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-                word = word[:-len(suffix)]
-                changed = True
-                break
-    if len(word) >= 4 and word[-1] == word[-2] and word[-1] not in 'aeiou':
-        word = word[:-1]
-    return word
-
-def _collide(a: str, b: str) -> bool:
-    """Same word, same stem, or one stem is a prefix of the other (4+ letters)."""
-    if a.lower() == b.lower():
-        return True
-    sa, sb = _stem(a), _stem(b)
-    short, long_ = sorted((sa, sb), key=len)
-    return sa == sb or (len(short) >= 4 and long_.startswith(short))
 
 def _find_section(adr, name: str) -> Optional[str]:
     """The heading that is this section: the name alone, or the name followed
@@ -1364,32 +1066,6 @@ def _find_section(adr, name: str) -> Optional[str]:
         if pattern.fullmatch(heading.strip()):
             return heading
     return None
-
-# --- adr.yaml ------------------------------------------------------------------
-
-@config_rule(contract=V1)
-def rule_v1_vocabulary_layers(ctx):
-    """No word or stem appears in two layers (ADR-304 §2), so a later contract
-    version cannot reintroduce a verb that collides with a state."""
-    lifecycle = set()
-    for schema in v1_kinds(ctx).values():
-        if isinstance(schema, dict):
-            lifecycle.update(v1_lifecycle(schema))
-    lifecycle = lifecycle or set(V1_LIFECYCLE)
-    layers = {
-        'lifecycle (L1)': sorted(lifecycle),
-        'verbs (L2)': sorted(v1_verbs(ctx)),
-        'derived state (L3)': sorted(V1_DERIVED_STATES),
-        'basis sources (L4)': sorted(v1_basis_sources(ctx)),
-    }
-    names = list(layers)
-    for i, a in enumerate(names):
-        for b in names[i + 1:]:
-            for word_a in layers[a]:
-                for word_b in layers[b]:
-                    if _collide(word_a, word_b):
-                        ctx.config_issues.append(Issue(
-                            f"'{word_a}' in {a} and '{word_b}' in {b} share a stem; layers share no word", 'error'))
 
 # --- one record ------------------------------------------------------------------
 
@@ -1425,32 +1101,6 @@ def rule_v1_imported(adr, ctx):
         v1_issue(adr, "imported.status: expected the source's status as written")
 
 @file_rule(contract=V1)
-def rule_v1_summary_legibility(adr, ctx):
-    """ADR-304 §12: the Summary carries probes, a mix of points the agent is
-    confident on and points it is not, each labelled, and an inversion.
-    Guidance for the writer, so a gap warns."""
-    if not is_v1_record(adr, ctx) or v1_record_kind(adr) is None:
-        return
-    heading = _find_section(adr, 'Summary')
-    if heading is None or not adr.frontmatter.get('verb'):
-        return  # sections rule reports a missing Summary; specs carry no probes
-    text = re.sub(r'\s+', ' ', adr.section_text.get(heading, '').lower())
-    missing = []
-    low = re.search(r'\bnot confident\b|\blow confidence\b', text)
-    high = re.search(r'(?<!not )(?<!less )\bconfident\b|\bhigh confidence\b', text)
-    if 'probe' not in text:
-        missing.append('probes')
-    else:
-        if low is None:
-            missing.append("a probe labelled 'not confident'")
-        if high is None:
-            missing.append("a probe labelled 'confident'")
-    if 'inversion' not in text:
-        missing.append('an inversion')
-    if missing:
-        v1_issue(adr, f"Summary lacks {', '.join(missing)} (ADR-304 §12)", 'warning')
-
-@file_rule(contract=V1)
 def rule_v1_enacted(adr, ctx):
     if not is_v1_record(adr, ctx) or 'enacted' not in adr.frontmatter:
         return
@@ -1464,153 +1114,6 @@ def rule_v1_enacted(adr, ctx):
         v1_issue(adr, f"enacted: quote the commit hash as a string (YAML read {enacted!r})")
     elif not re.fullmatch(r'[0-9a-f]{7,40}', enacted):
         v1_issue(adr, f"enacted: '{enacted}' is not a commit hash")
-
-# --- frozen decisions, read from git history --------------------------------------
-
-def _git(args: list, cwd: Path) -> Optional[str]:
-    try:
-        result = subprocess.run(['git', '-c', 'core.quotePath=false', *args], cwd=cwd,
-                                capture_output=True, encoding='utf-8', errors='replace', timeout=10)
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-    return result.stdout if result.returncode == 0 else None
-
-def _frozen_versions(adr, every: bool = False) -> list:
-    """(frontmatter, body) of the first committed version that was already
-    adr/v1 and past proposed, following renames, and with every=True each
-    committed version after it, oldest first. Empty outside git, for an
-    untracked file, or when no such version exists. A version that was still
-    v0 is never the snapshot: migrating an accepted v0 record to v1 adds the
-    v1 fields, and that is the migration, not an edit (ADR-304 §7)."""
-    root = get_project_root()
-    try:
-        rel = adr.path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return None
-    # A record freezes where it lands: history is read from the default
-    # branch when there is one, so a decision still in review on a feature
-    # branch can be revised. Without a remote default, HEAD's history counts.
-    # --first-parent keeps to the branch's own line, so a pull request merged
-    # with a merge commit lands at the merge, not at the first commit on its
-    # branch; -m lists the merge's files against that parent on older git.
-    ref = (_git(['rev-parse', '--abbrev-ref', 'origin/HEAD'], root) or '').strip() or 'HEAD'
-    # --reverse drops pre-rename history under --follow, so read newest first
-    # and reverse here. -z keeps names with spaces or non-ASCII intact.
-    log = _git(['log', ref, '--first-parent', '-m', '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
-    if not log:
-        return []
-    entries, commit = [], None
-    for token in log.split('\0'):
-        if token.startswith('commit:'):
-            commit = token[len('commit:'):]
-        elif commit and token.lstrip('\n'):
-            entries.append((commit, token.lstrip('\n')))
-            commit = None
-    versions = []
-    for commit, name in reversed(entries):
-        text = _git(['show', f'{commit}:{name}'], root)
-        if text is None:
-            continue
-        past = parse_text(text, adr.path)
-        if versions or (past.contract == V1 and past.status and str(past.status).lower() != 'proposed'):
-            versions.append((past.frontmatter, past.body))
-            if not every:
-                break
-    return versions
-
-def _unfilled(value) -> bool:
-    return value in (None, '', [], {})
-
-def _completes(then, now) -> bool:
-    """now fills what was empty in then and changes nothing else. On an
-    imported record that is finishing the import, not an edit: a sheet applied
-    with --partial is committed with empty fields (ADR-306 §3, §4)."""
-    if _unfilled(then):
-        return True
-    if isinstance(then, dict) and isinstance(now, dict):
-        return all(_unfilled(then.get(k)) or _same(then.get(k), now.get(k))
-                   for k in set(then) | set(now))
-    return False
-
-def _without_opening_summary(body: str, body_then: str) -> str:
-    """body with a ## Summary inserted right after the H1 taken out, when
-    the rest of it still starts with what followed the H1 in body_then.
-    Otherwise body unchanged."""
-    title = re.match(r'\s*# ADR-[^\n]*\n', body)
-    title_then = re.match(r'\s*# ADR-[^\n]*\n', body_then)
-    if not title or not title_then:
-        return body
-    after, after_then = body[title.end():], body_then[title_then.end():].strip('\n')
-    if not re.match(r'\n*## Summary[ \t]*\n', after):
-        return body
-    at = after.find(after_then) if after_then else len(after)
-    inserted = after[:at]
-    if at <= 0 or re.search(r'(?m)^## (?!Summary[ \t]*$)', inserted):
-        return body
-    return body[:title.end()] + '\n' + after[at:]
-
-def _same(a, b) -> bool:
-    """Equal, treating a date and its quoted string as the same value."""
-    if isinstance(a, (str, int, float, date)) and isinstance(b, (str, int, float, date)):
-        return str(a) == str(b)
-    return a == b
-
-V1_DEFAULT_MUTABLE = ('status', 'enacted', 'superseded_by', 'considered', 'concern', 'observable')
-
-@file_rule(contract=V1)
-def rule_v1_frozen(adr, ctx):
-    """Once a decision leaves proposed, only the kind's mutable_after_accept
-    fields may change, and the body grows only by appending (ADR-304 §1, §4).
-
-    An imported record may fill each field its import wrote empty, once: the
-    first committed value is then frozen like any other. A field absent at
-    import gets no allowance. It may also gain an opening Summary when the
-    import had none (ADR-306 §4), and that Summary stays editable: the
-    operator expects Summaries to change once the whole corpus is read.
-    `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it. Links compare by
-    file name, so moving a record or a domain's folder is not an edit."""
-    schema = v1_kind_schema(adr, ctx)
-    if not is_v1_record(adr, ctx) or schema is None:
-        return
-    # Proposed records are not frozen, and archived ones carry the archive
-    # banner by design; neither needs the history walk.
-    if str(adr.status or '').lower() == 'proposed' or is_archived(adr.path):
-        return
-    mutable = schema.get('mutable_after_accept', list(V1_DEFAULT_MUTABLE))
-    if mutable == 'all':
-        return
-    mutable = set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-    versions = _frozen_versions(adr, every=True)
-    if not versions:
-        return
-    then, body_then = versions[0]
-    imported = 'imported' in then and 'imported' in adr.frontmatter
-    # A path compares by its last segment: a record, or a record it links
-    # to, may have moved folder since, and its number did not change
-    # (ADR-306 §6).
-    body_then = canonical_paths(body_then)
-    body_now = canonical_paths(adr.body)
-    if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
-        body_now = _without_opening_summary(body_now, body_then)
-    for key in sorted(set(then) | set(adr.frontmatter)):
-        if key in mutable:
-            continue
-        frozen = then.get(key)
-        fillable = imported and key in then
-        if fillable:
-            # Fill once: each committed fill of an empty part becomes frozen.
-            for later, _ in versions[1:]:
-                if _completes(frozen, later.get(key)):
-                    frozen = later.get(key)
-        now = adr.frontmatter.get(key)
-        if _same(frozen, now) or (fillable and _completes(frozen, now)):
-            continue
-        hint = (f" (to allow it, add observable to kinds.{v1_record_kind(adr)}.mutable_after_accept; ADR-307 §2)"
-                if key == 'observable' else '')
-        v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change{hint}")
-    if not body_now.rstrip().startswith(body_then.rstrip()):
-        v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
 
 @file_rule(contract=V1)
 def rule_v1_no_placeholders(adr, ctx):
@@ -2282,6 +1785,26 @@ def open_fields(record: dict, schema: dict) -> list:
         elif _empty(value):
             found.append(name)
     return found
+
+_STEM_SUFFIXES = ('ations', 'ation', 'ments', 'ment', 'ions', 'ion', 'ings', 'ing',
+                  'ives', 'ive', 'als', 'al', 'ors', 'or', 'ers', 'er', 'ted', 'ed',
+                  'ts', 'es', 't', 'e', 's')
+
+def _stem(word: str) -> str:
+    """A crude English stem: strip suffixes repeatedly and collapse a doubled
+    final consonant, so ingest and ingestion rank as one word."""
+    word = word.lower()
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _STEM_SUFFIXES:
+            if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+                word = word[:-len(suffix)]
+                changed = True
+                break
+    if len(word) >= 4 and word[-1] == word[-2] and word[-1] not in 'aeiou':
+        word = word[:-1]
+    return word
 
 def _words(text: str) -> set:
     return {_stem(w) for w in re.findall(r"[a-z][a-z0-9']+", text.lower())
@@ -2996,7 +2519,7 @@ def cmd_lint(args):
     """
     if args.paths:
         # Resolved, so records parsed from the arguments match the corpus's
-        # own paths (grounding and other corpus rules key on the path).
+        # own paths (corpus rules key on the path).
         paths = [Path(p).resolve() for p in args.paths]
         adrs = [parse_adr(p) for p in paths]
     else:
@@ -3876,13 +3399,6 @@ def cmd_cite(args):
     - a citation whose records are all out of force (superseded, deprecated,
       rejected, abandoned, archived) warns and names each status and successor
     - a citation of a proposed or draft record prompts acceptance
-    - under adr/v1, a citation of a record on a capability whose latest
-      accepted add-or-cut is a cut warns until the cut is enacted and fails
-      after (§5)
-    - under adr/v1, an accepted retire's targets are checked against the
-      surface inventory commands in adr.yaml (§5). Inventory commands are
-      shell commands from adr.yaml; they run only on a whole-repo scan and
-      never with --no-inventory.
 
     A bare ADR-N resolves to its family {N, N.1, ...}. Files come from
     `git ls-files`, so ignored paths are never read. docs/architecture and the
@@ -3912,8 +3428,6 @@ def cmd_cite(args):
             return 2
 
     records = get_all_adrs(include_archived=True)
-    ctx = LintContext.from_corpus(records)
-    v1 = ctx.contract == V1
 
     # Lookup tables, built once: full number -> records, base -> family
     by_full, by_base = {}, {}
@@ -3933,23 +3447,6 @@ def cmd_cite(args):
 
     def is_proposed(adr) -> bool:
         return str(adr.status or '').lower() in ('proposed', 'draft')
-
-    # The state of each capability is its latest accepted add or cut, by date
-    # then number (ADR-304 §3). Only a capability whose latest is a cut counts.
-    cuts = {}
-    if v1:
-        latest = {}
-        for adr in records:
-            verb = adr.frontmatter.get('verb')
-            if (is_v1_record(adr, ctx) and verb in ('add', 'cut')
-                    and str(adr.status or '').lower() == 'accepted'):
-                order = decision_order(adr)
-                for capability in capability_scope(adr):
-                    if capability not in latest or order >= latest[capability][0]:
-                        latest[capability] = (order, adr)
-        for capability, (_, adr) in latest.items():
-            if adr.frontmatter.get('verb') == 'cut':
-                cuts[capability] = (adr, bool(adr.frontmatter.get('enacted')))
 
     def excluded(name: str) -> bool:
         for pattern in excludes:
@@ -3992,47 +3489,6 @@ def cmd_cite(args):
                     findings.append(('warning', where, f"{cited} is not in force ({named})"))
                 elif any(is_proposed(m) for m in members):
                     findings.append(('warning', where, f"{cited} is still proposed; accept it or cite the record in force"))
-                for member in members:
-                    if not is_v1_record(member, ctx):
-                        continue
-                    for capability in capability_scope(member):
-                        if capability in cuts and cuts[capability][0] is not member:
-                            cut, enacted = cuts[capability]
-                            if enacted:
-                                findings.append(('error', where, f"{cited} is on '{capability}', cut and enacted by ADR-{cut.number}; remove the citation"))
-                            else:
-                                findings.append(('warning', where, f"{cited} is on '{capability}', which ADR-{cut.number} cuts; remove before enacting"))
-
-    # Retire targets against the surface inventories (§5). Inventories run
-    # shell commands from adr.yaml, so only on a whole-repo scan.
-    if v1 and not scopes and not args.no_inventory:
-        surfaces = v1_surfaces(ctx)
-        listed_by, failed = {}, set()
-        for adr in records:
-            if (not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'retire'
-                    or str(adr.status or '').lower() != 'accepted'):
-                continue
-            enacted = bool(adr.frontmatter.get('enacted'))
-            for target in as_entries(adr.frontmatter.get('targets')):
-                namespace, _, target_name = target.partition(':')
-                command = _mapping(surfaces.get(namespace)).get('inventory')
-                if not command:
-                    continue
-                if namespace not in listed_by:
-                    listed_by[namespace] = _inventory(str(command), root)
-                listed, failure = listed_by[namespace]
-                where = str(relative_path(adr.path))
-                if listed is None:
-                    if namespace not in failed:  # once per namespace, not per target
-                        failed.add(namespace)
-                        findings.append(('warning', where, f"inventory for '{namespace}' did not run ({failure}): {command}"))
-                elif target_name in listed:
-                    if enacted:
-                        findings.append(('error', where, f"{target} is still present after ADR-{adr.number} was enacted"))
-                    else:
-                        findings.append(('warning', where, f"{target} is still present; ADR-{adr.number} retires it"))
-                elif not enacted:
-                    findings.append(('warning', where, f"{target} is not in the '{namespace}' inventory; check the name"))
 
     errors = sum(1 for f in findings if f[0] == 'error')
     warnings = len(findings) - errors
@@ -4070,28 +3526,6 @@ def _cite_files(root: Path) -> list:
         for filename in filenames:
             names.append((Path(dirpath) / filename).relative_to(root).as_posix())
     return sorted(names)
-
-def _inventory(command: str, root: Path) -> tuple:
-    """Run a surface inventory command from adr.yaml. Returns (names, None),
-    or (None, reason) when it failed. One name per line of output."""
-    import signal
-    try:
-        proc = subprocess.Popen(command, shell=True, cwd=root, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, start_new_session=True)
-    except OSError as e:
-        return None, str(e)
-    try:
-        stdout, stderr = proc.communicate(timeout=60)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)  # the shell and anything it started
-        proc.communicate()
-        return None, 'timed out after 60s'
-    if proc.returncode != 0:
-        detail = (stderr.strip().splitlines() or [''])[-1][:120]
-        return None, f"exit {proc.returncode}" + (f": {detail}" if detail else '')
-    return {line.strip() for line in stdout.splitlines() if line.strip()}, None
-
 def _lifecycle_target(args):
     """The v1 record the command acts on, or an exit code after an error."""
     matches = find_by_ref(args.adr, get_all_adrs())
@@ -4134,33 +3568,22 @@ def _set_status(raw: bytes, status: str) -> bytes:
     lines[i] = b'status: ' + status.encode() + (comment.group(0) if comment else b'') + ending
     return b'\n'.join(lines)
 
-def _errors_by_record(corpus: list, ctx) -> dict:
-    run_rules(corpus, ctx)
-    found = {a.path: {i.message for i in a.issues if i.severity == 'error'} for a in corpus}
-    found['adr.yaml'] = {i.message for i in ctx.config_issues if i.severity == 'error'}
-    return found
-
 def _trial(adr, status: str):
-    """Run every rule over the whole corpus as it is and again with the
-    record's status changed. Returns (the trial record, new errors as
-    (where, message)). A change that breaks another record, such as a
-    rejected precedent, shows up here, not just the record's own issues."""
-    baseline = get_all_adrs(include_archived=True)
-    before = _errors_by_record(baseline, LintContext.from_corpus(baseline))
+    """The record with its status changed, and its own errors as (where,
+    message): the file rules only, over this one record. The rest of the
+    corpus is not re-linted (ADR-311 §3)."""
     corpus = get_all_adrs(include_archived=True)
+    ctx = LintContext.from_corpus(corpus)
     trial = next(a for a in corpus if a.path == adr.path)
     trial.status = status
     trial.frontmatter = dict(trial.frontmatter, status=status)
     # The record was parsed clean enough to reach here (_lifecycle_target
     # refused anything else), so starting its issues fresh loses nothing.
     trial.issues = []
-    after = _errors_by_record(corpus, LintContext.from_corpus(corpus))
-    new = []
-    for path, messages in after.items():
-        for message in sorted(messages - before.get(path, set())):
-            where = 'adr.yaml' if path == 'adr.yaml' else relative_path(path)
-            new.append((where, message))
-    return trial, new
+    for rule in _active(FILE_RULES, ctx):
+        rule(trial, ctx)
+    where = relative_path(trial.path)
+    return trial, [(where, i.message) for i in trial.issues if i.severity == 'error']
 
 def _write_status(adr, status: str, suffix: str = '') -> Optional[str]:
     """Write the new status (and an appended suffix), then re-read the file to
@@ -4180,20 +3603,18 @@ def _write_status(adr, status: str, suffix: str = '') -> Optional[str]:
     return None
 
 def _refuse(adr, verb: str, new: list) -> int:
-    print(f"Refused: {verb} ADR-{adr.number} would add errors:", file=sys.stderr)
+    print(f"Refused: {verb} ADR-{adr.number} would leave it with errors:", file=sys.stderr)
     for where, message in new:
         print(f"  ❌ {where}: {message}", file=sys.stderr)
     return 1
 
 def cmd_accept(args):
-    """Accept a proposed adr/v1 record (ADR-304 §2, §11, §12).
+    """Accept a proposed adr/v1 record (ADR-304 §2, ADR-311 §3).
 
-    Runs every rule over the corpus as if the record were accepted and refuses
-    if that adds an error anywhere, so a decision whose basis does not meet the
-    rules, or one the operator started without a considered entry, stays
-    proposed. A precedent that is still proposed also refuses: §11 grounds a
-    decision in another accepted decision. The record's warnings are printed,
-    with open concerns first: shown at acceptance, not blocking.
+    Runs the record's own file rules as if it were accepted and refuses if
+    any reports an error. The rest of the corpus is not re-linted. The
+    record's warnings are printed, with open concerns first: shown at
+    acceptance, not blocking.
     """
     adr, code = _lifecycle_target(args)
     if adr is None:
@@ -4201,9 +3622,6 @@ def cmd_accept(args):
     trial, new = _trial(adr, 'accepted')
     if new:
         return _refuse(adr, 'accepting', new)
-    pending = [i for i in trial.issues if i.code == 'precedent-proposed']
-    if pending:
-        return _refuse(adr, 'accepting', [(relative_path(adr.path), i.message) for i in pending])
     concerns = [i for i in trial.issues if i.code == 'open-concern']
     others = [i for i in trial.issues if i.severity == 'warning' and i.code != 'open-concern']
     if concerns:
@@ -4291,31 +3709,6 @@ def _record_schema(adr) -> Optional[dict]:
     schema = kinds.get(adr.frontmatter.get('kind')) if isinstance(kinds, dict) else None
     return schema if isinstance(schema, dict) else None
 
-def _frozen(adr) -> Optional[set]:
-    """The fields that may still change on this record, or None when every
-    field may: a v0 or proposed record, an archived one, or a kind whose
-    mutable_after_accept is 'all'. Mirrors rule_v1_frozen."""
-    if adr.contract != V1 or str(adr.status or '').lower() == 'proposed' or is_archived(adr.path):
-        return None
-    mutable = (_record_schema(adr) or {}).get('mutable_after_accept', list(V1_DEFAULT_MUTABLE))
-    if mutable == 'all':
-        return None
-    return set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-
-def _frozen_message(key: str, mutable: set) -> str:
-    """The message rule_v1_frozen gives for the same field."""
-    return f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change"
-
-def _frozen_hint(adr) -> str:
-    return (f"ADR-{adr.number} is {str(adr.status).lower()}. Record the change as a new decision "
-            f"that supersedes or amends it, or pass --force for migration cleanup.")
-
-def _force_warning(adr, keys: list) -> None:
-    print(f"Warning: --force wrote frozen {'field' if len(keys) == 1 else 'fields'} "
-          f"{', '.join(repr(k) for k in keys)} on ADR-{adr.number}. Lint's frozen check still applies: "
-          f"it compares against the record as first accepted on the default branch's history.",
-          file=sys.stderr)
-
 def _show_diff(adr, before: bytes, after: bytes) -> None:
     import difflib
     name = str(relative_path(adr.path))
@@ -4376,7 +3769,7 @@ def probe_names(adr) -> list:
 
 def cmd_consider(args):
     """Append one considered entry: the operator's answer to the Summary
-    (ADR-304 §12). considered is mutable after acceptance, so any status."""
+    (ADR-304 §12), on a record in any status."""
     adr, code = _record_target(args.adr, 'consider')
     if adr is None:
         return code
@@ -4441,8 +3834,9 @@ def _parse_assignment(text: str):
     return key, op, value
 
 def cmd_set(args):
-    """Set, append to or remove from frontmatter fields, refusing a frozen
-    field of a record that has left proposed unless --force."""
+    """Set, append to or remove from frontmatter fields. status is refused:
+    the lifecycle commands own it. Any other field may be set on a record in
+    any status; git keeps what it was (ADR-311)."""
     adr, code = _record_target(args.adr, 'set', v1_only=False)
     if adr is None:
         return code
@@ -4450,13 +3844,6 @@ def cmd_set(args):
         changes = [_parse_assignment(a) for a in args.assignments]
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
-        return 1
-    mutable = _frozen(adr)
-    frozen = list(dict.fromkeys(k for k, _, _ in changes if mutable is not None and k not in mutable))
-    if frozen and not args.force:
-        for key in frozen:
-            print(f"Refused: ADR-{adr.number}: {_frozen_message(key, mutable)}", file=sys.stderr)
-        print(_frozen_hint(adr), file=sys.stderr)
         return 1
     if adr.contract == V1 and not args.force:
         for key, op, value in changes:
@@ -4497,8 +3884,6 @@ def cmd_set(args):
     except ValueError as e:
         print(f"Error: ADR-{adr.number} not changed: {e}", file=sys.stderr)
         return 1
-    if frozen and not args.dry_run:
-        _force_warning(adr, frozen)
     keys = ', '.join(dict.fromkeys(k for k, _, _ in changes))
     return _finish([(adr, edit)], args.dry_run, f"Set {keys} on ADR-{adr.number}: {adr.title}")
 
@@ -4552,12 +3937,7 @@ def cmd_supersede(args):
         return 1
     ref = _ref(old, section)
     edits = []
-    mutable = _frozen(new)
     if not _lists(new, field_name, ref):
-        if mutable is not None and field_name not in mutable and not args.force:
-            print(f"Refused: ADR-{new.number}: {_frozen_message(field_name, mutable)}", file=sys.stderr)
-            print(_frozen_hint(new), file=sys.stderr)
-            return 1
         edit, error = _open_edit(new)
         if error:
             print(f"Error: {error}", file=sys.stderr)
@@ -4568,8 +3948,6 @@ def cmd_supersede(args):
             print(f"Error: ADR-{new.number} not changed: {e}", file=sys.stderr)
             return 1
         edits.append((new, edit))
-        if mutable is not None and field_name not in mutable and not args.dry_run:
-            _force_warning(new, [field_name])
     if not section:
         edit, error = _open_edit(old)
         if error:
@@ -5096,15 +4474,13 @@ def main():
     p_set.add_argument('assignments', nargs='+', metavar='key=value',
                        help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
     p_set.add_argument('--force', action='store_true',
-                       help='Edit a frozen field anyway, for migration cleanup (lint still reports it)')
+                       help='Set status, or a field no v1 record carries, anyway')
     p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')
     p_supersede = subparsers.add_parser('supersede', help='Record a supersession on both records (ADR-304 §3)')
     p_supersede.add_argument('adr', help='The record replaced (e.g., 101, ADR-101)')
     p_supersede.add_argument('--by', required=True, help='The record that replaces it')
     p_supersede.add_argument('--amends', metavar='SECTION',
                              help='Replace one section only: amends: [OLD#SECTION] on the new record')
-    p_supersede.add_argument('--force', action='store_true',
-                             help="Write the edge on an accepted record whose kind freezes it")
     p_supersede.add_argument('--dry-run', action='store_true', help='Show the change without writing')
     p_enact = subparsers.add_parser('enact', help='Mark an accepted cut or retire done at a commit (ADR-304 §5)')
     p_enact.add_argument('adr', help='ADR number (e.g., 111, ADR-111)')
@@ -5115,8 +4491,9 @@ def main():
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
     p_cite.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
-    p_cite.add_argument('--no-inventory', action='store_true',
-                        help="Skip surface inventories (they run shell commands from adr.yaml)")
+    # Accepted and ignored: surface inventories are gone (ADR-311), and a
+    # script that still passes the flag keeps working.
+    p_cite.add_argument('--no-inventory', action='store_true', help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 

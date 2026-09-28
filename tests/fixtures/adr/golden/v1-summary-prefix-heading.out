@@ -7,18 +7,14 @@ Status distribution:
 Contract: adr/v1 (1 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 2 files:
+Issues found in 1 files:
 ────────────────────────────────────────────────────────────
-
-docs/architecture/adr.yaml
-  ⚠️ capability 'search' has no accepted add decision
 
 docs/architecture/system/ADR-108-ingest-over-v0.md
   ❌ a decision record opens with a '## Summary' section
-  ⚠️ cannot confirm the prior decision on 'ingest': ADR-110 is still v0
 
 ════════════════════════════════════════════════════════════
-Summary: 1 errors, 2 warnings
+Summary: 1 errors, 0 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

@@ -7,18 +7,15 @@ Status distribution:
 Contract: adr/v1 (1 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 2 files:
+Issues found in 1 files:
 ────────────────────────────────────────────────────────────
-
-docs/architecture/adr.yaml
-  ⚠️ capability 'search' has no accepted add decision
 
 docs/architecture/system/ADR-118-multiline-model.md
   ❌ a decision record requires 'basis'
   ⚠️ 12 placeholder line(s) from `adr new` still to fill, first: - **Decided:** [what is decided, in plain terms]
 
 ════════════════════════════════════════════════════════════
-Summary: 1 errors, 2 warnings
+Summary: 1 errors, 1 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

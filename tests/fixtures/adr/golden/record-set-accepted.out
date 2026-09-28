@@ -1,0 +1,3 @@
+Set capability, related on ADR-101: Add ingestion
+Lint docs/architecture/system/ADR-101-ingest.md: clean
+[exit 0]

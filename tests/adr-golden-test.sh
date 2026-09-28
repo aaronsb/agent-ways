@@ -13,7 +13,8 @@
 #             number for the multiple-match branch of view
 #   v1/       an adr/v1 corpus (ADR-304): every kind and verb used correctly,
 #             and one record still on v0
-#   v1-defects/  one broken record per v1 rule, and a malformed adr.yaml
+#   v1-defects/  one broken record per v1 rule, a malformed adr.yaml, and
+#             keys adr/v1 no longer reads
 #   v1-empty/ adr/v1 declared with no kinds and no capabilities
 #
 # Usage:
@@ -241,6 +242,8 @@ capture v1-new-spec-lint lint docs/architecture/system/ADR-116-export-format.md
 capture v1-new-bare new system "Bare decision"
 keep v1-new-bare-file.md docs/architecture/system/ADR-117-bare-decision.md
 capture v1-new-bare-lint lint docs/architecture/system/ADR-117-bare-decision.md
+# accept checks the record's own rules and refuses on an error (ADR-311 §3).
+capture v1-accept-own-errors accept 117
 capture v1-new-unknown-kind new system "Policy thing" --kind policy
 worktree v1-new-unknown-kind-status.txt
 capture v1-new-refused new system "Spec with a verb" --kind spec --verb add --agent Claude --capability nosuch
@@ -263,28 +266,17 @@ keep v1-new-custom-kind-file.md docs/architecture/system/ADR-115-retention-polic
 fresh v1-empty
 capture v1-empty-new new system "Anything"
 
-# Observables (ADR-307): loose shapes pass, malformed ones fail; adding one to
-# an accepted decision is allowed where the kind lists it as mutable.
+# Observables (ADR-307): loose shapes pass, malformed ones fail.
 fresh v1
 edit docs/architecture/system/ADR-101-ingest.md "s.replace('date: 2025-05-02\n', 'date: 2025-05-02\nobservable:\n  - ingest of a 10 MB file finishes under a second\n  - see: the queue drains\n    run: make drain-check\n  - url: https://example.com/dashboard\n', 1)"
-capture v1-observable-added-not-listed lint docs/architecture/system/ADR-101-ingest.md
-edit docs/architecture/adr.yaml "s.replace('mutable_after_accept: [status, enacted, superseded_by, considered, concern]', 'mutable_after_accept: [status, enacted, superseded_by, considered, concern, observable]', 1)"
-capture v1-observable-added-listed lint docs/architecture/system/ADR-101-ingest.md
+capture v1-observable-added lint docs/architecture/system/ADR-101-ingest.md
 edit docs/architecture/system/ADR-101-ingest.md "s.replace('  - url: https://example.com/dashboard\n', '  - \"\"\n  - {}\n  - 42\n', 1)"
 capture v1-observable-malformed lint docs/architecture/system/ADR-101-ingest.md
 edit docs/architecture/system/ADR-101-ingest.md "__import__('re').sub(r'observable:\n(?:  .*\n)+', 'observable: soon\n', s, count=1)"
 capture v1-observable-not-list lint docs/architecture/system/ADR-101-ingest.md
 edit docs/architecture/system/ADR-101-ingest.md "s.replace('observable: soon\n', 'observable: []\n', 1)"
 capture v1-observable-empty lint docs/architecture/system/ADR-101-ingest.md
-# A kind with no mutable_after_accept list falls back to the default, which
-# includes observable.
-fresh v1
-edit docs/architecture/adr.yaml "s.replace('    mutable_after_accept: [status, enacted, superseded_by, considered, concern]\n', '', 1)"
-edit docs/architecture/system/ADR-101-ingest.md "s.replace('date: 2025-05-02\n', 'date: 2025-05-02\nobservable:\n  - ingest of a 10 MB file finishes under a second\n', 1)"
-capture v1-observable-default-mutable lint docs/architecture/system/ADR-101-ingest.md
-
-# A change may list the capabilities it alters (ADR-308); each one needs its
-# own prior. ADR-116 supersedes an ingest decision and names no search prior.
+# A change may list the capabilities it alters (ADR-308).
 fresh v1
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, search]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and search\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
 capture v1-change-list lint docs/architecture/system/ADR-116-shared-queue.md
@@ -303,125 +295,16 @@ capture v1-summary-colon-heading lint docs/architecture/system/ADR-108-ingest-ov
 # An evidence kind (ADR-309): a basis that cites a record as evidence must
 # reach an evidence or spec record.
 fresh v1
-edit docs/architecture/adr.yaml "s.replace('basis: [decision, spec] }', 'basis: [decision, spec, evidence] }').replace('    edges: { supersedes: spec, decided_by: decision }\n', '    edges: { supersedes: spec, decided_by: decision }\n  evidence:\n    mutable_after_accept: [status, superseded_by, related]\n    verb: forbidden\n    requires: [capability]\n    edges: { supersedes: evidence }\n', 1)"
+edit docs/architecture/adr.yaml "s.replace('basis: [decision, spec] }', 'basis: [decision, spec, evidence] }').replace('    edges: { supersedes: spec, decided_by: decision }\n', '    edges: { supersedes: spec, decided_by: decision }\n  evidence:\n    verb: forbidden\n    requires: [capability]\n    edges: { supersedes: evidence }\n', 1)"
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: evidence\ncapability: ingest\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer]\n---\n\n# ADR-117: Ingest throughput survey\n\nMeasured 40 MB/s on the reference host.\n' > docs/architecture/system/ADR-117-ingest-throughput-survey.md)
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: ingest\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: ADR-117\n  - evidence: ADR-101\n  - evidence: ADR-999\n---\n\n# ADR-118: Raise the ingest batch size\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md)
 capture v1-evidence-kind lint docs/architecture/system/ADR-117-ingest-throughput-survey.md docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md
 
-# Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
-# capability adopted on 2025-05-10: it needs no add decision.
-baseline_fresh() {
-  fresh v1
-  edit docs/architecture/adr.yaml "s.replace('surfaces:', 'baseline:\\n  adopted: 2025-05-10\\n  capabilities: [export]\\n\\nsurfaces:', 1).replace('  search: Query over the store\\n', '  search: Query over the store\\n  export: Export from the store\\n')"
-}
-# export_change NUMBER SLUG DATE [EXTRA-FRONTMATTER-LINE]
-export_change() {
-  (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\n%sstatus: proposed\ndate: %s\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: export measured\n---\n\n# ADR-%s: %s\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' "${4:+$4\n}" "$3" "$1" "$2" > "docs/architecture/system/ADR-$1-$2.md")
-}
-baseline_fresh
-capture v1-lint-baseline lint
-# With export on the baseline, a listed change needs no export prior while its
-# ingest edge covers ingest.
-baseline_fresh
-(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: [ingest, export]\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-09\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: both paths share one queue\n---\n\n# ADR-116: Shared queue for ingest and export\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-shared-queue.md)
-capture v1-change-list-baseline lint docs/architecture/system/ADR-116-shared-queue.md
-baseline_fresh
-# A single-capability change whose only edge names a prior on another
-# capability does not fall back to the baseline.
-(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: export\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-09\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: exports reuse the ingest batcher\n---\n\n# ADR-116: Export batching\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-export-batching.md)
-capture v1-change-single-mismatched-edge lint docs/architecture/system/ADR-116-export-batching.md
-baseline_fresh
-# Malformed baseline config: a bare list, then an unknown name and a bad date.
-edit docs/architecture/adr.yaml "s.replace('baseline:\\n  adopted: 2025-05-10\\n  capabilities: [export]', 'baseline: [export]')"
-capture v1-lint-baseline-list lint
-edit docs/architecture/adr.yaml "s.replace('baseline: [export]', 'baseline:\\n  adopted: May 2025\\n  capabilities: [export, exprt]')"
-capture v1-lint-baseline-unknown lint
-# A change before adoption stands on the baseline, and so does the first
-# change after it. ADR-118 is numbered lower but dated later than ADR-119,
-# so it is the second post-adoption change and must name ADR-119.
-baseline_fresh
-export_change 117 pre-adoption-export 2025-05-09
-export_change 119 stream-exports 2025-05-20
-export_change 118 compress-exports 2025-05-22
-capture v1-lint-baseline-change lint
-edit docs/architecture/system/ADR-118-compress-exports.md "s.replace('capability: export\n', 'capability: export\nsupersedes: [ADR-119]\n')"
-capture v1-lint-baseline-change-names-prior lint
-# A rejected post-adoption change is no prior.
-edit docs/architecture/system/ADR-118-compress-exports.md "s.replace('supersedes: [ADR-119]\n', '')"
-edit docs/architecture/system/ADR-119-stream-exports.md "s.replace('status: proposed', 'status: rejected')"
-capture v1-lint-baseline-change-rejected-prior lint
-fresh v1
 fresh v1
 capture v1-cite        cite
-# The cut on search, enacted: citations of search records now fail.
-(cd "$WORK/repo" && sed -i.bak 's/^verb: cut$/verb: cut\nenacted: abcdef1/' docs/architecture/system/ADR-111-cut-search.md \
-  && rm docs/architecture/system/ADR-111-cut-search.md.bak)
-capture v1-cite-enacted cite --check
-capture v1-cite-no-inventory cite --no-inventory
-
-# A cut undone by a later accepted add: search is present again.
-fresh v1
-(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: search\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: demand returned\n---\n\n# ADR-115: Add search back\n' > docs/architecture/system/ADR-115-add-search-back.md)
-capture v1-cite-readded cite --no-inventory
-
-# A retire before enactment, with one target misspelled; then an inventory
-# command that fails.
-fresh v1
-edit docs/architecture/system/ADR-105-retire-legacy-ingest.md "s.replace('enacted: 3f9c2a1\n', '').replace('cli:ingest-legacy', 'cli:ingest-legacy, cli:ingest-legcy')"
-capture v1-cite-retire-pending cite
-edit docs/architecture/adr.yaml "s[:s.index('  cli:')] + '  cli: { inventory: \"exit 3\" }' + s[s.index(chr(10), s.index('  cli:')):]"
-capture v1-cite-inventory-fails cite
-
-# A frozen decision edited after acceptance: a changed capability (an error),
-# a body edited mid-text (a warning), and a mutable field (allowed).
-fresh v1
-edit docs/architecture/system/ADR-101-ingest.md "s.replace('capability: ingest\n', 'capability: search\n').replace('The decision.\n', 'The decision, rewritten.\n').replace('date: 2025-05-02\n', 'date: 2025-05-02\nconsidered: [{operator: developer, said: ok, via: PR 2}]\n')"
-capture v1-frozen-lint lint docs/architecture/system/ADR-101-ingest.md
-
-# The freeze follows a rename: renamed, committed, then edited.
-fresh v1
-(cd "$WORK/repo" && git mv docs/architecture/system/ADR-101-ingest.md docs/architecture/system/ADR-101-ingest-renamed.md)
-commit_all rename
-edit docs/architecture/system/ADR-101-ingest-renamed.md "s.replace('capability: ingest\n', 'capability: search\n')"
-capture v1-frozen-renamed lint docs/architecture/system/ADR-101-ingest-renamed.md
-
-# Proposed, then accepted in a later commit: accepting is not an edit.
-fresh v1
-edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('status: proposed\n', 'status: accepted\nconsidered: [{operator: developer, said: \"yes\", via: PR 13}]\n')"
-commit_all accept
-capture v1-frozen-accepted lint docs/architecture/system/ADR-113-operator-proposed.md
-
-# An accepted v0 record migrated to v1 adds the v1 fields: the migration,
-# not an edit of a frozen decision (ADR-304 §7).
-fresh v1
-edit docs/architecture/system/ADR-110-old-v0-record.md "s.replace('status: Accepted\n', 'contract: adr/v1\nkind: decision\nverb: add\ncapability: ingest\nstatus: accepted\nagent: {name: Claude, model: fixture-model}\nbasis:\n  - evidence: migrated from v0\n').replace('# ADR-110: An unmigrated v0 record\n', '# ADR-110: An unmigrated v0 record\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n')"
-capture v1-frozen-migrated lint docs/architecture/system/ADR-110-old-v0-record.md
-
-# A record accepted on a review branch and revised there freezes where it
-# merges, not at the branch's first accepted commit; editing it after the
-# merge still fails.
-fresh v1
-(cd "$WORK/repo" && git switch -q -c review)
-edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('status: proposed\n', 'status: accepted\nconsidered: [{operator: developer, said: \"yes\", via: PR 13}]\n')"
-commit_all accept
-edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('basis:\n', 'basis:\n  - evidence: a review fix\n', 1)"
-commit_all "review fix"
-(cd "$WORK/repo" && git switch -q - && git merge -q --no-ff -m "merge review" review)
-capture v1-frozen-merged-branch lint docs/architecture/system/ADR-113-operator-proposed.md
-edit docs/architecture/system/ADR-113-operator-proposed.md "s.replace('  - evidence: a review fix\n', '')"
-capture v1-frozen-merged-branch-edited lint docs/architecture/system/ADR-113-operator-proposed.md
-
-# A non-UTF-8 blob in a record's history does not stop lint.
-fresh v1
-printf 'binary \377\376 junk\n' > "$WORK/repo/docs/architecture/system/ADR-102-ingest-spec.md"
-commit_all "non-utf8"
-cp "$FIXTURES/v1/docs/architecture/system/ADR-102-ingest-spec.md" "$WORK/repo/docs/architecture/system/ADR-102-ingest-spec.md"
-commit_all restore
-capture v1-frozen-nonutf8 lint docs/architecture/system/ADR-102-ingest-spec.md
 
 # Lifecycle commands (ADR-304 §2, §11, §12)
 fresh v1
-capture v1-accept-refused       accept 113
 capture v1-accept-not-proposed  accept 102
 capture v1-accept-v0            accept 110
 capture v1-accept-dry-run       accept 106 --dry-run
@@ -429,6 +312,8 @@ worktree v1-accept-dry-run-status.txt
 capture v1-accept-concern       accept 114
 keep v1-accept-concern-file.md docs/architecture/system/ADR-114-open-concern.md
 capture v1-accept-then-lint     lint --check docs/architecture/system/ADR-114-open-concern.md
+# An operator-started record is accepted without a considered entry.
+capture v1-accept-no-considered accept 113
 
 fresh v1
 capture v1-reject               reject 107 --reason "Superseded by the batching work before it landed"
@@ -437,13 +322,12 @@ capture v1-abandon-no-reason    abandon 108 --reason "  "
 capture v1-reject-then-lint     lint --check docs/architecture/system/ADR-107-ingest-notes.md
 capture v1-abandon-no-flag      abandon 108
 
-# A record another record rests on: rejecting it is refused, naming the
-# dependent, and the dependent cannot be accepted while its precedent is
-# still proposed.
+# A record another record rests on: rejecting it and accepting the dependent
+# each check only the record acted on, not the corpus (ADR-311 §3).
 fresh v1
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: ingest\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-16\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - precedent: ADR-114\n---\n\n# ADR-116: Rests on ADR-114\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-116-rests-on-114.md)
 capture v1-reject-precedent     reject 114 --reason "Not needed"
-capture v1-accept-pending-precedent accept 116
+capture v1-accept-dependent     accept 116
 
 # Line endings survive a status rewrite.
 fresh v1
@@ -496,24 +380,10 @@ keep import-apply-partial-110.md docs/architecture/system/ADR-110-old-v0-record.
 keep import-apply-partial-115.md docs/architecture/system/ADR-115-nightly-ingest-window.md
 # An imported record with no Summary warns rather than fails (ADR-306 §4).
 capture import-lint-no-summary lint docs/architecture/system/ADR-115-nightly-ingest-window.md
-# Committed with empty fields, then completed: filling what the import left
-# empty and adding an opening Summary is not an edit of a frozen decision.
+# Committed with empty fields, then completed: the filled record lints clean.
 commit_all "partial import"
 edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('verb: ~', 'verb: add').replace('capability: ~', 'capability: ingest').replace('basis: []', 'basis:\n  - evidence: ingest logs').replace('name: ~', 'name: Claude').replace('# ADR-115: Nightly ingest window\n', '# ADR-115: Nightly ingest window\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n')"
 capture import-lint-completed lint docs/architecture/system/ADR-115-nightly-ingest-window.md
-# Fill once: after the fill is committed, changing it is an edit.
-commit_all "complete the import"
-edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('capability: ingest', 'capability: search').replace('name: Claude', 'name: Other')"
-capture import-lint-refilled lint docs/architecture/system/ADR-115-nightly-ingest-window.md
-# Changing a field the import did fill is an edit.
-edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('capability: search', 'capability: ingest').replace('name: Other', 'name: Claude').replace('date: 2025-04-01', 'date: 2025-04-03')"
-capture import-lint-completed-edited lint docs/architecture/system/ADR-115-nightly-ingest-window.md
-# A Summary added anywhere but first is still a body edit.
-edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('date: 2025-04-03', 'date: 2025-04-01').replace('## Decision\n', '## Summary\n\nLate.\n\n## Decision\n')"
-capture import-lint-summary-not-opening lint docs/architecture/system/ADR-115-nightly-ingest-window.md
-# A key absent at import gets no fill allowance.
-edit docs/architecture/system/ADR-115-nightly-ingest-window.md "s.replace('## Summary\n\nLate.\n\n## Decision\n', '## Decision\n').replace('status: accepted\n', 'status: accepted\nsupersedes:\n  - ADR-110\n')"
-capture import-lint-added-key lint docs/architecture/system/ADR-115-nightly-ingest-window.md
 
 # A completed sheet applies without --partial.
 import_fresh
@@ -620,7 +490,7 @@ capture domain-add-legacy-overlap domain add early --range 50-60 --folder early
 
 # rename: the domain key, its folder moved with git mv, every path into the
 # folder rewritten, and a catalog page's domain: key. Links between records
-# keep their shape, and lint sees no edit of a frozen decision.
+# keep their shape.
 rename_fresh() {
   fresh v1
   mkdir -p "$WORK/repo/docs/guide"
@@ -740,7 +610,7 @@ keep record-set-mutable-file.md "$S/ADR-103-ingest-batching.md"
 capture record-set-v0           set 110 status=Superseded
 keep record-set-v0-file.md "$S/ADR-110-old-v0-record.md"
 worktree record-set-status.txt
-capture record-set-frozen       set 101 capability=search "related=[ADR-100]"
+capture record-set-accepted     set 101 capability=search "related=[ADR-100]"
 capture record-set-status-cmd   set 106 status=accepted
 capture record-set-status-other set 106 status=proposed
 capture record-set-remove-missing set 106 related-=ADR-9
@@ -751,8 +621,6 @@ capture record-set-unknown-key  set 106 capabilty=search
 fresh v1
 capture record-set-dry-run      set 106 verb=add --dry-run
 worktree record-set-dry-run-status.txt
-capture record-set-force       set 101 verb=change --force
-keep record-set-force-file.md "$S/ADR-101-ingest.md"
 
 # Line endings survive a field edit.
 fresh v1
@@ -786,13 +654,12 @@ worktree record-supersede-amends-status.txt
 capture record-supersede-no-section   supersede 100 --by 108 --amends 9
 capture record-supersede-kind         supersede 102 --by 106
 capture record-supersede-old-proposed supersede 113 --by 106
-capture record-supersede-frozen       supersede 101 --by 104
 capture reject-for-supersede          reject 108 --reason "Dropped"
 capture record-supersede-new-rejected supersede 101 --by 108
 
 fresh v1
-capture record-supersede-force  supersede 101 --by 104 --force
-keep record-supersede-force-file.md "$S/ADR-104-no-network-in-hooks.md"
+capture record-supersede-accepted supersede 101 --by 104
+keep record-supersede-accepted-file.md "$S/ADR-104-no-network-in-hooks.md"
 
 fresh v1
 capture record-enact            enact 111 ABC1234

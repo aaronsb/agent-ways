@@ -121,6 +121,26 @@ def open_fields(record: dict, schema: dict) -> list:
             found.append(name)
     return found
 
+_STEM_SUFFIXES = ('ations', 'ation', 'ments', 'ment', 'ions', 'ion', 'ings', 'ing',
+                  'ives', 'ive', 'als', 'al', 'ors', 'or', 'ers', 'er', 'ted', 'ed',
+                  'ts', 'es', 't', 'e', 's')
+
+def _stem(word: str) -> str:
+    """A crude English stem: strip suffixes repeatedly and collapse a doubled
+    final consonant, so ingest and ingestion rank as one word."""
+    word = word.lower()
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _STEM_SUFFIXES:
+            if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+                word = word[:-len(suffix)]
+                changed = True
+                break
+    if len(word) >= 4 and word[-1] == word[-2] and word[-1] not in 'aeiou':
+        word = word[:-1]
+    return word
+
 def _words(text: str) -> set:
     return {_stem(w) for w in re.findall(r"[a-z][a-z0-9']+", text.lower())
             if len(w) >= 3 and w not in _STOPWORDS}

@@ -34,31 +34,6 @@ def _record_schema(adr) -> Optional[dict]:
     schema = kinds.get(adr.frontmatter.get('kind')) if isinstance(kinds, dict) else None
     return schema if isinstance(schema, dict) else None
 
-def _frozen(adr) -> Optional[set]:
-    """The fields that may still change on this record, or None when every
-    field may: a v0 or proposed record, an archived one, or a kind whose
-    mutable_after_accept is 'all'. Mirrors rule_v1_frozen."""
-    if adr.contract != V1 or str(adr.status or '').lower() == 'proposed' or is_archived(adr.path):
-        return None
-    mutable = (_record_schema(adr) or {}).get('mutable_after_accept', list(V1_DEFAULT_MUTABLE))
-    if mutable == 'all':
-        return None
-    return set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-
-def _frozen_message(key: str, mutable: set) -> str:
-    """The message rule_v1_frozen gives for the same field."""
-    return f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change"
-
-def _frozen_hint(adr) -> str:
-    return (f"ADR-{adr.number} is {str(adr.status).lower()}. Record the change as a new decision "
-            f"that supersedes or amends it, or pass --force for migration cleanup.")
-
-def _force_warning(adr, keys: list) -> None:
-    print(f"Warning: --force wrote frozen {'field' if len(keys) == 1 else 'fields'} "
-          f"{', '.join(repr(k) for k in keys)} on ADR-{adr.number}. Lint's frozen check still applies: "
-          f"it compares against the record as first accepted on the default branch's history.",
-          file=sys.stderr)
-
 def _show_diff(adr, before: bytes, after: bytes) -> None:
     import difflib
     name = str(relative_path(adr.path))
@@ -119,7 +94,7 @@ def probe_names(adr) -> list:
 
 def cmd_consider(args):
     """Append one considered entry: the operator's answer to the Summary
-    (ADR-304 §12). considered is mutable after acceptance, so any status."""
+    (ADR-304 §12), on a record in any status."""
     adr, code = _record_target(args.adr, 'consider')
     if adr is None:
         return code
@@ -184,8 +159,9 @@ def _parse_assignment(text: str):
     return key, op, value
 
 def cmd_set(args):
-    """Set, append to or remove from frontmatter fields, refusing a frozen
-    field of a record that has left proposed unless --force."""
+    """Set, append to or remove from frontmatter fields. status is refused:
+    the lifecycle commands own it. Any other field may be set on a record in
+    any status; git keeps what it was (ADR-311)."""
     adr, code = _record_target(args.adr, 'set', v1_only=False)
     if adr is None:
         return code
@@ -193,13 +169,6 @@ def cmd_set(args):
         changes = [_parse_assignment(a) for a in args.assignments]
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
-        return 1
-    mutable = _frozen(adr)
-    frozen = list(dict.fromkeys(k for k, _, _ in changes if mutable is not None and k not in mutable))
-    if frozen and not args.force:
-        for key in frozen:
-            print(f"Refused: ADR-{adr.number}: {_frozen_message(key, mutable)}", file=sys.stderr)
-        print(_frozen_hint(adr), file=sys.stderr)
         return 1
     if adr.contract == V1 and not args.force:
         for key, op, value in changes:
@@ -240,8 +209,6 @@ def cmd_set(args):
     except ValueError as e:
         print(f"Error: ADR-{adr.number} not changed: {e}", file=sys.stderr)
         return 1
-    if frozen and not args.dry_run:
-        _force_warning(adr, frozen)
     keys = ', '.join(dict.fromkeys(k for k, _, _ in changes))
     return _finish([(adr, edit)], args.dry_run, f"Set {keys} on ADR-{adr.number}: {adr.title}")
 
@@ -295,12 +262,7 @@ def cmd_supersede(args):
         return 1
     ref = _ref(old, section)
     edits = []
-    mutable = _frozen(new)
     if not _lists(new, field_name, ref):
-        if mutable is not None and field_name not in mutable and not args.force:
-            print(f"Refused: ADR-{new.number}: {_frozen_message(field_name, mutable)}", file=sys.stderr)
-            print(_frozen_hint(new), file=sys.stderr)
-            return 1
         edit, error = _open_edit(new)
         if error:
             print(f"Error: {error}", file=sys.stderr)
@@ -311,8 +273,6 @@ def cmd_supersede(args):
             print(f"Error: ADR-{new.number} not changed: {e}", file=sys.stderr)
             return 1
         edits.append((new, edit))
-        if mutable is not None and field_name not in mutable and not args.dry_run:
-            _force_warning(new, [field_name])
     if not section:
         edit, error = _open_edit(old)
         if error:
