@@ -475,6 +475,20 @@ printf '# 1. Use Postgres\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/0
 printf '# ADR-2: Inline\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/ADR-002-inline.md"
 printf 'Decisions live here.\n' > "$WORK/repo/notes/decisions/README.md"
 capture import-scan-flat import scan notes/decisions
+# A broad folder: each Markdown file passed over is named, a hidden folder
+# is named and not entered, other files are counted by extension, and the
+# tool's own files are left out only at the top of the folder scanned.
+mkdir -p "$WORK/repo/notes/.drafts" "$WORK/repo/notes/archive" "$WORK/repo/notes/sub" "$WORK/repo/notes/img"
+printf 'x\n' > "$WORK/repo/notes/.drafts/ADR-003-draft.md"
+printf 'x\n' > "$WORK/repo/notes/.notes.md"
+printf 'x\n' > "$WORK/repo/notes/INDEX.md"
+printf 'x\n' > "$WORK/repo/notes/sub/INDEX.md"
+printf 'k: v\n' > "$WORK/repo/notes/sub/adr.yaml"
+printf 'x\n' > "$WORK/repo/notes/archive/README.md"
+printf 'x\n' > "$WORK/repo/notes/archive/old.txt"
+printf 'x\n' > "$WORK/repo/notes/Makefile"
+for i in 1 2 3; do printf 'png' > "$WORK/repo/notes/img/p$i.png"; done
+capture import-scan-broad import scan notes
 keep_sheets import-scan-corpus
 
 # In the v1 fixture: a v1 record scanned as itself, a v0 record, a v0 record

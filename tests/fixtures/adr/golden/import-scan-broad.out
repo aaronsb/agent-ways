@@ -1,0 +1,13 @@
+Skipped: notes/.drafts: hidden directory, not entered
+Skipped: notes/.notes.md: not named ADR-NNN-<slug>.md
+Skipped: notes/archive/README.md: not named ADR-NNN-<slug>.md
+Skipped: notes/decisions/0001-use-postgres.md: not named ADR-NNN-<slug>.md
+Skipped: notes/decisions/README.md: not named ADR-NNN-<slug>.md
+Skipped: notes/sub/INDEX.md: not named ADR-NNN-<slug>.md
+Skipped: 1 file with no extension: not Markdown
+Skipped: 3 .png files: not Markdown
+Skipped: 1 .txt file: not Markdown
+Skipped: 1 .yaml file: not Markdown
+Skipped: notes/decisions/ADR-002-inline.md: no YAML frontmatter; import reads structured records (ADR-306 §2)
+Scan: 0 sheet(s) written, 13 skipped
+[exit 1]
