@@ -35,11 +35,11 @@ Then follow the ADR way's "Commands, Format and Lifecycle" section for this proj
 If `docs/architecture/adr.yaml` declares no `contract:` key, the project is adr/v0: use the legacy Context / Decision / Consequences / Alternatives sections and Draft|Proposed|Accepted|Superseded|Deprecated statuses instead.
 
 ### 4. Write the Record
-- Open a decision with a `## Summary`: what's decided, what it trades away, whether it's one-way, probes labeled confident/not confident, and the inversion.
+- Open a decision with a `## Summary`: what's decided, what it trades away, whether it's one-way, one or two probes that check the operator's intent in their terms (labeled confident/not confident), and the inversion. You make the technical calls and ground them in the basis; the probes never ask the operator to approve one.
 - Write each `basis` entry honestly. Quote the operator verbatim (`said`, `via`, `level`: authored|directed|guided) when they said it. Cite evidence, standard, upstream, or precedent otherwise. Never invent an operator statement — when a decision's option label was agent-written rather than said by the operator, mark `via` saying so.
 
 ### 5. Hand the Probes Back
-You run as a subagent, so the operator is not in your conversation. Return the Summary's probes to the calling session in plain words; the session asks the operator. When the operator's answer reaches you verbatim, record it:
+You run as a subagent, so the operator is not in your conversation. Return the Summary's probes to the calling session in plain words; the session asks the operator, or an advisor when no one is present. When an answer reaches you verbatim, record it, with `--operator advisor` and `via` naming the advisor when an advisor gave it:
 ```bash
 docs/scripts/adr consider <n> --said "<verbatim>" --via "<where it was said>" --covers <probe...>
 ```

@@ -68,7 +68,7 @@ out=$(run_macro "$(project v2-v1 "$CURRENT" adr/v1)")
 check "v1 guide" contains "ADR Tooling (adr/v1)" "$out"
 check "v1 guide names observable" contains "\`observable\`" "$out"
 check "lifecycle commands" contains "accept <n>" "$out"
-check "Summary guidance" contains "probes labelled confident and not confident" "$out"
+check "Summary guidance" contains "probes that check the operator's intent" "$out"
 check "no v0 format" lacks "Record format (adr/v0)" "$out"
 
 echo "Legacy tool, adr/v1 contract"
