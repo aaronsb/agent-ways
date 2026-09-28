@@ -65,6 +65,7 @@ docs/scripts/adr enact <n> <commit>                      # accepted cut or retir
 # Import (ADR-306) — convert v0 or foreign records into adr/v1 through editable import sheets
 docs/scripts/adr import scan <paths...> [--force]         # writes a sheet per record under .import/
 docs/scripts/adr import apply [sheets...] [--partial] [--force] [--dry-run]  # writes finished sheets as adr/v1 records
+# A source's text between its frontmatter and its title moves into the body, under the title
 
 # Config
 docs/scripts/adr config                   # Show current adr.yaml configuration

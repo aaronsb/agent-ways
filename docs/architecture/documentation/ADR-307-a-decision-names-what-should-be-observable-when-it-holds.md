@@ -98,7 +98,7 @@ No decision is required to carry an observable. `observable` joins the fields th
 
 When an agent drafts an `add` or `change` decision, it asks the operator what should be observable once the decision holds. The operator can name an observable, decline, or hand the observing to the agent. In the last case the agent works out what to observe, runs the work and iterates until it can show the outcome, as the develop loop does, and then writes the observable it used into the record.
 
-When a decision with observables is handed to the operator, the agent demonstrates them, where possible, as one step of the flow: it runs the command, shows the output or a screenshot, or opens the page. It asks its questions afterwards. The consider way carries this guidance, and routes a batch of questions through the choices way. `considered.via` says what the operator was shown. No separate field records it.
+When a decision with observables is handed to the operator, the agent demonstrates them, where possible, as one step of the flow: it runs the command, shows the output or a screenshot, or opens the page. It asks its questions afterwards. The consider way and the choices way carry this guidance. `considered.via` says what the operator was shown. No separate field records it.
 
 ### 4. The tool does not run observables
 
@@ -127,3 +127,9 @@ When a decision with observables is handed to the operator, the agent demonstrat
 - **Required on add and change, with a lint warning.** Rejected in favour of optional everywhere. The agent asks when drafting (§3), and the field itself stays optional.
 - **A `seen` list on `considered`.** Rejected: `via` already says what the operator was shown.
 - **`adr observe N` running a decision's commands.** Deferred until observables have been written in practice.
+
+## Corrections
+
+Appended 2026-09-27. The entry was first made in place after acceptance and moved here so the accepted text above stays as it was. It does not change what was decided.
+
+- **Demonstrating observables.** The consider way carries this guidance, and routes a batch of questions through the choices way. The accepted text said the consider way and the choices way both carry it; the choices way does not mention observables.
