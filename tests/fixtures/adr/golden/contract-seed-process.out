@@ -2,7 +2,8 @@ docs/architecture/adr.yaml: adr/v0 -> adr/v1
   added: contract: adr/v1
   added: kinds
   added: capabilities
-Capabilities seeded from domains: system, ops, docs. They are a starting point; the operator or the agent may keep, split, rename or delete each one.
+Capabilities seeded from domains: system, ops. They are a starting point; the operator or the agent may keep, split, rename or delete each one.
 Capabilities from the template: process and adr.
+Domain process is not seeded: the capability process keeps the template's text.
 Run `adr lint` to check the records against the contract.
 [exit 0]

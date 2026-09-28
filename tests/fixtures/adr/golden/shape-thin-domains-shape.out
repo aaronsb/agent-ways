@@ -1,0 +1,2 @@
+Notice: 52 records in 3 domains; system holds 47 (90%). Of the 3 capabilities seeded from the domains, system would carry 47 of the 52 records. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
+[exit 0]

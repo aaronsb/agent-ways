@@ -62,7 +62,12 @@ kinds:
     edges: { supersedes: evidence }
 
 # What the project does, one line each. A record's `capability` names one of
-# these, and a decision adds, cuts, changes or constrains them. Replace the
-# placeholder with the project's own list.
+# these, and a decision adds, cuts, changes or constrains them.
+# `adr contract --upgrade` seeded the entries before `process` from the
+# domains in this file. Each may be kept, split, renamed or deleted.
 capabilities:
-  core: The project's core behaviour (placeholder; replace)
+  system: Runtime, hooks and storage
+  ops: Deployment and runbooks, split across two folders
+  docs: Documentation structure and tooling
+  process: Conventions, documentation and the development process that belong to no product capability
+  adr: Decision records, their contract and the adr tool

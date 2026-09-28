@@ -51,6 +51,23 @@ records_declaring() {
     }' {} + 2>/dev/null | head -1
 }
 
+# shape_notice — the vocabulary-shape notices (a large corpus under few
+# domains or capabilities), from the installed agent-ways tool ($UNIVERSAL),
+# never the project's copy. `adr domains --shape` prints them, one
+# "Notice: ..." line each, or nothing. No python3, no PyYAML, an older tool
+# without the flag, an error or a timeout all mean no notice.
+shape_notice() {
+  [[ -f "$UNIVERSAL" ]] && command -v python3 &>/dev/null || return 0
+  local limit=() out line
+  command -v timeout &>/dev/null && limit=(timeout 2)
+  out=$(cd "$PROJECT_DIR" && "${limit[@]}" python3 "$UNIVERSAL" domains --shape 2>/dev/null) || return 0
+  while IFS= read -r line; do
+    [[ "$line" == "Notice: "* ]] || continue
+    echo ""
+    echo "_${line#Notice: }_"
+  done <<< "$out"
+}
+
 # contract_newer A B — true when contract A (adr/vN) is newer than B
 contract_newer() {
   local a=${1#adr/v} b=${2#adr/v}
@@ -232,6 +249,9 @@ if [[ -n "$ADR_SCRIPT" ]]; then
     echo ""
     echo "_\`adr.yaml\` declares $contract; this tool writes $current. \`$ADR_SCRIPT contract --upgrade\` brings \`adr.yaml\` to $current._"
   fi
+
+  # A large corpus under few names, as the installed tool reports it.
+  [[ $has_contract_cmd -eq 1 ]] && shape_notice
 
   # Direction-aware drift check against the universal template (ADR-177):
   # compare TOOL_VERSION stamps to tell stale from customized from ahead.

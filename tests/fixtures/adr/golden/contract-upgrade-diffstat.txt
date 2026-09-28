@@ -1,2 +1,2 @@
- docs/architecture/adr.yaml | 26 ++++++++++++++++++++++++++
- 1 file changed, 26 insertions(+)
+ docs/architecture/adr.yaml | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)

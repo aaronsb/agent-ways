@@ -1,0 +1,2 @@
+Error: --dry-run applies to `adr contract --upgrade`.
+[exit 1]

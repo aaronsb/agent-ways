@@ -129,6 +129,10 @@ worktree() {
 
 fresh corpus
 capture version              --version
+# No command prints argparse's help, which varies across Python versions, then
+# the module docstring's usage block, which does not. Keep the usage block.
+capture usage
+sed -n '/^Usage:$/,$p' "$ACTUAL/usage.out" > "$ACTUAL/usage.tmp" && mv "$ACTUAL/usage.tmp" "$ACTUAL/usage.out"
 capture list                 list
 capture list-alias-ls        ls
 capture list-group           list --group
@@ -314,6 +318,12 @@ capture v1-accept-not-proposed  accept 102
 capture v1-accept-v0            accept 110
 capture v1-accept-dry-run       accept 106 --dry-run
 worktree v1-accept-dry-run-status.txt
+# --whatif is an alias of --dry-run: the same output, nothing written.
+capture v1-accept-whatif        accept 106 --whatif
+worktree v1-accept-whatif-status.txt
+cmp -s "$ACTUAL/v1-accept-dry-run.out" "$ACTUAL/v1-accept-whatif.out" \
+  && echo "same as --dry-run" > "$ACTUAL/v1-accept-whatif-same.txt" \
+  || echo "differs from --dry-run" > "$ACTUAL/v1-accept-whatif-same.txt"
 capture v1-accept-concern       accept 114
 keep v1-accept-concern-file.md docs/architecture/system/ADR-114-open-concern.md
 capture v1-accept-then-lint     lint --check docs/architecture/system/ADR-114-open-concern.md
@@ -802,6 +812,7 @@ capture contract-after    contract
 # around it stay where they were.
 fresh corpus
 edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\n\n# Records stay on v0 for now.\ncontract: \"adr/v0\"  # decided in review\n', 1)"
+capture contract-upgrade-line-whatif contract --upgrade --whatif
 capture contract-upgrade-line contract --upgrade
 keep contract-upgrade-line-config.yaml docs/architecture/adr.yaml
 # A contract the tool does not know is refused, and adr.yaml is untouched.
@@ -830,6 +841,28 @@ fresh corpus
 edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\ncontract:\n', 1)"
 capture contract-upgrade-empty contract --upgrade
 keep contract-upgrade-empty-config.yaml docs/architecture/adr.yaml
+# --upgrade --whatif prints the contract line and the blocks, seeds included,
+# and writes nothing; --dry-run without --upgrade is refused.
+fresh corpus
+capture contract-upgrade-whatif contract --upgrade --whatif
+worktree contract-upgrade-whatif-status.txt
+capture contract-whatif-alone   contract --whatif
+# Capabilities are seeded from domains (ADR-312); the corpus upgrade above
+# seeds system, ops and docs. A domain named process is not seeded twice: the
+# template's process wins. A domain with no description is seeded from its
+# name.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('  docs:\n', '  process:\n', 1).replace('    description: Runtime, hooks and storage\n', '', 1)"
+capture contract-seed-process contract --upgrade
+keep contract-seed-process-config.yaml docs/architecture/adr.yaml
+# No domains: the template's block, with the placeholder core.
+fresh corpus
+(cd "$WORK/repo" && printf 'project_name: ADR Fixture\n\n# No domains yet.\ndomains: {}\n' > docs/architecture/adr.yaml)
+capture contract-seed-none contract --upgrade
+keep contract-seed-none-config.yaml docs/architecture/adr.yaml
+commit_all "no domains"
+capture contract-seed-none-noop contract --upgrade
+worktree contract-seed-none-noop-status.txt
 # Records ahead of a v0 config: lint warns on adr.yaml and names the command.
 fresh corpus
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: core\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: a finding\n---\n\n# ADR-107: A v1 record in a v0 repo\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-107-a-v1-record.md)
@@ -839,6 +872,64 @@ fresh corpus
 capture contract-import-scan  import scan docs/architecture/system/ADR-102-hook-ordering.md
 capture contract-import-apply import apply --partial
 (cd "$WORK/repo" && git status --porcelain -- docs/architecture/adr.yaml | normalize) > "$ACTUAL/contract-import-apply-config-status.txt"
+
+# --- vocabulary shape --------------------------------------------------------------
+
+# gen_v0 FOLDER FIRST COUNT — COUNT small v0 records numbered from FIRST
+gen_v0() {
+  local n
+  for ((n = $2; n < $2 + $3; n++)); do
+    printf -- '---\nstatus: Accepted\ndate: 2025-05-01\ndeciders: [developer]\n---\n\n# ADR-%d: Generated record %d\n\n## Context\n\nA generated record.\n' \
+      "$n" "$n" > "$WORK/repo/docs/architecture/$1/ADR-$n-generated.md"
+  done
+}
+# gen_v1 CAPABILITY FIRST COUNT — COUNT small v1 evidence records in system/
+gen_v1() {
+  local n
+  for ((n = $2; n < $2 + $3; n++)); do
+    printf -- '---\ncontract: adr/v1\nkind: evidence\ncapability: %s\nstatus: accepted\ndate: 2025-05-01\ndeciders: [developer]\n---\n\n# ADR-%d: Generated finding %d\n\nA generated finding.\n' \
+      "$1" "$n" "$n" > "$WORK/repo/docs/architecture/system/ADR-$n-generated.md"
+  done
+}
+
+# Fat corpus, skinny domains: 47 of 52 records in system. domains and
+# contract print a notice; --whatif prints it with the seeds; v0 lint does not.
+fresh corpus
+gen_v0 system 120 40
+commit_all "fat system"
+capture shape-thin-domains        domains
+capture shape-thin-domains-shape  domains --shape
+capture shape-thin-contract       contract
+capture shape-thin-upgrade-whatif contract --upgrade --whatif
+capture shape-thin-v0-lint        lint
+# Six declared domains, three holding records: the notice counts the six
+# seeds, not the three domains in use.
+edit docs/architecture/adr.yaml "s.replace('\nstatuses:', '  api:\n    range: [400, 499]\n    name: API\n    description: Endpoints\n    folder: api\n\n  ui:\n    range: [500, 599]\n    name: UI\n    description: Interfaces\n    folder: ui\n\n  ai:\n    range: [600, 699]\n    name: AI\n    description: Models\n    folder: ai\n\nstatuses:', 1)"
+capture shape-thin-six-domains-whatif contract --upgrade --whatif
+# Balanced: 52 records across three domains; no notice.
+fresh corpus
+gen_v0 system 120 14
+gen_v0 runbooks 220 13
+gen_v0 documentation 320 13
+commit_all "balanced"
+capture shape-balanced-domains domains
+capture shape-balanced-domains-shape domains --shape
+capture shape-balanced-contract contract
+# adr/v1, 40 records on one capability: lint warns (vocabulary-thin), contract
+# prints the notice.
+fresh v1
+gen_v1 ingest 120 40
+commit_all "fat ingest"
+capture shape-thin-v1-lint     lint
+capture shape-thin-v1-contract contract
+# adr/v1, 40 records across three capabilities in one domain: the capability
+# axis is balanced, so lint does not warn about the single domain.
+fresh v1
+gen_v1 adr 120 14
+gen_v1 ingest 134 13
+gen_v1 search 147 13
+commit_all "balanced capabilities"
+capture shape-balanced-v1-lint lint
 
 fresh v1-defects
 capture v1-defects-lint        lint

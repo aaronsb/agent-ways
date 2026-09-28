@@ -79,11 +79,44 @@ docs/scripts/adr import apply
 ```bash
 docs/scripts/adr contract --upgrade
 ```
-It adds the contract line, and the `kinds` and `capabilities` blocks when they are missing, and leaves the other lines and comments as they are. Replace the placeholder capability with the project's own list.
+It adds the contract line, and the `kinds` and `capabilities` blocks when they are missing, and leaves the other lines and comments as they are. The `capabilities` block it writes holds one capability per domain, then `process` and `adr`; with no domains it holds the placeholder `core` instead of seeds. Refine the list as in [Capabilities from domains](#capabilities-from-domains).
 
 A corpus not worth converting can instead be parked as read-only history under `docs/architecture/legacy/`, with `legacy.range` in `adr.yaml` covering its numbers. The tool lists only files named `ADR-NNN-*.md` with frontmatter, so rename and add frontmatter as in step 2 for parked records to appear in `adr list` and resolve in `adr cite`.
 
 For adr-tools, MADR, Log4brains, or other foreign formats — no reader exists yet — either copy each record's substance into a sheet by hand before applying, or skip conversion and park the corpus in `legacy/`.
+
+## Capabilities from domains
+
+`adr contract --upgrade` seeds one capability per v0 domain, using the domain's description as its line (ADR-312). The seeds are a starting point. Keep, split, rename or delete each one.
+
+- Split a seed when decisions change its parts independently.
+- A record may carry 2–3 capabilities when it changes several (ADR-308).
+- `process` holds conventions that apply across the codebase and belong to no product capability: datetime utilities, record numbering, the docs strategy.
+- `adr` holds the records themselves, their contract and the tool.
+
+knowledge-graph-system's 9 domains became 18 capabilities (#616), part of it:
+
+| v0 domain | capabilities |
+|---|---|
+| infra | `jobs`, `deploy`, `backup`, `storage` |
+| db | `graph`, `annealing` |
+| ingest | `ingest`, `extraction` |
+| query | `query`, `grounding` |
+| ui | `cli`, `web`, `fuse` |
+| meta | `process` |
+
+agent-ways, a tooling project, went from 6 domains to 13 capabilities: `adr`, `docs`, `method`, `matching`, `disclosure`, `authoring`, `cli`, `attend`, `install`, `config`, `governance`, `loop`, `testing` (its `docs/architecture/adr.yaml`).
+
+### When the tool reports a thin vocabulary
+
+`adr contract`, `adr domains` and, under adr/v1, `adr lint` print a notice when at least 40 records sit under 2 or fewer domains or capabilities, or one domain holds 60% of them, or one capability is on 50% of the adr/v1 records. Seeds from such domains give a list as coarse as the domains.
+
+1. Read the records: `adr list --json` gives each one's title and fields; read the Context sections of the large group.
+2. Group the records by what their decisions change. Under adr/v1, propose capabilities directly; the domains only allocate numbers.
+3. Show the operator each proposed domain or capability with its one-line description and three or four example records. The operator decides.
+4. Apply what the operator accepts: edit `capabilities` in `adr.yaml` and each record's `capability` with `adr set`, or move records with `adr domain move --plan`. Run each first with `--whatif`.
+
+The tool changes nothing on its own.
 
 ## Writing adr.yaml
 

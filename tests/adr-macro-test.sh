@@ -133,6 +133,58 @@ mkdir -p "$dir/docs/architecture/core"
 printf -- '---\ncontract: adr/v1\nkind: decision\n---\n\n# ADR-100: x\n' > "$dir/docs/architecture/core/ADR-100-x.md"
 check "records ahead, tool without the command: re-vendor first" contains "Re-vendor the tool (the \`adr\` skill), then run" "$(run_macro "$dir")"
 
+echo "Vocabulary shape (from the installed tool)"
+# records DIR FOLDER FIRST COUNT FRONTMATTER — COUNT records with that frontmatter
+records() {
+  local n
+  mkdir -p "$1/docs/architecture/$2"
+  for ((n = $3; n < $3 + $4; n++)); do
+    printf -- '---\n%b---\n\n# ADR-%d: r\n' "$5" "$n" > "$1/docs/architecture/$2/ADR-$n-r.md"
+  done
+}
+# domains DIR — declare core, api and ui
+domains() {
+  local cfg="$1/docs/architecture/adr.yaml"
+  grep -v '^domains:' "$cfg" > "$cfg.tmp"
+  printf 'domains:\n  core: {range: [100, 199], name: Core, description: Core, folder: core}\n  api: {range: [300, 399], name: API, description: API, folder: api}\n  ui: {range: [500, 599], name: UI, description: UI, folder: ui}\n' >> "$cfg.tmp"
+  mv "$cfg.tmp" "$cfg"
+}
+dir=$(project shape-fat "$CURRENT" '')
+domains "$dir"
+records "$dir" core 100 45 'status: Accepted\ndate: 2025-01-01\n'
+records "$dir" api 300 5 'status: Accepted\ndate: 2025-01-01\n'
+out=$(run_macro "$dir")
+check "fat domain: notice" contains "_50 records in 2 domains; core holds 45 (90%)." "$out"
+check "fat domain: names the seeds" contains "Of the 3 capabilities seeded from the domains" "$out"
+check "fat domain: one notice" lacks "adr/v1 records use" "$out"
+dir=$(project shape-even "$CURRENT" '')
+domains "$dir"
+records "$dir" core 100 15 'status: Accepted\ndate: 2025-01-01\n'
+records "$dir" api 300 15 'status: Accepted\ndate: 2025-01-01\n'
+records "$dir" ui 500 15 'status: Accepted\ndate: 2025-01-01\n'
+check "balanced domains: no notice" lacks "records in" "$(run_macro "$dir")"
+dir=$(project shape-v1 "$CURRENT" adr/v1)
+domains "$dir"
+printf 'capabilities:\n  ingest: x\n  search: y\n' >> "$dir/docs/architecture/adr.yaml"
+records "$dir" core 100 45 'contract: adr/v1\nkind: evidence\ncapability: ingest\nstatus: accepted\ndate: 2025-01-01\n'
+out=$(run_macro "$dir")
+check "fat capability: notice" contains "_45 adr/v1 records use 1 capability (ingest)." "$out"
+check "fat capability: no domain notice under v1" lacks "records in" "$out"
+# Fail quiet: the notice needs the installed tool to answer.
+fat="$WORK/shape-fat"
+out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/no-such-tool" bash "$MACRO" 2>&1)
+check "missing installed tool: no notice" lacks "records in" "$out"
+check "missing installed tool: guidance still printed" contains "Record format (adr/v0)" "$out"
+printf '#!/usr/bin/env python3\nprint("Notice: 1 records in 1 domain.")\nraise SystemExit(1)\n' > "$WORK/failing-tool"
+out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/failing-tool" bash "$MACRO" 2>&1)
+check "installed tool exits nonzero: no notice" lacks "records in" "$out"
+printf '#!/usr/bin/env python3\nimport sys\nsys.exit(2 if "--shape" in sys.argv else 0)\n' > "$WORK/old-tool"
+out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/old-tool" bash "$MACRO" 2>&1)
+check "installed tool without --shape: no notice" lacks "records in" "$out"
+printf '#!/usr/bin/env python3\nprint("Traceback (most recent call last):")\nprint("Notice-ish")\n' > "$WORK/noisy-tool"
+out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/noisy-tool" bash "$MACRO" 2>&1)
+check "installed tool prints other lines: none passed on" lacks "Traceback" "$out"
+
 echo "v1 guide content"
 out=$(run_macro "$(project content "$CURRENT" adr/v1)")
 check "enactment" contains "enacted:" "$out"

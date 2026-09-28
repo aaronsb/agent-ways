@@ -1,0 +1,7 @@
+docs/architecture/adr.yaml: adr/v0 -> adr/v1
+  added: contract: adr/v1
+  added: kinds
+  added: capabilities
+The capabilities list holds the placeholder core, with process and adr. Replace core with the project's own list.
+Run `adr lint` to check the records against the contract.
+[exit 0]

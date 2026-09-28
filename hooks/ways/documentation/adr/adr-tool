@@ -30,7 +30,10 @@ Usage:
     adr domain move <number> <domain> [--dry-run]
     adr domain move --plan <file.yaml> [--dry-run]
     adr config
-    adr contract [--current | --upgrade]
+    adr contract [--current | --upgrade [--dry-run|--whatif]]
+
+A command shown with [--dry-run] also takes it as --whatif: it prints the
+change and writes nothing.
 
 Configuration is loaded from docs/architecture/adr.yaml
 """
@@ -1189,6 +1192,113 @@ def rule_v1_observable(adr, ctx):
         if isinstance(entry, dict) and entry:
             continue
         v1_issue(adr, f"observable entry {i}: expected a line of words or a non-empty mapping")
+# ============================================================================
+# Vocabulary shape
+# ============================================================================
+#
+# Counts active records per domain and, for adr/v1 records, per capability,
+# and names a corpus that is large while its vocabulary is small: many
+# records under few domains or capabilities, or most of them under one.
+# `adr contract`, `adr domains` and, under adr/v1, `adr lint` print it as a
+# notice. It is a count and never fails a command. The way macro prints the
+# notices from `adr domains --shape`, run with the installed agent-ways tool.
+
+SHAPE_MIN_RECORDS = 40        # below this many records, no notice
+SHAPE_FEW_DOMAINS = 2         # this many domains in use, or fewer
+SHAPE_DOMAIN_SHARE = 0.60     # or one domain holding this share of the records
+SHAPE_FEW_CAPABILITIES = 2    # this many capabilities in use, or fewer
+SHAPE_CAPABILITY_SHARE = 0.50  # or one capability on this share of the records
+
+
+@dataclass
+class ShapeFinding:
+    axis: str        # 'domain' or 'capability'
+    records: int     # records counted on this axis
+    in_use: int      # distinct domains or capabilities among them
+    top: str         # the one holding the most records (ties: first by name)
+    top_count: int
+
+
+def _thin(axis: str, counts: dict, records: int, few: int, share: float):
+    if records < SHAPE_MIN_RECORDS or not counts:
+        return None
+    top = sorted(counts, key=lambda name: (-counts[name], name))[0]
+    if len(counts) <= few or counts[top] >= share * records:
+        return ShapeFinding(axis, records, len(counts), top, counts[top])
+    return None
+
+
+def vocabulary_shape(corpus: list) -> dict:
+    """The thin axes of the active corpus: {'domain': finding,
+    'capability': finding}, each None when that axis is not thin. The
+    capability axis counts only adr/v1 records; a record listing several
+    capabilities counts once for each."""
+    active = [adr for adr in corpus if not is_archived(adr.path)]
+    domains = {}
+    for adr in active:
+        if adr.domain:
+            domains[adr.domain] = domains.get(adr.domain, 0) + 1
+    capabilities, v1_records = {}, 0  # v1 records naming a capability
+    for adr in active:
+        if adr.contract != V1:
+            continue
+        names = sorted({name for name in capability_scope(adr) if name != '*'})
+        if names:
+            v1_records += 1
+        for name in names:
+            capabilities[name] = capabilities.get(name, 0) + 1
+    return {
+        'domain': _thin('domain', domains, sum(domains.values()),
+                        SHAPE_FEW_DOMAINS, SHAPE_DOMAIN_SHARE),
+        'capability': _thin('capability', capabilities, v1_records,
+                            SHAPE_FEW_CAPABILITIES, SHAPE_CAPABILITY_SHARE),
+    }
+
+
+def _plural(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
+
+
+def shape_notice(finding: ShapeFinding, seeds: Optional[list] = None) -> str:
+    """One notice line for a thin axis. seeds: the capabilities seeded, or
+    to be seeded, from the domains; None when no capabilities are seeded."""
+    pct = round(100 * finding.top_count / finding.records)
+    if finding.axis == 'domain':
+        text = f"{_plural(finding.records, 'record', 'records')} in {_plural(finding.in_use, 'domain', 'domains')}"
+        text += f" ({finding.top})." if finding.in_use == 1 else \
+            f"; {finding.top} holds {finding.top_count} ({pct}%)."
+        if seeds and finding.top in seeds:
+            text += (f" Of the {_plural(len(seeds), 'capability', 'capabilities')} seeded from the "
+                     f"domains, {finding.top} would carry {finding.top_count} of the "
+                     f"{finding.records} records.")
+        return (text + " Read the records and propose domains or capabilities (`adr list --json` "
+                "gives titles and fields), then apply with `adr domain move --plan` or by editing "
+                "`capabilities`, previewing with --whatif.")
+    text = f"{_plural(finding.records, 'adr/v1 record', 'adr/v1 records')} use " \
+           f"{_plural(finding.in_use, 'capability', 'capabilities')}"
+    text += f" ({finding.top})." if finding.in_use == 1 else \
+        f"; {finding.top} is on {finding.top_count} ({pct}%)."
+    return (text + " Read the records and propose a finer capability list (`adr list --json` "
+            "gives titles and fields), then edit `capabilities` in adr.yaml and each record's "
+            "`capability` with `adr set`, previewing with --whatif.")
+
+
+def shape_findings(shape: dict, config: dict) -> list:
+    """The findings to report. Under adr/v1 with a capabilities vocabulary,
+    capabilities carry what a record is about and a domain only allocates
+    numbers, so only the capability axis is reported. Otherwise the domain
+    axis is reported too, since the capabilities are still to be seeded
+    from it."""
+    if str(config.get('contract')) == V1 and config.get('capabilities'):
+        return [shape['capability']] if shape['capability'] else []
+    return [shape[axis] for axis in ('domain', 'capability') if shape[axis]]
+
+
+@config_rule(contract=V1)
+def rule_vocabulary_thin(ctx):
+    finding = vocabulary_shape(ctx.corpus)['capability']
+    if finding:
+        ctx.config_issues.append(Issue(shape_notice(finding), 'warning', code='vocabulary-thin'))
 # ============================================================================
 # Path rewriting for records that change folder (ADR-306 §6)
 # ============================================================================
@@ -3103,6 +3213,9 @@ def cmd_archive(args):
 
 def cmd_domains(args):
     """List available domains."""
+    if getattr(args, 'shape', False):
+        _print_shape_notices()
+        return 0
     domains = get_domains()
 
     project = get_config().get('project_name', 'Project')
@@ -3128,7 +3241,17 @@ def cmd_domains(args):
         print(f"\n  {'legacy':8} ({r[0]:3}-{r[1]:3})  {legacy.get('label', 'Legacy')}")
 
     print()
+    _print_shape_notices(blank_after=True)
     return 0
+
+
+def _print_shape_notices(blank_after: bool = False):
+    """The vocabulary-shape notices shape_findings reports, one line each."""
+    seeds = _pending_seeds(get_config())
+    for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
+        print(f"Notice: {shape_notice(finding, seeds=seeds)}")
+        if blank_after:
+            print()
 
 # ============================================================================
 # adr domain: add, rename, move (ADR-306 §6)
@@ -3600,7 +3723,9 @@ def cmd_config(args):
 # lines: the contract line is changed or appended, and each top-level key the
 # contract needs and the file lacks is appended as adr.yaml.template writes
 # it. A config already on the current contract gets only its missing blocks.
-# Comments and every other line are left as they were.
+# Comments and every other line are left as they were. A capabilities block
+# written into a config with domains holds one capability per domain in
+# place of the placeholder (ADR-312).
 
 # What adr.yaml needs for each contract past adr/v0, in the order it is
 # appended: (top-level key, block). The text matches adr.yaml.template, and
@@ -3629,12 +3754,27 @@ contract: adr/v1
 '''),
         ('capabilities', '''# What the project does, one line each. A record's `capability` names one of
 # these, and a decision adds, cuts, changes or constrains them. Replace the
-# placeholder with the project's own list.
+# `core` placeholder with the project's own list. `process` and `adr` apply
+# to every project that keeps these records.
 capabilities:
   core: The project's core behaviour (placeholder; replace)
+  process: Conventions, documentation and the development process that belong to no product capability
+  adr: Decision records, their contract and the adr tool
 '''),
     ),
 }
+
+# The capabilities every project has (ADR-312). The template ships them after
+# the placeholder, and --upgrade writes them after the capabilities it seeds
+# from domains.
+DEFAULT_CAPABILITIES = ('process', 'adr')
+
+# The comment above a capabilities block seeded from domains (ADR-312).
+SEEDED_CAPABILITIES_COMMENT = '''# What the project does, one line each. A record's `capability` names one of
+# these, and a decision adds, cuts, changes or constrains them.
+# `adr contract --upgrade` seeded the entries before `process` from the
+# domains in this file. Each may be kept, split, renamed or deleted.
+'''
 
 # A top-level contract line: key, optional quotes, value, optional comment.
 CONTRACT_LINE_RE = re.compile(
@@ -3642,7 +3782,11 @@ CONTRACT_LINE_RE = re.compile(
 
 
 def cmd_contract(args):
-    """adr contract [--current | --upgrade]."""
+    """adr contract [--current | --upgrade [--dry-run]]."""
+    dry_run = getattr(args, 'dry_run', False)
+    if dry_run and not args.upgrade:
+        print("Error: --dry-run applies to `adr contract --upgrade`.", file=sys.stderr)
+        return 1
     if args.current:
         print(CURRENT_CONTRACT)
         return 0
@@ -3665,8 +3809,10 @@ def cmd_contract(args):
         else:
             print(f"{config_path} is behind this tool. "
                   f"`adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
+        for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
+            print(f"Notice: {shape_notice(finding, seeds=_pending_seeds(get_config()))}")
         return 0
-    return _contract_upgrade(declared)
+    return _contract_upgrade(declared, dry_run)
 
 
 def _missing_blocks(config: dict) -> list:
@@ -3676,7 +3822,53 @@ def _missing_blocks(config: dict) -> list:
             if key != 'contract' and key not in config]
 
 
-def _contract_upgrade(declared: str) -> int:
+def _yaml_scalar(text, as_key: bool = False) -> str:
+    """text as a one-line YAML scalar: plain when it reads back unchanged,
+    double-quoted otherwise."""
+    text = ' '.join(str(text).split())
+    probe, want = (f"{text}: x", {text: 'x'}) if as_key else (f"k: {text}", {'k': text})
+    try:
+        if text and yaml.safe_load(probe) == want:
+            return text
+    except yaml.YAMLError:
+        pass
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _seeded_capabilities(config: dict):
+    """The capabilities block --upgrade writes (ADR-312): one entry per domain,
+    then the defaults. Returns the block, the domains seeded, and the domains
+    not seeded because a default capability has their name. With no domain
+    to seed, the block is the template's."""
+    template_block = dict(CONTRACT_BLOCKS[CURRENT_CONTRACT])['capabilities']
+    domains = config.get('domains')
+    seeds, taken = [], []
+    for key, cfg in (domains.items() if isinstance(domains, dict) else ()):
+        name = str(key)
+        if name in DEFAULT_CAPABILITIES:
+            taken.append(name)
+            continue
+        cfg = cfg if isinstance(cfg, dict) else {}
+        seeds.append((name, cfg.get('description') or cfg.get('name') or name))
+    if not seeds:
+        return template_block, [], taken
+    defaults = [line for line in template_block.splitlines(keepends=True)
+                if any(line.startswith(f"  {name}: ") for name in DEFAULT_CAPABILITIES)]
+    body = ''.join(f"  {_yaml_scalar(name, as_key=True)}: {_yaml_scalar(text)}\n"
+                   for name, text in seeds)
+    block = SEEDED_CAPABILITIES_COMMENT + 'capabilities:\n' + body + ''.join(defaults)
+    return block, [name for name, _ in seeds], taken
+
+
+def _pending_seeds(config: dict) -> Optional[list]:
+    """The capabilities --upgrade would seed from the domains; None when
+    adr.yaml already has a capabilities key, which --upgrade leaves alone."""
+    if 'capabilities' in config:
+        return None
+    return _seeded_capabilities(config)[1]
+
+
+def _contract_upgrade(declared: str, dry_run: bool = False) -> int:
     path = get_config_path()
     shown = relative_path(path)
     if declared == CURRENT_CONTRACT and not _missing_blocks(get_config()):
@@ -3688,7 +3880,7 @@ def _contract_upgrade(declared: str) -> int:
     lines = text.splitlines(keepends=True)
     config = get_config()
     added = []
-    replaced = False
+    replaced = None
     for i, line in enumerate(lines):
         if declared == CURRENT_CONTRACT:
             break
@@ -3699,22 +3891,25 @@ def _contract_upgrade(declared: str) -> int:
             if prefix == 'contract:':
                 prefix += ' '  # an empty `contract:` line has no space after the colon
             lines[i] = f"{prefix}{quote}{CURRENT_CONTRACT}{quote}{suffix}{ending}"
-            replaced = True
+            replaced = i
             break
-    if 'contract' in config and not replaced and declared != CURRENT_CONTRACT:
+    if 'contract' in config and replaced is None and declared != CURRENT_CONTRACT:
         print(f"Error: {shown} sets contract in a form this command does not edit; "
               f"change it to `contract: {CURRENT_CONTRACT}` by hand.", file=sys.stderr)
         return 1
     blocks = []
+    seeded, taken = [], []
     for key, block in CONTRACT_BLOCKS[CURRENT_CONTRACT]:
         if key == 'contract':
-            if replaced:
+            if replaced is not None:
                 added.append(f"changed: contract: {declared} -> {CURRENT_CONTRACT}")
                 continue
             if declared == CURRENT_CONTRACT:
                 continue
         elif key in config:
             continue
+        elif key == 'capabilities':
+            block, seeded, taken = _seeded_capabilities(config)
         blocks.append(block.replace('\n', newline))
         added.append(f"added: contract: {CURRENT_CONTRACT}" if key == 'contract' else f"added: {key}")
     if lines and not lines[-1].endswith('\n'):
@@ -3722,6 +3917,11 @@ def _contract_upgrade(declared: str) -> int:
     body = ''.join(lines)
     for block in blocks:
         body += newline + block
+    # The domain shape, read before the upgrade, says whether the seeds are thin.
+    thin = vocabulary_shape(get_all_adrs())['domain'] if 'added: capabilities' in added else None
+    if dry_run:
+        return _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
+                                         added, seeded, taken, thin)
     try:
         path.write_bytes(body.encode('utf-8'))
         reloaded = reload_config()
@@ -3740,9 +3940,55 @@ def _contract_upgrade(declared: str) -> int:
         print(f"{shown}: {declared} -> {CURRENT_CONTRACT}")
     for line in added:
         print(f"  {line}")
-    if 'added: capabilities' in added:
-        print("The capabilities list holds one placeholder. Replace it with the project's own list.")
+    _print_capability_notes(added, seeded, taken, thin)
     print("Run `adr lint` to check the records against the contract.")
+    return 0
+
+
+def _print_capability_notes(added: list, seeded: list, taken: list, thin=None):
+    defaults = ' and '.join(DEFAULT_CAPABILITIES)
+    if seeded:
+        print(f"Capabilities seeded from domains: {', '.join(seeded)}. They are a starting point; "
+              "the operator or the agent may keep, split, rename or delete each one.")
+        print(f"Capabilities from the template: {defaults}.")
+    elif 'added: capabilities' in added:
+        print(f"The capabilities list holds the placeholder core, with {defaults}. "
+              "Replace core with the project's own list.")
+    for name in taken:
+        print(f"Domain {name} is not seeded: the capability {name} keeps the template's text.")
+    if thin:
+        print(f"Notice: {shape_notice(thin, seeds=seeded)}")
+
+
+def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
+                              added, seeded, taken, thin) -> int:
+    """--upgrade --dry-run: print the lines the upgrade would write, and
+    write nothing."""
+    try:
+        loaded = yaml.safe_load(body)
+    except yaml.YAMLError:
+        loaded = None
+    if not isinstance(loaded, dict) or str(loaded.get('contract')) != CURRENT_CONTRACT:
+        print(f"Error: the upgraded {shown} would not read as {CURRENT_CONTRACT}; "
+              "the upgrade would not be written.", file=sys.stderr)
+        return 1
+    if declared == CURRENT_CONTRACT:
+        print(f"{shown}: {CURRENT_CONTRACT}, would be completed (dry run; nothing written)")
+    else:
+        print(f"{shown}: {declared} -> {CURRENT_CONTRACT} (dry run; nothing written)")
+    for line in added:
+        print(f"  would be {line}")
+    if replaced is not None:
+        print(f"\nLine {replaced + 1} would read:\n")
+        print(lines[replaced].rstrip('\r\n'))
+    if blocks:
+        print("\nAppended to the end of the file:")
+        for block in blocks:
+            print()
+            print(block.rstrip('\r\n').replace('\r\n', '\n'))
+        print()
+    _print_capability_notes(added, seeded, taken, thin)
+    print("Run `adr contract --upgrade` without --dry-run to write it.")
     return 0
 def cmd_cite(args):
     """Check ADR citations in the code against the records they cite.
@@ -4803,7 +5049,7 @@ def main():
                               'note, a number or domain mismatch')
     p_apply.add_argument('--force', action='store_true',
                          help='Overwrite a record that has uncommitted changes')
-    p_apply.add_argument('--dry-run', action='store_true',
+    p_apply.add_argument('--dry-run', '--whatif', action='store_true',
                          help='Write, lint inside the corpus and print each issue, then restore '
                               'every file and keep every sheet')
 
@@ -4813,7 +5059,9 @@ def main():
                               help='Update without prompting')
 
     # domains
-    subparsers.add_parser('domains', help='List domain number series')
+    p_domains = subparsers.add_parser('domains', help='List domain number series')
+    # For the way macro: print only the vocabulary-shape notices, or nothing.
+    p_domains.add_argument('--shape', action='store_true', help=argparse.SUPPRESS)
 
     # domain (ADR-306 §6)
     p_domain = subparsers.add_parser('domain', help='Add, rename or move domains')
@@ -4828,12 +5076,12 @@ def main():
     p_dren.add_argument('old', help='Current domain key')
     p_dren.add_argument('new', help='New domain key')
     p_dren.add_argument('--folder', help='New folder (default: the new key when the folder was the old key)')
-    p_dren.add_argument('--dry-run', action='store_true', help='Print each line the rename would change; write nothing')
+    p_dren.add_argument('--dry-run', '--whatif', action='store_true', help='Print each line the rename would change; write nothing')
     p_dmove = domain_sub.add_parser('move', help='Move records to another domain; numbers never change')
     p_dmove.add_argument('record', nargs='?', help='ADR number (e.g. 104, ADR-104)')
     p_dmove.add_argument('domain', nargs='?', help='Target domain')
     p_dmove.add_argument('--plan', help='YAML list of {record, domain} moves, applied together')
-    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and each line they would change; write nothing')
+    p_dmove.add_argument('--dry-run', '--whatif', action='store_true', help='Print the moves and each line they would change; write nothing')
 
     # archive
     p_archive = subparsers.add_parser(
@@ -4845,7 +5093,7 @@ def main():
                            help='Superseding ADR(s), comma-separated (e.g., ADR-51 or 51,52#4)')
     p_archive.add_argument('--status',
                            help='Archive status (default: Superseded; validated against adr.yaml)')
-    p_archive.add_argument('--dry-run', action='store_true',
+    p_archive.add_argument('--dry-run', '--whatif', action='store_true',
                            help='Report what would change without changing it')
 
     # config
@@ -4859,17 +5107,19 @@ def main():
                                help='Print the contract this tool writes, and nothing else')
     contract_mode.add_argument('--upgrade', action='store_true',
                                help='Bring adr.yaml to the current contract, editing lines in place')
+    p_contract.add_argument('--dry-run', '--whatif', action='store_true',
+                            help='With --upgrade: print what it would write; write nothing')
 
     # lifecycle (adr/v1, ADR-304 §2)
     p_accept = subparsers.add_parser('accept', help='Accept a proposed adr/v1 record')
     p_accept.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
-    p_accept.add_argument('--dry-run', action='store_true', help='Check and report without writing')
+    p_accept.add_argument('--dry-run', '--whatif', action='store_true', help='Check and report without writing')
     for verb, help_text in (('reject', 'Reject a proposed adr/v1 record: considered and declined'),
                             ('abandon', 'Abandon a proposed adr/v1 record: dropped before a decision')):
         p_close = subparsers.add_parser(verb, help=help_text)
         p_close.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
         p_close.add_argument('--reason', help='Why (required; appended as a Closure section)')
-        p_close.add_argument('--dry-run', action='store_true', help='Report without writing')
+        p_close.add_argument('--dry-run', '--whatif', action='store_true', help='Report without writing')
 
     # record edits (adr/v1): consider, set, supersede, enact
     p_consider = subparsers.add_parser('consider', help="Append a considered entry: the operator's answer (ADR-304 §12)")
@@ -4881,24 +5131,24 @@ def main():
                             help='Probe names from the Summary the answer covers (none given writes covers: [])')
     p_consider.add_argument('--paraphrase', action='store_true', help='said is a summary, not the words')
     p_consider.add_argument('--canary', choices=['caught', 'missed'], help='Whether the operator caught the canary')
-    p_consider.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_consider.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
     p_set = subparsers.add_parser('set', help='Edit frontmatter fields: key=value, key+=item, key-=item')
     p_set.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
     p_set.add_argument('assignments', nargs='+', metavar='key=value',
                        help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
     p_set.add_argument('--force', action='store_true',
                        help='Set status, or a field no v1 record carries, anyway')
-    p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_set.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
     p_supersede = subparsers.add_parser('supersede', help='Record a supersession on both records (ADR-304 §3)')
     p_supersede.add_argument('adr', help='The record replaced (e.g., 101, ADR-101)')
     p_supersede.add_argument('--by', required=True, help='The record that replaces it')
     p_supersede.add_argument('--amends', metavar='SECTION',
                              help='Replace one section only: amends: [OLD#SECTION] on the new record')
-    p_supersede.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_supersede.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
     p_enact = subparsers.add_parser('enact', help='Mark an accepted cut or retire done at a commit (ADR-304 §5)')
     p_enact.add_argument('adr', help='ADR number (e.g., 111, ADR-111)')
     p_enact.add_argument('commit', help='The commit hash that finished the removal')
-    p_enact.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_enact.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
 
     # cite
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')

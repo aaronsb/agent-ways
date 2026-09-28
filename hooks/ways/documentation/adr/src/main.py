@@ -73,7 +73,7 @@ def main():
                               'note, a number or domain mismatch')
     p_apply.add_argument('--force', action='store_true',
                          help='Overwrite a record that has uncommitted changes')
-    p_apply.add_argument('--dry-run', action='store_true',
+    p_apply.add_argument('--dry-run', '--whatif', action='store_true',
                          help='Write, lint inside the corpus and print each issue, then restore '
                               'every file and keep every sheet')
 
@@ -83,7 +83,9 @@ def main():
                               help='Update without prompting')
 
     # domains
-    subparsers.add_parser('domains', help='List domain number series')
+    p_domains = subparsers.add_parser('domains', help='List domain number series')
+    # For the way macro: print only the vocabulary-shape notices, or nothing.
+    p_domains.add_argument('--shape', action='store_true', help=argparse.SUPPRESS)
 
     # domain (ADR-306 §6)
     p_domain = subparsers.add_parser('domain', help='Add, rename or move domains')
@@ -98,12 +100,12 @@ def main():
     p_dren.add_argument('old', help='Current domain key')
     p_dren.add_argument('new', help='New domain key')
     p_dren.add_argument('--folder', help='New folder (default: the new key when the folder was the old key)')
-    p_dren.add_argument('--dry-run', action='store_true', help='Print each line the rename would change; write nothing')
+    p_dren.add_argument('--dry-run', '--whatif', action='store_true', help='Print each line the rename would change; write nothing')
     p_dmove = domain_sub.add_parser('move', help='Move records to another domain; numbers never change')
     p_dmove.add_argument('record', nargs='?', help='ADR number (e.g. 104, ADR-104)')
     p_dmove.add_argument('domain', nargs='?', help='Target domain')
     p_dmove.add_argument('--plan', help='YAML list of {record, domain} moves, applied together')
-    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and each line they would change; write nothing')
+    p_dmove.add_argument('--dry-run', '--whatif', action='store_true', help='Print the moves and each line they would change; write nothing')
 
     # archive
     p_archive = subparsers.add_parser(
@@ -115,7 +117,7 @@ def main():
                            help='Superseding ADR(s), comma-separated (e.g., ADR-51 or 51,52#4)')
     p_archive.add_argument('--status',
                            help='Archive status (default: Superseded; validated against adr.yaml)')
-    p_archive.add_argument('--dry-run', action='store_true',
+    p_archive.add_argument('--dry-run', '--whatif', action='store_true',
                            help='Report what would change without changing it')
 
     # config
@@ -129,17 +131,19 @@ def main():
                                help='Print the contract this tool writes, and nothing else')
     contract_mode.add_argument('--upgrade', action='store_true',
                                help='Bring adr.yaml to the current contract, editing lines in place')
+    p_contract.add_argument('--dry-run', '--whatif', action='store_true',
+                            help='With --upgrade: print what it would write; write nothing')
 
     # lifecycle (adr/v1, ADR-304 §2)
     p_accept = subparsers.add_parser('accept', help='Accept a proposed adr/v1 record')
     p_accept.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
-    p_accept.add_argument('--dry-run', action='store_true', help='Check and report without writing')
+    p_accept.add_argument('--dry-run', '--whatif', action='store_true', help='Check and report without writing')
     for verb, help_text in (('reject', 'Reject a proposed adr/v1 record: considered and declined'),
                             ('abandon', 'Abandon a proposed adr/v1 record: dropped before a decision')):
         p_close = subparsers.add_parser(verb, help=help_text)
         p_close.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
         p_close.add_argument('--reason', help='Why (required; appended as a Closure section)')
-        p_close.add_argument('--dry-run', action='store_true', help='Report without writing')
+        p_close.add_argument('--dry-run', '--whatif', action='store_true', help='Report without writing')
 
     # record edits (adr/v1): consider, set, supersede, enact
     p_consider = subparsers.add_parser('consider', help="Append a considered entry: the operator's answer (ADR-304 §12)")
@@ -151,24 +155,24 @@ def main():
                             help='Probe names from the Summary the answer covers (none given writes covers: [])')
     p_consider.add_argument('--paraphrase', action='store_true', help='said is a summary, not the words')
     p_consider.add_argument('--canary', choices=['caught', 'missed'], help='Whether the operator caught the canary')
-    p_consider.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_consider.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
     p_set = subparsers.add_parser('set', help='Edit frontmatter fields: key=value, key+=item, key-=item')
     p_set.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
     p_set.add_argument('assignments', nargs='+', metavar='key=value',
                        help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
     p_set.add_argument('--force', action='store_true',
                        help='Set status, or a field no v1 record carries, anyway')
-    p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_set.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
     p_supersede = subparsers.add_parser('supersede', help='Record a supersession on both records (ADR-304 §3)')
     p_supersede.add_argument('adr', help='The record replaced (e.g., 101, ADR-101)')
     p_supersede.add_argument('--by', required=True, help='The record that replaces it')
     p_supersede.add_argument('--amends', metavar='SECTION',
                              help='Replace one section only: amends: [OLD#SECTION] on the new record')
-    p_supersede.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_supersede.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
     p_enact = subparsers.add_parser('enact', help='Mark an accepted cut or retire done at a commit (ADR-304 §5)')
     p_enact.add_argument('adr', help='ADR number (e.g., 111, ADR-111)')
     p_enact.add_argument('commit', help='The commit hash that finished the removal')
-    p_enact.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_enact.add_argument('--dry-run', '--whatif', action='store_true', help='Show the change without writing')
 
     # cite
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')

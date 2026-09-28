@@ -6,7 +6,6 @@ domains:
   system:
     range: [100, 199]
     name: System
-    description: Runtime, hooks and storage
     folder: system
 
   ops:
@@ -17,7 +16,7 @@ domains:
       - operations
       - runbooks
 
-  docs:
+  process:
     range: [300, 399]
     name: Documentation
     description: Documentation structure and tooling
@@ -68,8 +67,7 @@ kinds:
 # `adr contract --upgrade` seeded the entries before `process` from the
 # domains in this file. Each may be kept, split, renamed or deleted.
 capabilities:
-  system: Runtime, hooks and storage
+  system: System
   ops: Deployment and runbooks, split across two folders
-  docs: Documentation structure and tooling
   process: Conventions, documentation and the development process that belong to no product capability
   adr: Decision records, their contract and the adr tool
