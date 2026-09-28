@@ -17,9 +17,7 @@ def cmd_cite(args):
     import fnmatch
 
     root = get_project_root().resolve()
-    config = get_config()
-    cite_config = config.get('cite') if isinstance(config.get('cite'), dict) else {}
-    excludes = ['docs/architecture/'] + [str(p) for p in (cite_config.get('exclude') or [])]
+    excludes = ['docs/architecture/'] + cite_excludes()
 
     # Path arguments are resolved against the working directory and must sit
     # inside the repository.

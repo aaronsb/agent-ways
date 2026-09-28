@@ -131,8 +131,53 @@ def get_config_path() -> Path:
     """Get path to adr.yaml config file."""
     return get_project_root() / 'docs' / 'architecture' / 'adr.yaml'
 
+# YAML 1.1 reads a plain key such as `yes`, `on` or `2024` as a boolean, a
+# number or a date. Every key in adr.yaml is a name, so a plain key with no
+# explicit tag keeps the text it was written with. The key is replaced by a
+# new node: a node shared through an anchor keeps its own type elsewhere.
+_NAME_KEY_TAGS = {f'tag:yaml.org,2002:{t}' for t in ('bool', 'int', 'float', 'null', 'timestamp')}
+_STR_TAG = 'tag:yaml.org,2002:str'
+
+class _ConfigLoader(yaml.SafeLoader):
+    def compose_scalar_node(self, anchor):
+        event = self.peek_event()
+        node = super().compose_scalar_node(anchor)
+        node.plain_implicit = event.tag in (None, '!') and event.style is None
+        return node
+
+def _name_key(key):
+    if isinstance(key, yaml.ScalarNode) and getattr(key, 'plain_implicit', False) \
+            and key.tag in _NAME_KEY_TAGS:
+        return yaml.ScalarNode(_STR_TAG, key.value, key.start_mark, key.end_mark)
+    return key
+
+def _keys_as_names(node, seen=None) -> None:
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return
+    seen.add(id(node))
+    if isinstance(node, yaml.MappingNode):
+        node.value = [(_name_key(key), value) for key, value in node.value]
+        for _, value in node.value:
+            _keys_as_names(value, seen)
+    elif isinstance(node, yaml.SequenceNode):
+        for item in node.value:
+            _keys_as_names(item, seen)
+
+def _read_config(stream):
+    """adr.yaml's content, its keys read as names; None for an empty file."""
+    loader = _ConfigLoader(stream)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None
+        _keys_as_names(node)
+        return loader.construct_document(node)
+    finally:
+        loader.dispose()
+
 def load_config() -> dict:
-    """Load configuration from adr.yaml."""
+    """Load configuration from adr.yaml. An empty file is an empty config."""
     config_path = get_config_path()
 
     if not config_path.exists():
@@ -142,24 +187,32 @@ def load_config() -> dict:
 
     try:
         with open(config_path) as f:
-            config = yaml.safe_load(f)
+            config = _read_config(f)
     except yaml.YAMLError as e:
         print(f"Error: Invalid YAML in config: {e}", file=sys.stderr)
         sys.exit(1)
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        print("Error: Config is not a mapping of keys to values", file=sys.stderr)
+        sys.exit(1)
 
     # Validate required fields
-    if 'domains' not in config:
+    if config.get('domains') is None:
         print("Error: Config missing 'domains' section", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(config['domains'], dict):
+        print("Error: Config 'domains' section is not a mapping of domain names", file=sys.stderr)
         sys.exit(1)
 
     # Convert range lists to tuples for easier use
-    for domain, cfg in config.get('domains', {}).items():
-        if 'range' in cfg and isinstance(cfg['range'], list):
+    for domain, cfg in config['domains'].items():
+        if isinstance(cfg, dict) and isinstance(cfg.get('range'), list):
             cfg['range'] = tuple(cfg['range'])
 
-    if 'legacy' in config and 'range' in config['legacy']:
-        if isinstance(config['legacy']['range'], list):
-            config['legacy']['range'] = tuple(config['legacy']['range'])
+    legacy = config.get('legacy')
+    if isinstance(legacy, dict) and isinstance(legacy.get('range'), list):
+        legacy['range'] = tuple(legacy['range'])
 
     return config
 
@@ -191,12 +244,43 @@ def contract_rank(contract) -> Optional[int]:
     return KNOWN_CONTRACTS.index(name) if name in KNOWN_CONTRACTS else None
 
 def get_domains() -> dict:
-    """Get domain configuration."""
-    return get_config().get('domains', {})
+    """Get domain configuration. An entry that is not a mapping reads as an
+    empty one; lint's domain-shape rule names it."""
+    return {name: cfg if isinstance(cfg, dict) else {}
+            for name, cfg in get_config().get('domains', {}).items()}
+
+def domain_range(cfg: dict) -> Optional[tuple]:
+    """A domain's (low, high), or None when adr.yaml gives no usable range."""
+    r = cfg.get('range')
+    if isinstance(r, (list, tuple)) and len(r) == 2 \
+            and all(isinstance(n, int) and not isinstance(n, bool) for n in r):
+        return tuple(r)
+    return None
+
+def domain_folders(cfg: dict) -> list:
+    """A domain's folders, first the primary; empty when adr.yaml names none."""
+    folders = cfg.get('folder')
+    folders = folders if isinstance(folders, list) else [folders]
+    return [f for f in folders if isinstance(f, str) and f]
+
+def name_list(value) -> Optional[list]:
+    """value as a list of strings, or None when it is not one."""
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return value
+    return None
+
+def config_section(key: str) -> dict:
+    """A top-level mapping in adr.yaml; empty when absent or not a mapping.
+    Lint's config-shape rule names a malformed one."""
+    value = get_config().get(key)
+    return value if isinstance(value, dict) else {}
 
 def get_statuses() -> set:
     """Get valid statuses."""
-    return set(get_config().get('statuses', ['Draft', 'Proposed', 'Accepted', 'Superseded', 'Deprecated']))
+    statuses = name_list(get_config().get('statuses'))
+    if statuses is None:
+        statuses = ['Draft', 'Proposed', 'Accepted', 'Superseded', 'Deprecated']
+    return set(statuses)
 
 def relative_path(path: Path, base: Path = None) -> Path:
     """Get path relative to base, or return absolute if not possible."""
@@ -208,13 +292,30 @@ def relative_path(path: Path, base: Path = None) -> Path:
         return path
 
 def get_defaults() -> dict:
-    """Get default values for new ADRs."""
-    return get_config().get('defaults', {'deciders': [], 'status': 'Draft'})
+    """Get default values for new ADRs. A deciders or status value of the
+    wrong type is left out, so the tool's own default applies."""
+    if get_config().get('defaults') is None:
+        return {'deciders': [], 'status': 'Draft'}
+    defaults = dict(config_section('defaults'))
+    if 'deciders' in defaults and name_list(defaults['deciders']) is None:
+        del defaults['deciders']
+    if 'status' in defaults and not isinstance(defaults['status'], str):
+        del defaults['status']
+    return defaults
 
 def get_legacy_range() -> tuple:
     """Get legacy ADR number range."""
-    legacy = get_config().get('legacy', {})
-    return legacy.get('range', (1, 99))
+    return domain_range(config_section('legacy')) or (1, 99)
+
+def get_viewer() -> str:
+    """The command `adr view` runs, {file} for the record."""
+    viewer = get_config().get('viewer')
+    return viewer if isinstance(viewer, str) and viewer.split() else 'cat {file}'
+
+def cite_excludes() -> list:
+    """adr.yaml's cite.exclude paths; empty when it lists none."""
+    exclude = config_section('cite').get('exclude')
+    return [str(p) for p in exclude] if isinstance(exclude, list) else []
 
 def _detect_git_user() -> Optional[str]:
     """Detect current git user (GitHub username or git config name)."""
@@ -405,6 +506,70 @@ def rule_supersession_links(adr, ctx):
                         f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
 
 
+# --- adr.yaml -------------------------------------------------------------------
+
+DOMAIN_KEYS = ('range', 'name', 'description', 'folder')
+
+# A key that is missing is a warning: the tool reads around it. A value that
+# is present but malformed is an error (ADR-311).
+
+@config_rule
+def rule_domain_shape(ctx):
+    """Each domain in adr.yaml gives the keys the tool reads from it. Other
+    commands read a domain without a range as placing no records by range,
+    and one without a name as named by its key."""
+    def issue(message, severity='error'):
+        ctx.config_issues.append(Issue(message, severity, code='domain-shape'))
+
+    domains = ctx.config.get('domains')
+    for name, cfg in (domains.items() if isinstance(domains, dict) else ()):
+        if not isinstance(name, str):
+            issue(f"domains.{name}: expected a name for the domain key")
+        if not isinstance(cfg, dict):
+            issue(f"domains.{name}: expected a mapping of {', '.join(DOMAIN_KEYS)}")
+            continue
+        missing = [key for key in DOMAIN_KEYS if key not in cfg]
+        if missing:
+            issue(f"domains.{name}: missing {', '.join(missing)}", 'warning')
+        if 'range' in cfg and domain_range(cfg) is None:
+            issue(f"domains.{name}.range: expected [low, high]")
+        if 'folder' in cfg and not domain_folders(cfg):
+            issue(f"domains.{name}.folder: expected a folder name or a list of them")
+
+@config_rule
+def rule_config_shape(ctx):
+    """The top-level keys the tool reads, when present, have the shape it
+    reads. Other commands fall back to their defaults for a malformed one."""
+    def bad(message):
+        ctx.config_issues.append(Issue(message, 'error', code='config-shape'))
+
+    config = ctx.config
+    if 'legacy' in config:
+        legacy = config['legacy']
+        if not isinstance(legacy, dict):
+            bad("legacy: expected a mapping of range and label")
+        elif 'range' in legacy and domain_range(legacy) is None:
+            bad("legacy.range: expected [low, high]")
+    if 'statuses' in config and name_list(config['statuses']) is None:
+        bad("statuses: expected a list of names")
+    if config.get('defaults') is not None:
+        defaults = config['defaults']
+        if not isinstance(defaults, dict):
+            bad("defaults: expected a mapping of deciders and status")
+        else:
+            if defaults.get('deciders') is not None and name_list(defaults['deciders']) is None:
+                bad("defaults.deciders: expected a list of names")
+            if 'status' in defaults and not isinstance(defaults['status'], str):
+                bad("defaults.status: expected a status name")
+    if 'viewer' in config and not (isinstance(config['viewer'], str) and config['viewer'].split()):
+        bad("viewer: expected a command, such as cat {file}")
+    if config.get('cite') is not None:
+        cite = config['cite']
+        if not isinstance(cite, dict):
+            bad("cite: expected a mapping")
+        elif cite.get('exclude') is not None and not isinstance(cite['exclude'], list):
+            bad("cite.exclude: expected a list of paths")
+
 # --- config against records ---------------------------------------------------
 
 @config_rule
@@ -547,17 +712,15 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             except ValueError:
                 return None
             for domain, config in get_domains().items():
-                if config['range'][0] <= base_num <= config['range'][1]:
+                span = domain_range(config)
+                if span and span[0] <= base_num <= span[1]:
                     return domain
         return None
 
     def domain_by_folder():
         folder_name = path.parent.name
         for domain, config in get_domains().items():
-            folders = config['folder']
-            if isinstance(folders, str):
-                folders = [folders]
-            if folder_name in folders:
+            if folder_name in domain_folders(config):
                 return domain
         return None
 
@@ -2131,8 +2294,7 @@ def _folder_domain(path: Path) -> Optional[str]:
     """The domain whose folder holds the file, or 'legacy' for the legacy folder."""
     name = path.parent.name
     for domain, config in get_domains().items():
-        folders = config.get('folder')
-        if name in (folders if isinstance(folders, list) else [folders]):
+        if name in domain_folders(config):
             return domain
     if name == 'legacy' and 'legacy' in get_config():
         return 'legacy'
@@ -2141,7 +2303,7 @@ def _folder_domain(path: Path) -> Optional[str]:
 def number_range(domain: str) -> Optional[tuple]:
     """(low, high) for a domain in adr.yaml, or the legacy range."""
     if domain in get_domains():
-        return tuple(get_domains()[domain].get('range', (0, -1)))
+        return domain_range(get_domains()[domain]) or (0, -1)
     if domain == 'legacy' and 'legacy' in get_config():
         return tuple(get_legacy_range())
     return None
@@ -2160,7 +2322,7 @@ def blocking_todo(todo: list) -> list:
 def _range_domain(number) -> Optional[str]:
     base = int(str(number).split('.')[0])
     for domain, config in get_domains().items():
-        low, high = config.get('range', (0, -1))
+        low, high = domain_range(config) or (0, -1)
         if low <= base <= high:
             return domain
     low, high = get_legacy_range()
@@ -2460,7 +2622,7 @@ def cmd_list(args):
             domain_adrs = [a for a in adrs if a.domain == domain_key]
             if not domain_adrs:
                 continue
-            print(f"\n## {domain_info.get('name', domain_key)} ({domain_key})")
+            print(f"\n## {domain_info.get('name') or domain_key} ({domain_key})")
             print("-" * 50)
             for adr in domain_adrs:
                 print_adr(adr)
@@ -2468,7 +2630,7 @@ def cmd_list(args):
         # Legacy (no domain)
         legacy_adrs = [a for a in adrs if not a.domain]
         if legacy_adrs:
-            legacy_label = get_config().get('legacy', {}).get('label', 'Legacy')
+            legacy_label = config_section('legacy').get('label', 'Legacy')
             print(f"\n## {legacy_label}")
             print("-" * 50)
             for adr in legacy_adrs:
@@ -2560,7 +2722,7 @@ def cmd_view(args):
     adr = matches[0]
 
     # Get viewer command from config
-    viewer_cmd = get_config().get('viewer', 'cat {file}')
+    viewer_cmd = get_viewer()
 
     # Check if viewer command exists
     viewer_bin = viewer_cmd.split()[0]
@@ -2581,10 +2743,15 @@ def cmd_new(args):
 
     if domain not in domains:
         print(f"Error: Unknown domain '{domain}'", file=sys.stderr)
-        print(f"Valid domains: {', '.join(domains.keys())}", file=sys.stderr)
+        print(f"Valid domains: {', '.join(map(str, domains))}", file=sys.stderr)
         return 1
 
     config = domains[domain]
+    span, folders = domain_range(config), domain_folders(config)
+    if span is None or not folders:
+        missing = 'range' if span is None else 'folder'
+        print(f"Error: domain '{domain}' has no {missing} in adr.yaml; `adr lint` names what it is missing", file=sys.stderr)
+        return 1
 
     # Find next available number in range — archived ADRs keep their numbers
     adrs = get_all_adrs(include_archived=True)
@@ -2597,21 +2764,20 @@ def cmd_new(args):
                 pass
 
     next_num = None
-    for n in range(config['range'][0], config['range'][1] + 1):
+    for n in range(span[0], span[1] + 1):
         if n not in used_numbers:
             next_num = n
             break
 
     if next_num is None:
-        print(f"Error: No available numbers in {domain} range ({config['range'][0]}-{config['range'][1]})", file=sys.stderr)
+        print(f"Error: No available numbers in {domain} range ({span[0]}-{span[1]})", file=sys.stderr)
         return 1
 
     # Generate slug from title
     slug = re.sub(r'[^a-z0-9]+', '-', args.title.lower()).strip('-')
 
     # Create file path (use first folder if multiple)
-    folders = config['folder']
-    primary_folder = folders[0] if isinstance(folders, list) else folders
+    primary_folder = folders[0]
     folder = get_project_root() / 'docs' / 'architecture' / primary_folder
     filename = f"ADR-{next_num:03d}-{slug}.md"
     filepath = folder / filename
@@ -2628,7 +2794,7 @@ def cmd_new(args):
         folder.mkdir(parents=True, exist_ok=True)
         filepath.write_text(content)
         print(f"Created: {relative_path(filepath)}")
-        print(f"  Domain: {config['name']} ({domain})")
+        print(f"  Domain: {config.get('name') or domain} ({domain})")
         print(f"  Number: ADR-{next_num:03d}")
         print("  Contract: adr/v1 (fill the empty fields; `adr lint` lists them)")
         return 0
@@ -2662,7 +2828,7 @@ related: []
     filepath.write_text(content)
 
     print(f"Created: {relative_path(filepath)}")
-    print(f"  Domain: {config['name']} ({domain})")
+    print(f"  Domain: {config.get('name') or domain} ({domain})")
     print(f"  Number: ADR-{next_num:03d}")
     return 0
 
@@ -2945,8 +3111,9 @@ def cmd_index(args):
         if not domain_adrs:
             continue
 
-        lines.append(f"## {config['name']}")
-        lines.append(f"_{config['description']}_")
+        lines.append(f"## {config.get('name') or domain}")
+        if config.get('description'):
+            lines.append(f"_{config['description']}_")
         lines.append("")
         lines.append("| ADR | Title | Status |")
         lines.append("|-----|-------|--------|")
@@ -2961,7 +3128,7 @@ def cmd_index(args):
         lines.append("")
 
     # Legacy (pre-domain numbering)
-    legacy_label = get_config().get('legacy', {}).get('label', 'Legacy')
+    legacy_label = config_section('legacy').get('label', 'Legacy')
     uncategorized = [a for a in adrs if not a.domain]
     if uncategorized:
         lines.append(f"## {legacy_label}")
@@ -3223,21 +3390,20 @@ def cmd_domains(args):
     print("=" * 60)
     print(f"(from {relative_path(get_config_path())})")
 
+    # A domain adr.yaml gives only in part prints what it has; lint names
+    # the rest (domain-shape).
     for domain, config in domains.items():
-        r = config['range']
-        folders = config['folder']
-        if isinstance(folders, list):
-            folder_str = ', '.join(f"{f}/" for f in folders)
-        else:
-            folder_str = f"{folders}/"
-        print(f"\n  {domain:8} ({r[0]:3}-{r[1]:3})  {config['name']}")
-        print(f"           {config['description']}")
+        r = domain_range(config) or ('?', '?')
+        folder_str = ', '.join(f"{f}/" for f in domain_folders(config)) or '(none)'
+        print(f"\n  {str(domain):8} ({r[0]:>3}-{r[1]:>3})  {config.get('name') or domain}")
+        if config.get('description'):
+            print(f"           {config['description']}")
         print(f"           Folder: {folder_str}")
 
     # Show legacy range
-    legacy = get_config().get('legacy', {})
+    legacy = config_section('legacy')
     if legacy:
-        r = legacy.get('range', (1, 99))
+        r = get_legacy_range()
         print(f"\n  {'legacy':8} ({r[0]:3}-{r[1]:3})  {legacy.get('label', 'Legacy')}")
 
     print()
@@ -3285,9 +3451,7 @@ def _relocation_scope(root: Path) -> tuple:
     are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
     import fnmatch
     tracked, known = tracked_paths(root)
-    cite_config = get_config().get('cite')
-    patterns = ['tests/fixtures', 'docs/architecture/archive'] + [
-        str(p) for p in ((cite_config.get('exclude') if isinstance(cite_config, dict) else None) or [])]
+    patterns = ['tests/fixtures', 'docs/architecture/archive'] + cite_excludes()
 
     def excluded(name: str) -> bool:
         if '.import' in name.split('/'):
@@ -3426,8 +3590,7 @@ def _save_config(text: str) -> bool:
 
 
 def _folders(config: dict) -> list:
-    folders = config.get('folder')
-    return list(folders) if isinstance(folders, list) else [folders]
+    return domain_folders(config)
 
 
 # --- add ----------------------------------------------------------------------------
@@ -3454,7 +3617,7 @@ def _domain_add(args):
         if folder in _folders(config):
             problems.append(f"folder '{folder}' already belongs to {other}")
     if low is not None and low <= high:
-        spans = [(other, config['range']) for other, config in domains.items()]
+        spans = [(other, domain_range(config)) for other, config in domains.items() if domain_range(config)]
         if 'legacy' in get_config():
             spans.append(('legacy', get_legacy_range()))
         for other, (a, b) in spans:
@@ -3500,10 +3663,13 @@ def _domain_rename(args):
     domains = get_domains()
     if old not in domains:
         print(f"Error: Unknown domain '{old}'", file=sys.stderr)
-        print(f"Valid domains: {', '.join(domains.keys())}", file=sys.stderr)
+        print(f"Valid domains: {', '.join(map(str, domains))}", file=sys.stderr)
         return 1
     config = domains[old]
     folders = _folders(config)
+    if not folders:
+        print(f"Error: domain '{old}' has no folder in adr.yaml; `adr lint` names what it is missing", file=sys.stderr)
+        return 1
     problems = []
     if new != old:
         if not DOMAIN_NAME_RE.fullmatch(new) or new in ('legacy', 'archive'):
@@ -3665,9 +3831,12 @@ def _domain_move(args):
             problems.append(f"ADR-{adr.number} is archived ({rel}); archived records are kept as they are")
             continue
         if domain not in domains:
-            problems.append(f"unknown domain '{domain}' (valid: {', '.join(domains.keys())})")
+            problems.append(f"unknown domain '{domain}' (valid: {', '.join(map(str, domains))})")
             continue
         folders = _folders(domains[domain])
+        if not folders:
+            problems.append(f"domain '{domain}' has no folder in adr.yaml; `adr lint` names what it is missing")
+            continue
         if adr.domain == domain and adr.path.parent.name in folders:
             problems.append(f"ADR-{adr.number} is already in {domain} ({rel})")
             continue
@@ -4009,9 +4178,7 @@ def cmd_cite(args):
     import fnmatch
 
     root = get_project_root().resolve()
-    config = get_config()
-    cite_config = config.get('cite') if isinstance(config.get('cite'), dict) else {}
-    excludes = ['docs/architecture/'] + [str(p) for p in (cite_config.get('exclude') or [])]
+    excludes = ['docs/architecture/'] + cite_excludes()
 
     # Path arguments are resolved against the working directory and must sit
     # inside the repository.
@@ -4769,8 +4936,10 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     for existing in find_adrs(include_archived=True):
         if filename_number(existing) == number.lstrip('0'):
             raise SheetError(f"ADR-{number} already exists: {relative_path(existing)}")
-    folders = get_domains()[domain]['folder'] if domain in get_domains() else 'legacy'
-    folder = folders[0] if isinstance(folders, list) else folders
+    folders = domain_folders(get_domains()[domain]) if domain in get_domains() else ['legacy']
+    if not folders:
+        raise SheetError(f"domain {domain} has no folder in adr.yaml; `adr lint` names what it is missing")
+    folder = folders[0]
     slug = re.sub(r'[^a-z0-9]+', '-', str(target['title']).lower()).strip('-')
     return get_project_root() / 'docs' / 'architecture' / folder / f"ADR-{number}-{slug}.md"
 

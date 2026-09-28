@@ -1,0 +1,20 @@
+
+ADR Fixture — ADR Domain Number Series
+============================================================
+(from docs/architecture/adr.yaml)
+
+  system   (100-199)  System
+           Runtime, hooks and storage
+           Folder: system/
+
+  ops      (200-299)  Operations
+           Deployment and runbooks, split across two folders
+           Folder: operations/, runbooks/
+
+  docs     (300-399)  Documentation
+           Documentation structure and tooling
+           Folder: documentation/
+
+  legacy   (  1- 99)  Legacy (Pre-Domain Numbering)
+
+[exit 0]

@@ -1,0 +1,2 @@
+Error: domain 'ops' has no range in adr.yaml; `adr lint` names what it is missing
+[exit 1]

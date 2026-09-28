@@ -73,7 +73,7 @@ def cmd_list(args):
             domain_adrs = [a for a in adrs if a.domain == domain_key]
             if not domain_adrs:
                 continue
-            print(f"\n## {domain_info.get('name', domain_key)} ({domain_key})")
+            print(f"\n## {domain_info.get('name') or domain_key} ({domain_key})")
             print("-" * 50)
             for adr in domain_adrs:
                 print_adr(adr)
@@ -81,7 +81,7 @@ def cmd_list(args):
         # Legacy (no domain)
         legacy_adrs = [a for a in adrs if not a.domain]
         if legacy_adrs:
-            legacy_label = get_config().get('legacy', {}).get('label', 'Legacy')
+            legacy_label = config_section('legacy').get('label', 'Legacy')
             print(f"\n## {legacy_label}")
             print("-" * 50)
             for adr in legacy_adrs:

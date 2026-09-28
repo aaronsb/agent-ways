@@ -938,6 +938,102 @@ capture v1-defects-lint-check  lint --check
 fresh v1-empty
 capture v1-empty-lint  lint
 
+# --- a malformed adr.yaml (#617): lint names what is missing, other commands
+# read what is there, nothing raises. `domains --shape` is the session macro's
+# path, which reads only stdout and treats a failure as no notice.
+
+# An empty file is an empty config: no domains, the error a config without
+# them gets.
+fresh corpus
+: > "$WORK/repo/docs/architecture/adr.yaml"
+capture config-empty-lint          lint
+capture config-empty-domains       domains
+capture config-empty-list          list
+capture config-empty-domains-shape domains --shape
+
+# A domain without a range places no records by range; its folder still does.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    range: [200, 299]\n', '', 1)"
+capture config-no-range-lint          lint
+capture config-no-range-domains       domains
+capture config-no-range-list          list --group
+capture config-no-range-domains-shape domains --shape
+capture config-no-range-new           new ops "Anything"
+
+# A domain without a name reads as its key; one without a description has none.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    name: Operations\n', '', 1).replace('    description: Documentation structure and tooling\n', '', 1)"
+capture config-no-name-lint          lint
+capture config-no-name-domains       domains
+capture config-no-name-list          list --group
+capture config-no-name-domains-shape domains --shape
+capture config-no-name-index         index -y
+keep config-no-name-index-file.md docs/architecture/INDEX.md
+
+# A domain entry with nothing under it, and a range that is not [low, high].
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    range: [300, 399]\n    name: Documentation\n    description: Documentation structure and tooling\n    folder: documentation\n', '', 1).replace('range: [100, 199]', 'range: 100', 1)"
+capture config-bare-domain-lint    lint
+capture config-bare-domain-domains domains
+capture config-bare-domain-list    list
+
+# YAML 1.1 reads a plain `yes` key as a boolean; a domain key keeps its text.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('  ops:\n', '  yes:\n', 1)"
+capture config-yes-key-domains domains
+capture config-yes-key-list    list --group
+capture config-yes-key-new     new yes "Anything"
+
+# Only a plain key with no tag is read as a name. A value shared through an
+# anchor keeps its YAML type where it is a value (`on` is true), and an
+# explicitly tagged key keeps its tag, which lint names under domains.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    description: Documentation structure and tooling\n', '    description: &d on\n', 1).replace('  ops:\n', '  !!int 7:\n', 1) + 'extra: {*d : shared}\n'"
+capture config-tagged-keys-lint    lint
+capture config-tagged-keys-domains domains
+
+# A present but malformed top-level value is a config-shape error; other
+# commands fall back to their defaults. `new` runs with a PATH that has no gh,
+# so the deciders it falls back to do not depend on the host.
+mkdir -p "$WORK/nogh"
+ln -sf "$(command -v python3)" "$WORK/nogh/python3"
+ln -sf "$(command -v git)" "$WORK/nogh/git"
+printf '#!/usr/bin/env bash\nPATH="%s" exec "%s" "$@"\n' "$WORK/nogh" "$ADR_TOOL" > "$WORK/adr-nogh"
+chmod +x "$WORK/adr-nogh"
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'(defaults|legacy|statuses):\n(?:  .*\n)+', lambda m: {'defaults': 'defaults: 3\n', 'legacy': 'legacy: oops\n', 'statuses': 'statuses: 5\n'}[m.group(1)], s).replace('viewer: cat {file}', 'viewer: 5') + 'cite: {exclude: 5}\n'"
+capture config-top-scalars-lint    lint
+capture config-top-scalars-domains domains
+capture config-top-scalars-list    list --group
+capture config-top-scalars-index   index
+capture config-top-scalars-view    view 101
+capture config-top-scalars-cite    cite src/storage.py
+ADR_TOOL="$WORK/adr-nogh" capture config-top-scalars-new new ops "Anything"
+keep config-top-scalars-new-file.md docs/architecture/operations/ADR-201-anything.md
+
+# A key left empty reads as absent, as on main: `deciders:` empty means
+# detect them. These lint with no adr.yaml issue.
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'  deciders:\n(?:    .*\n)+', '  deciders:\n', s) + 'cite:\n'"
+capture config-empty-values-lint lint
+edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite: {exclude: }\n')"
+capture config-empty-exclude-lint lint
+
+# A bare `defaults:` reads as absent: lint is clean and new takes the tool's
+# defaults (Draft; no gh on the PATH, so no detected decider).
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'defaults:\n(?:  .*\n)+', 'defaults:\n', s)"
+capture config-bare-defaults-lint lint
+ADR_TOOL="$WORK/adr-nogh" capture config-bare-defaults-new new ops "Anything"
+keep config-bare-defaults-new-file.md docs/architecture/operations/ADR-201-anything.md
+
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'defaults:\n(?:  .*\n)+', 'defaults: {deciders: 5, status: [1]}\n', s).replace('  range: [1, 99]\n', '  range: x\n', 1) + 'cite: 5\n'"
+capture config-top-fields-lint    lint
+capture config-top-fields-domains domains
+ADR_TOOL="$WORK/adr-nogh" capture config-top-fields-new new ops "Anything"
+keep config-top-fields-new-file.md docs/architecture/operations/ADR-201-anything.md
+
 # --- compare or update ----------------------------------------------------------
 
 if [[ $UPDATE -eq 1 ]]; then

@@ -133,6 +133,70 @@ def rule_supersession_links(adr, ctx):
                         f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
 
 
+# --- adr.yaml -------------------------------------------------------------------
+
+DOMAIN_KEYS = ('range', 'name', 'description', 'folder')
+
+# A key that is missing is a warning: the tool reads around it. A value that
+# is present but malformed is an error (ADR-311).
+
+@config_rule
+def rule_domain_shape(ctx):
+    """Each domain in adr.yaml gives the keys the tool reads from it. Other
+    commands read a domain without a range as placing no records by range,
+    and one without a name as named by its key."""
+    def issue(message, severity='error'):
+        ctx.config_issues.append(Issue(message, severity, code='domain-shape'))
+
+    domains = ctx.config.get('domains')
+    for name, cfg in (domains.items() if isinstance(domains, dict) else ()):
+        if not isinstance(name, str):
+            issue(f"domains.{name}: expected a name for the domain key")
+        if not isinstance(cfg, dict):
+            issue(f"domains.{name}: expected a mapping of {', '.join(DOMAIN_KEYS)}")
+            continue
+        missing = [key for key in DOMAIN_KEYS if key not in cfg]
+        if missing:
+            issue(f"domains.{name}: missing {', '.join(missing)}", 'warning')
+        if 'range' in cfg and domain_range(cfg) is None:
+            issue(f"domains.{name}.range: expected [low, high]")
+        if 'folder' in cfg and not domain_folders(cfg):
+            issue(f"domains.{name}.folder: expected a folder name or a list of them")
+
+@config_rule
+def rule_config_shape(ctx):
+    """The top-level keys the tool reads, when present, have the shape it
+    reads. Other commands fall back to their defaults for a malformed one."""
+    def bad(message):
+        ctx.config_issues.append(Issue(message, 'error', code='config-shape'))
+
+    config = ctx.config
+    if 'legacy' in config:
+        legacy = config['legacy']
+        if not isinstance(legacy, dict):
+            bad("legacy: expected a mapping of range and label")
+        elif 'range' in legacy and domain_range(legacy) is None:
+            bad("legacy.range: expected [low, high]")
+    if 'statuses' in config and name_list(config['statuses']) is None:
+        bad("statuses: expected a list of names")
+    if config.get('defaults') is not None:
+        defaults = config['defaults']
+        if not isinstance(defaults, dict):
+            bad("defaults: expected a mapping of deciders and status")
+        else:
+            if defaults.get('deciders') is not None and name_list(defaults['deciders']) is None:
+                bad("defaults.deciders: expected a list of names")
+            if 'status' in defaults and not isinstance(defaults['status'], str):
+                bad("defaults.status: expected a status name")
+    if 'viewer' in config and not (isinstance(config['viewer'], str) and config['viewer'].split()):
+        bad("viewer: expected a command, such as cat {file}")
+    if config.get('cite') is not None:
+        cite = config['cite']
+        if not isinstance(cite, dict):
+            bad("cite: expected a mapping")
+        elif cite.get('exclude') is not None and not isinstance(cite['exclude'], list):
+            bad("cite.exclude: expected a list of paths")
+
 # --- config against records ---------------------------------------------------
 
 @config_rule

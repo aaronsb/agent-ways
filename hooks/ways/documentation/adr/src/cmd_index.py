@@ -62,8 +62,9 @@ def cmd_index(args):
         if not domain_adrs:
             continue
 
-        lines.append(f"## {config['name']}")
-        lines.append(f"_{config['description']}_")
+        lines.append(f"## {config.get('name') or domain}")
+        if config.get('description'):
+            lines.append(f"_{config['description']}_")
         lines.append("")
         lines.append("| ADR | Title | Status |")
         lines.append("|-----|-------|--------|")
@@ -78,7 +79,7 @@ def cmd_index(args):
         lines.append("")
 
     # Legacy (pre-domain numbering)
-    legacy_label = get_config().get('legacy', {}).get('label', 'Legacy')
+    legacy_label = config_section('legacy').get('label', 'Legacy')
     uncategorized = [a for a in adrs if not a.domain]
     if uncategorized:
         lines.append(f"## {legacy_label}")

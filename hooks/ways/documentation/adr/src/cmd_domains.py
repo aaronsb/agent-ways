@@ -10,21 +10,20 @@ def cmd_domains(args):
     print("=" * 60)
     print(f"(from {relative_path(get_config_path())})")
 
+    # A domain adr.yaml gives only in part prints what it has; lint names
+    # the rest (domain-shape).
     for domain, config in domains.items():
-        r = config['range']
-        folders = config['folder']
-        if isinstance(folders, list):
-            folder_str = ', '.join(f"{f}/" for f in folders)
-        else:
-            folder_str = f"{folders}/"
-        print(f"\n  {domain:8} ({r[0]:3}-{r[1]:3})  {config['name']}")
-        print(f"           {config['description']}")
+        r = domain_range(config) or ('?', '?')
+        folder_str = ', '.join(f"{f}/" for f in domain_folders(config)) or '(none)'
+        print(f"\n  {str(domain):8} ({r[0]:>3}-{r[1]:>3})  {config.get('name') or domain}")
+        if config.get('description'):
+            print(f"           {config['description']}")
         print(f"           Folder: {folder_str}")
 
     # Show legacy range
-    legacy = get_config().get('legacy', {})
+    legacy = config_section('legacy')
     if legacy:
-        r = legacy.get('range', (1, 99))
+        r = get_legacy_range()
         print(f"\n  {'legacy':8} ({r[0]:3}-{r[1]:3})  {legacy.get('label', 'Legacy')}")
 
     print()

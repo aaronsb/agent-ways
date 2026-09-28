@@ -6,10 +6,15 @@ def cmd_new(args):
 
     if domain not in domains:
         print(f"Error: Unknown domain '{domain}'", file=sys.stderr)
-        print(f"Valid domains: {', '.join(domains.keys())}", file=sys.stderr)
+        print(f"Valid domains: {', '.join(map(str, domains))}", file=sys.stderr)
         return 1
 
     config = domains[domain]
+    span, folders = domain_range(config), domain_folders(config)
+    if span is None or not folders:
+        missing = 'range' if span is None else 'folder'
+        print(f"Error: domain '{domain}' has no {missing} in adr.yaml; `adr lint` names what it is missing", file=sys.stderr)
+        return 1
 
     # Find next available number in range — archived ADRs keep their numbers
     adrs = get_all_adrs(include_archived=True)
@@ -22,21 +27,20 @@ def cmd_new(args):
                 pass
 
     next_num = None
-    for n in range(config['range'][0], config['range'][1] + 1):
+    for n in range(span[0], span[1] + 1):
         if n not in used_numbers:
             next_num = n
             break
 
     if next_num is None:
-        print(f"Error: No available numbers in {domain} range ({config['range'][0]}-{config['range'][1]})", file=sys.stderr)
+        print(f"Error: No available numbers in {domain} range ({span[0]}-{span[1]})", file=sys.stderr)
         return 1
 
     # Generate slug from title
     slug = re.sub(r'[^a-z0-9]+', '-', args.title.lower()).strip('-')
 
     # Create file path (use first folder if multiple)
-    folders = config['folder']
-    primary_folder = folders[0] if isinstance(folders, list) else folders
+    primary_folder = folders[0]
     folder = get_project_root() / 'docs' / 'architecture' / primary_folder
     filename = f"ADR-{next_num:03d}-{slug}.md"
     filepath = folder / filename
@@ -53,7 +57,7 @@ def cmd_new(args):
         folder.mkdir(parents=True, exist_ok=True)
         filepath.write_text(content)
         print(f"Created: {relative_path(filepath)}")
-        print(f"  Domain: {config['name']} ({domain})")
+        print(f"  Domain: {config.get('name') or domain} ({domain})")
         print(f"  Number: ADR-{next_num:03d}")
         print("  Contract: adr/v1 (fill the empty fields; `adr lint` lists them)")
         return 0
@@ -87,7 +91,7 @@ related: []
     filepath.write_text(content)
 
     print(f"Created: {relative_path(filepath)}")
-    print(f"  Domain: {config['name']} ({domain})")
+    print(f"  Domain: {config.get('name') or domain} ({domain})")
     print(f"  Number: ADR-{next_num:03d}")
     return 0
 
