@@ -36,6 +36,14 @@ docker compose version >/dev/null 2>&1 || { echo "docker compose (v2) is require
 export FLAVOR
 export CLAUDE_VERSION="${CLAUDE_VERSION:-$CLAUDE_VERSION_PIN}"
 export CLAUDE_INSTALLER="${CLAUDE_INSTALLER:-native}"
+# `latest` names a moving target, so the installer layer must not stay cached
+# on a workstation. The date rebuilds it once a day. A pinned version leaves
+# CACHE_BUST empty and keeps full caching.
+if [[ "$CLAUDE_VERSION" == "latest" ]]; then
+  export CACHE_BUST="$(date -u +%F)"
+else
+  export CACHE_BUST=""
+fi
 if [[ -z "${GH_TOKEN:-}" ]] && command -v gh >/dev/null; then
   GH_TOKEN="$(gh auth token 2>/dev/null || true)"
 fi

@@ -71,10 +71,15 @@ jobs:
   live-fixture:
     name: live fixture (tier 1)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools
 
       - name: Build the suite binaries
         run: cargo build --release --manifest-path tools/Cargo.toml -p ways -p ways-audit -p attend -p attend-chat

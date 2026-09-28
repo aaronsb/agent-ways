@@ -9,6 +9,10 @@
 #                     test-live.sh. The default here only covers a bare
 #                     `docker build`.
 #   CLAUDE_INSTALLER  `native` (claude.ai/install.sh) or `npm`
+#   CACHE_BUST        test-live.sh sets it to the date when CLAUDE_VERSION is
+#                     `latest`, so the installer layers rebuild daily instead
+#                     of keeping the first `latest` forever. Empty for a
+#                     pinned version, which keeps every layer cached.
 ARG CLAUDE_VERSION=latest
 ARG CLAUDE_INSTALLER=native
 
@@ -26,6 +30,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash ca-certificates curl wget git jq make bc gzip python3 python3-yaml procps unzip gh \
  && rm -rf /var/lib/apt/lists/*
+
+# Declared here, before the first installer layer: a changed value misses the
+# cache for this RUN and every one after it, and leaves the apt layer above
+# cached.
+ARG CACHE_BUST=
 
 # The npm installer needs Node; the native one does not. Root installs it
 # system-wide so `claude` is on PATH for the test user.
