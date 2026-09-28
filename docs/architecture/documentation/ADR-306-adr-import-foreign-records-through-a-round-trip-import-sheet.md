@@ -97,7 +97,7 @@ One YAML file per record is the round-trip object between a source and a v1 reco
 
 ```yaml
 sheet: adr-import/v1
-source: {path: docs/architecture/system/ADR-186-….md, format: v0, sha256: "…"}
+source: {path: docs/architecture/ways/ADR-186-….md, format: v0, sha256: "…"}
 target: {number: 186, domain: system}
 record:                  # v1 frontmatter, filled as far as the reader can
   contract: adr/v1

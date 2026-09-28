@@ -1,6 +1,6 @@
 ---
 id: 01.016.E
-domain: system
+domain: ways
 mode: explanation
 related:
   - "[[ADR-140]]"

@@ -1,0 +1,51 @@
+path: docs/architecture/system/ADR-100-adopt-v1.md
+---
+contract: adr/v1
+kind: decision
+verb: add
+capability: adr
+status: accepted
+date: 2025-05-01
+deciders: [developer, agent]
+agent: {name: Claude, model: fixture-model}
+basis:
+  - operator: developer
+    level: guided
+    said: "agent-ways leads adoption, and its own corpus is the test"
+    via: session 2025-05-01
+  - evidence: fixture triage of 108 records
+considered:
+  - operator: developer
+    said: "looks good; the capability list is fine for now"
+    via: PR #1
+    covers: [probe-2, inversion]
+    canary: caught
+  - operator: developer
+    said: "ok, as it stands"
+    via: "PR #2"
+    covers: []
+concern:
+  - said: "The capability list may be friction for small repos"
+    resolve: "Operator confirms the list is acceptable"
+    answer: {said: "fine for now", via: "PR #1"}
+  - said: "Section references accept two forms"
+    resolve: "Pick one canonical form"
+    withdrawn: "Both forms are unambiguous; no longer a concern"
+---
+
+# ADR-100: Adopt the adr/v1 contract
+
+## Summary
+
+- **Decided:** the decision in plain terms.
+- **Trades away:** what it gives up.
+- **Probes:** *Confident:* the main point holds. *Not confident:* the edge case.
+- **Inversion:** one end, the other end; is the middle right?
+
+## 1. Decision
+
+The decision.
+
+## 2. Consequences
+
+They follow.

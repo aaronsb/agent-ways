@@ -1,0 +1,6 @@
+Warning: --force wrote frozen field 'verb' on ADR-101. Lint's frozen check still applies: it compares against the record as first accepted on the default branch's history.
+Set verb on ADR-101: Add ingestion
+Lint docs/architecture/system/ADR-101-ingest.md:
+  ❌ 'verb' changed after the decision left proposed; only concern, considered, enacted, status, superseded_by may change
+  ❌ a change decision supersedes or amends a prior decision on 'ingest'
+[exit 0]

@@ -10,28 +10,43 @@
 #     Summary (which ADR-306 §4 lets anyone add) is set aside; text may be appended
 # Records still v0, or archived, are skipped. A record whose body was edited on
 # purpose is listed in BODY_EDITED, with the reason.
+#
+# A record keeps its number when `adr domain move` or `rename` changes its
+# folder (ADR-306 §6), so a snapshot record is found by number wherever it
+# sits now. Those commands rewrite paths to what moved, so the snapshot body
+# gets the same rewrite, through the tool's own Relocation, before comparing.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 python3 - "$REPO_ROOT" <<'PY'
-import re, sys, yaml
+import re, subprocess, sys, types, yaml
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 root = Path(sys.argv[1])
+loader = SourceFileLoader('adr_tool', str(root / 'hooks/ways/documentation/adr/adr-tool'))
+tool = types.ModuleType(loader.name)
+loader.exec_module(tool)
 snapshot = root / 'tests/fixtures/adr/v0-corpus/docs/architecture'
 live = root / 'docs/architecture'
 
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
     '302': 'stray tool-call text removed from the end of the body',
+    '113': 'a link to the archived session-ledger record now points into the archive',
+    '114': 'a link to the archived session-ledger record now points into the archive',
+    '122': 'a path to a design note now points at its record (ADR-309)',
+    '160': 'a path to a design note now points at its record (ADR-309)',
+    '169': 'a path to a design note now points at its record (ADR-309)',
+    '181': 'a path to a design note now points at its record (ADR-309)',
+    '187': 'a path to a design note now points at its record (ADR-309)',
 }
 
 TITLE = re.compile(r'^# ADR-[0-9.]+:.*$', re.M)
 SUMMARY = re.compile(r'\A\s*## Summary[^\n]*\n.*?(?=^## |\Z)', re.M | re.S)
 
-def split(path):
-    text = path.read_text()
+def split(text):
     if not text.startswith('---\n'):
         return None, None
     end = text.index('\n---\n', 4)
@@ -45,11 +60,30 @@ def number(path):
     return m.group(1).lstrip('0') or '0' if m else None
 
 live_by_number = {number(p): p for p in live.rglob('ADR-*.md') if 'archive' not in p.parts}
+
+# Where each snapshot record lives now, as the moves that took it there.
+moves = {}
+for src in snapshot.rglob('ADR-*.md'):
+    dest = live_by_number.get(number(src))
+    if dest is not None and 'archive' not in src.parts:
+        was = 'docs/architecture/' + src.relative_to(snapshot).as_posix()
+        now = dest.relative_to(root).as_posix()
+        if was != now:
+            moves[was] = now
+listed = subprocess.run(['git', 'ls-files', '-z'], cwd=root, capture_output=True, text=True).stdout
+known = {n for n in listed.split('\0') if n}
+for name in list(known):
+    while '/' in name:
+        name = name.rsplit('/', 1)[0]
+        known.add(name)
+relocation = tool.Relocation(files=moves, known=known)
+
 checked = failures = 0
 for src in sorted(snapshot.rglob('ADR-*.md')):
     if 'archive' in src.parts:
         continue
-    before, body_before = split(src)
+    was = 'docs/architecture/' + src.relative_to(snapshot).as_posix()
+    before, body_before = split(relocation.text(src.read_text(), was)[0])
     if before is None or before.get('contract'):
         continue
     n = number(src)
@@ -58,7 +92,7 @@ for src in sorted(snapshot.rglob('ADR-*.md')):
         print(f"FAIL ADR-{n}: no live record")
         failures += 1
         continue
-    after, body_after = split(dest)
+    after, body_after = split(dest.read_text())
     if not after or after.get('contract') != 'adr/v1':
         continue
     checked += 1

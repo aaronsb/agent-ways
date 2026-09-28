@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-ADR - Architecture Decision Record CLI Tool
+ADR - Agent Decision Record CLI Tool
 
-A librarian for managing Architecture Decision Records.
+A librarian for managing Agent Decision Records.
 
 Usage:
     adr list [--domain DOMAIN] [--status STATUS] [--group] [--archived|--all]
+             [--field KEY[=VALUE]] [--kind K] [--verb V] [--capability C]
+             [--group-by KEY] [--json]
     adr view <number>          # View an ADR (aliases: v, show)
     adr new <domain> <title>
     adr rename <number> [new-title] [--slug SLUG]
@@ -14,10 +16,19 @@ Usage:
     adr cite [--check] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
+    adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
+                 [--paraphrase] [--canary caught|missed] [--dry-run]
+    adr set <number> key=value|key+=value|key-=value ... [--force] [--dry-run]
+    adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]
+    adr enact <number> <commit> [--dry-run]
     adr import scan <paths...> [--force]
-    adr import apply [sheets...] [--partial] [--force]
+    adr import apply [sheets...] [--partial] [--force] [--dry-run]
     adr index [-y]
     adr domains
+    adr domain add <name> --range A-B --folder F [--label L] [--description D]
+    adr domain rename <old> <new> [--folder F] [--dry-run]
+    adr domain move <number> <domain> [--dry-run]
+    adr domain move --plan <file.yaml> [--dry-run]
     adr config
 
 Configuration is loaded from docs/architecture/adr.yaml
@@ -29,7 +40,9 @@ Configuration is loaded from docs/architecture/adr.yaml
 
 import argparse
 import hashlib
+import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -139,6 +152,13 @@ def get_config() -> dict:
     if _config is None:
         _config = load_config()
     return _config
+
+def reload_config() -> dict:
+    """Drop the cached config and read adr.yaml again, after a command
+    edits it."""
+    global _config
+    _config = None
+    return get_config()
 
 def repo_contract() -> str:
     """The contract adr.yaml declares; adr/v0 when it declares none (ADR-304)."""
@@ -466,29 +486,36 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             info.title = match.group(2)
             break
 
-    # Determine domain from number range (authoritative) or folder name (fallback)
-    # Range takes precedence: an ADR's number definitively places it in a domain,
-    # even if the file is physically in a different domain's folder.
-    if info.number:
-        try:
-            base_num = int(info.number.split('.')[0])
+    # Determine the domain. Under adr/v0 the number range is authoritative and
+    # the folder is the fallback: a number definitively places a record, even
+    # in another domain's folder. Under adr/v1 a number is only an identity,
+    # never renumbered (ADR-306 §6): the folder decides, and the range, which
+    # allocates new numbers, is the fallback for a folder no domain names.
+    def domain_by_range():
+        if info.number:
+            try:
+                base_num = int(info.number.split('.')[0])
+            except ValueError:
+                return None
             for domain, config in get_domains().items():
                 if config['range'][0] <= base_num <= config['range'][1]:
-                    info.domain = domain
-                    break
-        except ValueError:
-            pass
+                    return domain
+        return None
 
-    # Fallback: determine from folder name (for unnumbered or out-of-range ADRs)
-    if not info.domain:
+    def domain_by_folder():
         folder_name = path.parent.name
         for domain, config in get_domains().items():
             folders = config['folder']
             if isinstance(folders, str):
                 folders = [folders]
             if folder_name in folders:
-                info.domain = domain
-                break
+                return domain
+        return None
+
+    if repo_contract() == 'adr/v1':
+        info.domain = domain_by_folder() or domain_by_range()
+    else:
+        info.domain = domain_by_range() or domain_by_folder()
 
     return info
 
@@ -1013,6 +1040,22 @@ def rule_v1_basis_config(ctx):
 
 # --- one record ----------------------------------------------------------------
 
+def _check_evidence_record(adr, ctx, where: str, ref: str) -> None:
+    """A basis `evidence: ADR-N` that names a record must resolve to one, and
+    under v1 to a kind the decision's basis edge accepts other than decision
+    (ADR-309 §2): a record cited as evidence is evidence or a spec."""
+    target = ctx.by_number.get(norm_ref(ref)[0])
+    if target is None:
+        v1_issue(adr, f"{where}: evidence {ref} resolves to no record")
+        return
+    if not is_v1_record(target, ctx):
+        return
+    schema = v1_kind_schema(adr, ctx) or {}
+    allowed = [k for k in (v1_edges(schema).get('basis') or []) if k != 'decision']
+    kind = target.frontmatter.get('kind')
+    if allowed and kind not in allowed:
+        v1_issue(adr, f"{where}: evidence {ref} is a {kind}; evidence cites a {' or '.join(allowed)} record")
+
 @file_rule(contract=V1)
 def rule_v1_basis_shape(adr, ctx):
     if not is_v1_record(adr, ctx) or 'basis' not in adr.frontmatter:
@@ -1048,6 +1091,8 @@ def rule_v1_basis_shape(adr, ctx):
                 v1_issue(adr, f"{where}: precedent takes one reference, such as ADR-101")
             elif not _text(value) and not (isinstance(value, int) and not isinstance(value, bool)):
                 v1_issue(adr, f"{where}: {source} needs a reference")
+            elif source == 'evidence' and re.fullmatch(r'ADR-\d+(\.\d+)?', str(value).strip()):
+                _check_evidence_record(adr, ctx, where, str(value).strip())
             continue
         # operator: who, the level, what was said and via which channel
         if not _text(value):
@@ -1523,7 +1568,8 @@ def rule_v1_frozen(adr, ctx):
     import had none (ADR-306 §4), and that Summary stays editable: the
     operator expects Summaries to change once the whole corpus is read.
     `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it."""
+    same allowance; git history still shows who added it. Links compare by
+    file name, so moving a record or a domain's folder is not an edit."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -1540,7 +1586,11 @@ def rule_v1_frozen(adr, ctx):
         return
     then, body_then = versions[0]
     imported = 'imported' in then and 'imported' in adr.frontmatter
-    body_now = adr.body
+    # A path compares by its last segment: a record, or a record it links
+    # to, may have moved folder since, and its number did not change
+    # (ADR-306 §6).
+    body_then = canonical_paths(body_then)
+    body_now = canonical_paths(adr.body)
     if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
         body_now = _without_opening_summary(body_now, body_then)
     for key in sorted(set(then) | set(adr.frontmatter)):
@@ -1595,6 +1645,167 @@ def rule_v1_observable(adr, ctx):
         if isinstance(entry, dict) and entry:
             continue
         v1_issue(adr, f"observable entry {i}: expected a line of words or a non-empty mapping")
+# ============================================================================
+# Path rewriting for records that change folder (ADR-306 §6)
+# ============================================================================
+#
+# A record's number is its identity and never changes. Under adr/v1 its
+# folder decides its domain, so moving a record to another domain moves its
+# file, and a domain renamed in place moves its folder. Either way every path
+# to what moved is rewritten: markdown links, paths written from the repo
+# root, and paths inside URLs. ADR-N citations are left alone: the number
+# still names the same record.
+
+# Frontmatter keys that record history and are never rewritten: an imported
+# record keeps the path it was imported from.
+RELOCATE_HISTORY_KEYS = ('imported',)
+
+_PATH_WORD_RE = re.compile(r'[\w./-]+')
+_FM_KEY_RE = re.compile(r'([A-Za-z_][\w-]*)\s*:')
+
+
+class Relocation:
+    """One simultaneous move: files (repo-relative old path -> new path),
+    directories (old dir -> new dir), and optionally a domain key rename for
+    catalog frontmatter (`domain: <key>`). `known` holds every tracked path
+    and directory, so a relative path is rewritten only when it names one."""
+
+    def __init__(self, files=None, dirs=None, known=None, domain=None):
+        self.files = dict(files or {})
+        self.dirs = dict(dirs or {})
+        self.known = set(known or ())
+        self.domain = domain  # (old key, new key) or None
+        self.basenames = {posixpath.basename(p) for p in self.files}
+        self._maps = ([(k.split('/'), v.split('/'), True) for k, v in self.files.items()]
+                      + [(k.split('/'), v.split('/'), False) for k, v in self.dirs.items()])
+
+    def target(self, rel: str) -> Optional[str]:
+        """Where a repo-relative path is after the move, or None if it stays."""
+        if rel in self.files:
+            return self.files[rel]
+        for old, new in self.dirs.items():
+            if rel == old or rel.startswith(old + '/'):
+                return new + rel[len(old):]
+        return None
+
+    def _path(self, token: str, old_dir: str, new_dir: str) -> Optional[str]:
+        """token rewritten as a path to something that moved, or None."""
+        slash = token.endswith('/') and len(token) > 1
+        core = token.rstrip('/') if slash else token
+        if not core:
+            return None
+        # Relative to the file that holds it, resolved from where that file
+        # was. A file that moves re-bases its links to paths that stay.
+        if not core.startswith('/'):
+            resolved = posixpath.normpath(posixpath.join(old_dir, core))
+            if not resolved.startswith('..'):
+                moved = self.target(resolved)
+                if moved is not None or (old_dir != new_dir and resolved in self.known):
+                    dest = moved or resolved
+                    if posixpath.normpath(posixpath.join(new_dir, core)) == dest:
+                        return None
+                    # Keep the link's shape where it still resolves: rename
+                    # only the segments that moved (../system/X -> ../platform/X).
+                    segments, walked = [], old_dir
+                    for segment in core.split('/'):
+                        walked = posixpath.normpath(posixpath.join(walked, segment)) if segment else walked
+                        after = self.target(walked) if segment not in ('', '.', '..') else None
+                        segments.append(posixpath.basename(after) if after else segment)
+                    new = '/'.join(segments)
+                    if posixpath.normpath(posixpath.join(new_dir, new)) != dest:
+                        new = posixpath.relpath(dest, new_dir or '.')
+                    if core.startswith('./') and not new.startswith('.'):
+                        new = './' + new
+                    return new + ('/' if slash else '')
+                if resolved in self.known:
+                    return None  # a real path that stays
+        # A path written from the repo root, or inside a URL: the longest run
+        # of its segments that ends a moved path. A directory needs two
+        # segments (architecture/system), so a bare folder name in prose is
+        # never taken for a path; a moved file matches on its name alone.
+        parts = core.split('/')
+        best = None
+        for old, new, is_file in self._maps:
+            ends = [len(parts)] if is_file else range(len(parts), 0, -1)
+            for end in ends:
+                for k in range(min(end, len(old)), 0, -1):
+                    if k < 2 and not is_file:
+                        break
+                    if parts[end - k:end] == old[-k:]:
+                        if best is None or k > best[0]:
+                            best = (k, end, new)
+                        break
+        if best is None:
+            return None
+        k, end, new = best
+        out = '/'.join(parts[:end - k] + (new[-k:] if len(new) >= k else new) + parts[end:])
+        return (out + ('/' if slash else '')) if out != core else None
+
+    def word(self, token: str, old_dir: str, new_dir: str) -> tuple:
+        """One run of path characters rewritten; (text, count)."""
+        stripped = token.rstrip('.')  # sentence punctuation is not the path
+        if not stripped:
+            return token, 0
+        if '/' not in stripped and stripped not in self.basenames:
+            # A bare sibling name is a path only when the file holding it
+            # moved and the name resolves to a tracked file: the link must be
+            # re-based even though its target stays put.
+            sibling = posixpath.normpath(posixpath.join(old_dir, stripped))
+            if old_dir == new_dir or sibling not in self.known:
+                return token, 0
+        new = self._path(stripped, old_dir, new_dir)
+        if new is None:
+            return token, 0
+        return new + token[len(stripped):], 1
+
+    def text(self, content: str, rel: str) -> tuple:
+        """content of the file at rel with its paths rewritten; (text, count).
+        History keys in frontmatter are left alone, and a frontmatter
+        `domain:` follows a domain rename."""
+        old_dir = posixpath.dirname(rel)
+        moved = self.target(rel)
+        new_dir = posixpath.dirname(moved) if moved else old_dir
+        lines = content.split('\n')
+        fm_end = None
+        if lines and lines[0].rstrip('\r') == '---':
+            fm_end = next((i for i in range(1, len(lines)) if lines[i].rstrip('\r') == '---'), None)
+        total, key, out = 0, None, []
+
+        def swap(m):
+            nonlocal total
+            new, n = self.word(m.group(0), old_dir, new_dir)
+            total += n
+            return new
+
+        for i, line in enumerate(lines):
+            if fm_end is not None and 0 < i < fm_end:
+                m = _FM_KEY_RE.match(line)
+                if m:
+                    key = m.group(1)
+                if key in RELOCATE_HISTORY_KEYS:
+                    out.append(line)
+                    continue
+                if self.domain and m and key == 'domain':
+                    dm = re.fullmatch(r'(domain:\s*)([\w-]+)(\s*(?:#.*)?)', line.rstrip('\r'))
+                    if dm and dm.group(2) == self.domain[0]:
+                        out.append(dm.group(1) + self.domain[1] + dm.group(3)
+                                   + ('\r' if line.endswith('\r') else ''))
+                        total += 1
+                        continue
+            out.append(_PATH_WORD_RE.sub(swap, line))
+        return '\n'.join(out), total
+
+
+def canonical_paths(text: str) -> str:
+    """Every path in text cut to its last segment, so two versions of a body
+    compare equal when only the folders their links run through differ."""
+    def last(m):
+        token = m.group(0)
+        if '/' not in token:
+            return token
+        segments = [s for s in token.split('/') if s]
+        return segments[-1] if segments else token
+    return _PATH_WORD_RE.sub(last, text)
 # --- import sheets and the v1 record writer (ADR-306) -------------------------------
 
 SHEET_FORMAT = 'adr-import/v1'
@@ -1740,6 +1951,215 @@ def placeholder_lines(text: str) -> list:
         if fence is None and any(prompt in line for prompt in SKELETON_PROMPTS):
             found.append(line.strip())
     return found
+
+# --- surgical frontmatter edits -----------------------------------------------------
+#
+# The record commands (consider, set, supersede, enact) change one field at a
+# time. They rewrite only the lines of that field and leave every other byte of
+# the file as it was: the other fields' YAML style, comments, line endings and
+# the body. A new field is written in the tool's own style (_RecordDumper) at
+# its place in V1_KEY_ORDER. A field keeps its layout where it can: a one-line
+# field stays on one line, and a block list gains or loses item lines. Every
+# edit is read back before it is returned, so a mismatch refuses the edit
+# rather than writing something else.
+
+_TOP_KEY = re.compile(r'^([A-Za-z_][A-Za-z0-9_-]*)\s*:(?:\s|$)')
+
+class _Quoted(str):
+    """A string written double-quoted, as the corpus writes `said` and a
+    commit hash. It reads back as a plain str."""
+
+_RecordDumper.add_representer(
+    _Quoted, lambda dumper, value: dumper.represent_scalar('tag:yaml.org,2002:str', str(value), style='"'))
+
+class _FlowList(list):
+    """A list written on one line, as the corpus writes a considered
+    entry's covers. It reads back as a plain list."""
+
+_RecordDumper.add_representer(
+    _FlowList, lambda dumper, value: dumper.represent_sequence('tag:yaml.org,2002:seq', list(value), flow_style=True))
+
+def _prefer_double(value: str):
+    """value double-quoted where YAML would single-quote it, since the
+    corpus quotes with double quotes; plain where it needs no quotes."""
+    return _Quoted(value) if _flow(value).startswith("'") else value
+
+def _flow(value) -> str:
+    return yaml.dump(value, Dumper=_RecordDumper, default_flow_style=True, sort_keys=False,
+                     allow_unicode=True, width=100000).rstrip('\n').removesuffix('\n...').rstrip('\n')
+
+def _block(key: str, value) -> list:
+    text = yaml.dump({key: value}, Dumper=_RecordDumper, sort_keys=False, allow_unicode=True,
+                     default_flow_style=False, width=100000)
+    return text.rstrip('\n').split('\n')
+
+def _plain(value):
+    """value with _Quoted strings turned back into str, for comparison."""
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    return str(value) if isinstance(value, _Quoted) else value
+
+class FrontmatterEdit:
+    """One record's file, split into its frontmatter lines and the rest."""
+
+    def __init__(self, raw: bytes):
+        text = raw.decode('utf-8')
+        lines = text.split('\n')
+        if not lines or lines[0].rstrip('\r').strip() != '---':
+            raise ValueError("the file has no YAML frontmatter")
+        end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == '---'), None)
+        if end is None:
+            raise ValueError("the frontmatter has no closing ---")
+        self.crlf = lines[0].endswith('\r')
+        self.head = lines[:1]
+        self.tail = lines[end:]
+        self.lines = [line[:-1] if self.crlf and line.endswith('\r') else line for line in lines[1:end]]
+        self.fields = self._load()
+
+    def _load(self) -> dict:
+        data = yaml.safe_load('\n'.join(self.lines)) or {}
+        if not isinstance(data, dict):
+            raise ValueError("the frontmatter is not a mapping of fields")
+        return data
+
+    def bytes(self) -> bytes:
+        body = [line + '\r' for line in self.lines] if self.crlf else list(self.lines)
+        return '\n'.join(self.head + body + self.tail).encode('utf-8')
+
+    def _blocks(self) -> list:
+        """(key, first line, last line) of each top-level field. A field's
+        block ends at its last indented line: a comment or blank line at
+        column 0 before the next key stays outside it."""
+        blocks = []
+        for i, line in enumerate(self.lines):
+            match = _TOP_KEY.match(line)
+            if match:
+                blocks.append([match.group(1), i, i])
+            elif blocks and line[:1] in (' ', '\t') and line.strip():
+                blocks[-1][2] = i
+            elif blocks and line.strip() and not line.startswith('#'):
+                blocks[-1][2] = i  # a continuation at column 0, such as a flow list's rest
+        return [tuple(b) for b in blocks]
+
+    def _block(self, key: str) -> Optional[tuple]:
+        found = [b for b in self._blocks() if b[0] == key]
+        if len(found) > 1:
+            raise ValueError(f"'{key}' appears {len(found)} times in the frontmatter")
+        return found[0] if found else None
+
+    def _replace(self, start: int, end: int, new_lines: list) -> None:
+        self.lines[start:end + 1] = new_lines
+
+    def _insert_at(self, key: str) -> int:
+        """The line a new field goes in at: after the nearest field before it in
+        V1_KEY_ORDER, else before the nearest field after it, else at the end."""
+        blocks = self._blocks()
+        if key in V1_KEY_ORDER:
+            rank = V1_KEY_ORDER.index(key)
+            before = [b for b in blocks if b[0] in V1_KEY_ORDER and V1_KEY_ORDER.index(b[0]) < rank]
+            if before:
+                return max(b[2] for b in before) + 1
+            after = [b for b in blocks if b[0] in V1_KEY_ORDER and V1_KEY_ORDER.index(b[0]) > rank]
+            if after:
+                return min(b[1] for b in after)
+        return blocks[-1][2] + 1 if blocks else len(self.lines)
+
+    def _one_line(self, key: str, value, old: str) -> str:
+        """key: value on one line, keeping a trailing comment of the old line."""
+        text = _flow(value) if isinstance(value, (list, dict)) else _block(key, value)[0][len(key) + 2:]
+        comment = re.search(r'\s+#[^\'"\]]*$', old)
+        return f"{key}: {text}" + (comment.group(0) if comment else '')
+
+    def _render(self, key: str, value, block: Optional[tuple]) -> list:
+        """The lines for key: value. An existing one-line field stays on one
+        line; a new field, or one written as a block, takes the tool's style."""
+        if block is not None and block[1] == block[2]:
+            one = self._one_line(key, value, self.lines[block[1]])
+            if not (isinstance(value, list) and value and any(isinstance(v, dict) for v in value)):
+                return [one]
+        lines = _block(key, value)
+        if block is not None and len(lines) > 1:
+            lines = [lines[0]] + self._reindent(lines[1:], block)
+        return lines
+
+    def _item_indent(self, block: tuple) -> Optional[str]:
+        for line in self.lines[block[1] + 1:block[2] + 1]:
+            match = re.match(r'^(\s*)- ', line) or re.match(r'^(\s*)-$', line)
+            if match:
+                return match.group(1)
+        return None
+
+    def _reindent(self, item_lines: list, block: tuple) -> list:
+        """Item lines rendered with the tool's two-space indent, moved to the
+        indent the field's existing items use."""
+        indent = self._item_indent(block)
+        if indent is None or indent == '  ':
+            return item_lines
+        return [indent + line[2:] if line.startswith('  ') else line for line in item_lines]
+
+    def _commit(self, expected: dict) -> None:
+        if _plain(self._load()) != _plain(expected):
+            raise ValueError("the edited frontmatter does not read back as intended")
+        self.fields = self._load()
+
+    # --- operations -------------------------------------------------------------
+
+    def set(self, key: str, value) -> None:
+        expected = dict(self.fields)
+        expected[key] = value
+        block = self._block(key)
+        if block is None:
+            at = self._insert_at(key)
+            self.lines[at:at] = _block(key, value)
+        else:
+            self._replace(block[1], block[2], self._render(key, value, block))
+        self._commit(expected)
+
+    def append(self, key: str, items: list) -> None:
+        """Append items to a list field, creating it when absent. A scalar
+        becomes a list holding it first."""
+        current = self.fields.get(key)
+        before = [] if current in (None, '') else (list(current) if isinstance(current, list) else [current])
+        value = before + list(items)
+        block = self._block(key)
+        indent = self._item_indent(block) if block is not None else None
+        if block is None or indent is None or not isinstance(current, list) or not current:
+            self.set(key, value)
+            return
+        expected = dict(self.fields)
+        expected[key] = value
+        new = self._reindent(_block(key, list(items))[1:], block)
+        self.lines[block[2] + 1:block[2] + 1] = new
+        self._commit(expected)
+
+    def remove(self, key: str, items: list) -> list:
+        """Remove each item from a list field. Returns the items not found."""
+        current = self.fields.get(key)
+        entries = current if isinstance(current, list) else ([] if current is None else [current])
+        wanted = [str(_plain(i)) for i in items]
+        missing = [i for i, w in zip(items, wanted) if w not in [str(e) for e in entries]]
+        if missing:
+            return missing
+        value = [e for e in entries if str(e) not in wanted]
+        block = self._block(key)
+        indent = self._item_indent(block) if block is not None else None
+        if indent is None or not value:
+            self.set(key, value)
+            return []
+        expected = dict(self.fields)
+        expected[key] = value
+        starts = [i for i in range(block[1] + 1, block[2] + 1)
+                  if re.match(re.escape(indent) + r'-(\s|$)', self.lines[i])]
+        chunks = [(s, (starts[n + 1] - 1) if n + 1 < len(starts) else block[2]) for n, s in enumerate(starts)]
+        for start, end in reversed(chunks):
+            text = '\n'.join(line[len(indent):] for line in self.lines[start:end + 1])
+            loaded = yaml.safe_load(text)
+            if isinstance(loaded, list) and len(loaded) == 1 and str(loaded[0]) in wanted:
+                del self.lines[start:end + 1]
+        self._commit(expected)
+        return []
 # --- adr import: readers and the sheet file (ADR-306) ---------------------------------
 #
 # A reader turns one source record into one import sheet (ADR-306 §1, §2).
@@ -1979,7 +2399,10 @@ def read_record(path: Path) -> dict:
         provenance['target.domain'] = 'number range'
     else:
         todo.append('target.domain: neither the folder nor the number names a domain')
-    span = number_range(domain) if domain else None
+    # Under adr/v1 a record in the tree keeps its number wherever its folder
+    # puts it (ADR-306 §6); the range only allocates new numbers.
+    moved_in_tree = repo_contract() == V1 and _in_tree(path)
+    span = number_range(domain) if domain and not moved_in_tree else None
     if span and not span[0] <= int(str(number).split('.')[0]) <= span[1]:
         todo.append(f"target.number: ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     provenance['target.title'] = 'H1'
@@ -2172,8 +2595,21 @@ def cmd_list(args):
 
     adrs.sort(key=sort_key)
 
+    # Frontmatter filters: --field, and --kind, --verb, --capability as its
+    # shorthands. A list field matches when it lists the value.
+    filters = list(getattr(args, 'field', None) or [])
+    for name in ('kind', 'verb', 'capability'):
+        if getattr(args, name, None):
+            filters.append(f"{name}={getattr(args, name)}")
+    for spec in filters:
+        key, has_value, value = spec.partition('=')
+        adrs = [a for a in adrs if _field_matches(a, key.strip(), value if has_value else None)]
+
+    if getattr(args, 'json', False):
+        return _list_json(adrs, getattr(args, 'group_by', None))
+
     project = get_config().get('project_name', 'Project')
-    print(f"\n{project} — Architecture Decision Records ({len(adrs)} total)")
+    print(f"\n{project} — Agent Decision Records ({len(adrs)} total)")
     print("=" * 55)
 
     def status_icon(status):
@@ -2191,7 +2627,13 @@ def cmd_list(args):
         marker = ' [archived]' if is_archived(adr.path) and getattr(args, 'all', False) else ''
         print(f"  {status_icon(adr.status)} ADR-{adr.number or '???':8} {adr.title or '(no title)'}{suffix}{marker}")
 
-    if args.group:
+    if getattr(args, 'group_by', None):
+        for value, members in _groups(adrs, args.group_by):
+            print(f"\n## {args.group_by}: {value} ({len(members)})")
+            print("-" * 50)
+            for adr in members:
+                print_adr(adr)
+    elif args.group:
         # Group by domain - show domains in config order, then legacy
         for domain_key, domain_info in domains.items():
             domain_adrs = [a for a in adrs if a.domain == domain_key]
@@ -2219,6 +2661,63 @@ def cmd_list(args):
     return 0
 
 
+
+# --- frontmatter queries for list ----------------------------------------------------
+
+_NO_VALUE = '(none)'
+
+def _field_values(adr, key: str) -> list:
+    """A field's values as strings: each item of a list, a scalar alone, and
+    nothing for an absent or empty field, read from the frontmatter.
+    Values compare case-sensitively."""
+    value = adr.frontmatter.get(key)
+    if value in (None, '', [], {}):
+        return []
+    if isinstance(value, list):
+        return [json.dumps(v, default=str, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+                for v in value]
+    if isinstance(value, dict):
+        return [json.dumps(value, default=str, ensure_ascii=False)]
+    return [str(value)]
+
+def _field_matches(adr, key: str, value: Optional[str]) -> bool:
+    values = _field_values(adr, key)
+    if value is None:
+        return bool(values)
+    if key == 'status':
+        return value.lower() in (v.lower() for v in values)
+    if key in V1_EDGE_FIELDS + ('superseded_by', 'related'):
+        # A reference without a section matches every section of that record.
+        number, section = norm_ref(value)
+        return any(norm_ref(v)[0] == number and (section is None or norm_ref(v)[1] == section)
+                   for v in values)
+    return value in values
+
+def _groups(adrs: list, key: str) -> list:
+    """(value, records) sorted by value, records without the field last.
+    A record listing several values is in each."""
+    groups = {}
+    for adr in adrs:
+        for value in _field_values(adr, key) or [_NO_VALUE]:
+            groups.setdefault(value, [])
+            if adr not in groups[value]:
+                groups[value].append(adr)
+    ordered = sorted(((v, m) for v, m in groups.items() if v != _NO_VALUE), key=lambda g: g[0].lower())
+    if _NO_VALUE in groups:
+        ordered.append((_NO_VALUE, groups[_NO_VALUE]))
+    return ordered
+
+def _record_json(adr) -> dict:
+    return {'number': adr.number, 'title': adr.title, 'path': str(relative_path(adr.path)),
+            'status': adr.status, 'frontmatter': adr.frontmatter}
+
+def _list_json(adrs: list, group_by: Optional[str]) -> int:
+    if group_by:
+        data = {value: [_record_json(a) for a in members] for value, members in _groups(adrs, group_by)}
+    else:
+        data = [_record_json(a) for a in adrs]
+    print(json.dumps(data, indent=2, default=str, ensure_ascii=False))
+    return 0
 def cmd_view(args):
     """View an ADR using the configured viewer."""
     import shutil
@@ -2584,21 +3083,36 @@ def cmd_index(args):
         status = adr.status or '?'
         return f"{status} ({note})" if note else status
 
-    lines = [
-        "# Architecture Decision Records",
-        "",
-        f"This directory contains Architecture Decision Records (ADRs) for {get_config().get('project_name', 'this project')}.",
-        "Each ADR documents a significant architectural decision, its context, and consequences.",
-        "",
-        "## ADR Format",
-        "",
-        "All ADRs follow a consistent format:",
-        "- **Status:** Draft / Proposed / Accepted / Deprecated / Superseded",
-        "- **Date:** When the decision was made",
-        "- **Deciders:** Who made the decision",
-        "- **Context:** The problem or situation requiring a decision",
-        "- **Decision:** The architectural choice made",
-        "- **Consequences:** Benefits, drawbacks, and other impacts",
+    project = get_config().get('project_name', 'this project')
+    if repo_contract() == 'adr/v1':
+        about = [
+            f"This directory contains the Agent Decision Records (ADRs) for {project}, under the adr/v1 contract.",
+            "A record's kind says what it holds: a decision, a spec kept current, or evidence (findings, surveys, explorations).",
+            "",
+            "## Record Format",
+            "",
+            "- **Kind:** decision / spec / evidence, as `adr.yaml` declares",
+            "- **Status:** proposed / accepted / rejected / abandoned / superseded / archived",
+            "- **Capability:** what the record is about, from the vocabulary in `adr.yaml`",
+            "- **Decisions** also carry a verb (add / cut / change / retire / constrain), a basis, and open with a Summary",
+            "- **Numbers** are permanent; a record's folder is its area",
+        ]
+    else:
+        about = [
+            f"This directory contains Agent Decision Records (ADRs) for {project}.",
+            "Each ADR documents a significant architectural decision, its context, and consequences.",
+            "",
+            "## ADR Format",
+            "",
+            "All ADRs follow a consistent format:",
+            "- **Status:** Draft / Proposed / Accepted / Deprecated / Superseded",
+            "- **Date:** When the decision was made",
+            "- **Deciders:** Who made the decision",
+            "- **Context:** The problem or situation requiring a decision",
+            "- **Decision:** The architectural choice made",
+            "- **Consequences:** Benefits, drawbacks, and other impacts",
+        ]
+    lines = ["# Agent Decision Records", ""] + about + [
         "",
         f"_This index is auto-generated by `adr index`. Configuration: [`adr.yaml`](./adr.yaml)_",
         "",
@@ -2905,6 +3419,439 @@ def cmd_domains(args):
     print()
     return 0
 
+# ============================================================================
+# adr domain: add, rename, move (ADR-306 §6)
+# ============================================================================
+#
+# The domain layout changes as a corpus grows. A record's number is its
+# permanent identity: it is never renumbered and never reused. Under adr/v1 a
+# record's folder decides its domain, and a domain's range only allocates the
+# numbers of new records. So moving a record moves its file and rewrites every
+# path to it, and ADR-N citations stay as they are.
+#
+# adr.yaml is edited as text, so its comments and layout survive.
+
+DOMAIN_NAME_RE = re.compile(r'[a-z][a-z0-9_-]*')
+FOLDER_NAME_RE = re.compile(r'[A-Za-z0-9][\w.-]*')
+
+
+def cmd_domain(args):
+    handlers = {'add': _domain_add, 'rename': _domain_rename, 'move': _domain_move}
+    if args.domain_command not in handlers:
+        print("usage: adr domain {add,rename,move} ...", file=sys.stderr)
+        return 2
+    return handlers[args.domain_command](args)
+
+
+# --- the files a rewrite reaches ----------------------------------------------------
+
+def _relocation_scope(root: Path) -> tuple:
+    """(names in scope, every tracked path and directory). Scope is every file
+    git tracks except fixtures, import sheets, the archive (archived records
+    are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
+    import fnmatch
+    out = _git(['ls-files', '-z'], root)
+    tracked = sorted(n for n in (out or '').split('\0') if n)
+    known = set(tracked)
+    for name in tracked:
+        parent = posixpath.dirname(name)
+        while parent and parent not in known:
+            known.add(parent)
+            parent = posixpath.dirname(parent)
+    cite_config = get_config().get('cite')
+    patterns = ['tests/fixtures', 'docs/architecture/archive'] + [
+        str(p) for p in ((cite_config.get('exclude') if isinstance(cite_config, dict) else None) or [])]
+
+    def excluded(name: str) -> bool:
+        if '.import' in name.split('/'):
+            return True
+        for pattern in patterns:
+            if any(c in pattern for c in '*?['):
+                if fnmatch.fnmatch(name, pattern):
+                    return True
+            elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
+                return True
+        return False
+    # INDEX.md is regenerated after the move, so it is not rewritten. A
+    # symlink is skipped: writing through it would edit its target, which is
+    # in scope (or excluded) in its own right. docs/scripts/adr is one.
+    return [n for n in tracked if not excluded(n) and n != 'docs/architecture/INDEX.md'
+            and not (root / n).is_symlink()], known
+
+
+def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:
+    """(name, count, new bytes) for each file whose text changes. Binary files
+    and files that are not UTF-8 are never touched."""
+    changes = []
+    for name in names:
+        path = root / name
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if b'\0' in raw[:8192]:
+            continue
+        try:
+            text = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            continue
+        new, count = relocation.text(text, name)
+        if count and new != text:
+            changes.append((name, count, new.encode('utf-8')))
+    return changes
+
+
+def _print_rewrites(changes: list, verb: str) -> None:
+    total = sum(c for _, c, _ in changes)
+    print(f"{verb} {total} path{'s' if total != 1 else ''} in {len(changes)} file{'s' if len(changes) != 1 else ''}")
+    for name, count, _ in changes:
+        print(f"  {name}: {count}")
+
+
+def _git_mv(root: Path, old: str, new: str) -> None:
+    (root / new).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(['git', 'mv', old, new], cwd=root,
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    (root / old).rename(root / new)
+
+
+def _write_rewrites(relocation: Relocation, root: Path, changes: list) -> None:
+    for name, _, data in changes:
+        (root / (relocation.target(name) or name)).write_bytes(data)
+
+
+def _refresh_index(root: Path) -> None:
+    """Regenerate INDEX.md when the project keeps one."""
+    if (root / 'docs' / 'architecture' / 'INDEX.md').exists():
+        cmd_index(argparse.Namespace(yes=True))
+
+
+# --- adr.yaml as text ---------------------------------------------------------------
+
+def _yaml_scalar(value: str) -> str:
+    if value and re.fullmatch(r'[A-Za-z0-9(][\w ,.()/+-]*', value) and value.strip() == value \
+            and value.lower() not in ('yes', 'no', 'true', 'false', 'on', 'off', 'null', '~'):
+        return value
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def _domains_block(lines: list) -> Optional[tuple]:
+    """(start, end) of the domains block: the `domains:` line and the index
+    just past its last indented line. None when there is no block form."""
+    start = next((i for i, line in enumerate(lines)
+                  if re.fullmatch(r'domains:\s*(#.*)?', line.rstrip('\r\n'))), None)
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end][0] in ' \t'):
+        end += 1
+    return start, end
+
+
+def _entry_indent(lines: list, start: int, end: int) -> tuple:
+    """(entry indent, field indent) used in the domains block."""
+    entry = field_ = None
+    for line in lines[start + 1:end]:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        indent = line[:len(line) - len(line.lstrip())]
+        if entry is None:
+            entry = indent
+        elif len(indent) > len(entry):
+            field_ = indent
+            break
+    entry = entry if entry is not None else '  '
+    return entry, field_ if field_ is not None else entry * 2
+
+
+def _save_config(text: str) -> bool:
+    """Write adr.yaml if the edited text still reads as YAML."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        print(f"Error: the edited adr.yaml does not parse ({e}); nothing written", file=sys.stderr)
+        return False
+    if not isinstance(data, dict) or not isinstance(data.get('domains'), dict):
+        print("Error: the edited adr.yaml lost its domains; nothing written", file=sys.stderr)
+        return False
+    get_config_path().write_text(text)
+    reload_config()
+    return True
+
+
+def _folders(config: dict) -> list:
+    folders = config.get('folder')
+    return list(folders) if isinstance(folders, list) else [folders]
+
+
+# --- add ----------------------------------------------------------------------------
+
+def _domain_add(args):
+    name, folder = args.name, args.folder
+    domains = get_domains()
+    problems = []
+    if not DOMAIN_NAME_RE.fullmatch(name) or name in ('legacy', 'archive'):
+        problems.append(f"'{name}' is not a usable domain name (lowercase letters, digits, - and _; not legacy or archive)")
+    elif name in domains:
+        problems.append(f"domain '{name}' already exists")
+    m = re.fullmatch(r'\s*(\d+)\s*-\s*(\d+)\s*', args.range or '')
+    low = high = None
+    if not m:
+        problems.append(f"--range '{args.range}' is not A-B")
+    else:
+        low, high = int(m.group(1)), int(m.group(2))
+        if low > high:
+            problems.append(f"--range {low}-{high} runs backwards")
+    if not FOLDER_NAME_RE.fullmatch(folder) or folder == 'archive':
+        problems.append(f"--folder '{folder}' is not a folder name under docs/architecture (and not archive)")
+    for other, config in domains.items():
+        if folder in _folders(config):
+            problems.append(f"folder '{folder}' already belongs to {other}")
+    if low is not None and low <= high:
+        spans = [(other, config['range']) for other, config in domains.items()]
+        if 'legacy' in get_config():
+            spans.append(('legacy', get_legacy_range()))
+        for other, (a, b) in spans:
+            if low <= b and a <= high:
+                problems.append(f"range {low}-{high} overlaps {other} ({a}-{b})")
+    if problems:
+        for problem in problems:
+            print(f"Error: {problem}", file=sys.stderr)
+        return 1
+
+    text = get_config_path().read_text()
+    lines = text.splitlines(keepends=True)
+    block = _domains_block(lines)
+    if block is None:
+        print("Error: adr.yaml has no block-style domains: section to add to; edit it by hand", file=sys.stderr)
+        return 1
+    start, end = block
+    entry, field_ = _entry_indent(lines, start, end)
+    last = max((i for i in range(start, end) if lines[i].strip()), default=start)
+    if not lines[last].endswith('\n'):
+        lines[last] += '\n'
+    label = args.label or name.capitalize()
+    new = ['\n', f"{entry}{name}:\n",
+           f"{field_}range: [{low}, {high}]\n",
+           f"{field_}name: {_yaml_scalar(label)}\n",
+           f"{field_}description: {_yaml_scalar(args.description or '')}\n",
+           f"{field_}folder: {_yaml_scalar(folder)}\n"]
+    if last == start:
+        new = new[1:]
+    lines[last + 1:last + 1] = new
+    if not _save_config(''.join(lines)):
+        return 1
+    print(f"Added domain: {name} ({low}-{high})")
+    print(f"  Name: {label}")
+    print(f"  Folder: docs/architecture/{folder}/")
+    return 0
+
+
+# --- rename -------------------------------------------------------------------------
+
+def _domain_rename(args):
+    old, new = args.old, args.new
+    domains = get_domains()
+    if old not in domains:
+        print(f"Error: Unknown domain '{old}'", file=sys.stderr)
+        print(f"Valid domains: {', '.join(domains.keys())}", file=sys.stderr)
+        return 1
+    config = domains[old]
+    folders = _folders(config)
+    problems = []
+    if new != old:
+        if not DOMAIN_NAME_RE.fullmatch(new) or new in ('legacy', 'archive'):
+            problems.append(f"'{new}' is not a usable domain name (lowercase letters, digits, - and _; not legacy or archive)")
+        elif new in domains:
+            problems.append(f"domain '{new}' already exists")
+    if args.folder and len(folders) > 1:
+        problems.append(f"{old} spans several folders ({', '.join(folders)}); rename them by hand")
+    # The folder follows the name when it matched the name; otherwise it
+    # stays, unless --folder names one.
+    folder_old = folders[0]
+    folder_new = args.folder or (new if len(folders) == 1 and folder_old == old else folder_old)
+    root = get_project_root()
+    arch = root / 'docs' / 'architecture'
+    if folder_new != folder_old:
+        if not FOLDER_NAME_RE.fullmatch(folder_new) or folder_new == 'archive':
+            problems.append(f"folder '{folder_new}' is not a folder name under docs/architecture (and not archive)")
+        for other, other_config in domains.items():
+            if other != old and folder_new in _folders(other_config):
+                problems.append(f"folder '{folder_new}' already belongs to {other}")
+        if (arch / folder_new).exists():
+            problems.append(f"docs/architecture/{folder_new} already exists")
+    if new == old and folder_new == folder_old:
+        problems.append("nothing to rename: give a new name or --folder")
+    if problems:
+        for problem in problems:
+            print(f"Error: {problem}", file=sys.stderr)
+        return 1
+
+    text = get_config_path().read_text()
+    lines = text.splitlines(keepends=True)
+    block = _domains_block(lines)
+    key_at = None
+    if block:
+        start, end = block
+        entry, _ = _entry_indent(lines, start, end)
+        key_re = re.compile(rf'{re.escape(entry)}{re.escape(old)}:(\s*(?:#.*)?)')
+        key_at = next((i for i in range(start + 1, end) if key_re.fullmatch(lines[i].rstrip('\r\n'))), None)
+    if key_at is None:
+        print(f"Error: cannot find the '{old}:' entry in adr.yaml's domains block; edit it by hand", file=sys.stderr)
+        return 1
+    ending = lines[key_at][len(lines[key_at].rstrip('\r\n')):]
+    lines[key_at] = f"{entry}{new}:" + key_re.fullmatch(lines[key_at].rstrip('\r\n')).group(1) + ending
+    if folder_new != folder_old:
+        stop = next((i for i in range(key_at + 1, end)
+                     if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= len(entry)), end)
+        folder_re = re.compile(r'(\s+folder:\s*)(\S+?)(\s*(?:#.*)?)')
+        for i in range(key_at + 1, stop):
+            fm = folder_re.fullmatch(lines[i].rstrip('\r\n'))
+            if fm:
+                ending_i = lines[i][len(lines[i].rstrip('\r\n')):]
+                lines[i] = fm.group(1) + _yaml_scalar(folder_new) + fm.group(3) + ending_i
+                break
+        else:
+            print(f"Error: cannot find {old}'s folder: line in adr.yaml; edit it by hand", file=sys.stderr)
+            return 1
+
+    names, known = _relocation_scope(root)
+    old_dir = f"docs/architecture/{folder_old}"
+    new_dir = f"docs/architecture/{folder_new}"
+    relocation = Relocation(dirs={old_dir: new_dir} if folder_new != folder_old else {},
+                            known=known, domain=(old, new) if new != old else None)
+    changes = _plan_rewrites(relocation, root, names)
+    # adr.yaml is written from its edited text, with its own paths rewritten.
+    config_rel = 'docs/architecture/adr.yaml'
+    config_text, config_count = relocation.text(''.join(lines), config_rel)
+    changes = [c for c in changes if c[0] != config_rel]
+    if config_count:
+        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'))])
+
+    verb = 'Would rename' if args.dry_run else 'Renamed'
+    print(f"{verb} domain: {old} → {new}")
+    if folder_new != folder_old:
+        print(f"  Folder: {old_dir}/ → {new_dir}/")
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    if args.dry_run:
+        print("Dry run: nothing written.")
+        return 0
+    if not _save_config(config_text):
+        return 1
+    if folder_new != folder_old and (root / old_dir).exists():
+        _git_mv(root, old_dir, new_dir)
+    _write_rewrites(relocation, root, [c for c in changes if c[0] != config_rel])
+    _refresh_index(root)
+    return 0
+
+
+# --- move ---------------------------------------------------------------------------
+
+def _load_plan(path: str) -> Optional[list]:
+    """The moves a plan file lists: [{record, domain}, ...]."""
+    try:
+        data = yaml.safe_load(Path(path).read_text())
+    except (OSError, yaml.YAMLError) as e:
+        print(f"Error: cannot read plan {path}: {e}", file=sys.stderr)
+        return None
+    if isinstance(data, dict) and 'moves' in data:
+        data = data['moves']
+    if not isinstance(data, list) or not data:
+        print(f"Error: plan {path}: expected a list of {{record, domain}} entries", file=sys.stderr)
+        return None
+    moves = []
+    for i, entry in enumerate(data, 1):
+        if not isinstance(entry, dict) or 'record' not in entry or 'domain' not in entry:
+            print(f"Error: plan entry {i}: expected {{record, domain}}", file=sys.stderr)
+            return None
+        extra = sorted(set(entry) - {'record', 'domain'})
+        if extra:
+            hint = '; a record keeps its number' if 'number' in extra else ''
+            print(f"Error: plan entry {i}: unknown key{'s' if len(extra) > 1 else ''} {', '.join(extra)}{hint}", file=sys.stderr)
+            return None
+        moves.append((str(entry['record']), str(entry['domain'])))
+    return moves
+
+
+def _domain_move(args):
+    if repo_contract() != 'adr/v1':
+        print("Error: under adr/v0 a record's number decides its domain, so a record cannot "
+              "change domain by folder; declare contract: adr/v1 in adr.yaml first", file=sys.stderr)
+        return 1
+    if args.plan:
+        if args.record or args.domain:
+            print("Error: give either <record> <domain> or --plan, not both", file=sys.stderr)
+            return 2
+        moves = _load_plan(args.plan)
+        if moves is None:
+            return 1
+    else:
+        if not args.record or not args.domain:
+            print("Error: adr domain move <record> <domain>, or --plan <file.yaml>", file=sys.stderr)
+            return 2
+        moves = [(args.record, args.domain)]
+
+    root = get_project_root()
+    domains = get_domains()
+    records = get_all_adrs(include_archived=True)
+    problems, files, lines_out, seen = [], {}, [], set()
+    for ref, domain in moves:
+        matches = find_by_ref(ref, records)
+        if not matches:
+            problems.append(f"ADR not found: {ref}")
+            continue
+        if len(matches) > 1:
+            problems.append(f"{ref} matches several records: " + ', '.join(str(relative_path(a.path, root)) for a in matches))
+            continue
+        adr = matches[0]
+        rel = relative_path(adr.path, root).as_posix()
+        if rel in seen:
+            problems.append(f"ADR-{adr.number} is listed twice")
+            continue
+        seen.add(rel)
+        if is_archived(adr.path):
+            problems.append(f"ADR-{adr.number} is archived ({rel}); archived records are kept as they are")
+            continue
+        if domain not in domains:
+            problems.append(f"unknown domain '{domain}' (valid: {', '.join(domains.keys())})")
+            continue
+        folders = _folders(domains[domain])
+        if adr.domain == domain and adr.path.parent.name in folders:
+            problems.append(f"ADR-{adr.number} is already in {domain} ({rel})")
+            continue
+        new_rel = f"docs/architecture/{folders[0]}/{adr.path.name}"
+        if (root / new_rel).exists():
+            problems.append(f"{new_rel} already exists")
+            continue
+        files[rel] = new_rel
+        lines_out.append((adr, adr.domain or 'legacy', domain, rel, new_rel))
+    if problems:
+        for problem in problems:
+            print(f"Error: {problem}", file=sys.stderr)
+        return 1
+
+    names, known = _relocation_scope(root)
+    relocation = Relocation(files=files, known=known)
+    changes = _plan_rewrites(relocation, root, names)
+
+    verb = 'Would move' if args.dry_run else 'Moved'
+    for adr, was, domain, rel, new_rel in lines_out:
+        print(f"{verb}: ADR-{adr.number} {was} → {domain}")
+        print(f"  {rel} → {new_rel}")
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    if args.dry_run:
+        print("Dry run: nothing written.")
+        return 0
+    for rel, new_rel in files.items():
+        _git_mv(root, rel, new_rel)
+    _write_rewrites(relocation, root, changes)
+    _refresh_index(root)
+    return 0
 def cmd_config(args):
     """Show current configuration."""
     config_path = get_config_path()
@@ -3308,6 +4255,376 @@ def cmd_reject(args):
 def cmd_abandon(args):
     return _close(args, 'abandoned')
 
+
+# --- record edits: consider, set, supersede, enact -----------------------------------
+#
+# Each command edits frontmatter through FrontmatterEdit, so only the lines of
+# the fields it touches change. It refuses what the contract refuses before
+# writing, then lints the records it wrote and prints their issues.
+
+def _record_target(ref: str, command: str, v1_only: bool = True):
+    """The record ref names, or (None, exit code) after an error."""
+    matches = find_by_ref(ref, get_all_adrs(include_archived=True))
+    if not matches:
+        print(f"Error: ADR not found: {ref}", file=sys.stderr)
+        return None, 1
+    if len(matches) > 1:
+        print(f"Error: '{ref}' matches several records; resolve the duplicate number first:", file=sys.stderr)
+        for match in matches:
+            print(f"  {relative_path(match.path)}", file=sys.stderr)
+        return None, 1
+    adr = matches[0]
+    if v1_only and (repo_contract() != V1 or adr.contract != V1):
+        print(f"Error: ADR-{adr.number} is not an adr/v1 record; `adr {command}` edits v1 fields "
+              f"(ADR-304 §7).", file=sys.stderr)
+        return None, 1
+    return adr, 0
+
+def _open_edit(adr):
+    try:
+        return FrontmatterEdit(adr.path.read_bytes()), None
+    except (ValueError, UnicodeDecodeError, yaml.YAMLError) as e:
+        return None, f"ADR-{adr.number}: {e}"
+
+def _record_schema(adr) -> Optional[dict]:
+    kinds = get_config().get('kinds')
+    schema = kinds.get(adr.frontmatter.get('kind')) if isinstance(kinds, dict) else None
+    return schema if isinstance(schema, dict) else None
+
+def _frozen(adr) -> Optional[set]:
+    """The fields that may still change on this record, or None when every
+    field may: a v0 or proposed record, an archived one, or a kind whose
+    mutable_after_accept is 'all'. Mirrors rule_v1_frozen."""
+    if adr.contract != V1 or str(adr.status or '').lower() == 'proposed' or is_archived(adr.path):
+        return None
+    mutable = (_record_schema(adr) or {}).get('mutable_after_accept', list(V1_DEFAULT_MUTABLE))
+    if mutable == 'all':
+        return None
+    return set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
+
+def _frozen_message(key: str, mutable: set) -> str:
+    """The message rule_v1_frozen gives for the same field."""
+    return f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change"
+
+def _frozen_hint(adr) -> str:
+    return (f"ADR-{adr.number} is {str(adr.status).lower()}. Record the change as a new decision "
+            f"that supersedes or amends it, or pass --force for migration cleanup.")
+
+def _force_warning(adr, keys: list) -> None:
+    print(f"Warning: --force wrote frozen {'field' if len(keys) == 1 else 'fields'} "
+          f"{', '.join(repr(k) for k in keys)} on ADR-{adr.number}. Lint's frozen check still applies: "
+          f"it compares against the record as first accepted on the default branch's history.",
+          file=sys.stderr)
+
+def _show_diff(adr, before: bytes, after: bytes) -> None:
+    import difflib
+    name = str(relative_path(adr.path))
+    diff = difflib.unified_diff(before.decode('utf-8').splitlines(True), after.decode('utf-8').splitlines(True),
+                                fromfile=f"a/{name}", tofile=f"b/{name}")
+    sys.stdout.writelines(line if line.endswith('\n') else line + '\n' for line in diff)
+
+def _write(edits: list, dry_run: bool) -> None:
+    """Write each (adr, edit) whose bytes changed, or show the diff."""
+    for adr, edit in edits:
+        before, after = adr.path.read_bytes(), edit.bytes()
+        if before == after:
+            continue
+        if dry_run:
+            _show_diff(adr, before, after)
+        else:
+            adr.path.write_bytes(after)
+
+def _lint_records(paths: list) -> None:
+    """Lint the records just written against the whole corpus and print
+    their issues, as `adr lint <path>` would list them."""
+    corpus = get_all_adrs(include_archived=True)
+    ctx = LintContext.from_corpus(corpus)
+    records = [a for a in corpus if a.path in paths]
+    run_rules(records, ctx)
+    for record in records:
+        where = relative_path(record.path)
+        if not record.issues:
+            print(f"Lint {where}: clean")
+            continue
+        print(f"Lint {where}:")
+        for issue in record.issues:
+            print(f"  {'❌' if issue.severity == 'error' else '⚠️'} {issue.message}")
+
+def _finish(edits: list, dry_run: bool, done: str) -> int:
+    _write(edits, dry_run)
+    if dry_run:
+        print(f"Dry run, nothing written: {done}")
+        return 0
+    print(done)
+    _lint_records([adr.path for adr, _ in edits])
+    return 0
+
+# --- consider -----------------------------------------------------------------------
+
+_PROBE_NAME = re.compile(r'\*\s*(?:not\s+)?confident\s*\(([^)\n]+)\)\s*:?\s*\*', re.IGNORECASE)
+
+def probe_names(adr) -> list:
+    """The named probes in a record's Summary, written *Confident (name):* or
+    *Not confident (name):*, then 'inversion' when the Summary has one: a
+    considered entry may cover the inversion too (ADR-304 §12)."""
+    heading = _find_section(adr, 'Summary')
+    text = adr.section_text.get(heading, '') if heading else ''
+    names = list(dict.fromkeys(m.strip() for m in _PROBE_NAME.findall(text)))
+    if re.search(r'\binversion\b', text, re.IGNORECASE):
+        names.append('inversion')
+    return names
+
+def cmd_consider(args):
+    """Append one considered entry: the operator's answer to the Summary
+    (ADR-304 §12). considered is mutable after acceptance, so any status."""
+    adr, code = _record_target(args.adr, 'consider')
+    if adr is None:
+        return code
+    for flag, value, what in (('--said', args.said, 'what the operator said, verbatim'),
+                              ('--via', args.via, 'the channel it was said in, such as a PR or a session')):
+        if value is None or not value.strip():
+            print(f"Error: {flag} is required: {what}.", file=sys.stderr)
+            return 1
+    operator = args.operator or _detect_git_user()
+    if not operator:
+        print("Error: no operator given and none detected from gh or git; pass --operator NAME.", file=sys.stderr)
+        return 1
+    if args.covers is not None:
+        valid = probe_names(adr)
+        unknown = [c for c in args.covers if c not in valid]
+        if unknown:
+            names = ', '.join(repr(u) for u in unknown)
+            if any(v != 'inversion' for v in valid):
+                print(f"Error: ADR-{adr.number} has no probe {names}. Names it can cover: {', '.join(valid)}.",
+                      file=sys.stderr)
+            else:
+                also = f" It can cover: {', '.join(valid)}." if valid else ''
+                print(f"Error: ADR-{adr.number} has no probe {names}; its Summary names no probes. "
+                      f"A probe is named as *Confident (name):* or *Not confident (name):*.{also}",
+                      file=sys.stderr)
+            return 1
+    edit, error = _open_edit(adr)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    entry = {'operator': operator, 'said': _Quoted(args.said), 'via': _prefer_double(args.via)}
+    if args.paraphrase:
+        entry['paraphrase'] = True
+    if args.covers is not None:
+        entry['covers'] = _FlowList(args.covers)
+    if args.canary:
+        entry['canary'] = args.canary
+    try:
+        edit.append('considered', [entry])
+    except ValueError as e:
+        print(f"Error: ADR-{adr.number} not changed: {e}", file=sys.stderr)
+        return 1
+    count = len(edit.fields.get('considered') or [])
+    return _finish([(adr, edit)], args.dry_run, f"Added considered entry {count} to ADR-{adr.number}: {adr.title}")
+
+# --- set ----------------------------------------------------------------------------
+
+_ASSIGNMENT = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*)(\+=|-=|=)(.*)$', re.DOTALL)
+# Statuses with a command of their own, which checks the corpus and records why.
+_STATUS_COMMANDS = {'accepted': 'accept', 'rejected': 'reject', 'abandoned': 'abandon',
+                    'superseded': 'supersede', 'archived': 'archive'}
+
+def _parse_assignment(text: str):
+    match = _ASSIGNMENT.match(text)
+    if not match:
+        raise ValueError(f"'{text}' is not key=value, key+=value or key-=value")
+    key, op, raw = match.groups()
+    try:
+        value = yaml.safe_load(raw) if raw.strip() else None
+    except yaml.YAMLError as e:
+        raise ValueError(f"{key}: the value is not YAML ({str(e).splitlines()[0]})")
+    return key, op, value
+
+def cmd_set(args):
+    """Set, append to or remove from frontmatter fields, refusing a frozen
+    field of a record that has left proposed unless --force."""
+    adr, code = _record_target(args.adr, 'set', v1_only=False)
+    if adr is None:
+        return code
+    try:
+        changes = [_parse_assignment(a) for a in args.assignments]
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    mutable = _frozen(adr)
+    frozen = list(dict.fromkeys(k for k, _, _ in changes if mutable is not None and k not in mutable))
+    if frozen and not args.force:
+        for key in frozen:
+            print(f"Refused: ADR-{adr.number}: {_frozen_message(key, mutable)}", file=sys.stderr)
+        print(_frozen_hint(adr), file=sys.stderr)
+        return 1
+    if adr.contract == V1 and not args.force:
+        for key, op, value in changes:
+            if key != 'status':
+                continue
+            command = _STATUS_COMMANDS.get(str(value).lower()) if op == '=' else None
+            if command:
+                print(f"Refused: use `adr {command} {adr.number}`; it checks the corpus and records why. "
+                      f"--force sets the status anyway.", file=sys.stderr)
+            else:
+                print(f"Refused: a record's status changes only through accept, reject, abandon, "
+                      f"supersede and archive. --force sets the status anyway.", file=sys.stderr)
+            return 1
+    # A key the record lacks and no v1 record carries is most likely a typo.
+    unknown = [k for k, _, _ in changes
+               if adr.contract == V1 and k not in adr.frontmatter and k not in V1_KEY_ORDER]
+    if unknown and not args.force:
+        print(f"Refused: ADR-{adr.number} has no field {', '.join(repr(k) for k in unknown)}, and it is not "
+              f"a v1 field ({', '.join(V1_KEY_ORDER)}). --force adds it anyway.", file=sys.stderr)
+        return 1
+    edit, error = _open_edit(adr)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    try:
+        for key, op, value in changes:
+            items = value if isinstance(value, list) else [value]
+            if op == '=':
+                edit.set(key, value)
+            elif op == '+=':
+                edit.append(key, items)
+            else:
+                missing = edit.remove(key, items)
+                if missing:
+                    print(f"Error: ADR-{adr.number} not changed: {key} does not list "
+                          f"{', '.join(repr(str(m)) for m in missing)}.", file=sys.stderr)
+                    return 1
+    except ValueError as e:
+        print(f"Error: ADR-{adr.number} not changed: {e}", file=sys.stderr)
+        return 1
+    if frozen and not args.dry_run:
+        _force_warning(adr, frozen)
+    keys = ', '.join(dict.fromkeys(k for k, _, _ in changes))
+    return _finish([(adr, edit)], args.dry_run, f"Set {keys} on ADR-{adr.number}: {adr.title}")
+
+# --- supersede ----------------------------------------------------------------------
+
+def _ref(adr, section: Optional[str] = None) -> str:
+    return f"ADR-{adr.number}" + (f"#{section}" if section else '')
+
+def _lists(adr, key: str, ref: str) -> bool:
+    number, section = norm_ref(ref)
+    return any(norm_ref(e) == (number, section) for e in as_entries(adr.frontmatter.get(key)))
+
+def cmd_supersede(args):
+    """Write both sides of a supersession, or with --amends a partial
+    replacement on the new record only (ADR-304 §3)."""
+    old, code = _record_target(args.adr, 'supersede')
+    if old is None:
+        return code
+    new, code = _record_target(args.by, 'supersede')
+    if new is None:
+        return code
+    if old.path == new.path:
+        print(f"Error: ADR-{old.number} cannot supersede itself.", file=sys.stderr)
+        return 1
+    new_status = str(new.status or '').lower()
+    if new_status not in ('accepted', 'proposed'):
+        print(f"Error: ADR-{new.number} is {new_status or 'without a status'}; only an accepted or proposed "
+              f"record supersedes another.", file=sys.stderr)
+        return 1
+    old_status = str(old.status or '').lower()
+    if old_status not in ('accepted', 'superseded'):
+        print(f"Error: ADR-{old.number} is {old_status or 'without a status'}; only an accepted record is "
+              f"superseded (a proposed one is rejected or abandoned).", file=sys.stderr)
+        return 1
+    field_name = 'amends' if args.amends else 'supersedes'
+    new_kind, old_kind = new.frontmatter.get('kind'), old.frontmatter.get('kind')
+    edges = v1_edges(_record_schema(new) or {})
+    if old_kind not in edges.get(field_name, []):
+        allowed = edges.get(field_name)
+        target = f"points at {' or '.join(allowed)} records" if allowed else "is not an edge it takes"
+        print(f"Error: a {new_kind} record cannot {'amend' if args.amends else 'supersede'} a {old_kind}: "
+              f"for a {new_kind}, {field_name} {target} (adr.yaml kinds.{new_kind}.edges).", file=sys.stderr)
+        return 1
+    section = args.amends
+    if section and not section_exists(old, section):
+        print(f"Error: ADR-{old.number} has no section '{section}'. Its sections: {', '.join(old.sections)}.",
+              file=sys.stderr)
+        return 1
+    if not section and 'superseded' not in v1_lifecycle(_record_schema(old)):
+        print(f"Error: the {old_kind} lifecycle has no superseded status.", file=sys.stderr)
+        return 1
+    ref = _ref(old, section)
+    edits = []
+    mutable = _frozen(new)
+    if not _lists(new, field_name, ref):
+        if mutable is not None and field_name not in mutable and not args.force:
+            print(f"Refused: ADR-{new.number}: {_frozen_message(field_name, mutable)}", file=sys.stderr)
+            print(_frozen_hint(new), file=sys.stderr)
+            return 1
+        edit, error = _open_edit(new)
+        if error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
+        try:
+            edit.append(field_name, [ref])
+        except ValueError as e:
+            print(f"Error: ADR-{new.number} not changed: {e}", file=sys.stderr)
+            return 1
+        edits.append((new, edit))
+        if mutable is not None and field_name not in mutable and not args.dry_run:
+            _force_warning(new, [field_name])
+    if not section:
+        edit, error = _open_edit(old)
+        if error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
+        try:
+            if not _lists(old, 'superseded_by', _ref(new)):
+                edit.append('superseded_by', [_ref(new)])
+            if old_status != 'superseded':
+                edit.set('status', 'superseded')
+        except ValueError as e:
+            print(f"Error: ADR-{old.number} not changed: {e}", file=sys.stderr)
+            return 1
+        edits.append((old, edit))
+    if section:
+        done = f"ADR-{new.number} amends ADR-{old.number} §{section}"
+    else:
+        done = f"ADR-{new.number} supersedes ADR-{old.number}; ADR-{old.number} is superseded"
+    code = _finish(edits, args.dry_run, done)
+    if not args.dry_run and not section:
+        print("Run `adr index -y` to refresh INDEX.md.")
+    return code
+
+# --- enact --------------------------------------------------------------------------
+
+def cmd_enact(args):
+    """Mark an accepted cut or retire decision done at a commit (ADR-304 §5)."""
+    adr, code = _record_target(args.adr, 'enact')
+    if adr is None:
+        return code
+    verb = adr.frontmatter.get('verb')
+    if verb not in V1_ENACTING_VERBS:
+        print(f"Error: ADR-{adr.number} is a{'n' if str(verb)[:1] in 'aeiou' else ''} {verb or 'verbless'} "
+              f"record; enacted belongs to a cut or retire decision (ADR-304 §5).", file=sys.stderr)
+        return 1
+    status = str(adr.status or '').lower()
+    if status != 'accepted':
+        print(f"Error: ADR-{adr.number} is {status}; enacted marks an accepted decision done.", file=sys.stderr)
+        return 1
+    commit = args.commit.strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{7,40}', commit):
+        print(f"Error: '{args.commit}' is not a commit hash (7 to 40 hex digits).", file=sys.stderr)
+        return 1
+    edit, error = _open_edit(adr)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    previous = adr.frontmatter.get('enacted')
+    try:
+        edit.set('enacted', _Quoted(commit))
+    except ValueError as e:
+        print(f"Error: ADR-{adr.number} not changed: {e}", file=sys.stderr)
+        return 1
+    note = f" (was {previous})" if previous and str(previous) != commit else ''
+    return _finish([(adr, edit)], args.dry_run, f"Enacted ADR-{adr.number} at {commit}{note}: {adr.title}")
 def cmd_import(args):
     """adr import scan | apply (ADR-306 §3)."""
     if args.import_command == 'scan':
@@ -3411,8 +4728,10 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
     """Where apply writes. A source under docs/architecture is written in
     place and keeps its number and domain: an import never renumbers (§5),
     and moving a record is `adr domain move` (§6). Any other source becomes
-    a new file in the domain's folder. The number must sit in the domain's
-    range either way. Raises SheetError when none of this holds."""
+    a new file in the domain's folder, and its number must sit in the
+    domain's range; under adr/v0 an in-tree record's must too. Under adr/v1
+    an in-tree record keeps its number wherever its folder is. Raises
+    SheetError when none of this holds."""
     target = sheet['target']
     number = format_number(target['number'])
     domain = target.get('domain')
@@ -3423,15 +4742,15 @@ def _destination(sheet: dict, source_file: Optional[Path]) -> Path:
         if was != number.lstrip('0') or was_domain != domain:
             raise SheetError(
                 f"the source is ADR-{was} in {was_domain}; the sheet says ADR-{number} in {domain}. "
-                f"Moving a record to another number or domain is `adr domain move` "
-                f"(ADR-306 §6), not built yet; restore target.number and target.domain")
+                f"A record keeps its number; moving it to another domain is `adr domain move` "
+                f"(ADR-306 §6). Restore target.number and target.domain")
     if not domain:
         raise SheetError('target.domain is empty')
     span = number_range(domain)
     if span is None:
         raise SheetError(f"domain '{domain}' is not in adr.yaml; add it first "
                          f"(creating a domain on apply, ADR-306 §6, is not built yet)")
-    if not span[0] <= int(number.split('.')[0]) <= span[1]:
+    if not (in_tree and repo_contract() == V1) and not span[0] <= int(number.split('.')[0]) <= span[1]:
         raise SheetError(f"ADR-{number} is outside the {domain} range {span[0]}-{span[1]}")
     if in_tree:
         return source_file
@@ -3633,7 +4952,7 @@ def _lint_counts(paths: list) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='ADR - Architecture Decision Record CLI Tool',
+        description='ADR - Agent Decision Record CLI Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
@@ -3652,6 +4971,15 @@ def main():
                             help='List archived ADRs only')
     list_scope.add_argument('--all', action='store_true',
                             help='List active and archived ADRs')
+    p_list.add_argument('--field', action='append', metavar='KEY[=VALUE]',
+                        help='Filter by frontmatter: KEY present, or KEY equal to or listing VALUE (repeatable)')
+    p_list.add_argument('--kind', help='Filter by kind (same as --field kind=KIND)')
+    p_list.add_argument('--verb', help='Filter by verb (same as --field verb=VERB)')
+    p_list.add_argument('--capability', help='Filter by capability, listed or single (same as --field capability=NAME)')
+    p_list.add_argument('--group-by', dest='group_by', metavar='KEY',
+                        help='Group by a frontmatter field; a record listing several values is in each group')
+    p_list.add_argument('--json', action='store_true',
+                        help='Machine output: number, title, path, status and frontmatter for each record')
 
     # view
     p_view = subparsers.add_parser('view', aliases=['v', 'show'], help='View an ADR')
@@ -3705,6 +5033,26 @@ def main():
     # domains
     subparsers.add_parser('domains', help='List domain number series')
 
+    # domain (ADR-306 §6)
+    p_domain = subparsers.add_parser('domain', help='Add, rename or move domains')
+    domain_sub = p_domain.add_subparsers(dest='domain_command')
+    p_dadd = domain_sub.add_parser('add', help='Add a domain to adr.yaml')
+    p_dadd.add_argument('name', help='Domain key (e.g. ops)')
+    p_dadd.add_argument('--range', required=True, help='Number range for new records, A-B (e.g. 400-499)')
+    p_dadd.add_argument('--folder', required=True, help='Folder under docs/architecture')
+    p_dadd.add_argument('--label', help='Display name (default: the key, capitalized)')
+    p_dadd.add_argument('--description', help='One line on what the domain covers')
+    p_dren = domain_sub.add_parser('rename', help='Rename a domain, and its folder, in place')
+    p_dren.add_argument('old', help='Current domain key')
+    p_dren.add_argument('new', help='New domain key')
+    p_dren.add_argument('--folder', help='New folder (default: the new key when the folder was the old key)')
+    p_dren.add_argument('--dry-run', action='store_true', help='Report what would change without changing it')
+    p_dmove = domain_sub.add_parser('move', help='Move records to another domain; numbers never change')
+    p_dmove.add_argument('record', nargs='?', help='ADR number (e.g. 104, ADR-104)')
+    p_dmove.add_argument('domain', nargs='?', help='Target domain')
+    p_dmove.add_argument('--plan', help='YAML list of {record, domain} moves, applied together')
+    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and the rewrites per file; write nothing')
+
     # archive
     p_archive = subparsers.add_parser(
         'archive', help='Archive an ADR out of the active set')
@@ -3732,6 +5080,37 @@ def main():
         p_close.add_argument('--reason', help='Why (required; appended as a Closure section)')
         p_close.add_argument('--dry-run', action='store_true', help='Report without writing')
 
+    # record edits (adr/v1): consider, set, supersede, enact
+    p_consider = subparsers.add_parser('consider', help="Append a considered entry: the operator's answer (ADR-304 §12)")
+    p_consider.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
+    p_consider.add_argument('--said', help='What the operator said, verbatim (required)')
+    p_consider.add_argument('--via', help='Where it was said, such as a PR or a session (required)')
+    p_consider.add_argument('--operator', help='Who said it (default: the gh or git user)')
+    p_consider.add_argument('--covers', nargs='*', metavar='PROBE',
+                            help='Probe names from the Summary the answer covers (none given writes covers: [])')
+    p_consider.add_argument('--paraphrase', action='store_true', help='said is a summary, not the words')
+    p_consider.add_argument('--canary', choices=['caught', 'missed'], help='Whether the operator caught the canary')
+    p_consider.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_set = subparsers.add_parser('set', help='Edit frontmatter fields: key=value, key+=item, key-=item')
+    p_set.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
+    p_set.add_argument('assignments', nargs='+', metavar='key=value',
+                       help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
+    p_set.add_argument('--force', action='store_true',
+                       help='Edit a frozen field anyway, for migration cleanup (lint still reports it)')
+    p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_supersede = subparsers.add_parser('supersede', help='Record a supersession on both records (ADR-304 §3)')
+    p_supersede.add_argument('adr', help='The record replaced (e.g., 101, ADR-101)')
+    p_supersede.add_argument('--by', required=True, help='The record that replaces it')
+    p_supersede.add_argument('--amends', metavar='SECTION',
+                             help='Replace one section only: amends: [OLD#SECTION] on the new record')
+    p_supersede.add_argument('--force', action='store_true',
+                             help="Write the edge on an accepted record whose kind freezes it")
+    p_supersede.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+    p_enact = subparsers.add_parser('enact', help='Mark an accepted cut or retire done at a commit (ADR-304 §5)')
+    p_enact.add_argument('adr', help='ADR number (e.g., 111, ADR-111)')
+    p_enact.add_argument('commit', help='The commit hash that finished the removal')
+    p_enact.add_argument('--dry-run', action='store_true', help='Show the change without writing')
+
     # cite
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
@@ -3757,12 +5136,17 @@ def main():
         'index': cmd_index,
         'archive': cmd_archive,
         'domains': cmd_domains,
+        'domain': cmd_domain,
         'config': cmd_config,
         'cite': cmd_cite,
         'accept': cmd_accept,
         'reject': cmd_reject,
         'abandon': cmd_abandon,
         'import': cmd_import,
+        'consider': cmd_consider,
+        'set': cmd_set,
+        'supersede': cmd_supersede,
+        'enact': cmd_enact,
     }
 
     return commands[args.command](args)

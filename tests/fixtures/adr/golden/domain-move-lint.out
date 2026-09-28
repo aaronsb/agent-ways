@@ -1,0 +1,21 @@
+
+Scanned: 3 ADRs
+
+Status distribution:
+  accepted: 2
+  proposed: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+
+════════════════════════════════════════════════════════════
+Summary: 0 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

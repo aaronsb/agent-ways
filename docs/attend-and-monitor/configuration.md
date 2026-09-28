@@ -47,7 +47,7 @@ governor:
   max_per_window: 3          # max disclosures in rate_window
   rate_window: 120           # seconds of the rolling rate window
 
-# Action potential engagement model (ADR-119, unified in ADR-123)
+# Action potential engagement model (ADR-123)
 # Run `attend tune` to auto-derive these from real session history
 engagement:
   burst_threshold: 3         # disclosures before refractory kicks in
@@ -286,7 +286,7 @@ If you need something the parser doesn't handle, either restructure or file an i
 - **ADR-115** — declarative config with project-scope overlay (the pattern this implements)
 - **ADR-116** — permission requirements
 - **ADR-117** — sensor crate extraction (feature flags for compile-time sensor selection)
-- **ADR-119** — action potential engagement (the `engagement` block)
+- **ADR-123** — action potential engagement (the `engagement` block)
 - [`engagement.md`](engagement.md) — engagement model in depth
 - [`authoring-sensors.md`](authoring-sensors.md) — how to declare and write new sensors
 - [`sensors.md`](sensors.md) — the built-in sensors and their default values

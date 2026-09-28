@@ -1,6 +1,6 @@
 ---
 id: 01.007.E
-domain: system
+domain: ways
 mode: explanation
 related:
   - "[[01.001.E]]"

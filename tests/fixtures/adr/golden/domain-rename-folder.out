@@ -1,0 +1,7 @@
+Renamed domain: system → core
+  Folder: docs/architecture/system/ → docs/architecture/kernel/
+Rewrote 6 paths in 3 files
+  docs/architecture/system/ADR-109-precedent-chain.md: 1
+  docs/guide/hooks.md: 4
+  src/search.py: 1
+[exit 0]

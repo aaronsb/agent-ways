@@ -55,13 +55,49 @@ docs/scripts/adr config 2>/dev/null
 - Warn: yaml exists but no domains configured
 - Fail: no yaml
 
+**Check: Which contract is the project on?**
+
+`docs/scripts/adr config` prints `contract: adr/v1` when the project has
+adopted it; its absence means the project is on the legacy `adr/v0` contract.
+This is informational: it decides which of the checks below apply. A v0
+project is not deficient for staying on v0.
+
 **Check: Do ADRs pass lint?**
 ```bash
 docs/scripts/adr lint --check 2>/dev/null
 ```
 - Pass: exit code 0
-- Warn: warnings only (missing optional fields)
-- Fail: errors (missing frontmatter, invalid status, etc.)
+- Warn: warnings only (missing optional fields; under adr/v1, a warning also
+  covers a capability with no accepted `add` decision while the corpus still
+  has v0 records to migrate, per ADR-304 §6)
+- Fail: errors (missing frontmatter, invalid status, adr/v1 grammar violations, etc.)
+
+**Check: Do citations resolve? (`adr cite`)**
+```bash
+docs/scripts/adr cite --check 2>/dev/null
+```
+- Pass: exit code 0
+- Warn: a citation of a superseded or proposed record (the acceptance or
+  cleanup worklist), or of a record governed by a cut/retire before it's
+  enacted
+- Fail: a citation resolves to no record
+
+**Check: adr/v1 records carry the fields their kind requires.**
+
+Only when `adr config` shows `contract: adr/v1`. Run `docs/scripts/adr list
+--json` and confirm: every record has `kind`; every kind that `adr.yaml`'s
+`kinds:` block requires `capability` for has one; every `decision` opens with
+`## Summary`. `adr lint` already enforces all three, so a clean lint run
+covers this — use `adr list --field kind` / `--field capability` or the JSON
+output when pointing at specific gaps.
+
+- Pass: `adr lint` clean, and no v1 record is missing `kind`, `capability`, or
+  (for a decision) `## Summary`
+- Warn: v0 records remain in an otherwise-v1 corpus (expected mid-migration —
+  convert them with `adr import scan`/`apply`, ADR-306)
+- Fail: a v1 record is missing a required field, or `adr lint` reports a
+  grammar error
+- N/A: contract is adr/v0
 
 **Check: Are there orphaned ADRs?**
 
@@ -69,7 +105,8 @@ Look for `ADR-*.md` files outside `docs/architecture/`:
 ```bash
 find . -name 'ADR-*.md' -not -path './docs/architecture/*' -not -path './node_modules/*' -not -path './.git/*' 2>/dev/null
 ```
-Also check for ADRs in `docs/architecture/` that don't belong to any domain folder.
+Also check for ADRs in `docs/architecture/` that don't belong to any domain
+folder (under adr/v1, an area folder; ADR-310).
 
 - Pass: all ADRs in domain directories
 - Warn: ADRs in legacy/ (expected for migrated repos)
@@ -286,12 +323,21 @@ Read the scaffold ADR and extract what was decided:
 - What CODEOWNERS strategy was elected?
 - Which ways were created?
 - What GitHub config was set up?
+- On adr/v1, does the scaffold record itself carry the fields its kind
+  requires — `kind`, `capability`, and, if it's a decision, `## Summary`? A
+  clean `adr lint` and `adr cite` covers this the same way it covers the rest
+  of the corpus (§1).
 
 Then compare against reality:
 - **Domain drift**: Are there new directories/concerns that suggest a domain should be added?
 - **CODEOWNERS drift**: Do the paths and owners still match the codebase structure?
 - **Ways drift**: Were ways created that the ADR said would be? Were any removed?
 - **Scope drift**: Has the project grown beyond what the scaffold anticipated? (e.g., started as a CLI tool, now has a web frontend too)
+- **Capability drift (adr/v1 only)**: `docs/scripts/adr lint` warns when a
+  capability in `adr.yaml`'s vocabulary has no accepted `add` decision and is
+  not listed under `baseline` (ADR-305). A capability the codebase clearly
+  uses but the vocabulary lacks is a candidate for an `add`. The scaffold's
+  own capability list is a starting point.
 
 **If drift is detected:**
 
@@ -303,7 +349,8 @@ Then ask:
 
 This is the key value of the scaffold ADR — it makes drift visible and forces a conscious decision about whether to update the plan or fix the divergence.
 
-- Pass: scaffold ADR exists and current state matches
+- Pass: scaffold ADR exists, current state matches, and (adr/v1) it lints
+  clean with its citations resolving
 - Drift: scaffold ADR exists but state has diverged (present the delta)
 - Info: no scaffold ADR (project may predate `/project-init` or was set up manually)
 
@@ -350,7 +397,7 @@ Determine the overall tone from the category statuses:
 
 **Score: XX% (NN/MM checks pass)**
 
-### ADR Health: X/5
+### ADR Health: X/N (N varies: the v1-only checks are N/A on an adr/v0 project)
 | Check | Status | Detail |
 |-------|--------|--------|
 | ...   | ...    | ...    |

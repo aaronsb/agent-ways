@@ -13,7 +13,7 @@ This page covers what each built-in observes, what magnitudes it emits, and what
 | **peers** | Other Claude sessions + signal files | 30s | 10s | 2.0 | peer status changes, peer messages |
 | **processes** | Build/dev-tool processes | 30s | 5s | 2.0 | process start/exit (cargo, npm, make, etc.) |
 
-All four use the adaptive interval scheme — they poll fast (`min_interval`) during active change and slow (`base_interval`) when quiet. All four participate in the action potential engagement model (ADR-119) with the shared global config.
+All four use the adaptive interval scheme — they poll fast (`min_interval`) during active change and slow (`base_interval`) when quiet. All four participate in the action potential engagement model (ADR-123) with the shared global config.
 
 ## `sensor-context` — interoceptive
 
@@ -222,4 +222,4 @@ Almost everything falls into category 2. Crate sensors are for the core observat
 - **ADR-113** — the original design of attend, including the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-118** — focus groups (used by `sensor-peers`)
-- **ADR-119** — action potential engagement model
+- **ADR-123** — action potential engagement model

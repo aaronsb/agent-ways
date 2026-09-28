@@ -1,0 +1,2 @@
+Error: ADR-110 is not an adr/v1 record; `adr consider` edits v1 fields (ADR-304 §7).
+[exit 1]

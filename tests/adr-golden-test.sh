@@ -300,6 +300,14 @@ capture v1-summary-prefix-heading lint docs/architecture/system/ADR-108-ingest-o
 edit docs/architecture/system/ADR-108-ingest-over-v0.md "s.replace('## Summary Nudge\n', '## Summary: the short version\n', 1)"
 capture v1-summary-colon-heading lint docs/architecture/system/ADR-108-ingest-over-v0.md
 
+# An evidence kind (ADR-309): a basis that cites a record as evidence must
+# reach an evidence or spec record.
+fresh v1
+edit docs/architecture/adr.yaml "s.replace('basis: [decision, spec] }', 'basis: [decision, spec, evidence] }').replace('    edges: { supersedes: spec, decided_by: decision }\n', '    edges: { supersedes: spec, decided_by: decision }\n  evidence:\n    mutable_after_accept: [status, superseded_by, related]\n    verb: forbidden\n    requires: [capability]\n    edges: { supersedes: evidence }\n', 1)"
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: evidence\ncapability: ingest\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer]\n---\n\n# ADR-117: Ingest throughput survey\n\nMeasured 40 MB/s on the reference host.\n' > docs/architecture/system/ADR-117-ingest-throughput-survey.md)
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: change\ncapability: ingest\nsupersedes: [ADR-103]\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: ADR-117\n  - evidence: ADR-101\n  - evidence: ADR-999\n---\n\n# ADR-118: Raise the ingest batch size\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md)
+capture v1-evidence-kind lint docs/architecture/system/ADR-117-ingest-throughput-survey.md docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md
+
 # Baseline capabilities (ADR-305). export joins the vocabulary as a baseline
 # capability adopted on 2025-05-10: it needs no add decision.
 baseline_fresh() {
@@ -591,6 +599,210 @@ capture import-apply-status import apply --partial
 fresh v1
 printf '\357\273\277---\nstatus: Accepted\ndate: 2025-04-01\ndeciders: [developer]\n---\n\n# ADR-117: With a BOM\n' > "$WORK/repo/docs/architecture/system/ADR-117-with-a-bom.md"
 capture import-scan-bom import scan docs/architecture/system/ADR-117-with-a-bom.md
+
+# --- adr domain (ADR-306 §6) ------------------------------------------------------
+# A record's number is its identity and never changes. Under adr/v1 its folder
+# decides its domain; a domain's range only allocates new numbers.
+
+# add: the entry is written into adr.yaml's domains block as text, so the
+# file's comments and layout stay. Overlapping ranges, a taken folder or name
+# and a backwards range are refused.
+fresh v1
+capture domain-add domain add docs --range 300-399 --folder documentation --label Documentation --description "Guides and references"
+keep domain-add-config.yaml docs/architecture/adr.yaml
+capture domain-add-overlap domain add ops --range 150-250 --folder operations
+capture domain-add-refused domain add docs --range 400-300 --folder system
+worktree domain-add-refused-status.txt
+fresh corpus
+capture domain-add-v0 domain add api --range 400-499 --folder api --label "API surface"
+keep domain-add-v0-config.yaml docs/architecture/adr.yaml
+capture domain-add-legacy-overlap domain add early --range 50-60 --folder early
+
+# rename: the domain key, its folder moved with git mv, every path into the
+# folder rewritten, and a catalog page's domain: key. Links between records
+# keep their shape, and lint sees no edit of a frozen decision.
+rename_fresh() {
+  fresh v1
+  mkdir -p "$WORK/repo/docs/guide"
+  printf -- '---\ndomain: system\n---\n\n# Hooks guide\n\nSee [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104.\nRecords live in docs/architecture/system/ and [the folder](../architecture/system/).\n' > "$WORK/repo/docs/guide/hooks.md"
+  edit docs/architecture/system/ADR-109-precedent-chain.md "s + '\n## 3. Notes\n\nSee [the constraint](../system/ADR-104-no-network-in-hooks.md).\n'"
+  edit src/search.py "s + '# ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md\n'"
+  commit_all "references"
+}
+rename_fresh
+capture domain-rename-dry domain rename system platform --dry-run
+worktree domain-rename-dry-status.txt
+capture domain-rename domain rename system platform
+worktree domain-rename-status.txt
+keep domain-rename-config.yaml docs/architecture/adr.yaml
+keep domain-rename-guide.md docs/guide/hooks.md
+keep domain-rename-109.md docs/architecture/platform/ADR-109-precedent-chain.md
+keep domain-rename-search.py src/search.py
+capture domain-rename-lint lint
+capture domain-rename-list list --group
+rename_fresh
+capture domain-rename-unknown domain rename nosuch other
+capture domain-rename-refused domain rename system system --folder archive
+capture domain-rename-same domain rename system system
+capture domain-rename-folder domain rename system core --folder kernel
+worktree domain-rename-folder-status.txt
+
+# move: the file goes to the target domain's folder with its number and slug;
+# path references are rewritten and ADR-N citations are not. ADR-104 then
+# sits outside the docs range, which is valid under adr/v1.
+move_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description "Guides" > /dev/null \
+    && "$ADR_TOOL" index -y > /dev/null)
+  mkdir -p "$WORK/repo/docs/guide"
+  printf -- '---\ndomain: system\n---\n\n# Hooks guide\n\nSee [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104#1.\n' > "$WORK/repo/docs/guide/hooks.md"
+  edit docs/architecture/system/ADR-109-precedent-chain.md "s + '\n## 3. Notes\n\nADR-104 applies; see [the constraint](ADR-104-no-network-in-hooks.md) and [ingest](./ADR-101-ingest.md).\n'"
+  edit docs/architecture/system/ADR-111-cut-search.md "s + '\nSee [ADR-104](ADR-104-no-network-in-hooks.md).\n'"
+  # The record that moves links to a sibling that stays, by bare file name.
+  edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s + '\nSee [the chain](ADR-109-precedent-chain.md).\n'"
+  edit src/search.py "s + '# ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md\n# ADR-1040 and ADR-104.1 are other numbers.\n'"
+  commit_all "references"
+}
+move_fresh
+capture domain-move-dry domain move 104 docs --dry-run
+worktree domain-move-dry-status.txt
+capture domain-move domain move ADR-104 docs
+worktree domain-move-status.txt
+keep domain-move-104.md docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+keep domain-move-109.md docs/architecture/system/ADR-109-precedent-chain.md
+keep domain-move-guide.md docs/guide/hooks.md
+keep domain-move-search.py src/search.py
+keep domain-move-index.md docs/architecture/INDEX.md
+capture domain-move-lint lint docs/architecture/documentation/ADR-104-no-network-in-hooks.md docs/architecture/system/ADR-109-precedent-chain.md docs/architecture/system/ADR-111-cut-search.md
+capture domain-move-list list --group
+capture domain-move-cite cite --no-inventory src/search.py docs/guide
+capture domain-move-scan import scan docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+capture domain-move-again domain move 104 docs
+# Numbers stay allocated by range, across every record wherever it sits.
+capture domain-move-new-docs new docs "Style guide"
+capture domain-move-new-system new system "Queue limits"
+capture domain-move-refused domain move 999 nowhere
+
+# A plan applies several moves at once: ADR-104 and ADR-111 move together, so
+# ADR-111's link to ADR-104 stays a sibling link.
+move_fresh
+printf -- '- {record: 104, domain: docs}\n- {record: ADR-111, domain: docs}\n' > "$WORK/plan.yaml"
+capture domain-move-plan domain move --plan "$WORK/plan.yaml"
+worktree domain-move-plan-status.txt
+keep domain-move-plan-111.md docs/architecture/documentation/ADR-111-cut-search.md
+keep domain-move-plan-109.md docs/architecture/system/ADR-109-precedent-chain.md
+move_fresh
+printf -- '- {record: 104, domain: docs, number: 300}\n' > "$WORK/plan.yaml"
+capture domain-move-plan-number domain move --plan "$WORK/plan.yaml"
+printf -- '- {record: 104, domain: docs}\n- {record: ADR-104, domain: docs}\n' > "$WORK/plan.yaml"
+capture domain-move-plan-twice domain move --plan "$WORK/plan.yaml"
+worktree domain-move-plan-refused-status.txt
+
+# Under adr/v0 the number decides the domain, so a move is refused.
+fresh corpus
+capture domain-move-v0 domain move 104 docs
+# --- record edits: consider, set, supersede, enact ----------------------------------
+#
+# Each edit keeps the file it wrote, so the goldens show that only the touched
+# field's lines changed.
+
+S="docs/architecture/system"
+# named_probes — an accepted record whose Summary names its probes
+named_probes() {
+  (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: adr\nstatus: accepted\ndate: 2025-05-20\ndeciders: [developer, agent]\nagent: {name: Claude, model: fixture-model}\nbasis:\n  - evidence: fixture measurement\n---\n\n# ADR-115: Named probes\n\n## Summary\n\n- **Decided:** the decision.\n- **Probes:** *Confident (identity-stable):* a. *Not confident (band-hint):* b.\n- **Inversion:** c.\n\n## 1. Decision\n\nThe decision.\n' > "$S/ADR-115-named-probes.md")
+  commit_all "named probes"
+}
+
+fresh v1
+named_probes
+capture record-consider         consider 115 --said '"Fine" (Recommended)' --via "session 2025-05-20, selected from agent-written options" --operator developer --covers band-hint inversion --canary caught
+keep record-consider-file.md "$S/ADR-115-named-probes.md"
+capture record-consider-append  consider 100 --said "ok, as it stands" --via "PR #2" --operator developer --covers
+keep record-consider-append-file.md "$S/ADR-100-adopt-v1.md"
+capture record-consider-new     consider 113 --said "add it back" --via call --operator developer --paraphrase
+keep record-consider-new-file.md "$S/ADR-113-operator-proposed.md"
+worktree record-consider-status.txt
+capture record-consider-unknown-probe consider 115 --said ok --via PR --operator developer --covers identity-stable no-such-probe
+capture record-consider-no-names      consider 101 --said ok --via PR --operator developer --covers edge-case
+capture record-consider-no-said       consider 115 --via PR --operator developer
+capture record-consider-no-via        consider 115 --said ok --via "  " --operator developer
+capture record-consider-v0            consider 110 --said ok --via PR --operator developer
+
+fresh v1
+capture record-set              set 106 "capability=[search, ingest]" "related=[ADR-100, ADR-101]" extends-=ADR-100 date=2025-05-17
+keep record-set-file.md "$S/ADR-106-search-change.md"
+capture record-set-remove-block set 106 related-=ADR-100
+keep record-set-remove-block-file.md "$S/ADR-106-search-change.md"
+capture record-set-append-block set 114 "basis+={evidence: a second load test}" "concern+={said: Retries may double, resolve: Count retries}"
+keep record-set-append-block-file.md "$S/ADR-114-open-concern.md"
+capture record-set-mutable      set 103 superseded_by+=ADR-107
+keep record-set-mutable-file.md "$S/ADR-103-ingest-batching.md"
+capture record-set-v0           set 110 status=Superseded
+keep record-set-v0-file.md "$S/ADR-110-old-v0-record.md"
+worktree record-set-status.txt
+capture record-set-frozen       set 101 capability=search "related=[ADR-100]"
+capture record-set-status-cmd   set 106 status=accepted
+capture record-set-status-other set 106 status=proposed
+capture record-set-remove-missing set 106 related-=ADR-9
+capture record-set-bad-yaml     set 106 "related=[ADR-1"
+capture record-set-bad-form     set 106 related
+capture record-set-unknown-key  set 106 capabilty=search
+
+fresh v1
+capture record-set-dry-run      set 106 verb=add --dry-run
+worktree record-set-dry-run-status.txt
+capture record-set-force       set 101 verb=change --force
+keep record-set-force-file.md "$S/ADR-101-ingest.md"
+
+# Line endings survive a field edit.
+fresh v1
+edit "$S/ADR-114-open-concern.md" "s.replace(chr(10), chr(13)+chr(10))"
+capture record-set-crlf         set 114 "basis+={evidence: a second load test}"
+(cd "$WORK/repo" && python3 -c "import sys; d=open(sys.argv[1],'rb').read(); print('crlf kept' if b'\\r\\n' in d and d.count(b'\\n')==d.count(b'\\r\\n') else 'crlf lost')" "$S/ADR-114-open-concern.md") > "$ACTUAL/record-set-crlf-file.txt"
+
+fresh v1
+capture record-list-field       list --field capability=ingest
+capture record-list-capability  list --capability adr
+capture record-list-kind        list --kind spec
+capture record-list-verb        list --verb change --field status=proposed
+capture record-list-edge        list --field amends=ADR-101
+capture record-list-present     list --field supersedes
+capture record-list-group-by    list --group-by capability
+capture record-list-json        list --json --verb retire
+capture record-list-json-group  list --json --group-by verb --field enacted
+fresh corpus
+capture record-list-group-by-v0 list --group-by status
+
+fresh v1
+capture record-supersede        supersede 101 --by 106
+keep record-supersede-new-file.md "$S/ADR-106-search-change.md"
+keep record-supersede-old-file.md "$S/ADR-101-ingest.md"
+worktree record-supersede-status.txt
+
+fresh v1
+capture record-supersede-amends supersede 100 --by 107 --amends 2
+keep record-supersede-amends-file.md "$S/ADR-107-ingest-notes.md"
+worktree record-supersede-amends-status.txt
+capture record-supersede-no-section   supersede 100 --by 108 --amends 9
+capture record-supersede-kind         supersede 102 --by 106
+capture record-supersede-old-proposed supersede 113 --by 106
+capture record-supersede-frozen       supersede 101 --by 104
+capture reject-for-supersede          reject 108 --reason "Dropped"
+capture record-supersede-new-rejected supersede 101 --by 108
+
+fresh v1
+capture record-supersede-force  supersede 101 --by 104 --force
+keep record-supersede-force-file.md "$S/ADR-104-no-network-in-hooks.md"
+
+fresh v1
+capture record-enact            enact 111 ABC1234
+keep record-enact-file.md "$S/ADR-111-cut-search.md"
+capture record-enact-again      enact 105 3f9c2a1dead
+keep record-enact-again-file.md "$S/ADR-105-retire-legacy-ingest.md"
+capture record-enact-wrong-verb enact 101 abc1234
+capture record-enact-not-hash   enact 111 HEAD~1
+capture set-for-enact           set 111 status=superseded --force
+capture record-enact-wrong-status enact 111 abc1234
 
 fresh v1-defects
 capture v1-defects-lint        lint

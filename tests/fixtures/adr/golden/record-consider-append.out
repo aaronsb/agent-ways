@@ -1,0 +1,3 @@
+Added considered entry 2 to ADR-100: Adopt the adr/v1 contract
+Lint docs/architecture/system/ADR-100-adopt-v1.md: clean
+[exit 0]

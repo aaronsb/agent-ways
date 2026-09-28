@@ -1,0 +1,2 @@
+Error: ADR-115 has no probe 'no-such-probe'. Names it can cover: identity-stable, band-hint, inversion.
+[exit 1]

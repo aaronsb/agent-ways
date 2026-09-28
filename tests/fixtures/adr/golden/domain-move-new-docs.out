@@ -1,0 +1,5 @@
+Created: docs/architecture/documentation/ADR-300-style-guide.md
+  Domain: Docs (docs)
+  Number: ADR-300
+  Contract: adr/v1 (fill the empty fields; `adr lint` lists them)
+[exit 0]

@@ -1,0 +1,5 @@
+Set basis, concern on ADR-114: Cap batch size
+Lint docs/architecture/system/ADR-114-open-concern.md:
+  ⚠️ open concern: Batch size may starve small tenants
+  ⚠️ open concern: Retries may double
+[exit 0]

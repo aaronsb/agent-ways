@@ -85,8 +85,8 @@ removal of the multiplier. τ_k (keyword floor) is global and is **not** parent-
 
 - `ways tune` — locale alias audit (fidelity / discrimination vs the English root
   anchor), ADR-139/125. Never writes relevance thresholds.
-- Salience / signal **decay** — ADR-121 turn-based exponential; a distinct model.
-- Progressive disclosure and token-gated re-fire (ADR-104/105/126); `refire` as a
+- Salience / signal **decay** — ADR-123 exponential over a progression axis; a distinct model.
+- Progressive disclosure and token-gated re-fire (ADR-105/123/126); `refire` as a
   fraction of the context window (ADR-126); three-root runtime (ADR-143); sentence-
   salience input reduction (ADR-130); authored disclosure graph / no BM25 (ADR-125).
 

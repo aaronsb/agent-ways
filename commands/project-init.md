@@ -25,7 +25,7 @@ Mark each task `in_progress` as you start it, `completed` when done. This is you
 
 **Read these docs first** — you need the full landscape before your first question:
 
-1. Read `~/.claude/hooks/ways/documentation/adr/migration/migration.md` — understand the five starting states (greenfield, flat directory, inline metadata, scattered, different tool) and migration strategies
+1. Read `~/.claude/hooks/ways/documentation/adr/migration/migration.md` — understand the starting states (greenfield, flat directory, v0 frontmatter, inline metadata, other tools) and the conversion path. Existing records named `ADR-NNN-*.md` with YAML frontmatter convert into adr/v1 through `docs/scripts/adr import scan <paths>` then `adr import apply` (ADR-306). Sequential `0001-*.md` files and inline metadata need renaming and frontmatter first, as the migration way describes.
 2. Read `~/.claude/hooks/ways/softwaredev/delivery/github/github.md` — understand PR-always stance, repo health expectations
 3. Read `~/.claude/hooks/ways/softwaredev/docs/docs.md` — understand documentation scaling by project complexity
 
@@ -141,6 +141,8 @@ Use `AskUserQuestion` with focused multiple-choice questions. Adapt based on ans
 
 If ADRs need setup or reorganization:
 
+**Contract**: ask whether the project adopts `adr/v1` (typed decision/spec/evidence records with verb, capability, basis, and lifecycle commands, ADR-304) or stays on the legacy `adr/v0` contract (Draft/Proposed/Accepted/Superseded/Deprecated status, Context/Decision/Consequences/Alternatives Considered). Recommend v1 for a new or actively-decided project; v0 is a reasonable choice for a project that just wants a lightweight decision log. Either way, name the capabilities the project's domains cover — under v1 these seed the `capabilities` vocabulary, and the ones the project already has go under `baseline` in `adr.yaml` with the adoption date, so they need no `add` decision (ADR-305). A capability declared after adoption gets an `add`.
+
 **For greenfield:**
 - Analyze the codebase structure (directory layout, package organization)
 - Propose 3-6 domains based on what you see
@@ -150,10 +152,10 @@ If ADRs need setup or reorganization:
 **For brownfield with existing ADRs:**
 - List what exists: how many ADRs, what format, what topics they cover
 - **Lint them immediately** — run the ADR tool's linter (or manually check frontmatter) and show the user what's broken: missing frontmatter, inline metadata that needs conversion, invalid statuses, missing fields
-- **Offer to fix the existing ADRs first** before proposing reorganization. "I found 8 ADRs — 3 are missing frontmatter, 2 have inline metadata instead of YAML. Want me to fix these up before we talk about domain organization?"
+- **Convert through import sheets.** `docs/scripts/adr import scan <paths>` writes an editable sheet per `ADR-NNN-*.md` record with frontmatter under `.import/` (rename and add frontmatter first for anything else); the user (or you, with their review) fills in the gaps a source format can't answer — kind, verb, capability, basis; `docs/scripts/adr import apply` then writes them as adr/v1 records (ADR-306). Offer this before proposing reorganization: "I found 8 ADRs. Want me to scan them into import sheets so we can bring them into the new contract?"
 - Show a proposed domain mapping: which existing ADRs belong to which domain based on their content
 - Ask about the migration approach: park as legacy and go forward, or reorganize everything
-- If reorganizing: show the move plan (which files go where) and get approval before touching anything
+- If reorganizing: show the move plan (which files go where) and get approval before touching anything; under adr/v1 a move keeps the record's number (ADR-310)
 
 ### GitHub Interview
 
@@ -212,7 +214,7 @@ After entry questions and ADR domains, present the **full artifact menu** with r
 | Planning | Dependency policy | `docs/policies/dependencies.md` |
 | Planning | Migration guide template | `docs/migration/TEMPLATE.md` |
 
-**RFCs as an ADR domain**: If the user selects RFCs, add an `rfc` domain to `adr.yaml` with its own range. RFCs use the same tooling but with an extended status flow: `Proposed → Discussing → Accepted → Rejected → Withdrawn`. The ADR tool handles this naturally — it's just a domain with different status conventions documented in the scaffold ADR.
+**RFCs as an ADR domain**: If the user selects RFCs, add an `rfc` domain to `adr.yaml` with its own range. On adr/v0, RFCs can use an extended status flow (`Proposed → Discussing → Accepted → Rejected → Withdrawn`) documented as a convention in the scaffold ADR; adr/v0's `statuses` list is project-wide, so this is a documented convention for the domain rather than a tool-enforced one. adr/v1's status set is fixed by the contract (proposed, accepted, rejected, abandoned, superseded, archived) — an RFC there is a `decision` record like any other, and a "Discussing" stage is a proposed record awaiting `consider`/`accept`.
 
 RFCs can reference internal or external sources — an RFC might propose adopting an external standard (linking to the spec), or it might be an internal design document that lives entirely in the repo. The `related:` frontmatter field supports both: internal ADR cross-references and external URLs. Ask during the interview whether the project uses external references (specs, standards, upstream RFCs) so the scaffold ADR can document the convention.
 
@@ -265,9 +267,9 @@ The scaffold itself is an architectural decision. After the interview, **create 
 - CODEOWNERS strategy (if applicable)
 - What was deferred or declined
 
-This ADR is collaborative — draft it from the interview answers, show it to the user, and iterate. The user influences the content. Use `docs/scripts/adr new meta "Adopt software engineering scaffold"` (or whatever the project management domain is named).
+This ADR is collaborative — draft it from the interview answers, show it to the user, and iterate. The user influences the content. On adr/v0, use `docs/scripts/adr new meta "Adopt software engineering scaffold"` (or whatever the project management domain is named). On adr/v1, add `--kind decision --verb add --capability <name>` naming the capability the scaffold itself establishes, and `--agent`/`--model`.
 
-Example structure:
+Example structure (adr/v0 — the legacy contract's Context/Decision/Consequences shape):
 ```markdown
 # ADR-NNN: Adopt Software Engineering Scaffold
 
@@ -297,7 +299,9 @@ We adopt the following practices:
 - [what was deferred: items declined during interview]
 ```
 
-**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project.
+On adr/v1, the scaffold record opens with `## Summary` (decided, trades away, one-way?, probes, inversion) instead, and its `basis` names the interview as an `operator` entry, quoting the operator's answers. `docs/scripts/adr new --help` and `adr lint` confirm the fields the chosen kind requires.
+
+**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project. On adr/v1 it stays `proposed` while the scaffold changes: at the end, ask the operator its probes, record the answer with `docs/scripts/adr consider <n> --said "..." --via "..."`, then `docs/scripts/adr accept <n>`. After acceptance its body is frozen, and a later change is a new decision.
 
 ### Sub-Agent Delegation
 
@@ -315,17 +319,26 @@ These are `subagent_type` values for the `Task` tool:
 parts the skill can't know:
 
 1. Vendor the tool via the **adr** skill (it copies `adr-tool` → `docs/scripts/adr`
-   and seeds `docs/architecture/adr.yaml` from the template).
+   and seeds `docs/architecture/adr.yaml` from the template). The template declares
+   `contract: adr/v1` with the decision, spec and evidence kinds, a placeholder
+   capability listed in `baseline`, dated by the skill's vendoring step.
 
 2. Customize `docs/architecture/adr.yaml` with the interview answers:
    - Project name
    - Domains with ranges (100-wide ranges, 1-99 for legacy)
-   - Statuses list
+   - Under adr/v1 (the template's default): replace the placeholder
+     `capabilities` with one line per capability the interview named, and
+     keep in `baseline.capabilities` the ones that already exist
    - Default deciders (from git/gh config)
 
-3. Create domain subdirectories under `docs/architecture/`
+3. Create domain subdirectories under `docs/architecture/`. Under adr/v1 these are
+   intent areas (ADR-310): a domain's range only allocates new numbers, and a
+   record moving between areas keeps its number.
 
-4. For brownfield: execute the appropriate migration strategy per the migration way
+4. For brownfield: convert existing records with `docs/scripts/adr import scan
+   <paths>` then `docs/scripts/adr import apply` (ADR-306), or, for a starting
+   state with nothing the importer reads, execute the appropriate migration
+   strategy per the migration way
 
 5. Validate:
    ```bash

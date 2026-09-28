@@ -106,29 +106,36 @@ def parse_text(content: str, path: Path) -> ADRInfo:
             info.title = match.group(2)
             break
 
-    # Determine domain from number range (authoritative) or folder name (fallback)
-    # Range takes precedence: an ADR's number definitively places it in a domain,
-    # even if the file is physically in a different domain's folder.
-    if info.number:
-        try:
-            base_num = int(info.number.split('.')[0])
+    # Determine the domain. Under adr/v0 the number range is authoritative and
+    # the folder is the fallback: a number definitively places a record, even
+    # in another domain's folder. Under adr/v1 a number is only an identity,
+    # never renumbered (ADR-306 §6): the folder decides, and the range, which
+    # allocates new numbers, is the fallback for a folder no domain names.
+    def domain_by_range():
+        if info.number:
+            try:
+                base_num = int(info.number.split('.')[0])
+            except ValueError:
+                return None
             for domain, config in get_domains().items():
                 if config['range'][0] <= base_num <= config['range'][1]:
-                    info.domain = domain
-                    break
-        except ValueError:
-            pass
+                    return domain
+        return None
 
-    # Fallback: determine from folder name (for unnumbered or out-of-range ADRs)
-    if not info.domain:
+    def domain_by_folder():
         folder_name = path.parent.name
         for domain, config in get_domains().items():
             folders = config['folder']
             if isinstance(folders, str):
                 folders = [folders]
             if folder_name in folders:
-                info.domain = domain
-                break
+                return domain
+        return None
+
+    if repo_contract() == 'adr/v1':
+        info.domain = domain_by_folder() or domain_by_range()
+    else:
+        info.domain = domain_by_range() or domain_by_folder()
 
     return info
 

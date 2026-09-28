@@ -1,0 +1,13 @@
+--- a/docs/architecture/system/ADR-106-search-change.md
++++ b/docs/architecture/system/ADR-106-search-change.md
+@@ -1,7 +1,7 @@
+ ---
+ contract: adr/v1
+ kind: decision
+-verb: change
++verb: add
+ capability: search
+ amends: [ADR-104#1]
+ extends: [ADR-100]
+Dry run, nothing written: Set verb on ADR-106: Search result caps
+[exit 0]

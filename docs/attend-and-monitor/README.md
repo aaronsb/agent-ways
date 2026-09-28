@@ -6,7 +6,7 @@ This directory documents the active awareness layer. Attend gives a session the 
 
 Monitor is Claude Code's general-purpose async delivery mechanism: launch a command, stream its stdout as notifications. Anthropic's assumption in designing it seems to be that Claude will wire up whatever ad-hoc command fits the moment — a `tail -f`, a `cargo watch`, a bespoke shell pipeline — and let Monitor relay whatever comes out. That's a powerful primitive but it puts the burden on every Claude session to reinvent the observation logic from scratch.
 
-**Attend is Monitor with intention.** It's a long-lived logic module that Claude doesn't have to tune case by case. It knows what kinds of changes matter, it governs their rate and salience through a formal engagement model (ADR-119, borrowing the activation-decay shape from ACT-R), it routes messages between peer agents through focus groups (ADR-118), and it cleans up after itself (ADR-121 for presentation decay, plus the 30-day disk sweep). Its emission governor is alarm management (ISA-18.2) applied to agent notifications — rate-limiting what reaches the conversation so the channel stays trustworthy instead of noisy. A Claude session drops into attend and gets a stable, opinionated awareness channel for free.
+**Attend is Monitor with intention.** It's a long-lived logic module that Claude doesn't have to tune case by case. It knows what kinds of changes matter, it governs their rate and salience through a formal engagement model (ADR-123, borrowing the activation-decay shape from ACT-R), it routes messages between peer agents through focus groups (ADR-118), and it cleans up after itself (ADR-123 for presentation decay, plus the 30-day disk sweep). Its emission governor is alarm management (ISA-18.2) applied to agent notifications — rate-limiting what reaches the conversation so the channel stays trustworthy instead of noisy. A Claude session drops into attend and gets a stable, opinionated awareness channel for free.
 
 Said another way: **Monitor is a delivery mechanism; attend is the editorial layer that decides what's worth delivering.** That editorial policy is calm technology (Weiser & Brown) applied to a coding session: most changes stay in the periphery, and only what deserves attention moves to the center. The combination turns "sporadic unpredictable state" into a structured stream of observations the agent can act on.
 
@@ -62,7 +62,7 @@ See [`authoring-sensors.md`](authoring-sensors.md) for the full author's guide, 
 | [`sensors.md`](sensors.md) | What each built-in sensor observes and how it emits (planned) |
 | [`signals.md`](signals.md) | Signal file format, storage layout, lifecycle (planned) |
 | [`engagement.md`](engagement.md) | Action potential model in prose and diagrams (planned) |
-| [`salience.md`](salience.md) | Turn-based presentation decay — the ADR-121 mechanism (planned) |
+| [`salience.md`](salience.md) | Presentation decay — the outward gate of the ADR-123 engine |
 | [`focus-groups.md`](focus-groups.md) | Dynamic group membership and signal routing (planned) |
 | [`configuration.md`](configuration.md) | Config schema, overlay semantics, tuning workflow (planned) |
 
@@ -84,17 +84,18 @@ Files marked **planned** are part of the ongoing documentation pass.
 ## Related docs
 
 - [`../vocabulary.md`](../vocabulary.md) — terminology anchors mapping the project's coined terms to their established concepts (ADR-301)
-- **ADR-113** (`docs/architecture/system/`) — the original decision to build attend as an active awareness module
+- **ADR-113** (`docs/architecture/ways/`) — the original decision to build attend as an active awareness module
 - **ADR-114** — attend as an insistent trigger type for ways
 - **ADR-115** — declarative config with project-scope overlay
 - **ADR-116** — permission requirements
 - **ADR-117** — sensor crate extraction
 - **ADR-118** — focus groups, dynamic agent grouping
-- **ADR-119** — action potential engagement model
+- **ADR-119** — action potential engagement model (superseded by ADR-123) <!-- adr-cite-ignore -->
 - **ADR-120** — interactive chat TUI, human in the signal loop
-- **ADR-121** — salience decay for signal presentation (draft)
+- **ADR-121** — salience decay for signal presentation (superseded by ADR-123) <!-- adr-cite-ignore -->
+- **ADR-123** — firing dynamics unification; the engagement and salience engine in force
 - `docs/hooks-and-ways/` — sibling docs for the synchronous hook mechanism
-- `docs/design-notes/cognitive-loop-and-awareness-layer.md` — earlier design exploration that informed ADR-113
+- `docs/architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md` — earlier design exploration that informed ADR-113
 
 ## Where the code lives
 

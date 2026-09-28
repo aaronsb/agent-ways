@@ -83,7 +83,7 @@ splitting files is a later pass.
 
 Return the COMPLETE rewritten file in rewritten_content, and a claims_ledger listing EVERY engine
 fact you asserted with its source citation. Sober, literal voice. Do not touch the still-current
-mechanisms (ways tune locale audit, salience decay ADR-121, progressive disclosure).`
+mechanisms (ways tune locale audit, salience decay ADR-123, progressive disclosure).`
 }
 
 function bannerPrompt(f) {

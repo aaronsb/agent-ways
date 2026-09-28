@@ -102,7 +102,7 @@ flowchart LR
     Write[write .tmp<br/>rename to .signal]
     Scan[peer sensor scans<br/>reads new files]
     Present[present to agent<br/>via Monitor]
-    Age[age with turns<br/>ADR-121 salience decay]
+    Age[age over time<br/>ADR-123 salience decay]
     Below[below presentation floor<br/>no longer shown]
     Cleanup[auto-cleanup sweep<br/>every 10 min]
     Delete[file removed<br/>after 30 days]
@@ -134,7 +134,7 @@ flowchart LR
 
 **Phase 3 — presentation.** Observations become events in the peer sensor's accumulator, feed into engagement/governor, and if they survive all the gates, emit as Monitor notification lines into the conversation. The agent sees them; the human (if running `attend chat`) sees them in the TUI.
 
-**Phase 4 — salience decay (ADR-121, drafted).** Once presented, a signal carries a salience that decays over turns. After its salience drops below the presentation floor, the signal stops appearing in notifications — but the file stays on disk. Re-engagement (a reply or reference) resets salience to 1.0 and the signal is visible again.
+**Phase 4 — salience decay (ADR-123).** Once presented, a signal carries a salience that decays as time passes. After its salience drops below the presentation floor, the signal stops appearing in notifications — but the file stays on disk. Re-engagement (a reply or reference) resets salience to 1.0 and the signal is visible again.
 
 **Phase 5 — auto-cleanup.** Every `cleanup.interval` seconds (default 10 minutes), the attend loop runs a sweep of the signals base. Any `.signal` file older than `cleanup.retention` (default 30 days) is removed. Empty project subdirs left behind after the file removal are also cleaned up.
 
@@ -150,7 +150,7 @@ Signals have **two different retention windows** that operate at different scale
 
 | | Disk retention | Attention window |
 |---|---|---|
-| **Unit** | Time (30 days) | Turns (half-life 20, per ADR-121) |
+| **Unit** | Time (30 days) | Turns (half-life 20, per ADR-121) | <!-- adr-cite-ignore -->
 | **Purpose** | Bulk storage hygiene | Presentation relevance |
 | **Controlled by** | `cleanup.retention` config | `attention.half_life` (planned) |
 | **Observable in** | Disk usage | Which signals Monitor notifies about |
@@ -158,7 +158,7 @@ Signals have **two different retention windows** that operate at different scale
 
 The short answer on why two units: **precision where it matters, convenience where it doesn't.** Attention works in turns because turn pacing varies too much to use wall-clock time at fine grain. Disk retention works in time because at 30-day horizons the variance averages out and "30 days" is a human-readable unit everyone intuits.
 
-See [`salience.md`](salience.md) for the attention side and the ADR-121 decay curve math.
+See [`salience.md`](salience.md) for the attention side and the ADR-123 decay curve math.
 
 ## Reading signals in tooling
 
@@ -176,7 +176,7 @@ Reading from `_broadcast/` gives you cross-agent visibility. Reading from `@<nam
 - **ADR-113** — the original attend design, including signal dir conventions
 - **ADR-118** — focus groups, `@<name>` directories
 - **ADR-120** — `attend chat`, the `re:` threading field
-- **ADR-121** — salience decay on the presentation side
+- **ADR-123** — salience decay on the presentation side
 - [`loop.md`](loop.md) — where signals are scanned and emitted in the loop
 - [`tui.md`](tui.md) — how the TUI reads and writes signals
 - [`focus-groups.md`](focus-groups.md) *(planned)* — `@<name>` dir management in detail

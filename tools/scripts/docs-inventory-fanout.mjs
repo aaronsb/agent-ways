@@ -42,9 +42,9 @@ RETIRED / STALE — flag any doc that still teaches these as live:
 STILL CURRENT (do NOT flag these as stale):
 - \`ways tune\` = LOCALE alias audit (fidelity/discrimination vs the English root
   anchor), ADR-139/125. It explicitly does NOT write thresholds. Correct as-is.
-- Salience/signal DECAY: turn-based exponential decay (ADR-121) — a separate model
+- Salience/signal DECAY: exponential decay over a progression axis (ADR-123) — a separate model
   from relevance scoring; still valid.
-- Progressive disclosure, token-gated re-fire (ADR-104/105/126), three-root runtime
+- Progressive disclosure, token-gated re-fire (ADR-105/123/126), three-root runtime
   (ADR-143), sentence-salience input reduction (ADR-130), authored disclosure graph /
   removal of BM25 (ADR-125), two embedding models EN + multilingual (localized mode).
 - ADRs themselves are immutable decision records — an ADR describing the pre-156 world

@@ -1,0 +1,4 @@
+Error: domain 'docs' already exists
+Error: --range 400-300 runs backwards
+Error: folder 'system' already belongs to system
+[exit 1]

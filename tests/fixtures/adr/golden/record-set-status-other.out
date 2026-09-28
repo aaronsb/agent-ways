@@ -1,0 +1,2 @@
+Refused: a record's status changes only through accept, reject, abandon, supersede and archive. --force sets the status anyway.
+[exit 1]

@@ -231,7 +231,7 @@ pub fn detect_legacy_redisclose(yaml_str: &str) -> Result<()> {
             return Err(anyhow!(
                 "legacy `redisclose:` field is no longer supported — \
                 migrate to an explicit `curve:` block per ADR-123. See \
-                docs/architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md \
+                docs/architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md \
                 for migration guidance."
             ));
         }

@@ -138,7 +138,7 @@ Turn 4 (project without Makefile): same bash → check does NOT fire
 
 Tests: `when:` project gate, `when:` file_exists gate.
 
-### Scenario 8: Token-Gated Re-Disclosure (ADR-104)
+### Scenario 8: Token-Gated Re-Disclosure (ADR-123, ADR-126)
 
 ```
 Turn 1: prompt → way fires, token position stamped

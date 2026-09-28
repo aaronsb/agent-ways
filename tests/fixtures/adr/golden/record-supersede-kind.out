@@ -1,0 +1,2 @@
+Error: a decision record cannot supersede a spec: for a decision, supersedes points at decision records (adr.yaml kinds.decision.edges).
+[exit 1]

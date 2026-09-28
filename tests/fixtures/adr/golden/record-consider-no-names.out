@@ -1,0 +1,2 @@
+Error: ADR-101 has no probe 'edge-case'; its Summary names no probes. A probe is named as *Confident (name):* or *Not confident (name):*. It can cover: inversion.
+[exit 1]
