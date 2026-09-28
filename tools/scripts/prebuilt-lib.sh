@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers for the per-component pre-built download scripts
 # (download-attend.sh, download-attend-chat.sh, download-ways.sh,
-# download-ways-audit.sh). Sourced, not executed.
+# download-ways-audit.sh, way-embed/download-binary.sh). Sourced, not executed.
 #
 # Why this exists: a transient GitHub API / network blip on a `gh release`
 # call used to be swallowed (the call was `... 2>/dev/null`), so an empty
@@ -11,9 +11,6 @@
 # so a real blip is retried and, if it persists, reported honestly instead of
 # masquerading as a missing binary.
 
-# Run a command, retrying on failure with exponential backoff. Returns the
-# command's own exit status once it succeeds, or non-zero after the last try.
-# Progress notes go to stderr so callers can capture stdout cleanly.
 # Echo the platform slug used in release asset names (`<component>-<platform>`),
 # e.g. `ways-darwin-arm64`.
 #
@@ -39,6 +36,9 @@ detect_platform() {
   printf '%s-%s\n' "$os" "$arch"
 }
 
+# Run a command, retrying on failure with exponential backoff. Returns the
+# command's own exit status once it succeeds, or non-zero after the last try.
+# Progress notes go to stderr so callers can capture stdout cleanly.
 retry() {
   local n=1 max="${RETRY_MAX:-3}" delay="${RETRY_DELAY:-2}"
   while true; do
@@ -53,4 +53,24 @@ retry() {
     n=$((n + 1))
     delay=$((delay * 2))
   done
+}
+
+# Echo the newest published release tag in REPO whose name starts with PREFIX
+# (e.g. `attend-chat-v`), or nothing when no release matches.
+#
+# The components release on independent cadences from one repo, and `ways`
+# cuts most of the releases. Taking the first match in a fixed-size window of
+# recent releases stops finding the slower components once enough `ways`
+# releases pile up in front of them (#518), so this walks every page of the
+# releases API and picks the highest version by `sort -V` within the prefix.
+# Drafts and prereleases are skipped: neither is an install target.
+#
+# Returns non-zero only when the API call fails after retries, so callers can
+# tell "could not reach GitHub" apart from "reached it, no matching release".
+latest_tag_for_prefix() {
+  local repo="$1" prefix="$2" tags
+  tags=$(retry gh api --paginate "repos/${repo}/releases?per_page=100" \
+    --jq ".[] | select((.draft or .prerelease) | not) | .tag_name | select(startswith(\"${prefix}\"))") || return 1
+  [[ -n "$tags" ]] || return 0
+  printf '%s\n' "$tags" | sort -V | tail -1
 }

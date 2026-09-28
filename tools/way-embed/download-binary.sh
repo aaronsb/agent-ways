@@ -70,12 +70,11 @@ mkdir -p "$OUTPUT_DIR"
 
 # Find the latest way-embed release
 if [[ "$RELEASE_TAG" == "latest" ]]; then
-  if ! release_tags=$(retry gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName'); then
+  if ! RELEASE_TAG=$(latest_tag_for_prefix "$GH_REPO" 'way-embed-v'); then
     echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
     echo "  Falling back to build-from-source: cd $APP_DIR && make setup" >&2
     exit 1
   fi
-  RELEASE_TAG=$(echo "$release_tags" | grep '^way-embed-v' | head -1 || true)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No way-embed release found. Build from source:" >&2
     echo "  cd $APP_DIR && make setup" >&2
