@@ -73,12 +73,11 @@ mkdir -p "$OUTPUT_DIR"
 if [[ "$RELEASE_TAG" == "latest" ]]; then
   # Retry transient API failures, then distinguish "couldn't reach the API"
   # (retries exhausted → honest error) from "reached it, no matching release".
-  if ! release_tags=$(retry gh release list --repo "$GH_REPO" --limit 100 --json tagName --jq '.[].tagName'); then
+  if ! RELEASE_TAG=$(latest_tag_for_prefix "$GH_REPO" 'ways-audit-v'); then
     echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
     echo "  Falling back to build-from-source: cd \"$REPO_ROOT\" && make ways-audit" >&2
     exit 1
   fi
-  RELEASE_TAG=$(echo "$release_tags" | grep '^ways-audit-v' | head -1 || true)
   if [[ -z "$RELEASE_TAG" ]]; then
     echo "No ways-audit release found. Build from source:" >&2
     echo "  cd \"$REPO_ROOT\" && make ways-audit" >&2
