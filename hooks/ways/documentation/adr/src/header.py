@@ -30,6 +30,7 @@ Usage:
     adr domain move <number> <domain> [--dry-run]
     adr domain move --plan <file.yaml> [--dry-run]
     adr config
+    adr contract [--current | --upgrade]
 
 Configuration is loaded from docs/architecture/adr.yaml
 """
@@ -61,7 +62,13 @@ except ImportError:
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "2.1.0"
+TOOL_VERSION = "2.2.0"
+
+# The record contract this tool writes (ADR-304). `adr contract --upgrade`
+# brings adr.yaml to it, and the way macro reads this line to tell a config
+# that is behind the tool. KNOWN_CONTRACTS runs oldest to newest and ends here.
+CURRENT_CONTRACT = "adr/v1"
+KNOWN_CONTRACTS = ('adr/v0', 'adr/v1')
 
 # Statuses that mean "no longer in force" — used by archive and the
 # partial-supersession convention (ADR-303 / issue #438 option C2).

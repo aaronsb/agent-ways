@@ -1,0 +1,7 @@
+docs/architecture/adr.yaml: adr/v0 -> adr/v1
+  changed: contract: adr/v0 -> adr/v1
+  added: kinds
+  added: capabilities
+The capabilities list holds one placeholder. Replace it with the project's own list.
+Run `adr lint` to check the records against the new contract.
+[exit 0]

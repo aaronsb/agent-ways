@@ -100,6 +100,28 @@ dir=$(project unversioned-v1 1.0.0 adr/v1)
 sed -i.bak '/^TOOL_VERSION = /d' "$dir/docs/scripts/adr" && rm "$dir/docs/scripts/adr.bak"
 check "unversioned under v1: labelled unversioned" contains "is unversioned and cannot enforce it" "$(run_macro "$dir")"
 
+echo "Current contract read from the tool (#614)"
+check "v1-capable tool, no contract: offers the upgrade" contains "docs/scripts/adr contract --upgrade\` writes that line" "$(run_macro "$(project up-v0 "$CURRENT" '')")"
+check "explicit adr/v0: the v0 guide, not the unknown notice" lacks "does not know" "$(run_macro "$(project up-explicit "$CURRENT" adr/v0)")"
+check "v1 contract: no upgrade offer" lacks "contract --upgrade" "$(run_macro "$(project up-v1 "$CURRENT" adr/v1)")"
+dir=$(project up-old 2.1.0 '')
+sed -i.bak '/^CURRENT_CONTRACT = /d' "$dir/docs/scripts/adr" && rm "$dir/docs/scripts/adr.bak"
+out=$(run_macro "$dir")
+check "2.1 tool without the line: falls back to adr/v1" contains "supports the adr/v1 contract" "$out"
+check "2.1 tool without the command: no upgrade offer" lacks "contract --upgrade" "$out"
+dir=$(project up-ahead "$CURRENT" '')
+mkdir -p "$dir/docs/architecture/core"
+printf -- '---\ncontract: adr/v1\nkind: decision\n---\n\n# ADR-100: x\n' > "$dir/docs/architecture/core/ADR-100-x.md"
+out=$(run_macro "$dir")
+check "records ahead of adr.yaml: said" contains "declare \`contract: adr/v1\`, but \`docs/architecture/adr.yaml\` declares no contract" "$out"
+check "records ahead of adr.yaml: offers the upgrade" contains "Run \`docs/scripts/adr contract --upgrade\`" "$out"
+check "records ahead of adr.yaml: v0 guide still applies" contains "Record format (adr/v0)" "$out"
+dir=$(project up-ahead-old 2.1.0 '')
+sed -i.bak '/^CURRENT_CONTRACT = /d' "$dir/docs/scripts/adr" && rm "$dir/docs/scripts/adr.bak"
+mkdir -p "$dir/docs/architecture/core"
+printf -- '---\ncontract: adr/v1\nkind: decision\n---\n\n# ADR-100: x\n' > "$dir/docs/architecture/core/ADR-100-x.md"
+check "records ahead, tool without the command: re-vendor first" contains "Re-vendor the tool (the \`adr\` skill), then run" "$(run_macro "$dir")"
+
 echo "v1 guide content"
 out=$(run_macro "$(project content "$CURRENT" adr/v1)")
 check "enactment" contains "enacted:" "$out"

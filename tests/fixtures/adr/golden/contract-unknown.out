@@ -1,0 +1,2 @@
+Error: docs/architecture/adr.yaml declares contract: adr/v9, which this tool does not know (it knows adr/v0, adr/v1). Check the value.
+[exit 1]

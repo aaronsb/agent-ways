@@ -30,6 +30,7 @@ Usage:
     adr domain move <number> <domain> [--dry-run]
     adr domain move --plan <file.yaml> [--dry-run]
     adr config
+    adr contract [--current | --upgrade]
 
 Configuration is loaded from docs/architecture/adr.yaml
 """
@@ -61,7 +62,13 @@ except ImportError:
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "2.1.0"
+TOOL_VERSION = "2.2.0"
+
+# The record contract this tool writes (ADR-304). `adr contract --upgrade`
+# brings adr.yaml to it, and the way macro reads this line to tell a config
+# that is behind the tool. KNOWN_CONTRACTS runs oldest to newest and ends here.
+CURRENT_CONTRACT = "adr/v1"
+KNOWN_CONTRACTS = ('adr/v0', 'adr/v1')
 
 # Statuses that mean "no longer in force" — used by archive and the
 # partial-supersession convention (ADR-303 / issue #438 option C2).
@@ -173,6 +180,12 @@ def reload_config() -> dict:
 def repo_contract() -> str:
     """The contract adr.yaml declares; adr/v0 when it declares none (ADR-304)."""
     return str(get_config().get('contract') or 'adr/v0')
+
+def contract_rank(contract) -> Optional[int]:
+    """A contract's place in KNOWN_CONTRACTS, oldest first; None when the
+    tool does not know it. A record with no contract is adr/v0."""
+    name = str(contract) if contract else 'adr/v0'
+    return KNOWN_CONTRACTS.index(name) if name in KNOWN_CONTRACTS else None
 
 def get_domains() -> dict:
     """Get domain configuration."""
@@ -388,6 +401,29 @@ def rule_supersession_links(adr, ctx):
                         f"{field_name}: ADR-{number} does not declare the reciprocal "
                         f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
 
+
+# --- config against records ---------------------------------------------------
+
+@config_rule
+def rule_records_ahead_of_config(ctx):
+    """Records that declare a newer contract than adr.yaml (#614). Only
+    known contracts are compared; a v0 corpus never reaches the warning."""
+    declared = contract_rank(ctx.contract)
+    if declared is None:
+        return
+    ahead = {}
+    for adr in ctx.corpus:
+        rank = contract_rank(adr.contract)
+        if rank is not None and rank > declared:
+            ahead[adr.contract] = ahead.get(adr.contract, 0) + 1
+    if not ahead:
+        return
+    newest = max(ahead, key=contract_rank)
+    count = sum(ahead.values())
+    ctx.config_issues.append(Issue(
+        f"{count} record(s) declare {newest}, newer than adr.yaml's {ctx.contract}; "
+        f"`adr contract --upgrade` brings adr.yaml to {CURRENT_CONTRACT}",
+        'warning', code='contract-behind'))
 # ============================================================================
 # Parsing
 # ============================================================================
@@ -3555,6 +3591,138 @@ def cmd_config(args):
 
     return 0
 
+# ============================================================================
+# Contract (#614)
+# ============================================================================
+#
+# `adr contract` names the contract adr.yaml declares and the one this tool
+# writes. `--upgrade` brings adr.yaml to the current contract by editing
+# lines: the contract line is changed or appended, and each top-level key the
+# contract needs and the file lacks is appended as adr.yaml.template writes
+# it. Comments and every other line are left as they were.
+
+# What adr.yaml needs for each contract past adr/v0, in the order it is
+# appended: (top-level key, block). The text matches adr.yaml.template, and
+# tests/adr-template-test.sh checks that it still does.
+CONTRACT_BLOCKS = {
+    'adr/v1': (
+        ('contract', '''# The record contract (ADR-304). With `contract: adr/v1`, records are typed:
+# each declares a kind, and a decision names a verb, a capability and its
+# basis. Delete this line and the v1 blocks below to stay on adr/v0.
+contract: adr/v1
+'''),
+        ('kinds', '''kinds:
+  decision:
+    verb: required
+    requires: [capability, basis, agent]
+    sections: [Summary]
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec, evidence] }
+  spec:
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+  evidence:
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: evidence }
+'''),
+        ('capabilities', '''# What the project does, one line each. A record's `capability` names one of
+# these, and a decision adds, cuts, changes or constrains them. Replace the
+# placeholder with the project's own list.
+capabilities:
+  core: The project's core behaviour (placeholder; replace)
+'''),
+    ),
+}
+
+# A top-level contract line: key, optional quotes, value, optional comment.
+CONTRACT_LINE_RE = re.compile(
+    r'^(contract:[ \t]*)(["\']?)([A-Za-z0-9/._-]*)\2([ \t]*(?:#.*)?)$')
+
+
+def cmd_contract(args):
+    """adr contract [--current | --upgrade]."""
+    if args.current:
+        print(CURRENT_CONTRACT)
+        return 0
+    declared = repo_contract()
+    config_path = relative_path(get_config_path())
+    if contract_rank(declared) is None:
+        print(f"Error: {config_path} declares contract: {declared}, which this tool does not know "
+              f"(it knows {', '.join(KNOWN_CONTRACTS)}). Check the value.", file=sys.stderr)
+        return 1
+    if not args.upgrade:
+        note = '' if get_config().get('contract') else ' (no contract line)'
+        print(f"Declared: {declared}{note}")
+        print(f"Current:  {CURRENT_CONTRACT} (adr-tool {TOOL_VERSION})")
+        if declared == CURRENT_CONTRACT:
+            print(f"{config_path} is current.")
+        else:
+            print(f"{config_path} is behind this tool. "
+                  f"`adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
+        return 0
+    return _contract_upgrade(declared)
+
+
+def _contract_upgrade(declared: str) -> int:
+    path = get_config_path()
+    shown = relative_path(path)
+    if declared == CURRENT_CONTRACT:
+        print(f"{shown} already declares {CURRENT_CONTRACT}; nothing to do.")
+        return 0
+    original = path.read_bytes()
+    text = original.decode('utf-8')
+    newline = '\r\n' if '\r\n' in text else '\n'
+    lines = text.splitlines(keepends=True)
+    config = get_config()
+    added = []
+    replaced = False
+    for i, line in enumerate(lines):
+        match = CONTRACT_LINE_RE.match(line.rstrip('\r\n'))
+        if match:
+            ending = line[len(line.rstrip('\r\n')):]
+            prefix, quote, _, suffix = match.groups()
+            lines[i] = f"{prefix}{quote}{CURRENT_CONTRACT}{quote}{suffix}{ending}"
+            replaced = True
+            break
+    if 'contract' in config and not replaced:
+        print(f"Error: {shown} sets contract in a form this command does not edit; "
+              f"change it to `contract: {CURRENT_CONTRACT}` by hand.", file=sys.stderr)
+        return 1
+    blocks = []
+    for key, block in CONTRACT_BLOCKS[CURRENT_CONTRACT]:
+        if key == 'contract':
+            if replaced:
+                added.append(f"changed: contract: {declared} -> {CURRENT_CONTRACT}")
+                continue
+        elif key in config:
+            continue
+        blocks.append(block.replace('\n', newline))
+        added.append(f"added: contract: {CURRENT_CONTRACT}" if key == 'contract' else f"added: {key}")
+    if lines and not lines[-1].endswith('\n'):
+        lines[-1] += newline
+    body = ''.join(lines)
+    for block in blocks:
+        body += newline + block
+    try:
+        path.write_bytes(body.encode('utf-8'))
+        reloaded = reload_config()
+    except SystemExit:
+        path.write_bytes(original)
+        print(f"Error: the upgraded {shown} did not load; it is restored unchanged.", file=sys.stderr)
+        return 1
+    if str(reloaded.get('contract')) != CURRENT_CONTRACT:
+        path.write_bytes(original)
+        print(f"Error: the upgraded {shown} does not read as {CURRENT_CONTRACT}; "
+              "it is restored unchanged.", file=sys.stderr)
+        return 1
+    print(f"{shown}: {declared} -> {CURRENT_CONTRACT}")
+    for line in added:
+        print(f"  {line}")
+    if 'added: capabilities' in added:
+        print("The capabilities list holds one placeholder. Replace it with the project's own list.")
+    print("Run `adr lint` to check the records against the new contract.")
+    return 0
 def cmd_cite(args):
     """Check ADR citations in the code against the records they cite.
 
@@ -4439,6 +4607,7 @@ def _import_apply(args):
     else:
         paths = sorted(import_dir().glob('ADR-*.yaml')) if import_dir().is_dir() else []
     lines, written = [], []
+    behind = None
     undo = {} if args.dry_run else None
     applied = skipped = refused = 0
     counts, issues = {}, {}
@@ -4469,6 +4638,7 @@ def _import_apply(args):
             partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
             lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
         counts, issues = _lint_counts(written)
+        behind = _contract_behind(written)
     finally:
         if undo is not None:
             for failed in _restore(undo):
@@ -4485,6 +4655,10 @@ def _import_apply(args):
     verb = 'would apply' if args.dry_run else 'applied'
     print(f"Import: {applied} {verb}, {skipped} skipped, {refused} refused"
           + (' (dry run: nothing written)' if args.dry_run else ''))
+    if behind:
+        verb = 'would declare' if args.dry_run else 'declare'
+        print(f"Note: the records written {verb} {behind}; adr.yaml declares {repo_contract()}. "
+              f"apply does not edit adr.yaml; `adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
     lint_errors = sum(e for e, _ in counts.values())
     return 1 if refused or (args.dry_run and lint_errors) else 0
 
@@ -4509,6 +4683,16 @@ def _restore(undo: dict) -> list:
         except OSError:
             pass
     return failed
+
+def _contract_behind(paths: list) -> Optional[str]:
+    """The newest contract the written records declare, when adr.yaml's is
+    older; None otherwise (#614)."""
+    declared = contract_rank(repo_contract())
+    if declared is None:
+        return None
+    ahead = [c for c in (parse_adr(p).contract for p in paths)
+             if (contract_rank(c) or 0) > declared]
+    return max(ahead, key=contract_rank) if ahead else None
 
 def _lint_counts(paths: list) -> dict:
     """(errors, warnings) per written record, and the issues themselves,
@@ -4646,6 +4830,15 @@ def main():
     # config
     subparsers.add_parser('config', help='Show configuration')
 
+    # contract (#614)
+    p_contract = subparsers.add_parser(
+        'contract', help="Show adr.yaml's contract and the tool's; --upgrade brings adr.yaml to it")
+    contract_mode = p_contract.add_mutually_exclusive_group()
+    contract_mode.add_argument('--current', action='store_true',
+                               help='Print the contract this tool writes, and nothing else')
+    contract_mode.add_argument('--upgrade', action='store_true',
+                               help='Bring adr.yaml to the current contract, editing lines in place')
+
     # lifecycle (adr/v1, ADR-304 §2)
     p_accept = subparsers.add_parser('accept', help='Accept a proposed adr/v1 record')
     p_accept.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
@@ -4714,6 +4907,7 @@ def main():
         'domains': cmd_domains,
         'domain': cmd_domain,
         'config': cmd_config,
+        'contract': cmd_contract,
         'cite': cmd_cite,
         'accept': cmd_accept,
         'reject': cmd_reject,

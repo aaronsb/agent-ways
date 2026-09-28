@@ -779,6 +779,47 @@ capture record-enact-not-hash   enact 111 HEAD~1
 capture set-for-enact           set 111 status=superseded --force
 capture record-enact-wrong-status enact 111 abc1234
 
+# --- adr contract (#614) -----------------------------------------------------------
+
+# A v0 config: contract names both contracts; --upgrade appends the contract
+# line and the v1 blocks, leaving every existing line as it was; a second
+# --upgrade does nothing.
+fresh corpus
+capture contract-current  contract --current
+capture contract-v0       contract
+capture contract-upgrade  contract --upgrade
+keep contract-upgrade-config.yaml docs/architecture/adr.yaml
+(cd "$WORK/repo" && git diff --stat -- docs/architecture/adr.yaml | normalize) > "$ACTUAL/contract-upgrade-diffstat.txt"
+commit_all "upgrade"
+capture contract-upgrade-noop contract --upgrade
+worktree contract-upgrade-noop-status.txt
+capture contract-after    contract
+# An explicit contract line keeps its quotes and comment; the comments
+# around it stay where they were.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\n\n# Records stay on v0 for now.\ncontract: \"adr/v0\"  # decided in review\n', 1)"
+capture contract-upgrade-line contract --upgrade
+keep contract-upgrade-line-config.yaml docs/architecture/adr.yaml
+# A contract the tool does not know is refused, and adr.yaml is untouched.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\ncontract: adr/v9\n', 1)"
+commit_all "unknown contract"
+capture contract-unknown         contract
+capture contract-upgrade-unknown contract --upgrade
+worktree contract-upgrade-unknown-status.txt
+# A v1 config is current.
+fresh v1
+capture contract-v1 contract
+# Records ahead of a v0 config: lint warns on adr.yaml and names the command.
+fresh corpus
+(cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: core\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: a finding\n---\n\n# ADR-107: A v1 record in a v0 repo\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-107-a-v1-record.md)
+capture contract-behind-lint lint
+# import apply into a v0 config says the config is behind and does not edit it.
+fresh corpus
+capture contract-import-scan  import scan docs/architecture/system/ADR-102-hook-ordering.md
+capture contract-import-apply import apply --partial
+(cd "$WORK/repo" && git status --porcelain -- docs/architecture/adr.yaml | normalize) > "$ACTUAL/contract-import-apply-config-status.txt"
+
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check
