@@ -74,12 +74,13 @@ _Documentation structure, tooling, coherence_
 | [ADR-302](./documentation/ADR-302-unified-documentation-model.md) | A unified documentation model — typed graph, ways packaging, cross-repo convergence | accepted |
 | [ADR-303](./documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md) | Active-set semantics, adr archive, and supersession reading for the ADR corpus | accepted |
 | [ADR-304](./documentation/ADR-304-typed-decision-records-the-adr-v1-contract.md) | Typed decision records: the adr/v1 contract | Accepted |
-| [ADR-305](./documentation/ADR-305-capabilities-active-at-adoption-need-no-add-decision.md) | Capabilities active at adoption need no add decision | accepted |
+| [ADR-305](./documentation/ADR-305-capabilities-active-at-adoption-need-no-add-decision.md) | Capabilities active at adoption need no add decision | superseded (superseded by ADR-311) |
 | [ADR-306](./documentation/ADR-306-adr-import-foreign-records-through-a-round-trip-import-sheet.md) | adr import: foreign records through a round-trip import sheet | accepted |
 | [ADR-307](./documentation/ADR-307-a-decision-names-what-should-be-observable-when-it-holds.md) | A decision names what should be observable when it holds | accepted |
 | [ADR-308](./documentation/ADR-308-a-change-decision-may-list-several-capabilities.md) | A change decision may list several capabilities | accepted |
 | [ADR-309](./documentation/ADR-309-an-evidence-record-kind-for-findings-surveys-and-explorations.md) | An evidence record kind for findings, surveys and explorations | accepted |
 | [ADR-310](./documentation/ADR-310-record-numbers-are-permanent-identity-and-records-live-by-intent.md) | Record numbers are permanent identity, and records live by intent | accepted |
+| [ADR-311](./documentation/ADR-311-the-adr-tool-checks-shape-and-references-git-keeps-the-history.md) | The adr tool checks shape and references; git keeps the history | accepted |
 
 ## Attend
 _Session awareness: sensors, peers, messaging, keepwarm_
