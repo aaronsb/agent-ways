@@ -20,12 +20,13 @@ The agent writes and proposes a decision; the operator considers it (ADR-304 §1
 - Probes are specific points put to the operator. Mix points you are confident on with points you are not, and label each. The mix is deliberate: probes prime the operator's judgement, and priming can bias it.
 - The inversion names the two ends the decision sits between and asks whether the answer lies outside your framing.
 - When the decision carries `observable` entries, demonstrate them before asking, where you can: run the command, show the output or a screenshot, open the page. Say in `via` what the operator was shown (ADR-307).
-- Ask the probes in the conversation, one question each, with enough context to answer without opening the record, and label which ones you are confident on. A probe that exists only in the record was never asked, so the answer to "looks good" covers none of them. With more than one probe or decision pending, ask them through the choice tool as one batch, one question each (choices(meta)).
+- Ask the probes in the conversation, one question each, with enough context to answer without opening the record, and label which ones you are confident on. A probe that exists only in the record was never asked, and an approval given before it was asked does not answer it. With more than one probe or decision pending, ask them through the choice tool as one batch, one question each (choices(meta)).
 - A probe may be a canary: a point that is deliberately wrong, harmless if accepted, and a little whimsical. Reveal it right after the operator answers. It never stays in the record and is never about safety.
 
 ## When the answer comes
 
-- A short yes is a real answer. Take it as given and move on; do not re-ask the probes.
+- If the operator approves before the probes and the inversion were asked in the conversation, ask them first, in plain words with the record's context. This holds when the approval says to accept. Record nothing and accept nothing until the operator answers.
+- Once the probes were asked, a short yes is a real answer. Take it as given and move on; do not re-ask the probes.
 - Under adr/v1, record a `considered` entry: what was said and via which channel. `covers` lists the probes the answer settled; a bare "looks good" covers none. Add `canary: caught` or `missed` only when a canary was used. `adr consider N --said "..." --via "..." --covers NAME...` writes the entry and refuses a probe name the Summary does not have.
 - If the canary was missed, say so once and constructively, offer a smaller set of probes, then proceed on the operator's answer.
 - A decision the operator started waits for their consideration before `adr accept`. The tool does not check for it, so the wait is yours to keep. A decision with no operator basis, grounded in evidence, a standard or upstream, may be accepted by the agent directly.

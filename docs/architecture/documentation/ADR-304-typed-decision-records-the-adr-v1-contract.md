@@ -820,3 +820,11 @@ From adr-tool 2.2.0:
 - The way macro reads `CURRENT_CONTRACT` from the vendored copy with `sed`, as it reads `TOOL_VERSION`, and does not run the copy. A 2.x copy without the line is taken to write adr/v1 and is not offered the command. When `adr.yaml` is behind, or records already declare the tool's contract while `adr.yaml` declares none, the macro names `adr contract --upgrade`.
 
 This keeps the rule in §10 that a tool upgrade never adopts a contract on the project's behalf: the upgrade runs only when someone runs it. The lint warning compares `adr.yaml` with the records' declared contracts and nothing else (ADR-311).
+
+## Note (2026-09-28): an approval before the probes were asked
+
+Appended to §12. The text above is unchanged.
+
+The consider way read two ways when the operator approved a record whose probes had not been put to them in the conversation: one line said such a "looks good" covers none of the probes, another said a short yes is a real answer and the probes are not re-asked. Tier 2 run 36492665438 failed on it, where an earlier run had passed. The agent asked the operator, in an agent-written question: "When you approve before the probes are asked, should the agent record your answer and accept, or ask the probes first?" The operator's decision: "the agent should ask the questions first. otherwise, the operator/human probably isn't aware of the context."
+
+`hooks/ways/documentation/adr/consider/consider.md` now says so. When the operator approves before the probes and the inversion were asked in the conversation, the agent asks them first, in plain words with the record's context, and records and accepts nothing until the operator answers. This holds when the approval says to accept. A short yes given after the probes were asked is still a real answer, and the probes are not re-asked. The `adr-consider` tier 2 scenario runs this as two turns.

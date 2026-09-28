@@ -84,7 +84,7 @@ domain and number range are the same thing, unchanged from before.
 2. **Create**: `docs/scripts/adr new <domain> "Decision Title"` (adr/v1: add `--kind`, `--verb`, `--capability`, `--agent`/`--model`) — assigns the next number, seeds frontmatter for the project's contract
 3. **Fill in the body** matching the record's kind — a v1 decision opens with `## Summary` and its `basis`; a v0 record uses Context, Decision, Consequences, Alternatives Considered
 4. **Lint**: `docs/scripts/adr lint` before committing
-5. **For a v1 decision with an operator basis, record their answer**: `docs/scripts/adr consider <n> --said "..." --via "..."` before `docs/scripts/adr accept <n>`
+5. **For a v1 decision with an operator basis, ask the operator the Summary's probes and inversion, then record their answer**: `docs/scripts/adr consider <n> --said "..." --via "..."` before `docs/scripts/adr accept <n>`. An approval given before the probes were asked is not their answer; ask the probes first.
 6. **Index**: `docs/scripts/adr index -y` after adding or changing ADRs
 
 ## Configuration
