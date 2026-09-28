@@ -1,5 +1,5 @@
 ---
-description: Architecture Decision Records — creating, managing, and referencing ADRs for technical choices, how reversible a decision is, a deliberate deviation from a standard, and superseding an accepted ADR
+description: Agent Decision Records (ADRs) — creating, managing, and referencing ADRs for technical choices, how reversible a decision is, a deliberate deviation from a standard, and superseding an accepted ADR
 vocabulary: adr architecture decision record design pattern technical choice trade-off rationale alternative reversibility reversible one-way irreversible deviation deviate depart standard exception waiver supersede superseded accepted defer
 pattern: (^| )adr( |$)|architect|decision|design.?pattern|technical.?choice|trade.?off
 files: docs/architecture/.*\.md$
@@ -39,7 +39,7 @@ A generalized ADR is reusable across everything that hits the same force. A disc
 ## What Counts as a Decision
 
 - **Doing nothing is a decision** when the alternatives were live. Record the destination, the trigger that starts the work, and what makes waiting safe.
-- **An as-built observation does not qualify.** A detail reconstructed from source with no recorded rationale goes in a design note or README, marked "rationale not recorded".
+- **An as-built observation does not qualify.** A detail reconstructed from source with no recorded rationale goes in an evidence record, a design note or a README, marked "rationale not recorded".
 - **A deliberate deviation qualifies.** When the project departs from a standard on purpose, the ADR names the standard, the reason, the scope (paths, environments, components), and the condition that ends it. Without the end condition a later session reads the departure as drift and fixes it.
 
 ## Reversibility

@@ -322,7 +322,7 @@ If your organization clones this repo under a different name without forking on 
 | [docs/hooks-and-ways.md](docs/hooks-and-ways.md) | Reference: hook lifecycle, state management, data flow |
 | [docs/governance.md](docs/governance.md) | Reference: compilation chain, provenance mechanics |
 | [docs/architecture.md](docs/architecture.md) | System architecture diagrams |
-| [docs/architecture/](docs/architecture/) | Architecture Decision Records |
+| [docs/architecture/](docs/architecture/) | Agent Decision Records |
 | [governance/](governance/) | Governance traceability and reporting |
 | [docs/README.md](docs/README.md) | Full documentation map |
 

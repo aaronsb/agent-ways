@@ -1,6 +1,6 @@
 ---
-description: migrating to ADR tooling, adopting ADRs, converting existing decisions, setting up adr.yaml, bootstrapping architecture records
-vocabulary: migrate adopt convert bootstrap setup greenfield legacy rename renumber frontmatter yaml scaffold import consolidate
+description: migrating to ADR tooling, adopting ADRs, converting existing decisions, setting up adr.yaml, bootstrapping agent decision records
+vocabulary: migrate adopt convert bootstrap setup greenfield legacy rename scan frontmatter yaml scaffold import consolidate
 scope: agent, subagent
 refire: 0.15
 ---
@@ -13,11 +13,11 @@ refire: 0.15
 
 | State | Signs | Strategy |
 |-------|-------|----------|
-| **Greenfield** | No ADRs, no `docs/architecture/` | Scaffold from scratch |
-| **Flat directory** | ADRs exist in one dir, sequential numbering (0001, 0002...) | Park as legacy, adopt domains going forward |
-| **Inline metadata** | `Status: Accepted` in markdown body, no YAML frontmatter | Add frontmatter, keep body |
-| **Scattered** | Decision docs in various locations (wiki, README, etc.) | Consolidate into `docs/architecture/` |
-| **Different tool** | Using adr-tools, Log4brains, or similar | Export and convert |
+| **Greenfield** | No records, no `docs/architecture/` | Scaffold from scratch |
+| **Flat directory** | Records in one dir, sequential numbering (0001, 0002...) | `adr import scan`, or park as legacy |
+| **v0 frontmatter** | YAML frontmatter with `status: Accepted` etc., no `kind`/`verb`/`capability`/`basis` | `adr import scan` |
+| **Inline metadata** | `Status: Accepted` in the markdown body, no YAML frontmatter | `adr import scan` |
+| **Other tools** | adr-tools, MADR, Log4brains, or similar | No reader yet — convert through a sheet by hand, or park as legacy |
 
 ## Greenfield Setup
 
@@ -33,69 +33,38 @@ docs/scripts/adr list       # Should show 0 ADRs
 
 The rest of this way is the migration-specific *why/when/what* the skill doesn't cover: which starting state you're in, and how to get existing decisions into the tooling without losing history.
 
-## Flat Directory Migration
+## Converting Existing Records
 
-Existing ADRs like `docs/adr/0001-use-postgres.md` with sequential numbering.
+Numbers are permanent identity (ADR-310) — conversion never renumbers or re-homes a record by domain range. A domain's range only allocates numbers for new records.
 
 1. **Vendor the tooling** (greenfield step 1 — use the **adr** skill)
 
-2. **Park existing ADRs as legacy** — don't renumber:
+2. **Scan** the existing records into editable import sheets:
+```bash
+docs/scripts/adr import scan docs/adr/          # or a list of files
+```
+This writes a sheet per record under `.import/`.
+
+3. **Edit the sheets** in `.import/` — resolve each sheet's open todo items (the v1 fields the scan could not infer, such as `kind`, `verb`, `capability` and `basis`). Apply skips a sheet with open items.
+
+4. **Dry-run the apply** — writes the records into the corpus, lints them, prints each issue, then restores every file and keeps the sheets:
+```bash
+docs/scripts/adr import apply --dry-run
+```
+
+5. **Apply for real** once the sheets are clean:
+```bash
+docs/scripts/adr import apply
+```
+`--partial` lands sheets that still carry open todo items, except ones lint can't re-find afterward (a status with no mapping, a Deprecated note, a number or domain mismatch). `--force` overwrites a record with uncommitted changes.
+
+A corpus not worth converting can instead be parked as read-only history:
 ```bash
 mkdir -p docs/architecture/legacy
 git mv docs/adr/0001-*.md docs/architecture/legacy/
-# Rename to ADR-NNN format if needed:
-git mv docs/architecture/legacy/0001-use-postgres.md docs/architecture/legacy/ADR-001-use-postgres.md  # adr-cite-ignore: example number
 ```
 
-3. **Set the legacy range** in `adr.yaml` to cover existing numbers:
-```yaml
-legacy:
-  range: [1, 99]
-  label: "Legacy (Pre-Domain Numbering)"
-```
-
-4. **Add frontmatter** to each legacy file (see frontmatter conversion below)
-
-5. **New ADRs use domains** — `docs/scripts/adr new core "Next Decision"` starts at 100+
-
-## Inline Metadata Conversion
-
-ADRs with metadata in the markdown body instead of YAML frontmatter:
-
-```markdown
-# ADR-014: Use Postgres for Session State          # Before (inline)
-
-Status: Accepted
-Date: 2026-01-15
-Deciders: @alice, @bob
-```
-
-Convert to YAML frontmatter:
-
-```markdown
----                                     # After (frontmatter)
-status: Accepted
-date: 2026-01-15
-deciders:
-  - alice
-  - bob
-related: []
----
-
-# ADR-014: Use Postgres for Session State
-```
-
-Remove the inline metadata lines from the body after moving them to frontmatter. Run `docs/scripts/adr lint` to verify the conversion.
-
-## Scattered Decisions
-
-Decision records spread across wiki pages, README sections, or issue threads.
-
-1. **Scaffold the tooling**
-2. **For each decision**: `docs/scripts/adr new <domain> "Title"` to get a proper template
-3. **Copy the substance** — extract Context, Decision, Consequences from the original source
-4. **Set status to `Accepted`** if the decision is already in effect
-5. **Link back** — add a `related:` entry or comment pointing to the original source for provenance
+For adr-tools, MADR, Log4brains, or other foreign formats — no reader exists yet — either copy each record's substance into a sheet by hand before applying, or skip conversion and park the corpus in `legacy/`.
 
 ## Writing adr.yaml
 

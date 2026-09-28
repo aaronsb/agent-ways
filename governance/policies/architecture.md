@@ -20,19 +20,19 @@ The way includes a pattern reference table (Factory, Strategy, Observer, Reposit
 
 When design discussions surface architectural trade-offs worth preserving, the way points to the ADR process for documentation.
 
-## ADR (Architecture Decision Records)
+## ADR (Agent Decision Records)
 
-**Triggers**: Prompt mentions "ADR", "architect", "decision", "design pattern", "technical choice", "tradeoff"; editing files in `docs/adr/`
+**Triggers**: Prompt mentions "ADR", "architect", "decision", "design pattern", "technical choice", "tradeoff"; editing files under `docs/architecture/`
 
-**Macro**: Tri-state detection of ADR tooling in the project (declined, installed, available).
+**Macro**: Detects the project's ADR tooling (declined, installed, available) and, when installed, the contract `adr.yaml` declares. It prints the commands, record format and lifecycle for that contract.
 
-ADRs document the "why" behind architectural decisions. The way provides:
+ADRs record the "why" behind decisions. Under the adr/v1 contract (ADR-304) a record has a kind: a decision, a spec kept current, or evidence (ADR-309). A decision carries a verb, a capability, a basis naming where it came from, and opens with a Summary. The way provides:
 
-- **Decision template** with Status, Context, Decision, Consequences sections
-- **Workflow**: debate → draft → PR → merge
 - **When to write one**: any decision that's hard to reverse, affects multiple components, or will confuse future readers if unexplained
+- **Lifecycle**: create with `adr new`, ask the operator the decision's probes and record the answer with `adr consider`, then `adr accept`; `adr lint` checks the contract throughout
+- **Legacy contract**: a project whose `adr.yaml` declares no contract keeps the adr/v0 format (Status, Context, Decision, Consequences) and the debate → draft → PR → merge workflow
 
-The macro adapts to project state. If ADR tooling is installed, it shows the command reference. If tooling is available but not installed, it suggests setup. If the project has explicitly opted out (`.claude/no-adr-tooling`), it respects that choice and stops suggesting.
+If the project has explicitly opted out (`.claude/no-adr-tooling`), the macro respects that choice and stops suggesting setup.
 
 ## API
 

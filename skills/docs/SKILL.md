@@ -111,7 +111,7 @@ scaffold, run `/project-init`. To decline the catalog for a project:
 
 ## Not for
 
-- Architecture Decision Records — that's the **adr** skill (the decisions half of the same catalog).
+- Agent Decision Records — that's the **adr** skill (the decisions half of the same catalog).
 - Hand-authoring `id`/`domain`/`mode` frontmatter — the CLI computes it.
 - Prose that isn't joining the catalog — untagged docs need no tool and are never linted.
 
