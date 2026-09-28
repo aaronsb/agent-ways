@@ -12,9 +12,11 @@
 # backslashes, and words that only contain a folder's name are left alone.
 # ADR-N citations are left alone too: the number still names the same record.
 #
-# The frozen check (rules_v1_integrity.py) reads the same rewrite from git
-# history: a frozen record may differ from its accepted version by exactly
-# the rewrite of paths from where records were to where they are now.
+# The frozen check (rules_v1_integrity.py) reads references the same way:
+# before it compares a frozen record with its accepted version, each
+# reference that resolves to a record becomes that record's number, so a
+# path rewritten after a move compares equal and a link repointed at another
+# record does not.
 
 # Frontmatter keys that record history and are never rewritten: an imported
 # record keeps the path it was imported from.
@@ -27,8 +29,15 @@ _REPO_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://([^/]+)/([^/]+)/([^/]+)/(?:blob|t
 _RAW_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)', re.IGNORECASE)
 _COMMIT_RE = re.compile(r'[0-9a-f]{7,40}')
 _FM_KEY_RE = re.compile(r'([A-Za-z_][\w-]*)\s*:')
-_RECORD_FILE_RE = re.compile(r'ADR-\d+(?:\.\d+)?-.*\.md')
+_RECORD_FILE_RE = re.compile(r'ADR-(\d+)((?:\.\d+)?)-.*\.md')
 _FENCE_RE = re.compile(r' {0,3}(`{3,}|~{3,})')
+
+
+def record_number(rel: str) -> Optional[str]:
+    """The number a record file's name carries (101, 101.1), or None when
+    the name is not ADR-NNN-<slug>.md."""
+    m = _RECORD_FILE_RE.fullmatch(posixpath.basename(rel))
+    return f"{int(m.group(1))}{m.group(2)}" if m else None
 
 
 def _repo_name(url: str) -> Optional[str]:
@@ -300,14 +309,70 @@ class Relocation:
         return '\n'.join(out), total
 
 
+def former_paths() -> dict:
+    """adr.yaml's `former_paths:`, {repo-relative path: record number}: the
+    paths of files that became records without carrying a number before,
+    such as design notes brought into the corpus. Malformed entries are
+    left out; lint reports them."""
+    configured = get_config().get('former_paths')
+    paths = {}
+    if not isinstance(configured, dict):
+        return paths
+    for record, values in configured.items():
+        m = re.fullmatch(r'(?:ADR-)?(\d+)((?:\.\d+)?)', str(record))
+        values = [values] if isinstance(values, str) else values if isinstance(values, list) else []
+        if m:
+            for value in values:
+                if isinstance(value, str) and value.strip():
+                    paths[posixpath.normpath(value.strip().lstrip('/'))] = f"{int(m.group(1))}{m.group(2)}"
+    return paths
+
+
+class RecordRefs:
+    """References read as the record they resolve to (ADR-310: a record's
+    number is its identity). `records` maps repo-relative paths to record
+    numbers; a reference resolves when it names one of them as a relative
+    path from the file that holds it, a path from the repo root, or a URL
+    into this repository at a branch. Each becomes a token carrying only the
+    number, so the same record named from another folder reads the same.
+    Everything else, fenced code included, is left as written."""
+
+    def __init__(self, records: dict, repo: Optional['Repository']):
+        self.records = records
+        self.repo = repo
+
+    def _word(self, token: str, holder_dir: str) -> str:
+        stripped = token.rstrip('.')
+        candidates = []
+        if '://' in stripped:
+            found = self.repo.path(stripped) if self.repo else None
+            if found:
+                candidates.append(found[1].rstrip('/').lstrip('/'))
+        elif stripped:
+            if not stripped.startswith('/'):
+                candidates.append(posixpath.normpath(posixpath.join(holder_dir, stripped)))
+            rest = stripped.lstrip('/')
+            if rest and posixpath.normpath(rest) == rest:
+                candidates.append(rest)
+        for path in candidates:
+            if path in self.records:
+                return f"\0ADR-{self.records[path]}\0" + token[len(stripped):]
+        return token
+
+    def text(self, content: str, rel: str) -> str:
+        """content, the body of the record at rel, with its references read."""
+        holder = posixpath.dirname(rel)
+        lines = content.split('\n')
+        fenced = _fenced(lines)
+        return '\n'.join(line if i in fenced else _sub_paths(line, lambda t: self._word(t, holder))
+                         for i, line in enumerate(lines))
+
     def value(self, value, rel: str):
-        """A parsed frontmatter value of the file at rel, with the paths in
-        its strings rewritten as text() rewrites them."""
-        moved = self.target(rel)
-        old_dir = posixpath.dirname(rel)
-        new_dir = posixpath.dirname(moved) if moved else old_dir
+        """A parsed frontmatter value of the record at rel, with the
+        references in its strings read."""
         if isinstance(value, str):
-            return _sub_paths(value, lambda t: self.word(t, old_dir, new_dir)[0])
+            holder = posixpath.dirname(rel)
+            return _sub_paths(value, lambda t: self._word(t, holder))
         if isinstance(value, list):
             return [self.value(v, rel) for v in value]
         if isinstance(value, dict):
@@ -326,59 +391,3 @@ def tracked_paths(root: Path) -> tuple:
             known.add(parent)
             parent = posixpath.dirname(parent)
     return tracked, known
-
-
-def _renames(output: Optional[str]) -> list:
-    """[(old, new)] from `--name-status -z` output, in its order."""
-    tokens = [t.lstrip('\n') for t in (output or '').split('\0')]
-    pairs, i = [], 0
-    while i < len(tokens):
-        if re.fullmatch(r'R\d*', tokens[i]) and i + 2 < len(tokens):
-            pairs.append((tokens[i + 1], tokens[i + 2]))
-            i += 3
-        else:
-            i += 1
-    return pairs
-
-
-_HISTORY_RELOCATIONS = {}
-
-def history_relocation(root: Path) -> Relocation:
-    """Every earlier path of a record file, mapped to where the file is now,
-    read from the renames in HEAD's history and those staged since (git mv
-    stages a rename). A folder that no longer exists maps to a new folder
-    when every record renamed out of it in one commit went there. Rename
-    detection only: a copy is a new file."""
-    key = str(root)
-    if key in _HISTORY_RELOCATIONS:
-        return _HISTORY_RELOCATIONS[key]
-    tracked, known = tracked_paths(root)
-    log = _git(['log', 'HEAD', '-M', '--diff-filter=R', '--name-status', '-z', '--format=%x01'], root) or ''
-    commits = [_renames(chunk) for chunk in reversed(log.split('\x01'))]
-    commits.append(_renames(_git(['diff', 'HEAD', '-M', '--diff-filter=R', '--name-status', '-z'], root)))
-    where, dirs = {}, {}
-    for renames in commits:
-        went = {}
-        for old, new in renames:
-            for earlier, now in where.items():
-                if now == old:
-                    where[earlier] = new
-            where[old] = new
-            if _RECORD_FILE_RE.fullmatch(posixpath.basename(new)) \
-                    and posixpath.basename(old) == posixpath.basename(new):
-                went.setdefault(posixpath.dirname(old), set()).add(posixpath.dirname(new))
-        for old_dir, new_dirs in went.items():
-            if len(new_dirs) == 1 and old_dir not in known:
-                dirs[old_dir] = next(iter(new_dirs))
-    # A folder renamed twice maps to where it went last.
-    for old_dir in dirs:
-        seen, new_dir = {old_dir}, dirs[old_dir]
-        while new_dir in dirs and new_dir not in seen:
-            seen.add(new_dir)
-            new_dir = dirs[new_dir]
-        dirs[old_dir] = new_dir
-    files = {old: new for old, new in where.items()
-             if old != new and _RECORD_FILE_RE.fullmatch(posixpath.basename(new))}
-    relocation = Relocation(files=files, dirs=dirs, known=known, repo=Repository(root))
-    _HISTORY_RELOCATIONS[key] = relocation
-    return relocation

@@ -82,6 +82,13 @@ surfaces: {}
 # same in every clone.
 # repository: github.com/owner/repo
 
+# Files that became records without carrying a number before, such as notes
+# brought into the corpus: ADR-N: <old path>. A reference to the old path
+# reads as the record, so an accepted record rewritten to point at the
+# record is not an edit.
+# former_paths:
+#   ADR-600: docs/notes/some-note.md
+
 # Valid ADR statuses (adr/v0 records)
 statuses:
   - Draft         # Initial creation, not yet proposed

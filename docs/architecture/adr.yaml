@@ -106,6 +106,23 @@ basis_sources: [operator, evidence, standard, upstream, precedent]
 # record it names. Without this key the origin remote is used.
 repository: github.com/aaronsb/agent-ways
 
+# Files that became records without carrying a number before: the design
+# notes (ADR-309). A reference to one of these paths reads as the record, so
+# an accepted record rewritten to point at the record is not an edit.
+former_paths:
+  ADR-183: docs/design-notes/adopter-localization-lifecycle-and-tuning.md
+  ADR-189: docs/design-notes/session-introspection-implementation-plan.md
+  ADR-190: docs/design-notes/lexical-gate-as-conditional-threshold.md
+  ADR-191: docs/design-notes/tool-use-channel-lookbehind-chunk-matching.md
+  ADR-192: docs/design-notes/late-interaction-matching-flow.md
+  ADR-400: docs/design-notes/attend-messaging-disclosure-reheat.md
+  ADR-401: docs/design-notes/attend-envelope-fields.md
+  ADR-500: docs/design-notes/settings-json-merge-spec-and-peer-writer-contract.md
+  ADR-600: docs/design-notes/cognitive-loop-and-awareness-layer.md
+  ADR-601: docs/design-notes/autonomy-goals-signposts-initiation.md
+  ADR-602: docs/design-notes/ways-functional-audit.md
+  ADR-603: docs/design-notes/cypress-survey.md
+
 # adr cite skips these: fixtures, tool sources and subagent prompts carry
 # example numbers.
 cite:

@@ -152,6 +152,7 @@ def rule_v1_enacted(adr, ctx):
 # --- frozen decisions, read from git history --------------------------------------
 
 def _git(args: list, cwd: Path) -> Optional[str]:
+    """git's output, or None when git failed, timed out or is missing."""
     try:
         result = subprocess.run(['git', '-c', 'core.quotePath=false', *args], cwd=cwd,
                                 capture_output=True, encoding='utf-8', errors='replace', timeout=10)
@@ -159,72 +160,172 @@ def _git(args: list, cwd: Path) -> Optional[str]:
         return None
     return result.stdout if result.returncode == 0 else None
 
-def _file_history(ref: str, rel: str, root: Path) -> list:
-    """[(commit, path)] for each commit on ref's first-parent line that
-    changed the file at rel, newest first, following renames. git's --follow
-    also follows copies, so a new file copied from a record would inherit
-    that record's history; the renames are followed here instead, one
-    `git diff -M` at each commit that added the file under its later name."""
-    entries, seen = [], set()
-    while (ref, rel) not in seen:
-        seen.add((ref, rel))
-        # -m lists a merge's files against its first parent on older git.
-        # -z keeps names with spaces or non-ASCII intact.
-        log = _git(['log', ref, '--first-parent', '-m', '--no-renames', '-z',
-                    '--format=%x01%H', '--name-status', '--', rel], root)
-        added = None
-        for chunk in (log or '').split('\x01'):
-            tokens = [t.lstrip('\n') for t in chunk.split('\0')]
-            if not tokens[0]:
-                continue
-            commit, status = tokens[0], tokens[1] if len(tokens) > 1 else ''
-            if status.startswith('D'):
-                continue  # deleted here; an earlier commit holds the file
-            entries.append((commit, rel))
-            if status.startswith('A'):
-                added = commit
-                break
-        if added is None:
-            break
-        renamed = _git(['diff', '-M', '--diff-filter=R', '--name-status', '-z',
-                        f'{added}^', added], root)
-        old = next((a for a, b in _renames(renamed) if b == rel), None)
-        if old is None:
-            break
-        ref, rel = f'{added}^', old
-    return entries
+_GIT_ONCE = {}
 
-def _frozen_versions(adr, every: bool = False) -> list:
-    """(frontmatter, body, path) of the first committed version that was
-    already adr/v1 and past proposed, following renames, and with every=True
-    each committed version after it, oldest first. path is where the file was
-    in that version. Empty outside git, for an untracked file, or when no
-    such version exists. A version that was still v0 is never the snapshot:
-    migrating an accepted v0 record to v1 adds the v1 fields, and that is the
-    migration, not an edit (ADR-304 §7)."""
+def _git_once(args: list, root: Path) -> Optional[str]:
+    """_git, run once per root and arguments for the life of the process:
+    for reads that one lint run repeats for every record."""
+    key = (str(root), tuple(args))
+    if key not in _GIT_ONCE:
+        _GIT_ONCE[key] = _git(args, root)
+    return _GIT_ONCE[key]
+
+def _history_ref(root: Path) -> Optional[str]:
+    """The ref whose history freezes a decision, or None when there is no
+    commit to read (outside git, or before the first commit).
+
+    A record freezes where it lands: history is read from the default
+    branch when there is one, so a decision still in review on a feature
+    branch can be revised. Without a remote default, HEAD's history counts."""
+    ref = (_git_once(['rev-parse', '--abbrev-ref', 'origin/HEAD'], root) or '').strip() or 'HEAD'
+    if _git_once(['rev-parse', '--verify', '-q', f'{ref}^{{commit}}'], root) is None:
+        return None
+    return ref
+
+_RECORD_LOGS = {}
+
+def _record_log(ref: str, root: Path) -> Optional[list]:
+    """[(commit, [(status, path)])], newest first: each commit on ref's
+    first-parent line that touched a record file, with the record files it
+    touched. Read with one git log per ref and root. None when git failed."""
+    key = (str(root), ref)
+    if key not in _RECORD_LOGS:
+        # --first-parent keeps to the branch's own line, so a pull request
+        # merged with a merge commit lands at the merge, not at the first
+        # commit on its branch; -m lists a merge's files against that parent
+        # on older git. -z keeps names with spaces or non-ASCII intact.
+        log = _git(['log', ref, '--first-parent', '-m', '--no-renames', '-z',
+                    '--format=%x01%H', '--name-status', '--',
+                    ':(glob)docs/architecture/**/ADR-*.md'], root)
+        entries = None
+        if log is not None:
+            entries = []
+            for chunk in log.split('\x01'):
+                tokens = [t.lstrip('\n') for t in chunk.split('\0')]
+                if tokens[0]:
+                    entries.append((tokens[0], list(zip(tokens[1::2], tokens[2::2]))))
+        _RECORD_LOGS[key] = entries
+    return _RECORD_LOGS[key]
+
+def _record_history(ref: str, rel: str, root: Path) -> Optional[list]:
+    """[(commit, path)], oldest first: each commit on ref's first-parent line
+    that added or changed a file carrying this record's number, in any
+    folder and under any slug, with the path it had there. A record's
+    number is its identity (ADR-310), so its history is every file that
+    carried the number: a move, a move with a rewrite, and a delete and
+    re-add are all the same record. A record written from another one
+    carries a new number, so it has its own history. None when git could
+    not read the history."""
+    number = record_number(rel)
+    if number is None:
+        return []
+    log = _record_log(ref, root)
+    if log is None:
+        return None
+    name = posixpath.basename(rel)
+    history = []
+    for commit, changes in log:
+        present = [path for status, path in changes
+                   if status and not status.startswith('D') and record_number(path) == number]
+        if not present:
+            continue  # untouched, or deleted here; an earlier commit holds the record
+        path = rel if rel in present else next(
+            (p for p in present if posixpath.basename(p) == name), present[0])
+        history.append((commit, path))
+    history.reverse()
+    return history
+
+def _blobs(specs: list, root: Path) -> Optional[list]:
+    """The text of each `commit:path` in specs, read with one git cat-file;
+    an entry is None when git holds no such file. None when git failed."""
+    if not specs:
+        return []
+    try:
+        result = subprocess.run(['git', 'cat-file', '--batch'], cwd=root, capture_output=True,
+                                input=''.join(f'{s}\n' for s in specs).encode('utf-8'), timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    out, at, texts = result.stdout, 0, []
+    for _ in specs:
+        end = out.find(b'\n', at)
+        if end < 0:
+            return None
+        header = out[at:end].split()
+        at = end + 1
+        if len(header) == 3 and header[1] == b'blob':
+            size = int(header[2])
+            texts.append(out[at:at + size].decode('utf-8', errors='replace'))
+            at += size + 1
+        else:
+            texts.append(None)
+    return texts
+
+def _record_paths(ref: str, root: Path) -> Optional[dict]:
+    """{path: record number} for every path that has held a record: each
+    record file in ref's history and in the working tree, and adr.yaml's
+    former_paths. A path that once held a record names that record, since
+    a number is never reused. None when git could not read the history."""
+    log = _record_log(ref, root)
+    if log is None:
+        return None
+    names = {path for _, changes in log for _, path in changes}
+    arch = root / 'docs' / 'architecture'
+    names.update(p.relative_to(root).as_posix() for p in arch.rglob('ADR-*.md') if p.is_file())
+    paths = former_paths()
+    for name in names:
+        number = record_number(name) if name else None
+        if number:
+            paths[name] = number
+    return paths
+
+_REPOSITORIES = {}
+
+def _repository(root: Path) -> 'Repository':
+    if str(root) not in _REPOSITORIES:
+        _REPOSITORIES[str(root)] = Repository(root)
+    return _REPOSITORIES[str(root)]
+
+def _frozen_versions(adr) -> tuple:
+    """([(frontmatter, body, path)], problem). The versions start at
+    the first committed one that was already adr/v1 and past proposed, and
+    run through each later one, oldest first; path is where the record was
+    in that version. Empty outside git, for a record with no committed
+    version, or when no such version exists. problem is a warning when git
+    could not read the history. A version that was still v0 is never the
+    snapshot: migrating an accepted v0 record to v1 adds the v1 fields, and
+    that is the migration, not an edit (ADR-304 §7)."""
     root = get_project_root()
     try:
         rel = adr.path.resolve().relative_to(root.resolve())
     except ValueError:
-        return None
-    # A record freezes where it lands: history is read from the default
-    # branch when there is one, so a decision still in review on a feature
-    # branch can be revised. Without a remote default, HEAD's history counts.
-    # --first-parent keeps to the branch's own line, so a pull request merged
-    # with a merge commit lands at the merge, not at the first commit on its
-    # branch; -m lists the merge's files against that parent on older git.
-    ref = (_git(['rev-parse', '--abbrev-ref', 'origin/HEAD'], root) or '').strip() or 'HEAD'
+        return [], None
+    ref = _history_ref(root)
+    if ref is None:
+        return [], None
+    history = _record_history(ref, rel.as_posix(), root)
+    texts = _blobs([f'{commit}:{path}' for commit, path in history], root) if history is not None else None
+    if texts is None:
+        return [], "frozen check skipped: git could not read this record's history (it failed or timed out)"
     versions = []
-    for commit, name in reversed(_file_history(ref, rel.as_posix(), root)):
-        text = _git(['show', f'{commit}:{name}'], root)
+    for (commit, path), text in zip(history, texts):
         if text is None:
             continue
         past = parse_text(text, adr.path)
         if versions or (past.contract == V1 and past.status and str(past.status).lower() != 'proposed'):
-            versions.append((past.frontmatter, past.body, name))
-            if not every:
-                break
-    return versions
+            versions.append((past.frontmatter, past.body, path))
+    return versions, None
+
+@config_rule(contract=V1)
+def rule_v1_full_history(ctx):
+    """The frozen check reads each decision's history from git. A shallow
+    clone holds only its last commits, so the check finds no accepted
+    version to compare and reports nothing; lint says so once."""
+    if (_git_once(['rev-parse', '--is-shallow-repository'], get_project_root()) or '').strip() == 'true':
+        ctx.config_issues.append(Issue(
+            "this clone is shallow, so the frozen check cannot read decisions' history and reports "
+            "no edits; fetch the full history (git fetch --unshallow; in CI, fetch-depth: 0)", 'warning'))
 
 def _unfilled(value) -> bool:
     return value in (None, '', [], {})
@@ -276,8 +377,8 @@ def rule_v1_frozen(adr, ctx):
     import had none (ADR-306 §4), and that Summary stays editable: the
     operator expects Summaries to change once the whole corpus is read.
     `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it. A path rewritten
-    from where a record was to where it is now is not an edit."""
+    same allowance; git history still shows who added it. A reference that
+    names the same record from another folder is not an edit."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -289,16 +390,38 @@ def rule_v1_frozen(adr, ctx):
     if mutable == 'all':
         return
     mutable = set(_str_list(mutable) or V1_DEFAULT_MUTABLE)
-    versions = _frozen_versions(adr, every=True)
+    versions, problem = _frozen_versions(adr)
+    if problem:
+        v1_issue(adr, problem, 'warning')
+        return
     if not versions:
         return
     then, body_then, then_path = versions[0]
     imported = 'imported' in then and 'imported' in adr.frontmatter
-    # A record, or a record it names by path, may have moved folder since
-    # it was accepted, and its number did not change (ADR-306 §6). The
-    # accepted version with those paths rewritten, as `adr domain` rewrites
-    # them, stands for it too; any other difference is an edit.
-    relocation = history_relocation(get_project_root())
+    root = get_project_root()
+    rel = adr.path.resolve().relative_to(root.resolve()).as_posix()
+    # A record, or a record it names, may have moved folder since it was
+    # accepted, and its number did not change (ADR-306 §6, ADR-310). Where
+    # the text differs, each reference that resolves to a record is read as
+    # that record's number, then and now, and the two are compared again.
+    # A path resolves when it has ever held a record, so a link to a record
+    # since moved or archived still reads as that record.
+    refs = None
+
+    def read(value, path, body=False):
+        nonlocal refs
+        if refs is None:
+            paths = _record_paths(_history_ref(root), root)
+            if paths is None:
+                v1_issue(adr, "git could not list the paths records have held, so paths are "
+                              "compared as written", 'warning')
+                refs = False
+            else:
+                refs = RecordRefs(paths, _repository(root))
+        if refs is False:
+            return value
+        return refs.text(value, path) if body else refs.value(value, path)
+
     for key in sorted(set(then) | set(adr.frontmatter)):
         if key in mutable:
             continue
@@ -312,13 +435,13 @@ def rule_v1_frozen(adr, ctx):
         now = adr.frontmatter.get(key)
         if _same(frozen, now) or (fillable and _completes(frozen, now)):
             continue
-        if key not in RELOCATE_HISTORY_KEYS and _same(relocation.value(frozen, then_path), now):
+        if key not in RELOCATE_HISTORY_KEYS and _same(read(frozen, then_path), read(now, rel)):
             continue
         hint = (f" (to allow it, add observable to kinds.{v1_record_kind(adr)}.mutable_after_accept; ADR-307 §2)"
                 if key == 'observable' else '')
         v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change{hint}")
-    relocated = relocation.text(body_then, then_path)[0]
-    if not any(_grows_from(adr.body, body, imported) for body in (body_then, relocated)):
+    if not _grows_from(adr.body, body_then, imported) and \
+            not _grows_from(read(adr.body, rel, True), read(body_then, then_path, True), imported):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
 
 def _grows_from(body: str, body_then: str, imported: bool) -> bool:

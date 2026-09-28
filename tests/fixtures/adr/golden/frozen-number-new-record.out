@@ -1,0 +1,23 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-115-bulk-ingestion.md
+  ⚠️ superseded_by: ADR-109 does not declare the reciprocal supersedes: ADR-115 — one-directional links rot
+
+════════════════════════════════════════════════════════════
+Summary: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

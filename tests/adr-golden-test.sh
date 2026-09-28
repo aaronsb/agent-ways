@@ -378,7 +378,7 @@ fresh v1
 edit docs/architecture/system/ADR-101-ingest.md "s.replace('capability: ingest\n', 'capability: search\n').replace('The decision.\n', 'The decision, rewritten.\n').replace('date: 2025-05-02\n', 'date: 2025-05-02\nconsidered: [{operator: developer, said: ok, via: PR 2}]\n')"
 capture v1-frozen-lint lint docs/architecture/system/ADR-101-ingest.md
 
-# The freeze follows a rename: renamed, committed, then edited.
+# The freeze follows the record's number: renamed, committed, then edited.
 fresh v1
 (cd "$WORK/repo" && git mv docs/architecture/system/ADR-101-ingest.md docs/architecture/system/ADR-101-ingest-renamed.md)
 commit_all rename
@@ -782,7 +782,7 @@ edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('  - evi
 capture frozen-edit-basis-path lint docs/architecture/system/ADR-104-no-network-in-hooks.md
 
 # A new record written as a copy of an accepted one has its own history: the
-# freeze follows renames, and a copy is a new file.
+# freeze follows the record's number, and a copy carries a new one.
 fresh v1
 python3 - "$WORK/repo/docs/architecture/system" <<'PY'
 import sys
@@ -794,7 +794,102 @@ PY
 commit_all "copy"
 capture frozen-copy-not-followed lint docs/architecture/system/ADR-115-bulk-ingest.md
 
+# --- the frozen check follows the record's number (ADR-310) ----------------------
+# A record's history is every file that carried its number, in any folder
+# under any slug. A reference is compared by the record it resolves to.
 S="docs/architecture/system"
+
+# ADR-104 was accepted citing ADR-101 by a sibling link, in its basis and in
+# its body. Moving 104, then 101, then 104 again, each committed, leaves the
+# link reaching ADR-101 from a third folder: the same record, not an edit.
+chain_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null \
+    && "$ADR_TOOL" domain add ops --range 400-499 --folder operations --description Operations > /dev/null)
+}
+chain_moves() {
+  (cd "$WORK/repo" && "$ADR_TOOL" domain move 104 docs > /dev/null); commit_all "move 104"
+  (cd "$WORK/repo" && "$ADR_TOOL" domain move 101 ops > /dev/null); commit_all "move 101"
+  (cd "$WORK/repo" && "$ADR_TOOL" domain move 104 ops > /dev/null); commit_all "move 104 again"
+}
+chain_fresh
+edit $S/ADR-104-no-network-in-hooks.md "s.replace('  - evidence: fixture measurement', '  - evidence: \"see [ingest](ADR-101-ingest.md)\"')"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+chain_moves
+keep relocate-chain-basis-104.md docs/architecture/operations/ADR-104-no-network-in-hooks.md
+capture relocate-chain-basis-lint lint docs/architecture/operations/ADR-104-no-network-in-hooks.md
+# Repointed at another record, the link is an edit.
+edit docs/architecture/operations/ADR-104-no-network-in-hooks.md "s.replace('../operations/ADR-101-ingest.md', '../operations/ADR-100-adopt-v1.md')"
+(cd "$WORK/repo" && git mv docs/architecture/system/ADR-100-adopt-v1.md docs/architecture/operations/ADR-100-adopt-v1.md)
+capture relocate-chain-basis-repointed lint docs/architecture/operations/ADR-104-no-network-in-hooks.md
+chain_fresh
+edit $S/ADR-104-no-network-in-hooks.md "s + '\nSee [ingest](ADR-101-ingest.md).\n'"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+chain_moves
+keep relocate-chain-body-104.md docs/architecture/operations/ADR-104-no-network-in-hooks.md
+capture relocate-chain-body-lint lint docs/architecture/operations/ADR-104-no-network-in-hooks.md
+
+# A record written from another, as that one is deleted in the same commit,
+# carries a new number and has its own history.
+fresh v1
+edit $S/ADR-103-ingest-batching.md "s.replace('# ADR-103: Batch ingestion', '# ADR-115: Bulk ingestion').replace('fixture measurement', 'a bulk load test')"
+(cd "$WORK/repo" && git mv $S/ADR-103-ingest-batching.md $S/ADR-115-bulk-ingestion.md)
+commit_all "103 rewritten as 115"
+capture frozen-number-new-record lint $S/ADR-115-bulk-ingestion.md
+
+# A record moved and rewritten in one commit is the same record: git sees no
+# rename, the number does.
+fresh v1
+mkdir -p "$WORK/repo/docs/architecture/other"
+(cd "$WORK/repo" && git mv $S/ADR-104-no-network-in-hooks.md docs/architecture/other/ADR-104-no-network-in-hooks.md)
+edit docs/architecture/other/ADR-104-no-network-in-hooks.md "s[:s.index('basis:')] + 'basis:\n  - evidence: a different measurement entirely\n---\n\n# ADR-104: No network calls in hooks\n\n## Summary\n\n- **Decided:** hooks may call the network, when a cache is warm and the operator opted in.\n- **Probes:** *Confident:* x. *Not confident:* y.\n- **Inversion:** z.\n\n## 1. Decision\n\nThis text shares little with the accepted version.\n'"
+commit_all "move and rewrite"
+capture frozen-number-move-rewrite lint docs/architecture/other/ADR-104-no-network-in-hooks.md
+
+# Deleted, then added back at the same path with a changed basis: the
+# accepted version before the delete still holds.
+fresh v1
+cp "$WORK/repo/$S/ADR-103-ingest-batching.md" "$WORK/103.md"
+(cd "$WORK/repo" && git rm -q $S/ADR-103-ingest-batching.md)
+commit_all delete
+cp "$WORK/103.md" "$WORK/repo/$S/ADR-103-ingest-batching.md"
+edit $S/ADR-103-ingest-batching.md "s.replace('fixture measurement', 'a changed basis')"
+commit_all "add back"
+capture frozen-number-readd lint $S/ADR-103-ingest-batching.md
+
+# A note cited by an accepted record becomes a record, and the citation is
+# rewritten to it. The note had no number, so only adr.yaml's former_paths
+# says the old path is that record; without it the rewrite is an edit.
+fresh v1
+mkdir -p "$WORK/repo/docs/notes"
+printf '# Hook timing\n\nMeasured.\n' > "$WORK/repo/docs/notes/hook-timing.md"
+edit $S/ADR-104-no-network-in-hooks.md "s + '\nSee the note at docs/notes/hook-timing.md.\n'"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+(cd "$WORK/repo" && git mv docs/notes/hook-timing.md $S/ADR-115-hook-timing.md)
+edit $S/ADR-115-hook-timing.md "'---\ncontract: adr/v1\nkind: spec\ncapability: ingest\nstatus: accepted\ndate: 2025-05-06\n---\n\n# ADR-115: Hook timing\n\nMeasured.\n'"
+edit $S/ADR-104-no-network-in-hooks.md "s.replace('docs/notes/hook-timing.md', 'docs/architecture/system/ADR-115-hook-timing.md')"
+commit_all "note becomes a record"
+capture frozen-former-path-unmapped lint $S/ADR-104-no-network-in-hooks.md
+edit docs/architecture/adr.yaml "s + 'former_paths:\n  ADR-115: docs/notes/hook-timing.md\n'"
+capture frozen-former-path lint $S/ADR-104-no-network-in-hooks.md
+edit docs/architecture/adr.yaml "s.replace('  ADR-115: docs/notes/hook-timing.md', '  note: docs/notes/hook-timing.md')"
+capture frozen-former-path-bad lint $S/ADR-104-no-network-in-hooks.md
+
+# A shallow clone holds no accepted version to compare: lint says so once.
+fresh v1
+edit $S/ADR-101-ingest.md "s.replace('capability: ingest\n', 'capability: search\n')"
+commit_all edit
+git clone -q --depth 1 "file://$WORK/repo" "$WORK/shallow" && rm -rf "$WORK/repo" && mv "$WORK/shallow" "$WORK/repo"
+capture frozen-shallow lint $S/ADR-101-ingest.md
+
+# History git cannot read is not "nothing changed": lint warns and skips.
+fresh v1
+first=$(cd "$WORK/repo" && git rev-parse HEAD)
+edit $S/ADR-101-ingest.md "s.replace('capability: ingest\n', 'capability: search\n')"
+commit_all edit
+rm -f "$WORK/repo/.git/objects/${first:0:2}/${first:2}"
+capture frozen-history-unreadable lint $S/ADR-101-ingest.md
+
 # --- which repository a URL names, and what a rewrite leaves (#603) -------------
 # adr.yaml's repository: names this repository, so lint and the rewrite read
 # the same URLs as this repository's with or without an origin remote.

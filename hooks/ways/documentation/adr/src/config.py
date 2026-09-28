@@ -2,8 +2,18 @@
 # Configuration
 # ============================================================================
 
+_PROJECT_ROOTS = {}
+
 def get_project_root() -> Path:
-    """Find project root via git or by walking up to find docs/architecture/."""
+    """Find project root via git or by walking up to find docs/architecture/.
+    Found once per working directory: lint asks for every record."""
+    cwd = os.getcwd()
+    if cwd not in _PROJECT_ROOTS:
+        _PROJECT_ROOTS[cwd] = _find_project_root()
+    return _PROJECT_ROOTS[cwd]
+
+
+def _find_project_root() -> Path:
     # Try git root first
     try:
         result = subprocess.run(

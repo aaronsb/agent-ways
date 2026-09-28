@@ -159,6 +159,14 @@ def rule_v1_config_shape(ctx):
         if not isinstance(names, list) or not names \
                 or not all(isinstance(n, str) and _repo_name(n) for n in names):
             bad("repository: expected host/owner/repo, or a list of them")
+    if 'former_paths' in config:
+        entries = config['former_paths']
+        if not isinstance(entries, dict) or not all(
+                re.fullmatch(r'(?:ADR-)?\d+(?:\.\d+)?', str(record))
+                and (isinstance(paths, str) and paths.strip()
+                     or isinstance(paths, list) and paths and all(isinstance(p, str) and p.strip() for p in paths))
+                for record, paths in entries.items()):
+            bad("former_paths: expected ADR-N: <path> (or a list of paths) for each record")
     if 'surfaces' in config and not isinstance(config['surfaces'], dict):
         bad("surfaces: expected a mapping of namespace to settings")
     if 'baseline' in config:

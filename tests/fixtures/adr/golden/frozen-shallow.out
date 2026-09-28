@@ -1,0 +1,21 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'ingest' has no accepted add decision
+  ⚠️ this clone is shallow, so the frozen check cannot read decisions' history and reports no edits; fetch the full history (git fetch --unshallow; in CI, fetch-depth: 0)
+
+════════════════════════════════════════════════════════════
+Summary: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]
