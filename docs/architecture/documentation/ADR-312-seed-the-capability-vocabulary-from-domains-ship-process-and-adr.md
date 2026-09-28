@@ -26,7 +26,12 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "1. yes. the core placeholder is the backstop, and the domains should be seeds 2. they could split. 3. I think it is highly variable based on the project 4. that sounds like a good starting threshhold"
+    via: "Claude Code session 2026-09-28, answering the agent's four probe questions in order: (1) whether v0 domains are a better starting point than the core placeholder, (2) whether projects split seeds or keep them as coarse as the domains, (3) whether process stays limited to conventions or collects product records, (4) whether the default thresholds fit. Question wording is the agent's; only the reply is the operator's."
+    covers: [domains-are-a-start, seeds-kept-as-is, process-absorbs, thresholds-fit]
+status: accepted
 date: 2026-09-28
 deciders:
   - aaronsb
