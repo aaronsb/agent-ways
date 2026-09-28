@@ -804,3 +804,19 @@ and read. None is cited from memory.
 - Solozobov, "Decision Evidence Maturity Model for Agentic AI," 2026. https://arxiv.org/abs/2605.04093
 - Linux kernel, "AI Coding Assistants." https://docs.kernel.org/process/coding-assistants.html
 - GitHub, "Risks and mitigations for Copilot cloud agent." https://docs.github.com/en/copilot/concepts/agents/cloud-agent/risks-and-mitigations
+
+## Note (2026-09-28): `adr contract` keeps adr.yaml on the tool's contract (#614)
+
+Appended to §10. The text above is unchanged.
+
+`adr import apply` wrote adr/v1 records and left `adr.yaml` with no `contract` line, so the records were checked under the v0 rules until someone added the line by hand. The operator's direction (#614): "we should update adr.yaml, but we should detect if it's not the current contract and offer to update it (or warn) - in the future we might update it further and this can keep the adr contract current"
+
+From adr-tool 2.2.0:
+
+- The tool names the contract it writes once, as `CURRENT_CONTRACT` beside `TOOL_VERSION`.
+- `adr contract` prints the contract `adr.yaml` declares and the tool's. `adr contract --upgrade` brings `adr.yaml` to the tool's contract. It edits lines in place, so comments survive, and appends the contract line and any block the contract needs that is missing (`kinds`, and `capabilities` with a placeholder), in the template's text. It refuses a contract it does not know and does nothing when `adr.yaml` is already current.
+- `adr import apply` prints a note when the records it writes declare a newer contract than `adr.yaml`. It does not edit `adr.yaml`.
+- `adr lint` warns on `adr.yaml` when any record declares a newer contract than it does. A v0 corpus lints exactly as before.
+- The way macro reads `CURRENT_CONTRACT` from the vendored copy with `sed`, as it reads `TOOL_VERSION`, and does not run the copy. A 2.x copy without the line is taken to write adr/v1 and is not offered the command. When `adr.yaml` is behind, or records already declare the tool's contract while `adr.yaml` declares none, the macro names `adr contract --upgrade`.
+
+This keeps the rule in §10 that a tool upgrade never adopts a contract on the project's behalf: the upgrade runs only when someone runs it. The lint warning compares `adr.yaml` with the records' declared contracts and nothing else (ADR-311).
