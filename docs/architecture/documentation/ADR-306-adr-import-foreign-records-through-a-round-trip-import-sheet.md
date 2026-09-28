@@ -76,7 +76,7 @@ related:
 - **Decided:** `adr import` is the acceptance model for a foreign record: whatever shape a record arrives in, it becomes an adr/v1 record through an import sheet. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
 - **Trades away:** a direct edit from source to record. Every record passes through a sheet, a staging format with its own schema, and other sources through field maps. Both have to be documented and kept stable.
 - **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
-- **Probes:** *Confident (frontmatter-carries-all):* v0 records from agent-ways, here or in any repo that adopted them, import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident (non-markdown-bodies):* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
+- **Probes:** *Confident:* v0 records from agent-ways, here or in any repo that adopted them, import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
 - **Inversion:** at one end, a reader written in code for every format: exact, but never finished. At the other end, an agent reads each foreign record and writes v1 by hand: flexible, but manual across a hundred records. This decision maps structured fields mechanically and leaves only the judgement fields to the agent.
 
 ## Context
@@ -97,7 +97,7 @@ One YAML file per record is the round-trip object between a source and a v1 reco
 
 ```yaml
 sheet: adr-import/v1
-source: {path: docs/architecture/ways/ADR-186-….md, format: v0, sha256: "…"}
+source: {path: docs/architecture/system/ADR-186-….md, format: v0, sha256: "…"}
 target: {number: 186, domain: system}
 record:                  # v1 frontmatter, filled as far as the reader can
   contract: adr/v1
@@ -140,25 +140,18 @@ fields:
   unmapped: [key, fields.labels]
 ```
 
-A body is one of two things:
-
-- **Text is markdown.** A source whose text is in another formatting language (HTML, a tracker's rich text, wiki markup) is converted to markdown before the sheet is written, by the reader or by a step run before `scan`.
-- **Structured data is YAML or JSON.** A source item whose content is data rather than prose keeps it as data: in the sheet, and in the record as a fenced `yaml` or `json` block.
-
-An import carries what the source says. A record states what was decided, and the implementation nearly always drifts from it to some degree, so an imported record is not evidence of what the code does. `adr cite` and review compare the two after import.
-
 No reader ever writes an `operator` basis from `deciders`, an assignee or any other metadata (ADR-304 §7, §11). A basis comes from what the record says, and it is filled during cleanup.
 
 ### 3. Commands
 
 - `adr import scan <paths> [--reader NAME | --map FILE]` writes sheets to `docs/architecture/.import/`. That directory is gitignored: sheets are working files, and only the records they produce are committed.
-- `adr import apply [sheets] [--partial]` writes each sheet whose `todo` is empty as a v1 record, then lints it. A sheet with open items is skipped. `--partial` writes it anyway, and lint reports what is missing, except for items lint cannot detect afterwards: a Deprecated record's missing historical note, a status that maps to nothing, and a changed number or domain. Those block even `--partial`.
+- `adr import apply [sheets] [--partial]` writes each sheet whose `todo` is empty as a v1 record, then lints it. A sheet with open items is skipped. `--partial` writes it anyway, and lint reports what is missing.
 - `adr new` builds an empty sheet from its arguments and applies it, so a new record and an imported record share one writer. In a v1 project it writes v1.
 - `adr supersede <old> --by <new>` writes both sides of the link. `adr enact <n> <commit>` sets `enacted` on an accepted cut or retire.
 
 ### 4. Imported records
 
-An imported record carries `imported: {from, format, status, unmapped}` in its frontmatter. `status` is the source's raw status, and `unmapped` holds every source field with no v1 home. No source value depends on a todo item being honoured to survive the import. Text found between a source's frontmatter and its title moves into the body, right under the title. For an imported record, a missing Summary is a lint warning. The Summary may be written later, once the whole corpus has been imported and read together, and git history records when it was added.
+An imported record carries `imported: {from, format}` in its frontmatter. For an imported record, a missing Summary is a lint warning. The Summary may be written later, once the whole corpus has been imported and read together, and git history records when it was added.
 
 ### 5. Numbering
 
@@ -208,3 +201,13 @@ These are tested properties:
 - **An agent migrates each record by hand.** The #581 rehearsal shows this works, but across a corpus of a hundred records the mechanical fields would be retyped each time, and nothing would check the result the way a round trip does.
 - **A code reader per format, with no field maps.** This is exact for known formats, but every tracker and template needs code in the vendored tool.
 - **Migrate in place with no intermediate object.** A migration writes the record directly. Without a sheet there is no place to stage what needs judgement, and no object to test the round trip against.
+
+## Corrections
+
+Appended 2026-09-27. Each entry was first made in place after acceptance and moved here so the accepted text above stays as it was. None changes what was decided.
+
+- **Summary, probes.** Each probe gained a label, so the operator's answers in `considered` can name the probe they cover: *Confident (frontmatter-carries-all)* and *Not confident (non-markdown-bodies)*.
+- **§1, the sheet example.** The example source path reads `docs/architecture/ways/ADR-186-….md`. The `system` domain was renamed `ways` (ADR-310).
+- **§2, bodies.** Recorded from the operator's probe answers. A body is one of two things. Text is markdown: a source whose text is in another formatting language (HTML, a tracker's rich text, wiki markup) is converted to markdown before the sheet is written, by the reader or by a step run before `scan`. Structured data is YAML or JSON: a source item whose content is data keeps it as data, in the sheet and in the record as a fenced `yaml` or `json` block. An import carries what the source says. A record states what was decided, and the implementation nearly always drifts from it, so an imported record is not evidence of what the code does; `adr cite` and review compare the two after import.
+- **§3, `--partial`.** Some open items block even `--partial`, because lint cannot detect them after the record is written: a Deprecated record's missing historical note, a status that maps to nothing, and a changed number or domain.
+- **§4, imported records.** An imported record carries `imported: {from, format, status, unmapped}`. `status` is the source's raw status, and `unmapped` holds every source field with no v1 home. No source value depends on a todo item being honoured to survive the import. The accepted text listed only `from` and `format`; the import as built keeps both extra fields.
