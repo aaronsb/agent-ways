@@ -45,7 +45,7 @@ docs/scripts/adr consider <n> --said "<verbatim>" --via "<where it was said>" --
 ```
 
 ### 6. Accept
-Accept once the session has put the probes to the operator. Acceptance does not wait on their answer; record whatever answer reaches you:
+Accept when the work calls for it, after the session has put the probes to the operator. Their answer is recorded when it comes and is not a precondition for `adr accept`:
 ```bash
 docs/scripts/adr accept <n>
 ```

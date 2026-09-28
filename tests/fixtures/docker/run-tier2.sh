@@ -112,7 +112,7 @@ run_scenario() {
   turns=${turns:-$MAX_TURNS}
   SESSION=""
   FIRED=""
-  run_turn "$dir/prompt.txt" ""
+  run_turn "$dir/prompt.txt" "" "$turns"
   if [[ -f "$dir/prompt2.txt" ]]; then
     if [[ -f "$dir/check1.sh" ]]; then
       RUBRIC_HIT=0
@@ -120,7 +120,11 @@ run_scenario() {
       # shellcheck disable=SC1091
       source "$dir/check1.sh"
     fi
-    run_turn "$dir/prompt2.txt" 2
+    if [[ -n "$SESSION" ]]; then
+      run_turn "$dir/prompt2.txt" 2 "$turns"
+    else
+      fail "claude -p (turn 2) resumed turn 1" "turn 1 gave no session_id; see $OUT/result.json"
+    fi
   fi
 
   RUBRIC_HIT=0
@@ -129,14 +133,15 @@ run_scenario() {
   source "$dir/check.sh"
 }
 
-# run_turn PROMPT_FILE SUFFIX — one `claude -p` call. An empty SUFFIX is the
-# first turn; a second turn (SUFFIX 2) resumes $SESSION, writes its files
-# with the suffix (result2.json, ...), and adds its fired ways to $FIRED.
+# run_turn PROMPT_FILE SUFFIX TURNS — one `claude -p` call capped at TURNS.
+# An empty SUFFIX is the first turn; a second turn (SUFFIX 2) resumes
+# $SESSION, writes its files with the suffix (result2.json, ...), and adds
+# its fired ways to $FIRED.
 run_turn() {
-  local prompt="$1" sfx="$2" rc
+  local prompt="$1" sfx="$2" turns="$3" rc
   local resume=()
   [[ -n "$sfx" ]] && resume=(--resume "$SESSION")
-  (cd "$PROJ" && claude -p "$(cat "$prompt")" "${resume[@]}" \
+  (cd "$PROJ" && claude -p "$(cat "$prompt")" ${resume[@]+"${resume[@]}"} \
       --model "$MODEL" \
       --max-turns "$turns" \
       --output-format json \

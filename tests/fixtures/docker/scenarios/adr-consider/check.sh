@@ -37,7 +37,10 @@ lint=$(cd "$PROJ" && docs/scripts/adr lint --check "${REC#$PROJ/}" 2>&1); rc=$?
 echo "$lint" > "$OUT/lint.txt"
 if [[ $rc -eq 0 ]]; then ok "record lints clean"; else fail "record lints clean" "$(grep '❌' <<<"$lint" | head -3)"; fi
 
-rubric "puts the latency probe"    'latency'
-rubric "puts the staleness probe"  'stale|30 ?s(ec|econds)?'
-rubric "asks a question"           '\?'
+# $ANSWER is the reply's result text. A probe counts only when it is asked:
+# its words and a question mark in the same sentence. A plain acceptance
+# report alone scores 1 and fails.
+rubric "asks a probe as a question"        '(latency|stal)[^.?]*\?'
+rubric "asks the inversion as a question"  '(middle|inversion|cach(e|es|ing) (nothing|everything))[^.?]*\?'
+rubric "reports acceptance"                'accept'
 rubric_threshold 2
