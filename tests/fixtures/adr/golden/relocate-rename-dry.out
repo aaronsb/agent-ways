@@ -1,0 +1,20 @@
+Would rename domain: system → platform
+  Folder: docs/architecture/system/ → docs/architecture/platform/
+Would rewrite 4 paths in 3 files
+  CHANGELOG.md: 2
+    CHANGELOG.md:4
+        - This repo: https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md
+      → - This repo: https://github.com/fixture/corpus/blob/main/docs/architecture/platform/ADR-101-ingest.md
+    CHANGELOG.md:6
+        - See docs/architecture/system/ADR-101-ingest.md.
+      → - See docs/architecture/platform/ADR-101-ingest.md.
+  docs/architecture/system/ADR-104-no-network-in-hooks.md: 1
+    docs/architecture/system/ADR-104-no-network-in-hooks.md:11
+          - evidence: "the survey at docs/architecture/system/ADR-101-ingest.md"
+      →   - evidence: "the survey at docs/architecture/platform/ADR-101-ingest.md"
+  src/app.py: 1
+    src/app.py:2
+        RECORDS = "docs/architecture/system"
+      → RECORDS = "docs/architecture/platform"
+Dry run: nothing written.
+[exit 0]

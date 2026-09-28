@@ -2,7 +2,22 @@ Would rename domain: system → platform
   Folder: docs/architecture/system/ → docs/architecture/platform/
 Would rewrite 6 paths in 3 files
   docs/architecture/system/ADR-109-precedent-chain.md: 1
+    docs/architecture/system/ADR-109-precedent-chain.md:35
+        See [the constraint](../system/ADR-104-no-network-in-hooks.md).
+      → See [the constraint](../platform/ADR-104-no-network-in-hooks.md).
   docs/guide/hooks.md: 4
+    docs/guide/hooks.md:2
+        domain: system
+      → domain: platform
+    docs/guide/hooks.md:7
+        See [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104.
+      → See [no network](../architecture/platform/ADR-104-no-network-in-hooks.md) and ADR-104.
+    docs/guide/hooks.md:8
+        Records live in docs/architecture/system/ and [the folder](../architecture/system/).
+      → Records live in docs/architecture/platform/ and [the folder](../architecture/platform/).
   src/search.py: 1
+    src/search.py:3
+        # ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md
+      → # ADR-104 hooks stay offline: docs/architecture/platform/ADR-104-no-network-in-hooks.md
 Dry run: nothing written.
 [exit 0]

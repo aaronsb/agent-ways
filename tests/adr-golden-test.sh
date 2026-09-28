@@ -701,6 +701,64 @@ worktree domain-move-plan-refused-status.txt
 # Under adr/v0 the number decides the domain, so a move is refused.
 fresh corpus
 capture domain-move-v0 domain move 104 docs
+
+# --- what a relocation rewrites (#603) ------------------------------------------------
+# A rewrite reaches a path that resolves to what moved: a relative link, a
+# path from the repo root, or a URL into this repository's origin. Another
+# repository's URL, prose, and a code constant naming a folder stay. The dry
+# run prints each line it would change.
+#
+# ADR-104 is accepted, and its basis evidence and body name ADR-101's path.
+# The rewrite reaches that frozen field, and lint accepts exactly the rewrite
+# of a path from where a record was to where it is now, before and after the
+# move is committed.
+safety_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && git remote add origin git@github.com:fixture/corpus.git)
+  printf 'TEMPLATE_DIR = "architecture/system"\nRECORDS = "docs/architecture/system"\n' > "$WORK/repo/src/app.py"
+  printf '# Changes\n\n- Another repo: https://github.com/someone/else/tree/main/docs/architecture/system/ADR-101-ingest.md\n- This repo: https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md\n- The vendor layout uses architecture/system and a system/ADR-101-ingest.md file.\n- See docs/architecture/system/ADR-101-ingest.md.\n' > "$WORK/repo/CHANGELOG.md"
+  edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('  - evidence: fixture measurement\n', '  - evidence: \"the survey at docs/architecture/system/ADR-101-ingest.md\"\n') + '\nSee [ingest](ADR-101-ingest.md), [the guide](https://example.com/v1/guide), [the notes](../api/README.md), and/or the spec.\n'"
+  (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description "Guides" > /dev/null)
+  # Part of the first commit, so ADR-104 was accepted with these paths.
+  (cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+}
+safety_fresh
+capture relocate-move-dry domain move 101 docs --dry-run
+capture relocate-rename-dry domain rename system platform --dry-run
+capture relocate-rename domain rename system platform
+keep relocate-rename-changelog.md CHANGELOG.md
+keep relocate-rename-app.py src/app.py
+keep relocate-rename-104.md docs/architecture/platform/ADR-104-no-network-in-hooks.md
+capture relocate-rename-lint lint
+commit_all rename
+capture relocate-rename-lint-committed lint
+
+# A move of a record that an accepted record cites by path, before and after
+# the move is committed.
+safety_fresh
+capture relocate-move domain move 101 docs
+keep relocate-move-104.md docs/architecture/system/ADR-104-no-network-in-hooks.md
+capture relocate-move-lint lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+commit_all move
+capture relocate-move-lint-committed lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+# The same link pointed somewhere the record never was is an edit.
+edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('](../documentation/ADR-101-ingest.md)', '](../elsewhere/ADR-101-ingest.md)')"
+capture relocate-move-lint-elsewhere lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+
+# The frozen check reports every body edit that is not such a path: a URL's
+# host, a link target with the same file name, and a word with a slash.
+safety_fresh
+edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('https://example.com/v1/guide', 'https://attacker.example/v1/guide')"
+capture frozen-edit-url lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+(cd "$WORK/repo" && git checkout -q -- .)
+edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('../api/README.md', '../infra/README.md')"
+capture frozen-edit-link lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+(cd "$WORK/repo" && git checkout -q -- .)
+edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('and/or', 'nor/or')"
+capture frozen-edit-slash-word lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+(cd "$WORK/repo" && git checkout -q -- .)
+edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('  - evidence: \"the survey at docs/architecture/system/ADR-101-ingest.md\"', '  - evidence: \"the survey at docs/architecture/other/ADR-101-ingest.md\"')"
+capture frozen-edit-basis-path lint docs/architecture/system/ADR-104-no-network-in-hooks.md
 # --- record edits: consider, set, supersede, enact ----------------------------------
 #
 # Each edit keeps the file it wrote, so the goldens show that only the touched

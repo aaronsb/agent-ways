@@ -160,12 +160,13 @@ def _git(args: list, cwd: Path) -> Optional[str]:
     return result.stdout if result.returncode == 0 else None
 
 def _frozen_versions(adr, every: bool = False) -> list:
-    """(frontmatter, body) of the first committed version that was already
-    adr/v1 and past proposed, following renames, and with every=True each
-    committed version after it, oldest first. Empty outside git, for an
-    untracked file, or when no such version exists. A version that was still
-    v0 is never the snapshot: migrating an accepted v0 record to v1 adds the
-    v1 fields, and that is the migration, not an edit (ADR-304 §7)."""
+    """(frontmatter, body, path) of the first committed version that was
+    already adr/v1 and past proposed, following renames, and with every=True
+    each committed version after it, oldest first. path is where the file was
+    in that version. Empty outside git, for an untracked file, or when no
+    such version exists. A version that was still v0 is never the snapshot:
+    migrating an accepted v0 record to v1 adds the v1 fields, and that is the
+    migration, not an edit (ADR-304 §7)."""
     root = get_project_root()
     try:
         rel = adr.path.resolve().relative_to(root.resolve())
@@ -197,7 +198,7 @@ def _frozen_versions(adr, every: bool = False) -> list:
             continue
         past = parse_text(text, adr.path)
         if versions or (past.contract == V1 and past.status and str(past.status).lower() != 'proposed'):
-            versions.append((past.frontmatter, past.body))
+            versions.append((past.frontmatter, past.body, name))
             if not every:
                 break
     return versions
@@ -252,8 +253,8 @@ def rule_v1_frozen(adr, ctx):
     import had none (ADR-306 §4), and that Summary stays editable: the
     operator expects Summaries to change once the whole corpus is read.
     `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it. Links compare by
-    file name, so moving a record or a domain's folder is not an edit."""
+    same allowance; git history still shows who added it. A path rewritten
+    from where a record was to where it is now is not an edit."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -268,15 +269,13 @@ def rule_v1_frozen(adr, ctx):
     versions = _frozen_versions(adr, every=True)
     if not versions:
         return
-    then, body_then = versions[0]
+    then, body_then, then_path = versions[0]
     imported = 'imported' in then and 'imported' in adr.frontmatter
-    # A path compares by its last segment: a record, or a record it links
-    # to, may have moved folder since, and its number did not change
-    # (ADR-306 §6).
-    body_then = canonical_paths(body_then)
-    body_now = canonical_paths(adr.body)
-    if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
-        body_now = _without_opening_summary(body_now, body_then)
+    # A record, or a record it names by path, may have moved folder since
+    # it was accepted, and its number did not change (ADR-306 §6). The
+    # accepted version with those paths rewritten, as `adr domain` rewrites
+    # them, stands for it too; any other difference is an edit.
+    relocation = history_relocation(get_project_root())
     for key in sorted(set(then) | set(adr.frontmatter)):
         if key in mutable:
             continue
@@ -284,17 +283,27 @@ def rule_v1_frozen(adr, ctx):
         fillable = imported and key in then
         if fillable:
             # Fill once: each committed fill of an empty part becomes frozen.
-            for later, _ in versions[1:]:
+            for later, _, _ in versions[1:]:
                 if _completes(frozen, later.get(key)):
                     frozen = later.get(key)
         now = adr.frontmatter.get(key)
         if _same(frozen, now) or (fillable and _completes(frozen, now)):
             continue
+        if key not in RELOCATE_HISTORY_KEYS and _same(relocation.value(frozen, then_path), now):
+            continue
         hint = (f" (to allow it, add observable to kinds.{v1_record_kind(adr)}.mutable_after_accept; ADR-307 §2)"
                 if key == 'observable' else '')
         v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change{hint}")
-    if not body_now.rstrip().startswith(body_then.rstrip()):
+    relocated = relocation.text(body_then, then_path)[0]
+    if not any(_grows_from(adr.body, body, imported) for body in (body_then, relocated)):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
+
+def _grows_from(body: str, body_then: str, imported: bool) -> bool:
+    """body is body_then with text appended. An imported record accepted
+    without a Summary may also have gained an opening one."""
+    if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
+        body = _without_opening_summary(body, body_then)
+    return body.rstrip().startswith(body_then.rstrip())
 
 @file_rule(contract=V1)
 def rule_v1_no_placeholders(adr, ctx):

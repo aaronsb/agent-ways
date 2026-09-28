@@ -1,0 +1,23 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 2 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ⚠️ capability 'search' has no accepted add decision
+
+docs/architecture/system/ADR-104-no-network-in-hooks.md
+  ⚠️ body edited after the decision left proposed; a decision grows by appending
+
+════════════════════════════════════════════════════════════
+Summary: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

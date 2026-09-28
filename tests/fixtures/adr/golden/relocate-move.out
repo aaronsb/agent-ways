@@ -1,0 +1,6 @@
+Moved: ADR-101 system → docs
+  docs/architecture/system/ADR-101-ingest.md → docs/architecture/documentation/ADR-101-ingest.md
+Rewrote 4 paths in 2 files
+  CHANGELOG.md: 2
+  docs/architecture/system/ADR-104-no-network-in-hooks.md: 2
+[exit 0]

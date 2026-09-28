@@ -1476,12 +1476,13 @@ def _git(args: list, cwd: Path) -> Optional[str]:
     return result.stdout if result.returncode == 0 else None
 
 def _frozen_versions(adr, every: bool = False) -> list:
-    """(frontmatter, body) of the first committed version that was already
-    adr/v1 and past proposed, following renames, and with every=True each
-    committed version after it, oldest first. Empty outside git, for an
-    untracked file, or when no such version exists. A version that was still
-    v0 is never the snapshot: migrating an accepted v0 record to v1 adds the
-    v1 fields, and that is the migration, not an edit (ADR-304 §7)."""
+    """(frontmatter, body, path) of the first committed version that was
+    already adr/v1 and past proposed, following renames, and with every=True
+    each committed version after it, oldest first. path is where the file was
+    in that version. Empty outside git, for an untracked file, or when no
+    such version exists. A version that was still v0 is never the snapshot:
+    migrating an accepted v0 record to v1 adds the v1 fields, and that is the
+    migration, not an edit (ADR-304 §7)."""
     root = get_project_root()
     try:
         rel = adr.path.resolve().relative_to(root.resolve())
@@ -1513,7 +1514,7 @@ def _frozen_versions(adr, every: bool = False) -> list:
             continue
         past = parse_text(text, adr.path)
         if versions or (past.contract == V1 and past.status and str(past.status).lower() != 'proposed'):
-            versions.append((past.frontmatter, past.body))
+            versions.append((past.frontmatter, past.body, name))
             if not every:
                 break
     return versions
@@ -1568,8 +1569,8 @@ def rule_v1_frozen(adr, ctx):
     import had none (ADR-306 §4), and that Summary stays editable: the
     operator expects Summaries to change once the whole corpus is read.
     `imported` is self-declared, so a record that adds it by hand gets the
-    same allowance; git history still shows who added it. Links compare by
-    file name, so moving a record or a domain's folder is not an edit."""
+    same allowance; git history still shows who added it. A path rewritten
+    from where a record was to where it is now is not an edit."""
     schema = v1_kind_schema(adr, ctx)
     if not is_v1_record(adr, ctx) or schema is None:
         return
@@ -1584,15 +1585,13 @@ def rule_v1_frozen(adr, ctx):
     versions = _frozen_versions(adr, every=True)
     if not versions:
         return
-    then, body_then = versions[0]
+    then, body_then, then_path = versions[0]
     imported = 'imported' in then and 'imported' in adr.frontmatter
-    # A path compares by its last segment: a record, or a record it links
-    # to, may have moved folder since, and its number did not change
-    # (ADR-306 §6).
-    body_then = canonical_paths(body_then)
-    body_now = canonical_paths(adr.body)
-    if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
-        body_now = _without_opening_summary(body_now, body_then)
+    # A record, or a record it names by path, may have moved folder since
+    # it was accepted, and its number did not change (ADR-306 §6). The
+    # accepted version with those paths rewritten, as `adr domain` rewrites
+    # them, stands for it too; any other difference is an edit.
+    relocation = history_relocation(get_project_root())
     for key in sorted(set(then) | set(adr.frontmatter)):
         if key in mutable:
             continue
@@ -1600,17 +1599,27 @@ def rule_v1_frozen(adr, ctx):
         fillable = imported and key in then
         if fillable:
             # Fill once: each committed fill of an empty part becomes frozen.
-            for later, _ in versions[1:]:
+            for later, _, _ in versions[1:]:
                 if _completes(frozen, later.get(key)):
                     frozen = later.get(key)
         now = adr.frontmatter.get(key)
         if _same(frozen, now) or (fillable and _completes(frozen, now)):
             continue
+        if key not in RELOCATE_HISTORY_KEYS and _same(relocation.value(frozen, then_path), now):
+            continue
         hint = (f" (to allow it, add observable to kinds.{v1_record_kind(adr)}.mutable_after_accept; ADR-307 §2)"
                 if key == 'observable' else '')
         v1_issue(adr, f"'{key}' changed after the decision left proposed; only {', '.join(sorted(mutable)) or 'no fields'} may change{hint}")
-    if not body_now.rstrip().startswith(body_then.rstrip()):
+    relocated = relocation.text(body_then, then_path)[0]
+    if not any(_grows_from(adr.body, body, imported) for body in (body_then, relocated)):
         v1_issue(adr, "body edited after the decision left proposed; a decision grows by appending", 'warning')
+
+def _grows_from(body: str, body_then: str, imported: bool) -> bool:
+    """body is body_then with text appended. An imported record accepted
+    without a Summary may also have gained an opening one."""
+    if imported and not re.search(r'(?m)^## Summary[ \t]*$', body_then):
+        body = _without_opening_summary(body, body_then)
+    return body.rstrip().startswith(body_then.rstrip())
 
 @file_rule(contract=V1)
 def rule_v1_no_placeholders(adr, ctx):
@@ -1652,32 +1661,41 @@ def rule_v1_observable(adr, ctx):
 # A record's number is its identity and never changes. Under adr/v1 its
 # folder decides its domain, so moving a record to another domain moves its
 # file, and a domain renamed in place moves its folder. Either way every path
-# to what moved is rewritten: markdown links, paths written from the repo
-# root, and paths inside URLs. ADR-N citations are left alone: the number
-# still names the same record.
+# to what moved is rewritten. A path is a relative link that resolves to what
+# moved, a path written from the repo root that names it, or a URL into this
+# repository's origin that names it. Other URLs, and words that only contain
+# a folder's name, are left alone. ADR-N citations are left alone too: the
+# number still names the same record.
+#
+# The frozen check (rules_v1_integrity.py) reads the same rewrite from git
+# history: a frozen record may differ from its accepted version by exactly
+# the rewrite of paths from where records were to where they are now.
 
 # Frontmatter keys that record history and are never rewritten: an imported
 # record keeps the path it was imported from.
 RELOCATE_HISTORY_KEYS = ('imported',)
 
-_PATH_WORD_RE = re.compile(r'[\w./-]+')
+_PATH_WORD_RE = re.compile(r'[A-Za-z][\w+.-]*://[\w./~%-]+|[\w./-]+')
+_REPO_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://([^/]+)/([^/]+)/([^/]+)/(?:blob|tree|raw)/[^/]+/(.+)')
 _FM_KEY_RE = re.compile(r'([A-Za-z_][\w-]*)\s*:')
+_RECORD_FILE_RE = re.compile(r'ADR-\d+(?:\.\d+)?-.*\.md')
 
 
 class Relocation:
     """One simultaneous move: files (repo-relative old path -> new path),
     directories (old dir -> new dir), and optionally a domain key rename for
-    catalog frontmatter (`domain: <key>`). `known` holds every tracked path
-    and directory, so a relative path is rewritten only when it names one."""
+    catalog frontmatter (`domain: <key>`). `known` holds tracked paths and
+    directories: a path is rewritten only when it names one, or names a
+    moved file. `repos` holds this repository's `host/owner/repo`, lowercase,
+    so a URL into it is rewritten like a path from the root."""
 
-    def __init__(self, files=None, dirs=None, known=None, domain=None):
+    def __init__(self, files=None, dirs=None, known=None, domain=None, repos=()):
         self.files = dict(files or {})
         self.dirs = dict(dirs or {})
         self.known = set(known or ())
         self.domain = domain  # (old key, new key) or None
+        self.repos = set(repos)
         self.basenames = {posixpath.basename(p) for p in self.files}
-        self._maps = ([(k.split('/'), v.split('/'), True) for k, v in self.files.items()]
-                      + [(k.split('/'), v.split('/'), False) for k, v in self.dirs.items()])
 
     def target(self, rel: str) -> Optional[str]:
         """Where a repo-relative path is after the move, or None if it stays."""
@@ -1687,6 +1705,26 @@ class Relocation:
             if rel == old or rel.startswith(old + '/'):
                 return new + rel[len(old):]
         return None
+
+    def _moved(self, rel: str) -> Optional[str]:
+        """target(rel) when rel names a real path that moved: a moved file, or
+        a path under a moved folder that is tracked before or after the move."""
+        if rel in self.files:
+            return self.files[rel]
+        moved = self.target(rel)
+        if moved is not None and (rel in self.known or moved in self.known):
+            return moved
+        return None
+
+    def _rooted(self, core: str) -> Optional[str]:
+        """core read as a path from the repo root, where it names something
+        that moved; None otherwise."""
+        lead = '/' if core.startswith('/') else ''
+        rest = core[len(lead):]
+        if not rest or posixpath.normpath(rest) != rest:
+            return None
+        moved = self._moved(rest)
+        return lead + moved if moved is not None else None
 
     def _path(self, token: str, old_dir: str, new_dir: str) -> Optional[str]:
         """token rewritten as a path to something that moved, or None."""
@@ -1699,7 +1737,7 @@ class Relocation:
         if not core.startswith('/'):
             resolved = posixpath.normpath(posixpath.join(old_dir, core))
             if not resolved.startswith('..'):
-                moved = self.target(resolved)
+                moved = self._moved(resolved)
                 if moved is not None or (old_dir != new_dir and resolved in self.known):
                     dest = moved or resolved
                     if posixpath.normpath(posixpath.join(new_dir, core)) == dest:
@@ -1719,52 +1757,55 @@ class Relocation:
                     return new + ('/' if slash else '')
                 if resolved in self.known:
                     return None  # a real path that stays
-        # A path written from the repo root, or inside a URL: the longest run
-        # of its segments that ends a moved path. A directory needs two
-        # segments (architecture/system), so a bare folder name in prose is
-        # never taken for a path; a moved file matches on its name alone.
-        parts = core.split('/')
-        best = None
-        for old, new, is_file in self._maps:
-            ends = [len(parts)] if is_file else range(len(parts), 0, -1)
-            for end in ends:
-                for k in range(min(end, len(old)), 0, -1):
-                    if k < 2 and not is_file:
-                        break
-                    if parts[end - k:end] == old[-k:]:
-                        if best is None or k > best[0]:
-                            best = (k, end, new)
-                        break
-        if best is None:
+        # A path written from the repo root names what moved in full.
+        new = self._rooted(core)
+        return (new + ('/' if slash else '')) if new is not None and new != core else None
+
+    def _url(self, token: str) -> Optional[str]:
+        """A URL into this repository, with the path it names rewritten."""
+        m = _REPO_URL_RE.fullmatch(token)
+        repo = '/'.join(m.group(1, 2, 3)).lower() if m else ''
+        if repo.endswith('.git'):
+            repo = repo[:-4]
+        if not m or repo not in self.repos:
             return None
-        k, end, new = best
-        out = '/'.join(parts[:end - k] + (new[-k:] if len(new) >= k else new) + parts[end:])
-        return (out + ('/' if slash else '')) if out != core else None
+        path = m.group(4)
+        slash = path.endswith('/')
+        new = self._rooted(path.rstrip('/'))
+        if new is None:
+            return None
+        return token[:m.start(4)] + new + ('/' if slash else '')
 
     def word(self, token: str, old_dir: str, new_dir: str) -> tuple:
         """One run of path characters rewritten; (text, count)."""
         stripped = token.rstrip('.')  # sentence punctuation is not the path
         if not stripped:
             return token, 0
-        if '/' not in stripped and stripped not in self.basenames:
-            # A bare sibling name is a path only when the file holding it
-            # moved and the name resolves to a tracked file: the link must be
-            # re-based even though its target stays put.
-            sibling = posixpath.normpath(posixpath.join(old_dir, stripped))
-            if old_dir == new_dir or sibling not in self.known:
-                return token, 0
-        new = self._path(stripped, old_dir, new_dir)
+        if '://' in stripped:
+            new = self._url(stripped)
+        else:
+            if '/' not in stripped and stripped not in self.basenames:
+                # A bare sibling name is a path only when the file holding it
+                # moved and the name resolves to a tracked file: the link must
+                # be re-based even though its target stays put.
+                sibling = posixpath.normpath(posixpath.join(old_dir, stripped))
+                if old_dir == new_dir or sibling not in self.known:
+                    return token, 0
+            new = self._path(stripped, old_dir, new_dir)
         if new is None:
             return token, 0
         return new + token[len(stripped):], 1
+
+    def _dirs(self, rel: str) -> tuple:
+        """(the folder of the file at rel, its folder after the move)"""
+        moved = self.target(rel)
+        return posixpath.dirname(rel), posixpath.dirname(moved) if moved else posixpath.dirname(rel)
 
     def text(self, content: str, rel: str) -> tuple:
         """content of the file at rel with its paths rewritten; (text, count).
         History keys in frontmatter are left alone, and a frontmatter
         `domain:` follows a domain rename."""
-        old_dir = posixpath.dirname(rel)
-        moved = self.target(rel)
-        new_dir = posixpath.dirname(moved) if moved else old_dir
+        old_dir, new_dir = self._dirs(rel)
         lines = content.split('\n')
         fm_end = None
         if lines and lines[0].rstrip('\r') == '---':
@@ -1795,17 +1836,93 @@ class Relocation:
             out.append(_PATH_WORD_RE.sub(swap, line))
         return '\n'.join(out), total
 
+    def value(self, value, rel: str):
+        """A parsed frontmatter value of the file at rel, with the paths in
+        its strings rewritten as text() rewrites them."""
+        old_dir, new_dir = self._dirs(rel)
+        if isinstance(value, str):
+            return _PATH_WORD_RE.sub(lambda m: self.word(m.group(0), old_dir, new_dir)[0], value)
+        if isinstance(value, list):
+            return [self.value(v, rel) for v in value]
+        if isinstance(value, dict):
+            return {k: self.value(v, rel) for k, v in value.items()}
+        return value
 
-def canonical_paths(text: str) -> str:
-    """Every path in text cut to its last segment, so two versions of a body
-    compare equal when only the folders their links run through differ."""
-    def last(m):
-        token = m.group(0)
-        if '/' not in token:
-            return token
-        segments = [s for s in token.split('/') if s]
-        return segments[-1] if segments else token
-    return _PATH_WORD_RE.sub(last, text)
+
+def tracked_paths(root: Path) -> tuple:
+    """(every file git tracks, sorted; those files and their folders)"""
+    out = _git(['ls-files', '-z'], root)
+    tracked = sorted(n for n in (out or '').split('\0') if n)
+    known = set(tracked)
+    for name in tracked:
+        parent = posixpath.dirname(name)
+        while parent and parent not in known:
+            known.add(parent)
+            parent = posixpath.dirname(parent)
+    return tracked, known
+
+
+def origin_repos(root: Path) -> set:
+    """{host/owner/repo} of the origin remote, lowercase; empty without one."""
+    url = (_git(['remote', 'get-url', 'origin'], root) or '').strip()
+    m = re.fullmatch(r'(?:[A-Za-z][\w+.-]*://)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]([^/]+/[^/]+?)(?:\.git)?/?', url)
+    return {f"{m.group(1)}/{m.group(2)}".lower()} if m else set()
+
+
+def _renames(output: Optional[str]) -> list:
+    """[(old, new)] from `--name-status -z` output, in its order."""
+    tokens = [t.lstrip('\n') for t in (output or '').split('\0')]
+    pairs, i = [], 0
+    while i < len(tokens):
+        if re.fullmatch(r'R\d*', tokens[i]) and i + 2 < len(tokens):
+            pairs.append((tokens[i + 1], tokens[i + 2]))
+            i += 3
+        else:
+            i += 1
+    return pairs
+
+
+_HISTORY_RELOCATIONS = {}
+
+def history_relocation(root: Path) -> Relocation:
+    """Every earlier path of a record file, mapped to where the file is now,
+    read from the renames in HEAD's history and those staged since (git mv
+    stages a rename). A folder that no longer exists maps to a new folder
+    when every record renamed out of it in one commit went there. Rename
+    detection only: a copy is a new file."""
+    key = str(root)
+    if key in _HISTORY_RELOCATIONS:
+        return _HISTORY_RELOCATIONS[key]
+    tracked, known = tracked_paths(root)
+    log = _git(['log', 'HEAD', '-M', '--diff-filter=R', '--name-status', '-z', '--format=%x01'], root) or ''
+    commits = [_renames(chunk) for chunk in reversed(log.split('\x01'))]
+    commits.append(_renames(_git(['diff', 'HEAD', '-M', '--diff-filter=R', '--name-status', '-z'], root)))
+    where, dirs = {}, {}
+    for renames in commits:
+        went = {}
+        for old, new in renames:
+            for earlier, now in where.items():
+                if now == old:
+                    where[earlier] = new
+            where[old] = new
+            if _RECORD_FILE_RE.fullmatch(posixpath.basename(new)) \
+                    and posixpath.basename(old) == posixpath.basename(new):
+                went.setdefault(posixpath.dirname(old), set()).add(posixpath.dirname(new))
+        for old_dir, new_dirs in went.items():
+            if len(new_dirs) == 1 and old_dir not in known:
+                dirs[old_dir] = next(iter(new_dirs))
+    # A folder renamed twice maps to where it went last.
+    for old_dir in dirs:
+        seen, new_dir = {old_dir}, dirs[old_dir]
+        while new_dir in dirs and new_dir not in seen:
+            seen.add(new_dir)
+            new_dir = dirs[new_dir]
+        dirs[old_dir] = new_dir
+    files = {old: new for old, new in where.items()
+             if old != new and _RECORD_FILE_RE.fullmatch(posixpath.basename(new))}
+    relocation = Relocation(files=files, dirs=dirs, known=known, repos=origin_repos(root))
+    _HISTORY_RELOCATIONS[key] = relocation
+    return relocation
 # --- import sheets and the v1 record writer (ADR-306) -------------------------------
 
 SHEET_FORMAT = 'adr-import/v1'
@@ -3450,14 +3567,7 @@ def _relocation_scope(root: Path) -> tuple:
     git tracks except fixtures, import sheets, the archive (archived records
     are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
     import fnmatch
-    out = _git(['ls-files', '-z'], root)
-    tracked = sorted(n for n in (out or '').split('\0') if n)
-    known = set(tracked)
-    for name in tracked:
-        parent = posixpath.dirname(name)
-        while parent and parent not in known:
-            known.add(parent)
-            parent = posixpath.dirname(parent)
+    tracked, known = tracked_paths(root)
     cite_config = get_config().get('cite')
     patterns = ['tests/fixtures', 'docs/architecture/archive'] + [
         str(p) for p in ((cite_config.get('exclude') if isinstance(cite_config, dict) else None) or [])]
@@ -3480,8 +3590,9 @@ def _relocation_scope(root: Path) -> tuple:
 
 
 def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:
-    """(name, count, new bytes) for each file whose text changes. Binary files
-    and files that are not UTF-8 are never touched."""
+    """(name, count, new bytes, [(line number, before, after)]) for each file
+    whose text changes. Binary files and files that are not UTF-8 are never
+    touched."""
     changes = []
     for name in names:
         path = root / name
@@ -3497,15 +3608,28 @@ def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:
             continue
         new, count = relocation.text(text, name)
         if count and new != text:
-            changes.append((name, count, new.encode('utf-8')))
+            changes.append((name, count, new.encode('utf-8'), _changed_lines(text, new)))
     return changes
 
 
-def _print_rewrites(changes: list, verb: str) -> None:
-    total = sum(c for _, c, _ in changes)
+def _changed_lines(before: str, after: str) -> list:
+    """[(line number, before, after)] for each line the rewrite changed. A
+    rewrite changes text within lines, so the lines pair up."""
+    return [(i, a, b) for i, (a, b) in enumerate(zip(before.split('\n'), after.split('\n')), 1) if a != b]
+
+
+def _print_rewrites(changes: list, verb: str, lines: bool = False) -> None:
+    """The count of rewritten paths per file, and with lines=True each line
+    the rewrite changes, before and after."""
+    total = sum(c[1] for c in changes)
     print(f"{verb} {total} path{'s' if total != 1 else ''} in {len(changes)} file{'s' if len(changes) != 1 else ''}")
-    for name, count, _ in changes:
+    for name, count, _, changed in changes:
         print(f"  {name}: {count}")
+        if lines:
+            for number, before, after in changed:
+                print(f"    {name}:{number}")
+                print(f"        {before.rstrip(chr(13))}")
+                print(f"      → {after.rstrip(chr(13))}")
 
 
 def _git_mv(root: Path, old: str, new: str) -> None:
@@ -3521,7 +3645,7 @@ def _git_mv(root: Path, old: str, new: str) -> None:
 
 
 def _write_rewrites(relocation: Relocation, root: Path, changes: list) -> None:
-    for name, _, data in changes:
+    for name, _, data, _ in changes:
         (root / (relocation.target(name) or name)).write_bytes(data)
 
 
@@ -3724,20 +3848,23 @@ def _domain_rename(args):
     old_dir = f"docs/architecture/{folder_old}"
     new_dir = f"docs/architecture/{folder_new}"
     relocation = Relocation(dirs={old_dir: new_dir} if folder_new != folder_old else {},
-                            known=known, domain=(old, new) if new != old else None)
+                            known=known, domain=(old, new) if new != old else None,
+                            repos=origin_repos(root))
     changes = _plan_rewrites(relocation, root, names)
     # adr.yaml is written from its edited text, with its own paths rewritten.
     config_rel = 'docs/architecture/adr.yaml'
-    config_text, config_count = relocation.text(''.join(lines), config_rel)
+    config_before = ''.join(lines)
+    config_text, config_count = relocation.text(config_before, config_rel)
     changes = [c for c in changes if c[0] != config_rel]
     if config_count:
-        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'))])
+        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'),
+                                     _changed_lines(config_before, config_text))])
 
     verb = 'Would rename' if args.dry_run else 'Renamed'
     print(f"{verb} domain: {old} → {new}")
     if folder_new != folder_old:
         print(f"  Folder: {old_dir}/ → {new_dir}/")
-    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote', lines=args.dry_run)
     if args.dry_run:
         print("Dry run: nothing written.")
         return 0
@@ -3836,14 +3963,14 @@ def _domain_move(args):
         return 1
 
     names, known = _relocation_scope(root)
-    relocation = Relocation(files=files, known=known)
+    relocation = Relocation(files=files, known=known, repos=origin_repos(root))
     changes = _plan_rewrites(relocation, root, names)
 
     verb = 'Would move' if args.dry_run else 'Moved'
     for adr, was, domain, rel, new_rel in lines_out:
         print(f"{verb}: ADR-{adr.number} {was} → {domain}")
         print(f"  {rel} → {new_rel}")
-    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote', lines=args.dry_run)
     if args.dry_run:
         print("Dry run: nothing written.")
         return 0
@@ -5046,12 +5173,12 @@ def main():
     p_dren.add_argument('old', help='Current domain key')
     p_dren.add_argument('new', help='New domain key')
     p_dren.add_argument('--folder', help='New folder (default: the new key when the folder was the old key)')
-    p_dren.add_argument('--dry-run', action='store_true', help='Report what would change without changing it')
+    p_dren.add_argument('--dry-run', action='store_true', help='Print each line the rename would change; write nothing')
     p_dmove = domain_sub.add_parser('move', help='Move records to another domain; numbers never change')
     p_dmove.add_argument('record', nargs='?', help='ADR number (e.g. 104, ADR-104)')
     p_dmove.add_argument('domain', nargs='?', help='Target domain')
     p_dmove.add_argument('--plan', help='YAML list of {record, domain} moves, applied together')
-    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and the rewrites per file; write nothing')
+    p_dmove.add_argument('--dry-run', action='store_true', help='Print the moves and each line they would change; write nothing')
 
     # archive
     p_archive = subparsers.add_parser(

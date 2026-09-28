@@ -29,14 +29,7 @@ def _relocation_scope(root: Path) -> tuple:
     git tracks except fixtures, import sheets, the archive (archived records
     are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
     import fnmatch
-    out = _git(['ls-files', '-z'], root)
-    tracked = sorted(n for n in (out or '').split('\0') if n)
-    known = set(tracked)
-    for name in tracked:
-        parent = posixpath.dirname(name)
-        while parent and parent not in known:
-            known.add(parent)
-            parent = posixpath.dirname(parent)
+    tracked, known = tracked_paths(root)
     cite_config = get_config().get('cite')
     patterns = ['tests/fixtures', 'docs/architecture/archive'] + [
         str(p) for p in ((cite_config.get('exclude') if isinstance(cite_config, dict) else None) or [])]
@@ -59,8 +52,9 @@ def _relocation_scope(root: Path) -> tuple:
 
 
 def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:
-    """(name, count, new bytes) for each file whose text changes. Binary files
-    and files that are not UTF-8 are never touched."""
+    """(name, count, new bytes, [(line number, before, after)]) for each file
+    whose text changes. Binary files and files that are not UTF-8 are never
+    touched."""
     changes = []
     for name in names:
         path = root / name
@@ -76,15 +70,28 @@ def _plan_rewrites(relocation: Relocation, root: Path, names: list) -> list:
             continue
         new, count = relocation.text(text, name)
         if count and new != text:
-            changes.append((name, count, new.encode('utf-8')))
+            changes.append((name, count, new.encode('utf-8'), _changed_lines(text, new)))
     return changes
 
 
-def _print_rewrites(changes: list, verb: str) -> None:
-    total = sum(c for _, c, _ in changes)
+def _changed_lines(before: str, after: str) -> list:
+    """[(line number, before, after)] for each line the rewrite changed. A
+    rewrite changes text within lines, so the lines pair up."""
+    return [(i, a, b) for i, (a, b) in enumerate(zip(before.split('\n'), after.split('\n')), 1) if a != b]
+
+
+def _print_rewrites(changes: list, verb: str, lines: bool = False) -> None:
+    """The count of rewritten paths per file, and with lines=True each line
+    the rewrite changes, before and after."""
+    total = sum(c[1] for c in changes)
     print(f"{verb} {total} path{'s' if total != 1 else ''} in {len(changes)} file{'s' if len(changes) != 1 else ''}")
-    for name, count, _ in changes:
+    for name, count, _, changed in changes:
         print(f"  {name}: {count}")
+        if lines:
+            for number, before, after in changed:
+                print(f"    {name}:{number}")
+                print(f"        {before.rstrip(chr(13))}")
+                print(f"      → {after.rstrip(chr(13))}")
 
 
 def _git_mv(root: Path, old: str, new: str) -> None:
@@ -100,7 +107,7 @@ def _git_mv(root: Path, old: str, new: str) -> None:
 
 
 def _write_rewrites(relocation: Relocation, root: Path, changes: list) -> None:
-    for name, _, data in changes:
+    for name, _, data, _ in changes:
         (root / (relocation.target(name) or name)).write_bytes(data)
 
 
@@ -303,20 +310,23 @@ def _domain_rename(args):
     old_dir = f"docs/architecture/{folder_old}"
     new_dir = f"docs/architecture/{folder_new}"
     relocation = Relocation(dirs={old_dir: new_dir} if folder_new != folder_old else {},
-                            known=known, domain=(old, new) if new != old else None)
+                            known=known, domain=(old, new) if new != old else None,
+                            repos=origin_repos(root))
     changes = _plan_rewrites(relocation, root, names)
     # adr.yaml is written from its edited text, with its own paths rewritten.
     config_rel = 'docs/architecture/adr.yaml'
-    config_text, config_count = relocation.text(''.join(lines), config_rel)
+    config_before = ''.join(lines)
+    config_text, config_count = relocation.text(config_before, config_rel)
     changes = [c for c in changes if c[0] != config_rel]
     if config_count:
-        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'))])
+        changes = sorted(changes + [(config_rel, config_count, config_text.encode('utf-8'),
+                                     _changed_lines(config_before, config_text))])
 
     verb = 'Would rename' if args.dry_run else 'Renamed'
     print(f"{verb} domain: {old} → {new}")
     if folder_new != folder_old:
         print(f"  Folder: {old_dir}/ → {new_dir}/")
-    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote', lines=args.dry_run)
     if args.dry_run:
         print("Dry run: nothing written.")
         return 0
@@ -415,14 +425,14 @@ def _domain_move(args):
         return 1
 
     names, known = _relocation_scope(root)
-    relocation = Relocation(files=files, known=known)
+    relocation = Relocation(files=files, known=known, repos=origin_repos(root))
     changes = _plan_rewrites(relocation, root, names)
 
     verb = 'Would move' if args.dry_run else 'Moved'
     for adr, was, domain, rel, new_rel in lines_out:
         print(f"{verb}: ADR-{adr.number} {was} → {domain}")
         print(f"  {rel} → {new_rel}")
-    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote')
+    _print_rewrites(changes, 'Would rewrite' if args.dry_run else 'Rewrote', lines=args.dry_run)
     if args.dry_run:
         print("Dry run: nothing written.")
         return 0

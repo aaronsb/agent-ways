@@ -1,0 +1,19 @@
+Would move: ADR-101 system → docs
+  docs/architecture/system/ADR-101-ingest.md → docs/architecture/documentation/ADR-101-ingest.md
+Would rewrite 4 paths in 2 files
+  CHANGELOG.md: 2
+    CHANGELOG.md:4
+        - This repo: https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md
+      → - This repo: https://github.com/fixture/corpus/blob/main/docs/architecture/documentation/ADR-101-ingest.md
+    CHANGELOG.md:6
+        - See docs/architecture/system/ADR-101-ingest.md.
+      → - See docs/architecture/documentation/ADR-101-ingest.md.
+  docs/architecture/system/ADR-104-no-network-in-hooks.md: 2
+    docs/architecture/system/ADR-104-no-network-in-hooks.md:11
+          - evidence: "the survey at docs/architecture/system/ADR-101-ingest.md"
+      →   - evidence: "the survey at docs/architecture/documentation/ADR-101-ingest.md"
+    docs/architecture/system/ADR-104-no-network-in-hooks.md:31
+        See [ingest](ADR-101-ingest.md), [the guide](https://example.com/v1/guide), [the notes](../api/README.md), and/or the spec.
+      → See [ingest](../documentation/ADR-101-ingest.md), [the guide](https://example.com/v1/guide), [the notes](../api/README.md), and/or the spec.
+Dry run: nothing written.
+[exit 0]
