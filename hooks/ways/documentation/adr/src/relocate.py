@@ -21,9 +21,9 @@ _PATH_WORD_RE = re.compile(r'[A-Za-z][\w+.-]*://[\w./~%-]+|[\w./-]+')
 # the ref follows the repo directly. A ref may hold slashes.
 _REPO_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://([^/]+)/([^/]+)/([^/]+)/(?:blob|tree|raw)/(.+)')
 _RAW_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)', re.IGNORECASE)
-_COMMIT_RE = re.compile(r'[0-9a-f]{7,40}')
+_COMMIT_RE = re.compile(r'[0-9a-fA-F]{7,40}')
 _FM_KEY_RE = re.compile(r'([A-Za-z_][\w-]*)\s*:')
-_FENCE_RE = re.compile(r' {0,3}(`{3,}|~{3,})')
+_FENCE_RE = re.compile(r'[ \t]*(`{3,}|~{3,})')
 
 
 def _repo_name(url: str) -> Optional[str]:

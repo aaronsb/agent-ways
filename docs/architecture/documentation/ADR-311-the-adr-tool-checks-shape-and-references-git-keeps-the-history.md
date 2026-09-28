@@ -5,7 +5,7 @@ verb: change
 capability: adr
 supersedes:
   - ADR-305
-amends: [ADR-304#1, ADR-304#6, ADR-304#11, ADR-304#12, ADR-308#2]
+amends: [ADR-304#1, ADR-304#5, ADR-304#6, ADR-304#11, ADR-304#12, ADR-308#2]
 basis:
   - operator: aaronsb
     level: directed
@@ -59,12 +59,12 @@ related:
 
 ## Context
 
-ADR-304 made records typed and added lint rules that enforce relationships: frozen decisions (§1, §6), an `add` for every capability, a prior for every `change`, precedent that reaches outside the corpus (§11), labelled probes (§12). ADR-305 added a `baseline` to excuse capabilities that predate adoption, and ADR-308 extended the prior rule to lists. Building the frozen check on moved records took three designs in #604, each adding configuration. An audit of the rules found the same pattern across the policy gates.
+ADR-304 made records typed and added lint rules that enforce relationships: frozen decisions (§1, §6), enactment checked against the code (§5), an `add` for every capability, a prior for every `change`, precedent that reaches outside the corpus (§11), labelled probes (§12). ADR-305 added a `baseline` to excuse capabilities that predate adoption, and ADR-308 extended the prior rule to lists. Building the frozen check on moved records took three designs in #604, each adding configuration. An audit of the rules found the same pattern across the policy gates.
 
 ## Decision
 
 1. **What the tool checks.** A record's fields and their values (kind, status, verb, capability in the vocabulary, a basis whose entries each name a source, agent, `imported`, `observable`), its required sections, leftover placeholders, `adr.yaml`'s own shape, and every reference: supersession pairs, `amends` sections, precedent, and `adr cite`'s citations.
-2. **What it no longer checks.** Frozen records and `mutable_after_accept`; an `add` per capability and `baseline`; a prior per `change`, for one capability or a list; a precedent chain reaching outside; vocabulary stems across layers; Summary probe labels and inversion; enactment inventories and `surfaces`. `enacted` stays a field.
+2. **What it no longer checks.** Frozen records and `mutable_after_accept`; an `add` per capability and `baseline`; a prior per `change`, for one capability or a list; a precedent chain reaching outside; vocabulary stems across layers; Summary probe labels and inversion; enactment inventories, `surfaces`, and `cite`'s warnings on citations of a cut capability; a retire decision's `targets`. `enacted` and `targets` stay fields.
 3. **Commands.** `adr accept` refuses a record that fails its own shape check, and does not lint the corpus. `adr set` refuses `status`, which the lifecycle commands own. `adr supersede` writes both sides on any record. `considered` stays a field; accept does not require it.
 4. **Conventions.** Correct an accepted record by appending; record a change as a new decision that names what it replaces; quote the operator. The ADR way teaches these.
 5. **Git is the backstop.** Earlier versions, and who changed them, are read with git.

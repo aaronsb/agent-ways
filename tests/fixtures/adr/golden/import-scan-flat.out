@@ -1,5 +1,6 @@
-Skipped: notes/decisions/0001-use-postgres.md: not named ADR-NNN-<slug>.md
-Skipped: notes/decisions/README.md: not named ADR-NNN-<slug>.md
+Skipped: notes/decisions/0001-use-postgres.md: not named ADR-NNN.md or ADR-NNN-<slug>.md
+Skipped: notes/decisions/README.md: not named ADR-NNN.md or ADR-NNN-<slug>.md
 Skipped: notes/decisions/ADR-002-inline.md: no YAML frontmatter; import reads structured records (ADR-306 §2)
-Scan: 0 sheet(s) written, 3 skipped
-[exit 1]
+Scanned: notes/decisions/ADR-003.md -> docs/architecture/.import/ADR-003.yaml (v0, 4 todo)
+Scan: 1 sheet(s) written, 3 skipped
+[exit 0]

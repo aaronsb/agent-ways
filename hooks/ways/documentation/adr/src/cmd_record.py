@@ -143,7 +143,7 @@ def cmd_consider(args):
 # --- set ----------------------------------------------------------------------------
 
 _ASSIGNMENT = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*)(\+=|-=|=)(.*)$', re.DOTALL)
-# Statuses with a command of their own, which checks the corpus and records why.
+# Statuses with a command of their own, which checks the record and records why.
 _STATUS_COMMANDS = {'accepted': 'accept', 'rejected': 'reject', 'abandoned': 'abandon',
                     'superseded': 'supersede', 'archived': 'archive'}
 
@@ -176,7 +176,7 @@ def cmd_set(args):
                 continue
             command = _STATUS_COMMANDS.get(str(value).lower()) if op == '=' else None
             if command:
-                print(f"Refused: use `adr {command} {adr.number}`; it checks the corpus and records why. "
+                print(f"Refused: use `adr {command} {adr.number}`; it checks the record and records why. "
                       f"--force sets the status anyway.", file=sys.stderr)
             else:
                 print(f"Refused: a record's status changes only through accept, reject, abandon, "

@@ -7,7 +7,7 @@ def cmd_import(args):
     print("Usage: adr import scan <paths...> | adr import apply [sheets...] [--partial]", file=sys.stderr)
     return 2
 
-SCAN_NAME_RE = re.compile(r'ADR-\d+(?:\.\d+)?-.+\.md')
+SCAN_NAME_RE = re.compile(r'ADR-\d+(?:\.\d+)?(?:-.+)?\.md')
 # The tool's own files at the top of a records folder, which are never
 # records: its config, its index, and the sheet directory.
 SCAN_TOOL_FILES = ('adr.yaml', 'INDEX.md', '.import')
@@ -44,7 +44,7 @@ def _scan_inputs(paths: list) -> tuple:
                         else:
                             found_files.append(found)
                     elif name.lower().endswith('.md'):
-                        found_passed.append((found, 'not named ADR-NNN-<slug>.md'))
+                        found_passed.append((found, 'not named ADR-NNN.md or ADR-NNN-<slug>.md'))
                     else:
                         ext = found.suffix.lower()
                         other[ext] = other.get(ext, 0) + 1

@@ -302,6 +302,7 @@ capture v1-evidence-kind lint docs/architecture/system/ADR-117-ingest-throughput
 
 fresh v1
 capture v1-cite        cite
+capture v1-cite-no-inventory cite --no-inventory
 
 # Lifecycle commands (ADR-304 §2, §11, §12)
 fresh v1
@@ -358,6 +359,7 @@ mkdir -p "$WORK/repo/notes/decisions"
 printf '# 1. Use Postgres\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/0001-use-postgres.md"
 printf '# ADR-2: Inline\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/ADR-002-inline.md"
 printf 'Decisions live here.\n' > "$WORK/repo/notes/decisions/README.md"
+printf -- '---\nstatus: Accepted\ndate: 2026-01-15\ndeciders: [a]\nrelated: []\n---\n\n# ADR-003: No slug\n\n## Context\nx\n' > "$WORK/repo/notes/decisions/ADR-003.md"
 capture import-scan-flat import scan notes/decisions
 # A broad folder: each Markdown file passed over is named, a hidden folder
 # is named and not entered, other files are counted by extension, and the
@@ -665,10 +667,10 @@ capture relocate-repository-bad lint $S/ADR-104-no-network-in-hooks.md
 
 # A URL at a commit or a tag is a permalink and stays; one at a branch, a
 # branch with a slash, or on GitHub's raw host is rewritten. A path written
-# with backslashes, or inside a fenced code block, stays.
+# with backslashes, or inside a fenced code block (indented in a list too), stays.
 fresh v1
 (cd "$WORK/repo" && git remote add origin git@github.com:fixture/corpus.git && git tag v1.0 && git branch feature/x)
-printf -- '# Notes\n\n- https://github.com/fixture/corpus/blob/0123456789abcdef0123456789abcdef01234567/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/abc1234/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/v1.0/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/feature/x/docs/architecture/system/ADR-101-ingest.md\n- https://raw.githubusercontent.com/fixture/corpus/main/docs/architecture/system/ADR-101-ingest.md\n- docs\\architecture\\system\\ADR-101-ingest.md\n\n```sh\ngit mv docs/architecture/system/ADR-101-ingest.md docs/architecture/documentation/ADR-101-ingest.md\n```\n\nSee docs/architecture/system/ADR-101-ingest.md.\n' > "$WORK/repo/NOTES.md"
+printf -- '# Notes\n\n- https://github.com/fixture/corpus/blob/0123456789abcdef0123456789abcdef01234567/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/abc1234/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/ABC1234/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/v1.0/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/feature/x/docs/architecture/system/ADR-101-ingest.md\n- https://raw.githubusercontent.com/fixture/corpus/main/docs/architecture/system/ADR-101-ingest.md\n- docs\\architecture\\system\\ADR-101-ingest.md\n\n```sh\ngit mv docs/architecture/system/ADR-101-ingest.md docs/architecture/documentation/ADR-101-ingest.md\n```\n\n1. Step one\n\n    ```sh\n    cat docs/architecture/system/ADR-101-ingest.md\n    ```\n\nSee docs/architecture/system/ADR-101-ingest.md.\n' > "$WORK/repo/NOTES.md"
 edit $S/ADR-109-precedent-chain.md "s + '\nOn Windows: docs\\\\architecture\\\\system\\\\ADR-101-ingest.md\n'"
 commit_all notes
 (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null)

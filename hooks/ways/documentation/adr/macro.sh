@@ -70,7 +70,7 @@ print_v1_guide() {
   echo "| \`$s new <domain> <title> --kind K --verb V --capability C\` | Create a record with its v1 frontmatter (\`--agent\`, \`--model\` for a decision) |"
   echo "| \`$s lint [--check]\` | Validate records against the contract |"
   echo "| \`$s consider <n> --said \"...\" --via \"...\"\` | Append the operator's answer to a decision's probes |"
-  echo "| \`$s accept <n>\` | Accept a proposed record; refuses if the record has lint errors |"
+  echo "| \`$s accept <n>\` | Accept a proposed record; refuses if the record fails its own field checks; \`$s lint\` checks its references |"
   echo "| \`$s reject <n> --reason \"...\"\` | Considered and declined |"
   echo "| \`$s abandon <n> --reason \"...\"\` | Dropped before a decision |"
   echo "| \`$s set <n> key=value key+=item\` | Edit frontmatter; refuses status, which the lifecycle commands set |"
