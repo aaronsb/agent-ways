@@ -62,6 +62,12 @@ kinds:
 capabilities:
   core: The project's core behaviour (placeholder; replace)
 
+# This repository, as URLs name it (host/owner/repo, or a list). A URL into
+# it at a branch is a path in the tree: `adr domain` rewrites it when a
+# record moves. Without this key the origin remote is used, so set it to
+# rewrite the same URLs in every clone.
+# repository: github.com/owner/repo
+
 # Valid ADR statuses (adr/v0 records)
 statuses:
   - Draft         # Initial creation, not yet proposed

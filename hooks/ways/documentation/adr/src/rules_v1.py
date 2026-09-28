@@ -126,6 +126,11 @@ def rule_v1_config_shape(ctx):
         bad("verbs: expected a list of names")
     if not isinstance(config.get('capabilities'), dict) or not config.get('capabilities'):
         bad("contract: adr/v1 declares no capabilities")
+    if 'repository' in config:
+        names = [config['repository']] if isinstance(config['repository'], str) else config['repository']
+        if not isinstance(names, list) or not names \
+                or not all(isinstance(n, str) and _repo_name(n) for n in names):
+            bad("repository: expected host/owner/repo, or a list of them")
 
 # --- one record ------------------------------------------------------------------
 

@@ -53,7 +53,7 @@ deciders:
 related: []
 ---
 
-# ADR-001: Use Postgres for Session State
+# ADR-001: Use Postgres for Session State   <!-- adr-cite-ignore: example number -->
 ```
 
 3. **Scan** the existing records into editable import sheets:

@@ -1,0 +1,21 @@
+
+Scanned: 15 ADRs
+
+Status distribution:
+  accepted: 9
+  proposed: 6
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/platform/ADR-114-open-concern.md
+  ⚠️ open concern: Batch size may starve small tenants
+
+════════════════════════════════════════════════════════════
+Summary: 0 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

@@ -352,6 +352,27 @@ fresh corpus
 capture import-scan-corpus import scan docs/architecture
 worktree import-scan-corpus-status.txt
 keep import-scan-corpus-gitignore docs/architecture/.import/.gitignore
+# A directory of records that scan cannot read: each file it passes over is
+# named, with the reason, and counted as skipped.
+mkdir -p "$WORK/repo/notes/decisions"
+printf '# 1. Use Postgres\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/0001-use-postgres.md"
+printf '# ADR-2: Inline\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/ADR-002-inline.md"
+printf 'Decisions live here.\n' > "$WORK/repo/notes/decisions/README.md"
+capture import-scan-flat import scan notes/decisions
+# A broad folder: each Markdown file passed over is named, a hidden folder
+# is named and not entered, other files are counted by extension, and the
+# tool's own files are left out only at the top of the folder scanned.
+mkdir -p "$WORK/repo/notes/.drafts" "$WORK/repo/notes/archive" "$WORK/repo/notes/sub" "$WORK/repo/notes/img"
+printf 'x\n' > "$WORK/repo/notes/.drafts/ADR-003-draft.md"
+printf 'x\n' > "$WORK/repo/notes/.notes.md"
+printf 'x\n' > "$WORK/repo/notes/INDEX.md"
+printf 'x\n' > "$WORK/repo/notes/sub/INDEX.md"
+printf 'k: v\n' > "$WORK/repo/notes/sub/adr.yaml"
+printf 'x\n' > "$WORK/repo/notes/archive/README.md"
+printf 'x\n' > "$WORK/repo/notes/archive/old.txt"
+printf 'x\n' > "$WORK/repo/notes/Makefile"
+for i in 1 2 3; do printf 'png' > "$WORK/repo/notes/img/p$i.png"; done
+capture import-scan-broad import scan notes
 keep_sheets import-scan-corpus
 
 # In the v1 fixture: a v1 record scanned as itself, a v0 record, a v0 record
@@ -571,6 +592,91 @@ worktree domain-move-plan-refused-status.txt
 # Under adr/v0 the number decides the domain, so a move is refused.
 fresh corpus
 capture domain-move-v0 domain move 104 docs
+
+# --- what a relocation rewrites (#603) ------------------------------------------------
+# A rewrite reaches a path that resolves to what moved: a relative link, a
+# path from the repo root, or a URL into this repository's origin. Another
+# repository's URL, prose, and a code constant naming a folder stay. The dry
+# run prints each line it would change.
+#
+# ADR-104's basis evidence and body name ADR-101's path, and the rewrite
+# reaches both.
+safety_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && git remote add origin git@github.com:fixture/corpus.git)
+  printf 'TEMPLATE_DIR = "architecture/system"\nRECORDS = "docs/architecture/system"\n' > "$WORK/repo/src/app.py"
+  printf '# Changes\n\n- Another repo: https://github.com/someone/else/tree/main/docs/architecture/system/ADR-101-ingest.md\n- This repo: https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md\n- The vendor layout uses architecture/system and a system/ADR-101-ingest.md file.\n- See docs/architecture/system/ADR-101-ingest.md.\n' > "$WORK/repo/CHANGELOG.md"
+  edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('  - evidence: fixture measurement\n', '  - evidence: \"the survey at docs/architecture/system/ADR-101-ingest.md\"\n') + '\nSee [ingest](ADR-101-ingest.md), [the guide](https://example.com/v1/guide), [the notes](../api/README.md), and/or the spec.\n'"
+  (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description "Guides" > /dev/null)
+  (cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+}
+safety_fresh
+capture relocate-move-dry domain move 101 docs --dry-run
+capture relocate-rename-dry domain rename system platform --dry-run
+capture relocate-rename domain rename system platform
+keep relocate-rename-changelog.md CHANGELOG.md
+keep relocate-rename-app.py src/app.py
+keep relocate-rename-104.md docs/architecture/platform/ADR-104-no-network-in-hooks.md
+capture relocate-rename-lint lint
+
+# A move of a record that another record cites by path.
+safety_fresh
+capture relocate-move domain move 101 docs
+keep relocate-move-104.md docs/architecture/system/ADR-104-no-network-in-hooks.md
+capture relocate-move-lint lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+S="docs/architecture/system"
+
+# ADR-104 cites ADR-101 by a sibling link, in its basis and in its body.
+# Moving 104, then 101, then 104 again, each committed, leaves the link
+# reaching ADR-101 from a third folder.
+chain_fresh() {
+  fresh v1
+  (cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null \
+    && "$ADR_TOOL" domain add ops --range 400-499 --folder operations --description Operations > /dev/null)
+}
+chain_moves() {
+  (cd "$WORK/repo" && "$ADR_TOOL" domain move 104 docs > /dev/null); commit_all "move 104"
+  (cd "$WORK/repo" && "$ADR_TOOL" domain move 101 ops > /dev/null); commit_all "move 101"
+  (cd "$WORK/repo" && "$ADR_TOOL" domain move 104 ops > /dev/null); commit_all "move 104 again"
+}
+chain_fresh
+edit $S/ADR-104-no-network-in-hooks.md "s.replace('  - evidence: fixture measurement', '  - evidence: \"see [ingest](ADR-101-ingest.md)\"')"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+chain_moves
+keep relocate-chain-basis-104.md docs/architecture/operations/ADR-104-no-network-in-hooks.md
+chain_fresh
+edit $S/ADR-104-no-network-in-hooks.md "s + '\nSee [ingest](ADR-101-ingest.md).\n'"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+chain_moves
+keep relocate-chain-body-104.md docs/architecture/operations/ADR-104-no-network-in-hooks.md
+
+# --- which repository a URL names, and what a rewrite leaves (#603) -------------
+# adr.yaml's repository: names this repository, so the rewrite reads the
+# same URLs as this repository's with or without an origin remote.
+fresh v1
+edit docs/architecture/adr.yaml "s + 'repository: github.com/fixture/corpus\n'"
+edit $S/ADR-104-no-network-in-hooks.md "s + '\nSee https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md.\n'"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+(cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null)
+capture relocate-repository-move domain move 101 docs
+keep relocate-repository-104.md $S/ADR-104-no-network-in-hooks.md
+edit docs/architecture/adr.yaml "s.replace('repository: github.com/fixture/corpus', 'repository: [3]')"
+capture relocate-repository-bad lint $S/ADR-104-no-network-in-hooks.md
+
+# A URL at a commit or a tag is a permalink and stays; one at a branch, a
+# branch with a slash, or on GitHub's raw host is rewritten. A path written
+# with backslashes, or inside a fenced code block, stays.
+fresh v1
+(cd "$WORK/repo" && git remote add origin git@github.com:fixture/corpus.git && git tag v1.0 && git branch feature/x)
+printf -- '# Notes\n\n- https://github.com/fixture/corpus/blob/0123456789abcdef0123456789abcdef01234567/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/abc1234/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/v1.0/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/feature/x/docs/architecture/system/ADR-101-ingest.md\n- https://raw.githubusercontent.com/fixture/corpus/main/docs/architecture/system/ADR-101-ingest.md\n- docs\\architecture\\system\\ADR-101-ingest.md\n\n```sh\ngit mv docs/architecture/system/ADR-101-ingest.md docs/architecture/documentation/ADR-101-ingest.md\n```\n\nSee docs/architecture/system/ADR-101-ingest.md.\n' > "$WORK/repo/NOTES.md"
+edit $S/ADR-109-precedent-chain.md "s + '\nOn Windows: docs\\\\architecture\\\\system\\\\ADR-101-ingest.md\n'"
+commit_all notes
+(cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null)
+capture relocate-refs-dry domain move 101 docs --dry-run
+capture relocate-refs domain move 101 docs
+keep relocate-refs-notes.md NOTES.md
+keep relocate-refs-109.md $S/ADR-109-precedent-chain.md
+
 # --- record edits: consider, set, supersede, enact ----------------------------------
 #
 # Each edit keeps the file it wrote, so the goldens show that only the touched
