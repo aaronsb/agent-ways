@@ -821,10 +821,23 @@ From adr-tool 2.2.0:
 
 This keeps the rule in §10 that a tool upgrade never adopts a contract on the project's behalf: the upgrade runs only when someone runs it. The lint warning compares `adr.yaml` with the records' declared contracts and nothing else (ADR-311).
 
-## Note (2026-09-28): an approval before the probes were asked
+## Note (2026-09-28): consideration does not block
 
 Appended to §12. The text above is unchanged.
 
-The consider way read two ways when the operator approved a record whose probes had not been put to them in the conversation: one line said such a "looks good" covers none of the probes, another said a short yes is a real answer and the probes are not re-asked. Tier 2 run 36492665438 failed on it, where an earlier run had passed. The agent asked the operator, in an agent-written question: "When you approve before the probes are asked, should the agent record your answer and accept, or ask the probes first?" The operator's decision: "the agent should ask the questions first. otherwise, the operator/human probably isn't aware of the context."
+The consider way gave two readings when the operator approved a record before its probes were put to them in the conversation. One line said such a "looks good" covers none of the probes. Another said a short yes is a real answer and the probes are not re-asked. Tier 2 run 36492665438 failed `adr-consider` on this, where an earlier run had passed. The operator settled it in one session, in four messages, quoted in order:
 
-`hooks/ways/documentation/adr/consider/consider.md` now says so. When the operator approves before the probes and the inversion were asked in the conversation, the agent asks them first, in plain words with the record's context, and records and accepts nothing until the operator answers. This holds when the approval says to accept. A short yes given after the probes were asked is still a real answer, and the probes are not re-asked. The `adr-consider` tier 2 scenario runs this as two turns.
+1. "the agent should ask the questions first. otherwise, the operator/human probably isn't aware of the context." (via: session 2026-09-28, answering the agent-written question "When you approve before the probes are asked, should the agent record your answer and accept, or ask the probes first?")
+2. "I"m not sure if I like this - because it puts a human halt in the mix." (via: the same session)
+3. "B, but let's make it so it's not blocking. if the human never develops the habit of surfacing decisions, then that's just the quality of the corpus. we shouldn't force it" (via: the same session, choosing the agent-written option B: "record the approval with covers: [], do what they said, and in the same reply put the probes to them; a later answer is appended as another considered entry")
+4. "but we should make it convenient - part of the natural flow should ask and if the human is like corbin dallas when rhuby rhod asks him how excited he is on floston paradise, then we just...continue" (via: the same session; the reference is to a flat, minimal answer)
+
+The rule in `hooks/ways/documentation/adr/consider/consider.md` is now:
+
+- The agent asks the probes and the inversion as part of its reply, one short line each, answerable in a word, through the choice tool as one batch when one is available.
+- An approval or a direction to accept given before the probes were asked is recorded as a `considered` entry with no `covers`, and the agent does what the operator said. It puts the probes to them in the same reply and does not wait for the answer.
+- Once the probes were asked, a short yes is a real answer and the probes are not re-asked. A minimal answer, or none, is recorded as said, with `covers` limited to what the words settled, and the agent continues without re-asking.
+- A later answer is another `considered` entry. A "no" is corrected by appending: a supersede, or a new record.
+- For a decision the operator started, acceptance no longer waits for their consideration. The earlier rule that it did is removed.
+
+The adr skill and the system-architect and workflow-orchestrator agents say the same. The `adr-consider` tier 2 scenario checks one turn: the record is accepted with a `considered` entry holding the operator's words and no `covers`, and the reply puts the probes to the operator. A record whose operator never answers the probes shows that in its `considered` entries; the corpus carries it and nothing forces it.

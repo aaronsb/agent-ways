@@ -1,1 +1,0 @@
-The latency win is real, agreed. 30 seconds of staleness is fine for lists. The middle is right.

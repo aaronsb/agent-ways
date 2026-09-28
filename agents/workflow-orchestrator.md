@@ -14,7 +14,7 @@ You coordinate the development lifecycle following the ADR-driven workflow patte
 ## Core Workflow Pattern
 
 ```
-Debate/Research → adr new (docs/architecture/<domain>/) → probes answered via adr consider →
+Debate/Research → adr new (docs/architecture/<domain>/) → probes put, any answer via adr consider →
 adr accept → Branch (reference ADR) → TodoWrite (session) → Implement →
 PR for code → Address review → Merge
 ```

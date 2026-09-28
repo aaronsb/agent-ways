@@ -1,5 +1,5 @@
 # adr-consider setup: a project on the adr/v1 contract with one proposed
-# decision the operator started, so accepting it needs their consideration.
+# decision the operator started, whose named probes the consider way puts to them.
 mkdir -p docs/scripts docs/architecture/system
 cp "$HOME/.claude/hooks/ways/documentation/adr/adr-tool" docs/scripts/adr
 chmod +x docs/scripts/adr
