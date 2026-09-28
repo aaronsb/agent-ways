@@ -49,6 +49,10 @@ capabilities:
   ingest: Document ingestion into the store
   search: Query over the store
 
+# Keys adr/v1 no longer reads (ADR-311): present, even malformed, they are
+# ignored.
+baseline: [search]
+
 surfaces:
   cli: {}
   route: {}

@@ -7,40 +7,74 @@ def cmd_import(args):
     print("Usage: adr import scan <paths...> | adr import apply [sheets...] [--partial]", file=sys.stderr)
     return 2
 
+SCAN_NAME_RE = re.compile(r'ADR-\d+(?:\.\d+)?(?:-.+)?\.md')
+# The tool's own files at the top of a records folder, which are never
+# records: its config, its index, and the sheet directory.
+SCAN_TOOL_FILES = ('adr.yaml', 'INDEX.md', '.import')
+
 def _scan_inputs(paths: list) -> tuple:
-    """(record files, messages). A directory yields its ADR-*.md files,
-    leaving out the archive and the sheet directory; an archived record is
-    scanned when it is named."""
-    files, messages, archived = [], [], 0
+    """(record files, messages, [(path passed over, reason)], {extension:
+    count of other files passed over}). A directory yields its
+    ADR-NNN-*.md files. Its archived records are left out and counted, and
+    the tool's own files at its top level are left out. Every other
+    Markdown file, and each hidden directory, which is not entered, is
+    passed over by name; other files are counted by extension, so a folder
+    of images reads as one line. An archived record is scanned when it is
+    named."""
+    files, messages, passed, other, archived = [], [], [], {}, 0
     for arg in paths:
         path = Path(arg)
         if path.is_dir():
-            for found in sorted(path.rglob('ADR-*.md')):
-                parts = found.relative_to(path).parts
-                if '.import' in parts:
-                    continue
-                if 'archive' in parts:
-                    archived += 1
-                    continue
-                files.append(found)
+            found_files, found_passed = [], []
+            for folder, dirs, names in os.walk(path):
+                here = Path(folder)
+                top = here == path
+                for d in dirs:
+                    if d.startswith('.') and not (top and d in SCAN_TOOL_FILES):
+                        found_passed.append((here / d, 'hidden directory, not entered'))
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                in_archive = 'archive' in here.relative_to(path).parts
+                for name in names:
+                    found = here / name
+                    if top and name in SCAN_TOOL_FILES:
+                        continue
+                    if SCAN_NAME_RE.fullmatch(name):
+                        if in_archive:
+                            archived += 1
+                        else:
+                            found_files.append(found)
+                    elif name.lower().endswith('.md'):
+                        found_passed.append((found, 'not named ADR-NNN.md or ADR-NNN-<slug>.md'))
+                    else:
+                        ext = found.suffix.lower()
+                        other[ext] = other.get(ext, 0) + 1
+            files.extend(sorted(found_files))
+            passed.extend(sorted(found_passed))
         elif path.is_file():
             files.append(path)
         else:
             messages.append(f"Skipped: {arg}: no such file or directory")
     if archived:
         messages.append(f"Note: {archived} archived record(s) left out; name a file to scan it")
-    return files, messages
+    return files, messages, passed, other
 
 def _import_scan(args):
     """Write one sheet per record to docs/architecture/.import/ (ADR-306 §1,
     §3). The directory ignores itself, so the repo's .gitignore is untouched.
     A source is only read, never written. A sheet that differs from what a
-    fresh scan writes may hold edits, so it is kept unless --force."""
-    files, messages = _scan_inputs(args.paths)
+    fresh scan writes may hold edits, so it is kept unless --force. Each
+    Markdown file passed over is named with the reason, other files are
+    counted by extension, and all of them count as skipped."""
+    files, messages, passed, other = _scan_inputs(args.paths)
     for message in messages:
         print(message)
+    for path, reason in passed:
+        print(f"Skipped: {relative_path(path.resolve()) if path.is_absolute() else path}: {reason}")
+    for ext, count in sorted(other.items()):
+        kind = f"{ext} file" if ext else "file with no extension"
+        print(f"Skipped: {count} {kind}{'s' if count != 1 else ''}: not Markdown")
     out = import_dir()
-    written = skipped = 0
+    written, skipped = 0, len(passed) + sum(other.values())
     claimed = {}
     for path in files:
         shown = relative_path(path.resolve()) if path.is_absolute() else path

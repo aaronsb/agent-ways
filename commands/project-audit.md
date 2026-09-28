@@ -67,9 +67,8 @@ project is not deficient for staying on v0.
 docs/scripts/adr lint --check 2>/dev/null
 ```
 - Pass: exit code 0
-- Warn: warnings only (missing optional fields; under adr/v1, a warning also
-  covers a capability with no accepted `add` decision while the corpus still
-  has v0 records to migrate, per ADR-304 §6)
+- Warn: warnings only (missing optional fields, an open concern, an imported
+  record with no Summary yet)
 - Fail: errors (missing frontmatter, invalid status, adr/v1 grammar violations, etc.)
 
 **Check: Do citations resolve? (`adr cite`)**
@@ -78,8 +77,7 @@ docs/scripts/adr cite --check 2>/dev/null
 ```
 - Pass: exit code 0
 - Warn: a citation of a superseded or proposed record (the acceptance or
-  cleanup worklist), or of a record governed by a cut/retire before it's
-  enacted
+  cleanup worklist)
 - Fail: a citation resolves to no record
 
 **Check: adr/v1 records carry the fields their kind requires.**
@@ -333,9 +331,8 @@ Then compare against reality:
 - **CODEOWNERS drift**: Do the paths and owners still match the codebase structure?
 - **Ways drift**: Were ways created that the ADR said would be? Were any removed?
 - **Scope drift**: Has the project grown beyond what the scaffold anticipated? (e.g., started as a CLI tool, now has a web frontend too)
-- **Capability drift (adr/v1 only)**: `docs/scripts/adr lint` warns when a
-  capability in `adr.yaml`'s vocabulary has no accepted `add` decision and is
-  not listed under `baseline` (ADR-305). A capability the codebase clearly
+- **Capability drift (adr/v1 only)**: compare `adr.yaml`'s `capabilities`
+  vocabulary with what the codebase does. A capability the codebase clearly
   uses but the vocabulary lacks is a candidate for an `add`. The scaffold's
   own capability list is a starting point.
 

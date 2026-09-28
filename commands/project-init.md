@@ -141,7 +141,7 @@ Use `AskUserQuestion` with focused multiple-choice questions. Adapt based on ans
 
 If ADRs need setup or reorganization:
 
-**Contract**: ask whether the project adopts `adr/v1` (typed decision/spec/evidence records with verb, capability, basis, and lifecycle commands, ADR-304) or stays on the legacy `adr/v0` contract (Draft/Proposed/Accepted/Superseded/Deprecated status, Context/Decision/Consequences/Alternatives Considered). Recommend v1 for a new or actively-decided project; v0 is a reasonable choice for a project that just wants a lightweight decision log. Either way, name the capabilities the project's domains cover — under v1 these seed the `capabilities` vocabulary, and the ones the project already has go under `baseline` in `adr.yaml` with the adoption date, so they need no `add` decision (ADR-305). A capability declared after adoption gets an `add`.
+**Contract**: ask whether the project adopts `adr/v1` (typed decision/spec/evidence records with verb, capability, basis, and lifecycle commands, ADR-304) or stays on the legacy `adr/v0` contract (Draft/Proposed/Accepted/Superseded/Deprecated status, Context/Decision/Consequences/Alternatives Considered). Recommend v1 for a new or actively-decided project; v0 is a reasonable choice for a project that just wants a lightweight decision log. Either way, name the capabilities the project's domains cover — under v1 these seed the `capabilities` vocabulary in `adr.yaml`.
 
 **For greenfield:**
 - Analyze the codebase structure (directory layout, package organization)
@@ -301,7 +301,7 @@ We adopt the following practices:
 
 On adr/v1, the scaffold record opens with `## Summary` (decided, trades away, one-way?, probes, inversion) instead, and its `basis` names the interview as an `operator` entry, quoting the operator's answers. `docs/scripts/adr new --help` and `adr lint` confirm the fields the chosen kind requires.
 
-**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project. On adr/v1 it stays `proposed` while the scaffold changes: at the end, ask the operator its probes, record the answer with `docs/scripts/adr consider <n> --said "..." --via "..."`, then `docs/scripts/adr accept <n>`. After acceptance its body is frozen, and a later change is a new decision.
+**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project. On adr/v1 it stays `proposed` while the scaffold changes: at the end, ask the operator its probes, record the answer with `docs/scripts/adr consider <n> --said "..." --via "..."`, then `docs/scripts/adr accept <n>`. After acceptance it is corrected by appending, and a later change is a new decision that names what it replaces.
 
 ### Sub-Agent Delegation
 
@@ -320,15 +320,14 @@ parts the skill can't know:
 
 1. Vendor the tool via the **adr** skill (it copies `adr-tool` → `docs/scripts/adr`
    and seeds `docs/architecture/adr.yaml` from the template). The template declares
-   `contract: adr/v1` with the decision, spec and evidence kinds, a placeholder
-   capability listed in `baseline`, dated by the skill's vendoring step.
+   `contract: adr/v1` with the decision, spec and evidence kinds and a
+   placeholder capability.
 
 2. Customize `docs/architecture/adr.yaml` with the interview answers:
    - Project name
    - Domains with ranges (100-wide ranges, 1-99 for legacy)
    - Under adr/v1 (the template's default): replace the placeholder
-     `capabilities` with one line per capability the interview named, and
-     keep in `baseline.capabilities` the ones that already exist
+     `capabilities` with one line per capability the interview named
    - Default deciders (from git/gh config)
 
 3. Create domain subdirectories under `docs/architecture/`. Under adr/v1 these are

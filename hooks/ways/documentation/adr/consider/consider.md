@@ -28,7 +28,7 @@ The agent writes and proposes a decision; the operator considers it (ADR-304 §1
 - A short yes is a real answer. Take it as given and move on; do not re-ask the probes.
 - Under adr/v1, record a `considered` entry: what was said and via which channel. `covers` lists the probes the answer settled; a bare "looks good" covers none. Add `canary: caught` or `missed` only when a canary was used. `adr consider N --said "..." --via "..." --covers NAME...` writes the entry and refuses a probe name the Summary does not have.
 - If the canary was missed, say so once and constructively, offer a smaller set of probes, then proceed on the operator's answer.
-- A decision the operator started waits for their consideration before `adr accept`. A decision with no operator basis, grounded in evidence, a standard or upstream, may be accepted by the agent directly.
+- A decision the operator started waits for their consideration before `adr accept`. The tool does not check for it, so the wait is yours to keep. A decision with no operator basis, grounded in evidence, a standard or upstream, may be accepted by the agent directly.
 
 ## Asking in plain words
 Field names such as `basis`, `considered` and `level` belong in the record, not in what you say to the operator. Ask the way a teammate would, and give enough context that the question can be answered without opening the file. The shape runs from worst to best:

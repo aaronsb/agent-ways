@@ -13,34 +13,45 @@
 #
 # A record keeps its number when `adr domain move` or `rename` changes its
 # folder (ADR-306 §6), so a snapshot record is found by number wherever it
-# sits now. Those commands rewrite paths to what moved, so the snapshot body
-# gets the same rewrite, through the tool's own Relocation, before comparing.
+# sits now. Those commands rewrite paths to what moved, and ADR-309 turned
+# design notes into records. The check builds its own map of those moves,
+# from the snapshot, the live tree and the NOTES table below, and applies it
+# to the snapshot body before comparing. It shares no code with the tool, so
+# a fault in the tool's rewrite shows here as a failing record.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 python3 - "$REPO_ROOT" <<'PY'
-import re, subprocess, sys, types, yaml
-from importlib.machinery import SourceFileLoader
+import posixpath, re, sys, yaml
 from pathlib import Path
 
 root = Path(sys.argv[1])
-loader = SourceFileLoader('adr_tool', str(root / 'hooks/ways/documentation/adr/adr-tool'))
-tool = types.ModuleType(loader.name)
-loader.exec_module(tool)
 snapshot = root / 'tests/fixtures/adr/v0-corpus/docs/architecture'
 live = root / 'docs/architecture'
 
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
     '302': 'stray tool-call text removed from the end of the body',
-    '113': 'a link to the archived session-ledger record now points into the archive',
-    '114': 'a link to the archived session-ledger record now points into the archive',
-    '122': 'a path to a design note now points at its record (ADR-309)',
-    '160': 'a path to a design note now points at its record (ADR-309)',
-    '169': 'a path to a design note now points at its record (ADR-309)',
-    '181': 'a path to a design note now points at its record (ADR-309)',
-    '187': 'a path to a design note now points at its record (ADR-309)',
+}
+
+# Design notes a snapshot body names that became records (ADR-309): the
+# note's path -> the record's number.
+NOTES = {
+    'docs/design-notes/attend-envelope-fields.md': '401',
+    'docs/design-notes/attend-messaging-disclosure-reheat.md': '400',
+    'docs/design-notes/cognitive-loop-and-awareness-layer.md': '600',
+    'docs/design-notes/cypress-survey.md': '603',
+    'docs/design-notes/settings-json-merge-spec-and-peer-writer-contract.md': '500',
+    'docs/design-notes/tool-use-channel-lookbehind-chunk-matching.md': '191',
+}
+
+# Links that named no file in the snapshot and were repaired after
+# conversion: the record's number -> (the folder the links named it in,
+# the reason). The links now point to where the record is.
+REPAIRED = {
+    '112': ('docs/architecture/system',
+            'the session-ledger record was already archived; links named it as a sibling'),
 }
 
 TITLE = re.compile(r'^# ADR-[0-9.]+:.*$', re.M)
@@ -60,30 +71,53 @@ def number(path):
     return m.group(1).lstrip('0') or '0' if m else None
 
 live_by_number = {number(p): p for p in live.rglob('ADR-*.md') if 'archive' not in p.parts}
+# An archived record is still a place a link can point to.
+anywhere = {**{number(p): p for p in live.rglob('ADR-*.md') if 'archive' in p.parts}, **live_by_number}
 
-# Where each snapshot record lives now, as the moves that took it there.
-moves = {}
+def repo_path(path):
+    return path.relative_to(root).as_posix()
+
+# Each file a snapshot body may name by path -> where that file is now: every
+# snapshot record, found by its number, each design note in NOTES, and each
+# broken link in REPAIRED.
+moved = {}
 for src in snapshot.rglob('ADR-*.md'):
-    dest = live_by_number.get(number(src))
-    if dest is not None and 'archive' not in src.parts:
-        was = 'docs/architecture/' + src.relative_to(snapshot).as_posix()
-        now = dest.relative_to(root).as_posix()
-        if was != now:
-            moves[was] = now
-listed = subprocess.run(['git', 'ls-files', '-z'], cwd=root, capture_output=True, text=True).stdout
-known = {n for n in listed.split('\0') if n}
-for name in list(known):
-    while '/' in name:
-        name = name.rsplit('/', 1)[0]
-        known.add(name)
-relocation = tool.Relocation(files=moves, known=known)
+    dest = anywhere.get(number(src))
+    if dest is not None:
+        moved['docs/architecture/' + src.relative_to(snapshot).as_posix()] = repo_path(dest)
+for note, n in NOTES.items():
+    moved[note] = repo_path(anywhere[n])
+for n, (folder, _) in REPAIRED.items():
+    moved[f'{folder}/{anywhere[n].name}'] = repo_path(anywhere[n])
+
+PATH = re.compile(r'[\w./-]+')
+
+def relocate(body, was, now):
+    """body, written at `was`, with each path to a moved file rewritten to
+    that file's place now: a path from the repo root stays one, and a path
+    relative to the record is written relative to where the record is now."""
+    was_dir, now_dir = posixpath.dirname(was), posixpath.dirname(now)
+    def one(m):
+        token = m.group(0)
+        path = token.rstrip('.')
+        if path in moved:
+            return moved[path] + token[len(path):]
+        resolved = posixpath.normpath(posixpath.join(was_dir, path))
+        target = moved.get(resolved)
+        if target is None or posixpath.normpath(posixpath.join(now_dir, path)) == target:
+            return token
+        new = posixpath.relpath(target, now_dir)
+        if path.startswith('./') and not new.startswith('.'):
+            new = './' + new
+        return new + token[len(path):]
+    return PATH.sub(one, body)
 
 checked = failures = 0
 for src in sorted(snapshot.rglob('ADR-*.md')):
     if 'archive' in src.parts:
         continue
     was = 'docs/architecture/' + src.relative_to(snapshot).as_posix()
-    before, body_before = split(relocation.text(src.read_text(), was)[0])
+    before, body_before = split(src.read_text())
     if before is None or before.get('contract'):
         continue
     n = number(src)
@@ -113,7 +147,8 @@ for src in sorted(snapshot.rglob('ADR-*.md')):
         problems.append("no H1 on one side")
     elif n not in BODY_EDITED:
         opened = SUMMARY.sub('', body_after, count=1).lstrip('\n')
-        if not opened.startswith(body_before.lstrip('\n')):
+        expected = relocate(body_before, was, repo_path(dest))
+        if not opened.startswith(expected.lstrip('\n')):
             problems.append("the original body no longer opens the record")
     for p in problems:
         print(f"FAIL ADR-{n}: {p}")

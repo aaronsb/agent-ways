@@ -24,7 +24,7 @@ Discuss architectural options with the operator:
 ### 2. Choose the Kind
 - **decision** — adds, cuts, changes, retires, or constrains a capability. Needs `--verb`, `--capability`, `basis` entries, and `agent: {name, model}`; opens with a `## Summary`.
 - **spec** — a specification kept current as the system changes; no verb, stays mutable after acceptance.
-- **evidence** — a finding, survey, audit, measurement, or exploration; frozen once accepted. Decisions cite it in `basis` instead of restating it.
+- **evidence** — a finding, survey, audit, measurement, or exploration; corrected by appending once accepted. Decisions cite it in `basis` instead of restating it.
 
 ### 3. Create the Record
 ```bash
@@ -49,7 +49,7 @@ Accept only after the operator has considered the decision:
 ```bash
 docs/scripts/adr accept <n>
 ```
-Use `docs/scripts/adr reject <n> --reason "..."` or `docs/scripts/adr abandon <n> --reason "..."` when the decision doesn't hold. Once accepted, a decision is frozen except for the fields its kind's `mutable_after_accept` lists in `adr.yaml`. Mark a cut or retire done with `docs/scripts/adr enact <n> <commit>` once the commit lands.
+Use `docs/scripts/adr reject <n> --reason "..."` or `docs/scripts/adr abandon <n> --reason "..."` when the decision doesn't hold. Once accepted, a decision is corrected by appending, and a change in what the project does is a new decision that names what it replaces. The tool checks shape and references, not these conventions; review catches them, and git keeps every earlier version (ADR-311). Mark a cut or retire done with `docs/scripts/adr enact <n> <commit>` once the commit lands.
 
 ## SOLID Principles Evaluation
 

@@ -1,0 +1,8 @@
+Renamed domain: system → platform
+  Folder: docs/architecture/system/ → docs/architecture/platform/
+Rewrote 6 paths in 4 files
+  CHANGELOG.md: 2
+  docs/architecture/adr.yaml: 2
+  docs/architecture/system/ADR-104-no-network-in-hooks.md: 1
+  src/app.py: 1
+[exit 0]

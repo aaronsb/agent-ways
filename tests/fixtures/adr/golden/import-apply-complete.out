@@ -1,3 +1,3 @@
-Applied: docs/architecture/.import/ADR-110.yaml -> docs/architecture/system/ADR-110-old-v0-record.md (lint: 0 errors, 1 warnings)
+Applied: docs/architecture/.import/ADR-110.yaml -> docs/architecture/system/ADR-110-old-v0-record.md (lint: 0 errors, 0 warnings)
 Import: 1 applied, 0 skipped, 0 refused
 [exit 0]

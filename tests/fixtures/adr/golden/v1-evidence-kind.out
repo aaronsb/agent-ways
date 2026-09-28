@@ -8,11 +8,8 @@ Status distribution:
 Contract: adr/v1 (1 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 2 files:
+Issues found in 1 files:
 ────────────────────────────────────────────────────────────
-
-docs/architecture/adr.yaml
-  ⚠️ capability 'search' has no accepted add decision
 
 docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md
   ❌ basis entry 2: evidence ADR-101 is a decision; evidence cites a spec or evidence record
@@ -20,7 +17,7 @@ docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md
   ⚠️ supersedes: ADR-103 does not declare the reciprocal superseded_by: ADR-118 — one-directional links rot
 
 ════════════════════════════════════════════════════════════
-Summary: 2 errors, 2 warnings
+Summary: 2 errors, 1 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

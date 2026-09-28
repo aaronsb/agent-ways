@@ -6,18 +6,8 @@ Status distribution:
 
 Contract: adr/v1 (2 v0 records remain)
 
-────────────────────────────────────────────────────────────
-Issues found in 2 files:
-────────────────────────────────────────────────────────────
-
-docs/architecture/adr.yaml
-  ⚠️ capability 'search' has no accepted add decision
-
-docs/architecture/system/ADR-110-old-v0-record.md
-  ⚠️ Summary lacks probes, an inversion (ADR-304 §12)
-
 ════════════════════════════════════════════════════════════
-Summary: 0 errors, 2 warnings
+Summary: 0 errors, 0 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

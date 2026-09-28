@@ -1,3 +1,0 @@
-Refused: accepting ADR-113 would add errors:
-  ❌ docs/architecture/system/ADR-113-operator-proposed.md: accepted with an operator basis but no considered entry; the operator considers what they started
-[exit 1]
