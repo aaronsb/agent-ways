@@ -179,7 +179,7 @@ def rule_config_shape(ctx):
             bad("legacy.range: expected [low, high]")
     if 'statuses' in config and name_list(config['statuses']) is None:
         bad("statuses: expected a list of names")
-    if 'defaults' in config:
+    if config.get('defaults') is not None:
         defaults = config['defaults']
         if not isinstance(defaults, dict):
             bad("defaults: expected a mapping of deciders and status")

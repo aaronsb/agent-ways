@@ -205,7 +205,7 @@ def relative_path(path: Path, base: Path = None) -> Path:
 def get_defaults() -> dict:
     """Get default values for new ADRs. A deciders or status value of the
     wrong type is left out, so the tool's own default applies."""
-    if 'defaults' not in get_config():
+    if get_config().get('defaults') is None:
         return {'deciders': [], 'status': 'Draft'}
     defaults = dict(config_section('defaults'))
     if 'deciders' in defaults and name_list(defaults['deciders']) is None:

@@ -1019,6 +1019,14 @@ capture config-empty-values-lint lint
 edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite: {exclude: }\n')"
 capture config-empty-exclude-lint lint
 
+# A bare `defaults:` reads as absent: lint is clean and new takes the tool's
+# defaults (Draft; no gh on the PATH, so no detected decider).
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'defaults:\n(?:  .*\n)+', 'defaults:\n', s)"
+capture config-bare-defaults-lint lint
+ADR_TOOL="$WORK/adr-nogh" capture config-bare-defaults-new new ops "Anything"
+keep config-bare-defaults-new-file.md docs/architecture/operations/ADR-201-anything.md
+
 fresh corpus
 edit docs/architecture/adr.yaml "__import__('re').sub(r'defaults:\n(?:  .*\n)+', 'defaults: {deciders: 5, status: [1]}\n', s).replace('  range: [1, 99]\n', '  range: x\n', 1) + 'cite: 5\n'"
 capture config-top-fields-lint    lint
