@@ -468,6 +468,13 @@ fresh corpus
 capture import-scan-corpus import scan docs/architecture
 worktree import-scan-corpus-status.txt
 keep import-scan-corpus-gitignore docs/architecture/.import/.gitignore
+# A directory of records that scan cannot read: each file it passes over is
+# named, with the reason, and counted as skipped.
+mkdir -p "$WORK/repo/notes/decisions"
+printf '# 1. Use Postgres\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/0001-use-postgres.md"
+printf '# ADR-2: Inline\n\nStatus: Accepted\n' > "$WORK/repo/notes/decisions/ADR-002-inline.md"
+printf 'Decisions live here.\n' > "$WORK/repo/notes/decisions/README.md"
+capture import-scan-flat import scan notes/decisions
 keep_sheets import-scan-corpus
 
 # In the v1 fixture: a v1 record scanned as itself, a v0 record, a v0 record

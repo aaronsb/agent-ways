@@ -4784,40 +4784,52 @@ def cmd_import(args):
     print("Usage: adr import scan <paths...> | adr import apply [sheets...] [--partial]", file=sys.stderr)
     return 2
 
+SCAN_NAME_RE = re.compile(r'ADR-\d+(?:\.\d+)?-.+\.md')
+# The tool's own files in a records folder, which are never records.
+SCAN_TOOL_FILES = ('adr.yaml', 'INDEX.md')
+
 def _scan_inputs(paths: list) -> tuple:
-    """(record files, messages). A directory yields its ADR-*.md files,
-    leaving out the archive and the sheet directory; an archived record is
-    scanned when it is named."""
-    files, messages, archived = [], [], 0
+    """(record files, messages, [(file passed over, reason)]). A directory
+    yields its ADR-NNN-*.md files, leaving out the archive, the sheet
+    directory, hidden files and the tool's own files; every other file in it
+    is passed over. An archived record is scanned when it is named."""
+    files, messages, passed, archived = [], [], [], 0
     for arg in paths:
         path = Path(arg)
         if path.is_dir():
-            for found in sorted(path.rglob('ADR-*.md')):
+            for found in sorted(path.rglob('*')):
                 parts = found.relative_to(path).parts
-                if '.import' in parts:
+                if not found.is_file() or '.import' in parts or any(p.startswith('.') for p in parts) \
+                        or found.name in SCAN_TOOL_FILES:
                     continue
+                named = SCAN_NAME_RE.fullmatch(found.name)
                 if 'archive' in parts:
-                    archived += 1
-                    continue
-                files.append(found)
+                    archived += bool(named)
+                elif not named:
+                    passed.append((found, 'not named ADR-NNN-<slug>.md'))
+                else:
+                    files.append(found)
         elif path.is_file():
             files.append(path)
         else:
             messages.append(f"Skipped: {arg}: no such file or directory")
     if archived:
         messages.append(f"Note: {archived} archived record(s) left out; name a file to scan it")
-    return files, messages
+    return files, messages, passed
 
 def _import_scan(args):
     """Write one sheet per record to docs/architecture/.import/ (ADR-306 §1,
     §3). The directory ignores itself, so the repo's .gitignore is untouched.
     A source is only read, never written. A sheet that differs from what a
-    fresh scan writes may hold edits, so it is kept unless --force."""
-    files, messages = _scan_inputs(args.paths)
+    fresh scan writes may hold edits, so it is kept unless --force. Each file
+    passed over is named with the reason, and counted as skipped."""
+    files, messages, passed = _scan_inputs(args.paths)
     for message in messages:
         print(message)
+    for path, reason in passed:
+        print(f"Skipped: {relative_path(path.resolve()) if path.is_absolute() else path}: {reason}")
     out = import_dir()
-    written = skipped = 0
+    written, skipped = 0, len(passed)
     claimed = {}
     for path in files:
         shown = relative_path(path.resolve()) if path.is_absolute() else path
