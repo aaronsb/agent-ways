@@ -146,7 +146,7 @@ def main():
     p_set = subparsers.add_parser('set', help='Edit frontmatter fields: key=value, key+=item, key-=item')
     p_set.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
     p_set.add_argument('assignments', nargs='+', metavar='key=value',
-                       help='Values are YAML: status=superseded, capability=[a, b], related+=ADR-7')
+                       help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
     p_set.add_argument('--force', action='store_true',
                        help='Edit a frozen field anyway, for migration cleanup (lint still reports it)')
     p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')

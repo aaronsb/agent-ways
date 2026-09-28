@@ -22,7 +22,7 @@ Usage:
     adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]
     adr enact <number> <commit> [--dry-run]
     adr import scan <paths...> [--force]
-    adr import apply [sheets...] [--partial] [--force]
+    adr import apply [sheets...] [--partial] [--force] [--dry-run]
     adr index [-y]
     adr domains
     adr domain add <name> --range A-B --folder F [--label L] [--description D]
@@ -2668,8 +2668,8 @@ _NO_VALUE = '(none)'
 
 def _field_values(adr, key: str) -> list:
     """A field's values as strings: each item of a list, a scalar alone, and
-    nothing for an absent or empty field. status and date come from the
-    parsed record, so a v0 record reads the same way."""
+    nothing for an absent or empty field, read from the frontmatter.
+    Values compare case-sensitively."""
     value = adr.frontmatter.get(key)
     if value in (None, '', [], {}):
         return []
@@ -4426,7 +4426,8 @@ def cmd_consider(args):
 
 _ASSIGNMENT = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*)(\+=|-=|=)(.*)$', re.DOTALL)
 # Statuses with a command of their own, which checks the corpus and records why.
-_STATUS_COMMANDS = {'accepted': 'accept', 'rejected': 'reject', 'abandoned': 'abandon'}
+_STATUS_COMMANDS = {'accepted': 'accept', 'rejected': 'reject', 'abandoned': 'abandon',
+                    'superseded': 'supersede', 'archived': 'archive'}
 
 def _parse_assignment(text: str):
     match = _ASSIGNMENT.match(text)
@@ -4459,11 +4460,16 @@ def cmd_set(args):
         return 1
     if adr.contract == V1 and not args.force:
         for key, op, value in changes:
-            command = _STATUS_COMMANDS.get(str(value).lower()) if key == 'status' and op == '=' else None
+            if key != 'status':
+                continue
+            command = _STATUS_COMMANDS.get(str(value).lower()) if op == '=' else None
             if command:
                 print(f"Refused: use `adr {command} {adr.number}`; it checks the corpus and records why. "
                       f"--force sets the status anyway.", file=sys.stderr)
-                return 1
+            else:
+                print(f"Refused: a record's status changes only through accept, reject, abandon, "
+                      f"supersede and archive. --force sets the status anyway.", file=sys.stderr)
+            return 1
     # A key the record lacks and no v1 record carries is most likely a typo.
     unknown = [k for k, _, _ in changes
                if adr.contract == V1 and k not in adr.frontmatter and k not in V1_KEY_ORDER]
@@ -5088,7 +5094,7 @@ def main():
     p_set = subparsers.add_parser('set', help='Edit frontmatter fields: key=value, key+=item, key-=item')
     p_set.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
     p_set.add_argument('assignments', nargs='+', metavar='key=value',
-                       help='Values are YAML: status=superseded, capability=[a, b], related+=ADR-7')
+                       help='Values are YAML: capability=[a, b], related+=ADR-7, observable+="..."')
     p_set.add_argument('--force', action='store_true',
                        help='Edit a frozen field anyway, for migration cleanup (lint still reports it)')
     p_set.add_argument('--dry-run', action='store_true', help='Show the change without writing')

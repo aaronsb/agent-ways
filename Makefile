@@ -374,6 +374,7 @@ test-adr:
 	@bash tests/adr-import-roundtrip.sh
 	@bash tests/adr-macro-test.sh
 	@bash tests/adr-conversion-check.sh
+	@bash tests/adr-template-test.sh
 	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
 	@echo "adr tool tests passed."
 

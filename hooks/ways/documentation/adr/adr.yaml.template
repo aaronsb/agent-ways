@@ -66,11 +66,11 @@ capabilities:
   core: The project's core behaviour (placeholder; replace)
 
 # Capabilities the project already had when it adopted adr/v1 need no `add`
-# decision (ADR-305). List them with the adoption date; a capability declared
-# later needs an add.
-# baseline:
-#   adopted: YYYY-MM-DD
-#   capabilities: [core]
+# decision (ADR-305). Set `adopted` to the day the project adopts adr/v1 and
+# list the capabilities it had then; a capability declared later needs an add.
+baseline:
+  adopted: 2026-01-01
+  capabilities: [core]
 
 # Retire targets name a surface: the namespaces the project exposes.
 surfaces: {}

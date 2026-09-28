@@ -26,7 +26,7 @@ docs/
 └── [other]/          # Project-specific needs
 ```
 
-Research findings, spike reports, and other design notes go in `docs/architecture/<domain>/` as **evidence** records (`adr new <domain> "<title>" --kind evidence`), not a separate `research/` or `design-notes/` folder - decisions cite them in `basis`.
+Research findings, spike reports, and other design notes go in `docs/architecture/<domain>/` as **evidence** records (`adr new <domain> "<title>" --kind evidence --capability <capability>`), not a separate `research/` or `design-notes/` folder - decisions cite them in `basis`.
 
 **Flexibility is key** - suggest structure, don't mandate it.
 
@@ -83,7 +83,7 @@ You: "Want me to set up docs/architecture/ with a domain or two for decision tra
 ### Documentation Scattered
 ```
 User: "Can't find the auth decision doc"
-You: "I see ADRs in docs/, root/, and notes/. Want me to consolidate them into docs/architecture/<domain>/? Existing v1 records move with `adr domain move`, anything older goes through `adr import`."
+You: "I see ADRs in docs/, root/, and notes/. Want me to consolidate them into docs/architecture/<domain>/? Records outside docs/architecture/ come in through `adr import` (named ADR-NNN-*.md with frontmatter first); records already under docs/architecture/ change area with `adr domain move`."
 ```
 
 ### ADR Domain Unclear
@@ -138,7 +138,7 @@ Good: "Depends on what you have. ADRs go in docs/architecture/<domain>/. A resea
 
 ### Consolidate Scattered ADRs
 1. Find all ADRs: `find . -name "*adr*" -o -name "*decision*"`
-2. Convert v0 or foreign records into `docs/architecture/<domain>/` with `adr import scan` then `adr import apply`; move existing v1 records with `adr domain move`
+2. Bring records from elsewhere into `docs/architecture/<domain>/` with `adr import scan` then `adr import apply` (rename to `ADR-NNN-*.md` and add frontmatter first); `adr domain move` only moves records already under `docs/architecture/`
 3. Update references in other docs
 
 ### Set Up New Project

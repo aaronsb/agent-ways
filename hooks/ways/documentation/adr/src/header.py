@@ -22,7 +22,7 @@ Usage:
     adr supersede <old> --by <new> [--amends SECTION] [--force] [--dry-run]
     adr enact <number> <commit> [--dry-run]
     adr import scan <paths...> [--force]
-    adr import apply [sheets...] [--partial] [--force]
+    adr import apply [sheets...] [--partial] [--force] [--dry-run]
     adr index [-y]
     adr domains
     adr domain add <name> --range A-B --folder F [--label L] [--description D]

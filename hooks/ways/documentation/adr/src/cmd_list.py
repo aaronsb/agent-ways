@@ -102,8 +102,8 @@ _NO_VALUE = '(none)'
 
 def _field_values(adr, key: str) -> list:
     """A field's values as strings: each item of a list, a scalar alone, and
-    nothing for an absent or empty field. status and date come from the
-    parsed record, so a v0 record reads the same way."""
+    nothing for an absent or empty field, read from the frontmatter.
+    Values compare case-sensitively."""
     value = adr.frontmatter.get(key)
     if value in (None, '', [], {}):
         return []

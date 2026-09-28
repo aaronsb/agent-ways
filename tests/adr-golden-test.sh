@@ -742,6 +742,7 @@ keep record-set-v0-file.md "$S/ADR-110-old-v0-record.md"
 worktree record-set-status.txt
 capture record-set-frozen       set 101 capability=search "related=[ADR-100]"
 capture record-set-status-cmd   set 106 status=accepted
+capture record-set-status-other set 106 status=proposed
 capture record-set-remove-missing set 106 related-=ADR-9
 capture record-set-bad-yaml     set 106 "related=[ADR-1"
 capture record-set-bad-form     set 106 related
@@ -800,7 +801,7 @@ capture record-enact-again      enact 105 3f9c2a1dead
 keep record-enact-again-file.md "$S/ADR-105-retire-legacy-ingest.md"
 capture record-enact-wrong-verb enact 101 abc1234
 capture record-enact-not-hash   enact 111 HEAD~1
-capture set-for-enact           set 111 status=superseded
+capture set-for-enact           set 111 status=superseded --force
 capture record-enact-wrong-status enact 111 abc1234
 
 fresh v1-defects

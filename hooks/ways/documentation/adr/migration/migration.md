@@ -14,9 +14,9 @@ refire: 0.15
 | State | Signs | Strategy |
 |-------|-------|----------|
 | **Greenfield** | No records, no `docs/architecture/` | Scaffold from scratch |
-| **Flat directory** | Records in one dir, sequential numbering (0001, 0002...) | `adr import scan`, or park as legacy |
+| **Flat directory** | Records in one dir, sequential numbering (0001, 0002...) | Rename to `ADR-NNN-*.md`, then `adr import scan`; or park as legacy |
 | **v0 frontmatter** | YAML frontmatter with `status: Accepted` etc., no `kind`/`verb`/`capability`/`basis` | `adr import scan` |
-| **Inline metadata** | `Status: Accepted` in the markdown body, no YAML frontmatter | `adr import scan` |
+| **Inline metadata** | `Status: Accepted` in the markdown body, no YAML frontmatter | Move the metadata into frontmatter, then `adr import scan` |
 | **Other tools** | adr-tools, MADR, Log4brains, or similar | No reader yet — convert through a sheet by hand, or park as legacy |
 
 ## Greenfield Setup
@@ -39,30 +39,43 @@ Numbers are permanent identity (ADR-310) — conversion never renumbers or re-ho
 
 1. **Vendor the tooling** (greenfield step 1 — use the **adr** skill)
 
-2. **Scan** the existing records into editable import sheets:
+2. **Prepare what the scanner can't read.** `adr import scan` reads files named `ADR-NNN-*.md` that open with YAML frontmatter, and passes over anything else. Rename sequential files, keeping the number:
+```bash
+git mv docs/adr/0001-use-postgres.md docs/adr/ADR-001-use-postgres.md  # adr-cite-ignore: example number
+```
+Move inline metadata into frontmatter and delete the inline lines:
+```markdown
+---
+status: Accepted
+date: 2026-01-15
+deciders:
+  - alice
+related: []
+---
+
+# ADR-001: Use Postgres for Session State
+```
+
+3. **Scan** the existing records into editable import sheets:
 ```bash
 docs/scripts/adr import scan docs/adr/          # or a list of files
 ```
 This writes a sheet per record under `.import/`.
 
-3. **Edit the sheets** in `.import/` — resolve each sheet's open todo items (the v1 fields the scan could not infer, such as `kind`, `verb`, `capability` and `basis`). Apply skips a sheet with open items.
+4. **Edit the sheets** in `.import/` — resolve each sheet's open todo items (the v1 fields the scan could not infer, such as `kind`, `verb`, `capability` and `basis`). Apply skips a sheet with open items.
 
-4. **Dry-run the apply** — writes the records into the corpus, lints them, prints each issue, then restores every file and keeps the sheets:
+5. **Dry-run the apply** — writes the records into the corpus, lints them, prints each issue, then restores every file and keeps the sheets:
 ```bash
 docs/scripts/adr import apply --dry-run
 ```
 
-5. **Apply for real** once the sheets are clean:
+6. **Apply for real** once the sheets are clean:
 ```bash
 docs/scripts/adr import apply
 ```
 `--partial` lands sheets that still carry open todo items, except ones lint can't re-find afterward (a status with no mapping, a Deprecated note, a number or domain mismatch). `--force` overwrites a record with uncommitted changes.
 
-A corpus not worth converting can instead be parked as read-only history:
-```bash
-mkdir -p docs/architecture/legacy
-git mv docs/adr/0001-*.md docs/architecture/legacy/
-```
+A corpus not worth converting can instead be parked as read-only history under `docs/architecture/legacy/`, with `legacy.range` in `adr.yaml` covering its numbers. The tool lists only files named `ADR-NNN-*.md` with frontmatter, so rename and add frontmatter as in step 2 for parked records to appear in `adr list` and resolve in `adr cite`.
 
 For adr-tools, MADR, Log4brains, or other foreign formats — no reader exists yet — either copy each record's substance into a sheet by hand before applying, or skip conversion and park the corpus in `legacy/`.
 

@@ -169,7 +169,8 @@ def cmd_consider(args):
 
 _ASSIGNMENT = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*)(\+=|-=|=)(.*)$', re.DOTALL)
 # Statuses with a command of their own, which checks the corpus and records why.
-_STATUS_COMMANDS = {'accepted': 'accept', 'rejected': 'reject', 'abandoned': 'abandon'}
+_STATUS_COMMANDS = {'accepted': 'accept', 'rejected': 'reject', 'abandoned': 'abandon',
+                    'superseded': 'supersede', 'archived': 'archive'}
 
 def _parse_assignment(text: str):
     match = _ASSIGNMENT.match(text)
@@ -202,11 +203,16 @@ def cmd_set(args):
         return 1
     if adr.contract == V1 and not args.force:
         for key, op, value in changes:
-            command = _STATUS_COMMANDS.get(str(value).lower()) if key == 'status' and op == '=' else None
+            if key != 'status':
+                continue
+            command = _STATUS_COMMANDS.get(str(value).lower()) if op == '=' else None
             if command:
                 print(f"Refused: use `adr {command} {adr.number}`; it checks the corpus and records why. "
                       f"--force sets the status anyway.", file=sys.stderr)
-                return 1
+            else:
+                print(f"Refused: a record's status changes only through accept, reject, abandon, "
+                      f"supersede and archive. --force sets the status anyway.", file=sys.stderr)
+            return 1
     # A key the record lacks and no v1 record carries is most likely a typo.
     unknown = [k for k, _, _ in changes
                if adr.contract == V1 and k not in adr.frontmatter and k not in V1_KEY_ORDER]

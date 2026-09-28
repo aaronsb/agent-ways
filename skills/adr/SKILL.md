@@ -17,7 +17,7 @@ A project declares its record contract in `docs/architecture/adr.yaml`. With `co
 docs/scripts/adr domains                  # Show domain number series and ranges
 docs/scripts/adr list --group             # List active ADRs grouped by domain
 docs/scripts/adr list --archived          # Archived only; --all for both
-docs/scripts/adr list --domain system     # Filter to one domain
+docs/scripts/adr list --domain <domain>   # Filter to one domain
 docs/scripts/adr list --status Accepted   # Filter by status (v0 title case or v1 lower case; compared case-insensitively)
 docs/scripts/adr view <number>            # View an ADR (accepts 14, 014, ADR-014)
 
@@ -174,13 +174,14 @@ mkdir -p docs/scripts docs/architecture
 cp ~/.claude/hooks/ways/documentation/adr/adr-tool docs/scripts/adr
 cp ~/.claude/hooks/ways/documentation/adr/adr.yaml.template docs/architecture/adr.yaml
 chmod +x docs/scripts/adr
+sed -i.bak "s/^  adopted: .*/  adopted: $(date +%F)/" docs/architecture/adr.yaml && rm docs/architecture/adr.yaml.bak
 ```
 
-Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
+The `sed` line dates the baseline to the day of adoption. Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
 validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template
 declares `contract: adr/v1` with the decision, spec and evidence kinds and a
-placeholder capability: replace it with the project's capabilities, and list
-the ones that already exist under `baseline` (ADR-305). To stay on adr/v0,
+placeholder capability in its `baseline`: replace both with the project's
+capabilities, keeping in `baseline` the ones that already exist (ADR-305). To stay on adr/v0,
 delete the `contract` line and the v1 blocks under it.
 
 For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run

@@ -25,7 +25,7 @@ Mark each task `in_progress` as you start it, `completed` when done. This is you
 
 **Read these docs first** — you need the full landscape before your first question:
 
-1. Read `~/.claude/hooks/ways/documentation/adr/migration/migration.md` — understand the starting states (greenfield, flat directory, v0 frontmatter, inline metadata, other tools) and the conversion path. For a project with existing records in any of the non-greenfield states, `docs/scripts/adr import scan <paths>` then `adr import apply` (ADR-306) converts them into adr/v1 through editable import sheets, rather than hand-editing frontmatter.
+1. Read `~/.claude/hooks/ways/documentation/adr/migration/migration.md` — understand the starting states (greenfield, flat directory, v0 frontmatter, inline metadata, other tools) and the conversion path. Existing records named `ADR-NNN-*.md` with YAML frontmatter convert into adr/v1 through `docs/scripts/adr import scan <paths>` then `adr import apply` (ADR-306). Sequential `0001-*.md` files and inline metadata need renaming and frontmatter first, as the migration way describes.
 2. Read `~/.claude/hooks/ways/softwaredev/delivery/github/github.md` — understand PR-always stance, repo health expectations
 3. Read `~/.claude/hooks/ways/softwaredev/docs/docs.md` — understand documentation scaling by project complexity
 
@@ -152,7 +152,7 @@ If ADRs need setup or reorganization:
 **For brownfield with existing ADRs:**
 - List what exists: how many ADRs, what format, what topics they cover
 - **Lint them immediately** — run the ADR tool's linter (or manually check frontmatter) and show the user what's broken: missing frontmatter, inline metadata that needs conversion, invalid statuses, missing fields
-- **Convert through import sheets.** `docs/scripts/adr import scan <paths>` writes an editable sheet per record under `.import/`; the user (or you, with their review) fills in the gaps a source format can't answer — kind, verb, capability, basis; `docs/scripts/adr import apply` then writes them as adr/v1 records (ADR-306). Offer this before proposing reorganization: "I found 8 ADRs. Want me to scan them into import sheets so we can bring them into the new contract?"
+- **Convert through import sheets.** `docs/scripts/adr import scan <paths>` writes an editable sheet per `ADR-NNN-*.md` record with frontmatter under `.import/` (rename and add frontmatter first for anything else); the user (or you, with their review) fills in the gaps a source format can't answer — kind, verb, capability, basis; `docs/scripts/adr import apply` then writes them as adr/v1 records (ADR-306). Offer this before proposing reorganization: "I found 8 ADRs. Want me to scan them into import sheets so we can bring them into the new contract?"
 - Show a proposed domain mapping: which existing ADRs belong to which domain based on their content
 - Ask about the migration approach: park as legacy and go forward, or reorganize everything
 - If reorganizing: show the move plan (which files go where) and get approval before touching anything; under adr/v1 a move keeps the record's number (ADR-310)
@@ -299,9 +299,9 @@ We adopt the following practices:
 - [what was deferred: items declined during interview]
 ```
 
-On adr/v1, the scaffold record opens with `## Summary` (decided, trades away, one-way?, probes, inversion) instead, and its `basis` names the interview as an `operator` entry. `docs/scripts/adr new --help` and `adr lint` confirm the fields the chosen kind requires.
+On adr/v1, the scaffold record opens with `## Summary` (decided, trades away, one-way?, probes, inversion) instead, and its `basis` names the interview as an `operator` entry, quoting the operator's answers. `docs/scripts/adr new --help` and `adr lint` confirm the fields the chosen kind requires.
 
-**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project.
+**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project. On adr/v1 it stays `proposed` while the scaffold changes: at the end, ask the operator its probes, record the answer with `docs/scripts/adr consider <n> --said "..." --via "..."`, then `docs/scripts/adr accept <n>`. After acceptance its body is frozen, and a later change is a new decision.
 
 ### Sub-Agent Delegation
 
@@ -321,14 +321,14 @@ parts the skill can't know:
 1. Vendor the tool via the **adr** skill (it copies `adr-tool` → `docs/scripts/adr`
    and seeds `docs/architecture/adr.yaml` from the template). The template declares
    `contract: adr/v1` with the decision, spec and evidence kinds, a placeholder
-   capability, and a commented `baseline` block.
+   capability listed in `baseline`, dated by the skill's vendoring step.
 
 2. Customize `docs/architecture/adr.yaml` with the interview answers:
    - Project name
    - Domains with ranges (100-wide ranges, 1-99 for legacy)
    - Under adr/v1 (the template's default): replace the placeholder
      `capabilities` with one line per capability the interview named, and
-     `baseline: {adopted: <date>, capabilities: [...]}` for those that already exist
+     keep in `baseline.capabilities` the ones that already exist
    - Default deciders (from git/gh config)
 
 3. Create domain subdirectories under `docs/architecture/`. Under adr/v1 these are
