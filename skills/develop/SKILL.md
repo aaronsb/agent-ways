@@ -69,7 +69,7 @@ keep it one level deep. Coupled work stays inline.
 ## Key Principles
 
 - **Route, don't reimplement** — `develop` sequences the stage skills/ways; it is thin.
-- **Delegate where it pays** — the grant comes with the invocation; the payoff is yours to name.
+- **Delegate where it pays** — the grant comes with the invocation; you name the payoff before delegating.
 - **Front by uncertainty** — lead with the stage that answers the load-bearing question.
 - **Stable tail** — build → review → fix → merge, every time, via `/merge`.
 - **Claim then evidence** — record decisions, then hold them to what the system proves.

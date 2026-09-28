@@ -92,7 +92,7 @@ The gate condition is met on its own terms.
 
 Still ask first when the delegation is **not** part of an invoked procedure, when it spends significant tokens outside the stated task, or when the operator has said to work solo.
 
-The grant covers *whether* to delegate. Width is yours to size. A procedure that says "fan out" authorizes the fan-out it describes, so size it to the work and say the number before spawning it. Past roughly half a dozen, ask.
+The grant covers *whether* to delegate. You set the width. A procedure that says "fan out" authorizes the fan-out it describes, so size it to the work and say the number before spawning it. Past roughly half a dozen, ask.
 
 ## Name the Payoff, Don't Assume It
 
