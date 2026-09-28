@@ -25,7 +25,7 @@ Claude Code hook events drive the system. Each fires shell scripts that scan for
 ### Session Lifecycle
 
 - **`clear-markers.sh`** - Clears session markers from `{SESSIONS_ROOT}/{session_id}/`. Resets session state so ways can fire fresh. Scoped to the current session only.
-- **`ways init`** - Creates `$PROJECT/.claude/ways/_template.md` if the project has a `.claude/` or `.git/` dir but no ways directory yet.
+- **`ways init`** - If the project has a `.claude/` or `.git/` directory, writes `$PROJECT/.claude/.gitignore` and `$PROJECT/.claude/ways/_template.md` when they are missing, then seeds `MEMORY.md` (ADR-128). A fresh repo therefore gets these two files as untracked files. `.claude/.gitignore` keeps developer-local files (`settings.local.json`, `memory/`, `plans/` and similar) out of git, and `_template.md` is a starting point for writing a project way; its empty frontmatter means it never fires. Projects may commit or ignore either file. `ways init` does not overwrite them once they exist.
 - **`ways corpus --if-stale --quiet`** - Regenerates the embedding corpus if way files have changed since last build.
 - **`check-config-updates.sh`** - Checks if the config is behind upstream. Detects four install scenarios: direct clones, GitHub forks, renamed clones (via `.claude-upstream` marker file), and plugin installs. Network calls (`git fetch`, `gh api`, `git ls-remote`) are rate-limited to once per hour; update notices fire every session when behind. See the [Updating](#updating) section of the README for scenario details and how to control this behavior.
 
@@ -72,7 +72,7 @@ sequenceDiagram
         CC->>CS: SessionStart:startup
         CS->>Ctx: core guidance + state-triggered ways
         CC->>WI: SessionStart:startup
-        WI->>WI: create $PROJECT/.claude/ways/_template.md
+        WI->>WI: create .claude/.gitignore + .claude/ways/_template.md if missing
         CC->>WC: SessionStart:startup
         WC->>WC: regenerate corpus if stale
     end

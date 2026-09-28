@@ -112,3 +112,17 @@ Claude remains free to write memory — no permission changes, no harness modifi
 - **Feature-flag the seeding behind an opt-in.** Rejected. The framing should be the default, not opt-in. Also: a flag is exactly the kind of unrequested preservation scaffold the project has explicitly deprecated.
 - **Put project knowledge in `~/.claude/projects/<hash>/memory/` as topic files (current practice).** Rejected — this is the per-instance cage this ADR exists to leave. Topic files in that directory don't travel with the repo, aren't lint-validated, aren't reviewable, and compete with ways for the project's accumulated learning.
 - **Rely on Anthropic's periodic memory-compaction to consolidate instead.** Rejected. Compaction consolidates memory *into* memory — it tidies the silo without addressing the two structural problems this ADR targets (per-instance cage, short-circuited discipline). A tidier silo is still a silo.
+
+## Note (2026-09-28): `ways init` scaffolds the project's `.claude/` (#567)
+
+Appended to §d. The text above is unchanged.
+
+§d says `ways init` runs on every invocation. The settings template (`settings.json`) runs it on the SessionStart `startup` and `clear` matchers, not on `compact` or `resume`. Before it seeds `MEMORY.md`, `tools/ways-cli/src/cmd/init.rs` does the following in the project directory (`--project`, else `CLAUDE_PROJECT_DIR`, else `PWD`), and only when that directory has `.claude/` or `.git/`:
+
+- creates `.claude/ways/` if it is missing;
+- writes `.claude/.gitignore` if it is missing. It lists developer-local files (`settings.local.json`, `todo-*.md`, `memory/`, `projects/`, `plans/`) and says ways and `CLAUDE.md` are committed;
+- writes `.claude/ways/_template.md` if it is missing. It is a way-authoring template whose frontmatter is empty, so it never fires.
+
+Neither file is overwritten once it exists. A fresh git repo opened in a session therefore shows these two files as untracked. No ADR said so before this note. The operator's decision on #567: "the .claude/ scaffold is expected" (via: Claude Code session 2026-09-28).
+
+The scaffold stays, with no opt-in. A project may commit both files or ignore them. This repo ignores `.claude/ways/_template.md` in its own `.gitignore`. The tier 2 scenario checks keep their exemption for these two paths, since the files are expected.
