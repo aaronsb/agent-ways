@@ -311,7 +311,7 @@ def _domain_rename(args):
     new_dir = f"docs/architecture/{folder_new}"
     relocation = Relocation(dirs={old_dir: new_dir} if folder_new != folder_old else {},
                             known=known, domain=(old, new) if new != old else None,
-                            repos=origin_repos(root))
+                            repo=Repository(root))
     changes = _plan_rewrites(relocation, root, names)
     # adr.yaml is written from its edited text, with its own paths
     # rewritten. Its listing is taken against the text as it was, so the
@@ -428,7 +428,7 @@ def _domain_move(args):
         return 1
 
     names, known = _relocation_scope(root)
-    relocation = Relocation(files=files, known=known, repos=origin_repos(root))
+    relocation = Relocation(files=files, known=known, repo=Repository(root))
     changes = _plan_rewrites(relocation, root, names)
 
     verb = 'Would move' if args.dry_run else 'Moved'

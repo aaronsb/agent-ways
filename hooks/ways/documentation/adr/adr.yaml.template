@@ -75,6 +75,13 @@ baseline:
 # Retire targets name a surface: the namespaces the project exposes.
 surfaces: {}
 
+# This repository, as URLs name it (host/owner/repo, or a list). A URL into
+# it at a branch is a path in the tree: `adr domain` rewrites it when a
+# record moves, and lint's frozen check reads it as the record it names.
+# Without this key the origin remote is used, so set it to keep lint the
+# same in every clone.
+# repository: github.com/owner/repo
+
 # Valid ADR statuses (adr/v0 records)
 statuses:
   - Draft         # Initial creation, not yet proposed

@@ -1,0 +1,18 @@
+Would move: ADR-101 system → docs
+  docs/architecture/system/ADR-101-ingest.md → docs/architecture/documentation/ADR-101-ingest.md
+Would rewrite 4 paths in 1 file
+  NOTES.md: 4
+    NOTES.md:6
+        - https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md
+      → - https://github.com/fixture/corpus/blob/main/docs/architecture/documentation/ADR-101-ingest.md
+    NOTES.md:7
+        - https://github.com/fixture/corpus/blob/feature/x/docs/architecture/system/ADR-101-ingest.md
+      → - https://github.com/fixture/corpus/blob/feature/x/docs/architecture/documentation/ADR-101-ingest.md
+    NOTES.md:8
+        - https://raw.githubusercontent.com/fixture/corpus/main/docs/architecture/system/ADR-101-ingest.md
+      → - https://raw.githubusercontent.com/fixture/corpus/main/docs/architecture/documentation/ADR-101-ingest.md
+    NOTES.md:15
+        See docs/architecture/system/ADR-101-ingest.md.
+      → See docs/architecture/documentation/ADR-101-ingest.md.
+Dry run: nothing written.
+[exit 0]

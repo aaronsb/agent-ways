@@ -101,6 +101,11 @@ surfaces:
 # The basis sources a decision may name (ADR-304 §11); the v1 default.
 basis_sources: [operator, evidence, standard, upstream, precedent]
 
+# This repository, as URLs name it. A URL into it at a branch is a path in
+# the tree: adr domain rewrites it, and the frozen check reads it as the
+# record it names. Without this key the origin remote is used.
+repository: github.com/aaronsb/agent-ways
+
 # adr cite skips these: fixtures, tool sources and subagent prompts carry
 # example numbers.
 cite:

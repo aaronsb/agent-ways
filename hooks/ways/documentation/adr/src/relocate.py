@@ -2,14 +2,15 @@
 # Path rewriting for records that change folder (ADR-306 §6)
 # ============================================================================
 #
-# A record's number is its identity and never changes. Under adr/v1 its
-# folder decides its domain, so moving a record to another domain moves its
-# file, and a domain renamed in place moves its folder. Either way every path
-# to what moved is rewritten. A path is a relative link that resolves to what
-# moved, a path written from the repo root that names it, or a URL into this
-# repository's origin that names it. Other URLs, and words that only contain
-# a folder's name, are left alone. ADR-N citations are left alone too: the
-# number still names the same record.
+# A record's number is its identity and never changes (ADR-310). Under adr/v1
+# its folder decides its domain, so moving a record to another domain moves
+# its file, and a domain renamed in place moves its folder. Either way every
+# path to what moved is rewritten. A path is a relative link that resolves to
+# what moved, a path written from the repo root that names it, or a URL into
+# this repository at a branch that names it. Other URLs, a URL at a commit or
+# a tag (a permalink), a path inside a fenced code block, a path written with
+# backslashes, and words that only contain a folder's name are left alone.
+# ADR-N citations are left alone too: the number still names the same record.
 #
 # The frozen check (rules_v1_integrity.py) reads the same rewrite from git
 # history: a frozen record may differ from its accepted version by exactly
@@ -20,9 +21,125 @@
 RELOCATE_HISTORY_KEYS = ('imported',)
 
 _PATH_WORD_RE = re.compile(r'[A-Za-z][\w+.-]*://[\w./~%-]+|[\w./-]+')
-_REPO_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://([^/]+)/([^/]+)/([^/]+)/(?:blob|tree|raw)/[^/]+/(.+)')
+# host/owner/repo/blob|tree|raw/<ref>/<path>, and GitHub's raw host, where
+# the ref follows the repo directly. A ref may hold slashes.
+_REPO_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://([^/]+)/([^/]+)/([^/]+)/(?:blob|tree|raw)/(.+)')
+_RAW_URL_RE = re.compile(r'[A-Za-z][\w+.-]*://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)', re.IGNORECASE)
+_COMMIT_RE = re.compile(r'[0-9a-f]{7,40}')
 _FM_KEY_RE = re.compile(r'([A-Za-z_][\w-]*)\s*:')
 _RECORD_FILE_RE = re.compile(r'ADR-\d+(?:\.\d+)?-.*\.md')
+_FENCE_RE = re.compile(r' {0,3}(`{3,}|~{3,})')
+
+
+def _repo_name(url: str) -> Optional[str]:
+    """host/owner/repo, lowercase, from a remote URL or a written name."""
+    m = re.fullmatch(r'(?:[A-Za-z][\w+.-]*://)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]([^/]+/[^/]+?)(?:\.git)?/?',
+                     url.strip())
+    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+
+
+def project_repos(root: Path) -> set:
+    """The names this repository goes by, host/owner/repo, lowercase:
+    adr.yaml's `repository:` (a name or a list of names) when it is set,
+    otherwise the origin remote. Empty without either."""
+    configured = get_config().get('repository')
+    if configured:
+        values = [configured] if isinstance(configured, str) else configured if isinstance(configured, list) else []
+        return {n for n in (_repo_name(str(v)) for v in values) if n}
+    name = _repo_name((_git(['remote', 'get-url', 'origin'], root) or '').strip())
+    return {name} if name else set()
+
+
+class Repository:
+    """This repository as URLs name it: its names, and its tags and branches,
+    each read from git once when first needed. A URL into it at a branch
+    names a path in the working tree. At a commit or a tag it is a
+    permalink to a snapshot, and names nothing that moves."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.names = project_repos(root)
+        self._tags = self._branches = None
+
+    @property
+    def tags(self) -> set:
+        if self._tags is None:
+            self._tags = set((_git(['tag', '-l'], self.root) or '').split())
+        return self._tags
+
+    @property
+    def branches(self) -> set:
+        """Local branches, and remote-tracking ones by their branch name."""
+        if self._branches is None:
+            out = _git(['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes'], self.root) or ''
+            names = set()
+            for ref in out.split():
+                if ref.startswith('refs/heads/'):
+                    names.add(ref[len('refs/heads/'):])
+                elif ref.startswith('refs/remotes/') and ref.count('/') >= 3:
+                    names.add(ref.split('/', 3)[3])
+            self._branches = names
+        return self._branches
+
+    def path(self, token: str) -> Optional[tuple]:
+        """(where the path starts in token, the path from the repo root) for
+        a URL into this repository at a branch; None otherwise. A ref with a
+        slash is read as the longest leading run of segments that names a
+        known branch; otherwise the ref is the first segment."""
+        m = _RAW_URL_RE.fullmatch(token)
+        if m:
+            repo, rest, at = f"github.com/{m.group(1)}/{m.group(2)}", m.group(3), m.start(3)
+        else:
+            m = _REPO_URL_RE.fullmatch(token)
+            if not m:
+                return None
+            repo, rest, at = '/'.join(m.group(1, 2, 3)), m.group(4), m.start(4)
+        repo = repo.lower()
+        if repo.endswith('.git'):
+            repo = repo[:-4]
+        if repo not in self.names:
+            return None
+        segments = rest.split('/')
+        if len(segments) < 2:
+            return None
+        width = next((n for n in range(len(segments) - 1, 1, -1)
+                      if '/'.join(segments[:n]) in self.branches), 1)
+        ref = '/'.join(segments[:width])
+        if width == 1 and ref not in self.branches and (_COMMIT_RE.fullmatch(ref) or ref in self.tags):
+            return None
+        path = '/'.join(segments[width:])
+        return (at + len(ref) + 1, path) if path else None
+
+
+def _fenced(lines: list, start: int = 0) -> set:
+    """Indexes of the lines from start on that sit in a fenced code block,
+    fence lines included."""
+    inside, fence = set(), None
+    for i in range(start, len(lines)):
+        m = _FENCE_RE.match(lines[i])
+        if fence is None:
+            if m:
+                fence = m.group(1)
+                inside.add(i)
+        else:
+            inside.add(i)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                    and not lines[i][m.end():].strip():
+                fence = None
+    return inside
+
+
+def _sub_paths(line: str, swap) -> str:
+    """line with each run of path characters replaced by swap(token), or
+    left alone when it touches a backslash: a Windows path is not a
+    path this tool resolves."""
+    def one(m):
+        before = m.string[m.start() - 1:m.start()]
+        after = m.string[m.end():m.end() + 1]
+        if before == '\\' or after == '\\':
+            return m.group(0)
+        return swap(m.group(0))
+    return _PATH_WORD_RE.sub(one, line)
 
 
 class Relocation:
@@ -30,15 +147,16 @@ class Relocation:
     directories (old dir -> new dir), and optionally a domain key rename for
     catalog frontmatter (`domain: <key>`). `known` holds tracked paths and
     directories: a path is rewritten only when it names one, or names a
-    moved file. `repos` holds this repository's `host/owner/repo`, lowercase,
-    so a URL into it is rewritten like a path from the root."""
+    moved file. `repo` (a Repository) says which URLs point into this
+    repository at a branch; such a URL is rewritten like a path from the
+    root."""
 
-    def __init__(self, files=None, dirs=None, known=None, domain=None, repos=()):
+    def __init__(self, files=None, dirs=None, known=None, domain=None, repo=None):
         self.files = dict(files or {})
         self.dirs = dict(dirs or {})
         self.known = set(known or ())
         self.domain = domain  # (old key, new key) or None
-        self.repos = set(repos)
+        self.repo = repo
         self.basenames = {posixpath.basename(p) for p in self.files}
 
     def target(self, rel: str) -> Optional[str]:
@@ -106,19 +224,17 @@ class Relocation:
         return (new + ('/' if slash else '')) if new is not None and new != core else None
 
     def _url(self, token: str) -> Optional[str]:
-        """A URL into this repository, with the path it names rewritten."""
-        m = _REPO_URL_RE.fullmatch(token)
-        repo = '/'.join(m.group(1, 2, 3)).lower() if m else ''
-        if repo.endswith('.git'):
-            repo = repo[:-4]
-        if not m or repo not in self.repos:
+        """A URL into this repository at a branch, with the path it names
+        rewritten."""
+        found = self.repo.path(token) if self.repo else None
+        if found is None:
             return None
-        path = m.group(4)
+        at, path = found
         slash = path.endswith('/')
         new = self._rooted(path.rstrip('/'))
         if new is None:
             return None
-        return token[:m.start(4)] + new + ('/' if slash else '')
+        return token[:at] + new + ('/' if slash else '')
 
     def word(self, token: str, old_dir: str, new_dir: str) -> tuple:
         """One run of path characters rewritten; (text, count)."""
@@ -140,29 +256,32 @@ class Relocation:
             return token, 0
         return new + token[len(stripped):], 1
 
-    def _dirs(self, rel: str) -> tuple:
-        """(the folder of the file at rel, its folder after the move)"""
-        moved = self.target(rel)
-        return posixpath.dirname(rel), posixpath.dirname(moved) if moved else posixpath.dirname(rel)
-
     def text(self, content: str, rel: str) -> tuple:
         """content of the file at rel with its paths rewritten; (text, count).
-        History keys in frontmatter are left alone, and a frontmatter
-        `domain:` follows a domain rename."""
-        old_dir, new_dir = self._dirs(rel)
+        History keys in frontmatter are left alone, a frontmatter `domain:`
+        follows a domain rename, and in a Markdown file a fenced code block
+        is left as written: it quotes text, such as a command, rather than
+        linking to a file."""
+        moved = self.target(rel)
+        old_dir = posixpath.dirname(rel)
+        new_dir = posixpath.dirname(moved) if moved else old_dir
         lines = content.split('\n')
         fm_end = None
         if lines and lines[0].rstrip('\r') == '---':
             fm_end = next((i for i in range(1, len(lines)) if lines[i].rstrip('\r') == '---'), None)
+        fenced = _fenced(lines, fm_end + 1 if fm_end is not None else 0) if rel.lower().endswith('.md') else set()
         total, key, out = 0, None, []
 
-        def swap(m):
+        def swap(token):
             nonlocal total
-            new, n = self.word(m.group(0), old_dir, new_dir)
+            new, n = self.word(token, old_dir, new_dir)
             total += n
             return new
 
         for i, line in enumerate(lines):
+            if i in fenced:
+                out.append(line)
+                continue
             if fm_end is not None and 0 < i < fm_end:
                 m = _FM_KEY_RE.match(line)
                 if m:
@@ -177,15 +296,18 @@ class Relocation:
                                    + ('\r' if line.endswith('\r') else ''))
                         total += 1
                         continue
-            out.append(_PATH_WORD_RE.sub(swap, line))
+            out.append(_sub_paths(line, swap))
         return '\n'.join(out), total
+
 
     def value(self, value, rel: str):
         """A parsed frontmatter value of the file at rel, with the paths in
         its strings rewritten as text() rewrites them."""
-        old_dir, new_dir = self._dirs(rel)
+        moved = self.target(rel)
+        old_dir = posixpath.dirname(rel)
+        new_dir = posixpath.dirname(moved) if moved else old_dir
         if isinstance(value, str):
-            return _PATH_WORD_RE.sub(lambda m: self.word(m.group(0), old_dir, new_dir)[0], value)
+            return _sub_paths(value, lambda t: self.word(t, old_dir, new_dir)[0])
         if isinstance(value, list):
             return [self.value(v, rel) for v in value]
         if isinstance(value, dict):
@@ -204,13 +326,6 @@ def tracked_paths(root: Path) -> tuple:
             known.add(parent)
             parent = posixpath.dirname(parent)
     return tracked, known
-
-
-def origin_repos(root: Path) -> set:
-    """{host/owner/repo} of the origin remote, lowercase; empty without one."""
-    url = (_git(['remote', 'get-url', 'origin'], root) or '').strip()
-    m = re.fullmatch(r'(?:[A-Za-z][\w+.-]*://)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]([^/]+/[^/]+?)(?:\.git)?/?', url)
-    return {f"{m.group(1)}/{m.group(2)}".lower()} if m else set()
 
 
 def _renames(output: Optional[str]) -> list:
@@ -264,6 +379,6 @@ def history_relocation(root: Path) -> Relocation:
         dirs[old_dir] = new_dir
     files = {old: new for old, new in where.items()
              if old != new and _RECORD_FILE_RE.fullmatch(posixpath.basename(new))}
-    relocation = Relocation(files=files, dirs=dirs, known=known, repos=origin_repos(root))
+    relocation = Relocation(files=files, dirs=dirs, known=known, repo=Repository(root))
     _HISTORY_RELOCATIONS[key] = relocation
     return relocation

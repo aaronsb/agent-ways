@@ -794,6 +794,37 @@ PY
 commit_all "copy"
 capture frozen-copy-not-followed lint docs/architecture/system/ADR-115-bulk-ingest.md
 
+S="docs/architecture/system"
+# --- which repository a URL names, and what a rewrite leaves (#603) -------------
+# adr.yaml's repository: names this repository, so lint and the rewrite read
+# the same URLs as this repository's with or without an origin remote.
+fresh v1
+edit docs/architecture/adr.yaml "s + 'repository: github.com/fixture/corpus\n'"
+edit $S/ADR-104-no-network-in-hooks.md "s + '\nSee https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md.\n'"
+(cd "$WORK/repo" && git add -A && git commit -q --amend -m fixture)
+(cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null)
+capture relocate-repository-move domain move 101 docs
+commit_all move
+capture relocate-repository-lint lint $S/ADR-104-no-network-in-hooks.md
+(cd "$WORK/repo" && git remote add origin git@github.com:someone/fork.git)
+capture relocate-repository-lint-fork-origin lint $S/ADR-104-no-network-in-hooks.md
+edit docs/architecture/adr.yaml "s.replace('repository: github.com/fixture/corpus', 'repository: [3]')"
+capture relocate-repository-bad lint $S/ADR-104-no-network-in-hooks.md
+
+# A URL at a commit or a tag is a permalink and stays; one at a branch, a
+# branch with a slash, or on GitHub's raw host is rewritten. A path written
+# with backslashes, or inside a fenced code block, stays.
+fresh v1
+(cd "$WORK/repo" && git remote add origin git@github.com:fixture/corpus.git && git tag v1.0 && git branch feature/x)
+printf -- '# Notes\n\n- https://github.com/fixture/corpus/blob/0123456789abcdef0123456789abcdef01234567/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/abc1234/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/v1.0/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/main/docs/architecture/system/ADR-101-ingest.md\n- https://github.com/fixture/corpus/blob/feature/x/docs/architecture/system/ADR-101-ingest.md\n- https://raw.githubusercontent.com/fixture/corpus/main/docs/architecture/system/ADR-101-ingest.md\n- docs\\architecture\\system\\ADR-101-ingest.md\n\n```sh\ngit mv docs/architecture/system/ADR-101-ingest.md docs/architecture/documentation/ADR-101-ingest.md\n```\n\nSee docs/architecture/system/ADR-101-ingest.md.\n' > "$WORK/repo/NOTES.md"
+edit $S/ADR-109-precedent-chain.md "s + '\nOn Windows: docs\\\\architecture\\\\system\\\\ADR-101-ingest.md\n'"
+commit_all notes
+(cd "$WORK/repo" && "$ADR_TOOL" domain add docs --range 300-399 --folder documentation --description Guides > /dev/null)
+capture relocate-refs-dry domain move 101 docs --dry-run
+capture relocate-refs domain move 101 docs
+keep relocate-refs-notes.md NOTES.md
+keep relocate-refs-109.md $S/ADR-109-precedent-chain.md
+
 # --- record edits: consider, set, supersede, enact ----------------------------------
 #
 # Each edit keeps the file it wrote, so the goldens show that only the touched
