@@ -51,149 +51,21 @@ records_declaring() {
     }' {} + 2>/dev/null | head -1
 }
 
-# The vocabulary shape, counted as the tool's src/shape.py counts it and with
-# its thresholds, which tests/adr-macro-test.sh holds equal to shape.py's.
-SHAPE_MIN_RECORDS=40
-SHAPE_FEW_DOMAINS=2
-SHAPE_DOMAIN_SHARE=0.60
-SHAPE_FEW_CAPABILITIES=2
-SHAPE_CAPABILITY_SHARE=0.50
-
-# thin_axis FEW SHARE — reads one line per record, holding its names
-# separated by commas. Prints "records in_use top top_count" when at least
-# SHAPE_MIN_RECORDS records sit under FEW names or fewer, or one name is on
-# SHARE of them; nothing otherwise.
-thin_axis() {
-  awk -F',' -v min="$SHAPE_MIN_RECORDS" -v few="$1" -v share="$2" '
-    {
-      n = 0; delete seen
-      for (i = 1; i <= NF; i++) {
-        c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c)
-        if (c == "" || c == "*" || (c in seen)) continue
-        seen[c] = 1; count[c]++; n++
-      }
-      if (n) records++
-    }
-    END {
-      if (records < min) exit
-      for (c in count) {
-        k++
-        if (count[c] > tc || (count[c] == tc && c < top)) { top = c; tc = count[c] }
-      }
-      if (k <= few || tc >= share * records) printf "%d %d %s %d\n", records, k, top, tc
-    }'
-}
-
-# record_domains DIR CONFIG FIRST — one line per active record: its domain,
-# placed as the tool's parse.py places it. FIRST is `range` (adr/v0: the
-# number's range, then the folder) or `folder` (adr/v1: the folder, then the
-# range). The domains' ranges and folders are read from adr.yaml's `domains`
-# block: a key per domain, `range: [lo, hi]`, and `folder:` as a name, a flow
-# list or a block list. A record no domain places is not counted.
-record_domains() {
-  find "$1" -type f -name 'ADR-*.md' -not -path "$1/archive/*" 2>/dev/null \
-    | awk -v first="$3" '
-    FNR == NR {
-      sub(/\r$/, "")
-      if ($0 ~ /^domains:/) { indom = 1; next }
-      if (!indom || $0 ~ /^[ \t]*(#.*)?$/) next
-      if ($0 ~ /^[^ \t]/) { indom = 0; next }
-      match($0, /^[ ]*/); ind = RLENGTH
-      if (dind == 0) dind = ind
-      line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+#.*$/, "", line)
-      if (ind == dind) {
-        cur = line; sub(/:.*$/, "", cur); gsub(/["\047]/, "", cur)
-        n++; name[n] = cur; infolder = 0; next
-      }
-      if (line ~ /^range:/) {
-        v = line; sub(/^range:/, "", v); gsub(/[^0-9]+/, " ", v); sub(/^ +/, "", v)
-        split(v, r, " "); lo[n] = r[1] + 0; hi[n] = r[2] + 0; infolder = 0; next
-      }
-      if (line ~ /^folder:/) {
-        v = line; sub(/^folder:[ \t]*/, "", v); gsub(/[][\"\047]/, "", v)
-        infolder = (v == "")
-        m = split(v, f, ",")
-        for (i = 1; i <= m; i++) { g = f[i]; gsub(/^[ \t]+|[ \t]+$/, "", g); if (g != "") folder[g] = n }
-        next
-      }
-      if (infolder && line ~ /^-/) {
-        v = line; sub(/^-[ \t]*/, "", v); gsub(/["\047]/, "", v); folder[v] = n; next
-      }
-      infolder = 0
-      next
-    }
-    {
-      p = split($0, parts, "/"); dir = parts[p - 1]
-      num = -1
-      if (match(parts[p], /^ADR-[0-9]+/)) num = substr(parts[p], 5, RLENGTH - 4) + 0
-      by_range = 0
-      if (num >= 0) for (i = 1; i <= n; i++) if (num >= lo[i] && num <= hi[i]) { by_range = i; break }
-      by_folder = (dir in folder) ? folder[dir] : 0
-      d = (first == "range") ? (by_range ? by_range : by_folder) : (by_folder ? by_folder : by_range)
-      if (d) print name[d]
-    }' "$2" - 2>/dev/null
-}
-
-# has_capabilities CONFIG — true when adr.yaml declares a non-empty
-# `capabilities` mapping, as the tool reads it (a null or empty value is none).
-has_capabilities() {
-  awk '
-    { sub(/\r$/, "") }
-    !found && /^capabilities:/ {
-      v = $0; sub(/^capabilities:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v)
-      if (v == "") { found = 1; next }
-      ok = (v != "{}" && v != "{ }" && v != "~" && v != "null" && v != "[]"); exit
-    }
-    found && /^[ \t]*(#.*)?$/ { next }
-    found { ok = ($0 ~ /^[ \t]+[^ \t#-]/); exit }
-    END { exit !ok }' "$1" 2>/dev/null
-}
-
-# record_capabilities DIR — one line per active adr/v1 record: its capability
-# names, from the frontmatter block only (a scalar, a flow list or a block list).
-record_capabilities() {
-  find "$1" -type f -name 'ADR-*.md' -not -path "$1/archive/*" -exec awk '
-    { sub(/\r$/, "") }
-    FNR == 1 { infm = ($0 == "---"); v1 = 0; caps = ""; inlist = 0; next }
-    !infm { nextfile }
-    /^---[ \t]*$/ { if (v1 && caps != "") print caps; infm = 0; nextfile }
-    inlist && /^[ \t]+-/ {
-      v = $0; sub(/^[ \t]+-[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v); gsub(/["\047]/, "", v)
-      caps = caps (caps == "" ? "" : ",") v; next
-    }
-    { inlist = 0 }
-    /^contract:/ {
-      v = $0; sub(/^contract:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v); gsub(/["\047 \t]/, "", v)
-      if (v == "adr/v1") v1 = 1
-    }
-    /^capability:/ {
-      v = $0; sub(/^capability:[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v); gsub(/[][\"\047]/, "", v)
-      if (v == "") inlist = 1; else caps = v
-    }' {} + 2>/dev/null
-}
-
-# shape_notice SCRIPT AXIS [range|folder] — one line when the axis is thin (the tool's
-# `domains` and `lint` print the full notice).
+# shape_notice — the vocabulary-shape notices (a large corpus under few
+# domains or capabilities), from the installed agent-ways tool ($UNIVERSAL),
+# never the project's copy. `adr domains --shape` prints them, one
+# "Notice: ..." line each, or nothing. No python3, no PyYAML, an older tool
+# without the flag, an error or a timeout all mean no notice.
 shape_notice() {
-  local arch="$PROJECT_DIR/docs/architecture" found records in_use top top_count pct
-  if [[ "$2" == capability ]]; then
-    found=$(record_capabilities "$arch" | thin_axis "$SHAPE_FEW_CAPABILITIES" "$SHAPE_CAPABILITY_SHARE")
-  else
-    found=$(record_domains "$arch" "$arch/adr.yaml" "$3" | thin_axis "$SHAPE_FEW_DOMAINS" "$SHAPE_DOMAIN_SHARE")
-  fi
-  [[ -n "$found" ]] || return 0
-  read -r records in_use top top_count <<< "$found"
-  pct=$(( (100 * top_count + records / 2) / records ))
-  echo ""
-  if [[ "$2" == capability ]]; then
-    local names=capabilities
-    (( in_use == 1 )) && names=capability
-    echo "_$records adr/v1 records use $in_use $names; $top is on $top_count ($pct%). \`$1 lint\` names the next steps._"
-  else
-    local names=domains
-    (( in_use == 1 )) && names=domain
-    echo "_$records records in $in_use $names; $top holds $top_count ($pct%). \`$1 domains\` names the next steps._"
-  fi
+  [[ -f "$UNIVERSAL" ]] && command -v python3 &>/dev/null || return 0
+  local limit=() out line
+  command -v timeout &>/dev/null && limit=(timeout 2)
+  out=$(cd "$PROJECT_DIR" && "${limit[@]}" python3 "$UNIVERSAL" domains --shape 2>/dev/null) || return 0
+  while IFS= read -r line; do
+    [[ "$line" == "Notice: "* ]] || continue
+    echo ""
+    echo "_${line#Notice: }_"
+  done <<< "$out"
 }
 
 # contract_newer A B — true when contract A (adr/vN) is newer than B
@@ -378,22 +250,8 @@ if [[ -n "$ADR_SCRIPT" ]]; then
     echo "_\`adr.yaml\` declares $contract; this tool writes $current. \`$ADR_SCRIPT contract --upgrade\` brings \`adr.yaml\` to $current._"
   fi
 
-  # A large corpus under few names (the tool's vocabulary shape), reported as
-  # shape_findings reports it: under adr/v1 with a non-empty capabilities
-  # vocabulary, the capability axis only; otherwise the domains (placed as
-  # the contract places them) and then the capabilities.
-  if [[ $has_contract_cmd -eq 1 ]]; then
-    if [[ "$contract" == "adr/v1" ]] && has_capabilities "$PROJECT_DIR/docs/architecture/adr.yaml"; then
-      shape_notice "$ADR_SCRIPT" capability
-    else
-      if [[ "$contract" == "adr/v1" ]]; then
-        shape_notice "$ADR_SCRIPT" domain folder
-      else
-        shape_notice "$ADR_SCRIPT" domain range
-      fi
-      shape_notice "$ADR_SCRIPT" capability
-    fi
-  fi
+  # A large corpus under few names, as the installed tool reports it.
+  [[ $has_contract_cmd -eq 1 ]] && shape_notice
 
   # Direction-aware drift check against the universal template (ADR-177):
   # compare TOOL_VERSION stamps to tell stale from customized from ahead.

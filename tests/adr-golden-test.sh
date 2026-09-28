@@ -898,6 +898,7 @@ fresh corpus
 gen_v0 system 120 40
 commit_all "fat system"
 capture shape-thin-domains        domains
+capture shape-thin-domains-shape  domains --shape
 capture shape-thin-contract       contract
 capture shape-thin-upgrade-whatif contract --upgrade --whatif
 capture shape-thin-v0-lint        lint
@@ -912,6 +913,7 @@ gen_v0 runbooks 220 13
 gen_v0 documentation 320 13
 commit_all "balanced"
 capture shape-balanced-domains domains
+capture shape-balanced-domains-shape domains --shape
 capture shape-balanced-contract contract
 # adr/v1, 40 records on one capability: lint warns (vocabulary-thin), contract
 # prints the notice.

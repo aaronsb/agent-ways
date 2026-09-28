@@ -6,8 +6,8 @@
 # and names a corpus that is large while its vocabulary is small: many
 # records under few domains or capabilities, or most of them under one.
 # `adr contract`, `adr domains` and, under adr/v1, `adr lint` print it as a
-# notice. It is a count and never fails a command. The way macro repeats the
-# count in shell with the same thresholds.
+# notice. It is a count and never fails a command. The way macro prints the
+# notices from `adr domains --shape`, run with the installed agent-ways tool.
 
 SHAPE_MIN_RECORDS = 40        # below this many records, no notice
 SHAPE_FEW_DOMAINS = 2         # this many domains in use, or fewer

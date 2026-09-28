@@ -83,7 +83,9 @@ def main():
                               help='Update without prompting')
 
     # domains
-    subparsers.add_parser('domains', help='List domain number series')
+    p_domains = subparsers.add_parser('domains', help='List domain number series')
+    # For the way macro: print only the vocabulary-shape notices, or nothing.
+    p_domains.add_argument('--shape', action='store_true', help=argparse.SUPPRESS)
 
     # domain (ADR-306 §6)
     p_domain = subparsers.add_parser('domain', help='Add, rename or move domains')
