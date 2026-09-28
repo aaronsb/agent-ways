@@ -1,19 +1,13 @@
 path: docs/architecture/adr.yaml
-# Fixture: adr/v1 declared with no kinds and no capabilities.
-project_name: ADR v1 Empty Fixture
+project_name: ADR Fixture
+
+# No domains yet.
+domains: {}
+
+# The record contract (ADR-304). With `contract: adr/v1`, records are typed:
+# each declares a kind, and a decision names a verb, a capability and its
+# basis. Delete this line and the v1 blocks below to stay on adr/v0.
 contract: adr/v1
-
-domains:
-  system:
-    range: [100, 199]
-    name: System
-    description: Runtime
-    folder: system
-
-defaults:
-  deciders: [developer, agent]
-
-viewer: cat {file}
 
 kinds:
   decision:
@@ -31,10 +25,10 @@ kinds:
     edges: { supersedes: evidence }
 
 # What the project does, one line each. A record's `capability` names one of
-# these, and a decision adds, cuts, changes or constrains them.
-# `adr contract --upgrade` seeded the entries before `process` from the
-# domains in this file. Each may be kept, split, renamed or deleted.
+# these, and a decision adds, cuts, changes or constrains them. Replace the
+# `core` placeholder with the project's own list. `process` and `adr` apply
+# to every project that keeps these records.
 capabilities:
-  system: Runtime
+  core: The project's core behaviour (placeholder; replace)
   process: Conventions, documentation and the development process that belong to no product capability
   adr: Decision records, their contract and the adr tool

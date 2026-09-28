@@ -129,6 +129,10 @@ worktree() {
 
 fresh corpus
 capture version              --version
+# No command prints argparse's help, which varies across Python versions, then
+# the module docstring's usage block, which does not. Keep the usage block.
+capture usage
+sed -n '/^Usage:$/,$p' "$ACTUAL/usage.out" > "$ACTUAL/usage.tmp" && mv "$ACTUAL/usage.tmp" "$ACTUAL/usage.out"
 capture list                 list
 capture list-alias-ls        ls
 capture list-group           list --group
@@ -314,6 +318,12 @@ capture v1-accept-not-proposed  accept 102
 capture v1-accept-v0            accept 110
 capture v1-accept-dry-run       accept 106 --dry-run
 worktree v1-accept-dry-run-status.txt
+# --whatif is an alias of --dry-run: the same output, nothing written.
+capture v1-accept-whatif        accept 106 --whatif
+worktree v1-accept-whatif-status.txt
+cmp -s "$ACTUAL/v1-accept-dry-run.out" "$ACTUAL/v1-accept-whatif.out" \
+  && echo "same as --dry-run" > "$ACTUAL/v1-accept-whatif-same.txt" \
+  || echo "differs from --dry-run" > "$ACTUAL/v1-accept-whatif-same.txt"
 capture v1-accept-concern       accept 114
 keep v1-accept-concern-file.md docs/architecture/system/ADR-114-open-concern.md
 capture v1-accept-then-lint     lint --check docs/architecture/system/ADR-114-open-concern.md
@@ -802,6 +812,7 @@ capture contract-after    contract
 # around it stay where they were.
 fresh corpus
 edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\n\n# Records stay on v0 for now.\ncontract: \"adr/v0\"  # decided in review\n', 1)"
+capture contract-upgrade-line-whatif contract --upgrade --whatif
 capture contract-upgrade-line contract --upgrade
 keep contract-upgrade-line-config.yaml docs/architecture/adr.yaml
 # A contract the tool does not know is refused, and adr.yaml is untouched.
@@ -830,6 +841,28 @@ fresh corpus
 edit docs/architecture/adr.yaml "s.replace('project_name: ADR Fixture\n', 'project_name: ADR Fixture\ncontract:\n', 1)"
 capture contract-upgrade-empty contract --upgrade
 keep contract-upgrade-empty-config.yaml docs/architecture/adr.yaml
+# --upgrade --whatif prints the contract line and the blocks, seeds included,
+# and writes nothing; --dry-run without --upgrade is refused.
+fresh corpus
+capture contract-upgrade-whatif contract --upgrade --whatif
+worktree contract-upgrade-whatif-status.txt
+capture contract-whatif-alone   contract --whatif
+# Capabilities are seeded from domains (ADR-312); the corpus upgrade above
+# seeds system, ops and docs. A domain named process is not seeded twice: the
+# template's process wins. A domain with no description is seeded from its
+# name.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('  docs:\n', '  process:\n', 1).replace('    description: Runtime, hooks and storage\n', '', 1)"
+capture contract-seed-process contract --upgrade
+keep contract-seed-process-config.yaml docs/architecture/adr.yaml
+# No domains: the template's block, with the placeholder core.
+fresh corpus
+(cd "$WORK/repo" && printf 'project_name: ADR Fixture\n\n# No domains yet.\ndomains: {}\n' > docs/architecture/adr.yaml)
+capture contract-seed-none contract --upgrade
+keep contract-seed-none-config.yaml docs/architecture/adr.yaml
+commit_all "no domains"
+capture contract-seed-none-noop contract --upgrade
+worktree contract-seed-none-noop-status.txt
 # Records ahead of a v0 config: lint warns on adr.yaml and names the command.
 fresh corpus
 (cd "$WORK/repo" && printf -- '---\ncontract: adr/v1\nkind: decision\nverb: add\ncapability: core\nstatus: proposed\ndate: 2025-05-21\ndeciders: [developer]\nagent: {name: Claude, model: m}\nbasis:\n  - evidence: a finding\n---\n\n# ADR-107: A v1 record in a v0 repo\n\n## Summary\n\n- **Probes:** *Confident:* a. *Not confident:* b.\n- **Inversion:** c.\n' > docs/architecture/system/ADR-107-a-v1-record.md)

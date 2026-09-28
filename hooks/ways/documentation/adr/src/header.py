@@ -30,7 +30,10 @@ Usage:
     adr domain move <number> <domain> [--dry-run]
     adr domain move --plan <file.yaml> [--dry-run]
     adr config
-    adr contract [--current | --upgrade]
+    adr contract [--current | --upgrade [--dry-run|--whatif]]
+
+A command shown with [--dry-run] also takes it as --whatif: it prints the
+change and writes nothing.
 
 Configuration is loaded from docs/architecture/adr.yaml
 """

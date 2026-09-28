@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 ADR now means Agent Decision Record; the `ADR-N` citation form is unchanged. Operate ADRs through the `docs/scripts/adr` CLI tool. Never create ADR files manually. If the tool isn't present in the project yet, vendor it first — see [Vendoring the tool into a project](#vendoring-the-tool-into-a-project).
 
-A project declares its record contract in `docs/architecture/adr.yaml`. With `contract: adr/v1` it uses declared kinds, verbs, capabilities and lifecycle commands (below). Without it, the project is on the legacy `adr/v0` contract: Draft/Proposed/Accepted/Superseded/Deprecated status, and Context/Decision/Consequences/Alternatives Considered sections. `adr contract` shows the contract `adr.yaml` declares and the one the tool writes; `adr contract --upgrade` brings `adr.yaml` to the tool's contract. Both contracts share the same tool and the same `ADR-N` number space.
+A project declares its record contract in `docs/architecture/adr.yaml`. With `contract: adr/v1` it uses declared kinds, verbs, capabilities and lifecycle commands (below). Without it, the project is on the legacy `adr/v0` contract: Draft/Proposed/Accepted/Superseded/Deprecated status, and Context/Decision/Consequences/Alternatives Considered sections. `adr contract` shows the contract `adr.yaml` declares and the one the tool writes; `adr contract --upgrade` brings `adr.yaml` to the tool's contract, and `--whatif` (alias of `--dry-run`) prints what it would write. Both contracts share the same tool and the same `ADR-N` number space.
 
 ## Commands
 
@@ -96,7 +96,7 @@ than assumed:
 - **statuses**: valid v0 status values (Draft, Proposed, Accepted, Superseded, Deprecated); adr/v1 has a fixed status set (proposed, accepted, rejected, abandoned, superseded, archived)
 - **defaults**: default deciders and initial status for new ADRs
 - **legacy**: number range for pre-domain ADRs
-- **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0. `adr contract --upgrade` writes it, with `kinds` and a placeholder capability when they are missing
+- **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0. `adr contract --upgrade` writes it, with `kinds` and `capabilities` when they are missing; the capabilities are seeded from the domains, plus `process` and `adr`
 - **kinds** (adr/v1 only): `decision`, `spec`, `evidence`, each declaring its required fields, sections, and edges
 - **capabilities** (adr/v1 only): the closed vocabulary a record's `capability` field draws from
 - **basis_sources** (adr/v1 only): what a decision may ground itself in — operator, evidence, standard, upstream, precedent
@@ -182,8 +182,9 @@ chmod +x docs/scripts/adr
 
 Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
 validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template
-declares `contract: adr/v1` with the decision, spec and evidence kinds and a
-placeholder capability: replace it with the project's capabilities. To stay on
+declares `contract: adr/v1` with the decision, spec and evidence kinds, a
+placeholder capability `core`, and `process` and `adr`: replace `core` with the
+project's capabilities. To stay on
 adr/v0, delete the `contract` line and the v1 blocks under it.
 
 For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run

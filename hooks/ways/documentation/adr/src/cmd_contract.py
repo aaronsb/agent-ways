@@ -7,7 +7,9 @@
 # lines: the contract line is changed or appended, and each top-level key the
 # contract needs and the file lacks is appended as adr.yaml.template writes
 # it. A config already on the current contract gets only its missing blocks.
-# Comments and every other line are left as they were.
+# Comments and every other line are left as they were. A capabilities block
+# written into a config with domains holds one capability per domain in
+# place of the placeholder (ADR-312).
 
 # What adr.yaml needs for each contract past adr/v0, in the order it is
 # appended: (top-level key, block). The text matches adr.yaml.template, and
@@ -36,12 +38,27 @@ contract: adr/v1
 '''),
         ('capabilities', '''# What the project does, one line each. A record's `capability` names one of
 # these, and a decision adds, cuts, changes or constrains them. Replace the
-# placeholder with the project's own list.
+# `core` placeholder with the project's own list. `process` and `adr` apply
+# to every project that keeps these records.
 capabilities:
   core: The project's core behaviour (placeholder; replace)
+  process: Conventions, documentation and the development process that belong to no product capability
+  adr: Decision records, their contract and the adr tool
 '''),
     ),
 }
+
+# The capabilities every project has (ADR-312). The template ships them after
+# the placeholder, and --upgrade writes them after the capabilities it seeds
+# from domains.
+DEFAULT_CAPABILITIES = ('process', 'adr')
+
+# The comment above a capabilities block seeded from domains (ADR-312).
+SEEDED_CAPABILITIES_COMMENT = '''# What the project does, one line each. A record's `capability` names one of
+# these, and a decision adds, cuts, changes or constrains them.
+# `adr contract --upgrade` seeded the entries before `process` from the
+# domains in this file. Each may be kept, split, renamed or deleted.
+'''
 
 # A top-level contract line: key, optional quotes, value, optional comment.
 CONTRACT_LINE_RE = re.compile(
@@ -49,7 +66,11 @@ CONTRACT_LINE_RE = re.compile(
 
 
 def cmd_contract(args):
-    """adr contract [--current | --upgrade]."""
+    """adr contract [--current | --upgrade [--dry-run]]."""
+    dry_run = getattr(args, 'dry_run', False)
+    if dry_run and not args.upgrade:
+        print("Error: --dry-run applies to `adr contract --upgrade`.", file=sys.stderr)
+        return 1
     if args.current:
         print(CURRENT_CONTRACT)
         return 0
@@ -73,7 +94,7 @@ def cmd_contract(args):
             print(f"{config_path} is behind this tool. "
                   f"`adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
         return 0
-    return _contract_upgrade(declared)
+    return _contract_upgrade(declared, dry_run)
 
 
 def _missing_blocks(config: dict) -> list:
@@ -83,7 +104,45 @@ def _missing_blocks(config: dict) -> list:
             if key != 'contract' and key not in config]
 
 
-def _contract_upgrade(declared: str) -> int:
+def _yaml_scalar(text, as_key: bool = False) -> str:
+    """text as a one-line YAML scalar: plain when it reads back unchanged,
+    double-quoted otherwise."""
+    text = ' '.join(str(text).split())
+    probe, want = (f"{text}: x", {text: 'x'}) if as_key else (f"k: {text}", {'k': text})
+    try:
+        if text and yaml.safe_load(probe) == want:
+            return text
+    except yaml.YAMLError:
+        pass
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _seeded_capabilities(config: dict):
+    """The capabilities block --upgrade writes (ADR-312): one entry per domain,
+    then the defaults. Returns the block, the domains seeded, and the domains
+    not seeded because a default capability has their name. With no domain
+    to seed, the block is the template's."""
+    template_block = dict(CONTRACT_BLOCKS[CURRENT_CONTRACT])['capabilities']
+    domains = config.get('domains')
+    seeds, taken = [], []
+    for key, cfg in (domains.items() if isinstance(domains, dict) else ()):
+        name = str(key)
+        if name in DEFAULT_CAPABILITIES:
+            taken.append(name)
+            continue
+        cfg = cfg if isinstance(cfg, dict) else {}
+        seeds.append((name, cfg.get('description') or cfg.get('name') or name))
+    if not seeds:
+        return template_block, [], taken
+    defaults = [line for line in template_block.splitlines(keepends=True)
+                if any(line.startswith(f"  {name}: ") for name in DEFAULT_CAPABILITIES)]
+    body = ''.join(f"  {_yaml_scalar(name, as_key=True)}: {_yaml_scalar(text)}\n"
+                   for name, text in seeds)
+    block = SEEDED_CAPABILITIES_COMMENT + 'capabilities:\n' + body + ''.join(defaults)
+    return block, [name for name, _ in seeds], taken
+
+
+def _contract_upgrade(declared: str, dry_run: bool = False) -> int:
     path = get_config_path()
     shown = relative_path(path)
     if declared == CURRENT_CONTRACT and not _missing_blocks(get_config()):
@@ -95,7 +154,7 @@ def _contract_upgrade(declared: str) -> int:
     lines = text.splitlines(keepends=True)
     config = get_config()
     added = []
-    replaced = False
+    replaced = None
     for i, line in enumerate(lines):
         if declared == CURRENT_CONTRACT:
             break
@@ -106,22 +165,25 @@ def _contract_upgrade(declared: str) -> int:
             if prefix == 'contract:':
                 prefix += ' '  # an empty `contract:` line has no space after the colon
             lines[i] = f"{prefix}{quote}{CURRENT_CONTRACT}{quote}{suffix}{ending}"
-            replaced = True
+            replaced = i
             break
-    if 'contract' in config and not replaced and declared != CURRENT_CONTRACT:
+    if 'contract' in config and replaced is None and declared != CURRENT_CONTRACT:
         print(f"Error: {shown} sets contract in a form this command does not edit; "
               f"change it to `contract: {CURRENT_CONTRACT}` by hand.", file=sys.stderr)
         return 1
     blocks = []
+    seeded, taken = [], []
     for key, block in CONTRACT_BLOCKS[CURRENT_CONTRACT]:
         if key == 'contract':
-            if replaced:
+            if replaced is not None:
                 added.append(f"changed: contract: {declared} -> {CURRENT_CONTRACT}")
                 continue
             if declared == CURRENT_CONTRACT:
                 continue
         elif key in config:
             continue
+        elif key == 'capabilities':
+            block, seeded, taken = _seeded_capabilities(config)
         blocks.append(block.replace('\n', newline))
         added.append(f"added: contract: {CURRENT_CONTRACT}" if key == 'contract' else f"added: {key}")
     if lines and not lines[-1].endswith('\n'):
@@ -129,6 +191,9 @@ def _contract_upgrade(declared: str) -> int:
     body = ''.join(lines)
     for block in blocks:
         body += newline + block
+    if dry_run:
+        return _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
+                                         added, seeded, taken)
     try:
         path.write_bytes(body.encode('utf-8'))
         reloaded = reload_config()
@@ -147,7 +212,51 @@ def _contract_upgrade(declared: str) -> int:
         print(f"{shown}: {declared} -> {CURRENT_CONTRACT}")
     for line in added:
         print(f"  {line}")
-    if 'added: capabilities' in added:
-        print("The capabilities list holds one placeholder. Replace it with the project's own list.")
+    _print_capability_notes(added, seeded, taken)
     print("Run `adr lint` to check the records against the contract.")
+    return 0
+
+
+def _print_capability_notes(added: list, seeded: list, taken: list):
+    defaults = ' and '.join(DEFAULT_CAPABILITIES)
+    if seeded:
+        print(f"Capabilities seeded from domains: {', '.join(seeded)}. They are a starting point; "
+              "the operator or the agent may keep, split, rename or delete each one.")
+        print(f"Capabilities from the template: {defaults}.")
+    elif 'added: capabilities' in added:
+        print(f"The capabilities list holds the placeholder core, with {defaults}. "
+              "Replace core with the project's own list.")
+    for name in taken:
+        print(f"Domain {name} is not seeded: the capability {name} keeps the template's text.")
+
+
+def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
+                              added, seeded, taken) -> int:
+    """--upgrade --dry-run: print the lines the upgrade would write, and
+    write nothing."""
+    try:
+        loaded = yaml.safe_load(body)
+    except yaml.YAMLError:
+        loaded = None
+    if not isinstance(loaded, dict) or str(loaded.get('contract')) != CURRENT_CONTRACT:
+        print(f"Error: the upgraded {shown} would not read as {CURRENT_CONTRACT}; "
+              "the upgrade would not be written.", file=sys.stderr)
+        return 1
+    if declared == CURRENT_CONTRACT:
+        print(f"{shown}: {CURRENT_CONTRACT}, would be completed (dry run; nothing written)")
+    else:
+        print(f"{shown}: {declared} -> {CURRENT_CONTRACT} (dry run; nothing written)")
+    for line in added:
+        print(f"  would be {line}")
+    if replaced is not None:
+        print(f"\nLine {replaced + 1} would read:\n")
+        print(lines[replaced].rstrip('\r\n'))
+    if blocks:
+        print("\nAppended to the end of the file:")
+        for block in blocks:
+            print()
+            print(block.rstrip('\r\n').replace('\r\n', '\n'))
+        print()
+    _print_capability_notes(added, seeded, taken)
+    print("Run `adr contract --upgrade` without --dry-run to write it.")
     return 0

@@ -58,9 +58,12 @@ kinds:
 
 # What the project does, one line each. A record's `capability` names one of
 # these, and a decision adds, cuts, changes or constrains them. Replace the
-# placeholder with the project's own list.
+# `core` placeholder with the project's own list. `process` and `adr` apply
+# to every project that keeps these records.
 capabilities:
   core: The project's core behaviour (placeholder; replace)
+  process: Conventions, documentation and the development process that belong to no product capability
+  adr: Decision records, their contract and the adr tool
 
 # This repository, as URLs name it (host/owner/repo, or a list). A URL into
 # it at a branch is a path in the tree: `adr domain` rewrites it when a
