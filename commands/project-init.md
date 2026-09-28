@@ -319,17 +319,15 @@ These are `subagent_type` values for the `Task` tool:
 parts the skill can't know:
 
 1. Vendor the tool via the **adr** skill (it copies `adr-tool` → `docs/scripts/adr`
-   and seeds `docs/architecture/adr.yaml` from the template). The template carries
-   only the legacy adr/v0 shape — `project_name`, `domains`, `statuses`, `defaults`,
-   `legacy`, `viewer` — with no `contract`, `kinds` or `capabilities` key. Vendoring
-   never adopts adr/v1 on the project's behalf.
+   and seeds `docs/architecture/adr.yaml` from the template). The template declares
+   `contract: adr/v1` with the decision, spec and evidence kinds, a placeholder
+   capability, and a commented `baseline` block.
 
 2. Customize `docs/architecture/adr.yaml` with the interview answers:
    - Project name
    - Domains with ranges (100-wide ranges, 1-99 for legacy)
-   - Statuses list (v0) or, if the interview chose adr/v1, `contract: adr/v1` plus
-     `kinds` (decision, spec, evidence — the seed set from ADR-304 and ADR-309) and
-     `capabilities` (one line per capability the project's domains name), and
+   - Under adr/v1 (the template's default): replace the placeholder
+     `capabilities` with one line per capability the interview named, and
      `baseline: {adopted: <date>, capabilities: [...]}` for those that already exist
    - Default deciders (from git/gh config)
 

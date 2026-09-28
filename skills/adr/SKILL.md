@@ -178,9 +178,10 @@ chmod +x docs/scripts/adr
 
 Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
 validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template
-seeds the legacy adr/v0 shape. Adopting adr/v1 (`contract: adr/v1` plus
-`kinds` and `capabilities`) comes afterward, as the project's own deliberate
-decision.
+declares `contract: adr/v1` with the decision, spec and evidence kinds and a
+placeholder capability: replace it with the project's capabilities, and list
+the ones that already exist under `baseline` (ADR-305). To stay on adr/v0,
+delete the `contract` line and the v1 blocks under it.
 
 For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run
 `/project-init` instead — it vendors this tool as one step of a larger setup. The
