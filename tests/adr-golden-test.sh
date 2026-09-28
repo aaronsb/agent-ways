@@ -759,6 +759,20 @@ capture frozen-edit-slash-word lint docs/architecture/system/ADR-104-no-network-
 (cd "$WORK/repo" && git checkout -q -- .)
 edit docs/architecture/system/ADR-104-no-network-in-hooks.md "s.replace('  - evidence: \"the survey at docs/architecture/system/ADR-101-ingest.md\"', '  - evidence: \"the survey at docs/architecture/other/ADR-101-ingest.md\"')"
 capture frozen-edit-basis-path lint docs/architecture/system/ADR-104-no-network-in-hooks.md
+
+# A new record written as a copy of an accepted one has its own history: the
+# freeze follows renames, and a copy is a new file.
+fresh v1
+python3 - "$WORK/repo/docs/architecture/system" <<'PY'
+import sys
+d = sys.argv[1]
+s = open(f"{d}/ADR-101-ingest.md").read()
+s = s.replace('# ADR-101: Add ingestion', '# ADR-115: Add bulk ingestion').replace('  - evidence: fixture measurement\n', '  - evidence: a bulk load test\n')
+open(f"{d}/ADR-115-bulk-ingest.md", 'w').write(s)
+PY
+commit_all "copy"
+capture frozen-copy-not-followed lint docs/architecture/system/ADR-115-bulk-ingest.md
+
 # --- record edits: consider, set, supersede, enact ----------------------------------
 #
 # Each edit keeps the file it wrote, so the goldens show that only the touched

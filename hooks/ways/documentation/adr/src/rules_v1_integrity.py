@@ -159,6 +159,41 @@ def _git(args: list, cwd: Path) -> Optional[str]:
         return None
     return result.stdout if result.returncode == 0 else None
 
+def _file_history(ref: str, rel: str, root: Path) -> list:
+    """[(commit, path)] for each commit on ref's first-parent line that
+    changed the file at rel, newest first, following renames. git's --follow
+    also follows copies, so a new file copied from a record would inherit
+    that record's history; the renames are followed here instead, one
+    `git diff -M` at each commit that added the file under its later name."""
+    entries, seen = [], set()
+    while (ref, rel) not in seen:
+        seen.add((ref, rel))
+        # -m lists a merge's files against its first parent on older git.
+        # -z keeps names with spaces or non-ASCII intact.
+        log = _git(['log', ref, '--first-parent', '-m', '--no-renames', '-z',
+                    '--format=%x01%H', '--name-status', '--', rel], root)
+        added = None
+        for chunk in (log or '').split('\x01'):
+            tokens = [t.lstrip('\n') for t in chunk.split('\0')]
+            if not tokens[0]:
+                continue
+            commit, status = tokens[0], tokens[1] if len(tokens) > 1 else ''
+            if status.startswith('D'):
+                continue  # deleted here; an earlier commit holds the file
+            entries.append((commit, rel))
+            if status.startswith('A'):
+                added = commit
+                break
+        if added is None:
+            break
+        renamed = _git(['diff', '-M', '--diff-filter=R', '--name-status', '-z',
+                        f'{added}^', added], root)
+        old = next((a for a, b in _renames(renamed) if b == rel), None)
+        if old is None:
+            break
+        ref, rel = f'{added}^', old
+    return entries
+
 def _frozen_versions(adr, every: bool = False) -> list:
     """(frontmatter, body, path) of the first committed version that was
     already adr/v1 and past proposed, following renames, and with every=True
@@ -179,20 +214,8 @@ def _frozen_versions(adr, every: bool = False) -> list:
     # with a merge commit lands at the merge, not at the first commit on its
     # branch; -m lists the merge's files against that parent on older git.
     ref = (_git(['rev-parse', '--abbrev-ref', 'origin/HEAD'], root) or '').strip() or 'HEAD'
-    # --reverse drops pre-rename history under --follow, so read newest first
-    # and reverse here. -z keeps names with spaces or non-ASCII intact.
-    log = _git(['log', ref, '--first-parent', '-m', '--follow', '-z', '--format=commit:%H', '--name-only', '--', str(rel)], root)
-    if not log:
-        return []
-    entries, commit = [], None
-    for token in log.split('\0'):
-        if token.startswith('commit:'):
-            commit = token[len('commit:'):]
-        elif commit and token.lstrip('\n'):
-            entries.append((commit, token.lstrip('\n')))
-            commit = None
     versions = []
-    for commit, name in reversed(entries):
+    for commit, name in reversed(_file_history(ref, rel.as_posix(), root)):
         text = _git(['show', f'{commit}:{name}'], root)
         if text is None:
             continue
