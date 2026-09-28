@@ -1,5 +1,5 @@
 Declared: adr/v0 (no contract line)
 Current:  adr/v1 (adr-tool <VERSION>)
 docs/architecture/adr.yaml is behind this tool. `adr contract --upgrade` brings it to adr/v1.
-Notice: 52 records in 3 domains; system holds 47 (90%). Seeding from these domains gives 3 capabilities. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
+Notice: 52 records in 3 domains; system holds 47 (90%). Of the 3 capabilities seeded from the domains, system would carry 47 of the 52 records. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
 [exit 0]

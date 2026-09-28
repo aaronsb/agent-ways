@@ -25,7 +25,7 @@ def cmd_domains(args):
         print(f"\n  {'legacy':8} ({r[0]:3}-{r[1]:3})  {legacy.get('label', 'Legacy')}")
 
     print()
-    seeds = 'capabilities' not in get_config()
+    seeds = _pending_seeds(get_config())
     for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
         print(f"Notice: {shape_notice(finding, seeds=seeds)}\n")
     return 0

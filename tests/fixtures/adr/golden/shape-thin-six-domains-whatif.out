@@ -33,11 +33,14 @@ capabilities:
   system: Runtime, hooks and storage
   ops: Deployment and runbooks, split across two folders
   docs: Documentation structure and tooling
+  api: Endpoints
+  ui: Interfaces
+  ai: Models
   process: Conventions, documentation and the development process that belong to no product capability
   adr: Decision records, their contract and the adr tool
 
-Capabilities seeded from domains: system, ops, docs. They are a starting point; the operator or the agent may keep, split, rename or delete each one.
+Capabilities seeded from domains: system, ops, docs, api, ui, ai. They are a starting point; the operator or the agent may keep, split, rename or delete each one.
 Capabilities from the template: process and adr.
-Notice: 52 records in 3 domains; system holds 47 (90%). Of the 3 capabilities seeded from the domains, system would carry 47 of the 52 records. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
+Notice: 52 records in 3 domains; system holds 47 (90%). Of the 6 capabilities seeded from the domains, system would carry 47 of the 52 records. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
 Run `adr contract --upgrade` without --dry-run to write it.
 [exit 0]

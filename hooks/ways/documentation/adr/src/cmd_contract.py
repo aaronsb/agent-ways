@@ -94,7 +94,7 @@ def cmd_contract(args):
             print(f"{config_path} is behind this tool. "
                   f"`adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
         for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
-            print(f"Notice: {shape_notice(finding, seeds='capabilities' in missing)}")
+            print(f"Notice: {shape_notice(finding, seeds=_pending_seeds(get_config()))}")
         return 0
     return _contract_upgrade(declared, dry_run)
 
@@ -142,6 +142,14 @@ def _seeded_capabilities(config: dict):
                    for name, text in seeds)
     block = SEEDED_CAPABILITIES_COMMENT + 'capabilities:\n' + body + ''.join(defaults)
     return block, [name for name, _ in seeds], taken
+
+
+def _pending_seeds(config: dict) -> Optional[list]:
+    """The capabilities --upgrade would seed from the domains; None when
+    adr.yaml already has a capabilities key, which --upgrade leaves alone."""
+    if 'capabilities' in config:
+        return None
+    return _seeded_capabilities(config)[1]
 
 
 def _contract_upgrade(declared: str, dry_run: bool = False) -> int:
@@ -233,7 +241,7 @@ def _print_capability_notes(added: list, seeded: list, taken: list, thin=None):
     for name in taken:
         print(f"Domain {name} is not seeded: the capability {name} keeps the template's text.")
     if thin:
-        print(f"Notice: {shape_notice(thin, seeds=True)}")
+        print(f"Notice: {shape_notice(thin, seeds=seeded)}")
 
 
 def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,

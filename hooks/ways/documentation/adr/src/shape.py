@@ -65,16 +65,18 @@ def _plural(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}"
 
 
-def shape_notice(finding: ShapeFinding, seeds: bool = False) -> str:
-    """One notice line for a thin axis. seeds: the capabilities block is
-    still to be written from the domains."""
+def shape_notice(finding: ShapeFinding, seeds: Optional[list] = None) -> str:
+    """One notice line for a thin axis. seeds: the capabilities seeded, or
+    to be seeded, from the domains; None when no capabilities are seeded."""
     pct = round(100 * finding.top_count / finding.records)
     if finding.axis == 'domain':
         text = f"{_plural(finding.records, 'record', 'records')} in {_plural(finding.in_use, 'domain', 'domains')}"
         text += f" ({finding.top})." if finding.in_use == 1 else \
             f"; {finding.top} holds {finding.top_count} ({pct}%)."
-        if seeds:
-            text += f" Seeding from these domains gives {_plural(finding.in_use, 'capability', 'capabilities')}."
+        if seeds and finding.top in seeds:
+            text += (f" Of the {_plural(len(seeds), 'capability', 'capabilities')} seeded from the "
+                     f"domains, {finding.top} would carry {finding.top_count} of the "
+                     f"{finding.records} records.")
         return (text + " Read the records and propose domains or capabilities (`adr list --json` "
                 "gives titles and fields), then apply with `adr domain move --plan` or by editing "
                 "`capabilities`, previewing with --whatif.")

@@ -1259,16 +1259,18 @@ def _plural(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}"
 
 
-def shape_notice(finding: ShapeFinding, seeds: bool = False) -> str:
-    """One notice line for a thin axis. seeds: the capabilities block is
-    still to be written from the domains."""
+def shape_notice(finding: ShapeFinding, seeds: Optional[list] = None) -> str:
+    """One notice line for a thin axis. seeds: the capabilities seeded, or
+    to be seeded, from the domains; None when no capabilities are seeded."""
     pct = round(100 * finding.top_count / finding.records)
     if finding.axis == 'domain':
         text = f"{_plural(finding.records, 'record', 'records')} in {_plural(finding.in_use, 'domain', 'domains')}"
         text += f" ({finding.top})." if finding.in_use == 1 else \
             f"; {finding.top} holds {finding.top_count} ({pct}%)."
-        if seeds:
-            text += f" Seeding from these domains gives {_plural(finding.in_use, 'capability', 'capabilities')}."
+        if seeds and finding.top in seeds:
+            text += (f" Of the {_plural(len(seeds), 'capability', 'capabilities')} seeded from the "
+                     f"domains, {finding.top} would carry {finding.top_count} of the "
+                     f"{finding.records} records.")
         return (text + " Read the records and propose domains or capabilities (`adr list --json` "
                 "gives titles and fields), then apply with `adr domain move --plan` or by editing "
                 "`capabilities`, previewing with --whatif.")
@@ -3236,7 +3238,7 @@ def cmd_domains(args):
         print(f"\n  {'legacy':8} ({r[0]:3}-{r[1]:3})  {legacy.get('label', 'Legacy')}")
 
     print()
-    seeds = 'capabilities' not in get_config()
+    seeds = _pending_seeds(get_config())
     for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
         print(f"Notice: {shape_notice(finding, seeds=seeds)}\n")
     return 0
@@ -3798,7 +3800,7 @@ def cmd_contract(args):
             print(f"{config_path} is behind this tool. "
                   f"`adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
         for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
-            print(f"Notice: {shape_notice(finding, seeds='capabilities' in missing)}")
+            print(f"Notice: {shape_notice(finding, seeds=_pending_seeds(get_config()))}")
         return 0
     return _contract_upgrade(declared, dry_run)
 
@@ -3846,6 +3848,14 @@ def _seeded_capabilities(config: dict):
                    for name, text in seeds)
     block = SEEDED_CAPABILITIES_COMMENT + 'capabilities:\n' + body + ''.join(defaults)
     return block, [name for name, _ in seeds], taken
+
+
+def _pending_seeds(config: dict) -> Optional[list]:
+    """The capabilities --upgrade would seed from the domains; None when
+    adr.yaml already has a capabilities key, which --upgrade leaves alone."""
+    if 'capabilities' in config:
+        return None
+    return _seeded_capabilities(config)[1]
 
 
 def _contract_upgrade(declared: str, dry_run: bool = False) -> int:
@@ -3937,7 +3947,7 @@ def _print_capability_notes(added: list, seeded: list, taken: list, thin=None):
     for name in taken:
         print(f"Domain {name} is not seeded: the capability {name} keeps the template's text.")
     if thin:
-        print(f"Notice: {shape_notice(thin, seeds=True)}")
+        print(f"Notice: {shape_notice(thin, seeds=seeded)}")
 
 
 def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,

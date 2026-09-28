@@ -901,6 +901,10 @@ capture shape-thin-domains        domains
 capture shape-thin-contract       contract
 capture shape-thin-upgrade-whatif contract --upgrade --whatif
 capture shape-thin-v0-lint        lint
+# Six declared domains, three holding records: the notice counts the six
+# seeds, not the three domains in use.
+edit docs/architecture/adr.yaml "s.replace('\nstatuses:', '  api:\n    range: [400, 499]\n    name: API\n    description: Endpoints\n    folder: api\n\n  ui:\n    range: [500, 599]\n    name: UI\n    description: Interfaces\n    folder: ui\n\n  ai:\n    range: [600, 699]\n    name: AI\n    description: Models\n    folder: ai\n\nstatuses:', 1)"
+capture shape-thin-six-domains-whatif contract --upgrade --whatif
 # Balanced: 52 records across three domains; no notice.
 fresh corpus
 gen_v0 system 120 14
