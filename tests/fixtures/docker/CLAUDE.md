@@ -1,6 +1,6 @@
 # Working in the live fixture
 
-This directory is the tier 1 live install fixture from [ADR-186](../../../docs/architecture/system/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md). [README.md](README.md) here says what it asserts. This file says how to run it, change it, and read a failure.
+This directory is the tier 1 live install fixture from [ADR-186](../../../docs/architecture/platform/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md). [README.md](README.md) here says what it asserts. This file says how to run it, change it, and read a failure.
 
 ## Run it
 
