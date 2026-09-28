@@ -80,6 +80,7 @@ _Documentation structure, tooling, coherence_
 | [ADR-308](./documentation/ADR-308-a-change-decision-may-list-several-capabilities.md) | A change decision may list several capabilities | accepted |
 | [ADR-309](./documentation/ADR-309-an-evidence-record-kind-for-findings-surveys-and-explorations.md) | An evidence record kind for findings, surveys and explorations | accepted |
 | [ADR-310](./documentation/ADR-310-record-numbers-are-permanent-identity-and-records-live-by-intent.md) | Record numbers are permanent identity, and records live by intent | accepted |
+| [ADR-311](./documentation/ADR-311-the-frozen-check-reads-the-change-under-review-git-keeps-the-history.md) | The frozen check reads the change under review; git keeps the history | accepted |
 
 ## Attend
 _Session awareness: sensors, peers, messaging, keepwarm_
