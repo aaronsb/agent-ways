@@ -52,8 +52,8 @@ pub(super) struct TickState<'a> {
     pub(super) cfg: &'a config::Config,
 }
 
-/// Build the engagement curve from config (ADR-119 action potential,
-/// ADR-123 progression-axis unification). All sensors share these
+/// Build the engagement curve from config (ADR-123 action-potential
+/// curve on the unified progression axis). All sensors share these
 /// engagement parameters; per-sensor overrides can be added later
 /// if the defaults turn out to be too coarse.
 ///

@@ -1,0 +1,2 @@
+Refused: use `adr accept 106`; it checks the record and records why. --force sets the status anyway.
+[exit 1]

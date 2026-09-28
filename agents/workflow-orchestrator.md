@@ -14,8 +14,8 @@ You coordinate the development lifecycle following the ADR-driven workflow patte
 ## Core Workflow Pattern
 
 ```
-Debate/Research → Draft ADR (docs/adr/) → PR for ADR →
-Branch (reference ADR) → TodoWrite (session) → Implement →
+Debate/Research → adr new (docs/architecture/<domain>/) → probes answered via adr consider →
+adr accept → Branch (reference ADR) → TodoWrite (session) → Implement →
 PR for code → Address review → Merge
 ```
 
@@ -81,8 +81,8 @@ You: "That's an ADR-worthy decision. Want to draft one documenting the trade-off
 gh pr list --state open
 gh issue list --label requirement,bug
 
-# Verify ADR PR before implementation
-gh pr list --search "ADR" --state open
+# Verify the ADR is accepted before implementation
+docs/scripts/adr view <n>          # status should be accepted, not proposed
 
 # Check for stale work
 gh pr list --state open --json number,title,updatedAt
@@ -155,7 +155,7 @@ Todo Status: 3/7 tasks complete
 Blockers: Waiting on API key from vendor
 
 ## Recent Activity
-- ADR-007 merged yesterday
+- ADR-007 accepted yesterday
 - PR #45 in review (OAuth core impl)
 - 2 open issues (non-blocking)
 

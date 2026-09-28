@@ -1,0 +1,66 @@
+path: docs/architecture/.import/ADR-104.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-104-hook-priorities.md
+  format: v0
+  sha256: b188a9282e21030785b3079d66039ecac3a78197e88169be7c9233dd785706cc
+target:
+  number: '104'
+  domain: system
+  title: Hook priorities
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  supersedes:
+    - ADR-102#2
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-08-01
+  deciders:
+    - developer
+    - agent
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+candidates:
+  capability: []
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Accepted'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+  record.supersedes: frontmatter supersedes
+unmapped: {}
+body: |
+  ## Context
+
+  Replaces one section of ADR-102.
+
+  ## Decision
+
+  The decision for ADR-104: Hook priorities.
+
+  ## Consequences
+
+  ### Positive
+
+  - It works.
+
+  ## 2. Priority bands
+
+  Hooks run in three bands.

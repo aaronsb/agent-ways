@@ -1,5 +1,14 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: adr
+basis:
+  - evidence: 'issue #438: 85 ADRs on disk, nine supersedes/superseded_by declarations, and zero code reading any of it'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-08-06
 deciders:
   - aaronsb
@@ -7,6 +16,10 @@ deciders:
 related:
   - 177
   - 302
+imported:
+  from: docs/architecture/documentation/ADR-303-active-set-semantics-adr-archive-and-supersession-reading-for-the-adr-corpus.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-303: Active-set semantics, adr archive, and supersession reading for the ADR corpus

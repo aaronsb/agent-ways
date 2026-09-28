@@ -1,0 +1,8 @@
+Renamed domain: system → platform
+  Folder: docs/architecture/system/ → docs/architecture/platform/
+Rewrote 8 paths in 4 files
+  docs/architecture/adr.yaml: 2
+  docs/architecture/system/ADR-109-precedent-chain.md: 1
+  docs/guide/hooks.md: 4
+  src/search.py: 1
+[exit 0]

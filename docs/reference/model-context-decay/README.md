@@ -39,7 +39,7 @@ Benchmarks from Anthropic's Claude 4.6 model card (March 2026).
 
 ### The Problem
 
-Ways originally disclosed once per session — a marker-file rule designed for 200K context windows where the entire conversation fit within a single effective attention span. That rule is retired: the engine now re-discloses on a token-distance axis (ADR-104 → ADR-123 → ADR-126). The motivating problem is unchanged — at 1M tokens:
+Ways originally disclosed once per session — a marker-file rule designed for 200K context windows where the entire conversation fit within a single effective attention span. That rule is retired: the engine now re-discloses on a token-distance axis (ADR-104 → ADR-123 → ADR-126). The motivating problem is unchanged — at 1M tokens: <!-- adr-cite-ignore -->
 
 - A way disclosed at token 50K has measurably degraded influence at token 500K
 - Retrieval accuracy for that disclosure drops ~15-20% (Opus) or ~30%+ (Sonnet)
@@ -70,7 +70,7 @@ The interval is **window-relative and per-way**, not a single global threshold. 
 | `normal` | 0.15 | the standard load-bearing cadence |
 | `frequent` | 0.05 | re-fires on each fresh occurrence of its trigger |
 
-A way needing finer shaping declares an explicit `curve:` block instead (ADR-123); `refire:` wins when both are present. An early design proposed a flat 25%-of-window global constant (retired ADR-104); it was superseded by these per-way presets. See `docs/hooks-and-ways/engine-reference.md` and ADR-126.
+A way needing finer shaping declares an explicit `curve:` block instead (ADR-123); `refire:` wins when both are present. An early design proposed a flat 25%-of-window global constant (retired ADR-104); it was superseded by these per-way presets. See `docs/hooks-and-ways/engine-reference.md` and ADR-126. <!-- adr-cite-ignore -->
 
 ### Token Budget Consideration
 

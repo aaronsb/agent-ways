@@ -52,7 +52,7 @@ Like `attend run`, `attend chat` is a long-lived process. Unlike `attend run`, i
 
 **Left sidebar, bottom — agents.** Every peer Claude session attend has discovered is listed with ambient metadata: a status indicator (arrow = working, dot = idle), commits ahead/behind upstream, and current context percentage. This is the peer sensor's output rendered directly.
 
-**Main area — messages.** Chronological signal stream, scoped by whichever sidebar filter is active. Each message carries a two-line sender chip. The first line is the same persona every attend conduit renders (`Jovan-alpha` for a Claude session, `aaron` for a human), derived through the shared `attend-identity-view` crate so the chip, the Monitor line, and the Stop-hook drain agree on one name. The second line is the cwd basename, falling back to `broadcast` when the signal carries no cwd. After the chip come the routing scope (`@focus-group`, `broadcast`, or project name), and the body. Messages fade after their salience drops below the presentation floor (ADR-121), matching the agent's view.
+**Main area — messages.** Chronological signal stream, scoped by whichever sidebar filter is active. Each message carries a two-line sender chip. The first line is the same persona every attend conduit renders (`Jovan-alpha` for a Claude session, `aaron` for a human), derived through the shared `attend-identity-view` crate so the chip, the Monitor line, and the Stop-hook drain agree on one name. The second line is the cwd basename, falling back to `broadcast` when the signal carries no cwd. After the chip come the routing scope (`@focus-group`, `broadcast`, or project name), and the body. Messages fade after their salience drops below the presentation floor (ADR-123), matching the agent's view.
 
 **Input bar — compose.** Plain text input supports `@group` and `#issue` inline addressing. Enter sends.
 
@@ -124,8 +124,8 @@ The chat TUI is where the human *orchestrates*. The agent terminals are where th
 
 - **ADR-120** — the design decision for this feature (draft status)
 - **ADR-118** — focus groups; the TUI's sidebar depends directly on this model
-- **ADR-119** — action potential engagement; the TUI's message stream respects the same refractory and governor rules as the agent side
-- **ADR-121** — salience decay; the TUI fades old messages using the same turn-based curve
+- **ADR-123** — action potential engagement; the TUI's message stream respects the same refractory and governor rules as the agent side
+- **ADR-123** — salience decay; the TUI fades old messages using the same curve
 - [`loop.md`](loop.md) — the sensor loop substrate that feeds the TUI
 - [`signals.md`](signals.md) *(planned)* — the wire format the TUI reads and writes
 - [`focus-groups.md`](focus-groups.md) *(planned)* — the group model the sidebar reflects

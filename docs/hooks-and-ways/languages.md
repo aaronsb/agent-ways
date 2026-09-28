@@ -5,7 +5,7 @@ Ways runs in one of two **modes**, decided by a single switch. English is the
 the framework translates itself, validated against the English root (ADR-139). This
 page is the reference; the lifecycle and rationale live in
 `docs/explanation/localization/` (`01.009.E`–`01.013.E`) and the design note
-`docs/design-notes/adopter-localization-lifecycle-and-tuning.md`.
+`docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md`.
 
 ## The two modes
 
@@ -129,4 +129,4 @@ ways language --json   # machine-readable (resolved_language, models, locales_fo
 - **ADR-139** — adopter-run localization (the two modes, the shelve, root-anchoring)
 - **ADR-125** — the coordinate-alias model (`description`+`vocabulary` as embedding-space alias)
 - **ADR-107** — original locale support and the dual-model approach (superseded in part)
-- `docs/design-notes/adopter-localization-lifecycle-and-tuning.md` — the mechanics
+- `docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md` — the mechanics

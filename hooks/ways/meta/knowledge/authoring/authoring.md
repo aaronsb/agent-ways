@@ -103,7 +103,7 @@ Common choices (numeric ↔ preset, matching the built-in defaults):
 | Procedural event handlers (fires often relative to session) | `0.05` | `frequent` |
 | Disclose once per session | `1.0` | `once` |
 
-Numeric values between these presets are fine — for example, the 14 ways migrated from ADR-127's 1M-Opus hack sit at `refire: 0.2` (between `normal` and `rare`), deliberately pinned to today's model.
+Numeric values between these presets are fine — for example, the 14 ways migrated from the PR #70 1M-Opus narrow-tune (ADR-126) sit at `refire: 0.2` (between `normal` and `rare`), deliberately pinned to today's model.
 
 Missing `refire:` on a fire-bearing way means the way fires once and never re-discloses — valid but uncommon, and `ways lint` warns on it. Check files and `trigger: attend` handlers are exempt (checks ride on parent way firing; attend handlers are signal-triggered).
 

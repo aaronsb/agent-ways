@@ -24,7 +24,7 @@ Groups compose naturally with the other two scopes:
 | Focus group | `@<name>/` | anyone who joined the named group |
 | Broadcast | `_broadcast/` | everyone with attend running |
 
-A single `attend send` can fan out to multiple scopes via flags; the default (ADR-119) is broadcast.
+A single `attend send` can fan out to multiple scopes via flags; the default (ADR-119) is broadcast. <!-- adr-cite-ignore -->
 
 ## CLI surface
 
@@ -101,7 +101,7 @@ This means group membership is **self-reported**. An agent adds itself to a grou
 
 The provider mechanism is simple: when `sensor-peers` is registered during startup, it receives a closure that clones the `Groups` handle. On each scan, it calls the closure, which returns the current list of joined group directories. The closure closes over an owned clone of `Groups` so it doesn't hold a borrow into the main loop state.
 
-## Interaction with action potential (ADR-119)
+## Interaction with action potential (ADR-123)
 
 Focus groups and engagement compose cleanly. Groups scope **which signals reach the agent**; engagement governs **how the agent responds once they arrive**. They operate at different layers:
 
@@ -112,9 +112,9 @@ Focus groups and engagement compose cleanly. Groups scope **which signals reach 
 
 The per-peer engagement boost (see [`engagement.md`](engagement.md)) also applies across focus group boundaries. A peer you've been actively chatting with in `@deploy` gets their messages boosted globally, not just within that group. This is usually the right shape — "I've been talking to this agent a lot" is a conversation-level state, not a group-level state.
 
-## The routing simplification from ADR-119
+## The routing simplification from ADR-119 <!-- adr-cite-ignore -->
 
-ADR-119 collapsed attend's peer-messaging routing down to a single default: **broadcast**. Before ADR-119, an agent had to reason about where to send messages — "should this go to a focus group? to a specific cwd? to broadcast?" — and routinely got it wrong. After ADR-119, the agent sends to broadcast and lets the engagement model sort out who pays attention.
+ADR-119 collapsed attend's peer-messaging routing down to a single default: **broadcast**. Before ADR-119, an agent had to reason about where to send messages — "should this go to a focus group? to a specific cwd? to broadcast?" — and routinely got it wrong. After ADR-119, the agent sends to broadcast and lets the engagement model sort out who pays attention. <!-- adr-cite-ignore -->
 
 Focus groups still exist and are still useful, but their role has shifted. They're not the primary routing mechanism anymore; the action potential's per-peer boost handles most "which agents should engage with this" decisions automatically. Groups are now better understood as **explicit scoping for cases where the engagement model isn't enough**:
 
@@ -133,7 +133,8 @@ Importantly, clicking a group in the sidebar is a TUI-local filter — it doesn'
 ## Related
 
 - **ADR-118** — the decision to build focus groups
-- **ADR-119** — action potential engagement; routing simplification
+- **ADR-123** — action potential engagement
+- **ADR-119** — routing simplification (superseded by ADR-123) <!-- adr-cite-ignore -->
 - [`signals.md`](signals.md) — how `@<name>/` dirs fit into the overall signal layout
 - [`engagement.md`](engagement.md) — per-peer boost and refractory
 - [`tui.md`](tui.md) — the sidebar UI for groups

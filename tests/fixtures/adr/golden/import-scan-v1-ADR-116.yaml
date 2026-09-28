@@ -1,0 +1,50 @@
+path: docs/architecture/.import/ADR-116.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-116-hourly-ingest.md
+  format: v0
+  sha256: 1b1c93891a8152b926668171c667bfecc5613257a7cf68ce8283aecd2ccb8744
+target:
+  number: '116'
+  domain: system
+  title: Hourly ingest
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-04-05
+  deciders:
+    - developer
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+  - 'status note: Deprecated with no successor maps to accepted with a note that the decision is historical (ADR-304 §7); add the note to the body'
+candidates:
+  capability:
+    - ingest
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Deprecated, with no successor (ADR-304 §7)'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+unmapped: {}
+body: |
+  ## Context
+
+  Ingest ran hourly.

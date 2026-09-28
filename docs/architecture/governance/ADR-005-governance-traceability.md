@@ -1,0 +1,172 @@
+---
+contract: adr/v1
+kind: decision
+verb: add
+capability: governance
+superseded_by:
+  - ADR-200
+basis:
+  - evidence: the step from policy document to way.md is invisible; the link between policy source and compiled guidance exists only in the author's head (Context, The Compilation Gap)
+agent:
+  name: Claude
+  model: unrecorded
+status: superseded
+date: 2026-02-05
+deciders:
+  - aaronsb
+  - claude
+related:
+  - ADR-013
+  - ADR-200
+imported:
+  from: docs/architecture/legacy/ADR-005-governance-traceability.md
+  format: v0
+  status: Superseded
+---
+
+# ADR-005: Governance Traceability for Ways
+
+> **Superseded by [ADR-200](../governance/ADR-200-compliance-claims-and-session-derived-findings.md).**
+> This ADR established provenance traceability but framed the hand-authored mappings as
+> "auditability" and "proof." ADR-200 corrects the epistemics: the mappings are compliance
+> **claims** (control-*design* assertions — SOC 2 Type I), not **findings** (assessed
+> evidence). The sidecar mechanism described here is retained and renamed; its framing as
+> proof is replaced. Storage later moved from way frontmatter to a `provenance.yaml`
+> sidecar (ADR-110). Kept unedited below as the historical record.
+
+## Context
+
+### The Compilation Gap
+
+The ways system has a clear pipeline, documented in `docs/hooks-and-ways/README.md`:
+
+1. **Principle** — an opinion about how things should work
+2. **Governance Interpretation** — how it applies in practice (policy docs)
+3. **Documentation** — how the system works (reference layer)
+4. **Implementation** — way.md files (machine layer)
+
+This pipeline produces good guidance, but the transformation from stage 2 to stage 4 is invisible. A human reads the policy, thinks about it, and writes a way.md. The connection between policy source and compiled guidance exists only in that person's head.
+
+For a personal project, this is fine. For an organization that needs to demonstrate that its AI agent governance actually derives from its stated policies, this is a gap.
+
+### The Compilation Metaphor
+
+Ways are compiled policy. The analogy is precise:
+
+| Concept | Software Build | Way System |
+|---------|---------------|------------|
+| Source code | `.c` / `.rs` files | Policy documents (ADRs, controls, regulatory specs) |
+| Compiler | `gcc` / `rustc` | Human authoring process |
+| Object code | `.o` / `.rlib` files | `way.md` files (compressed, context-optimized) |
+| Debug symbols | DWARF / PDB | Provenance metadata (frontmatter the runtime ignores) |
+| Symbol table | `.map` / `.pdb` | Traceability manifest (generated index) |
+| Linker output | Executable | Agent context (assembled at runtime from matching ways) |
+
+Just as debug symbols don't affect program execution but are essential for debugging, provenance metadata doesn't affect way injection but is essential for governance auditing.
+
+### Cross-Repo Reality
+
+In practice, policy documents and way implementations won't live in the same repository:
+
+- A compliance team maintains ADRs, control inventories, and regulatory mappings in their repo
+- A platform team maintains Claude Code ways in `~/.claude/hooks/ways/`
+- An enterprise might have multiple policy repos feeding multiple way configurations
+
+The traceability system must bridge this boundary without coupling the repos.
+
+## Decision
+
+Add optional **provenance metadata** to way frontmatter and provide tooling to generate a **traceability manifest** that bridges policy repos to way repos.
+
+### 1. Provenance Frontmatter
+
+Way frontmatter gains an optional `provenance:` block:
+
+```yaml
+---
+match: regex
+pattern: commit|push
+provenance:
+  policy:
+    - uri: github://acme-corp/sdlc-controls/docs/architecture/change/ADR-150.md
+      type: adr
+    - uri: governance/policies/code-lifecycle.md
+      type: governance-doc
+  controls:
+    - NIST SP 800-53 CM-3 (Configuration Change Control)
+    - SOC 2 CC8.1 (Change Management)
+  verified: 2026-02-05
+  rationale: >
+    Conventional commits create structured change records with type classification
+    and justification, implementing auditable configuration change control.
+---
+```
+
+**Fields:**
+
+| Field | Purpose |
+|-------|---------|
+| `policy[].uri` | Reference to source policy document |
+| `policy[].type` | Classification: `adr`, `governance-doc`, `regulatory-framework`, `control-spec` |
+| `controls[]` | Regulatory control IDs this way addresses |
+| `verified` | Date provenance was last confirmed accurate |
+| `rationale` | How policy intent became way guidance |
+
+**URI convention:** `github://org/repo/path` for cross-repo references. Relative paths for same-repo references. The scheme is a convention, not a protocol — it's meant to be human-readable and machine-parseable, not clickable.
+
+**Zero runtime cost:** The hook scripts (`show-way.sh`, `check-prompt.sh`, etc.) strip all frontmatter before injection. Fields they don't recognize are silently ignored. Provenance metadata never reaches the agent's context window.
+
+### 2. Traceability Manifest
+
+A generated `provenance-manifest.json` that aggregates provenance across all ways:
+
+- Per-way provenance data extracted from frontmatter
+- Inverted indices: policy → implementing ways, control → addressing ways
+- Coverage statistics (ways with/without provenance)
+
+Generated by scanning, not maintained by hand. Can be cross-referenced with external audit artifacts (e.g., a compliance repo's control disposition map).
+
+### 3. Verification Tooling
+
+A coverage report script that:
+- Identifies ways missing provenance
+- Cross-references control IDs against external audit ledgers
+- Flags stale `verified` dates
+- Reports gaps in both directions (policies without ways, ways without policies)
+
+Reports, does not enforce. The system is informational, not blocking.
+
+## Consequences
+
+### Positive
+
+- **Traceability exists.** The chain from regulatory framework through policy through way to agent context is walkable in either direction.
+- **Zero runtime cost.** Provenance is metadata only — no performance impact, no context window cost.
+- **Incremental adoption.** Ways without provenance work exactly as before. Provenance can be added gradually.
+- **Cross-repo capable.** URI references work across organizational boundaries without coupling repos.
+- **Auditable.** An auditor can ask "show me which agent governance implements NIST CM-3" and get a concrete answer.
+
+### Negative
+
+- **Manual compilation.** The human still writes the way. Provenance makes the connection traceable, not automatic.
+- **Staleness risk.** Provenance metadata can go stale if policies change and ways aren't updated. The `verified` date and verification tooling mitigate this.
+- **Added frontmatter complexity.** Way authors now have an optional block to learn about. Keeping it optional prevents this from being a barrier.
+
+### Neutral
+
+- **Not enforcement.** The system reports, it doesn't block. A way with missing or stale provenance still fires normally.
+- **Not a product.** This establishes a pattern and proves a concept. Enterprise adoption would likely want tighter integration with their specific compliance tooling.
+
+## Alternatives Considered
+
+### External mapping file
+
+A separate YAML/JSON file mapping ways to policies, kept alongside `ways.json`. Rejected because it separates provenance from the thing it describes — the way file should be self-contained. Also creates a maintenance burden (two files to keep in sync).
+
+### Mandatory provenance
+
+Requiring all ways to have provenance. Rejected because many ways (like `meta/todos` or `meta/memory`) are operational, not policy-derived. Mandatory provenance would force meaningless metadata on ways that don't need it.
+
+### Automated compilation
+
+A tool that reads policy documents and generates way.md files automatically. Rejected as premature — the compilation requires human judgment about what's relevant to agent context, how terse to be, what triggers to use. This may be feasible in the future but the pattern needs to be established manually first.

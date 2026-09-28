@@ -1,0 +1,20 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  accepted: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-101-ingest.md
+  ❌ observable: expected a list of entries, each a line of words or a mapping
+
+════════════════════════════════════════════════════════════
+Summary: 1 errors, 0 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

@@ -2,7 +2,7 @@
 
 **A companion to [The Context Decay Model: Why Timed Injection Beats Front-Loading](context-decay.md)**
 
-**See also:** [ADR-123: Firing dynamics — progression-axis unification](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md) — the architecture that operationalizes this model for ways and attend, including why token position (not turn count, not wall clock) is the correct progression axis for transformer-hosted ways.
+**See also:** [ADR-123: Firing dynamics — progression-axis unification](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) — the architecture that operationalizes this model for ways and attend, including why token position (not turn count, not wall clock) is the correct progression axis for transformer-hosted ways.
 
 > **Read section 1.1a before citing this document.** The RoPE decay derivation below is the *baseline positional prior*, not a complete model of trained-attention retrieval behavior. Modern LLMs override the baseline for salient content via head specialization, and empirical retention is substantially better than the baseline curve predicts. The decay model is used here as an approximation of *aggregate presentation economics*, which is the right quantity for firing decisions — but it is not a direct model of attention internals.
 

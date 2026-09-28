@@ -9,27 +9,32 @@ refire: 0.15
 <!-- epistemic: convention -->
 # ADR Context — Read Before You Build
 
-Before diving into implementation, check if the project has Architecture Decision Records that inform the work.
+Before diving into implementation, check if the project has Agent Decision Records that inform the work.
 
 ## Discovery
 
-Use the ADR tool if installed (`docs/scripts/adr` or similar):
+Use the ADR tool if installed (`docs/scripts/adr` or similar). Under adr/v1 (see the project's `docs/architecture/adr.yaml`), query rather than browse:
 
 ```
-adr list --group     # see domains and decisions at a glance
-adr view <N>         # read a specific ADR
+adr list --capability X      # records touching a capability
+adr list --kind decision     # decisions only (also: spec, evidence)
+adr list --field verb=cut    # any frontmatter field
+adr list --group-by capability
+adr view <N>                 # read a specific record
 ```
 
-No tool? Check `docs/architecture/` for `ADR-*.md` files directly.
+No `adr.yaml`, or no tool? The project is adr/v0 — check `docs/architecture/` for `ADR-*.md` files directly.
 
 ## Reading Strategy
 
 **Read selectively, not exhaustively.**
 
-- Identify 1-3 ADRs most relevant to the current task
-- Prioritize **Accepted** status — those are active decisions
-- Read Context and Decision sections first; skip Alternatives unless debating a change
-- Don't bulk-read the entire ADR corpus — it consumes context without payoff
+- Identify 1-3 records most relevant to the current task
+- Prioritize **accepted** status — those are active decisions
+- On a decision record, read the **Summary** first (decided, trades away, one-way?) before the body
+- Follow `supersedes`/`amends` links to the current version of a decision
+- Evidence records (findings, surveys, audits) are background a decision's `basis` cites — read one when a decision points to it
+- Don't bulk-read the entire corpus — it consumes context without payoff
 
 ## When to Check
 

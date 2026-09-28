@@ -1,0 +1,3 @@
+Enacted ADR-105 at 3f9c2a1dead (was 3f9c2a1): Retire the legacy ingest surface
+Lint docs/architecture/system/ADR-105-retire-legacy-ingest.md: clean
+[exit 0]

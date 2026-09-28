@@ -1,5 +1,5 @@
 
-ADR Fixture — Architecture Decision Records (14 total)
+ADR Fixture — Agent Decision Records (14 total)
 =======================================================
   📦 ADR-005      Legacy storage format  (superseded by ADR-101)
   ✅ ADR-012      Plain-text logging

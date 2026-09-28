@@ -6,7 +6,7 @@ def cmd_lint(args):
     """
     if args.paths:
         # Resolved, so records parsed from the arguments match the corpus's
-        # own paths (grounding and other corpus rules key on the path).
+        # own paths (corpus rules key on the path).
         paths = [Path(p).resolve() for p in args.paths]
         adrs = [parse_adr(p) for p in paths]
     else:

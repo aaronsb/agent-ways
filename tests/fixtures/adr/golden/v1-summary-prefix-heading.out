@@ -1,0 +1,20 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  proposed: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-108-ingest-over-v0.md
+  ❌ a decision record opens with a '## Summary' section
+
+════════════════════════════════════════════════════════════
+Summary: 1 errors, 0 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

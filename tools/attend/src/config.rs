@@ -52,7 +52,7 @@ pub struct GovernorConfig {
     pub rate_window: Duration,
 }
 
-/// Action potential engagement parameters (ADR-119).
+/// Action potential engagement parameters (ADR-123 `Curve::ActionPotential`).
 ///
 /// Governs per-sensor refractory behavior: after a burst of disclosures,
 /// the sensor enters a refractory period where only high-magnitude events
@@ -248,7 +248,7 @@ governor:
   max_per_window: 3
   rate_window: 120
 
-# Action potential engagement model (ADR-119, unified in ADR-123).
+# Action potential engagement model (ADR-123).
 # Run `attend tune` to auto-derive these from real session history.
 engagement:
   burst_threshold: 3         # disclosures before refractory kicks in
@@ -369,7 +369,7 @@ fn detect_legacy_burst_window(yaml_str: &str) -> Result<(), String> {
                  under ADR-123 the burst window is implicit in multiplier_half_life \
                  (derived from decay_per_minute). Run `attend config lint --fix` \
                  to remove the key from your config. See \
-                 docs/architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md \
+                 docs/architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md \
                  for migration guidance."
                     .to_string(),
             );

@@ -281,8 +281,8 @@ fi
 #
 # Precedence approximates Claude Code's resolution order (project-local >
 # project > user-global, highest wins). Each sub-key resolves INDEPENDENTLY, on
-# the documented merge law that objects deep-merge key by key (ADR-147; mirrored
-# in tools/ways-cli/src/cmd/settings/compile.rs) — so a project file setting
+# the documented merge law that objects deep-merge key by key (recorded in
+# ADR-147, retired by ADR-169 with its compile.rs mirror) — so a project file setting  # adr-cite-ignore
 # .commit must not hide a user file setting .sessionUrl. NOTE: that law is
 # documented for settings merging generally; its application to `attribution`
 # ACROSS SCOPES is inferred, not verified. If Claude Code instead replaces the

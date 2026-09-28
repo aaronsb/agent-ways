@@ -499,7 +499,8 @@ def main():
             errors += 1
         else:
             # --no-inventory: doclint is a lint and runs no shell commands
-            # from adr.yaml. `adr cite` run directly checks the inventories.
+            # from adr.yaml. A vendored adr tool from before ADR-311 runs
+            # surface inventories without it; a current one ignores it.
             print("\nCitations (adr cite --no-inventory):", flush=True)
             result = subprocess.run([sys.executable, str(adr_tool), "cite", "--no-inventory"],
                                     cwd=REPO, capture_output=True, text=True)

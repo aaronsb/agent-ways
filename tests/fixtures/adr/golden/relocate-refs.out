@@ -1,0 +1,5 @@
+Moved: ADR-101 system → docs
+  docs/architecture/system/ADR-101-ingest.md → docs/architecture/documentation/ADR-101-ingest.md
+Rewrote 4 paths in 1 file
+  NOTES.md: 4
+[exit 0]

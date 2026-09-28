@@ -1,0 +1,23 @@
+
+Scanned: 2 ADRs
+
+Status distribution:
+  accepted: 1
+  proposed: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-118-raise-the-ingest-batch-size.md
+  ❌ basis entry 2: evidence ADR-101 is a decision; evidence cites a spec or evidence record
+  ❌ basis entry 3: evidence ADR-999 resolves to no record
+  ⚠️ supersedes: ADR-103 does not declare the reciprocal superseded_by: ADR-118 — one-directional links rot
+
+════════════════════════════════════════════════════════════
+Summary: 2 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

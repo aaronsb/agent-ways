@@ -1,0 +1,8 @@
+Refused: accepting ADR-117 would leave it with errors:
+  ❌ docs/architecture/system/ADR-117-bare-decision.md: a decision record requires a verb (add, cut, change, retire, constrain)
+  ❌ docs/architecture/system/ADR-117-bare-decision.md: a decision record requires 'capability'
+  ❌ docs/architecture/system/ADR-117-bare-decision.md: a decision record requires 'basis'
+  ❌ docs/architecture/system/ADR-117-bare-decision.md: agent: records 'name'
+  ❌ docs/architecture/system/ADR-117-bare-decision.md: agent: records 'model'
+  ❌ docs/architecture/system/ADR-117-bare-decision.md: 12 placeholder line(s) from `adr new` still to fill, first: - **Decided:** [what is decided, in plain terms]
+[exit 1]

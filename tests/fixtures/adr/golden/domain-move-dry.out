@@ -1,0 +1,25 @@
+Would move: ADR-104 system → docs
+  docs/architecture/system/ADR-104-no-network-in-hooks.md → docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+Would rewrite 5 paths in 5 files
+  docs/architecture/system/ADR-104-no-network-in-hooks.md: 1
+    docs/architecture/system/ADR-104-no-network-in-hooks.md:31
+        See [the chain](ADR-109-precedent-chain.md).
+      → See [the chain](../system/ADR-109-precedent-chain.md).
+  docs/architecture/system/ADR-109-precedent-chain.md: 1
+    docs/architecture/system/ADR-109-precedent-chain.md:35
+        ADR-104 applies; see [the constraint](ADR-104-no-network-in-hooks.md) and [ingest](./ADR-101-ingest.md).
+      → ADR-104 applies; see [the constraint](../documentation/ADR-104-no-network-in-hooks.md) and [ingest](./ADR-101-ingest.md).
+  docs/architecture/system/ADR-111-cut-search.md: 1
+    docs/architecture/system/ADR-111-cut-search.md:27
+        See [ADR-104](ADR-104-no-network-in-hooks.md).
+      → See [ADR-104](../documentation/ADR-104-no-network-in-hooks.md).
+  docs/guide/hooks.md: 1
+    docs/guide/hooks.md:7
+        See [no network](../architecture/system/ADR-104-no-network-in-hooks.md) and ADR-104#1.
+      → See [no network](../architecture/documentation/ADR-104-no-network-in-hooks.md) and ADR-104#1.
+  src/search.py: 1
+    src/search.py:3
+        # ADR-104 hooks stay offline: docs/architecture/system/ADR-104-no-network-in-hooks.md
+      → # ADR-104 hooks stay offline: docs/architecture/documentation/ADR-104-no-network-in-hooks.md
+Dry run: nothing written.
+[exit 0]

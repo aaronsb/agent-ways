@@ -1,0 +1,213 @@
+---
+contract: adr/v1
+kind: decision
+verb: change
+capability: adr
+amends: [ADR-304#7]
+basis:
+  - operator: aaronsb
+    level: guided
+    said: "I think we need to make sure that the new adr tools can create the content and manage the lifecycle of data, and probably, we need to think about a 'foreign import' tool that would take any kind of decision record that's not directly lintable/usable, and can ingest the foreign record. this way, it becomes our cannonical 'migration' tool."
+    via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "I think the foreign import model needs a round trip data object template of some kind."
+    via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "we should assuem that reasonable foregin records have some sort of structured data (frontmatter, for example). a /very foreign/ import could literally be jira issues for example"
+    via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "I think optional, but always lint warnings. sometimes, the summary isn't obvious until the apparent motion of the complete dataset is visible. this means that adr record properties can be altered (like summaries). this is fine, because any alteration that gets tracked is a git commit. we don't have to overthink integrity here"
+    via: session 2026-09-27, on whether imported records need a Summary
+  - operator: aaronsb
+    level: guided
+    said: "we don't need to explicitly handle jira. all I'm saying is 'jira issues can be flattened to a record, just like any other record, and usually there's a description and a summary and various fields, and if we can selectively import jira issues, then we probably can take records from about anything'"
+    via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "the domain layout shouldn't ever be set forever. things change over time, certain domains might merge or split. during import from v0 adr to v1 in-repo, it might make sense to add or combine domains. during a full foreign import, perhaps something like a jira or github issues, then these would expand over time."
+    via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "it might be more work to curate the records, but if an adr changes domains, then I think it needs to be changed in code."
+    via: session 2026-09-27
+  - operator: aaronsb
+    level: guided
+    said: "or in references"
+    via: session 2026-09-27, following the message above
+  - operator: aaronsb
+    level: guided
+    said: "yes we trade away hand migrations freedom to restructure a record, but that feels like a forced decision. there's nothing stopping us from transforming the record before import. import is just the acceptance model for a foreign record"
+    via: session 2026-09-27, reviewing ADR-306
+  - evidence: "this repo holds 93 v0 records, each with v0 frontmatter (status, date, deciders, related) that a reader can map without judgement"
+  - evidence: "in a project that declares contract: adr/v1, `adr new` still writes a v0 record with no contract, kind, verb, capability, basis, agent or Summary"
+agent:
+  name: Claude
+  model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "i read the adr and it aligns with my understanding. let's accept and merge it"
+    via: session 2026-09-27, PR #587
+    covers: []
+  - operator: aaronsb
+    said: "my assumption is that everything needed is carried in the docs. but because reality can drift and is complex, its possible (and we should assume it happens) that the actual implementation nearly always has some drift from the record of desire."
+    via: session 2026-09-27, answering the probes after acceptance
+    covers: [frontmatter-carries-all]
+  - operator: aaronsb
+    said: "we import markdown for text. any complex formatting language needs to be markdown. we import a structured body for structured data - I'm not sure what the convention is right now, but yaml or json seems to be the right approach."
+    via: session 2026-09-27, answering the probes after acceptance
+    covers: [non-markdown-bodies]
+status: accepted
+date: 2026-09-27
+deciders:
+  - aaronsb
+  - Claude
+related:
+  - 304
+  - 305
+---
+
+# ADR-306: adr import: foreign records through a round-trip import sheet
+
+## Summary
+
+- **Decided:** `adr import` is the acceptance model for a foreign record: whatever shape a record arrives in, it becomes an adr/v1 record through an import sheet. `scan` reads records from any structured source into one import sheet per record. The agent fills in what needs judgement. `apply` writes each finished sheet as a v1 record. `adr new` writes through the same writer, and `adr supersede` and `adr enact` complete the lifecycle commands. Domains can be added, merged and split as the corpus grows. A record that moves to another domain is renumbered into that domain's range, and every reference to it, by number or by path, is rewritten.
+- **Trades away:** a direct edit from source to record. Every record passes through a sheet, a staging format with its own schema, and other sources through field maps. Both have to be documented and kept stable.
+- **One-way?** No. Sheets are staging files and records stay in git. A bad import is reverted like any commit.
+- **Probes:** *Confident:* v0 records from agent-ways, here or in any repo that adopted them, import with the body unchanged, since everything the reader needs is in the frontmatter. *Not confident:* whether a field map that flattens a structured item into fields and a body covers sources whose body isn't markdown, or whether some sources need a conversion step first.
+- **Inversion:** at one end, a reader written in code for every format: exact, but never finished. At the other end, an agent reads each foreign record and writes v1 by hand: flexible, but manual across a hundred records. This decision maps structured fields mechanically and leaves only the judgement fields to the agent.
+
+## Context
+
+ADR-304 §7 moves a v0 record to v1 "when someone next edits it". That works for a trickle of edits, and it doesn't work for a corpus. This repo holds 93 v0 records. Any repo using a file-based record system, or v0 records from agent-ways, holds a corpus of its own, in v0, adr-tools, MADR or tracker formats. #581 migrated two records here by hand, and the tier 2 rehearsal showed an agent can do it without inventing anything, but record by record.
+
+Most of a migration is mechanical. Status maps by the §7 table, and date, deciders and links carry over. The body stays as written. A few fields need judgement: the verb, the capability, the basis, and a Summary. Those are the only fields an agent should have to touch.
+
+The tool also has lifecycle gaps. `adr new` writes a v0 record in a v1 project. Supersession needs both sides' links edited by hand, and enactment is a hand-edited field.
+
+## Decision
+
+### 1. The import sheet
+
+Import accepts a record. It does not restrict what happens to the record before it's accepted. A record can be split, merged or rewritten before `scan`, or its sheet edited before `apply`. The importer itself never changes content: whatever the sheet says is what `apply` writes.
+
+One YAML file per record is the round-trip object between a source and a v1 record:
+
+```yaml
+sheet: adr-import/v1
+source: {path: docs/architecture/system/ADR-186-….md, format: v0, sha256: "…"}
+target: {number: 186, domain: system}
+record:                  # v1 frontmatter, filled as far as the reader can
+  contract: adr/v1
+  kind: decision
+  status: accepted
+  date: 2026-09-17
+  verb: ~
+  capability: ~
+  basis: []
+  agent: {name: Claude, model: unrecorded}
+summary: ~
+todo: [verb, capability, basis]
+candidates: {capability: [testing, install]}
+provenance: {status: "frontmatter status: Accepted"}
+unmapped: {deprecation_note: "…"}
+body: |
+  …
+```
+
+- `record` holds v1 frontmatter. The reader fills what the source states, and `provenance` says where each value came from.
+- `todo` lists what the reader could not fill. `candidates` ranks vocabulary matches to help whoever fills them.
+- `unmapped` keeps every source field that has no v1 home. Nothing is dropped.
+- `body` starts as the source body, verbatim. It can be edited like any other part of the sheet.
+
+### 2. Readers
+
+A reader turns a source into sheets. Import assumes structured sources: frontmatter, a metadata block, or a structured export. Unstructured prose is out of scope.
+
+- **Built in:** v0 (this tool's frontmatter), MADR, and adr-tools (inline `## Status`, `0001-` numbering).
+- **Field maps:** any other structured source is flattened into fields and a body. A declarative map names which source field fills which sheet field, and how values translate. No source gets its own reader. The example is a tracker export, since a source like that flattening cleanly suggests most structured records will:
+
+```yaml
+reader: tracker
+items: issues                    # a JSON export: one sheet per item, selected by --filter
+fields:
+  title: fields.summary
+  date: fields.created
+  status: {from: fields.status.name, map: {Done: accepted, "Won't Do": rejected, "To Do": proposed}}
+  body: fields.description
+  unmapped: [key, fields.labels]
+```
+
+No reader ever writes an `operator` basis from `deciders`, an assignee or any other metadata (ADR-304 §7, §11). A basis comes from what the record says, and it is filled during cleanup.
+
+### 3. Commands
+
+- `adr import scan <paths> [--reader NAME | --map FILE]` writes sheets to `docs/architecture/.import/`. That directory is gitignored: sheets are working files, and only the records they produce are committed.
+- `adr import apply [sheets] [--partial]` writes each sheet whose `todo` is empty as a v1 record, then lints it. A sheet with open items is skipped. `--partial` writes it anyway, and lint reports what is missing.
+- `adr new` builds an empty sheet from its arguments and applies it, so a new record and an imported record share one writer. In a v1 project it writes v1.
+- `adr supersede <old> --by <new>` writes both sides of the link. `adr enact <n> <commit>` sets `enacted` on an accepted cut or retire.
+
+### 4. Imported records
+
+An imported record carries `imported: {from, format}` in its frontmatter. For an imported record, a missing Summary is a lint warning. The Summary may be written later, once the whole corpus has been imported and read together, and git history records when it was added.
+
+### 5. Numbering
+
+A source numbered inside the project's domain ranges keeps its number. Code, ways and other records cite these numbers, and nothing structural calls for new ones, so an import never renumbers them. This covers every v0 record from agent-ways, in this repo or any other. Any other source gets a number from `target`, which the reader proposes from the domain and the agent may change. `apply` rewrites references within the imported set to the new numbers, and `imported.from` keeps the original identifier.
+
+### 6. Domains evolve
+
+The domain layout is not fixed. An import may add or combine domains, and a corpus fed from a tracker keeps growing new ones. A record's number tells you its domain, as it does under v0, so the number follows the domain:
+
+- A domain may hold several ranges. Merging two domains keeps both ranges, so no record is renumbered.
+- A record that moves to another domain, whether by a split or on its own, gets a new number from that domain's range. `adr domain move` rewrites every reference to the record, whether by number (`ADR-N`) or by path (a link to the file, whose folder and name both change). That covers records (`related`, `supersedes` and the other edges, and links in the body), catalog docs, READMEs, ways and code. `adr cite` finds the number references, and the move finds the path references. This is more curation work than keeping the number, and in exchange a number always names its domain.
+- The old number is retired and never reused. The record carries `renumbered_from: [ADR-N]`, so a citation that can't be rewritten, such as one in a commit message or a closed pull request, can still be traced, and `adr cite` reports any left in the tree.
+- `adr domain add`, `merge`, `split` and `move` edit `adr.yaml`, move and renumber the files, rewrite citations and regenerate the index.
+- A sheet whose `target.domain` names a domain that does not exist yet creates it on `apply`, with a free range.
+
+An import alone never renumbers (§5). Renumbering happens only when a record changes domain.
+
+### 7. Round-trip guarantees
+
+These are tested properties:
+
+- Applying an unedited sheet keeps the body byte-identical, and every source field is either mapped into `record` or kept in `unmapped`.
+- Scanning a v1 record and applying the result reproduces the record.
+- v0 output of every existing command stays byte-identical.
+
+## Consequences
+
+### Positive
+
+- Migrating a corpus becomes one scan, one cleanup pass over small structured files, and one apply. This repo's 93 v0 records and any other repo's file-based records go through the same path.
+- A new source needs a field map, not a code change, whenever it flattens to fields and a body.
+- `adr new` produces a v1 record in a v1 project.
+
+### Negative
+
+- The sheet schema and the field-map language are formats the tool must keep stable across versions, since sheets and maps outlive a single run.
+- Imported records may sit without a Summary, and lint keeps warning until they have one.
+- Field maps are a small configuration language that has to be documented and kept stable.
+
+### Neutral
+
+- ADR-304 §7's status table is unchanged. The v0 reader applies it.
+- A v0 record edited by hand still moves to v1 as before. Import is the bulk path alongside it.
+
+## Alternatives Considered
+
+- **An agent migrates each record by hand.** The #581 rehearsal shows this works, but across a corpus of a hundred records the mechanical fields would be retyped each time, and nothing would check the result the way a round trip does.
+- **A code reader per format, with no field maps.** This is exact for known formats, but every tracker and template needs code in the vendored tool.
+- **Migrate in place with no intermediate object.** A migration writes the record directly. Without a sheet there is no place to stage what needs judgement, and no object to test the round trip against.
+
+## Corrections
+
+Appended 2026-09-27. Each entry was first made in place after acceptance and moved here so the accepted text above stays as it was. None changes what was decided.
+
+- **Summary, probes.** Each probe gained a label, so the operator's answers in `considered` can name the probe they cover: *Confident (frontmatter-carries-all)* and *Not confident (non-markdown-bodies)*.
+- **§1, the sheet example.** The example source path reads `docs/architecture/ways/ADR-186-….md`. The `system` domain was renamed `ways` (ADR-310).
+- **§2, bodies.** Recorded from the operator's probe answers. A body is one of two things. Text is markdown: a source whose text is in another formatting language (HTML, a tracker's rich text, wiki markup) is converted to markdown before the sheet is written, by the reader or by a step run before `scan`. Structured data is YAML or JSON: a source item whose content is data keeps it as data, in the sheet and in the record as a fenced `yaml` or `json` block. An import carries what the source says. A record states what was decided, and the implementation nearly always drifts from it, so an imported record is not evidence of what the code does; `adr cite` and review compare the two after import.
+- **§3, `--partial`.** Some open items block even `--partial`, because lint cannot detect them after the record is written: a Deprecated record's missing historical note, a status that maps to nothing, and a changed number or domain.
+- **§4, imported records.** An imported record carries `imported: {from, format, status, unmapped}`. `status` is the source's raw status, and `unmapped` holds every source field with no v1 home. No source value depends on a todo item being honoured to survive the import. The accepted text listed only `from` and `format`; the import as built keeps both extra fields.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash): deny commit / PR / issue authoring commands that carry a
 # Claude-Session transcript link in trailer/footer position. See ADR-167
-# (supersedes ADR-162).
+# (supersedes ADR-162). # adr-cite-ignore
 #
 # The session link resolves to the FULL session transcript; publishing it in a
 # commit trailer or PR/issue body is a thin wall in front of accidental secret
@@ -10,13 +10,13 @@
 # This hook is a BACKSTOP, not the primary control. `attribution.sessionUrl: false`
 # suppresses the link at the source — the model is never instructed to emit it, so
 # when that works this hook never fires. The key shipped in v2.1.183 and is
-# projected to ~/.claude/settings.json from the settings fragment store (ADR-147 /
-# ADR-163). A controlled experiment on 2026-07-16 (same repo, same v2.1.212, only
+# projected to ~/.claude/settings.json from the dotfiles-side fragment store (ADR-163,
+# ADR-169). A controlled experiment on 2026-07-16 (same repo, same v2.1.212, only
 # the key differing) confirms it governs the trailer.
 #
 # It is retained because that setting is undocumented (upstream #69614), defaults
 # to ON, and is scope-qualified upstream ("web and Remote Control sessions") — a
-# host that never receives the fragment leaks by default. ADR-162 previously
+# host that never receives the fragment leaks by default. ADR-162 previously # adr-cite-ignore
 # claimed no setting could govern the link at all, citing #18253; that was the
 # Co-Authored-By/footer bug, not the session link. See ADR-167 for the correction.
 #
@@ -59,7 +59,7 @@ printf '%s' "$CMD" \
   | grep -qiE '^[[:space:]]*(Claude-Session:[[:space:]]*)?https?://claude\.ai/code/session_[A-Za-z0-9_-]+[^A-Za-z0-9]*$' \
   || exit 0
 
-REASON='Blocked (ADR-162): this command publishes a Claude-Session transcript link (a "Claude-Session:" trailer or a bare claude.ai/code/session_ URL on its own line) to git or GitHub. That link resolves to the full session transcript and must not be published. Remove the trailer/footer line from the commit message or PR/issue body and re-run. (A session URL mentioned inline in prose is allowed; only trailer/footer lines are blocked.)'
+REASON='Blocked (ADR-167): this command publishes a Claude-Session transcript link (a "Claude-Session:" trailer or a bare claude.ai/code/session_ URL on its own line) to git or GitHub. That link resolves to the full session transcript and must not be published. Remove the trailer/footer line from the commit message or PR/issue body and re-run. (A session URL mentioned inline in prose is allowed; only trailer/footer lines are blocked.)'
 
 jq -cn --arg reason "$REASON" '{
   hookSpecificOutput: {

@@ -9,6 +9,10 @@ refs.py
 rules_v1.py
 rules_v1_basis.py
 rules_v1_integrity.py
+relocate.py
+sheet.py
+record_edit.py
+import_read.py
 cmd_list.py
 cmd_view.py
 cmd_new.py
@@ -17,7 +21,10 @@ cmd_lint.py
 cmd_index.py
 cmd_archive.py
 cmd_domains.py
+cmd_domain.py
 cmd_config.py
 cmd_cite.py
 cmd_lifecycle.py
+cmd_record.py
+cmd_import.py
 main.py

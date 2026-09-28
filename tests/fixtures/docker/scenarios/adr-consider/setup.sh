@@ -11,7 +11,7 @@ domains:
 defaults: {deciders: [developer, agent]}
 kinds:
   decision:
-    mutable_after_accept: [status, enacted, superseded_by, considered, concern]
+    mutable_after_accept: [status, enacted, superseded_by, considered, concern, observable]
     verb: required
     requires: [capability, basis, agent]
     sections: [Summary]

@@ -1,4 +1,3 @@
-Refused: rejecting ADR-114 would add errors:
-  ❌ docs/architecture/system/ADR-116-rests-on-114.md: basis: following precedent never reaches an external source (operator, evidence, standard, upstream)
-  ❌ docs/architecture/system/ADR-116-rests-on-114.md: basis: precedent ADR-114 is rejected, so it grounds nothing
-[exit 1]
+Marked ADR-114 rejected: Cap batch size
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

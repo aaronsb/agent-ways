@@ -1,0 +1,3 @@
+Would apply: docs/architecture/.import/ADR-110.yaml -> docs/architecture/system/ADR-110-old-v0-record.md (lint: 0 errors, 0 warnings)
+Import: 1 would apply, 0 skipped, 0 refused (dry run: nothing written)
+[exit 0]

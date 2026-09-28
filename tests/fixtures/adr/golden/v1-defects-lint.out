@@ -1,18 +1,17 @@
 
-Scanned: 59 ADRs
+Scanned: 41 ADRs
 
 Status distribution:
   Unknown: 1
-  accepted: 28
+  accepted: 21
   draft: 1
-  proposed: 27
-  rejected: 1
+  proposed: 17
   superseded: 1
 
 Contract: adr/v1 (0 v0 records remain)
 
 ────────────────────────────────────────────────────────────
-Issues found in 49 files:
+Issues found in 37 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
@@ -22,8 +21,6 @@ docs/architecture/adr.yaml
   ❌ kinds.weird.statuses: expected a list of names
   ❌ kinds.weird.edges: expected a mapping of field to kind or kinds
   ❌ verbs: expected a list of names
-  ❌ capability 'search' has no accepted add decision
-  ❌ 'archived' in lifecycle (L1) and 'archive' in basis sources (L4) share a stem; layers share no word
 
 docs/architecture/system/ADR-120-no-kind.md
   ❌ adr/v1 record declares no kind
@@ -47,17 +44,10 @@ docs/architecture/system/ADR-126-unknown-capability.md
   ❌ capability 'telepathy' is not in the adr.yaml vocabulary
 
 docs/architecture/system/ADR-127-list-capability.md
-  ❌ capability takes one name; only a constrain decision takes a list
+  ❌ capability takes one name; only change and constrain decisions take a list
 
 docs/architecture/system/ADR-128-star-on-add.md
   ❌ only a constrain decision may be scoped to '*'
-
-docs/architecture/system/ADR-129-retire-no-targets.md
-  ❌ a retire decision names its targets (targets: [cli:..., route:...])
-
-docs/architecture/system/ADR-130-retire-bad-targets.md
-  ❌ target 'grpc:Upload': surface 'grpc' is not declared in adr.yaml
-  ❌ target 'plainname' is not namespace:name
 
 docs/architecture/system/ADR-131-spec-extends.md
   ❌ a spec record takes no extends edge
@@ -70,9 +60,6 @@ docs/architecture/system/ADR-133-amends-no-section.md
 
 docs/architecture/system/ADR-134-amends-dangling.md
   ❌ amends: 'ADR-199' resolves to no known ADR
-
-docs/architecture/system/ADR-135-change-no-prior.md
-  ❌ a change decision supersedes or amends a prior decision on 'ingest'
 
 docs/architecture/system/ADR-136-v0-status.md
   ❌ status 'Draft' is not in the decision lifecycle (proposed, accepted, rejected, abandoned, superseded, archived)
@@ -93,10 +80,6 @@ docs/architecture/system/ADR-140-change-dangling-supersedes.md
 docs/architecture/system/ADR-143-spec-supersedes-decision.md
   ⚠️ supersedes: ADR-100 does not declare the reciprocal superseded_by: ADR-143 — one-directional links rot
   ❌ supersedes: ADR-100 is a decision, expected spec
-
-docs/architecture/system/ADR-145-change-supersedes-broader.md
-  ⚠️ supersedes: ADR-144 does not declare the reciprocal superseded_by: ADR-145 — one-directional links rot
-  ❌ a change on 'adr' against a broader decision amends it rather than superseding it
 
 docs/architecture/system/ADR-150-basis-not-list.md
   ❌ basis: expected a list of entries, each naming one source
@@ -128,9 +111,6 @@ docs/architecture/system/ADR-155-considered-bad.md
   ❌ considered entry 1: canary is caught or missed
   ❌ considered entry 2: expected a mapping with operator, said and via
 
-docs/architecture/system/ADR-156-operator-no-considered.md
-  ❌ accepted with an operator basis but no considered entry; the operator considers what they started
-
 docs/architecture/system/ADR-157-concern-bad.md
   ❌ concern 1: names what would resolve it ('resolve')
   ⚠️ open concern: No resolution named
@@ -141,22 +121,6 @@ docs/architecture/system/ADR-157-concern-bad.md
 
 docs/architecture/system/ADR-158-precedent-dangling.md
   ❌ basis: precedent 'ADR-197' resolves to no known ADR
-  ❌ basis: following precedent never reaches an external source (operator, evidence, standard, archive)
-
-docs/architecture/system/ADR-159-precedent-loop-a.md
-  ⚠️ basis: precedent ADR-161 is still proposed
-  ❌ basis: precedent loops back through ADR-159 -> ADR-161 without reaching an external source
-
-docs/architecture/system/ADR-161-precedent-loop-b.md
-  ⚠️ basis: precedent ADR-159 is still proposed
-  ❌ basis: precedent loops back through ADR-161 -> ADR-159 without reaching an external source
-
-docs/architecture/system/ADR-162-precedent-internal.md
-  ❌ basis: precedent ADR-101 has neither a basis nor decided_by
-  ❌ basis: following precedent never reaches an external source (operator, evidence, standard, archive)
-
-docs/architecture/system/ADR-164-summary-thin.md
-  ⚠️ Summary lacks probes, an inversion (ADR-304 §12)
 
 docs/architecture/system/ADR-165-no-summary.md
   ❌ a decision record opens with a '## Summary' section
@@ -168,22 +132,11 @@ docs/architecture/system/ADR-167-enacted-early.md
   ❌ enacted marks an accepted decision done; this one is proposed
   ❌ enacted: 'soon' is not a commit hash
 
-docs/architecture/system/ADR-169-summary-less-confident.md
-  ⚠️ Summary lacks a probe labelled 'confident' (ADR-304 §12)
-
 docs/architecture/system/ADR-172-dangling-beside-grounded.md
   ❌ basis: precedent 'ADR-196' resolves to no known ADR
 
 docs/architecture/system/ADR-173-external-and-dangling.md
   ❌ basis: precedent 'ADR-195' resolves to no known ADR
-
-docs/architecture/system/ADR-177-precedent-to-rejected.md
-  ❌ basis: precedent ADR-176 is rejected, so it grounds nothing
-  ❌ basis: following precedent never reaches an external source (operator, evidence, standard, archive)
-
-docs/architecture/system/ADR-178-downstream-of-loop.md
-  ⚠️ basis: precedent ADR-159 is still proposed
-  ❌ basis: following precedent never reaches an external source (operator, evidence, standard, archive)
 
 docs/architecture/system/ADR-179-said-whitespace.md
   ❌ concern 1: records what the concern is ('said')
@@ -202,7 +155,7 @@ docs/architecture/system/ADR-182-precedent-list.md
   ❌ basis entry 2: evidence needs a reference
 
 ════════════════════════════════════════════════════════════
-Summary: 78 errors, 10 warnings
+Summary: 62 errors, 4 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

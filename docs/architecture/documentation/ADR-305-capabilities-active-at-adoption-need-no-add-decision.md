@@ -4,6 +4,8 @@ kind: decision
 verb: change
 capability: adr
 amends: [ADR-304#6]
+superseded_by:
+  - ADR-311
 basis:
   - operator: aaronsb
     level: guided
@@ -27,7 +29,7 @@ considered:
     said: "ok. so basically, I think it's the correct direction and implements the change to adr as discussed."
     via: session 2026-09-27, reviewing PR #583
     covers: []
-status: accepted
+status: superseded
 date: 2026-09-27
 deciders:
   - aaronsb

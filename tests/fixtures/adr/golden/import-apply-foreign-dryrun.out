@@ -1,0 +1,8 @@
+Would apply: docs/architecture/.import/ADR-042.yaml -> docs/architecture/system/ADR-150-foreign-record.md, 4 todo left (lint: 4 errors, 1 warnings)
+    error: a decision record requires a verb (add, cut, change, retire, constrain)
+    error: a decision record requires 'capability'
+    error: a decision record requires 'basis'
+    error: agent: records 'name'
+    warning: imported record has no '## Summary' yet (ADR-306 §4)
+Import: 1 would apply, 0 skipped, 0 refused (dry run: nothing written)
+[exit 1]

@@ -115,7 +115,7 @@ The built-in ways cover software development, but the framework is domain-agnost
 3. **SubagentStart** injects relevant ways into subagents spawned via Task
 4. A way fires when matched, then **re-discloses on its `refire:` cadence** (a fraction of the context window, ADR-126) as its salience decays — marker files track the first fire and drive that re-disclosure state machine, they don't permanently block re-triggering
 
-Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/system/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy.
+Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy.
 
 `ways list` shows the live session state — which ways fired, when (epoch), how far back (distance), what triggered them, tree relationships, check decay curves, and a re-disclosure forecast showing when distant ways will re-fire as context fills:
 
@@ -322,7 +322,7 @@ If your organization clones this repo under a different name without forking on 
 | [docs/hooks-and-ways.md](docs/hooks-and-ways.md) | Reference: hook lifecycle, state management, data flow |
 | [docs/governance.md](docs/governance.md) | Reference: compilation chain, provenance mechanics |
 | [docs/architecture.md](docs/architecture.md) | System architecture diagrams |
-| [docs/architecture/](docs/architecture/) | Architecture Decision Records |
+| [docs/architecture/](docs/architecture/) | Agent Decision Records |
 | [governance/](governance/) | Governance traceability and reporting |
 | [docs/README.md](docs/README.md) | Full documentation map |
 

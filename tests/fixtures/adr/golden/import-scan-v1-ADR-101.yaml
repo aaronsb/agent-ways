@@ -1,0 +1,49 @@
+path: docs/architecture/.import/ADR-101.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/system/ADR-101-ingest.md
+  format: v1
+  sha256: ffe57ae56e9cb8c103ade235a59e6aad873b5fc8f0d599235ad29c9214064a5f
+target:
+  number: '101'
+  domain: system
+  title: Add ingestion
+record:
+  contract: adr/v1
+  kind: decision
+  verb: add
+  capability: ingest
+  basis:
+    - evidence: fixture measurement
+  agent:
+    name: Claude
+    model: fixture-model
+  status: accepted
+  date: 2025-05-02
+  deciders:
+    - developer
+    - agent
+summary: |
+  - **Decided:** the decision in plain terms.
+  - **Trades away:** what it gives up.
+  - **Probes:** *Confident:* the main point holds. *Not confident:* the edge case.
+  - **Inversion:** one end, the other end; is the middle right?
+todo: []
+candidates: {}
+provenance:
+  target.number: file name
+  target.domain: folder system
+  target.title: H1
+  summary: '## Summary section'
+  record: frontmatter (adr/v1)
+unmapped: {}
+body: |
+  ## 1. Decision
+
+  The decision.
+
+  ## 2. Consequences
+
+  They follow.

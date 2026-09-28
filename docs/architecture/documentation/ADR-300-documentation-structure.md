@@ -1,5 +1,15 @@
 ---
-status: Accepted
+contract: adr/v1
+kind: decision
+verb: change
+capability: docs
+basis:
+  - evidence: 'doc-graph.sh audit: 41 doc files, 29 links, 34 dead ends, 23 orphans'
+  - evidence: 'docs/audit-findings.md: 5 files present gzip NCD as primary where BM25 is the implementation, and 6 content areas are duplicated'
+agent:
+  name: Claude
+  model: unrecorded
+status: accepted
 date: 2026-02-17
 deciders:
   - aaronsb
@@ -8,6 +18,10 @@ related:
   - ADR-004
   - ADR-005
   - ADR-014
+imported:
+  from: docs/architecture/documentation/ADR-300-documentation-structure.md
+  format: v0
+  status: Accepted
 ---
 
 # ADR-300: Documentation Structure

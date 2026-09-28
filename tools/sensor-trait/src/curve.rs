@@ -24,8 +24,8 @@ pub enum Curve {
 
     /// Action-potential model: event-count burst detection raises a
     /// refractory multiplier that then decays back toward 1.0 over tick
-    /// distance. Ported from ADR-119 with event-count windowing (see
-    /// ADR-123 Decision 2) so it is robust to chunky progression axes.
+    /// distance. Ported from ADR-119 with event-count windowing // adr-cite-ignore
+    /// (see ADR-123 Decision 2) so it is robust to chunky progression axes.
     ///
     /// The "burst window" is NOT a separate tick span. It is implicit in
     /// which history entries still contribute non-trivial multiplier

@@ -40,33 +40,22 @@ def _set_status(raw: bytes, status: str) -> bytes:
     lines[i] = b'status: ' + status.encode() + (comment.group(0) if comment else b'') + ending
     return b'\n'.join(lines)
 
-def _errors_by_record(corpus: list, ctx) -> dict:
-    run_rules(corpus, ctx)
-    found = {a.path: {i.message for i in a.issues if i.severity == 'error'} for a in corpus}
-    found['adr.yaml'] = {i.message for i in ctx.config_issues if i.severity == 'error'}
-    return found
-
 def _trial(adr, status: str):
-    """Run every rule over the whole corpus as it is and again with the
-    record's status changed. Returns (the trial record, new errors as
-    (where, message)). A change that breaks another record, such as a
-    rejected precedent, shows up here, not just the record's own issues."""
-    baseline = get_all_adrs(include_archived=True)
-    before = _errors_by_record(baseline, LintContext.from_corpus(baseline))
+    """The record with its status changed, and its own errors as (where,
+    message): the file rules only, over this one record. The rest of the
+    corpus is not re-linted (ADR-311 §3)."""
     corpus = get_all_adrs(include_archived=True)
+    ctx = LintContext.from_corpus(corpus)
     trial = next(a for a in corpus if a.path == adr.path)
     trial.status = status
     trial.frontmatter = dict(trial.frontmatter, status=status)
     # The record was parsed clean enough to reach here (_lifecycle_target
     # refused anything else), so starting its issues fresh loses nothing.
     trial.issues = []
-    after = _errors_by_record(corpus, LintContext.from_corpus(corpus))
-    new = []
-    for path, messages in after.items():
-        for message in sorted(messages - before.get(path, set())):
-            where = 'adr.yaml' if path == 'adr.yaml' else relative_path(path)
-            new.append((where, message))
-    return trial, new
+    for rule in _active(FILE_RULES, ctx):
+        rule(trial, ctx)
+    where = relative_path(trial.path)
+    return trial, [(where, i.message) for i in trial.issues if i.severity == 'error']
 
 def _write_status(adr, status: str, suffix: str = '') -> Optional[str]:
     """Write the new status (and an appended suffix), then re-read the file to
@@ -86,20 +75,18 @@ def _write_status(adr, status: str, suffix: str = '') -> Optional[str]:
     return None
 
 def _refuse(adr, verb: str, new: list) -> int:
-    print(f"Refused: {verb} ADR-{adr.number} would add errors:", file=sys.stderr)
+    print(f"Refused: {verb} ADR-{adr.number} would leave it with errors:", file=sys.stderr)
     for where, message in new:
         print(f"  ❌ {where}: {message}", file=sys.stderr)
     return 1
 
 def cmd_accept(args):
-    """Accept a proposed adr/v1 record (ADR-304 §2, §11, §12).
+    """Accept a proposed adr/v1 record (ADR-304 §2, ADR-311 §3).
 
-    Runs every rule over the corpus as if the record were accepted and refuses
-    if that adds an error anywhere, so a decision whose basis does not meet the
-    rules, or one the operator started without a considered entry, stays
-    proposed. A precedent that is still proposed also refuses: §11 grounds a
-    decision in another accepted decision. The record's warnings are printed,
-    with open concerns first: shown at acceptance, not blocking.
+    Runs the record's own file rules as if it were accepted and refuses if
+    any reports an error. The rest of the corpus is not re-linted. The
+    record's warnings are printed, with open concerns first: shown at
+    acceptance, not blocking.
     """
     adr, code = _lifecycle_target(args)
     if adr is None:
@@ -107,9 +94,6 @@ def cmd_accept(args):
     trial, new = _trial(adr, 'accepted')
     if new:
         return _refuse(adr, 'accepting', new)
-    pending = [i for i in trial.issues if i.code == 'precedent-proposed']
-    if pending:
-        return _refuse(adr, 'accepting', [(relative_path(adr.path), i.message) for i in pending])
     concerns = [i for i in trial.issues if i.code == 'open-concern']
     others = [i for i in trial.issues if i.severity == 'warning' and i.code != 'open-concern']
     if concerns:

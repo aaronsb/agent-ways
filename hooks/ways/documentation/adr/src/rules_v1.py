@@ -37,17 +37,6 @@ def _str_list(value) -> Optional[list]:
 def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
-def _iso_date(value) -> Optional[str]:
-    """value as a YYYY-MM-DD string, or None. YAML may load a date as one."""
-    text = str(value) if value is not None else ''
-    return text if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text) else None
-
-def v1_baseline(ctx) -> tuple:
-    """(adoption date or None, set of baseline capability names)."""
-    baseline = _mapping(ctx.config.get('baseline'))
-    return (_iso_date(baseline.get('adopted')),
-            set(_str_list(baseline.get('capabilities')) or []))
-
 def v1_kinds(ctx) -> dict:
     return _mapping(ctx.config.get('kinds'))
 
@@ -83,9 +72,6 @@ def v1_edges(schema: dict) -> dict:
 def v1_capabilities(ctx) -> dict:
     return _mapping(ctx.config.get('capabilities'))
 
-def v1_surfaces(ctx) -> dict:
-    return _mapping(ctx.config.get('surfaces'))
-
 def as_entries(value) -> list:
     if value is None:
         return []
@@ -94,17 +80,6 @@ def as_entries(value) -> list:
 def capability_scope(adr) -> list:
     """The capabilities a record covers: one name, a list, or ['*']."""
     return as_entries(adr.frontmatter.get('capability'))
-
-def covers(prior, capability: str) -> bool:
-    """A prior decision is on this capability when it names it, lists it,
-    or is scoped to '*' (ADR-304 §3)."""
-    scope = capability_scope(prior)
-    return '*' in scope or capability in scope
-
-def broader_than(prior, capability: str) -> bool:
-    """The prior covers more than this one capability: '*' or a list."""
-    scope = capability_scope(prior)
-    return '*' in scope or len(scope) > 1
 
 def section_exists(target, section: str) -> bool:
     """A section reference matches a heading that is numbered with it ('2.',
@@ -139,9 +114,6 @@ def rule_v1_config_shape(ctx):
         for key in ('requires', 'statuses', 'sections'):
             if key in schema and _str_list(schema[key]) is None:
                 bad(f"kinds.{name}.{key}: expected a list of names")
-        mutable = schema.get('mutable_after_accept')
-        if mutable is not None and mutable != 'all' and _str_list(mutable) is None:
-            bad(f"kinds.{name}.mutable_after_accept: expected a list of fields or 'all'")
         if 'edges' in schema:
             edges = schema['edges']
             if not isinstance(edges, dict):
@@ -154,44 +126,11 @@ def rule_v1_config_shape(ctx):
         bad("verbs: expected a list of names")
     if not isinstance(config.get('capabilities'), dict) or not config.get('capabilities'):
         bad("contract: adr/v1 declares no capabilities")
-    if 'surfaces' in config and not isinstance(config['surfaces'], dict):
-        bad("surfaces: expected a mapping of namespace to settings")
-    if 'baseline' in config:
-        baseline = config['baseline']
-        names = _str_list(baseline.get('capabilities')) if isinstance(baseline, dict) else None
-        if names is None:
-            bad("baseline: expected 'adopted' (a YYYY-MM-DD date) and 'capabilities' (a list of names)")
-        else:
-            if not _iso_date(baseline.get('adopted')):
-                bad("baseline.adopted: expected a YYYY-MM-DD date")
-            if isinstance(config.get('capabilities'), dict):
-                for name in names:
-                    if name not in config['capabilities']:
-                        bad(f"baseline: '{name}' is not in the capabilities vocabulary")
-
-@config_rule(contract=V1)
-def rule_v1_capabilities_added(ctx):
-    """Every capability in the vocabulary has an accepted `add` decision, except
-    those in `baseline`: capabilities that were active when the project
-    adopted the contract, which no record added. This warns while v0 records
-    remain, so a migrating corpus is not failed on every capability, and fails
-    once migration is done (ADR-304 §6, amended by ADR-305)."""
-    added = set()
-    for adr in ctx.corpus:
-        if (is_v1_record(adr, ctx)
-                and adr.frontmatter.get('verb') == 'add'
-                and str(adr.status or '').lower() == 'accepted'):
-            added.update(capability_scope(adr))
-    # Archived records are never edited, so they never migrate and do not
-    # hold the check at warning.
-    migrating = any(not is_v1_record(adr, ctx) and not is_archived(adr.path)
-                    for adr in ctx.corpus)
-    _, baseline = v1_baseline(ctx)
-    for name in v1_capabilities(ctx):
-        if name not in added and name not in baseline:
-            ctx.config_issues.append(Issue(
-                f"capability '{name}' has no accepted add decision",
-                'warning' if migrating else 'error'))
+    if 'repository' in config:
+        names = [config['repository']] if isinstance(config['repository'], str) else config['repository']
+        if not isinstance(names, list) or not names \
+                or not all(isinstance(n, str) and _repo_name(n) for n in names):
+            bad("repository: expected host/owner/repo, or a list of them")
 
 # --- one record ------------------------------------------------------------------
 
@@ -251,9 +190,12 @@ def rule_v1_capability(adr, ctx):
     if raw in (None, '', []):
         return  # reported by rule_v1_required_fields when the kind requires it
     scope = capability_scope(adr)
-    if adr.frontmatter.get('verb') != 'constrain':
-        if isinstance(raw, list):
-            v1_issue(adr, "capability takes one name; only a constrain decision takes a list")
+    verb = adr.frontmatter.get('verb')
+    if verb != 'constrain':
+        # A change may list the capabilities it alters (ADR-308); only a
+        # constrain may be scoped to '*'.
+        if isinstance(raw, list) and verb != 'change':
+            v1_issue(adr, "capability takes one name; only change and constrain decisions take a list")
             return
         if '*' in scope:
             v1_issue(adr, "only a constrain decision may be scoped to '*'")
@@ -262,21 +204,8 @@ def rule_v1_capability(adr, ctx):
     for name in scope:
         if name != '*' and name not in vocabulary:
             v1_issue(adr, f"capability '{name}' is not in the adr.yaml vocabulary")
-
-@file_rule(contract=V1)
-def rule_v1_retire_targets(adr, ctx):
-    if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'retire':
-        return
-    targets = as_entries(adr.frontmatter.get('targets'))
-    if not targets:
-        v1_issue(adr, "a retire decision names its targets (targets: [cli:..., route:...])")
-    surfaces = v1_surfaces(ctx)
-    for target in targets:
-        namespace, sep, name = target.partition(':')
-        if not sep or not name:
-            v1_issue(adr, f"target '{target}' is not namespace:name")
-        elif namespace not in surfaces:
-            v1_issue(adr, f"target '{target}': surface '{namespace}' is not declared in adr.yaml")
+    if verb == 'change' and len(scope) > 3:
+        v1_issue(adr, f"a change lists {len(scope)} capabilities; list only those it alters, the rest belong in related (ADR-308 §3)", 'warning')
 
 # --- against the corpus ------------------------------------------------------------
 
@@ -310,61 +239,3 @@ def rule_v1_edges(adr, ctx):
                     v1_issue(adr, f"{field_name}: ADR-{number} is a {target_kind}, expected {' or '.join(target_kinds)}")
             if section and not section_exists(target, section):
                 v1_issue(adr, f"{field_name}: ADR-{number} has no section '{section}'")
-
-def decision_order(adr) -> tuple:
-    """Records in decision order: by date, then number (ADR-304 §3)."""
-    base, _, part = str(adr.number or '0').partition('.')
-    return (str(adr.date or ''), int(base or 0), int(part or 0))
-
-def _stands_on_baseline(capability: str, adr, ctx) -> bool:
-    """A change with no prior edge stands on the baseline when the capability
-    is in it and either the change predates adoption, or no live decision on
-    the capability has been made since adoption before it. Only decisions
-    dated after adoption count: each was written as v1, so migrating an older
-    record never moves the answer (ADR-305)."""
-    adopted, baseline = v1_baseline(ctx)
-    when = _iso_date(adr.date)
-    if capability not in baseline or not adopted or not when:
-        return False
-    if when <= adopted:
-        return True
-    for other in ctx.corpus:
-        other_when = _iso_date(other.date)
-        if (other is not adr and is_v1_record(other, ctx)
-                and other.frontmatter.get('verb') not in (None, 'constrain')
-                and str(other.status or '').lower() not in ('rejected', 'abandoned')
-                and covers(other, capability)
-                and other_when and other_when > adopted
-                and decision_order(other) < decision_order(adr)):
-            return False
-    return True
-
-@corpus_rule(contract=V1)
-def rule_v1_change_replaces(adr, ctx):
-    """A change decision supersedes or amends a prior decision on the same
-    capability. When the prior covers more than this capability ('*' or a
-    list), the change amends it (ADR-304 §3). A change on a baseline
-    capability with no prior record to name stands on the baseline (ADR-305)."""
-    if not is_v1_record(adr, ctx) or adr.frontmatter.get('verb') != 'change':
-        return
-    edges = []
-    for field_name in ('supersedes', 'amends'):
-        for entry in as_entries(adr.frontmatter.get(field_name)):
-            target = ctx.by_number.get(norm_ref(entry)[0])
-            if target is None:
-                return  # a dangling edge is already reported by the edge rules
-            edges.append((field_name, target))
-    for capability in [c for c in capability_scope(adr) if c != '*']:
-        v0_priors = [t for _, t in edges if not is_v1_record(t, ctx)]
-        fits = [(f, t) for f, t in edges if is_v1_record(t, ctx) and covers(t, capability)]
-        if any(f == 'amends' or not broader_than(t, capability) for f, t in fits):
-            continue
-        if fits:
-            v1_issue(adr, f"a change on '{capability}' against a broader decision amends it rather than superseding it")
-        elif not edges and _stands_on_baseline(capability, adr, ctx):
-            continue
-        elif v0_priors:
-            numbers = ', '.join(f"ADR-{t.number}" for t in v0_priors)
-            v1_issue(adr, f"cannot confirm the prior decision on '{capability}': {numbers} is still v0", 'warning')
-        else:
-            v1_issue(adr, f"a change decision supersedes or amends a prior decision on '{capability}'")

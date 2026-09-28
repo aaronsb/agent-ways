@@ -2,7 +2,7 @@
 
 Attend's engagement model governs *when a sensor is allowed to fire a disclosure*. The idea it implements is established: in cognitive architectures like ACT-R, base-level activation decays with disuse, and recent activity changes how easily the next stimulus gets through. Attend applies that idea per sensor, borrowing its shape from the neuronal action potential: resting baseline, rapid rise on stimulus, refractory period after a burst, gradual return to rest. The biology gives us a predictable, well-studied shape for a phenomenon we actually care about — how productive engagement with a stimulus decays naturally over time.
 
-This page covers the model in prose and diagrams, explains what each parameter does, and walks through how it interacts with the disclosure governor. The canonical architecture is **[ADR-123](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification that moved the firing-dynamics core into a shared crate consumed by both attend and ways. This page is the attend-specific, implementer-and-author-friendly explainer for how attend instantiates that core.
+This page covers the model in prose and diagrams, explains what each parameter does, and walks through how it interacts with the disclosure governor. The canonical architecture is **[ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification that moved the firing-dynamics core into a shared crate consumed by both attend and ways. This page is the attend-specific, implementer-and-author-friendly explainer for how attend instantiates that core.
 
 ## The problem engagement solves
 
@@ -47,7 +47,7 @@ The biological action potential has an overshoot and hyperpolarization phase too
 
 Attend's firing engine operates on an abstract monotonic **progression axis**. The engine does not know what a tick is — attend supplies one by convention. For attend, a tick is **one second of wall-clock time** (`sensor_trait::epoch_secs()`, which reads `SystemTime::now().duration_since(UNIX_EPOCH)`).
 
-Why wall clock: attend steers external timing — peer conversations, build events, ambient awareness — which all live outside any single model's token space. Multiple attend instances may need to compare events across their own independent progressions, and wall clock is the only axis that's guaranteed common across all of them. This is the multi-observer case argued in [ADR-123 Decision 4](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory).
+Why wall clock: attend steers external timing — peer conversations, build events, ambient awareness — which all live outside any single model's token space. Multiple attend instances may need to compare events across their own independent progressions, and wall clock is the only axis that's guaranteed common across all of them. This is the multi-observer case argued in [ADR-123 Decision 4](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory).
 
 The consequence for attend authors: **all engagement parameters are in seconds**. `absolute_refractory: 60` means 60 wall-clock seconds. Half-lives are in wall-clock seconds. If you ever see a parameter expressed as a "tick count" in the code, interpret it as seconds for attend specifically.
 
@@ -223,12 +223,12 @@ All tuning is via attend config, using the ADR-115 overlay pattern — user scop
 
 The shift in this page's framing (vs earlier versions) is that engagement no longer exclusively belongs to attend. After ADR-123, the engagement state machine — `EngagementState` with a `Curve::ActionPotential` — is a shared crate (`sensor-trait::engagement`) consumed by both attend and ways. Attend uses it with wall-clock-seconds ticks and action-potential refractory. Ways uses the same engine with token-position ticks and `Curve::Exponential` outward-gate salience. Same math, different axis, different curve variant.
 
-For the ways-side equivalent of this page see [ADR-123 Decision 4](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory) and the context-decay presentation-economics model in [`../hooks-and-ways/context-decay.md`](../hooks-and-ways/context-decay.md). The shared engine means any future improvement to burst detection, refractory decay, or curve shapes lands in one place and reaches both tools.
+For the ways-side equivalent of this page see [ADR-123 Decision 4](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#4-ways-tick-unit-host-addressing-not-a-decay-theory) and the context-decay presentation-economics model in [`../hooks-and-ways/context-decay.md`](../hooks-and-ways/context-decay.md). The shared engine means any future improvement to burst detection, refractory decay, or curve shapes lands in one place and reaches both tools.
 
 ## Related
 
-- **[ADR-123](../architecture/system/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification and curve-as-parameter framing
-- **ADR-119** — the original action potential model (pre-unification; superseded by ADR-123 for the math, preserved for the biology-analogy framing)
+- **[ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification and curve-as-parameter framing
+- **ADR-119** — the original action potential model (pre-unification; superseded by ADR-123 for the math, preserved for the biology-analogy framing) <!-- adr-cite-ignore -->
 - [`loop.md`](loop.md) — where engagement state sits in the loop iteration
 - [`authoring-sensors.md`](authoring-sensors.md) — how sensor authors design around engagement
 - [`configuration.md`](configuration.md) — full config schema for engagement parameters

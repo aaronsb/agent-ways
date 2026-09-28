@@ -1,0 +1,3 @@
+Accepted ADR-116: Rests on ADR-114
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

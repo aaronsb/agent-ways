@@ -11,7 +11,7 @@ Turns an English-only ways install into a localized one (ADR-139). English is th
 root. This skill is the operator-facing orchestrator for the lifecycle in
 `docs/explanation/localization/` (scenario `01.011.E`) — interview, consent,
 translate, tune, switch. The mechanics live in the design note
-`docs/design-notes/adopter-localization-lifecycle-and-tuning.md`; don't restate them.
+`docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md`; don't restate them.
 
 ```bash
 ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"

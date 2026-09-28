@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-ADR - Architecture Decision Record CLI Tool
+ADR - Agent Decision Record CLI Tool
 
-A librarian for managing Architecture Decision Records.
+A librarian for managing Agent Decision Records.
 
 Usage:
     adr list [--domain DOMAIN] [--status STATUS] [--group] [--archived|--all]
+             [--field KEY[=VALUE]] [--kind K] [--verb V] [--capability C]
+             [--group-by KEY] [--json]
     adr view <number>          # View an ADR (aliases: v, show)
     adr new <domain> <title>
     adr rename <number> [new-title] [--slug SLUG]
@@ -14,8 +16,19 @@ Usage:
     adr cite [--check] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
+    adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
+                 [--paraphrase] [--canary caught|missed] [--dry-run]
+    adr set <number> key=value|key+=value|key-=value ... [--force] [--dry-run]
+    adr supersede <old> --by <new> [--amends SECTION] [--dry-run]
+    adr enact <number> <commit> [--dry-run]
+    adr import scan <paths...> [--force]
+    adr import apply [sheets...] [--partial] [--force] [--dry-run]
     adr index [-y]
     adr domains
+    adr domain add <name> --range A-B --folder F [--label L] [--description D]
+    adr domain rename <old> <new> [--folder F] [--dry-run]
+    adr domain move <number> <domain> [--dry-run]
+    adr domain move --plan <file.yaml> [--dry-run]
     adr config
 
 Configuration is loaded from docs/architecture/adr.yaml
@@ -26,7 +39,10 @@ Configuration is loaded from docs/architecture/adr.yaml
 # customize (ADR-177).
 
 import argparse
+import hashlib
+import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -45,7 +61,7 @@ except ImportError:
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "2.0.0"
+TOOL_VERSION = "2.1.0"
 
 # Statuses that mean "no longer in force" — used by archive and the
 # partial-supersession convention (ADR-303 / issue #438 option C2).

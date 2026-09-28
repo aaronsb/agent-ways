@@ -1,0 +1,3 @@
+Skipped: docs/architecture/system/ADR-110-old-v0-record.md: docs/architecture/.import/ADR-110.yaml differs from a fresh scan (edited, or the source changed); --force overwrites it and discards its edits
+Scan: 0 sheet(s) written, 1 skipped
+[exit 1]

@@ -1,0 +1,59 @@
+path: docs/architecture/.import/ADR-300.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: docs/architecture/documentation/ADR-300-doc-structure.md
+  format: v0
+  sha256: 936ae33576633b0120d147dad661e0df50aa2f462ad66869f4e56700353bdeb7
+target:
+  number: '300'
+  domain: docs
+  title: Documentation structure
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2025-05-01
+  deciders:
+    - developer
+    - agent
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+candidates:
+  capability: []
+provenance:
+  target.number: file name
+  target.domain: folder documentation
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Accepted'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+unmapped: {}
+body: |
+  ## Context
+
+  Where documentation lives.
+
+  ## Decision
+
+  The decision for ADR-300: Documentation structure.
+
+  ## Consequences
+
+  ### Positive
+
+  - It works.

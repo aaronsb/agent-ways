@@ -1,0 +1,25 @@
+
+Scanned: 1 ADRs
+
+Status distribution:
+  proposed: 1
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-117-bare-decision.md
+  ❌ a decision record requires a verb (add, cut, change, retire, constrain)
+  ❌ a decision record requires 'capability'
+  ❌ a decision record requires 'basis'
+  ❌ agent: records 'name'
+  ❌ agent: records 'model'
+  ⚠️ 12 placeholder line(s) from `adr new` still to fill, first: - **Decided:** [what is decided, in plain terms]
+
+════════════════════════════════════════════════════════════
+Summary: 5 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

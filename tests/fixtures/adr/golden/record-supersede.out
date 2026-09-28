@@ -1,0 +1,5 @@
+ADR-106 supersedes ADR-101; ADR-101 is superseded
+Lint docs/architecture/system/ADR-101-ingest.md: clean
+Lint docs/architecture/system/ADR-106-search-change.md: clean
+Run `adr index -y` to refresh INDEX.md.
+[exit 0]

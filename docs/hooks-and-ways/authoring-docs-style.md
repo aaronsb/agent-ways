@@ -107,9 +107,9 @@ prose:
 - **`ways tune`** — the *locale* alias audit (fidelity / discrimination vs the English
   root anchor, ADR-139/125). It never wrote relevance thresholds; it fixes stub
   quality by re-authoring.
-- **Salience / signal decay** — turn-based exponential decay (ADR-121), a model
+- **Salience / signal decay** — exponential decay over a progression axis (ADR-123), a model
   separate from relevance scoring.
-- **Progressive disclosure and token-gated re-fire** (ADR-104/105/126), the
+- **Progressive disclosure and token-gated re-fire** (ADR-105/123/126), the
   three-root runtime (ADR-143), sentence-salience input reduction (ADR-130), the
   authored disclosure graph and removal of BM25 (ADR-125), and the two embedding
   models (EN + multilingual for localized mode).

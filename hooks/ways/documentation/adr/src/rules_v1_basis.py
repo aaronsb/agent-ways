@@ -3,9 +3,9 @@
 # ============================================================================
 #
 # A decision's basis names what it rests on. precedent points at another
-# record in the corpus; every other source is external. Following precedent
-# must reach an external source: a corpus that justifies itself only by citing
-# itself can drift anywhere and still look consistent.
+# record in the corpus, and must resolve to one; every other source is
+# external. Where a chain of precedent leads is for a reader to judge, not
+# lint (ADR-311).
 #
 # The operator basis and `considered` are an audit trail, not a credential.
 # Lint checks that `said` and `via` are present. It cannot check that they are
@@ -18,17 +18,11 @@ V1_CONSIDERED_KEYS = ('operator', 'said', 'via', 'paraphrase', 'covers', 'canary
 V1_CONCERN_KEYS = ('said', 'resolve', 'answer', 'withdrawn', 'raised')
 V1_ANSWER_KEYS = ('operator', 'said', 'via', 'paraphrase')
 V1_CANARY = ('caught', 'missed')
-# A precedent is "another accepted decision" (§11). These statuses ground;
-# proposed warns; anything else (rejected, abandoned) does not ground.
-V1_GROUNDING_STATUSES = ('accepted', 'superseded', 'archived')
 
 def v1_basis_sources(ctx) -> tuple:
     """adr.yaml may rename or extend the sources. precedent is the one
     internal source; every other declared source is external."""
     return tuple(_str_list(ctx.config.get('basis_sources')) or V1_BASIS_SOURCES)
-
-def v1_external_sources(ctx) -> tuple:
-    return tuple(s for s in v1_basis_sources(ctx) if s != 'precedent')
 
 def _text(value) -> bool:
     return isinstance(value, str) and value.strip() != ''
@@ -49,9 +43,6 @@ def basis_entries(adr, ctx) -> list:
                 out.append((sources[0], entry[sources[0]], entry))
     return out
 
-def has_operator_basis(adr, ctx) -> bool:
-    return any(source == 'operator' for source, _, _ in basis_entries(adr, ctx))
-
 def _unknown_keys(entry: dict, allowed: tuple) -> list:
     return [k for k in entry if k not in allowed]
 
@@ -62,20 +53,36 @@ def rule_v1_basis_config(ctx):
     raw = ctx.config.get('basis_sources')
     if raw is None:
         return
-    sources = _str_list(raw)
-    if sources is None:
+    if _str_list(raw) is None:
         ctx.config_issues.append(Issue("basis_sources: expected a list of names", 'error'))
-    elif not any(s != 'precedent' for s in sources):
-        ctx.config_issues.append(Issue("basis_sources: declares no external source, so no chain can leave the corpus", 'error'))
 
 # --- one record ----------------------------------------------------------------
+
+def _check_evidence_record(adr, ctx, where: str, ref: str) -> None:
+    """A basis `evidence: ADR-N` that names a record must resolve to one, and
+    under v1 to a kind the decision's basis edge accepts other than decision
+    (ADR-309 §2): a record cited as evidence is evidence or a spec."""
+    target = ctx.by_number.get(norm_ref(ref)[0])
+    if target is None:
+        v1_issue(adr, f"{where}: evidence {ref} resolves to no record")
+        return
+    if not is_v1_record(target, ctx):
+        return
+    schema = v1_kind_schema(adr, ctx) or {}
+    allowed = [k for k in (v1_edges(schema).get('basis') or []) if k != 'decision']
+    kind = target.frontmatter.get('kind')
+    if allowed and kind not in allowed:
+        v1_issue(adr, f"{where}: evidence {ref} is a {kind}; evidence cites a {' or '.join(allowed)} record")
 
 @file_rule(contract=V1)
 def rule_v1_basis_shape(adr, ctx):
     if not is_v1_record(adr, ctx) or 'basis' not in adr.frontmatter:
         return
     basis = adr.frontmatter.get('basis')
-    if not isinstance(basis, list) or not basis:
+    schema = v1_kind_schema(adr, ctx)
+    if basis == [] and schema is not None and 'basis' in v1_requires(schema):
+        return  # empty where the kind requires a basis: the requires rule reports it
+    if not isinstance(basis, list):
         v1_issue(adr, "basis: expected a list of entries, each naming one source")
         return
     allowed = v1_basis_sources(ctx)
@@ -102,6 +109,8 @@ def rule_v1_basis_shape(adr, ctx):
                 v1_issue(adr, f"{where}: precedent takes one reference, such as ADR-101")
             elif not _text(value) and not (isinstance(value, int) and not isinstance(value, bool)):
                 v1_issue(adr, f"{where}: {source} needs a reference")
+            elif source == 'evidence' and re.fullmatch(r'ADR-\d+(\.\d+)?', str(value).strip()):
+                _check_evidence_record(adr, ctx, where, str(value).strip())
             continue
         # operator: who, the level, what was said and via which channel
         if not _text(value):
@@ -151,10 +160,6 @@ def rule_v1_considered(adr, ctx):
                 v1_issue(adr, f"{where}: covers is a list of probe names")
             if 'canary' in entry and entry['canary'] not in V1_CANARY:
                 v1_issue(adr, f"{where}: canary is caught or missed")
-    # ADR-304 §12: a decision the operator started waits for their consideration
-    if (has_operator_basis(adr, ctx) and str(adr.status or '').lower() == 'accepted'
-            and not adr.frontmatter.get('considered')):
-        v1_issue(adr, "accepted with an operator basis but no considered entry; the operator considers what they started")
 
 @file_rule(contract=V1)
 def rule_v1_concern(adr, ctx):
@@ -191,135 +196,24 @@ def rule_v1_concern(adr, ctx):
         else:
             adr.issues.append(Issue(f"open concern: {_first_line(entry.get('said'))}", 'warning', 'open-concern'))
 
-# --- against the corpus: grounding -------------------------------------------------
-#
-# Grounding is a least fixed point, so the verdict does not depend on the order
-# of basis entries and each record is visited a bounded number of times:
-#
-#   grounded(r) = r has an external source
-#              or some precedent of r points at a grounding-status record t
-#                 with grounded(t)
-#
-# A record with no basis but a decided_by (a spec) is grounded through the
-# records that decided it. A non-archived v0 record grounds provisionally: the
-# chain passes with a warning until the record is migrated. An archived v0
-# record grounds outright, since archived records never migrate.
-
-def _is_v0_ground(target, ctx) -> Optional[str]:
-    """'final' for an archived v0 record, 'provisional' for a live one."""
-    if is_v1_record(target, ctx):
-        return None
-    return 'final' if is_archived(target.path) else 'provisional'
-
-def _grounding_map(ctx) -> dict:
-    """path -> 'final' | 'provisional' for every grounded v1 record."""
-    cache = getattr(ctx, '_grounding', None)
-    if cache is not None:
-        return cache
-    records = [a for a in ctx.corpus if is_v1_record(a, ctx)]
-    external = v1_external_sources(ctx)
-    grounded = {}
-    for adr in records:
-        if any(source in external for source, _, _ in basis_entries(adr, ctx)):
-            grounded[adr.path] = 'final'
-
-    def level_of(target) -> Optional[str]:
-        v0 = _is_v0_ground(target, ctx)
-        if v0:
-            return v0
-        return grounded.get(target.path)
-
-    changed = True
-    while changed:
-        changed = False
-        for adr in records:
-            best = grounded.get(adr.path)
-            if best == 'final':
-                continue
-            candidates = []
-            entries = basis_entries(adr, ctx)
-            if entries:
-                for value in _precedent_values(adr, ctx):
-                    target = ctx.by_number.get(norm_ref(value)[0])
-                    if target is None or str(target.status or '').lower() not in V1_GROUNDING_STATUSES + ('proposed',):
-                        continue
-                    candidates.append(level_of(target))
-            elif 'basis' not in adr.frontmatter:
-                for ref in as_entries(adr.frontmatter.get('decided_by')):
-                    target = ctx.by_number.get(norm_ref(ref)[0])
-                    if target is not None:
-                        candidates.append(level_of(target))
-            new = 'final' if 'final' in candidates else ('provisional' if 'provisional' in candidates else None)
-            if new and new != best:
-                grounded[adr.path] = new
-                changed = True
-    ctx._grounding = grounded
-    return grounded
+# --- against the corpus ------------------------------------------------------------
 
 def _precedent_values(adr, ctx) -> list:
     """Precedent references of a usable shape; the shape rule reports others."""
     return [value for source, value, _ in basis_entries(adr, ctx)
             if source == 'precedent' and isinstance(value, (str, int)) and not isinstance(value, bool)]
 
-def _precedent_targets(adr, ctx) -> list:
-    return [ctx.by_number.get(norm_ref(value)[0]) for value in _precedent_values(adr, ctx)]
-
-def _cycle_through(adr, ctx) -> Optional[list]:
-    """The numbers on a precedent cycle that returns to adr, if any."""
-    stack = [(adr, [adr])]
-    visited = set()
-    while stack:
-        node, path = stack.pop()
-        for target in _precedent_targets(node, ctx):
-            if target is None or not is_v1_record(target, ctx):
-                continue
-            if target.path == adr.path:
-                return [n.number or n.path.name for n in path]
-            if target.path not in visited:
-                visited.add(target.path)
-                stack.append((target, path + [target]))
-    return None
-
 @corpus_rule(contract=V1)
-def rule_v1_basis_chain(adr, ctx):
-    """Every precedent resolves to an allowed, accepted record, and following
-    precedent reaches an external source (ADR-304 §11)."""
+def rule_v1_precedent(adr, ctx):
+    """Each precedent resolves to a record of a kind the basis edge accepts."""
     if not is_v1_record(adr, ctx):
         return
-    entries = basis_entries(adr, ctx)
-    precedents = [(value, ctx.by_number.get(norm_ref(value)[0]))
-                  for value in _precedent_values(adr, ctx)]
-    schema = v1_kind_schema(adr, ctx) or {}
-    allowed_kinds = v1_edges(schema).get('basis')
-    for value, target in precedents:
+    allowed_kinds = v1_edges(v1_kind_schema(adr, ctx) or {}).get('basis')
+    for value in _precedent_values(adr, ctx):
+        target = ctx.by_number.get(norm_ref(value)[0])
         if target is None:
             v1_issue(adr, f"basis: precedent '{value}' resolves to no known ADR")
-            continue
-        status = str(target.status or '').lower()
-        if is_v1_record(target, ctx):
-            kind = v1_record_kind(target)
-            if allowed_kinds is not None and kind not in allowed_kinds:
-                v1_issue(adr, f"basis: precedent ADR-{target.number} is a {kind}, expected {' or '.join(allowed_kinds)}")
-            if status == 'proposed':
-                adr.issues.append(Issue(f"basis: precedent ADR-{target.number} is still proposed", 'warning', 'precedent-proposed'))
-            elif status not in V1_GROUNDING_STATUSES:
-                v1_issue(adr, f"basis: precedent ADR-{target.number} is {status or 'without a status'}, so it grounds nothing")
-            elif 'basis' not in target.frontmatter and not target.frontmatter.get('decided_by'):
-                v1_issue(adr, f"basis: precedent ADR-{target.number} has neither a basis nor decided_by")
-    if not entries:
-        return
-    level = _grounding_map(ctx).get(adr.path)
-    if level == 'final':
-        return
-    if level == 'provisional':
-        v0s = sorted({t.number for _, t in precedents if t is not None and _is_v0_ground(t, ctx) == 'provisional'})
-        via = f" (ADR-{', ADR-'.join(v0s)})" if v0s else ''
-        v1_issue(adr, f"basis: grounded only through records still on v0{via}; migrate them to confirm the chain", 'warning')
-        return
-    if not precedents:
-        return  # no source at all: the shape rule reports the entries
-    cycle = _cycle_through(adr, ctx)
-    if cycle:
-        v1_issue(adr, f"basis: precedent loops back through ADR-{' -> ADR-'.join(str(n) for n in cycle)} without reaching an external source")
-    else:
-        v1_issue(adr, f"basis: following precedent never reaches an external source ({', '.join(v1_external_sources(ctx))})")
+        elif is_v1_record(target, ctx) and allowed_kinds is not None \
+                and v1_record_kind(target) not in allowed_kinds:
+            v1_issue(adr, f"basis: precedent ADR-{target.number} is a {v1_record_kind(target)}, "
+                          f"expected {' or '.join(allowed_kinds)}")

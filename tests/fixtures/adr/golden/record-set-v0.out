@@ -1,0 +1,3 @@
+Set status on ADR-110: An unmigrated v0 record
+Lint docs/architecture/system/ADR-110-old-v0-record.md: clean
+[exit 0]

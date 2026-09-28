@@ -1,0 +1,8 @@
+  ⚠️ src/search.py:1  ADR-106 is still proposed; accept it or cite the record in force
+  ❌ src/search.py:4  ADR-1040 resolves to no record
+  ❌ src/search.py:4  ADR-104.1 resolves to no record
+
+════════════════════════════════════════════════════════════
+Citations: 2 errors, 1 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

@@ -1,0 +1,49 @@
+path: docs/architecture/.import/ADR-003.yaml
+# adr import sheet (ADR-306). Fill or clear each todo item, then run
+# `adr import apply`. Sheets are working files; only records are committed.
+sheet: adr-import/v1
+source:
+  path: notes/decisions/ADR-003.md
+  format: v0
+  sha256: 78ddea958a25abe35b25a000aafc88c49de225bdcbb92aa65a6ee5a732bb63f9
+target:
+  number: '3'
+  domain: legacy
+  title: No slug
+record:
+  contract: adr/v1
+  kind: decision
+  verb: ~
+  capability: ~
+  basis: []
+  agent:
+    name: ~
+    model: unrecorded
+  status: accepted
+  date: 2026-01-15
+  deciders:
+    - a
+  related: []
+summary: ~
+todo:
+  - verb
+  - capability
+  - basis
+  - agent.name
+candidates:
+  capability: []
+provenance:
+  target.number: file name
+  target.domain: number range
+  target.title: H1
+  record.contract: v0 reader
+  record.kind: 'v0 reader: every v0 record is a decision'
+  record.agent.model: 'v0 reader: the model was not recorded'
+  record.status: 'frontmatter status: Accepted'
+  record.date: frontmatter date
+  record.deciders: frontmatter deciders (never an operator basis, ADR-304 §7)
+  record.related: frontmatter related
+unmapped: {}
+body: |
+  ## Context
+  x

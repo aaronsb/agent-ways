@@ -26,7 +26,7 @@ pub(crate) fn display_config(cfg: &config::Config) {
 
     t.add(vec!["", "", ""]);
 
-    // Engagement section (ADR-119 action potential, unified in ADR-123)
+    // Engagement section (ADR-123 action-potential curve)
     t.add(vec![
         "engagement",
         "burst_threshold",

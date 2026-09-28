@@ -28,6 +28,16 @@ def get_project_root() -> Path:
     return Path.cwd()
 
 
+def _git(args: list, cwd: Path) -> Optional[str]:
+    """git's output, or None when git is missing, fails or times out."""
+    try:
+        result = subprocess.run(['git', '-c', 'core.quotePath=false', *args], cwd=cwd,
+                                capture_output=True, encoding='utf-8', errors='replace', timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
 def get_config_path() -> Path:
     """Get path to adr.yaml config file."""
     return get_project_root() / 'docs' / 'architecture' / 'adr.yaml'
@@ -73,6 +83,13 @@ def get_config() -> dict:
     if _config is None:
         _config = load_config()
     return _config
+
+def reload_config() -> dict:
+    """Drop the cached config and read adr.yaml again, after a command
+    edits it."""
+    global _config
+    _config = None
+    return get_config()
 
 def repo_contract() -> str:
     """The contract adr.yaml declares; adr/v0 when it declares none (ADR-304)."""

@@ -1,0 +1,4 @@
+Set superseded_by on ADR-103: Batch ingestion
+Lint docs/architecture/system/ADR-103-ingest-batching.md:
+  ⚠️ superseded_by: ADR-107 does not declare the reciprocal supersedes: ADR-103 — one-directional links rot
+[exit 0]
