@@ -23,6 +23,7 @@ cmd_archive.py
 cmd_domains.py
 cmd_domain.py
 cmd_config.py
+cmd_contract.py
 cmd_cite.py
 cmd_lifecycle.py
 cmd_record.py

@@ -1,0 +1,2 @@
+ docs/architecture/adr.yaml | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)

@@ -269,6 +269,7 @@ def _import_apply(args):
     else:
         paths = sorted(import_dir().glob('ADR-*.yaml')) if import_dir().is_dir() else []
     lines, written = [], []
+    behind = None
     undo = {} if args.dry_run else None
     applied = skipped = refused = 0
     counts, issues = {}, {}
@@ -299,6 +300,7 @@ def _import_apply(args):
             partial = (f", {len(todo)} todo left" if todo else '') + ('' if changed else ', unchanged')
             lines.append((f"Applied: {shown} -> {relative_path(dest)}{partial}", dest.resolve()))
         counts, issues = _lint_counts(written)
+        behind = _contract_behind(written)
     finally:
         if undo is not None:
             for failed in _restore(undo):
@@ -315,6 +317,10 @@ def _import_apply(args):
     verb = 'would apply' if args.dry_run else 'applied'
     print(f"Import: {applied} {verb}, {skipped} skipped, {refused} refused"
           + (' (dry run: nothing written)' if args.dry_run else ''))
+    if behind:
+        verb = 'would declare' if args.dry_run else 'declare'
+        print(f"Note: the records written {verb} {behind}; adr.yaml declares {repo_contract()}. "
+              f"apply does not edit adr.yaml; `adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
     lint_errors = sum(e for e, _ in counts.values())
     return 1 if refused or (args.dry_run and lint_errors) else 0
 
@@ -339,6 +345,16 @@ def _restore(undo: dict) -> list:
         except OSError:
             pass
     return failed
+
+def _contract_behind(paths: list) -> Optional[str]:
+    """The newest contract the written records declare, when adr.yaml's is
+    older; None otherwise (#614)."""
+    declared = contract_rank(repo_contract())
+    if declared is None:
+        return None
+    ahead = [c for c in (parse_adr(p).contract for p in paths)
+             if (contract_rank(c) or 0) > declared]
+    return max(ahead, key=contract_rank) if ahead else None
 
 def _lint_counts(paths: list) -> dict:
     """(errors, warnings) per written record, and the issues themselves,

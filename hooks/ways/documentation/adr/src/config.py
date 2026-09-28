@@ -95,6 +95,12 @@ def repo_contract() -> str:
     """The contract adr.yaml declares; adr/v0 when it declares none (ADR-304)."""
     return str(get_config().get('contract') or 'adr/v0')
 
+def contract_rank(contract) -> Optional[int]:
+    """A contract's place in KNOWN_CONTRACTS, oldest first; None when the
+    tool does not know it. A record with no contract is adr/v0."""
+    name = str(contract) if contract else 'adr/v0'
+    return KNOWN_CONTRACTS.index(name) if name in KNOWN_CONTRACTS else None
+
 def get_domains() -> dict:
     """Get domain configuration."""
     return get_config().get('domains', {})

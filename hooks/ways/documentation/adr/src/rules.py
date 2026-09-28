@@ -132,3 +132,26 @@ def rule_supersession_links(adr, ctx):
                         f"{field_name}: ADR-{number} does not declare the reciprocal "
                         f"{reverse}: ADR-{own} — one-directional links rot", 'warning'))
 
+
+# --- config against records ---------------------------------------------------
+
+@config_rule
+def rule_records_ahead_of_config(ctx):
+    """Records that declare a newer contract than adr.yaml (#614). Only
+    known contracts are compared; a v0 corpus never reaches the warning."""
+    declared = contract_rank(ctx.contract)
+    if declared is None:
+        return
+    ahead = {}
+    for adr in ctx.corpus:
+        rank = contract_rank(adr.contract)
+        if rank is not None and rank > declared:
+            ahead[adr.contract] = ahead.get(adr.contract, 0) + 1
+    if not ahead:
+        return
+    newest = max(ahead, key=contract_rank)
+    count = sum(ahead.values())
+    ctx.config_issues.append(Issue(
+        f"{count} record(s) declare {newest}, newer than adr.yaml's {ctx.contract}; "
+        f"`adr contract --upgrade` brings adr.yaml to {CURRENT_CONTRACT}",
+        'warning', code='contract-behind'))

@@ -1,0 +1,4 @@
+Applied: docs/architecture/.import/ADR-102.yaml -> docs/architecture/system/ADR-102-hook-ordering.md, 4 todo left (lint: 0 errors, 1 warnings)
+Import: 1 applied, 0 skipped, 0 refused
+Note: the records written declare adr/v1; adr.yaml declares adr/v0. apply does not edit adr.yaml; `adr contract --upgrade` brings it to adr/v1.
+[exit 0]

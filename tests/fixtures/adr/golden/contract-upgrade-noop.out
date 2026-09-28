@@ -1,0 +1,2 @@
+docs/architecture/adr.yaml already declares adr/v1 and has the blocks it needs; nothing to do.
+[exit 0]

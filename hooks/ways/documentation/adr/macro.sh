@@ -24,6 +24,39 @@ tool_version() {
   sed -nE 's/^TOOL_VERSION = "([0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?)"$/\1/p' "$1" 2>/dev/null | head -1
 }
 
+# The contract the vendored tool writes. From 2.2.0 the tool names it on a
+# CURRENT_CONTRACT line and has `adr contract`; the line is read the same way
+# as TOOL_VERSION, so the macro never runs the project's copy. A 2.x tool
+# without the line writes adr/v1; an older one writes adr/v0.
+tool_contract() {
+  sed -nE 's/^CURRENT_CONTRACT = "(adr\/v[0-9]+)"$/\1/p' "$1" 2>/dev/null | head -1
+}
+
+# records_declaring DIR CONTRACT — prints "yes" when an ADR-*.md record under
+# DIR declares CONTRACT in its frontmatter. Only the leading block between the
+# first-line `---` and the next `---` is read, so a `contract:` line in a
+# record's body (a fenced example) does not count.
+records_declaring() {
+  [[ -d "$1" ]] || return 0
+  find "$1" -type f -name 'ADR-*.md' -exec awk -v want="$2" '
+    { sub(/\r$/, "") }
+    FNR == 1 { infm = ($0 == "---"); next }
+    !infm { nextfile }
+    /^---[ \t]*$/ { infm = 0; nextfile }
+    /^contract:/ {
+      v = $0
+      sub(/^contract:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v)
+      gsub(/["\047]/, "", v); sub(/[ \t]+$/, "", v)
+      if (v == want) { print "yes"; exit }
+    }' {} + 2>/dev/null | head -1
+}
+
+# contract_newer A B — true when contract A (adr/vN) is newer than B
+contract_newer() {
+  local a=${1#adr/v} b=${2#adr/v}
+  [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ ]] && (( 10#$a > 10#$b ))
+}
+
 print_v0_commands() {
   local s="$1"
   echo "## ADR Tooling"
@@ -149,6 +182,19 @@ if [[ -n "$ADR_SCRIPT" ]]; then
   [[ -n "$major" ]] && (( 10#$major >= 2 )) && v1_tool=1
   version_label=${local_ver:+v$local_ver}
   version_label=${version_label:-unversioned}
+  current=$(tool_contract "$PROJECT_DIR/$ADR_SCRIPT")
+  has_contract_cmd=0
+  [[ -n "$current" ]] && has_contract_cmd=1
+  if [[ -z "$current" ]]; then
+    if [[ $v1_tool -eq 1 ]]; then current="adr/v1"; else current="adr/v0"; fi
+  fi
+  [[ "$contract" == "adr/v0" ]] && contract=""
+  # Records that already declare the tool's contract while adr.yaml does not
+  records_ahead=0
+  if [[ -z "$contract" && "$current" != "adr/v0" ]] \
+     && [[ -n "$(records_declaring "$PROJECT_DIR/docs/architecture" "$current")" ]]; then
+    records_ahead=1
+  fi
 
   # The four tool/contract combinations (ADR-304 §10)
   if [[ "$contract" == "adr/v1" && $v1_tool -eq 1 ]]; then
@@ -158,15 +204,33 @@ if [[ -n "$ADR_SCRIPT" ]]; then
     echo ""
     print_v0_commands "$ADR_SCRIPT"
   elif [[ -n "$contract" ]]; then
-    echo "**\`docs/architecture/adr.yaml\` declares \`contract: $contract\`, which this guidance does not know.** Check the value; the known contract is adr/v1. Until then the v0 guidance below applies."
+    echo "**\`docs/architecture/adr.yaml\` declares \`contract: $contract\`, which this guidance does not know.** Check the value; the tool writes $current. Until then the v0 guidance below applies."
+    echo ""
+    print_v0_guide "$ADR_SCRIPT"
+  elif [[ $records_ahead -eq 1 ]]; then
+    echo "**Records under \`docs/architecture/\` declare \`contract: $current\`, but \`docs/architecture/adr.yaml\` declares no contract, so the tool checks them under the v0 rules.**"
+    if [[ $has_contract_cmd -eq 1 ]]; then
+      echo "Run \`$ADR_SCRIPT contract --upgrade\` to bring \`adr.yaml\` to $current. It adds the contract line and the blocks the contract needs, and leaves the other lines as they are."
+    else
+      echo "Re-vendor the tool (the \`adr\` skill), then run \`$ADR_SCRIPT contract --upgrade\` to bring \`adr.yaml\` to $current."
+    fi
     echo ""
     print_v0_guide "$ADR_SCRIPT"
   else
     print_v0_guide "$ADR_SCRIPT"
     if [[ $v1_tool -eq 1 ]]; then
       echo ""
-      echo "_This tool supports the adr/v1 contract (ADR-304). Adopting it is a decision with \`capability: adr\`; until \`adr.yaml\` declares \`contract: adr/v1\`, the v0 rules apply._"
+      if [[ $has_contract_cmd -eq 1 ]]; then
+        echo "_This tool supports the $current contract (ADR-304). Adopting it is a decision with \`capability: adr\`; until \`adr.yaml\` declares \`contract: $current\`, the v0 rules apply. Once it is decided, \`$ADR_SCRIPT contract --upgrade\` writes that line and the blocks the contract needs._"
+      else
+        echo "_This tool supports the $current contract (ADR-304). Adopting it is a decision with \`capability: adr\`; until \`adr.yaml\` declares \`contract: $current\`, the v0 rules apply._"
+      fi
     fi
+  fi
+  # A config on a known contract older than the tool's
+  if [[ -n "$contract" && $has_contract_cmd -eq 1 ]] && contract_newer "$current" "$contract"; then
+    echo ""
+    echo "_\`adr.yaml\` declares $contract; this tool writes $current. \`$ADR_SCRIPT contract --upgrade\` brings \`adr.yaml\` to $current._"
   fi
 
   # Direction-aware drift check against the universal template (ADR-177):

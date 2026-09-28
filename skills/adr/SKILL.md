@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 ADR now means Agent Decision Record; the `ADR-N` citation form is unchanged. Operate ADRs through the `docs/scripts/adr` CLI tool. Never create ADR files manually. If the tool isn't present in the project yet, vendor it first — see [Vendoring the tool into a project](#vendoring-the-tool-into-a-project).
 
-A project declares its record contract in `docs/architecture/adr.yaml`. With `contract: adr/v1` it uses declared kinds, verbs, capabilities and lifecycle commands (below). Without it, the project is on the legacy `adr/v0` contract: Draft/Proposed/Accepted/Superseded/Deprecated status, and Context/Decision/Consequences/Alternatives Considered sections. `adr config` shows which contract a project is on. Both contracts share the same tool and the same `ADR-N` number space.
+A project declares its record contract in `docs/architecture/adr.yaml`. With `contract: adr/v1` it uses declared kinds, verbs, capabilities and lifecycle commands (below). Without it, the project is on the legacy `adr/v0` contract: Draft/Proposed/Accepted/Superseded/Deprecated status, and Context/Decision/Consequences/Alternatives Considered sections. `adr contract` shows the contract `adr.yaml` declares and the one the tool writes; `adr contract --upgrade` brings `adr.yaml` to the tool's contract. Both contracts share the same tool and the same `ADR-N` number space.
 
 ## Commands
 
@@ -69,6 +69,8 @@ docs/scripts/adr import apply [sheets...] [--partial] [--force] [--dry-run]  # w
 
 # Config
 docs/scripts/adr config                   # Show current adr.yaml configuration
+docs/scripts/adr contract                 # The contract adr.yaml declares, and the one the tool writes
+docs/scripts/adr contract --upgrade       # Bring adr.yaml to the tool's contract; edits lines, keeps comments
 ```
 
 Under adr/v1, a record's folder decides its area (ADR-310), and its number is
@@ -94,7 +96,7 @@ than assumed:
 - **statuses**: valid v0 status values (Draft, Proposed, Accepted, Superseded, Deprecated); adr/v1 has a fixed status set (proposed, accepted, rejected, abandoned, superseded, archived)
 - **defaults**: default deciders and initial status for new ADRs
 - **legacy**: number range for pre-domain ADRs
-- **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0
+- **contract** (adr/v1 only): `adr/v1`, opting the project into the fields below; absent means adr/v0. `adr contract --upgrade` writes it, with `kinds` and a placeholder capability when they are missing
 - **kinds** (adr/v1 only): `decision`, `spec`, `evidence`, each declaring its required fields, sections, and edges
 - **capabilities** (adr/v1 only): the closed vocabulary a record's `capability` field draws from
 - **basis_sources** (adr/v1 only): what a decision may ground itself in — operator, evidence, standard, upstream, precedent
@@ -192,7 +194,9 @@ A project with existing decision records in another shape (a flat directory,
 inline metadata, a different tool) converts them with `docs/scripts/adr import
 scan <paths>` then `docs/scripts/adr import apply` (ADR-306) rather than by
 hand-editing frontmatter — the import sheets are editable and re-lintable
-before anything is written as an adr/v1 record.
+before anything is written as an adr/v1 record. `import apply` does not edit
+`adr.yaml`; when the records it writes declare a newer contract than `adr.yaml`,
+it says so, and `docs/scripts/adr contract --upgrade` brings `adr.yaml` to it.
 
 ## Updating a vendored copy
 
@@ -202,7 +206,9 @@ saying the copy is *out of date* means ways ships a newer tool (ADR-177).
 
 - **Unmodified copy** (only the `TOOL_VERSION` line differs, if anything):
   re-run the `cp` from the vendoring steps above. `adr.yaml` is untouched —
-  config and tool update independently.
+  config and tool update independently. When the new tool writes a newer
+  contract than `adr.yaml` declares, `adr contract` says so, and
+  `adr contract --upgrade` brings `adr.yaml` to it.
 - **Customized copy**: diff first, then carry the local changes forward onto
   the new version — never overwrite on sight:
 

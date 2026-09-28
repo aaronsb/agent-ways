@@ -1,0 +1,37 @@
+path: docs/architecture/adr.yaml
+# Fixture: adr/v1 declared with no kinds and no capabilities.
+project_name: ADR v1 Empty Fixture
+contract: adr/v1
+
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Runtime
+    folder: system
+
+defaults:
+  deciders: [developer, agent]
+
+viewer: cat {file}
+
+kinds:
+  decision:
+    verb: required
+    requires: [capability, basis, agent]
+    sections: [Summary]
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec, evidence] }
+  spec:
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+  evidence:
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: evidence }
+
+# What the project does, one line each. A record's `capability` names one of
+# these, and a decision adds, cuts, changes or constrains them. Replace the
+# placeholder with the project's own list.
+capabilities:
+  core: The project's core behaviour (placeholder; replace)

@@ -75,6 +75,12 @@ docs/scripts/adr import apply
 ```
 `--partial` lands sheets that still carry open todo items, except ones lint can't re-find afterward (a status with no mapping, a Deprecated note, a number or domain mismatch). `--force` overwrites a record with uncommitted changes.
 
+7. **Bring `adr.yaml` to the records' contract.** Apply writes adr/v1 records and leaves `adr.yaml` as it is. When `adr.yaml` declares an older contract, apply prints a note and `adr lint` warns. Run:
+```bash
+docs/scripts/adr contract --upgrade
+```
+It adds the contract line, and the `kinds` and `capabilities` blocks when they are missing, and leaves the other lines and comments as they are. Replace the placeholder capability with the project's own list.
+
 A corpus not worth converting can instead be parked as read-only history under `docs/architecture/legacy/`, with `legacy.range` in `adr.yaml` covering its numbers. The tool lists only files named `ADR-NNN-*.md` with frontmatter, so rename and add frontmatter as in step 2 for parked records to appear in `adr list` and resolve in `adr cite`.
 
 For adr-tools, MADR, Log4brains, or other foreign formats — no reader exists yet — either copy each record's substance into a sheet by hand before applying, or skip conversion and park the corpus in `legacy/`.

@@ -121,6 +121,15 @@ def main():
     # config
     subparsers.add_parser('config', help='Show configuration')
 
+    # contract (#614)
+    p_contract = subparsers.add_parser(
+        'contract', help="Show adr.yaml's contract and the tool's; --upgrade brings adr.yaml to it")
+    contract_mode = p_contract.add_mutually_exclusive_group()
+    contract_mode.add_argument('--current', action='store_true',
+                               help='Print the contract this tool writes, and nothing else')
+    contract_mode.add_argument('--upgrade', action='store_true',
+                               help='Bring adr.yaml to the current contract, editing lines in place')
+
     # lifecycle (adr/v1, ADR-304 §2)
     p_accept = subparsers.add_parser('accept', help='Accept a proposed adr/v1 record')
     p_accept.add_argument('adr', help='ADR number (e.g., 101, ADR-101)')
@@ -189,6 +198,7 @@ def main():
         'domains': cmd_domains,
         'domain': cmd_domain,
         'config': cmd_config,
+        'contract': cmd_contract,
         'cite': cmd_cite,
         'accept': cmd_accept,
         'reject': cmd_reject,
