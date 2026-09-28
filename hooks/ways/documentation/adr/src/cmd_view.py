@@ -19,7 +19,7 @@ def cmd_view(args):
     adr = matches[0]
 
     # Get viewer command from config
-    viewer_cmd = get_config().get('viewer', 'cat {file}')
+    viewer_cmd = get_viewer()
 
     # Check if viewer command exists
     viewer_bin = viewer_cmd.split()[0]

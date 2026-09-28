@@ -984,6 +984,40 @@ capture config-yes-key-domains domains
 capture config-yes-key-list    list --group
 capture config-yes-key-new     new yes "Anything"
 
+# Only a plain key with no tag is read as a name. A value shared through an
+# anchor keeps its YAML type where it is a value (`on` is true), and an
+# explicitly tagged key keeps its tag, which lint names under domains.
+fresh corpus
+edit docs/architecture/adr.yaml "s.replace('    description: Documentation structure and tooling\n', '    description: &d on\n', 1).replace('  ops:\n', '  !!int 7:\n', 1) + 'extra: {*d : shared}\n'"
+capture config-tagged-keys-lint    lint
+capture config-tagged-keys-domains domains
+
+# A present but malformed top-level value is a config-shape error; other
+# commands fall back to their defaults. `new` runs with a PATH that has no gh,
+# so the deciders it falls back to do not depend on the host.
+mkdir -p "$WORK/nogh"
+ln -sf "$(command -v python3)" "$WORK/nogh/python3"
+ln -sf "$(command -v git)" "$WORK/nogh/git"
+printf '#!/usr/bin/env bash\nPATH="%s" exec "%s" "$@"\n' "$WORK/nogh" "$ADR_TOOL" > "$WORK/adr-nogh"
+chmod +x "$WORK/adr-nogh"
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'(defaults|legacy|statuses):\n(?:  .*\n)+', lambda m: {'defaults': 'defaults: 3\n', 'legacy': 'legacy: oops\n', 'statuses': 'statuses: 5\n'}[m.group(1)], s).replace('viewer: cat {file}', 'viewer: 5') + 'cite: {exclude: 5}\n'"
+capture config-top-scalars-lint    lint
+capture config-top-scalars-domains domains
+capture config-top-scalars-list    list --group
+capture config-top-scalars-index   index
+capture config-top-scalars-view    view 101
+capture config-top-scalars-cite    cite src/storage.py
+ADR_TOOL="$WORK/adr-nogh" capture config-top-scalars-new new ops "Anything"
+keep config-top-scalars-new-file.md docs/architecture/operations/ADR-201-anything.md
+
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'defaults:\n(?:  .*\n)+', 'defaults: {deciders: 5, status: [1]}\n', s).replace('  range: [1, 99]\n', '  range: x\n', 1) + 'cite: 5\n'"
+capture config-top-fields-lint    lint
+capture config-top-fields-domains domains
+ADR_TOOL="$WORK/adr-nogh" capture config-top-fields-new new ops "Anything"
+keep config-top-fields-new-file.md docs/architecture/operations/ADR-201-anything.md
+
 # --- compare or update ----------------------------------------------------------
 
 if [[ $UPDATE -eq 1 ]]; then

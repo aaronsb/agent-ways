@@ -43,9 +43,24 @@ def get_config_path() -> Path:
     return get_project_root() / 'docs' / 'architecture' / 'adr.yaml'
 
 # YAML 1.1 reads a plain key such as `yes`, `on` or `2024` as a boolean, a
-# number or a date. Every key in adr.yaml is a name, so a plain key keeps the
-# text it was written with.
+# number or a date. Every key in adr.yaml is a name, so a plain key with no
+# explicit tag keeps the text it was written with. The key is replaced by a
+# new node: a node shared through an anchor keeps its own type elsewhere.
 _NAME_KEY_TAGS = {f'tag:yaml.org,2002:{t}' for t in ('bool', 'int', 'float', 'null', 'timestamp')}
+_STR_TAG = 'tag:yaml.org,2002:str'
+
+class _ConfigLoader(yaml.SafeLoader):
+    def compose_scalar_node(self, anchor):
+        event = self.peek_event()
+        node = super().compose_scalar_node(anchor)
+        node.plain_implicit = event.tag in (None, '!') and event.style is None
+        return node
+
+def _name_key(key):
+    if isinstance(key, yaml.ScalarNode) and getattr(key, 'plain_implicit', False) \
+            and key.tag in _NAME_KEY_TAGS:
+        return yaml.ScalarNode(_STR_TAG, key.value, key.start_mark, key.end_mark)
+    return key
 
 def _keys_as_names(node, seen=None) -> None:
     seen = set() if seen is None else seen
@@ -53,9 +68,8 @@ def _keys_as_names(node, seen=None) -> None:
         return
     seen.add(id(node))
     if isinstance(node, yaml.MappingNode):
-        for key, value in node.value:
-            if isinstance(key, yaml.ScalarNode) and key.style is None and key.tag in _NAME_KEY_TAGS:
-                key.tag = 'tag:yaml.org,2002:str'
+        node.value = [(_name_key(key), value) for key, value in node.value]
+        for _, value in node.value:
             _keys_as_names(value, seen)
     elif isinstance(node, yaml.SequenceNode):
         for item in node.value:
@@ -63,7 +77,7 @@ def _keys_as_names(node, seen=None) -> None:
 
 def _read_config(stream):
     """adr.yaml's content, its keys read as names; None for an empty file."""
-    loader = yaml.SafeLoader(stream)
+    loader = _ConfigLoader(stream)
     try:
         node = loader.get_single_node()
         if node is None:
@@ -160,9 +174,24 @@ def domain_folders(cfg: dict) -> list:
     folders = folders if isinstance(folders, list) else [folders]
     return [f for f in folders if isinstance(f, str) and f]
 
+def name_list(value) -> Optional[list]:
+    """value as a list of strings, or None when it is not one."""
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return value
+    return None
+
+def config_section(key: str) -> dict:
+    """A top-level mapping in adr.yaml; empty when absent or not a mapping.
+    Lint's config-shape rule names a malformed one."""
+    value = get_config().get(key)
+    return value if isinstance(value, dict) else {}
+
 def get_statuses() -> set:
     """Get valid statuses."""
-    return set(get_config().get('statuses', ['Draft', 'Proposed', 'Accepted', 'Superseded', 'Deprecated']))
+    statuses = name_list(get_config().get('statuses'))
+    if statuses is None:
+        statuses = ['Draft', 'Proposed', 'Accepted', 'Superseded', 'Deprecated']
+    return set(statuses)
 
 def relative_path(path: Path, base: Path = None) -> Path:
     """Get path relative to base, or return absolute if not possible."""
@@ -174,13 +203,30 @@ def relative_path(path: Path, base: Path = None) -> Path:
         return path
 
 def get_defaults() -> dict:
-    """Get default values for new ADRs."""
-    return get_config().get('defaults', {'deciders': [], 'status': 'Draft'})
+    """Get default values for new ADRs. A deciders or status value of the
+    wrong type is left out, so the tool's own default applies."""
+    if 'defaults' not in get_config():
+        return {'deciders': [], 'status': 'Draft'}
+    defaults = dict(config_section('defaults'))
+    if 'deciders' in defaults and name_list(defaults['deciders']) is None:
+        del defaults['deciders']
+    if 'status' in defaults and not isinstance(defaults['status'], str):
+        del defaults['status']
+    return defaults
 
 def get_legacy_range() -> tuple:
     """Get legacy ADR number range."""
-    legacy = get_config().get('legacy')
-    return legacy.get('range', (1, 99)) if isinstance(legacy, dict) else (1, 99)
+    return domain_range(config_section('legacy')) or (1, 99)
+
+def get_viewer() -> str:
+    """The command `adr view` runs, {file} for the record."""
+    viewer = get_config().get('viewer')
+    return viewer if isinstance(viewer, str) and viewer.split() else 'cat {file}'
+
+def cite_excludes() -> list:
+    """adr.yaml's cite.exclude paths; empty when it lists none."""
+    exclude = config_section('cite').get('exclude')
+    return [str(p) for p in exclude] if isinstance(exclude, list) else []
 
 def _detect_git_user() -> Optional[str]:
     """Detect current git user (GitHub username or git config name)."""

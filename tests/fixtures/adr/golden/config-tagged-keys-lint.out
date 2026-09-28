@@ -14,7 +14,7 @@ Issues found in 5 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
-  ⚠️ domains.ops: missing range
+  ❌ domains.7: expected a name for the domain key
 
 docs/architecture/archive/system/ADR-107-old-queue.md
   ⚠️ superseded_by: ADR-101 does not declare the reciprocal supersedes: ADR-107 — one-directional links rot
@@ -29,7 +29,7 @@ docs/architecture/system/ADR-106-one-sided.md
   ⚠️ supersedes: ADR-12 does not declare the reciprocal superseded_by: ADR-106 — one-directional links rot
 
 ════════════════════════════════════════════════════════════
-Summary: 2 errors, 3 warnings
+Summary: 3 errors, 2 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]

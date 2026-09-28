@@ -6,7 +6,7 @@ def cmd_new(args):
 
     if domain not in domains:
         print(f"Error: Unknown domain '{domain}'", file=sys.stderr)
-        print(f"Valid domains: {', '.join(domains.keys())}", file=sys.stderr)
+        print(f"Valid domains: {', '.join(map(str, domains))}", file=sys.stderr)
         return 1
 
     config = domains[domain]

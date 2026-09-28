@@ -14,7 +14,11 @@ Issues found in 5 files:
 ────────────────────────────────────────────────────────────
 
 docs/architecture/adr.yaml
-  ⚠️ domains.ops: missing range
+  ❌ legacy: expected a mapping of range and label
+  ❌ statuses: expected a list of names
+  ❌ defaults: expected a mapping of deciders and status
+  ❌ viewer: expected a command, such as cat {file}
+  ❌ cite.exclude: expected a list of paths
 
 docs/architecture/archive/system/ADR-107-old-queue.md
   ⚠️ superseded_by: ADR-101 does not declare the reciprocal supersedes: ADR-107 — one-directional links rot
@@ -29,7 +33,7 @@ docs/architecture/system/ADR-106-one-sided.md
   ⚠️ supersedes: ADR-12 does not declare the reciprocal superseded_by: ADR-106 — one-directional links rot
 
 ════════════════════════════════════════════════════════════
-Summary: 2 errors, 3 warnings
+Summary: 7 errors, 2 warnings
 ════════════════════════════════════════════════════════════
 
 [exit 0]
