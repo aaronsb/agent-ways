@@ -103,3 +103,7 @@ Seeding helps a project whose domains already describe its areas. A project with
 - **A generic default set in the template**, from #616's list (`jobs`, `deploy`, `backup`, `storage`, `auth`, `query`, `ingest`, `providers`, `cli`, `web`, `process`, and a slot for the core model). It fits a service project and gives a tooling project capabilities it does not have; agent-ways would have to delete most of it.
 - **Keep the placeholder and add only a worked example.** Leaves every upgrade at `core` when the project's domains are already in the same file.
 - **Cluster the records inside the tool and propose domains.** The tool is one vendored file that depends only on the standard library and PyYAML. Keyword clusters would need rewriting by the agent anyway, and the embedding engine is not available where the tool is vendored. Counting in the tool and proposing in the agent splits the work where each is reliable.
+
+## Note (2026-09-28): §5 usage wording
+
+§5 says the no-command usage text states that "any command that writes" accepts `--whatif`. `new`, `rename`, `index` and `domain add` write and have no dry-run, so the implementation (#619) says instead that a command shown with `[--dry-run]` also takes it as `--whatif`. That wording replaces §5's sentence. Found in the review of #619.
