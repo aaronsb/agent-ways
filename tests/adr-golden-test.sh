@@ -1011,6 +1011,14 @@ capture config-top-scalars-cite    cite src/storage.py
 ADR_TOOL="$WORK/adr-nogh" capture config-top-scalars-new new ops "Anything"
 keep config-top-scalars-new-file.md docs/architecture/operations/ADR-201-anything.md
 
+# A key left empty reads as absent, as on main: `deciders:` empty means
+# detect them. These lint with no adr.yaml issue.
+fresh corpus
+edit docs/architecture/adr.yaml "__import__('re').sub(r'  deciders:\n(?:    .*\n)+', '  deciders:\n', s) + 'cite:\n'"
+capture config-empty-values-lint lint
+edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite: {exclude: }\n')"
+capture config-empty-exclude-lint lint
+
 fresh corpus
 edit docs/architecture/adr.yaml "__import__('re').sub(r'defaults:\n(?:  .*\n)+', 'defaults: {deciders: 5, status: [1]}\n', s).replace('  range: [1, 99]\n', '  range: x\n', 1) + 'cite: 5\n'"
 capture config-top-fields-lint    lint
