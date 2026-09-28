@@ -1,0 +1,5 @@
+Declared: adr/v1
+Current:  adr/v1 (adr-tool <VERSION>)
+docs/architecture/adr.yaml is current.
+Notice: 53 adr/v1 records use 3 capabilities; ingest is on 49 (92%). Read the records and propose a finer capability list (`adr list --json` gives titles and fields), then edit `capabilities` in adr.yaml and each record's `capability` with `adr set`, previewing with --whatif.
+[exit 0]

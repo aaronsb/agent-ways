@@ -1,0 +1,141 @@
+
+Scanned: 55 ADRs
+
+Status distribution:
+  accepted: 49
+  proposed: 6
+
+Contract: adr/v1 (1 v0 records remain)
+
+────────────────────────────────────────────────────────────
+Issues found in 41 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/system/ADR-114-open-concern.md
+  ⚠️ open concern: Batch size may starve small tenants
+
+docs/architecture/system/ADR-120-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-121-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-122-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-123-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-124-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-125-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-126-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-127-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-128-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-129-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-130-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-131-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-132-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-133-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-134-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-135-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-136-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-137-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-138-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-139-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-140-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-141-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-142-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-143-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-144-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-145-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-146-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-147-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-148-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-149-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-150-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-151-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-152-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-153-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-154-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-155-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-156-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-157-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-158-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+docs/architecture/system/ADR-159-generated.md
+  ❌ kind 'evidence' is not declared in adr.yaml (declared: decision, spec)
+
+════════════════════════════════════════════════════════════
+Summary: 40 errors, 1 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

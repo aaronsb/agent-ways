@@ -93,6 +93,8 @@ def cmd_contract(args):
         else:
             print(f"{config_path} is behind this tool. "
                   f"`adr contract --upgrade` brings it to {CURRENT_CONTRACT}.")
+        for finding in shape_findings(vocabulary_shape(get_all_adrs()), get_config()):
+            print(f"Notice: {shape_notice(finding, seeds='capabilities' in missing)}")
         return 0
     return _contract_upgrade(declared, dry_run)
 
@@ -191,9 +193,11 @@ def _contract_upgrade(declared: str, dry_run: bool = False) -> int:
     body = ''.join(lines)
     for block in blocks:
         body += newline + block
+    # The domain shape, read before the upgrade, says whether the seeds are thin.
+    thin = vocabulary_shape(get_all_adrs())['domain'] if 'added: capabilities' in added else None
     if dry_run:
         return _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
-                                         added, seeded, taken)
+                                         added, seeded, taken, thin)
     try:
         path.write_bytes(body.encode('utf-8'))
         reloaded = reload_config()
@@ -212,12 +216,12 @@ def _contract_upgrade(declared: str, dry_run: bool = False) -> int:
         print(f"{shown}: {declared} -> {CURRENT_CONTRACT}")
     for line in added:
         print(f"  {line}")
-    _print_capability_notes(added, seeded, taken)
+    _print_capability_notes(added, seeded, taken, thin)
     print("Run `adr lint` to check the records against the contract.")
     return 0
 
 
-def _print_capability_notes(added: list, seeded: list, taken: list):
+def _print_capability_notes(added: list, seeded: list, taken: list, thin=None):
     defaults = ' and '.join(DEFAULT_CAPABILITIES)
     if seeded:
         print(f"Capabilities seeded from domains: {', '.join(seeded)}. They are a starting point; "
@@ -228,10 +232,12 @@ def _print_capability_notes(added: list, seeded: list, taken: list):
               "Replace core with the project's own list.")
     for name in taken:
         print(f"Domain {name} is not seeded: the capability {name} keeps the template's text.")
+    if thin:
+        print(f"Notice: {shape_notice(thin, seeds=True)}")
 
 
 def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
-                              added, seeded, taken) -> int:
+                              added, seeded, taken, thin) -> int:
     """--upgrade --dry-run: print the lines the upgrade would write, and
     write nothing."""
     try:
@@ -257,6 +263,6 @@ def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
             print()
             print(block.rstrip('\r\n').replace('\r\n', '\n'))
         print()
-    _print_capability_notes(added, seeded, taken)
+    _print_capability_notes(added, seeded, taken, thin)
     print("Run `adr contract --upgrade` without --dry-run to write it.")
     return 0

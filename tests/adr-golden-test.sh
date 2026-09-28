@@ -873,6 +873,58 @@ capture contract-import-scan  import scan docs/architecture/system/ADR-102-hook-
 capture contract-import-apply import apply --partial
 (cd "$WORK/repo" && git status --porcelain -- docs/architecture/adr.yaml | normalize) > "$ACTUAL/contract-import-apply-config-status.txt"
 
+# --- vocabulary shape --------------------------------------------------------------
+
+# gen_v0 FOLDER FIRST COUNT — COUNT small v0 records numbered from FIRST
+gen_v0() {
+  local n
+  for ((n = $2; n < $2 + $3; n++)); do
+    printf -- '---\nstatus: Accepted\ndate: 2025-05-01\ndeciders: [developer]\n---\n\n# ADR-%d: Generated record %d\n\n## Context\n\nA generated record.\n' \
+      "$n" "$n" > "$WORK/repo/docs/architecture/$1/ADR-$n-generated.md"
+  done
+}
+# gen_v1 CAPABILITY FIRST COUNT — COUNT small v1 evidence records in system/
+gen_v1() {
+  local n
+  for ((n = $2; n < $2 + $3; n++)); do
+    printf -- '---\ncontract: adr/v1\nkind: evidence\ncapability: %s\nstatus: accepted\ndate: 2025-05-01\ndeciders: [developer]\n---\n\n# ADR-%d: Generated finding %d\n\nA generated finding.\n' \
+      "$1" "$n" "$n" > "$WORK/repo/docs/architecture/system/ADR-$n-generated.md"
+  done
+}
+
+# Fat corpus, skinny domains: 47 of 52 records in system. domains and
+# contract print a notice; --whatif prints it with the seeds; v0 lint does not.
+fresh corpus
+gen_v0 system 120 40
+commit_all "fat system"
+capture shape-thin-domains        domains
+capture shape-thin-contract       contract
+capture shape-thin-upgrade-whatif contract --upgrade --whatif
+capture shape-thin-v0-lint        lint
+# Balanced: 52 records across three domains; no notice.
+fresh corpus
+gen_v0 system 120 14
+gen_v0 runbooks 220 13
+gen_v0 documentation 320 13
+commit_all "balanced"
+capture shape-balanced-domains domains
+capture shape-balanced-contract contract
+# adr/v1, 40 records on one capability: lint warns (vocabulary-thin), contract
+# prints the notice.
+fresh v1
+gen_v1 ingest 120 40
+commit_all "fat ingest"
+capture shape-thin-v1-lint     lint
+capture shape-thin-v1-contract contract
+# adr/v1, 40 records across three capabilities in one domain: the capability
+# axis is balanced, so lint does not warn about the single domain.
+fresh v1
+gen_v1 adr 120 14
+gen_v1 ingest 134 13
+gen_v1 search 147 13
+commit_all "balanced capabilities"
+capture shape-balanced-v1-lint lint
+
 fresh v1-defects
 capture v1-defects-lint        lint
 capture v1-defects-lint-check  lint --check

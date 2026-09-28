@@ -133,6 +133,47 @@ mkdir -p "$dir/docs/architecture/core"
 printf -- '---\ncontract: adr/v1\nkind: decision\n---\n\n# ADR-100: x\n' > "$dir/docs/architecture/core/ADR-100-x.md"
 check "records ahead, tool without the command: re-vendor first" contains "Re-vendor the tool (the \`adr\` skill), then run" "$(run_macro "$dir")"
 
+echo "Vocabulary shape"
+# records DIR FOLDER FIRST COUNT FRONTMATTER — COUNT records with that frontmatter
+records() {
+  local n
+  mkdir -p "$1/docs/architecture/$2"
+  for ((n = $3; n < $3 + $4; n++)); do
+    printf -- '---\n%b---\n\n# ADR-%d: r\n' "$5" "$n" > "$1/docs/architecture/$2/ADR-$n-r.md"
+  done
+}
+dir=$(project shape-fat "$CURRENT" '')
+records "$dir" core 100 45 'status: Accepted\n'
+records "$dir" api 300 5 'status: Accepted\n'
+records "$dir" archive 500 30 'status: Accepted\n'
+out=$(run_macro "$dir")
+check "fat domain: notice" contains "_50 records sit in 2 folders under \`docs/architecture/\`; core holds 45 (90%)." "$out"
+check "fat domain: points at adr domains" contains "\`docs/scripts/adr domains\` names the next steps" "$out"
+dir=$(project shape-few "$CURRENT" '')
+records "$dir" core 100 39 'status: Accepted\n'
+check "under 40 records: no notice" lacks "records sit in" "$(run_macro "$dir")"
+dir=$(project shape-even "$CURRENT" '')
+records "$dir" core 100 15 'status: Accepted\n'
+records "$dir" api 300 15 'status: Accepted\n'
+records "$dir" ui 500 15 'status: Accepted\n'
+check "balanced domains: no notice" lacks "records sit in" "$(run_macro "$dir")"
+dir=$(project shape-v1 "$CURRENT" adr/v1)
+printf 'capabilities:\n  ingest: x\n  search: y\n  adr: z\n' >> "$dir/docs/architecture/adr.yaml"
+records "$dir" core 100 30 'contract: adr/v1\ncapability: ingest\n'
+records "$dir" core 130 6 'contract: "adr/v1"\ncapability: [ingest, search]\n'
+records "$dir" core 136 6 'contract: adr/v1\ncapability:\n  - search\n  - adr\n'
+out=$(run_macro "$dir")
+check "fat capability: notice" contains "_42 adr/v1 records use 3 capabilities; ingest is on 36 (86%)." "$out"
+check "fat capability: no folder notice" lacks "records sit in" "$out"
+dir=$(project shape-v1-even "$CURRENT" adr/v1)
+printf 'capabilities:\n  ingest: x\n  search: y\n  adr: z\n' >> "$dir/docs/architecture/adr.yaml"
+records "$dir" core 100 14 'contract: adr/v1\ncapability: ingest\n'
+records "$dir" core 114 14 'contract: adr/v1\ncapability: search\n'
+records "$dir" core 128 14 'contract: adr/v1\ncapability: adr\n'
+out=$(run_macro "$dir")
+check "balanced capabilities in one folder: no notice" lacks "adr/v1 records use" "$out"
+check "balanced capabilities in one folder: no folder notice" lacks "records sit in" "$out"
+
 echo "v1 guide content"
 out=$(run_macro "$(project content "$CURRENT" adr/v1)")
 check "enactment" contains "enacted:" "$out"

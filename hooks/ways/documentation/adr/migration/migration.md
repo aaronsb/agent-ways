@@ -107,6 +107,17 @@ knowledge-graph-system's 9 domains became 18 capabilities (#616), part of it:
 
 agent-ways, a tooling project, went from 6 domains to 13 capabilities: `adr`, `docs`, `method`, `matching`, `disclosure`, `authoring`, `cli`, `attend`, `install`, `config`, `governance`, `loop`, `testing` (its `docs/architecture/adr.yaml`).
 
+### When the tool reports a thin vocabulary
+
+`adr contract`, `adr domains` and, under adr/v1, `adr lint` print a notice when at least 40 records sit under 2 or fewer domains or capabilities, or one domain holds 60% of them, or one capability is on 50% of the adr/v1 records. Seeds from such domains give a list as coarse as the domains.
+
+1. Read the records: `adr list --json` gives each one's title and fields; read the Context sections of the large group.
+2. Group the records by what their decisions change. Under adr/v1, propose capabilities directly; the domains only allocate numbers.
+3. Show the operator each proposed domain or capability with its one-line description and three or four example records. The operator decides.
+4. Apply what the operator accepts: edit `capabilities` in `adr.yaml` and each record's `capability` with `adr set`, or move records with `adr domain move --plan`. Run each first with `--whatif`.
+
+The tool changes nothing on its own.
+
 ## Writing adr.yaml
 
 The config file defines your project's ADR structure. Required fields:

@@ -1,0 +1,22 @@
+
+ADR Fixture — ADR Domain Number Series
+============================================================
+(from docs/architecture/adr.yaml)
+
+  system   (100-199)  System
+           Runtime, hooks and storage
+           Folder: system/
+
+  ops      (200-299)  Operations
+           Deployment and runbooks, split across two folders
+           Folder: operations/, runbooks/
+
+  docs     (300-399)  Documentation
+           Documentation structure and tooling
+           Folder: documentation/
+
+  legacy   (  1- 99)  Legacy (Pre-Domain Numbering)
+
+Notice: 52 records in 3 domains; system holds 47 (90%). Seeding from these domains gives 3 capabilities. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
+
+[exit 0]

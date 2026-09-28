@@ -9,6 +9,7 @@ refs.py
 rules_v1.py
 rules_v1_basis.py
 rules_v1_integrity.py
+shape.py
 relocate.py
 sheet.py
 record_edit.py

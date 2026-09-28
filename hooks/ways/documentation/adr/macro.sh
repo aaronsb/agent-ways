@@ -51,6 +51,88 @@ records_declaring() {
     }' {} + 2>/dev/null | head -1
 }
 
+# The vocabulary shape, counted as the tool's src/shape.py counts it and with
+# its thresholds: at least SHAPE_MIN records, and at most FEW names in use or
+# one name on SHARE of the records. Prints "records in_use top top_count", or
+# nothing when the axis is not thin. Input: one line per record, holding its
+# names separated by commas.
+SHAPE_MIN=40
+thin_axis() {  # thin_axis FEW SHARE
+  awk -F',' -v min="$SHAPE_MIN" -v few="$1" -v share="$2" '
+    {
+      n = 0; delete seen
+      for (i = 1; i <= NF; i++) {
+        c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c)
+        if (c == "" || c == "*" || (c in seen)) continue
+        seen[c] = 1; count[c]++; n++
+      }
+      if (n) records++
+    }
+    END {
+      if (records < min) exit
+      for (c in count) {
+        k++
+        if (count[c] > tc || (count[c] == tc && c < top)) { top = c; tc = count[c] }
+      }
+      if (k <= few || tc >= share * records) printf "%d %d %s %d\n", records, k, top, tc
+    }'
+}
+
+# domain_folders DIR — one line per active record: the folder it sits in.
+# The tool counts domains, and a domain may span folders, so this count can
+# only undercount a thin shape. archive/ and legacy/ are not domains.
+domain_folders() {
+  find "$1" -mindepth 2 -maxdepth 2 -type f -name 'ADR-*.md' 2>/dev/null \
+    | awk -F/ '$(NF-1) != "archive" && $(NF-1) != "legacy" { print $(NF-1) }'
+}
+
+# record_capabilities DIR — one line per active adr/v1 record: its capability
+# names, from the frontmatter block only (a scalar, a flow list or a block list).
+record_capabilities() {
+  find "$1" -type f -name 'ADR-*.md' -not -path "$1/archive/*" -exec awk '
+    { sub(/\r$/, "") }
+    FNR == 1 { infm = ($0 == "---"); v1 = 0; caps = ""; inlist = 0; next }
+    !infm { nextfile }
+    /^---[ \t]*$/ { if (v1 && caps != "") print caps; infm = 0; nextfile }
+    inlist && /^[ \t]+-/ {
+      v = $0; sub(/^[ \t]+-[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v); gsub(/["\047]/, "", v)
+      caps = caps (caps == "" ? "" : ",") v; next
+    }
+    { inlist = 0 }
+    /^contract:/ {
+      v = $0; sub(/^contract:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v); gsub(/["\047 \t]/, "", v)
+      if (v == "adr/v1") v1 = 1
+    }
+    /^capability:/ {
+      v = $0; sub(/^capability:[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v); gsub(/[][\"\047]/, "", v)
+      if (v == "") inlist = 1; else caps = v
+    }' {} + 2>/dev/null
+}
+
+# shape_notice SCRIPT AXIS — one line when the axis is thin (the tool's
+# `domains` and `lint` print the full notice).
+shape_notice() {
+  local arch="$PROJECT_DIR/docs/architecture" found records in_use top top_count pct
+  if [[ "$2" == capability ]]; then
+    found=$(record_capabilities "$arch" | thin_axis 2 0.50)
+  else
+    found=$(domain_folders "$arch" | thin_axis 2 0.60)
+  fi
+  [[ -n "$found" ]] || return 0
+  read -r records in_use top top_count <<< "$found"
+  pct=$(( (100 * top_count + records / 2) / records ))
+  echo ""
+  if [[ "$2" == capability ]]; then
+    local names=capabilities
+    (( in_use == 1 )) && names=capability
+    echo "_$records adr/v1 records use $in_use $names; $top is on $top_count ($pct%). \`$1 lint\` names the next steps._"
+  else
+    local names=folders
+    (( in_use == 1 )) && names=folder
+    echo "_$records records sit in $in_use $names under \`docs/architecture/\`; $top holds $top_count ($pct%). \`$1 domains\` names the next steps._"
+  fi
+}
+
 # contract_newer A B — true when contract A (adr/vN) is newer than B
 contract_newer() {
   local a=${1#adr/v} b=${2#adr/v}
@@ -231,6 +313,18 @@ if [[ -n "$ADR_SCRIPT" ]]; then
   if [[ -n "$contract" && $has_contract_cmd -eq 1 ]] && contract_newer "$current" "$contract"; then
     echo ""
     echo "_\`adr.yaml\` declares $contract; this tool writes $current. \`$ADR_SCRIPT contract --upgrade\` brings \`adr.yaml\` to $current._"
+  fi
+
+  # A large corpus under few names (the tool's vocabulary shape). Under
+  # adr/v1 with a capabilities vocabulary the capability axis is counted,
+  # otherwise the domain folders.
+  if [[ $has_contract_cmd -eq 1 ]]; then
+    if [[ "$contract" == "adr/v1" && $v1_tool -eq 1 ]] \
+       && grep -q '^capabilities:' "$PROJECT_DIR/docs/architecture/adr.yaml" 2>/dev/null; then
+      shape_notice "$ADR_SCRIPT" capability
+    else
+      shape_notice "$ADR_SCRIPT" domain
+    fi
   fi
 
   # Direction-aware drift check against the universal template (ADR-177):

@@ -1,0 +1,43 @@
+docs/architecture/adr.yaml: adr/v0 -> adr/v1 (dry run; nothing written)
+  would be added: contract: adr/v1
+  would be added: kinds
+  would be added: capabilities
+
+Appended to the end of the file:
+
+# The record contract (ADR-304). With `contract: adr/v1`, records are typed:
+# each declares a kind, and a decision names a verb, a capability and its
+# basis. Delete this line and the v1 blocks below to stay on adr/v0.
+contract: adr/v1
+
+kinds:
+  decision:
+    verb: required
+    requires: [capability, basis, agent]
+    sections: [Summary]
+    edges: { supersedes: decision, amends: decision, extends: decision, basis: [decision, spec, evidence] }
+  spec:
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: spec, decided_by: decision }
+  evidence:
+    verb: forbidden
+    requires: [capability]
+    edges: { supersedes: evidence }
+
+# What the project does, one line each. A record's `capability` names one of
+# these, and a decision adds, cuts, changes or constrains them.
+# `adr contract --upgrade` seeded the entries before `process` from the
+# domains in this file. Each may be kept, split, renamed or deleted.
+capabilities:
+  system: Runtime, hooks and storage
+  ops: Deployment and runbooks, split across two folders
+  docs: Documentation structure and tooling
+  process: Conventions, documentation and the development process that belong to no product capability
+  adr: Decision records, their contract and the adr tool
+
+Capabilities seeded from domains: system, ops, docs. They are a starting point; the operator or the agent may keep, split, rename or delete each one.
+Capabilities from the template: process and adr.
+Notice: 52 records in 3 domains; system holds 47 (90%). Seeding from these domains gives 3 capabilities. Read the records and propose domains or capabilities (`adr list --json` gives titles and fields), then apply with `adr domain move --plan` or by editing `capabilities`, previewing with --whatif.
+Run `adr contract --upgrade` without --dry-run to write it.
+[exit 0]
