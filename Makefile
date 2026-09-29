@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-lang test-locales test-multilingual test-live release purge-attend-state
+.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-lang test-locales test-multilingual test-live release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -349,7 +349,7 @@ way-embed-rebuild:
 
 # --- Test ---
 
-test: lint test-smoke test-unit test-sim test-adr
+test: lint test-smoke test-unit test-sim test-adr test-statusline
 	@echo "All tests passed."
 
 lint:
@@ -378,6 +378,10 @@ test-adr:
 	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
 	@docs/scripts/adr cite --check >/dev/null || { docs/scripts/adr cite; exit 1; }
 	@echo "adr tool tests passed."
+
+test-statusline: ## Test statusline.sh segments against stub attend builds
+	@echo "Running statusline tests..."
+	@bash tests/statusline-test.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."

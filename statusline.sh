@@ -1,57 +1,95 @@
 #!/usr/bin/env bash
+# statusline.sh — the agent-ways reference status line for Claude Code.
+#
+# Use it as is: point settings.json at it.
+#   "statusLine": { "type": "command", "command": "${HOME}/.local/share/agent-ways/statusline.sh" }
+#
+# Build on it: source it from your own script and call the segments you want.
+#   source "${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/statusline.sh"
+#   echo "$(sl_agent)$(sl_dir) | my own stuff"
+#
+# Sourcing defines the sl_* functions and prints nothing. Each segment prints
+# its text with a trailing space, or nothing when it has nothing to show, so
+# segments concatenate without separators to manage. See
+# docs/reference/statusline.md.
 
-# Timeout for all operations (1 second max)
-TIMEOUT=1
+SL_TIMEOUT=${SL_TIMEOUT:-1}
 
-# Get current directory (basename only for brevity)
-DIR=$(basename "$(pwd)")
-
-# Get current time
-TIME=$(date +%H:%M)
-
-# Get attend agent name if this session is enrolled (attend running).
-# CLI is the contract: read sanctioned attend surfaces, never attend-owned
-# state. Prefer `attend whoami` (ADR-171): its display name derives from the
-# session record's origin path, so it stays stable when the shell's cwd
-# wanders (the `attend peers` self-row keys on live process cwd and would
-# drift — e.g. rendering a tools/-flavored persona after a stray `cd`).
-# Fall back to the peers parse for attend builds that predate whoami.
-AGENT_INFO=""
-if command -v attend > /dev/null 2>&1; then
-    ESC=$(printf '\033')
-    AGENT_NAME=$(timeout $TIMEOUT attend whoami 2>/dev/null \
-        | sed "s/${ESC}\[[0-9;]*m//g" \
-        | awk '/^ *display/{print $2; exit}')
-    if [[ -z "$AGENT_NAME" ]]; then
-        AGENT_NAME=$(timeout $TIMEOUT attend peers 2>/dev/null \
-            | sed "s/${ESC}\[[0-9;]*m//g" \
-            | awk '/\(self\)/{print $2; exit}')
-    fi
-    if [[ -n "$AGENT_NAME" ]]; then
-        AGENT_INFO="🤖 $AGENT_NAME "
-    fi
-fi
-
-# Get git branch and remote if in a git repo
-GIT_INFO=""
-REMOTE_INFO=""
-if timeout $TIMEOUT git rev-parse --git-dir > /dev/null 2>&1; then
-    BRANCH=$(timeout $TIMEOUT git branch --show-current 2>/dev/null || timeout $TIMEOUT git rev-parse --short HEAD 2>/dev/null)
-    # Check for uncommitted changes (skip if timeout)
-    if timeout $TIMEOUT git status --porcelain 2>/dev/null | grep -q .; then
-        GIT_INFO=" 🔀 $BRANCH*"
+# Run a command under SL_TIMEOUT seconds. macOS ships no `timeout`; coreutils
+# from Homebrew installs it as `gtimeout`. Without either, run unbounded.
+sl__run() {
+    if command -v timeout > /dev/null 2>&1; then
+        timeout "$SL_TIMEOUT" "$@"
+    elif command -v gtimeout > /dev/null 2>&1; then
+        gtimeout "$SL_TIMEOUT" "$@"
     else
-        GIT_INFO=" 🔀 $BRANCH"
+        "$@"
     fi
+}
 
-    # Get remote URL and extract owner/repo
-    REMOTE_URL=$(timeout $TIMEOUT git remote get-url origin 2>/dev/null)
-    if [[ -n "$REMOTE_URL" ]]; then
-        # Extract owner/repo from URL (works for both SSH and HTTPS)
-        REMOTE_REPO=$(echo "$REMOTE_URL" | sed -E 's#.*/([^/]+/[^/]+)(\.git)?$#\1#' | sed 's/\.git$//')
-        REMOTE_INFO=" 📡 $REMOTE_REPO"
+# This session's attend display name, or nothing when attend is absent.
+# CLI is the contract: read sanctioned attend surfaces, never attend-owned
+# state. `attend whoami` derives the name from the session record's origin
+# path (ADR-171), so it stays stable when the shell's cwd wanders.
+# `--display` prints the name alone; attend builds before it get the name
+# parsed from the whoami table.
+sl_agent_name() {
+    command -v attend > /dev/null 2>&1 || return 0
+    local name
+    name=$(sl__run attend whoami --display 2>/dev/null) || name=""
+    if [[ -z "$name" ]]; then
+        local esc
+        esc=$(printf '\033')
+        name=$(sl__run attend whoami 2>/dev/null \
+            | sed "s/${esc}\[[0-9;]*m//g" \
+            | awk '/^ *display/{print $2; exit}')
     fi
+    printf '%s' "$name"
+}
+
+sl_agent() {
+    local name
+    name=$(sl_agent_name)
+    [[ -n "$name" ]] && printf '🤖 %s ' "$name"
+    return 0
+}
+
+sl_dir() {
+    printf '📁 %s ' "$(basename "$(pwd)")"
+}
+
+# Branch, with `*` when the tree has uncommitted changes.
+sl_git() {
+    sl__run git rev-parse --git-dir > /dev/null 2>&1 || return 0
+    local branch
+    branch=$(sl__run git branch --show-current 2>/dev/null)
+    [[ -n "$branch" ]] || branch=$(sl__run git rev-parse --short HEAD 2>/dev/null)
+    if sl__run git status --porcelain 2>/dev/null | grep -q .; then
+        branch="$branch*"
+    fi
+    printf '🔀 %s ' "$branch"
+}
+
+# owner/repo of the origin remote, from an SSH or HTTPS URL.
+sl_remote() {
+    local url repo
+    url=$(sl__run git remote get-url origin 2>/dev/null) || return 0
+    [[ -n "$url" ]] || return 0
+    repo=$(printf '%s' "$url" | sed -E 's#.*[/:]([^/:]+/[^/]+)$#\1#; s/\.git$//')
+    printf '📡 %s ' "$repo"
+}
+
+sl_time() {
+    printf '🕐 %s ' "$(date +%H:%M)"
+}
+
+statusline_render() {
+    local right
+    right=$(sl_time)
+    printf '%s| %s\n' "$(sl_agent)$(sl_dir)$(sl_git)$(sl_remote)" "${right% }"
+}
+
+# Render only when executed. Sourcing defines the functions and stops here.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    statusline_render
 fi
-
-# Combine all elements
-echo "${AGENT_INFO}📁 $DIR$GIT_INFO$REMOTE_INFO | 🕐 $TIME"
