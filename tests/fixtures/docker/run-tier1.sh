@@ -275,7 +275,7 @@ NZ=$(nonzero_hooks); if [[ -z "$NZ" ]]; then ok "every UserPromptSubmit hook exi
 
 section "hooks: PreToolUse Bash"
 OUT=$(run_event PreToolUse Bash "$FIX/payloads/pre-tool-use-bash.json")
-assert_contains "decision approve" '"decision":"approve"' "$OUT"
+assert_contains "hookSpecificOutput emitted" '"hookEventName":"PreToolUse"' "$OUT"
 assert_contains "gitconfig way disclosed on git config --global" "# Global Git Config" "$OUT"
 NZ=$(nonzero_hooks); if [[ -z "$NZ" ]]; then ok "every PreToolUse Bash hook exits 0"; else fail "every PreToolUse Bash hook exits 0" "$NZ"; fi
 

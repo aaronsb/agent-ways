@@ -7,6 +7,8 @@
 //! when both paths agree (they're independent confirmations of the same
 //! semantic match).
 
+use crate::cmd::show::ContextBudget;
+
 pub(crate) struct EmbedScores {
     /// Scores from the English model × English corpus.
     /// `None` means the engine/corpus/model is unavailable.
@@ -252,13 +254,20 @@ pub(crate) fn capture_show_way(
     fire_score: Option<f64>,
     matched_span: Option<&str>,
     surface: Option<&str>,
+    budget: Option<&mut ContextBudget>,
 ) -> String {
-    crate::cmd::show::way_scored(id, session_id, trigger, fire_score, matched_span, surface)
+    crate::cmd::show::way_scored(id, session_id, trigger, fire_score, matched_span, surface, budget)
         .unwrap_or_default()
 }
 
-pub(crate) fn capture_show_check(id: &str, session_id: &str, trigger: &str, score: f64) -> String {
-    crate::cmd::show::check(id, session_id, trigger, score).unwrap_or_default()
+pub(crate) fn capture_show_check(
+    id: &str,
+    session_id: &str,
+    trigger: &str,
+    score: f64,
+    budget: Option<&mut ContextBudget>,
+) -> String {
+    crate::cmd::show::check_within(id, session_id, trigger, score, budget).unwrap_or_default()
 }
 
 // ── Path helpers ───────────────────────────────────────────────

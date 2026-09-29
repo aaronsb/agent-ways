@@ -17,7 +17,110 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None, None, None)
+    way_scored(id, session_id, trigger, None, None, None, None)
+}
+
+// ── Hook context budget ─────────────────────────────────────────
+
+/// Claude Code's cap on one hook's `additionalContext` string. From the hooks
+/// reference (<https://code.claude.com/docs/en/hooks.md>, "JSON output"): each
+/// `additionalContext` is capped at 10,000 characters, and over the limit
+/// Claude Code saves it to a file and hands the model the path plus a preview
+/// of the first 2,000 characters. One `git commit` once matched 17,832
+/// characters across seven ways, so most of that never reached the model.
+pub const HOOK_CONTEXT_CAP: usize = 10_000;
+
+/// Length as Claude Code counts it: a JavaScript string length, which is
+/// UTF-16 code units. Never less than the `char` count, so it errs short.
+pub fn context_chars(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Room left in one hook invocation's `additionalContext`.
+///
+/// A scan lane hands one budget to every way and check it shows, in match
+/// order. A body that fits is admitted whole. The first body that does not
+/// fit closes the budget, and every later candidate in the invocation is
+/// withheld. A withheld way is not recorded as fired, so its refire curve does
+/// not start for guidance the model never saw, and it is free to fire on its
+/// next match. Bodies are never split.
+///
+/// The first body is always admitted, even when it alone is over the cap.
+/// Dropping it would withhold that way on every match for good; admitting it
+/// gets Claude Code's file-plus-preview handling, the result before the budget.
+#[derive(Debug)]
+pub struct ContextBudget {
+    used: usize,
+    cap: usize,
+    closed: bool,
+}
+
+impl ContextBudget {
+    pub fn new(cap: usize) -> Self {
+        Self { used: 0, cap, closed: false }
+    }
+
+    /// A budget sized to Claude Code's hook `additionalContext` cap.
+    pub fn hook() -> Self {
+        Self::new(HOOK_CONTEXT_CAP)
+    }
+
+    /// Admit `text` whole if it fits, and charge it. The first refusal closes
+    /// the budget.
+    pub fn admit(&mut self, text: &str) -> bool {
+        if self.closed {
+            return false;
+        }
+        let n = context_chars(text);
+        if self.used == 0 || self.used + n <= self.cap {
+            self.used += n;
+            true
+        } else {
+            self.closed = true;
+            false
+        }
+    }
+
+    /// Charge text the caller adds between admitted bodies (separators).
+    pub fn charge(&mut self, text: &str) {
+        self.used += context_chars(text);
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+}
+
+/// Record a way that matched but was not shown, so the refire curve's work
+/// and the context cap's are countable in the event log. Cheap by design: no
+/// transcript read and no engagement reload.
+///
+/// `reason` is `refire` when the way's refire curve (ADR-126) still holds it
+/// back, or `context_cap` when the hook's context budget had no room for it.
+fn log_way_suppressed(
+    id: &str,
+    domain: &str,
+    trigger: &str,
+    reason: &str,
+    scope: &str,
+    project_dir: &str,
+    session_id: &str,
+) {
+    let agent_id = std::env::var("CLAUDE_AGENT_ID")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "main".to_string());
+    session::log_event(&[
+        ("event", "way_suppressed"),
+        ("way", id),
+        ("domain", domain),
+        ("trigger", trigger),
+        ("reason", reason),
+        ("scope", scope),
+        ("project", project_dir),
+        ("session", session_id),
+        ("agent_id", &agent_id),
+    ]);
 }
 
 /// Whether a resolved context actually detected its window, rather than falling
@@ -153,6 +256,7 @@ pub fn way_scored(
     fire_score: Option<f64>,
     matched_span: Option<&str>,
     surface: Option<&str>,
+    budget: Option<&mut ContextBudget>,
 ) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
@@ -217,10 +321,15 @@ pub fn way_scored(
     })?;
     let outcome = session::way_fire_outcome(id, session_id, &curve);
     if !outcome.is_allowed() {
+        log_way_suppressed(id, domain, trigger, "refire", &scope, &project_dir, session_id);
         return Ok(String::new());
     }
     let is_redisclosure = outcome.is_redisclosure();
-    session::record_way_fire(id, session_id, &curve);
+    // A closed budget withholds the way before its macro runs.
+    if budget.as_deref().is_some_and(ContextBudget::is_closed) {
+        log_way_suppressed(id, domain, trigger, "context_cap", &scope, &project_dir, session_id);
+        return Ok(String::new());
+    }
 
     // Macro handling
     let macro_pos = extract_field(&content, "macro");
@@ -257,6 +366,17 @@ pub fn way_scored(
             output.push_str(out);
         }
     }
+
+    // Record the fire only once the body is known to be emitted. A way the
+    // context budget withholds must not start its refire curve or stamp its
+    // markers, or the curve would hold back guidance the model never saw.
+    if let Some(b) = budget {
+        if !b.admit(&output) {
+            log_way_suppressed(id, domain, trigger, "context_cap", &scope, &project_dir, session_id);
+            return Ok(String::new());
+        }
+    }
+    session::record_way_fire(id, session_id, &curve);
 
     // Stamp markers
     let token_pos = session::get_token_position(session_id);
@@ -376,6 +496,17 @@ pub fn way_scored(
 // ── ways show check ─────────────────────────────────────────────
 
 pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Result<String> {
+    check_within(id, session_id, trigger, match_score, None)
+}
+
+/// [`check`] charged against a hook's [`ContextBudget`] when one is given.
+pub fn check_within(
+    id: &str,
+    session_id: &str,
+    trigger: &str,
+    match_score: f64,
+    mut budget: Option<&mut ContextBudget>,
+) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
 
@@ -425,20 +556,35 @@ pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Res
         return Ok(String::new());
     }
 
+    // Include anchor section when epoch distance >= 5
+    let include_anchor = epoch_distance >= 5;
+    let sections = check_sections_text(&check_content, include_anchor);
+
+    // The check's own sections claim budget first; a check with no room is
+    // withheld whole and its fire count is not bumped. The parent way pulled
+    // below then competes for what is left, under the same rules as any way.
+    if let Some(b) = budget.as_deref_mut() {
+        if !b.admit(&sections) {
+            return Ok(String::new());
+        }
+    }
+
     let mut output = String::new();
 
     // If parent way hasn't fired, pull it in alongside the check
     if !way_has_fired {
-        let parent_out = way(id, session_id, "check-pull")?;
+        let parent_out =
+            way_scored(id, session_id, "check-pull", None, None, None, budget.as_deref_mut())?;
         if !parent_out.is_empty() {
             output.push_str(&parent_out);
             output.push('\n');
+            if let Some(b) = budget {
+                b.charge("\n");
+            }
         }
     }
 
-    // Include anchor section when epoch distance >= 5
-    let include_anchor = epoch_distance >= 5;
-    output.push_str(&check_sections_text(&check_content, include_anchor));
+    output.push_str(&sections);
 
     // Bump fire count
     session::bump_check_fires(id, session_id);
@@ -788,5 +934,45 @@ mod tests {
     #[test]
     fn normalize_single_segment() {
         assert_eq!(normalize_way_id("testing"), "testing");
+    }
+
+    // ── ContextBudget (#528) ────────────────────────────────────
+
+    #[test]
+    fn budget_admits_whole_bodies_in_order_then_closes() {
+        let mut b = ContextBudget::new(10);
+        assert!(b.admit("abcd"));
+        b.charge("\n\n");
+        assert!(b.admit("ab"), "6 + 2 = 8 fits under 10");
+        assert!(!b.admit("abc"), "8 + 3 = 11 is over the cap");
+        assert!(b.is_closed());
+        assert!(!b.admit(""), "a closed budget admits nothing, even an empty body");
+    }
+
+    #[test]
+    fn budget_admits_an_oversized_first_body() {
+        let mut b = ContextBudget::new(10);
+        assert!(b.admit(&"x".repeat(25)), "the first body is never dropped");
+        assert!(!b.admit("y"));
+        assert!(b.is_closed());
+    }
+
+    #[test]
+    fn budget_counts_utf16_units_like_claude_code() {
+        // One astral-plane char is two UTF-16 units, as a JS string counts it.
+        assert_eq!(context_chars("😀"), 2);
+        assert_eq!(context_chars("é"), 1);
+        let mut b = ContextBudget::new(3);
+        assert!(b.admit("😀"));
+        assert!(!b.admit("😀"), "2 + 2 = 4 is over a cap of 3");
+    }
+
+    #[test]
+    fn hook_budget_is_the_documented_cap() {
+        assert_eq!(HOOK_CONTEXT_CAP, 10_000);
+        let mut b = ContextBudget::hook();
+        assert!(b.admit(&"x".repeat(6_000)));
+        assert!(b.admit(&"x".repeat(4_000)), "exactly at the cap fits");
+        assert!(!b.admit("x"));
     }
 }
