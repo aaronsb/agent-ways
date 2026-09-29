@@ -1,6 +1,6 @@
 ---
 description: handing a proposed decision record to the operator, checking the operator's intent, an advisor answering when no one is present or under a goal, reviewing past decisions with the operator, accepting rejecting or abandoning a record, and raising a concern about a decision
-vocabulary: consider review approve approval looks good lgtm ship it sounds good go ahead accept reject abandon proposed decision summary probe probes intent inversion advisor skeptic goal unattended concern pushback sign off operator recent decisions sessions flag
+vocabulary: canary consider review approve approval looks good lgtm ship it sounds good go ahead accept reject abandon proposed decision summary probe probes intent inversion advisor skeptic goal unattended concern pushback sign off operator recent decisions sessions flag
 pattern: \b(looks? good|lgtm|sgtm|ship it|sounds good|go ahead|go for it|approved?|accept (it|this|the adr|adr-?\s?\d+)|review (with me )?(the |my |our )?(recent |last \w+ )?(decisions|adrs|records))\b
 commands: adr\ (accept|reject|abandon|consider)
 files: docs/architecture/.*\.md$
@@ -21,6 +21,13 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
 - Ask the probes as part of your reply, one short line each. With more than one pending, ask them through the choice tool as one batch when it is available. An answer is never required. `adr accept` reads no answer and records nothing on the operator's behalf.
+
+## A canary
+
+- You may add a canary among the intent checks: a point that is deliberately wrong, harmless if accepted, and never about safety. Ask it in the conversation only. It never goes in the record's text.
+- It is a signal probe and is never required. If no one answers it, record nothing about it and continue.
+- When someone answers, reveal the canary right after, and add `--canary caught` or `--canary missed` to that answer's `considered` entry. When an advisor answers, the canary tests the advisor's confidence; record it the same way on the advisor's entry.
+- A missed canary is information. Say so once, and proceed without chasing it or re-asking the probes.
 
 ## When the answer comes
 
