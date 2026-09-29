@@ -18,13 +18,22 @@ jobs:
     strategy:
       matrix:
         include:
+          # GGML_NATIVE=OFF: llama.cpp otherwise compiles for the runner's own
+          # CPU. GitHub's x86 runners have AVX-512, and a native build died
+          # with SIGILL on AVX2-only CPUs (Alder Lake and later Intel client
+          # chips). Off, x86 targets the AVX2/FMA/F16C baseline and aarch64
+          # plain ARMv8. The Apple Silicon build stays native; every arm64
+          # Mac shares its baseline.
           - os: ubuntu-latest
             platform: linux-x86_64
+            cmake_extra: -DGGML_NATIVE=OFF
           - os: ubuntu-24.04-arm
             platform: linux-aarch64
+            cmake_extra: -DGGML_NATIVE=OFF
           - os: macos-latest
             platform: darwin-x86_64
             cmake_extra: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DGGML_NATIVE=OFF
+            cross: true
           - os: macos-latest
             platform: darwin-arm64
 
@@ -52,12 +61,21 @@ jobs:
           cp build/way-embed ../../bin/way-embed-${{ matrix.platform }}
 
       - name: Smoke test
-        if: ${{ !matrix.cmake_extra }}
+        if: ${{ !matrix.cross }}
         run: |
           bin/way-embed-${{ matrix.platform }} --version
 
+      # The runner has AVX-512, so the smoke test above passes even when the
+      # binary would die on an AVX2-only CPU. Check the instructions instead.
+      - name: No AVX-512 in the portable x86 build
+        if: ${{ matrix.platform == 'linux-x86_64' }}
+        run: |
+          n=$(objdump -d --no-show-raw-insn bin/way-embed-linux-x86_64 | grep -c zmm || true)
+          echo "zmm instructions: $n"
+          test "$n" -eq 0
+
       - name: Verify binary exists (cross-compiled)
-        if: ${{ matrix.cmake_extra }}
+        if: ${{ matrix.cross }}
         run: |
           file bin/way-embed-${{ matrix.platform }}
           ls -lh bin/way-embed-${{ matrix.platform }}
