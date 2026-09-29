@@ -183,7 +183,7 @@ enum Commands {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Scaffold a new way with frontmatter, body template, and locale stubs
+    /// Scaffold a new way file (frontmatter and a body template). Ways are authored English-only; locale stubs come from ways-localize (ADR-139)
     Template {
         /// Way path relative to ways root (e.g., "softwaredev/code/newway")
         path: String,

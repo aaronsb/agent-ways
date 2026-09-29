@@ -916,3 +916,77 @@ fn scenario_14_show_way_budget_used_withholds_with_exit_3() {
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// ── Scenario 15: the file lane admits ways in a fixed order (#634) ──
+
+fn scan_file_isolated(session: &str, path: &str, home: &Path, state: &Path) -> String {
+    let output = Command::new(ways_bin())
+        .args([
+            "scan", "file",
+            "--path", path,
+            "--session", session,
+            "--project", "/tmp/nonexistent-project",
+        ])
+        .env("HOME", home)
+        .env("USERPROFILE", home) // see scan_prompt
+        .env("XDG_STATE_HOME", state)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .env_remove("CLAUDE_AGENT_ID")
+        .output()
+        .expect("Failed to run ways scan file");
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// Write a way at `root/rel` that fires on `*.ordered` paths, with a
+/// `# Marker <name>` heading and `body_chars` of filler.
+fn write_file_way(root: &Path, rel: &str, body_chars: usize) {
+    let name = rel.rsplit('/').next().unwrap();
+    let dir = root.join(rel);
+    std::fs::create_dir_all(&dir).unwrap();
+    let body = format!("# Marker {name}\n\n{}\n", "lorem ipsum ".repeat(body_chars / 12));
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\nfiles: \\.ordered$\nscope: agent\nrefire: 0.15\n---\n{body}"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn scenario_15_file_lane_admits_parent_before_children() {
+    let base = std::env::temp_dir().join(format!("ways-sim-order-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    let root = home.join(".claude/hooks/ways/orderdomain");
+
+    // A small unrelated way, then a parent and a child that do not both fit
+    // under the 10,000-character cap. The child's name sorts before the
+    // parent's, so a walk that reaches it first would admit it first.
+    write_file_way(&root, "mm-other", 500);
+    write_file_way(&root, "zz-parent", 5000);
+    write_file_way(&root, "zz-parent/aa-child", 5000);
+
+    let session = format!("sim-s15-{}", std::process::id());
+    clean_markers(&session);
+
+    let out = scan_file_isolated(&session, "/work/notes.ordered", &home, &state);
+    let ctx = assert_pretooluse_envelope(&out, "# Marker zz-parent\n");
+    let other = ctx.find("# Marker mm-other\n").expect("the small way fits first");
+    let parent = ctx.find("# Marker zz-parent\n").unwrap();
+    assert!(other < parent, "families are admitted in id order");
+    assert!(!ctx.contains("# Marker aa-child\n"), "the child must yield to its parent");
+    assert_eq!(
+        events_of(&state, &session, "way_suppressed"),
+        vec![("orderdomain/zz-parent/aa-child".to_string(), "context_cap".to_string())]
+    );
+
+    // The next matching edit delivers the child; the others are inside their
+    // refire windows.
+    let out = scan_file_isolated(&session, "/work/more.ordered", &home, &state);
+    assert_pretooluse_envelope(&out, "# Marker aa-child\n");
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}

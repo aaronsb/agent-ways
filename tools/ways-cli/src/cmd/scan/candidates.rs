@@ -40,7 +40,16 @@ pub(crate) fn collect_candidates(project_dir: &str) -> Vec<WayCandidate> {
     let claimed = seen.clone();
     collect_from_dir(Walk { dir: &roots.core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.core) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
+    sort_by_tree_id(&mut candidates);
     candidates
+}
+
+/// Put candidates in tree order of their bare id (a parent before its
+/// children), so every consumer sees the same order whatever the directory
+/// walk returned. Shadowing is already resolved by this point, so the order
+/// across roots carries no meaning.
+fn sort_by_tree_id(candidates: &mut [WayCandidate]) {
+    candidates.sort_by(|a, b| a.id.split('/').cmp(b.id.split('/')));
 }
 
 /// The three way roots and their canonical forms.
@@ -102,6 +111,7 @@ pub(crate) fn collect_checks(project_dir: &str) -> Vec<WayCandidate> {
     let claimed = seen.clone();
     collect_from_dir(Walk { dir: &roots.core, corpus_prefix: "", kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.core) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
+    sort_by_tree_id(&mut candidates);
     candidates
 }
 

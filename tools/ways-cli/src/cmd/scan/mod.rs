@@ -6,6 +6,7 @@
 pub(crate) mod candidates;
 mod late_interaction;
 mod lookbehind;
+mod order;
 mod reduce;
 mod scoring;
 mod state;
@@ -33,6 +34,7 @@ use crate::session;
 use candidates::{check_when, collect_candidates, collect_checks};
 use scoring::{capture_show_check, capture_show_way, default_project, EmbedScores};
 use crate::cmd::show::ContextBudget;
+use order::{order_hits, Hit};
 
 pub(crate) struct WayCandidate {
     pub id: String,
@@ -293,6 +295,9 @@ fn scan_prompt_surface(
 
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
+    // Fired ways are collected, then admitted in a fixed order (scan/order.rs).
+    // Payload: (channel, matched span).
+    let mut hits: Vec<Hit<(String, Option<String>)>> = Vec::new();
 
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
@@ -345,20 +350,7 @@ fn scan_prompt_surface(
 
         match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
-                let out = capture_show_way(
-                    &way.id,
-                    session_id,
-                    &channel,
-                    score,
-                    matched_span.as_deref(),
-                    Some(reduced.as_str()),
-                    Some(&mut budget),
-                );
-                if !out.is_empty() {
-                    context.push_str(&out);
-                    context.push_str("\n\n");
-                    budget.charge("\n\n");
-                }
+                hits.push(Hit { id: way.id.clone(), score, payload: (channel, matched_span) });
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "prompt", &scope, &project_dir, session_id);
@@ -367,6 +359,25 @@ fn scan_prompt_surface(
                 log_near_miss(way, &nm, "prompt", &scope, &project_dir, session_id, query);
             }
             PromptMatch::NoMatch => {}
+        }
+    }
+
+    order_hits(&mut hits);
+    for hit in &hits {
+        let (channel, matched_span) = &hit.payload;
+        let out = capture_show_way(
+            &hit.id,
+            session_id,
+            channel,
+            hit.score,
+            matched_span.as_deref(),
+            Some(reduced.as_str()),
+            Some(&mut budget),
+        );
+        if !out.is_empty() {
+            context.push_str(&out);
+            context.push_str("\n\n");
+            budget.charge("\n\n");
         }
     }
 
@@ -425,7 +436,8 @@ pub fn task(
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
     let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
 
-    let mut matched: Vec<(String, String)> = Vec::new(); // (way_id, channel)
+    // Payload: channel. Ordered like the other lanes before the stash is written.
+    let mut hits: Vec<Hit<String>> = Vec::new();
 
     for way in &candidates {
         // Must have subagent or teammate scope
@@ -461,7 +473,9 @@ pub fn task(
             keyword_floor,
             verdicts.as_ref(),
         ) {
-            PromptMatch::Fired { channel, .. } => matched.push((way.id.clone(), channel)),
+            PromptMatch::Fired { channel, score, .. } => {
+                hits.push(Hit { id: way.id.clone(), score, payload: channel })
+            }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "task", task_scope, &project_dir, session_id);
             }
@@ -471,6 +485,9 @@ pub fn task(
             PromptMatch::NoMatch => {}
         }
     }
+
+    order_hits(&mut hits);
+    let matched: Vec<(String, String)> = hits.into_iter().map(|h| (h.id, h.payload)).collect();
 
     // Write stash file if any ways matched
     if !matched.is_empty() {
@@ -542,7 +559,10 @@ pub fn command(
     let reduced_for_embed = reduce::reduce_for_embed(&query_for_embed, BUDGET_COMMAND);
     let embed_matches = batch_embed_score(&reduced_for_embed);
 
-    // Way matching: commands regex + pattern regex + semantic (ADR-155 §4)
+    // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
+    // Hits are collected, then admitted in a fixed order (scan/order.rs).
+    // Payload: (channel, matched span).
+    let mut hits: Vec<Hit<(&'static str, Option<String>)>> = Vec::new();
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
             continue;
@@ -565,10 +585,7 @@ pub fn command(
             });
 
         if let Some(span) = matched_span {
-            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()), None, Some(&mut budget));
-            if !out.is_empty() {
-                context.push_str(&out);
-            }
+            hits.push(Hit { id: way.id.clone(), score: None, payload: ("bash", Some(span)) });
             continue;
         }
 
@@ -597,18 +614,26 @@ pub fn command(
             None
         };
         if let Some((channel, score)) = fired {
-            let out = capture_show_way(
-                &way.id,
-                session_id,
-                channel,
-                score,
-                None,
-                Some(reduced_for_embed.as_str()),
-                Some(&mut budget),
-            );
-            if !out.is_empty() {
-                context.push_str(&out);
-            }
+            hits.push(Hit { id: way.id.clone(), score, payload: (channel, None) });
+        }
+    }
+    order_hits(&mut hits);
+    for hit in &hits {
+        let (channel, span) = &hit.payload;
+        // A regex hit carries its span and no surface; a semantic hit carries
+        // the embedded surface and no span.
+        let surface = if span.is_some() { None } else { Some(reduced_for_embed.as_str()) };
+        let out = capture_show_way(
+            &hit.id,
+            session_id,
+            channel,
+            hit.score,
+            span.as_deref(),
+            surface,
+            Some(&mut budget),
+        );
+        if !out.is_empty() {
+            context.push_str(&out);
         }
     }
 
@@ -670,6 +695,9 @@ pub fn file(
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
 
+    // Collect the hits, then admit them in a fixed order (scan/order.rs):
+    // walk order is directory order, and it decides what the budget withholds.
+    let mut hits: Vec<Hit<String>> = Vec::new();
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
             continue;
@@ -680,11 +708,15 @@ pub fn file(
 
         if let Some(ref files_pattern) = way.files {
             if let Some(span) = regex_span(files_pattern, filepath) {
-                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()), None, Some(&mut budget));
-                if !out.is_empty() {
-                    context.push_str(&out);
-                }
+                hits.push(Hit { id: way.id.clone(), score: None, payload: span });
             }
+        }
+    }
+    order_hits(&mut hits);
+    for hit in &hits {
+        let out = capture_show_way(&hit.id, session_id, "file", None, Some(hit.payload.as_str()), None, Some(&mut budget));
+        if !out.is_empty() {
+            context.push_str(&out);
         }
     }
 
