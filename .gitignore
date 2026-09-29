@@ -29,6 +29,13 @@ __pycache__/
 hooks/ways/logseq/
 hooks/ways/.obsidian/
 
+# --- Claude Code's synced skills ---
+# Claude Code saves skills synced from claude.ai into ~/.claude/skills/synced/.
+# ~/.claude/skills is a link into this checkout (ADR-142), so they land here.
+# Untracked files under a projected tree are the user's (ADR-144), so nothing
+# projects or prunes them; this entry only keeps them out of git status.
+/skills/synced/
+
 # --- Local Claude Code runtime state in this checkout ---
 # When you work on agent-ways with Claude Code, <checkout>/.claude/ accumulates
 # session/marker/cache state — ignore it. But DO track the project-scoped dev
