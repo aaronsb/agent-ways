@@ -13,10 +13,16 @@ root. This skill is the operator-facing orchestrator for the lifecycle in
 translate, tune, switch. The mechanics live in the design note
 `docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md`; don't restate them.
 
+The app source (the language registry, the embedder's Makefile, the docs) lives in
+`$XDG_DATA_HOME/agent-ways`. `~/.claude` is a projection of it that does not carry
+`tools/` (ADR-142). Resolve both once. The skill is global, so the working directory
+is unknown at invocation:
+
 ```bash
-ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-# Verify this is the agent-ways checkout before doing anything.
-[ -f "$ROOT/tools/ways-cli/languages.json" ] || { echo "Not an agent-ways install: $ROOT"; exit 1; }
+APP="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"   # app source: tools/, docs/, bin/
+ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"              # Claude Code config: settings.json
+# Verify the app source is there before doing anything.
+[ -f "$APP/tools/ways-core/languages.json" ] || { echo "No agent-ways app source at $APP. (Re-run the installer to (re)stage it.)"; exit 1; }
 ```
 
 ## 1. Interview — which language
@@ -28,7 +34,7 @@ before proceeding:
 
 ```bash
 jq -r '.languages | to_entries[] | "\(.key)\t\(.value.name)\t\(.value.active)"' \
-  "$ROOT/tools/ways-cli/languages.json"   # code  name  active
+  "$APP/tools/ways-core/languages.json"   # code  name  active
 ```
 
 Use the code (e.g. `es`) for ways; the English name (e.g. `spanish`) for Claude Code.
@@ -44,21 +50,23 @@ the same bar the delivery skills hold.)
 
 ## 3. Flip the mode switch
 
-The **effective** switch is the user-scope `language` in `~/.config/ways/config.yaml`
-(it overrides `ways.json`'s `output_language`). Set it to the code:
+The **effective** switch is the user-scope `language` in
+`$XDG_CONFIG_HOME/agent-ways/config.yaml` (`ways config path` prints it). It overrides
+the legacy `~/.config/ways/config.yaml` and `ways.json`'s `output_language`. Set it to
+the code:
 
 ```bash
-CFG="${XDG_CONFIG_HOME:-$HOME/.config}/ways/config.yaml"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/config.yaml"
 mkdir -p "$(dirname "$CFG")"; touch "$CFG"
 # replace an existing `language:` line, else append
 grep -q '^language:' "$CFG" && sed -i "s/^language:.*/language: $CODE/" "$CFG" || printf 'language: %s\n' "$CODE" >> "$CFG"
-"$ROOT/bin/ways" language --json | jq -r '.language'   # confirm it resolves to $CODE
+"$APP/bin/ways" language --json | jq -r '.resolved_language'   # confirm it resolves to $CODE
 ```
 
 ## 4. Fetch the multilingual model (on-demand)
 
 ```bash
-make -C "$ROOT/tools/way-embed" model-multilingual   # 127 MB, only when localizing
+make -C "$APP/tools/way-embed" model-multilingual   # 127 MB, only when localizing
 ```
 
 ## 5. Translate every way against the English root
@@ -75,13 +83,14 @@ This is many small, independent units across ~all ways — a good **Workflow** f
 when the count is large (translate + tune per way in parallel); batch inline for a
 handful. Vocabulary carries the *objective match words* in local form, so translate
 intent, not word-for-word. (`.{lang}.md` stubs + `pack-locales.sh` are the alternate
-path if you prefer per-file stubs.)
+path if you prefer per-file stubs; the script is
+`$APP/tools/ways-cli/scripts/pack-locales.sh`.)
 
 ## 6. Build the corpus, then tune as the acceptance gate
 
 ```bash
-"$ROOT/bin/ways" corpus --quiet               # localized mode → multi corpus + English anchor
-"$ROOT/bin/ways" tune --lang "$CODE"          # root-anchored fidelity + discrimination
+"$APP/bin/ways" corpus --quiet               # localized mode → multi corpus + English anchor
+"$APP/bin/ways" tune --lang "$CODE"          # root-anchored fidelity + discrimination
 ```
 
 `ways tune` is the **objective gate**: fidelity = alignment to the English root,
@@ -111,6 +120,6 @@ clean, and that Claude Code's language takes effect next session.
 
 ## See also
 
-- `docs/explanation/localization/` (`01.009.E`–`01.013.E`) — the scenarios and the mode gate
-- the design note `adopter-localization-lifecycle-and-tuning` — the mechanics
+- `$APP/docs/explanation/localization/` (`01.009.E`–`01.013.E`) — the scenarios and the mode gate
+- `$APP/docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md` — the mechanics
 - the **ways** skill — authoring the English roots this skill derives from

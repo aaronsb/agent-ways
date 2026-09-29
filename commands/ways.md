@@ -67,9 +67,9 @@ Ask what's wrong:
 - "The guidance isn't helpful" → review the content, apply voice/framing principles
 - "I want to change what it covers" → may need vocabulary tuning, scope change, or split into sub-ways
 
-Use the `ways` binary for live diagnostics:
+Use the `ways` binary for live diagnostics. `ways match` runs the live late-interaction matcher (ADR-160) over global and project-local ways and shows, per candidate, the peak, share, body-confirm and whether it fired:
 ```bash
-ways embed --query "$prompt"
+ways match "$prompt"
 ```
 
 ## Scaffold
@@ -153,20 +153,22 @@ After creating or revising a way:
 
 1. **Lint**: Check frontmatter is valid
    ```bash
-   # Verify the way has required fields and valid structure
+   ways lint "$CLAUDE_PROJECT_DIR/.claude/ways/{domain}/{wayname}"
    ```
 
-2. **Score** (for semantic ways): Test against sample prompts from the conversation
+2. **Rebuild the corpus** so scores reflect the new `description`/`vocabulary`
    ```bash
-   ways embed --query "sample prompt"
+   ways corpus
    ```
 
-3. **Cross-check**: Score all project ways against the same prompt to verify no cross-firing
+3. **Score** (for semantic ways): Test against sample prompts from the conversation
    ```bash
-   # For each way in the project, score against the sample prompt
+   ways match "sample prompt"
    ```
 
-4. Show results and explain: match/no-match, score vs threshold, any overlaps with other ways
+4. **Cross-check**: `ways match` ranks every way, global and project-local, against the prompt. Read the rows above and below the new way to verify no cross-firing. For structural overlap independent of any prompt, run `ways siblings <way-id>`.
+
+5. Show results and explain: fired or not, which gate it fell short of (`< gate` or `< confirm`), and any overlaps with other ways
 
 ## Handoff
 
