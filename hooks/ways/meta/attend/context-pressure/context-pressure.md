@@ -1,5 +1,5 @@
 ---
-description: Guide reflection and ledger capture as context approaches compaction
+description: Guide capture of decisions, tasks, and commits as context approaches compaction
 trigger:
   type: attend
   signals:

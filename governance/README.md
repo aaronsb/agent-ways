@@ -116,8 +116,8 @@ ways-audit active
 # Flat traceability matrix: way | control | justification
 ways-audit matrix
 
-# Validate claims: controls present, justifications present, policy URIs resolve,
-# verified dates well-formed
+# Validate claims: controls present, justifications present, policy URIs resolve
+# (relative URIs against $HOME/.claude/), verified dates well-formed
 ways-audit lint
 
 # Assemble finding records from claims + the firing log; --write appends them
@@ -154,7 +154,7 @@ This directory is designed to be separable. To use it standalone:
 1. Copy `governance/` to a new repo
 2. Add `provenance.yaml` sidecars to your ways, with policy URIs pointing at your own policy documents
 3. Run `ways-audit report` from a project whose `.claude/ways/` holds those ways, or `ways-audit --global report` for `~/.claude/hooks/ways/`
-4. Run `ways-audit lint` to check that the policy URIs resolve
+4. Run `ways-audit lint` to check that the policy URIs resolve. Lint resolves a relative URI against `$HOME/.claude/<uri>`, not against the copied repo, so the policy files must be reachable under `~/.claude/` at that path (URIs starting with `http` or `github://` are not checked)
 
 The `ways-audit` binary is the only dependency.
 

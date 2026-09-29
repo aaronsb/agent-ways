@@ -24,7 +24,7 @@ Groups compose naturally with the other two scopes:
 | Focus group | `@<name>/` | anyone who joined the named group |
 | Broadcast | `_broadcast/` | everyone with attend running |
 
-`attend send` with no routing flag writes to `_broadcast/`; `--focus <name>` writes to a group and `--to <path>` to a project scope (`tools/attend/src/cmd/send.rs`).
+`attend send` with no routing flag writes to `_broadcast/`; `--channel <name>` writes to a group and `--to <path>` to a project scope (ADR-401).
 
 ## CLI surface
 
@@ -107,16 +107,16 @@ Groups scope **which signals reach the agent**. Once a signal reaches a session,
 
 - `attend focus on deploy` — the agent now receives `@deploy` signals as well as project and broadcast signals
 - Each unseen `@deploy` signal surfaces on the next peer poll; more than 8 in one poll are coalesced into a digest line
-- Leaving the group stops the scan of `@deploy/`; signals already there stay on disk for the members who remain
+- Leaving the group stops the scan of `@deploy/`. If members remain, the signals stay on disk for them. If the leave empties the group and it is not pinned, attend removes `@deploy/` and its signals (`tools/attend-groups/src/lib.rs:184-197`)
 
 ## Broadcast by default
 
-`attend send` with no routing flag writes to `_broadcast/`, which every session with attend running scans. The sender does not have to choose between a group, a project, and broadcast for an ordinary message. The code comment at the routing site states this default (`tools/attend/src/cmd/send.rs:154-169`); no accepted ADR records it.
+`attend send` with no routing flag writes to `_broadcast/`, which every session with attend running scans. The sender does not have to choose between a group, a project, and broadcast for an ordinary message. ADR-401 records this default: `attend send <msg>` (and `--broadcast`) lands in `_broadcast/`, and `attend send --channel <name>` lands in `@<name>/`. `--focus` is a deprecated alias for `--channel`.
 
 Groups are **explicit scoping** for cases where broadcast is too wide:
 
 - Multi-project coordination where you want signals visible to three specific agents and invisible to a fourth
-- Long-lived coordination channels that should persist across scene changes (via `--pin`)
+- Long-lived coordination channels that should keep existing with no members (via `--pin`); a scene change still leaves pinned groups, but the group and its directory remain for the next join
 - Conversations that would otherwise add traffic to every session's broadcast scan
 
 For ad-hoc conversations, broadcast is sufficient. For structured scopes, use groups.
