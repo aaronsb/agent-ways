@@ -12,7 +12,7 @@ Use these to see what's happening in a session.
 
 **When:** After a Claude conversation turn, to verify which ways fired and in what order.
 
-**Run from:** Anywhere — auto-detects the current session from `/tmp`.
+**Run from:** Anywhere — auto-detects the current session under the sessions root (`ways sessions-root` prints it).
 
 **Tells you:** A table of every way that fired this session: epoch (turn number), match distance, trigger type (keyword / semantic / state / file / bash), re-disclosure eligibility, and which agent received it.
 
@@ -50,6 +50,8 @@ ways status --json
 
 ```
 ways context
+ways context --session <id>   # pin to one session instead of guessing from cwd
+ways context --project <dir>  # resolve the transcript for another project
 ways context --json
 ```
 
@@ -69,6 +71,7 @@ ways context --json
 ways stats
 ways stats --days 7
 ways stats --global
+ways stats --project <dir>   # filter to one project path
 ways stats --json
 ```
 
@@ -92,6 +95,8 @@ ways stats --json
 ways rethink                          # interactive picker
 ways rethink --session <id>           # jump to a specific session
 ways rethink --list                   # non-interactive session table
+ways rethink --project <dir>          # sessions from another project
+ways rethink --all                    # sessions across every project
 ways rethink --speed 500              # faster animation (ms per frame)
 ways rethink --json                   # dump most recent session as JSON
 ways rethink --session <id> --json    # dump a specific session as JSON
@@ -126,26 +131,39 @@ ways scan prompt --query "git commit" --session dummy --project ~/my-project
 
 ### `ways match`
 
-**When:** A way isn't firing and you want to see its raw score; understanding why the wrong way is winning; checking whether a vocabulary change moved the needle.
+**When:** A way isn't firing and you want to see why; understanding why the wrong way is winning; checking whether a vocabulary change moved the needle. This is the authoring tool: it shows how a query matches under the live matcher.
 
-**Run from:** Anywhere.
+**Run from:** Anywhere. It covers global ways plus the project-local ways of `--project <dir>` (default: the current directory).
 
-**Tells you:** A ranked table of all ways with their EN and multilingual cosine similarity scores for the query. Higher = closer match. These raw cosines are not the firing signal: firing maps each cosine through the calibrated logistic `g(s)` and fires globally when `g(s) ≥ τ_s` (default 0.5) — there is no per-way threshold. See `../hooks-and-ways/engine-reference.md`.
+**Tells you:** The late-interaction diagnostic (ADR-160). A header line gives the gates in force (admit on share or peak, then confirm) and how many ways would fire, followed by the reduced surface the query was chunked from. Then, for the top 20 candidates ranked by share:
+
+| Column | Meaning |
+|--------|---------|
+| `peak` | The way's strongest single-chunk cosine |
+| `share` | Softmax mass the way won across chunks — what the share gate reads |
+| `confirm` | Best match of the way's own body prose against the chunk it won (`—` when not admitted) |
+| `outcome` | `fired ✓`, `< gate` (admitted by neither share nor peak), or `< confirm` (admitted, but the body did not corroborate) |
+| `won chunk` | The surface chunk the way matched on |
+
+When the query is too sparse to chunk, or the embedding engine cannot run late interaction, it says so on stderr and prints the single-vector view instead, mirroring the fire path's fail-safe.
+
+`--cosine` prints the legacy single-vector view directly: a table of ways with EN and multilingual cosine scores, ranked by the EN score. Those cosines no longer reflect the fire path; on the fallback path they are mapped through the calibrated logistic `g(s)` and fire when `g(s) ≥ τ_s`. See `../hooks-and-ways/engine-reference.md`. `--corpus <path>` scores a corpus built with `ways corpus --output` and applies to the `--cosine` view only.
 
 ```
 ways match "how do I test if a way is working"
-ways match "git commit message format"
+ways match "git commit message format" --project ~/my-project
+ways match --cosine "git commit message format"
 ```
 
 ---
 
 ### `ways embed`
 
-**When:** Debugging at the embedding layer only — bypasses keyword matching. Useful when you suspect the keyword layer is overriding semantic scores, or you want to see the pure vector similarity without any boosts.
+**When:** Rarely. It is retained as an alias for `ways match --cosine`.
 
 **Run from:** Anywhere.
 
-**Tells you:** Raw embedding similarity scores without keyword boosting applied. Compare against `ways match` output for the same query to see the keyword layer's effect.
+**Tells you:** The legacy single-vector view: EN and multilingual cosine scores per way. It applies no keyword matching, and neither does `ways match`. `--corpus <path>` scores another corpus; `--model` is accepted and ignored.
 
 ```
 ways embed "security vulnerability scanning"
@@ -157,13 +175,13 @@ ways embed "security vulnerability scanning"
 
 **When:** Verifying what content Claude actually receives when a way fires; checking whether session-aware idempotency is suppressing a way you expect to see.
 
-**Run from:** Anywhere.
+**Run from:** Anywhere. `--session` is required; pass any string (e.g., `dummy`) for a dry run that doesn't touch a real session's state.
 
-**Tells you:** The rendered markdown content of the way exactly as it would appear in the prompt, including any session-state-aware sections.
+**Tells you:** The rendered markdown content of the way exactly as it would appear in the prompt, including any session-state-aware sections. Because it is session-aware, a second call with the same session id prints nothing: the way has already been shown.
 
 ```
-ways show way meta/knowledge
-ways show way softwaredev/code/testing
+ways show way meta/knowledge --session dummy
+ways show way softwaredev/code/testing --session dummy
 ```
 
 ---
@@ -195,11 +213,11 @@ Use these when creating or maintaining ways.
 
 **Run from:** Project directory to create in `.claude/ways/`. Add `--global` to create in `~/.claude/hooks/ways/`.
 
-**Tells you:** Scaffolds the way file at the given path with a frontmatter template, body placeholder, and vocabulary hints derived from the description.
+**Tells you:** Scaffolds the way file at the given path with a frontmatter template, body placeholder, and locale stubs. `-d` (description) is required; `-V` sets the vocabulary; `--scope` sets `agent`, `subagent`, or `teammate` (comma-separated, default `agent`).
 
 ```
 ways template softwaredev/myteam/workflow -d "team deployment workflow and release process"
-ways template itops/alerts -d "alerting runbooks" --global
+ways template itops/alerts -d "alerting runbooks" -V "alert pager oncall runbook" --global
 ```
 
 ---
@@ -272,6 +290,7 @@ Use these after ways are working to improve match quality and re-disclosure cade
 ```
 ways tune
 ways tune --way "meta/knowledge"
+ways tune --lang es                   # audit one language (default: the active one)
 ways tune --fidelity-threshold 0.7    # stricter fidelity requirement
 ```
 
@@ -431,6 +450,7 @@ ways reconcile                       # every target in config.yaml; default: ~/.
 ways reconcile --dry-run             # preview; prints "refused <root>" for real paths, exit 0
 ways reconcile --force               # rename each real path to <name>.ways-backup-<seconds>, then link
 ways reconcile --source <checkout> --dest <dir>   # dogfood a development checkout
+ways reconcile --mode copy           # copy files instead of symlinking (default: symlink)
 ways reconcile --quiet               # suppress the summary line
 ```
 

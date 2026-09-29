@@ -19,7 +19,7 @@ No configuration files to update. No registration step. The discovery scripts sc
 | A broad concept users describe variously | `description:` + `vocabulary:` (embedding semantic matching) |
 | A session condition, not content | `trigger:` with `context-threshold`, `file-exists`, or `session-start` |
 
-Matching is additive-OR — the semantic and keyword lanes are independent, and a way can carry both a `pattern:` and `description:` + `vocabulary:`. The semantic lane fires when the calibrated relevance probability `g(s)` clears `τ_s` (`semantic_fire_probability`, 0.5); the keyword lane is **floor-gated** — a `pattern:` hit fires only when `g(s)` also clears the lower floor `τ_k` (`keyword_floor_probability`, 0.15), so a bare keyword can't drag in an unrelated prompt. The keyword lane fails open (fires unconditionally) when there's no calibrated signal, and `pattern_strict: true` bypasses the gate by design. See [engine-reference.md](engine-reference.md) for the exact fire rule. Semantic matching uses embeddings (`ways embed`) — a subcommand of the unified `ways` binary.
+Matching is additive-OR — the semantic and keyword lanes are independent, and a way can carry both a `pattern:` and `description:` + `vocabulary:`. The semantic lane fires when the calibrated relevance probability `g(s)` clears `τ_s` (`semantic_fire_probability`, 0.5); the keyword lane is **floor-gated** — a `pattern:` hit fires only when `g(s)` also clears the lower floor `τ_k` (`keyword_floor_probability`, 0.15), so a bare keyword can't drag in an unrelated prompt. The keyword lane fails open (fires unconditionally) when there's no calibrated signal, and `pattern_strict: true` bypasses the gate by design. See [engine-reference.md](engine-reference.md) for the exact fire rule. Semantic matching uses embeddings; `ways match` shows how a prompt matches, and it is a subcommand of the unified `ways` binary.
 
 ### Writing effective guidance
 
@@ -53,13 +53,12 @@ Use `/ways-tests` to validate matching quality without trial-and-error:
 /ways-tests score <way> "sample prompt"       # test one way against a prompt
 /ways-tests score-all "sample prompt"         # rank all ways — check for false positives
 /ways-tests suggest <way>                     # find vocabulary gaps
-/ways-tests suggest --all                     # survey all ways at once
 /ways-tests lint <way>                        # validate frontmatter
 ```
 
 For semantic ways, `/ways-tests suggest` analyzes the way body text and recommends vocabulary additions. Not all suggestions should be added — body terms like "code" or "use" don't discriminate between ways. Add terms that are *domain-specific* words users would say.
 
-To verify the live system, include the way's keywords in a prompt and check that it fires (appears in system-reminder). Use `/ways` to see which ways have fired in the current session.
+To verify the live system, include the way's keywords in a prompt and check that it fires (appears in system-reminder). Run `ways list` to see which ways have fired in the current session.
 
 ## Progressive Disclosure with Sub-Ways
 

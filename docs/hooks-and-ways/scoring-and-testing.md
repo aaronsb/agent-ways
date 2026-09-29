@@ -67,13 +67,17 @@ The `ways` binary includes embedding-based semantic scoring as a built-in subcom
 
 ```bash
 # Score a prompt against all ways (query is positional; there is no --threshold flag)
-ways embed "what's new in claude code recently"
+ways match "what's new in claude code recently"
 
-# Output: ranked list with per-model cosine similarity.
-# The raw cosine is the INPUT to g(s), not a fire cutoff. A way fires when its
-# calibrated probability g(s) clears the global bar τ_s (0.5) on the semantic
-# lane, or τ_k (0.15) on a keyword-gated pattern hit. Read the decision off g(s),
-# not the raw cosine — see engine-reference.md.
+# Output: the live late-interaction matcher (ADR-160) per candidate: peak chunk
+# cosine, summed share, body-confirm, and whether it fired. When the prompt is too
+# sparse to chunk, it falls back to the single-vector view, as the fire path does.
+
+# The legacy single-vector view: ranked list with per-model cosine similarity.
+ways match --cosine "what's new in claude code recently"
+# On that view the raw cosine is the INPUT to g(s), not a fire cutoff. A way fires
+# when its calibrated probability g(s) clears the global bar τ_s (0.5) on the
+# semantic lane, or τ_k (0.15) on a keyword-gated pattern hit — see engine-reference.md.
 ```
 
 The `/ways-tests` skill wraps this with higher-level operations: scoring all ways against a prompt (and surfacing the calibrated `g(s)` alongside the cosine), analyzing vocabulary gaps, checking for cross-way overlap, and validating frontmatter.
@@ -227,13 +231,13 @@ The `/ways-tests crowding` command distinguishes these cases. When it reports tw
 | `/ways-tests score <way> "prompt"` | Score one way, with automatic cross-way context |
 | `/ways-tests score-all "prompt"` | Rank all ways against a prompt |
 | `/ways-tests suggest <way>` | Analyze vocabulary gaps (body terms missing from vocabulary) |
-| `/ways-tests suggest <way> --apply` | Auto-fix vocabulary gaps |
 | `/ways-tests crowding "prompt"` | Detect vocabulary overlap across all ways |
-| `/ways-tests lint --all` | Validate all way frontmatter |
+| `ways lint` | Validate way frontmatter (`--check` for CI) |
 | `ways tune` | Audit locale alias fidelity + discrimination (per-way, across all languages) |
 | `ways tune --way <path>` | Filter the audit to a single way or subtree |
 | `ways tune-precision` | Heuristic relevance audit: flag ways firing into off-domain sessions (`--min-sessions`, `--flag-threshold`, `--project`, `--way`, `--json`) — ADR-134 Decision 3 |
-| `ways siblings <path>` | Compute vocabulary overlap (Jaccard) between sibling ways |
+| `ways tree <path> --jaccard` | Compute vocabulary overlap (Jaccard) between sibling ways |
+| `ways siblings <id>` | Way-vs-way embedding cosine (`all` for the full matrix) |
 
 See the [ways-tests skill](/skills/ways-tests/SKILL.md) for the testing skill and [Locale Alias Audit](../../hooks/ways/meta/knowledge/optimization/tuning/tuning.md) (the `knowledge/optimization/tuning` way) for the `ways tune` workflow in depth.
 

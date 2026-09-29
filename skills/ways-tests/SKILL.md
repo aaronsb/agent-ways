@@ -15,10 +15,9 @@ skill is the **interpretation layer** over the `ways` binary's measurement comma
 ```
 /ways-tests score <way> "prompt"          # Score one way against a prompt
 /ways-tests score-all "prompt"            # Rank all ways against a prompt
-/ways-tests suggest <way> [--apply]       # Vocabulary gaps (optionally update in place)
-/ways-tests suggest --all [--apply]       # Analyze/update all ways
-/ways-tests lint <way> | --all            # Validate frontmatter (+ tree health)
-/ways-tests check <check> "context"       # Test check scoring curve
+/ways-tests suggest <way>                 # Vocabulary gaps for one way (report only)
+/ways-tests lint [<path>]                 # Validate frontmatter
+/ways-tests check <check> "context"       # Work out a check's scoring curve (by hand)
 /ways-tests tree <path>                   # Progressive-disclosure tree structure
 /ways-tests budget <path>                 # Token cost for a way tree
 /ways-tests jaccard <tree> | <way1> <way2> # Sibling / pairwise vocabulary overlap
@@ -26,8 +25,12 @@ skill is the **interpretation layer** over the `ways` binary's measurement comma
 /ways-tests compare <path1> <path2>       # Side-by-side tree metrics
 /ways-tests metrics                       # Session disclosure metrics
 /ways-tests embed-status                  # Embedding engine health
-/ways-tests embed-score[-all] [<way>] "prompt"  # Cosine score(s)
+/ways-tests embed-score[-all] [<way>] "prompt"  # Legacy single-vector cosine score(s)
 ```
+
+Each mode maps to a `ways` command, or, where no command exists (check, budget,
+crowding, compare, metrics), to steps you carry out by reading command output and
+the way files. The sections below say which.
 
 ## Not for
 
@@ -36,6 +39,14 @@ skill is the **interpretation layer** over the `ways` binary's measurement comma
 - This skill only *measures and validates*: scoring, vocabulary analysis, frontmatter and tree lint.
 
 ## Engine
+
+The live semantic matcher is **late interaction** (ADR-160): the prompt is split into
+chunks, each chunk is matched against every way, and a way is admitted on its summed
+softmax **share** or its **peak** chunk cosine, then **confirmed** against its own body
+prose. `ways match "prompt"` shows those quantities per candidate. The single-vector
+gate described next (ADR-156) is the fail-safe fallback, used when a surface is too
+sparse to chunk or the late-interaction path cannot run. `ways match` says so and
+prints the single-vector view when that happens.
 
 A way has **two lanes** (ADR-156).
 
@@ -70,18 +81,23 @@ After editing any `description`/`vocabulary`, regenerate so scores reflect it:
 `ways corpus`. Then rank the whole corpus in one batch:
 
 ```bash
-ways embed "$prompt"    # full corpus ranking by cosine — read down the list to debug a miss
-                        # QUERY is positional. There is no --threshold flag: firing is the
-                        # global probability gate (τ_s / τ_k) after calibration, not a per-way
-                        # cutoff. The keyword lane is the way's pattern: field, not a CLI option.
+ways match "$prompt"            # live matcher (ADR-160): peak · share · confirm · outcome per way
+ways match --cosine "$prompt"   # legacy single-vector EN/multi cosine view (embed-score mode)
+                                # QUERY is positional. There is no --threshold flag. The keyword
+                                # lane is the way's pattern: field, not a CLI option.
 ```
 
-For a single way, grep its id (path relative to the ways root, e.g.
-`softwaredev/security`) from the batch output.
+`ways match` covers project-local ways too (`--project <dir>`, default the current
+directory). Its outcome column reads `fired ✓`, `< gate` (admitted by neither share
+nor peak) or `< confirm` (admitted, but the way's body did not corroborate the chunk
+it won). For a single way, grep its id (path relative to the ways root, e.g.
+`softwaredev/security`) from the batch output. `ways embed` is an alias of
+`ways match --cosine`.
 
 **Always include cross-way context.** When scoring one way, also show the top 5–8
 ranking, so you can see whether it *wins*, *defers* to a more specific way, or
-*overlaps* a competitor. Read the decision off the calibrated probability `g(s)`
+*overlaps* a competitor. On the late-interaction view, read the outcome column. On the
+single-vector fallback view, read the decision off the calibrated probability `g(s)`
 against the global semantic bar `τ_s = 0.5` (keyword-lane fires against `τ_k = 0.15`):
 
 ```
@@ -144,24 +160,26 @@ ways suggest "$wayfile" --min-freq 2
 
 Sections: GAPS (body terms missing from vocabulary), COVERAGE, UNUSED, VOCABULARY.
 UNUSED is usually *intentional* — vocabulary catches user-query terms that don't
-appear in the body, so don't auto-remove. `--apply` rewrites the vocabulary line in
-place (git-safety: refuses on untracked files unless `--force`); `--all --apply`
-processes every way with gaps.
+appear in the body, so don't auto-remove. `ways suggest` only reports; it takes one
+file and has no flag that writes. Edit the `vocabulary:` line by hand, then
+`ways corpus` and re-score. To survey several ways, run it once per file.
 
-## Lint — frontmatter + tree health
+## Lint — frontmatter
 
 ```bash
-ways lint            # all ways (global + project-local)
-ways lint <dir>      # one directory
+ways lint            # project ways inside a project, else global
+ways lint --global   # global ways
+ways lint <path>     # one file or directory
 ways lint --check    # exit non-zero on errors (CI)
 ways lint --schema   # full field reference
 ```
 
 Checks: unknown/typo fields, invalid values, incomplete description↔vocabulary
-pairs, `when:` blocks, `*.check.md` structure, sibling Jaccard (>0.15 warn, >0.25
-error). It does **not** flag absent *optional* fields. With `--all` it also checks
-tree health: vocabulary/pattern isolation between siblings, orphans, >500-token ways,
-and depth > 4.
+pairs, `when:` blocks, `*.check.md` structure, pattern hygiene, locale stubs,
+provenance. It does **not** flag absent *optional* fields, and it does not check tree
+health. For sibling overlap use `ways tree <path> --jaccard` (vocabulary) or `ways siblings <id>` (embedding cosine); for
+size and depth read `ways tree <path>` (see Tree and Budget below). `--all` only
+widens `--fix` to the whole corpus.
 
 ## Tree — `ways tree <path>`
 
@@ -171,22 +189,23 @@ specificity). There are **no per-level thresholds** — firing uses the global
 floored at `parent_boost_floor`) plus how much more specific each level's vocabulary is than
 its parent's. Flag: **weak narrowing** (a
 child no more specific than its parent — nothing for progressive disclosure to earn),
-sibling **Jaccard > 0.15** (`ways siblings`), **orphans** (a way file with no ancestor
+sibling **Jaccard > 0.15** (`ways tree <path> --jaccard`), **orphans** (a way file with no ancestor
 way), **depth > 4** / **breadth > 7** (over-decomposed).
 
-## Jaccard — `ways siblings <tree>`
+## Jaccard — `ways tree <tree> --jaccard`
 
 Vocabulary isolation between siblings — structural overlap, independent of any
 prompt. Flag **> 0.15** (siblings compete; move shared terms up to the parent or
 pick one owner) and **> 0.25** (collision; merge or split harder); show the shared
 terms so the author knows what to relocate. 0.00 across all pairs is perfect
 isolation — report it as a positive. (For one specific pair, diff the two
-vocabulary sets directly.)
+vocabulary sets directly. `ways siblings <id>` is the embedding-space counterpart: way-vs-way cosine, default floor 0.3.)
 
 ## Crowding — corpus-wide contention
 
-No single subcommand: run `ways embed` for the prompt, cluster results within 0.05
-cosine, and cross-check `ways siblings` / vocabularies. Matters at 50+ ways, where
+No single subcommand. Steps: run `ways match` for the prompt, cluster candidates
+whose peak is within 0.05 of each other, and cross-check `ways siblings` /
+vocabularies. Matters at 50+ ways, where
 embedding space gets contested. Flag: clusters of 3+ ways matching with overlapping
 *purpose*, Jaccard > 0.25 pairs, and terms appearing in 4+ vocabularies (too
 generic). Distinguish **accidental** overlap (sharpen vocabularies apart) from
@@ -194,21 +213,24 @@ generic). Distinguish **accidental** overlap (sharpen vocabularies apart) from
 
 ## Budget — token cost
 
-No subcommand: estimate each way as frontmatter-stripped bytes ÷ 4, summed along
-each root→leaf path. Flag: per-way > 500 tokens (consider splitting), path > 1500,
+No subcommand computes the totals. `ways tree <path>` prints each way's Tokens
+(frontmatter-stripped body bytes ÷ 4). Steps: sum that column along each root→leaf
+path for the realistic cost, and over the whole tree for the worst case. Flag: per-way > 500 tokens (consider splitting), path > 1500,
 worst-case (all fire) > 5000, or one way accounting for > 40% of a tree's total.
 
 ## Compare — two trees side by side
 
-No subcommand: present depth, total ways, vocabulary-specificity narrowing,
-worst-case/avg tokens, and max sibling Jaccard for each, then assess which is more
+No subcommand. Steps: run `ways tree <path> --jaccard` on each tree, then present
+depth, total ways, vocabulary-specificity narrowing, worst-case/avg tokens (from the
+Tokens column), and max sibling Jaccard for each, then assess which is more
 mature and whether the simpler one has room to grow. Useful for judging whether a
 refactor helped.
 
 ## Metrics — session disclosure
 
-Read the session's disclosure metrics (`ways list`, or the metrics JSONL under the
-sessions root). Reports per-tree coverage (which children fired, epoch distance) and
+No subcommand computes these. Steps: read the session's firings with `ways list`
+(epoch per fired way; `--json` for the raw rows) or `ways introspect dump` (turns,
+fired ways and their criteria), then group them by tree. Report per-tree coverage (which children fired, epoch distance) and
 parent-activated bar lowering (`parent_threshold_multiplier`, floored at `parent_boost_floor`). Flag: **orphaned roots** (root
 fires, no children), **instant cascades** (parent+child same epoch = co-disclosed,
 not progressive), **never-fire children** (vocabulary too narrow), **parent-only**
@@ -216,11 +238,18 @@ sessions (fine — the root sufficed).
 
 ## Check — scoring curve
 
-Simulate a check's match / distance / decay curve over successive firings:
+No command simulates the curve: `ways show check` fires the check for real against
+a session. Compute it by hand from the check file. The rule is `check_within` in
+`tools/ways-cli/src/cmd/show/mod.rs` under the app source
+(`${XDG_DATA_HOME:-~/.local/share}/agent-ways`):
 
-```bash
-/ways-tests check design "editing architecture file" --distance 20 --fires 0
-```
+1. `distance` = epochs since the parent way fired, capped at 30 (30 if it has not fired).
+2. `fires` = times this check has already fired this session.
+3. `effective = match_score × (ln(distance + 1) + 1) × 1 / (fires + 1)`.
+4. The check fires when `effective ≥ threshold` (the check file's `threshold:`,
+   default 2.0). Its anchor section is included when `distance ≥ 5`.
+
+Tabulate `effective` over a few `distance` / `fires` values to show the curve.
 
 ## Evaluation Guidelines
 
@@ -251,6 +280,6 @@ measured through the calibration, neither a per-way threshold. Accept some misse
 - Scores are cosine on the 0–1 scale, mapped through `g(s) = σ(a·s + b)` to a
   probability; the fire cutoffs are the **global** `τ_s = 0.5` / `τ_k = 0.15`, not a
   per-way value.
-- The `way-embed` binary + model live under `~/.cache/claude-ways/user/` (via `make setup`); `ways status` checks them.
+- The `way-embed` binary + model live under `~/.cache/agent-ways/user/` (via `make setup`); `ways status` checks them.
 - After editing any `description`/`vocabulary`, run `ways corpus` so embedding scores reflect the change.
 - Present results human-readably, not raw machine output.
