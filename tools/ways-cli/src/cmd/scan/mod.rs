@@ -32,6 +32,7 @@ use crate::session;
 
 use candidates::{check_when, collect_candidates, collect_checks};
 use scoring::{capture_show_check, capture_show_way, default_project, EmbedScores};
+use crate::cmd::show::ContextBudget;
 
 pub(crate) struct WayCandidate {
     pub id: String,
@@ -291,6 +292,7 @@ fn scan_prompt_surface(
     let mut prompt_only_scores: Option<EmbedScores> = None;
 
     let mut context = String::new();
+    let mut budget = ContextBudget::hook();
 
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
@@ -343,10 +345,19 @@ fn scan_prompt_surface(
 
         match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
-                let out = capture_show_way(&way.id, session_id, &channel, score, matched_span.as_deref(), Some(reduced.as_str()));
+                let out = capture_show_way(
+                    &way.id,
+                    session_id,
+                    &channel,
+                    score,
+                    matched_span.as_deref(),
+                    Some(reduced.as_str()),
+                    Some(&mut budget),
+                );
                 if !out.is_empty() {
                     context.push_str(&out);
                     context.push_str("\n\n");
+                    budget.charge("\n\n");
                 }
             }
             PromptMatch::KeywordGated(kg) => {
@@ -509,6 +520,7 @@ pub fn command(
     let candidates = collect_candidates(&project_dir);
 
     let mut context = String::new();
+    let mut budget = ContextBudget::hook();
 
     // One embed pass for the whole surface (ways and checks share it).
     // ADR-130: cap embed input. Heredoc bodies (gh pr create --body
@@ -553,7 +565,7 @@ pub fn command(
             });
 
         if let Some(span) = matched_span {
-            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()), None);
+            let out = capture_show_way(&way.id, session_id, "bash", None, Some(span.as_str()), None, Some(&mut budget));
             if !out.is_empty() {
                 context.push_str(&out);
             }
@@ -585,7 +597,15 @@ pub fn command(
             None
         };
         if let Some((channel, score)) = fired {
-            let out = capture_show_way(&way.id, session_id, channel, score, None, Some(reduced_for_embed.as_str()));
+            let out = capture_show_way(
+                &way.id,
+                session_id,
+                channel,
+                score,
+                None,
+                Some(reduced_for_embed.as_str()),
+                Some(&mut budget),
+            );
             if !out.is_empty() {
                 context.push_str(&out);
             }
@@ -616,22 +636,15 @@ pub fn command(
         }
 
         if match_score > 0.0 {
-            let out = capture_show_check(&check.id, session_id, "bash", match_score);
+            let out = capture_show_check(&check.id, session_id, "bash", match_score, Some(&mut budget));
             if !out.is_empty() {
                 context.push_str(&out);
             }
         }
     }
 
-    // Output JSON for PreToolUse
     if !context.is_empty() {
-        println!(
-            "{}",
-            serde_json::json!({
-                "decision": "approve",
-                "additionalContext": context
-            })
-        );
+        emit_hook_context("PreToolUse", context.trim_end());
     }
 
     Ok(())
@@ -655,6 +668,7 @@ pub fn file(
     let candidates = collect_candidates(&project_dir);
 
     let mut context = String::new();
+    let mut budget = ContextBudget::hook();
 
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
@@ -666,7 +680,7 @@ pub fn file(
 
         if let Some(ref files_pattern) = way.files {
             if let Some(span) = regex_span(files_pattern, filepath) {
-                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()), None);
+                let out = capture_show_way(&way.id, session_id, "file", None, Some(span.as_str()), None, Some(&mut budget));
                 if !out.is_empty() {
                     context.push_str(&out);
                 }
@@ -701,7 +715,7 @@ pub fn file(
         }
 
         if match_score > 0.0 {
-            let out = capture_show_check(&check.id, session_id, "file", match_score);
+            let out = capture_show_check(&check.id, session_id, "file", match_score, Some(&mut budget));
             if !out.is_empty() {
                 context.push_str(&out);
             }
@@ -709,13 +723,7 @@ pub fn file(
     }
 
     if !context.is_empty() {
-        println!(
-            "{}",
-            serde_json::json!({
-                "decision": "approve",
-                "additionalContext": context
-            })
-        );
+        emit_hook_context("PreToolUse", context.trim_end());
     }
 
     Ok(())
@@ -1085,10 +1093,22 @@ fn regex_span(pattern: &str, text: &str) -> Option<String> {
 /// stdout landed in `hook_success` bookkeeping, no context attachment was
 /// created, and the payload (the ways catalog and the core posture) reached
 /// zero sessions on record. Undocumented JSON stdout is dropped silently, so
-/// nothing but the canonical envelope belongs here. The PreToolUse emitters
-/// in [`command`] and [`file`] build their `decision`-bearing shape inline
-/// and never route through this function; whether their `additionalContext`
-/// is delivered is tracked separately.
+/// nothing but the canonical envelope belongs here.
+///
+/// The PreToolUse lanes ([`command`], [`file`]) made the same mistake with a
+/// top-level `{"decision":"approve","additionalContext":…}`: over 30 days,
+/// about 5,458 PreToolUse invocations delivered context 0 times, while
+/// PostToolUse, already canonical, delivered 143 of 143 (#528). They route
+/// through here now. The envelope deliberately carries no
+/// `permissionDecision`: per the hooks reference
+/// (<https://code.claude.com/docs/en/hooks.md>, "PreToolUse decision
+/// control"), omitting it means the hook makes no decision and the tool call
+/// continues through the normal permission flow. `"allow"` would bypass the
+/// permission prompt, which a guidance hook must never do.
+///
+/// Callers keep `context` within [`crate::cmd::show::HOOK_CONTEXT_CAP`] via a
+/// [`ContextBudget`]; over that cap Claude Code replaces the string with a
+/// file path and a 2,000-character preview.
 pub(super) fn emit_hook_context(hook_event: &str, context: &str) {
     let payload = serde_json::json!({
         "hookSpecificOutput": {

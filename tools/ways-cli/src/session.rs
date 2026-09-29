@@ -14,7 +14,8 @@ mod engagement;
 // `session::way_fire_outcome`, etc. — no call-site churn from the
 // structural split (issue #52).
 pub use engagement::{
-    record_way_fire, way_fire_outcome, way_refire_threshold_k, FireOutcome, REFIRE_FLOOR,
+    first_suppression_in_window, lock_engagement, record_way_fire, way_fire_outcome,
+    way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
 
 // ── Session directory ──────────────────────────────────────────
@@ -487,15 +488,27 @@ pub fn append_metric(session_id: &str, metric: &serde_json::Value) {
     let path = session_dir(session_id).join("metrics.jsonl");
     ensure_parent(&path);
     if let Ok(line) = serde_json::to_string(metric) {
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .and_then(|mut f| {
-                use std::io::Write;
-                writeln!(f, "{}", line)
-            });
+        append_jsonl_line(&path, &line);
     }
+}
+
+/// Append one JSONL record as a single `write` on an `O_APPEND` handle.
+///
+/// `writeln!` on a `File` issues two writes, the record and then the newline.
+/// Parallel hooks append to the same logs, and two processes interleaving as
+/// `recA recB \n \n` corrupt both lines, which readers then drop. That lost the
+/// `way_fired` and `way_suppressed` rows of two racing PreToolUse hooks in CI
+/// (#528). One buffer, one `write_all`, keeps each record whole.
+fn append_jsonl_line(path: &std::path::Path, line: &str) {
+    use std::io::Write;
+    let mut buf = String::with_capacity(line.len() + 1);
+    buf.push_str(line);
+    buf.push('\n');
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(buf.as_bytes()));
 }
 
 // ── Event logging ───────────────────────────────────────────────
@@ -526,14 +539,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
     }
 
     if let Ok(line) = serde_json::to_string(&serde_json::Value::Object(obj)) {
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&events_file)
-            .and_then(|mut f| {
-                use std::io::Write;
-                writeln!(f, "{}", line)
-            });
+        append_jsonl_line(&events_file, &line);
     }
 
     // Amortized cap: only when the log crosses MAX do we rewrite it to the most

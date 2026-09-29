@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use sensor_trait::{Curve, EngagementState, Tick};
 
-use super::{ensure_parent, get_token_position, resolve_way_file, session_dir};
+use super::{ensure_parent, resolve_way_file, session_dir};
 
 /// Floor on `EngagementState::current_salience` below which a re-fire is
 /// considered warranted. Tuned so that `Curve::Exponential { half_life: H }`
@@ -103,19 +103,80 @@ fn save_engagement(way_id: &str, session_id: &str, state: &EngagementState) {
     }
 }
 
-/// Query the ADR-123 firing engine: should this way fire at the current
-/// tick, and if so is it a first-fire or a re-fire?
+/// The firing engine's answer for one way at one tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FireDecision {
+    pub outcome: FireOutcome,
+    /// The tick of the way's last recorded fire, `None` before its first.
+    /// Keys the once-per-fire-window dedupe of refire suppressions.
+    pub last_fire: Option<Tick>,
+}
+
+/// Query the ADR-123 firing engine: should this way fire at `current_tick`,
+/// and if so is it a first-fire or a re-fire?
 ///
-/// The caller supplies the way's `curve` from its parsed frontmatter.
-/// Tick source is `get_token_position(session_id)`.
+/// The caller supplies the way's `curve` from its parsed frontmatter and the
+/// tick, read once per decision from `get_token_position`. That read parses
+/// the transcript, so a caller that decides twice (the unlocked fast path and
+/// the re-check under [`lock_engagement`]) passes the same tick to both.
 pub fn way_fire_outcome(
     way_id: &str,
     session_id: &str,
     curve: &Curve,
-) -> FireOutcome {
-    let current_tick: Tick = get_token_position(session_id);
+    current_tick: Tick,
+) -> FireDecision {
     let state = load_engagement_for_tick(way_id, session_id, curve, current_tick);
-    classify_outcome(&state, current_tick)
+    FireDecision {
+        outcome: classify_outcome(&state, current_tick),
+        last_fire: state.last_fire_tick(),
+    }
+}
+
+/// An exclusive lock on one way's engagement state, released on drop.
+///
+/// `way_fire_outcome` only reads, and `record_way_fire` writes later. Parallel
+/// tool calls run concurrent PreToolUse hooks, so without a lock two processes
+/// can both read FirstFire and both deliver the way inside its refire window.
+/// Holders re-check the outcome under the lock and record before releasing.
+///
+/// The lock is `std::fs::File::lock` (flock on Unix, LockFileEx on Windows) on
+/// a sentinel `<way>.lock` beside the state file. The sentinel is never
+/// renamed or removed, so every process locks the same inode. The OS drops
+/// the lock when the holder exits, so a crashed hook cannot wedge a way.
+pub struct EngagementLock {
+    _file: std::fs::File,
+}
+
+/// Take the lock for `way_id`, blocking until it is free. `None` when the
+/// sentinel cannot be opened or locked: the caller proceeds unlocked, which is
+/// the behaviour before the lock existed, rather than dropping the way.
+pub fn lock_engagement(way_id: &str, session_id: &str) -> Option<EngagementLock> {
+    let path = engagement_path(way_id, session_id).with_extension("lock");
+    ensure_parent(&path);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .ok()?;
+    file.lock().ok()?;
+    Some(EngagementLock { _file: file })
+}
+
+/// Whether a refire suppression for this fire window has not been logged
+/// yet, and mark it logged. A window is keyed on the way's last-fire tick: the
+/// first suppression after each fire returns `true`, the rest `false`. Keeps
+/// `way_suppressed` to at most one refire row per way per fire. Best effort:
+/// two racing hooks may both log once.
+pub fn first_suppression_in_window(way_id: &str, session_id: &str, last_fire: Tick) -> bool {
+    let path = engagement_path(way_id, session_id).with_extension("suppressed");
+    let key = last_fire.to_string();
+    if std::fs::read_to_string(&path).is_ok_and(|s| s.trim() == key) {
+        return false;
+    }
+    ensure_parent(&path);
+    let _ = std::fs::write(&path, key);
+    true
 }
 
 /// Pure classification: given an already-loaded `EngagementState` and the
@@ -133,10 +194,10 @@ fn classify_outcome(state: &EngagementState, current_tick: Tick) -> FireOutcome 
     }
 }
 
-/// Record that a way fired at the current tick, updating and persisting
-/// its engagement state.
-pub fn record_way_fire(way_id: &str, session_id: &str, curve: &Curve) {
-    let current_tick: Tick = get_token_position(session_id);
+/// Record that a way fired at `current_tick`, updating and persisting its
+/// engagement state. Call it under [`lock_engagement`], after re-checking
+/// the outcome there.
+pub fn record_way_fire(way_id: &str, session_id: &str, curve: &Curve, current_tick: Tick) {
     let mut state = load_engagement_for_tick(way_id, session_id, curve, current_tick);
     state.record_fire(current_tick, 1.0);
     save_engagement(way_id, session_id, &state);

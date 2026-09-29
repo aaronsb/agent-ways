@@ -642,6 +642,14 @@ enum ShowCommand {
         /// Trigger channel (keyword, semantic:embedding)
         #[arg(long, default_value = "unknown")]
         trigger: String,
+        /// Characters of the hook's additionalContext already spent by the
+        /// caller (check-post.sh assembles one context across several calls).
+        /// Charges the way against the 10,000-character hook cap; a value
+        /// past the cap means the caller's budget is closed. When the way is
+        /// withheld for the cap, nothing is printed, nothing is recorded, and
+        /// the exit status is 3.
+        #[arg(long)]
+        budget_used: Option<usize>,
     },
     /// Display a check (with scoring curve)
     Check {
@@ -906,9 +914,19 @@ fn run() -> Result<()> {
             }
         },
         Commands::Show { what } => match what {
-            ShowCommand::Way { id, session, trigger } => {
+            ShowCommand::Way { id, session, trigger, budget_used: None } => {
                 let out = cmd::show::way(&id, &session, &trigger)?;
                 if !out.is_empty() { print!("{out}"); }
+                Ok(())
+            }
+            ShowCommand::Way { id, session, trigger, budget_used: Some(used) } => {
+                let mut budget = cmd::show::ContextBudget::hook_with_used(used);
+                let out = cmd::show::way_scored(&id, &session, &trigger, None, None, None, Some(&mut budget))?;
+                if !out.is_empty() {
+                    print!("{out}");
+                } else if budget.is_closed() {
+                    std::process::exit(3);
+                }
                 Ok(())
             }
             ShowCommand::Check { id, session, trigger, score } => {

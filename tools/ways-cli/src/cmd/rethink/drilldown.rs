@@ -311,6 +311,7 @@ mod tests {
             way_id: way.into(),
             trigger_channel: channel.into(),
             gated: false,
+            suppressed: None,
             fire_score: score,
             way_path: None,
             criteria: MatchCriteria { pattern: Some("p".into()), ..Default::default() },

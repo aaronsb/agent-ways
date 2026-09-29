@@ -17,7 +17,175 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None, None, None)
+    way_scored(id, session_id, trigger, None, None, None, None)
+}
+
+// ── Hook context budget ─────────────────────────────────────────
+
+/// Claude Code's cap on one hook's `additionalContext` string. From the hooks
+/// reference (<https://code.claude.com/docs/en/hooks.md>, "JSON output"): each
+/// `additionalContext` is capped at 10,000 characters, and over the limit
+/// Claude Code saves it to a file and hands the model the path plus a preview
+/// of the first 2,000 characters. One `git commit` once matched 17,832
+/// characters across seven ways, so most of that never reached the model.
+pub const HOOK_CONTEXT_CAP: usize = 10_000;
+
+/// Length as Claude Code counts it: a JavaScript string length, which is
+/// UTF-16 code units. Never less than the `char` count, so it errs short.
+pub fn context_chars(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Room left in one hook invocation's `additionalContext`.
+///
+/// A scan lane hands one budget to every way and check it shows, in match
+/// order. A unit that fits is admitted whole. The first unit that does not
+/// fit closes the budget, and every later candidate in the invocation is
+/// withheld. A withheld way is not recorded as fired, so its refire curve does
+/// not start for guidance the model never saw, and it is free to fire on its
+/// next match. Bodies are never split.
+///
+/// A check and the parent way it pulls in are one unit: the check reserves
+/// room for its sections while the parent is admitted, and the pair goes out
+/// together or not at all.
+///
+/// The first unit is always admitted, even when it alone is over the cap.
+/// Dropping it would withhold that way on every match for good; admitting it
+/// gets Claude Code's file-plus-preview handling, the result before the budget.
+#[derive(Debug)]
+pub struct ContextBudget {
+    used: usize,
+    cap: usize,
+    closed: bool,
+    /// Room held back for text that must follow the next admitted body.
+    reserved: usize,
+}
+
+impl ContextBudget {
+    pub fn new(cap: usize) -> Self {
+        Self { used: 0, cap, closed: false, reserved: 0 }
+    }
+
+    /// A budget sized to Claude Code's hook `additionalContext` cap.
+    pub fn hook() -> Self {
+        Self::new(HOOK_CONTEXT_CAP)
+    }
+
+    /// A hook budget with `used` characters already spent, for a caller that
+    /// assembles the context across several `ways` processes (check-post.sh).
+    /// A `used` past the cap means that caller's budget is already closed.
+    pub fn hook_with_used(used: usize) -> Self {
+        let mut b = Self::hook();
+        b.used = used;
+        b.closed = used > b.cap;
+        b
+    }
+
+    fn fits_chars(&self, n: usize) -> bool {
+        !self.closed && (self.used == 0 || self.used + n + self.reserved <= self.cap)
+    }
+
+    /// Whether `text` would be admitted now. Charges nothing.
+    pub fn fits(&self, text: &str) -> bool {
+        self.fits_chars(context_chars(text))
+    }
+
+    /// Admit `text` whole if it fits, and charge it. The first refusal closes
+    /// the budget.
+    pub fn admit(&mut self, text: &str) -> bool {
+        let n = context_chars(text);
+        if self.fits_chars(n) {
+            self.used += n;
+            true
+        } else {
+            self.closed = true;
+            false
+        }
+    }
+
+    /// Close the budget: nothing more is admitted in this invocation.
+    pub fn close(&mut self) {
+        self.closed = true;
+    }
+
+    /// Charge text the caller adds between admitted bodies (separators).
+    pub fn charge(&mut self, text: &str) {
+        self.used += context_chars(text);
+    }
+
+    /// Hold back room for `text`, which must follow the next admitted body.
+    pub fn reserve(&mut self, text: &str) {
+        self.reserved = context_chars(text);
+    }
+
+    /// Spend the reservation: the body it was held for was admitted.
+    pub fn commit_reservation(&mut self) {
+        self.used += self.reserved;
+        self.reserved = 0;
+    }
+
+    /// Drop the reservation unspent.
+    pub fn cancel_reservation(&mut self) {
+        self.reserved = 0;
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+}
+
+/// Why a matched way or check was not shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Suppression {
+    /// The way's refire curve (ADR-126) still holds it back.
+    Refire,
+    /// The hook's context budget had no room for it.
+    ContextCap,
+}
+
+impl Suppression {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Refire => "refire",
+            Self::ContextCap => "context_cap",
+        }
+    }
+}
+
+/// Record a way or check that matched but was not shown, so the refire
+/// curve's work and the context cap's are countable in the event log. Cheap
+/// by design: no transcript read and no engagement reload.
+///
+/// `kind` is `way` or `check`. Refire rows are deduplicated by the caller to
+/// one per way per fire window; context-cap rows are rare and log as they
+/// happen.
+#[allow(clippy::too_many_arguments)]
+fn log_way_suppressed(
+    kind: &str,
+    id: &str,
+    domain: &str,
+    trigger: &str,
+    why: Suppression,
+    scope: &str,
+    project_dir: &str,
+    session_id: &str,
+) {
+    let agent_id = std::env::var("CLAUDE_AGENT_ID")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "main".to_string());
+    session::log_event(&[
+        ("event", "way_suppressed"),
+        ("kind", kind),
+        ("way", id),
+        ("domain", domain),
+        ("trigger", trigger),
+        ("reason", why.reason()),
+        ("scope", scope),
+        ("project", project_dir),
+        ("session", session_id),
+        ("agent_id", &agent_id),
+    ]);
 }
 
 /// Whether a resolved context actually detected its window, rather than falling
@@ -153,6 +321,7 @@ pub fn way_scored(
     fire_score: Option<f64>,
     matched_span: Option<&str>,
     surface: Option<&str>,
+    mut budget: Option<&mut ContextBudget>,
 ) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
@@ -215,14 +384,39 @@ pub fn way_scored(
             id
         )
     })?;
-    let outcome = session::way_fire_outcome(id, session_id, &curve);
-    if !outcome.is_allowed() {
+    // One transcript read per fire: the same tick feeds the fast-path decision,
+    // the re-check under the lock, the recorded fire, and the stamps below.
+    let token_pos = session::get_token_position(session_id);
+    // A refire suppression logs once per way per fire window; a context-cap
+    // withhold logs every time (it is rare, and each one is a missed delivery).
+    let suppress = |why: Suppression, last_fire: Option<u64>| {
+        if why == Suppression::Refire
+            && !last_fire.is_some_and(|t| session::first_suppression_in_window(id, session_id, t))
+        {
+            return;
+        }
+        log_way_suppressed("way", id, domain, trigger, why, &scope, &project_dir, session_id);
+    };
+
+    // Fast path, unlocked: most suppressed ways stop here without the lock.
+    let decision = session::way_fire_outcome(id, session_id, &curve, token_pos);
+    if !decision.outcome.is_allowed() {
+        suppress(Suppression::Refire, decision.last_fire);
         return Ok(String::new());
     }
-    let is_redisclosure = outcome.is_redisclosure();
-    session::record_way_fire(id, session_id, &curve);
+    // A closed budget withholds the way before its macro runs, and so does a
+    // static body that cannot fit: the macro only adds to it.
+    let body = body_text(&content);
+    if let Some(b) = budget.as_deref_mut() {
+        if !b.fits(&body) {
+            b.close();
+            suppress(Suppression::ContextCap, decision.last_fire);
+            return Ok(String::new());
+        }
+    }
 
-    // Macro handling
+    // Macro handling. Runs outside the engagement lock: a macro may call git
+    // or gh, and holding the lock across it would serialize parallel hooks.
     let macro_pos = extract_field(&content, "macro");
     let way_dir = way_file.parent().unwrap_or(Path::new("."));
     let macro_file = way_dir.join("macro.sh");
@@ -249,7 +443,7 @@ pub fn way_scored(
         }
     }
 
-    output.push_str(&body_text(&content));
+    output.push_str(&body);
 
     if macro_pos.as_deref() == Some("append") {
         if let Some(ref out) = macro_out {
@@ -258,8 +452,31 @@ pub fn way_scored(
         }
     }
 
+    // Critical section: re-check, admit, record. Parallel tool calls run
+    // concurrent hooks, and another process may have fired this way while the
+    // macro ran; the re-check under the lock sees its record, so a way is
+    // delivered at most once per refire window. The fire is recorded only once
+    // the body is admitted: a way the budget withholds must not start its
+    // refire curve, or the curve would hold back guidance the model never saw.
+    let lock = session::lock_engagement(id, session_id);
+    let decision = session::way_fire_outcome(id, session_id, &curve, token_pos);
+    if !decision.outcome.is_allowed() {
+        drop(lock);
+        suppress(Suppression::Refire, decision.last_fire);
+        return Ok(String::new());
+    }
+    if let Some(b) = budget {
+        if !b.admit(&output) {
+            drop(lock);
+            suppress(Suppression::ContextCap, decision.last_fire);
+            return Ok(String::new());
+        }
+    }
+    session::record_way_fire(id, session_id, &curve, token_pos);
+    drop(lock);
+    let is_redisclosure = decision.outcome.is_redisclosure();
+
     // Stamp markers
-    let token_pos = session::get_token_position(session_id);
     session::stamp_way_marker(id, session_id, token_pos);
     session::stamp_way_tokens(id, session_id, token_pos);
 
@@ -376,6 +593,17 @@ pub fn way_scored(
 // ── ways show check ─────────────────────────────────────────────
 
 pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Result<String> {
+    check_within(id, session_id, trigger, match_score, None)
+}
+
+/// [`check`] charged against a hook's [`ContextBudget`] when one is given.
+pub fn check_within(
+    id: &str,
+    session_id: &str,
+    trigger: &str,
+    match_score: f64,
+    mut budget: Option<&mut ContextBudget>,
+) -> Result<String> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
 
@@ -425,20 +653,58 @@ pub fn check(id: &str, session_id: &str, trigger: &str, match_score: f64) -> Res
         return Ok(String::new());
     }
 
-    let mut output = String::new();
+    // Include anchor section when epoch distance >= 5
+    let include_anchor = epoch_distance >= 5;
+    let sections = check_sections_text(&check_content, include_anchor);
 
-    // If parent way hasn't fired, pull it in alongside the check
+    // A check and the parent way it pulls in are one budget unit: the pair
+    // goes out together or not at all. A withheld check is logged and its fire
+    // count is not bumped.
+    let withhold = || {
+        log_way_suppressed("check", id, domain, trigger, Suppression::ContextCap, &scope, &project_dir, session_id);
+        Ok(String::new())
+    };
+    if budget.as_deref().is_some_and(ContextBudget::is_closed) {
+        return withhold();
+    }
+
+    let mut output = String::new();
+    let mut parent_shown = false;
+
+    // If parent way hasn't fired, pull it in alongside the check, holding back
+    // room for the check's sections (and the newline between them) meanwhile.
     if !way_has_fired {
-        let parent_out = way(id, session_id, "check-pull")?;
+        if let Some(b) = budget.as_deref_mut() {
+            b.reserve(&format!("\n{sections}"));
+        }
+        let parent_out =
+            way_scored(id, session_id, "check-pull", None, None, None, budget.as_deref_mut())?;
+        if let Some(b) = budget.as_deref_mut() {
+            if parent_out.is_empty() {
+                b.cancel_reservation();
+            } else {
+                b.commit_reservation();
+            }
+        }
         if !parent_out.is_empty() {
             output.push_str(&parent_out);
             output.push('\n');
+            parent_shown = true;
         }
     }
 
-    // Include anchor section when epoch distance >= 5
-    let include_anchor = epoch_distance >= 5;
-    output.push_str(&check_sections_text(&check_content, include_anchor));
+    // Parent shown: its reservation already paid for the sections. Otherwise
+    // the check stands alone, and is withheld when the parent was withheld for
+    // the cap or the sections do not fit.
+    if !parent_shown {
+        if let Some(b) = budget {
+            if !b.admit(&sections) {
+                return withhold();
+            }
+        }
+    }
+
+    output.push_str(&sections);
 
     // Bump fire count
     session::bump_check_fires(id, session_id);
@@ -788,5 +1054,78 @@ mod tests {
     #[test]
     fn normalize_single_segment() {
         assert_eq!(normalize_way_id("testing"), "testing");
+    }
+
+    // ── ContextBudget (#528) ────────────────────────────────────
+
+    #[test]
+    fn budget_admits_whole_bodies_in_order_then_closes() {
+        let mut b = ContextBudget::new(10);
+        assert!(b.admit("abcd"));
+        b.charge("\n\n");
+        assert!(b.admit("ab"), "6 + 2 = 8 fits under 10");
+        assert!(!b.admit("abc"), "8 + 3 = 11 is over the cap");
+        assert!(b.is_closed());
+        assert!(!b.admit(""), "a closed budget admits nothing, even an empty body");
+    }
+
+    #[test]
+    fn budget_admits_an_oversized_first_body() {
+        let mut b = ContextBudget::new(10);
+        assert!(b.admit(&"x".repeat(25)), "the first body is never dropped");
+        assert!(!b.admit("y"));
+        assert!(b.is_closed());
+    }
+
+    #[test]
+    fn budget_counts_utf16_units_like_claude_code() {
+        // One astral-plane char is two UTF-16 units, as a JS string counts it.
+        assert_eq!(context_chars("😀"), 2);
+        assert_eq!(context_chars("é"), 1);
+        let mut b = ContextBudget::new(3);
+        assert!(b.admit("😀"));
+        assert!(!b.admit("😀"), "2 + 2 = 4 is over a cap of 3");
+    }
+
+    #[test]
+    fn check_and_parent_are_one_unit() {
+        // Room for the parent alone but not the parent plus the check's
+        // reserved sections: the parent is refused and the budget closes, so
+        // the check is withheld too.
+        let mut b = ContextBudget::new(20);
+        assert!(b.admit("0123456789"));
+        b.reserve("abcde");
+        assert!(!b.admit("012345"), "10 + 6 + 5 reserved = 21 is over");
+        b.cancel_reservation();
+        assert!(b.is_closed(), "the pair's refusal closes the budget");
+
+        // The pair fits: the parent is admitted and the reservation is spent.
+        let mut b = ContextBudget::new(20);
+        assert!(b.admit("0123456789"));
+        b.reserve("abcd");
+        assert!(b.admit("0123"));
+        b.commit_reservation();
+        assert!(!b.admit("xyz"), "18 + 3 is over");
+    }
+
+    #[test]
+    fn hook_with_used_resumes_or_is_closed() {
+        let mut b = ContextBudget::hook_with_used(7_000);
+        assert!(!b.admit(&"x".repeat(4_000)));
+        let mut b = ContextBudget::hook_with_used(7_000);
+        assert!(b.admit(&"x".repeat(3_000)));
+        let b = ContextBudget::hook_with_used(HOOK_CONTEXT_CAP + 1);
+        assert!(b.is_closed());
+        let mut b = ContextBudget::hook_with_used(0);
+        assert!(b.admit(&"x".repeat(12_000)), "zero spent keeps the first-unit rule");
+    }
+
+    #[test]
+    fn hook_budget_is_the_documented_cap() {
+        assert_eq!(HOOK_CONTEXT_CAP, 10_000);
+        let mut b = ContextBudget::hook();
+        assert!(b.admit(&"x".repeat(6_000)));
+        assert!(b.admit(&"x".repeat(4_000)), "exactly at the cap fits");
+        assert!(!b.admit("x"));
     }
 }

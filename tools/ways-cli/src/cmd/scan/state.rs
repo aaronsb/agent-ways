@@ -101,7 +101,10 @@ pub fn state(
         // the branch was dead. (The mark-tasks-active hook still writes the marker;
         // it is dormant, kept as the hook-point should per-way tasks-active
         // suppression be wanted again.)
-        let out = capture_show_way(&way.id, session_id, "state", None, None, None);
+        // No context budget on this lane yet: core alone runs past the 10,000
+        // character cap on SessionStart, and a budget would admit core and
+        // then withhold every state way behind it.
+        let out = capture_show_way(&way.id, session_id, "state", None, None, None, None);
         if !out.is_empty() {
             context.push_str(&out);
             context.push_str("\n\n");

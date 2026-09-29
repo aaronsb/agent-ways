@@ -321,6 +321,33 @@ fn assert_check_fires(way_id: &str, session_id: &str, expected: u64) {
     );
 }
 
+/// Assert `stdout` is exactly the canonical PreToolUse envelope (#528):
+/// `hookSpecificOutput` with `hookEventName: "PreToolUse"` and a non-empty
+/// `additionalContext` within Claude Code's 10,000-character cap. No top-level
+/// `decision` or `additionalContext`, and no `permissionDecision`, so the hook
+/// never changes the tool's permission outcome. Returns the context.
+fn assert_pretooluse_envelope(stdout: &str, needle: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("PreToolUse stdout is not one JSON object ({e}): {stdout:?}"));
+    let obj = v.as_object().expect("PreToolUse stdout is a JSON object");
+    assert_eq!(
+        obj.keys().collect::<Vec<_>>(),
+        vec!["hookSpecificOutput"],
+        "only the canonical envelope at top level; got: {stdout}"
+    );
+    let hso = &v["hookSpecificOutput"];
+    assert_eq!(hso["hookEventName"], "PreToolUse");
+    assert!(
+        hso.get("permissionDecision").is_none(),
+        "a guidance hook must not make a permission decision; got: {stdout}"
+    );
+    let ctx = hso["additionalContext"].as_str().expect("additionalContext is a string");
+    assert!(!ctx.is_empty());
+    assert!(ctx.encode_utf16().count() <= 10_000, "context over the cap: {} chars", ctx.len());
+    assert!(ctx.contains(needle), "context missing {needle:?}: {ctx:?}");
+    ctx.to_string()
+}
+
 // ── Scenario 1: Basic Prompt Matching + Idempotency ────────────
 
 #[test]
@@ -366,9 +393,13 @@ fn scenario_2_command_triggers() {
     let s = Session::new("s2");
 
     // Turn 1: git commit → should match cmd-trigger
-    s.scan_command("git commit -m 'fix: auth bug'");
+    let out = s.scan_command("git commit -m 'fix: auth bug'");
     assert_epoch(&s.id, 1);
     assert_marker_exists("testdomain/cmd-trigger", &s.id);
+    // #528: PreToolUse context reaches the model only in the canonical
+    // envelope; the old top-level `decision`/`additionalContext` went to the
+    // debug log.
+    assert_pretooluse_envelope(&out, "# Commit Messages");
 
     // Turn 2: npm install → should match with-check (commands: ^npm install)
     s.scan_command("npm install express");
@@ -388,9 +419,10 @@ fn scenario_3_file_triggers() {
     let s = Session::new("s3");
 
     // Turn 1: .env file → should match file-trigger
-    s.scan_file("/app/.env");
+    let out = s.scan_file("/app/.env");
     assert_epoch(&s.id, 1);
     assert_marker_exists("testdomain/file-trigger", &s.id);
+    assert_pretooluse_envelope(&out, "# Environment Config");
 
     // Turn 2: unmatched file → nothing
     s.scan_file("src/api/routes.ts");
@@ -630,4 +662,257 @@ fn scenario_11_hook_event_misroute_warning() {
         stdout.contains("State Trigger Test Way"),
         "scan state without --hook-event must still default-fire SessionStart; got stdout: {stdout:?}"
     );
+}
+
+// ── Scenario 12: PreToolUse context cap and way_suppressed (#528) ──
+
+/// Run `ways scan command` against an isolated HOME and XDG state dir, so the
+/// test owns its ways corpus and reads its own event log.
+fn scan_command_isolated(session: &str, cmd: &str, home: &Path, state: &Path) -> String {
+    let output = Command::new(ways_bin())
+        .args([
+            "scan", "command",
+            "--command", cmd,
+            "--session", session,
+            "--project", "/tmp/nonexistent-project",
+        ])
+        .env("HOME", home)
+        .env("USERPROFILE", home) // see scan_prompt
+        .env("XDG_STATE_HOME", state)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .env_remove("CLAUDE_AGENT_ID")
+        .output()
+        .expect("Failed to run ways scan command");
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// `(way, reason)` for every `event` row of `session` in the isolated log.
+/// `reason` is empty for events that carry none.
+fn events_of(state: &Path, session: &str, event: &str) -> Vec<(String, String)> {
+    let log = state.join("agent-ways/events.jsonl");
+    std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == event && v["session"] == session)
+        .map(|v| {
+            (
+                v["way"].as_str().unwrap_or("").to_string(),
+                v["reason"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+fn fired_ways(state: &Path, session: &str, event: &str) -> Vec<String> {
+    let mut ways: Vec<String> = events_of(state, session, event).into_iter().map(|(w, _)| w).collect();
+    ways.sort();
+    ways
+}
+
+/// Write a way under `root` that fires on `^git commit`, with `body_chars`
+/// of filler after its `# Marker <id>` heading, and an optional macro script.
+fn write_commit_way(root: &Path, id: &str, body_chars: usize, macro_sh: Option<&str>) {
+    let dir = root.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    let body = format!("# Marker {id}\n\n{}\n", "lorem ipsum ".repeat(body_chars / 12));
+    let macro_field = if macro_sh.is_some() { "macro: append\n" } else { "" };
+    std::fs::write(
+        dir.join(format!("{id}.md")),
+        format!("---\ndescription: test way {id}\ncommands: ^git\\ commit\nscope: agent\nrefire: 0.15\n{macro_field}---\n{body}"),
+    )
+    .unwrap();
+    if let Some(script) = macro_sh {
+        std::fs::write(dir.join("macro.sh"), script).unwrap();
+    }
+}
+
+#[test]
+fn scenario_12_pretooluse_cap_withholds_without_firing() {
+    let base = std::env::temp_dir().join(format!("ways-sim-cap-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    let ways_root = home.join(".claude/hooks/ways/capdomain");
+
+    // Three ways on the same command, about 4,000 characters each: any two
+    // fit under the 10,000-character cap, all three do not.
+    let ids = ["cap-a", "cap-b", "cap-c"];
+    for id in ids {
+        write_commit_way(&ways_root, id, 3960, None);
+    }
+
+    let session = format!("sim-s12-{}", std::process::id());
+    clean_markers(&session);
+    let full = |id: &str| format!("capdomain/{id}");
+
+    // Turn 1: two ways fit, the third is withheld for the cap.
+    let out = scan_command_isolated(&session, "git commit -m x", &home, &state);
+    let ctx = assert_pretooluse_envelope(&out, "# Marker cap-");
+    let shown: Vec<&str> = ids
+        .iter()
+        .copied()
+        .filter(|id| ctx.contains(&format!("# Marker {id}\n")))
+        .collect();
+    assert_eq!(shown.len(), 2, "two whole ways fit under the cap; got {shown:?}");
+    let withheld = ids.iter().copied().find(|id| !shown.contains(id)).unwrap();
+    let mut shown_full: Vec<String> = shown.iter().map(|id| full(id)).collect();
+    shown_full.sort();
+
+    for id in &shown {
+        assert_marker_exists(&full(id), &session);
+    }
+    // The withheld way was never shown, so it must not be recorded as fired.
+    assert_marker_absent(&full(withheld), &session);
+    let engagement = format!(
+        "{}/{session}/way-engagement/capdomain__{withheld}.json",
+        sessions_root()
+    );
+    assert!(!Path::new(&engagement).exists(), "withheld way started its refire curve");
+    assert_eq!(fired_ways(&state, &session, "way_fired"), shown_full, "turn 1 fires only the shown ways");
+    assert_eq!(
+        events_of(&state, &session, "way_suppressed"),
+        vec![(full(withheld), "context_cap".to_string())]
+    );
+
+    // Turn 2: the two shown ways are inside their refire window and are
+    // suppressed; the withheld way is free to fire now, as a first fire.
+    let out = scan_command_isolated(&session, "git commit -m y", &home, &state);
+    let ctx = assert_pretooluse_envelope(&out, &format!("# Marker {withheld}\n"));
+    for id in &shown {
+        assert!(
+            !ctx.contains(&format!("# Marker {id}\n")),
+            "{id} re-delivered inside its refire window"
+        );
+    }
+    assert_marker_exists(&full(withheld), &session);
+    let mut all_fired = shown_full.clone();
+    all_fired.push(full(withheld));
+    all_fired.sort();
+    assert_eq!(fired_ways(&state, &session, "way_fired"), all_fired, "turn 2 first-fires the withheld way");
+    assert!(
+        fired_ways(&state, &session, "way_redisclosed").is_empty(),
+        "the withheld way was never delivered, so its turn-2 fire is not a redisclosure"
+    );
+    let refire_rows = || {
+        let mut w: Vec<String> = events_of(&state, &session, "way_suppressed")
+            .into_iter()
+            .filter(|(_, r)| r == "refire")
+            .map(|(w, _)| w)
+            .collect();
+        w.sort();
+        w
+    };
+    assert_eq!(refire_rows(), shown_full, "each refire suppression is logged");
+
+    // Turn 3: all three are inside their windows. Refire suppressions log at
+    // most once per way per fire window, so only the turn-2 fire adds a row.
+    scan_command_isolated(&session, "git commit -m z", &home, &state);
+    assert_eq!(refire_rows(), all_fired, "refire rows are deduplicated per fire window");
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+// ── Scenario 13: concurrent hooks deliver a way once (#528 review) ──
+
+#[test]
+fn scenario_13_concurrent_scans_fire_a_way_once() {
+    let base = std::env::temp_dir().join(format!("ways-sim-race-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    // The macro sleeps between the refire decision and the record, which is
+    // the window two parallel PreToolUse hooks race through without a lock.
+    write_commit_way(
+        &home.join(".claude/hooks/ways/racedomain"),
+        "slow",
+        200,
+        Some("sleep 1\necho macro-done\n"),
+    );
+
+    let session = format!("sim-s13-{}", std::process::id());
+    clean_markers(&session);
+
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let (s, h, st) = (session.clone(), home.clone(), state.clone());
+            std::thread::spawn(move || scan_command_isolated(&s, "git commit -m x", &h, &st))
+        })
+        .collect();
+    let outs: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    let delivered = outs.iter().filter(|o| o.contains("# Marker slow")).count();
+    assert_eq!(delivered, 1, "exactly one concurrent hook delivers the way; got {outs:?}");
+    // The two hooks append to one log at nearly the same moment (the winner's
+    // way_fired, the loser's way_suppressed). Each record must land whole: a
+    // record split across two writes interleaves and corrupts both lines.
+    let log = std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
+    for line in log.lines() {
+        assert!(
+            serde_json::from_str::<serde_json::Value>(line).is_ok(),
+            "corrupt event log line (interleaved appends?): {line:?}"
+        );
+    }
+    assert_eq!(
+        fired_ways(&state, &session, "way_fired"),
+        vec!["racedomain/slow".to_string()],
+        "one way_fired across both hooks"
+    );
+    assert_eq!(
+        events_of(&state, &session, "way_suppressed"),
+        vec![("racedomain/slow".to_string(), "refire".to_string())],
+        "the losing hook logs a refire suppression"
+    );
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+// ── Scenario 14: `show way --budget-used` for check-post.sh ─────
+
+#[test]
+fn scenario_14_show_way_budget_used_withholds_with_exit_3() {
+    let base = std::env::temp_dir().join(format!("ways-sim-show-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    write_commit_way(&home.join(".claude/hooks/ways/showdomain"), "big", 3960, None);
+    let session = format!("sim-s14-{}", std::process::id());
+    clean_markers(&session);
+
+    let show = |used: &str| {
+        Command::new(ways_bin())
+            .args(["show", "way", "showdomain/big", "--session", &session, "--trigger", "postcheck"])
+            .arg(format!("--budget-used={used}"))
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("XDG_STATE_HOME", &state)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("CLAUDE_PROJECT_DIR", "/tmp/nonexistent-project")
+            .env_remove("CLAUDE_AGENT_ID")
+            .output()
+            .expect("Failed to run ways show way")
+    };
+
+    // 7,000 already spent: a 4,000-character way does not fit.
+    let out = show("7000");
+    assert_eq!(out.status.code(), Some(3), "withheld for the cap exits 3");
+    assert!(out.stdout.is_empty());
+    assert_marker_absent("showdomain/big", &session);
+    assert_eq!(
+        events_of(&state, &session, "way_suppressed"),
+        vec![("showdomain/big".to_string(), "context_cap".to_string())]
+    );
+
+    // Nothing spent yet: the way is shown and recorded.
+    let out = show("0");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("# Marker big"));
+    assert_marker_exists("showdomain/big", &session);
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
 }

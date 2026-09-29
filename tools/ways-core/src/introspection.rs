@@ -97,7 +97,10 @@ pub struct MatchDetail {
 /// `gated: true` row, a suppressed candidate: a pattern hit vetoed by the
 /// semantic keyword gate (ADR-155), shown so "why didn't X fire" is
 /// answerable from the session record. Gated rows inject nothing and are
-/// excluded from the fire counts.
+/// excluded from the fire counts. A row with `suppressed` set is a way that
+/// matched and was withheld (a `way_suppressed` event): its refire curve still
+/// held it back, or the hook's context cap had no room. It too injects nothing
+/// and is excluded from the fire counts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FiredWay {
     pub way_id: String,
@@ -110,6 +113,10 @@ pub struct FiredWay {
     /// matched (see `match_detail`) but the way did not fire.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub gated: bool,
+    /// Why a matched way was withheld (`refire`, `context_cap`), from a
+    /// `way_suppressed` event. `None` for a fire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppressed: Option<String>,
     /// Way-level cosine for semantic fires; `None` for deterministic channels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fire_score: Option<f64>,
@@ -119,6 +126,14 @@ pub struct FiredWay {
     /// What hit — `None` until fire-time enrichment (increment 3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub match_detail: Option<MatchDetail>,
+}
+
+impl FiredWay {
+    /// Whether this row put the way's body into context: neither gated nor
+    /// suppressed.
+    pub fn injected(&self) -> bool {
+        !self.gated && self.suppressed.is_none()
+    }
 }
 
 /// One turn (an epoch cluster of fires) of a session.
@@ -149,6 +164,10 @@ pub struct IntrospectionSummary {
     /// `total_fires` or `distinct_ways`.
     #[serde(skip_serializing_if = "u64_is_zero")]
     pub gated_candidates: u64,
+    /// Matched ways withheld by the refire curve or the hook context cap
+    /// (`way_suppressed`). Counted separately, like `gated_candidates`.
+    #[serde(skip_serializing_if = "u64_is_zero")]
+    pub suppressed_candidates: u64,
     /// Turns whose join was upgraded to `Keyed` by a transcript foreign key
     /// (ADR-153 §3). `0` until [`SessionIntrospection::join_transcript`] runs.
     pub keyed_turns: usize,
@@ -203,7 +222,7 @@ impl SessionIntrospection {
             .filter(|e| {
                 matches!(
                     e["event"].as_str(),
-                    Some("way_fired") | Some("way_keyword_gated")
+                    Some("way_fired") | Some("way_keyword_gated") | Some("way_suppressed")
                 )
             })
             .filter_map(FireRow::from_value)
@@ -230,25 +249,27 @@ impl SessionIntrospection {
             turns.push(build_turn(&cluster, epoch, criteria));
         }
 
-        // Gated candidates are shown in their turn but never counted as fires —
-        // they injected nothing (ADR-155).
-        let total_fires: u64 = turns
-            .iter()
-            .map(|t| t.fired_ways.iter().filter(|w| !w.gated).count() as u64)
-            .sum();
-        let gated_candidates: u64 = turns
-            .iter()
-            .map(|t| t.fired_ways.iter().filter(|w| w.gated).count() as u64)
-            .sum();
+        // Gated and suppressed candidates are shown in their turn but never
+        // counted as fires — they injected nothing (ADR-155, #528).
+        let count = |pred: fn(&FiredWay) -> bool| -> u64 {
+            turns
+                .iter()
+                .map(|t| t.fired_ways.iter().filter(|w| pred(w)).count() as u64)
+                .sum()
+        };
+        let total_fires = count(FiredWay::injected);
+        let gated_candidates = count(|w| w.gated);
+        let suppressed_candidates = count(|w| w.suppressed.is_some());
         let distinct: HashSet<&str> = turns
             .iter()
-            .flat_map(|t| t.fired_ways.iter().filter(|w| !w.gated).map(|w| w.way_id.as_str()))
+            .flat_map(|t| t.fired_ways.iter().filter(|w| w.injected()).map(|w| w.way_id.as_str()))
             .collect();
         let summary = IntrospectionSummary {
             turns: turns.len(),
             distinct_ways: distinct.len(),
             total_fires,
             gated_candidates,
+            suppressed_candidates,
             keyed_turns: 0, // set by join_transcript once a transcript is joined
         };
 
@@ -342,6 +363,7 @@ fn build_turn(cluster: &[&FireRow], epoch: u64, criteria: &CriteriaMap) -> Turn 
                 way_id: f.way.clone(),
                 trigger_channel: f.trigger.clone(),
                 gated: f.gated,
+                suppressed: f.suppressed.clone(),
                 fire_score: f.fire_score,
                 way_path: meta.path,
                 criteria: meta.criteria,
@@ -378,12 +400,16 @@ struct FireRow {
     /// `true` for a `way_keyword_gated` event (ADR-155): a suppressed
     /// candidate, not a fire.
     gated: bool,
+    /// The `reason` of a `way_suppressed` event: a matched way withheld.
+    suppressed: Option<String>,
 }
 
 impl FireRow {
     fn from_value(v: &Value) -> Option<Self> {
         let way = v["way"].as_str().filter(|s| !s.is_empty())?;
         let gated = v["event"].as_str() == Some("way_keyword_gated");
+        let suppressed = (v["event"].as_str() == Some("way_suppressed"))
+            .then(|| v["reason"].as_str().unwrap_or("unknown").to_string());
         Some(FireRow {
             ts: v["ts"].as_str().unwrap_or("").to_string(),
             way: way.to_string(),
@@ -399,6 +425,7 @@ impl FireRow {
             token_position: str_or_num_u64(&v["token_position"]).unwrap_or(0),
             matched_span: v["matched_span"].as_str().map(|s| s.to_string()),
             gated,
+            suppressed,
         })
     }
 }
@@ -669,6 +696,30 @@ scope: subagent
         let md = g.match_detail.as_ref().expect("gated row records what hit");
         assert_eq!(md.matched_span.as_deref(), Some("remember"));
         assert!(!t0.fired_ways.iter().find(|w| w.way_id == "d/a").unwrap().gated);
+    }
+
+    #[test]
+    fn suppressed_ways_join_as_withheld_rows_not_fires() {
+        // #528: a way_suppressed event (refire curve or context cap) lands in
+        // its turn with its reason, and never counts as a fire.
+        let events = vec![
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"bash"}),
+            json!({"event":"way_suppressed","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/b","trigger":"bash","reason":"refire"}),
+            json!({"event":"way_suppressed","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/c","trigger":"bash","reason":"context_cap"}),
+        ];
+        let s = SessionIntrospection::build(&events, "s1", "/proj", 200, &CriteriaMap::new());
+
+        assert_eq!(s.summary.total_fires, 1);
+        assert_eq!(s.summary.distinct_ways, 1);
+        assert_eq!(s.summary.suppressed_candidates, 2);
+        assert_eq!(s.summary.gated_candidates, 0);
+
+        let rows = &s.turns[0].fired_ways;
+        let reason = |id: &str| rows.iter().find(|w| w.way_id == id).unwrap().suppressed.clone();
+        assert_eq!(reason("d/a"), None);
+        assert_eq!(reason("d/b").as_deref(), Some("refire"));
+        assert_eq!(reason("d/c").as_deref(), Some("context_cap"));
+        assert_eq!(rows.iter().find(|w| w.way_id == "d/b").unwrap().trigger_channel, "bash");
     }
 
     #[test]
