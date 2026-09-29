@@ -846,6 +846,16 @@ fn scenario_13_concurrent_scans_fire_a_way_once() {
 
     let delivered = outs.iter().filter(|o| o.contains("# Marker slow")).count();
     assert_eq!(delivered, 1, "exactly one concurrent hook delivers the way; got {outs:?}");
+    // The two hooks append to one log at nearly the same moment (the winner's
+    // way_fired, the loser's way_suppressed). Each record must land whole: a
+    // record split across two writes interleaves and corrupts both lines.
+    let log = std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
+    for line in log.lines() {
+        assert!(
+            serde_json::from_str::<serde_json::Value>(line).is_ok(),
+            "corrupt event log line (interleaved appends?): {line:?}"
+        );
+    }
     assert_eq!(
         fired_ways(&state, &session, "way_fired"),
         vec!["racedomain/slow".to_string()],
