@@ -177,14 +177,15 @@ After creating or tuning a way, verify it matches what you expect — and doesn'
 ways lint --global
 
 # Vocabulary gap analysis
-ways suggest --file ~/.claude/hooks/ways/softwaredev/code/security/security.md
+ways suggest ~/.claude/hooks/ways/softwaredev/code/security/security.md
 
-# Embedding similarity scores
-way-embed match --corpus ~/.cache/agent-ways/user/ways-corpus.jsonl \
-  --model ~/.cache/agent-ways/user/minilm-l6-v2.gguf \
-  --query "pin lockfile versions"
+# How a prompt matches under the live matcher (ADR-160); --cosine for the single-vector view
+ways match "pin lockfile versions"
 
 # Sibling vocabulary overlap (Jaccard)
+ways tree softwaredev/code/supplychain/depscan --jaccard
+
+# Way-vs-way embedding similarity
 ways siblings softwaredev/code/supplychain/depscan/node
 
 # Session simulation tests (Rust integration tests)

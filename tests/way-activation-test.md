@@ -16,11 +16,11 @@ After each user prompt, check **two** signals:
 
 2. **Embedding scoring via CLI** — run this from `~/.claude/`:
    ```bash
-   ways embed --query "the exact prompt the user typed"
+   ways match "the exact prompt the user typed"
    ```
-   This prints a ranked table: Way, Score, Description. Report the top 3 results.
+   This prints the ranked candidates with peak, share, confirm and outcome (`fired ✓`, `< gate`, `< confirm`). Report the top 3 results.
 
-Use **both** signals: system-reminders confirm delivery; `ways embed` confirms scoring.
+Use **both** signals: system-reminders confirm delivery; `ways match` confirms scoring.
 
 ### Report format
 
@@ -55,7 +55,7 @@ After reading this file, begin with Step 1.
 
 > **CLAUDE**: Check system-reminders for commit guidance, then run:
 > ```bash
-> cd ~/.claude && ways embed --query "I need to commit these changes and push to origin"
+> cd ~/.claude && ways match "I need to commit these changes and push to origin"
 > ```
 > Report injected content and top 3 matches.
 
@@ -69,7 +69,7 @@ After reading this file, begin with Step 1.
 
 > **CLAUDE**: Check system-reminders for security guidance, then run:
 > ```bash
-> cd ~/.claude && ways embed --query "how should I hash passwords with bcrypt for our login system?"
+> cd ~/.claude && ways match "how should I hash passwords with bcrypt for our login system?"
 > ```
 > Report injected content and top 3 matches.
 
@@ -83,7 +83,7 @@ After reading this file, begin with Step 1.
 
 > **CLAUDE**: Check system-reminders for performance guidance, then run:
 > ```bash
-> cd ~/.claude && ways embed --query "profile the rendering loop to find the bottleneck and reduce latency"
+> cd ~/.claude && ways match "profile the rendering loop to find the bottleneck and reduce latency"
 > ```
 > Report injected content and top 3 matches.
 
@@ -97,7 +97,7 @@ After reading this file, begin with Step 1.
 
 > **CLAUDE**: Check system-reminders for migration guidance, then run:
 > ```bash
-> cd ~/.claude && ways embed --query "create a migration to alter the users table and add an index on the email column"
+> cd ~/.claude && ways match "create a migration to alter the users table and add an index on the email column"
 > ```
 > Report injected content and top 3 matches.
 
@@ -111,7 +111,7 @@ After reading this file, begin with Step 1.
 
 > **CLAUDE**: Check system-reminders for any new content, then run:
 > ```bash
-> cd ~/.claude && ways embed --query "what's the weather like today?"
+> cd ~/.claude && ways match "what's the weather like today?"
 > ```
 > Report whether anything scored above threshold.
 

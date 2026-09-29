@@ -15,9 +15,9 @@ refire: 0.15
 suggest → interpret → apply → test → verify
 ```
 
-1. **Survey**: `/ways-tests suggest --all` (or `--all --summary` for overview)
+1. **Survey**: the Current Way Health table prepended above covers every semantic way. For one way's detail, run `ways suggest <way-file>`.
 2. **Interpret**: Gaps vs intentional unused (see below)
-3. **Apply**: `/ways-tests suggest <way> --apply` (git-safe, shows diff)
+3. **Apply**: edit the `vocabulary:` line by hand, since `ways suggest` only reports. Then run `ways corpus` and review the edit in the diff.
 4. **Test**: `/ways-tests score-all "<sample prompt>"` to verify discrimination
 5. **Verify**: `make test-sim` for regression
 
