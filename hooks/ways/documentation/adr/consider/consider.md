@@ -34,7 +34,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 
 A run under `/goal`, or any unattended run, completes the consider step with no human reply.
 
-- The goal condition is the operator's stated intent. Cite it as the `operator` basis: `said` quotes the condition verbatim, `via` names the goal and the session.
+- The goal condition is the operator's stated intent. Cite it as the `operator` basis at `level: directed`: `said` quotes the condition verbatim, `via` names the goal and the session.
 - You may put the probes to an advisor: a second model, or the `skeptic` subagent. Give the advisor the goal condition or the operator's words, and ask whether the decision serves that intent.
 - Record the advisor's answer as a `considered` entry attributed to the advisor: `adr consider N --operator advisor --said "..." --via "<which advisor and model, and the run>"`. Pass `--operator advisor` every time, since the default is the git user.
 - That entry is a complete record of an autonomous run. Nothing flags it or asks for a human answer later.

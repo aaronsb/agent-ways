@@ -42,6 +42,7 @@ If `docs/architecture/adr.yaml` declares no `contract:` key, the project is adr/
 You run as a subagent, so the operator is not in your conversation. Return the Summary's probes to the calling session in plain words; the session asks the operator, or an advisor when no one is present. When an answer reaches you verbatim, record it, with `--operator advisor` and `via` naming the advisor when an advisor gave it:
 ```bash
 docs/scripts/adr consider <n> --said "<verbatim>" --via "<where it was said>" --covers <probe...>
+docs/scripts/adr consider <n> --operator advisor --said "..." --via "<advisor, model, run>"
 ```
 
 ### 6. Accept

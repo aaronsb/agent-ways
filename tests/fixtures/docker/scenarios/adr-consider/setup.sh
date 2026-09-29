@@ -51,7 +51,7 @@ basis:
 - **Trades away:** up to 30 seconds of staleness on lists.
 - **One-way?** No. The cache is behind a flag.
 - **Probes:** *Confident (fresh-enough):* you asked for faster list pages; is list data up to 30 seconds old fine for what you need?
-- **Inversion:** one end caches nothing and scales the database; the other caches everything with invalidation. This sits between. Is the middle right?
+- **Inversion:** one end caches nothing and scales the database; the other caches everything with invalidation. This sits between them.
 
 ## 1. Decision
 
