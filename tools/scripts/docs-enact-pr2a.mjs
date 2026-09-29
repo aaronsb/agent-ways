@@ -4,7 +4,7 @@ export const meta = {
   phases: [{ title: 'Rewrite', detail: 'one agent per engine doc; claims verified against source' }],
 }
 
-const REPO = '/home/aaron/Projects/ai/agent-ways'
+const REPO = '/home/aaron/Projects/ai/harness/agent-ways'
 const STYLE = `${REPO}/docs/hooks-and-ways/authoring-docs-style.md`
 const REF = `${REPO}/docs/hooks-and-ways/engine-reference.md`
 

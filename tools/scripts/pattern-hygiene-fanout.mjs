@@ -8,7 +8,7 @@ export const meta = {
 
 // Session-specific absolute repo root (workflow scripts have no cwd/fs access to
 // derive it). Edit this if replaying the methodology from another checkout.
-const REPO = '/home/aaron/Projects/ai/agent-ways'
+const REPO = '/home/aaron/Projects/ai/harness/agent-ways'
 // Findings manifest inlined (see scratchpad/findings-manifest.json) — avoids the
 // fragile args-passing path that reached the script as a non-array.
 const ways = [
