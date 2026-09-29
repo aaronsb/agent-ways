@@ -23,7 +23,7 @@
 #include <vector>
 #include <algorithm>
 
-#define VERSION "1.1.1"
+#define VERSION "1.1.2"
 #define MAX_CORPUS 512
 #define MAX_LINE   65536  /* corpus lines can be long with embedding vectors */
 
