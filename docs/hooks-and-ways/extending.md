@@ -69,10 +69,11 @@ Ways can nest: `{domain}/{parent}/{child}/{child}.md`. Each level adds context o
 ```
 meta/knowledge/knowledge.md                 — fires on "ways" (overview, ~60 lines)
 meta/knowledge/authoring/authoring.md       — fires when editing way files (format spec)
+meta/knowledge/authoring/*/                 — children on refire, the keyword lane, trees, frontmatter fields, locale stubs
 meta/knowledge/optimization/optimization.md — fires on "optimize vocabulary" (tuning workflow + live health via macro)
 ```
 
-If you just ask "what are ways?" you get the 60-line overview. The authoring spec and optimization workflow never load. But if you start editing a way file, the authoring way fires automatically. If you discuss vocabulary tuning, the optimization way fires and its macro injects a live health dashboard of all ways.
+If you just ask "what are ways?" you get the 60-line overview. The authoring spec and optimization workflow never load. But if you start editing a way file, the authoring way fires automatically. Its children load when the work turns to their topic, such as setting a way's refire cadence or splitting a way into a tree. If you discuss vocabulary tuning, the optimization way fires and its macro injects a live health dashboard of all ways.
 
 **Design principle**: Parent ways provide orientation. Child ways provide depth. Each child has its own trigger — pattern, semantic, file, or command — so it only loads when that specific sub-topic is active.
 

@@ -22,6 +22,7 @@
 //!   against the `locale_stub:` schema block.
 //! - [`requires`] is the ADR-116 scan-macro-to-permissions machinery.
 //! - [`provenance`] validates ADR-110 provenance sidecars.
+//! - [`size`] measures a way's delivered body against the hook context cap.
 //!
 //! Public surface is `run()` — everything else is `pub(super)` within
 //! the module.
@@ -35,6 +36,7 @@ mod provenance;
 mod requires;
 mod scanning;
 mod schema;
+mod size;
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;

@@ -59,5 +59,5 @@ Diagnostic, not prescriptive. Read the values:
 ## See Also
 
 - knowledge/optimization(meta) — broader vocabulary tuning and sparsity principles
-- knowledge/authoring(meta) — way file format, coordinate-alias model
+- knowledge/authoring/locale-stubs(meta) — the locale stub file and its coordinate-alias model
 - the design note `adopter-localization-lifecycle-and-tuning` — the root-anchored model in full

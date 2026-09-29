@@ -36,14 +36,23 @@ pub fn context_chars(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
+/// The static text `way_scored` injects for a way: the body after the
+/// frontmatter. Macro output is added at fire time and is not part of it.
+/// `ways lint` measures this against [`HOOK_CONTEXT_CAP`], so the show path and
+/// the size rule read one definition of a way's delivered body.
+pub fn static_way_body(content: &str) -> String {
+    body_text(content)
+}
+
 /// Room left in one hook invocation's `additionalContext`.
 ///
-/// A scan lane hands one budget to every way and check it shows, in match
-/// order. A unit that fits is admitted whole. The first unit that does not
-/// fit closes the budget, and every later candidate in the invocation is
-/// withheld. A withheld way is not recorded as fired, so its refire curve does
-/// not start for guidance the model never saw, and it is free to fire on its
-/// next match. Bodies are never split.
+/// A scan lane hands one budget to every way and check it shows, in the
+/// admission order `scan/order.rs` sets. A unit that fits is admitted whole. A
+/// unit that does not fit is skipped: it is withheld and logged, and admission
+/// continues with the later candidates, so a smaller way further down can
+/// still use the room left. A withheld way is not recorded as fired, so its
+/// refire curve does not start for guidance the model never saw, and it is
+/// free to fire on its next match. Bodies are never split.
 ///
 /// A check and the parent way it pulls in are one unit: the check reserves
 /// room for its sections while the parent is admitted, and the pair goes out
@@ -56,14 +65,16 @@ pub fn context_chars(s: &str) -> usize {
 pub struct ContextBudget {
     used: usize,
     cap: usize,
-    closed: bool,
     /// Room held back for text that must follow the next admitted body.
     reserved: usize,
+    /// Units refused in this invocation. Callers read it to tell a withhold
+    /// for the cap apart from a way that returned nothing for another reason.
+    refusals: usize,
 }
 
 impl ContextBudget {
     pub fn new(cap: usize) -> Self {
-        Self { used: 0, cap, closed: false, reserved: 0 }
+        Self { used: 0, cap, reserved: 0, refusals: 0 }
     }
 
     /// A budget sized to Claude Code's hook `additionalContext` cap.
@@ -73,16 +84,15 @@ impl ContextBudget {
 
     /// A hook budget with `used` characters already spent, for a caller that
     /// assembles the context across several `ways` processes (check-post.sh).
-    /// A `used` past the cap means that caller's budget is already closed.
+    /// A `used` at or past the cap leaves room for nothing.
     pub fn hook_with_used(used: usize) -> Self {
         let mut b = Self::hook();
         b.used = used;
-        b.closed = used > b.cap;
         b
     }
 
     fn fits_chars(&self, n: usize) -> bool {
-        !self.closed && (self.used == 0 || self.used + n + self.reserved <= self.cap)
+        self.used == 0 || self.used + n + self.reserved <= self.cap
     }
 
     /// Whether `text` would be admitted now. Charges nothing.
@@ -90,22 +100,28 @@ impl ContextBudget {
         self.fits_chars(context_chars(text))
     }
 
-    /// Admit `text` whole if it fits, and charge it. The first refusal closes
-    /// the budget.
+    /// Admit `text` whole if it fits, and charge it. A refusal is counted and
+    /// leaves the budget open for later, smaller units.
     pub fn admit(&mut self, text: &str) -> bool {
         let n = context_chars(text);
         if self.fits_chars(n) {
             self.used += n;
             true
         } else {
-            self.closed = true;
+            self.refusals += 1;
             false
         }
     }
 
-    /// Close the budget: nothing more is admitted in this invocation.
-    pub fn close(&mut self) {
-        self.closed = true;
+    /// Count a refusal the caller decided without calling `admit` (a static
+    /// body that cannot fit is refused before its macro runs).
+    pub fn refuse(&mut self) {
+        self.refusals += 1;
+    }
+
+    /// Units refused so far in this invocation.
+    pub fn refusals(&self) -> usize {
+        self.refusals
     }
 
     /// Charge text the caller adds between admitted bodies (separators).
@@ -127,10 +143,6 @@ impl ContextBudget {
     /// Drop the reservation unspent.
     pub fn cancel_reservation(&mut self) {
         self.reserved = 0;
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.closed
     }
 }
 
@@ -404,12 +416,12 @@ pub fn way_scored(
         suppress(Suppression::Refire, decision.last_fire);
         return Ok(String::new());
     }
-    // A closed budget withholds the way before its macro runs, and so does a
-    // static body that cannot fit: the macro only adds to it.
-    let body = body_text(&content);
+    // A static body that cannot fit is withheld before its macro runs: the
+    // macro only adds to it. Later, smaller candidates may still fit.
+    let body = static_way_body(&content);
     if let Some(b) = budget.as_deref_mut() {
         if !b.fits(&body) {
-            b.close();
+            b.refuse();
             suppress(Suppression::ContextCap, decision.last_fire);
             return Ok(String::new());
         }
@@ -664,15 +676,12 @@ pub fn check_within(
         log_way_suppressed("check", id, domain, trigger, Suppression::ContextCap, &scope, &project_dir, session_id);
         Ok(String::new())
     };
-    if budget.as_deref().is_some_and(ContextBudget::is_closed) {
-        return withhold();
-    }
-
     let mut output = String::new();
     let mut parent_shown = false;
 
     // If parent way hasn't fired, pull it in alongside the check, holding back
     // room for the check's sections (and the newline between them) meanwhile.
+    let refusals_before = budget.as_deref().map_or(0, ContextBudget::refusals);
     if !way_has_fired {
         if let Some(b) = budget.as_deref_mut() {
             b.reserve(&format!("\n{sections}"));
@@ -695,10 +704,10 @@ pub fn check_within(
 
     // Parent shown: its reservation already paid for the sections. Otherwise
     // the check stands alone, and is withheld when the parent was withheld for
-    // the cap or the sections do not fit.
+    // the cap (the pair is one unit) or the sections do not fit.
     if !parent_shown {
         if let Some(b) = budget {
-            if !b.admit(&sections) {
+            if b.refusals() > refusals_before || !b.admit(&sections) {
                 return withhold();
             }
         }
@@ -1059,14 +1068,16 @@ mod tests {
     // ── ContextBudget (#528) ────────────────────────────────────
 
     #[test]
-    fn budget_admits_whole_bodies_in_order_then_closes() {
+    fn budget_skips_a_body_that_does_not_fit_and_admits_later_ones() {
         let mut b = ContextBudget::new(10);
         assert!(b.admit("abcd"));
         b.charge("\n\n");
         assert!(b.admit("ab"), "6 + 2 = 8 fits under 10");
         assert!(!b.admit("abc"), "8 + 3 = 11 is over the cap");
-        assert!(b.is_closed());
-        assert!(!b.admit(""), "a closed budget admits nothing, even an empty body");
+        assert_eq!(b.refusals(), 1);
+        assert!(b.admit("xy"), "a refusal does not stop admission: 8 + 2 = 10 fits");
+        assert!(!b.admit("z"));
+        assert!(b.admit(""), "an empty body always fits");
     }
 
     #[test]
@@ -1074,7 +1085,7 @@ mod tests {
         let mut b = ContextBudget::new(10);
         assert!(b.admit(&"x".repeat(25)), "the first body is never dropped");
         assert!(!b.admit("y"));
-        assert!(b.is_closed());
+        assert_eq!(b.refusals(), 1);
     }
 
     #[test]
@@ -1090,14 +1101,16 @@ mod tests {
     #[test]
     fn check_and_parent_are_one_unit() {
         // Room for the parent alone but not the parent plus the check's
-        // reserved sections: the parent is refused and the budget closes, so
-        // the check is withheld too.
+        // reserved sections: the parent is refused, and the refusal count tells
+        // the check to withhold itself too.
         let mut b = ContextBudget::new(20);
         assert!(b.admit("0123456789"));
+        let before = b.refusals();
         b.reserve("abcde");
         assert!(!b.admit("012345"), "10 + 6 + 5 reserved = 21 is over");
         b.cancel_reservation();
-        assert!(b.is_closed(), "the pair's refusal closes the budget");
+        assert!(b.refusals() > before, "the pair's refusal is visible to the check");
+        assert!(b.admit("0123"), "later, smaller units are still admitted");
 
         // The pair fits: the parent is admitted and the reservation is spent.
         let mut b = ContextBudget::new(20);
@@ -1109,13 +1122,13 @@ mod tests {
     }
 
     #[test]
-    fn hook_with_used_resumes_or_is_closed() {
+    fn hook_with_used_resumes_or_has_no_room() {
         let mut b = ContextBudget::hook_with_used(7_000);
         assert!(!b.admit(&"x".repeat(4_000)));
         let mut b = ContextBudget::hook_with_used(7_000);
         assert!(b.admit(&"x".repeat(3_000)));
-        let b = ContextBudget::hook_with_used(HOOK_CONTEXT_CAP + 1);
-        assert!(b.is_closed());
+        let mut b = ContextBudget::hook_with_used(HOOK_CONTEXT_CAP + 1);
+        assert!(!b.admit("x"), "a spent budget has room for nothing");
         let mut b = ContextBudget::hook_with_used(0);
         assert!(b.admit(&"x".repeat(12_000)), "zero spent keeps the first-unit rule");
     }

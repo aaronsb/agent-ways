@@ -916,3 +916,129 @@ fn scenario_14_show_way_budget_used_withholds_with_exit_3() {
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// ── Scenarios 15–16: the file lane's admission order (#634) ────
+
+fn scan_file_isolated(session: &str, path: &str, home: &Path, state: &Path) -> String {
+    let output = Command::new(ways_bin())
+        .args([
+            "scan", "file",
+            "--path", path,
+            "--session", session,
+            "--project", "/tmp/nonexistent-project",
+        ])
+        .env("HOME", home)
+        .env("USERPROFILE", home) // see scan_prompt
+        .env("XDG_STATE_HOME", state)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .env_remove("CLAUDE_AGENT_ID")
+        .output()
+        .expect("Failed to run ways scan file");
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// Write a way at `root/rel` with a `files:` trigger, a `# Marker <name>`
+/// heading, and `body_chars` of filler.
+fn write_file_way(root: &Path, rel: &str, files: &str, body_chars: usize) {
+    let name = rel.rsplit('/').next().unwrap();
+    let dir = root.join(rel);
+    std::fs::create_dir_all(&dir).unwrap();
+    let body = format!("# Marker {name}\n\n{}\n", "lorem ipsum ".repeat(body_chars / 12));
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\nfiles: {files}\nscope: agent\nrefire: 0.15\n---\n{body}"),
+    )
+    .unwrap();
+}
+
+/// Positions of each `# Marker <name>` heading in `ctx`, in `names` order;
+/// `None` for a way that was not delivered.
+fn marker_positions(ctx: &str, names: &[&str]) -> Vec<Option<usize>> {
+    names.iter().map(|n| ctx.find(&format!("# Marker {n}\n"))).collect()
+}
+
+#[test]
+fn scenario_15_file_lane_orders_by_specificity_and_skips_what_does_not_fit() {
+    let base = std::env::temp_dir().join(format!("ways-sim-order-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    let root = home.join(".claude/hooks/ways/orderdomain");
+
+    // `zz-named` names the file; `aa-glob` and `mm-small` match it by
+    // extension. By id alone `aa-glob` would go first and take the room
+    // `zz-named` needs, so this fails without the specificity order in
+    // scan/order.rs. `zz-named/aa-child` sorts before its parent by name but
+    // must follow it. `aa-glob` does not fit once the named tree is in, and is
+    // skipped; the smaller `mm-small` after it still fits.
+    write_file_way(&root, "zz-named", r"notes\.ordered$", 5000);
+    write_file_way(&root, "zz-named/aa-child", r"notes\.ordered$", 1000);
+    write_file_way(&root, "aa-glob", r"\.ordered$", 6000);
+    write_file_way(&root, "mm-small", r"\.ordered$", 500);
+
+    let session = format!("sim-s15-{}", std::process::id());
+    clean_markers(&session);
+
+    let out = scan_file_isolated(&session, "/work/notes.ordered", &home, &state);
+    let ctx = assert_pretooluse_envelope(&out, "# Marker zz-named\n");
+    let pos = marker_positions(&ctx, &["zz-named", "aa-child", "aa-glob", "mm-small"]);
+    let (named, child, glob, small) = (pos[0], pos[1], pos[2], pos[3]);
+    assert!(named < child, "a parent precedes its child: {pos:?}");
+    assert!(child.is_some() && small.is_some(), "both fit: {pos:?}");
+    assert!(child < small, "the named tree precedes the extension match: {pos:?}");
+    assert!(glob.is_none(), "aa-glob does not fit and is skipped: {pos:?}");
+    assert_eq!(
+        events_of(&state, &session, "way_suppressed"),
+        vec![("orderdomain/aa-glob".to_string(), "context_cap".to_string())]
+    );
+
+    // The next matching edit delivers the skipped way; the others are inside
+    // their refire windows.
+    let out = scan_file_isolated(&session, "/work/notes.ordered", &home, &state);
+    assert_pretooluse_envelope(&out, "# Marker aa-glob\n");
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn scenario_16_readme_edit_delivers_validate_in_the_first_hook() {
+    // The tier-1 live fixture's case: an edit to README.md matches the
+    // documentation tree and the extension-wide branching way, more than one
+    // hook holds. The ways that name README go first, the `\.md$` way is
+    // skipped, and branching still fits after it.
+    let base = std::env::temp_dir().join(format!("ways-sim-readme-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    let root = home.join(".claude/hooks/ways");
+
+    write_file_way(&root, "documentation", r"README\.md$|docs/.*\.md$|mkdocs\.ya?ml$", 2940);
+    write_file_way(&root, "documentation/markdown", r"\.md$", 3720);
+    write_file_way(
+        &root,
+        "documentation/validate",
+        r"README\.md$|docs/.*(guide|tutorial|getting.?started|onboarding|index)\.md$",
+        3823,
+    );
+    write_file_way(&root, "softwaredev/delivery/branching", r"\.(md|rs|sh|py|js|ts|json)$", 1289);
+
+    let session = format!("sim-s16-{}", std::process::id());
+    clean_markers(&session);
+
+    let out = scan_file_isolated(&session, "/repo/README.md", &home, &state);
+    let ctx = assert_pretooluse_envelope(&out, "# Marker validate\n");
+    let pos = marker_positions(&ctx, &["documentation", "validate", "markdown", "branching"]);
+    assert!(pos[0].is_some() && pos[0] < pos[1], "documentation, then validate: {pos:?}");
+    assert!(pos[1] < pos[3], "branching follows the documentation tree: {pos:?}");
+    assert!(pos[2].is_none(), "markdown does not fit and is skipped: {pos:?}");
+    assert_eq!(
+        events_of(&state, &session, "way_suppressed"),
+        vec![("documentation/markdown".to_string(), "context_cap".to_string())]
+    );
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}

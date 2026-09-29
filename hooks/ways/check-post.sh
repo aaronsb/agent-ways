@@ -42,7 +42,6 @@ fi
 WAYS_ROOTS+=("${HOME}/.claude/hooks/ways")
 
 CONTEXT=""
-CLOSED=""
 # Track way IDs already fired this tick so two postchecks under the
 # same way directory don't double-fire.
 declare -A FIRED=()
@@ -70,8 +69,8 @@ for WAYS_ROOT in "${WAYS_ROOTS[@]}"; do
       # the way fits in what is left of the 10,000-character additionalContext
       # cap. USED is counted in bytes, an upper bound on the UTF-16 length
       # Claude Code measures. Exit 3 = withheld for the cap (not recorded as
-      # fired); from then on the budget is closed for this hook.
-      if [[ -n "$CLOSED" ]]; then USED=10001; else USED=$(( $(printf '%s' "$CONTEXT" | LC_ALL=C wc -c) )); fi
+      # fired); a later, smaller way may still fit what is left.
+      USED=$(( $(printf '%s' "$CONTEXT" | LC_ALL=C wc -c) ))
       OUT=$("${HOME}/.claude/bin/ways" show way "$way_id" \
         --session "$SESSION_ID" \
         --trigger "postcheck" --budget-used="$USED" 2>/dev/null)
@@ -81,8 +80,6 @@ for WAYS_ROOT in "${WAYS_ROOTS[@]}"; do
         OUT=$("${HOME}/.claude/bin/ways" show way "$way_id" \
           --session "$SESSION_ID" \
           --trigger "postcheck" 2>/dev/null)
-      elif [[ $STATUS -eq 3 ]]; then
-        CLOSED=1
       fi
       if [[ -n "$OUT" ]]; then
         CONTEXT+="$OUT"$'\n\n'

@@ -401,6 +401,12 @@ pub(super) fn lint_file(
         }
     }
 
+    // Delivered size against the hook context cap. Checks are exempt: a check
+    // is delivered with its parent way as one unit, and its sections are short.
+    if !is_check {
+        super::size::check_body_size(&rel, &content, errors, warnings);
+    }
+
     // Write back if modified
     if modified {
         std::fs::write(path, &content)?;
