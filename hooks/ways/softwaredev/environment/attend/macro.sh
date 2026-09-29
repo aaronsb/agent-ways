@@ -12,9 +12,10 @@ fi
 # ancestry reaches the claude process that runs this hook. Another session's
 # attend doesn't count.
 session_pid() {
-  local p=$PPID
+  local p=$PPID comm
   while [[ -n "$p" && "$p" -gt 1 ]]; do
-    [[ "$(ps -o comm= -p "$p" 2>/dev/null)" == claude ]] && { echo "$p"; return; }
+    comm=$(ps -o comm= -p "$p" 2>/dev/null)
+    [[ "${comm##*/}" == claude ]] && { echo "$p"; return; }
     p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
   done
 }
