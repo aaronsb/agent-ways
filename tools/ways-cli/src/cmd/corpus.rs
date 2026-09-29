@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
@@ -76,9 +76,12 @@ pub fn run(
     std::fs::create_dir_all(&out_dir)?;
     let corpus_path = out_dir.join("ways-corpus.jsonl");
 
-    let tmpfile = corpus_path.with_extension("jsonl.tmp");
+    // All three corpus files are written to `.tmp` siblings; `settle` moves them
+    // into place once the embedding passes are known to have succeeded.
+    let staged = Staged::new(&out_dir);
+    let tmpfile = &staged.combined.0;
     let mut w = BufWriter::new(
-        std::fs::File::create(&tmpfile)
+        std::fs::File::create(tmpfile)
             .with_context(|| format!("creating {}", tmpfile.display()))?,
     );
 
@@ -216,18 +219,16 @@ pub fn run(
     w.flush()?;
     drop(w);
 
-    // Atomic move
-    vlog(&format!("writing corpus: {}", corpus_path.display()));
-    std::fs::rename(&tmpfile, &corpus_path)?;
+    // A failed pass never replaces an embedded corpus (#645).
+    let outcome = auto_embed(&staged, &engine_dir, verbose, &vlog, &log)?;
+    vlog(&format!("settling corpus: {}", corpus_path.display()));
+    settle(&staged, outcome)?;
 
     let total = global_count + user_count + project_total;
     log(&format!(
         "Generated {}: {total} ways ({global_count} core, {user_count} user, {project_total} project)",
         corpus_path.display()
     ));
-
-    // Auto-embed if way-embed binary and model are available
-    auto_embed(&out_dir, &engine_dir, &corpus_path, verbose, &vlog, &log)?;
 
     // Fit per-model calibration g(s)=σ(a·s+b) from the probe corpus (ADR-156).
     let calibration = fit_calibration(&out_dir, &engine_dir, verbose, &vlog, &log);
@@ -282,7 +283,8 @@ fn elapsed_suffix(t: Instant, verbose: bool) -> String {
     }
 }
 
-/// Run one `way-embed generate` pass, returning the elapsed time on success.
+/// Run one `way-embed generate` pass, returning the elapsed time on success
+/// and the reason on failure.
 ///
 /// `what` names the pass in diagnostics. Under `--verbose` the exact argv is
 /// echoed, so a stalled pass can be rerun standalone outside the corpus build.
@@ -293,7 +295,7 @@ fn run_generate(
     what: &str,
     verbose: bool,
     vlog: &dyn Fn(&str),
-) -> Option<Instant> {
+) -> std::result::Result<Instant, String> {
     vlog(&format!(
         "exec: {} generate --corpus {} --model {}",
         bin.display(),
@@ -310,16 +312,79 @@ fn run_generate(
         .status();
 
     match status {
-        Ok(s) if s.success() => Some(t),
-        Ok(s) => {
-            eprintln!("WARNING: {what} embedding generation failed ({s})");
-            None
-        }
-        Err(e) => {
-            eprintln!("WARNING: {what} embedding generation could not start: {e}");
-            None
+        Ok(s) if s.success() => Ok(t),
+        Ok(s) => Err(format!("{what} embedding generation failed ({s})")),
+        Err(e) => Err(format!("{what} embedding generation could not start: {e}")),
+    }
+}
+
+/// The three corpus files, each written to a `.tmp` sibling first:
+/// `(staged, final)` pairs for the combined corpus and the two model lanes.
+struct Staged {
+    combined: (PathBuf, PathBuf),
+    en: (PathBuf, PathBuf),
+    multi: (PathBuf, PathBuf),
+}
+
+impl Staged {
+    fn new(out_dir: &Path) -> Self {
+        let pair = |name: &str| (out_dir.join(format!("{name}.tmp")), out_dir.join(name));
+        Staged {
+            combined: pair("ways-corpus.jsonl"),
+            en: pair("ways-corpus-en.jsonl"),
+            multi: pair("ways-corpus-multi.jsonl"),
         }
     }
+
+    fn pairs(&self) -> [&(PathBuf, PathBuf); 3] {
+        [&self.combined, &self.en, &self.multi]
+    }
+}
+
+/// How the embedding passes went.
+#[derive(Debug)]
+enum Embedded {
+    /// Every pass that had a model ran and succeeded.
+    Complete,
+    /// A pass failed or could not run; the reason, for the operator.
+    Failed(String),
+}
+
+/// Move the staged corpus into place, or keep what is there.
+///
+/// A complete embed promotes all three files. A failed one keeps a previous
+/// corpus untouched, since its vectors still match and a raw corpus would
+/// silently drop matching to keywords. With no previous corpus the raw one
+/// is promoted, keyword matching being better than none. Either failure
+/// returns an error naming what happened, so `ways corpus` exits non-zero
+/// and the manifest is not rewritten: the corpus stays stale and the next
+/// session retries.
+fn settle(staged: &Staged, outcome: Embedded) -> Result<()> {
+    let promote = || -> Result<()> {
+        for (tmp, dest) in staged.pairs() {
+            if tmp.is_file() {
+                std::fs::rename(tmp, dest)
+                    .with_context(|| format!("moving {} into place", dest.display()))?;
+            }
+        }
+        Ok(())
+    };
+    let why = match outcome {
+        Embedded::Complete => return promote(),
+        Embedded::Failed(why) => why,
+    };
+    let corpus = &staged.combined.1;
+    if corpus.is_file() {
+        for (tmp, _) in staged.pairs() {
+            let _ = std::fs::remove_file(tmp);
+        }
+        bail!("{why}; kept the previous corpus at {}", corpus.display());
+    }
+    promote()?;
+    bail!(
+        "{why}; wrote {} without embeddings, so matching is keyword-only until `ways corpus` succeeds",
+        corpus.display()
+    )
 }
 
 /// Embed one project's `.claude/ways/` under namespace `key`.
@@ -587,28 +652,27 @@ fn resolve_embed_bin(engine_dir: &Path) -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// Shell out to way-embed generate for embedding vectors.
-/// Generates two corpus files: one with EN model embeddings, one with multilingual.
+/// Shell out to way-embed generate for embedding vectors, on the staged files.
+/// Splits the staged combined corpus into EN and multilingual lanes, embeds
+/// each with its model, then embeds the combined corpus with the EN model.
 ///
-/// `out_dir` receives the split corpora; `engine_dir` (always the canonical XDG
-/// cache) supplies the way-embed binary and GGUF models. The two differ only
-/// when `ways corpus --output <dir>` redirects an isolated build.
+/// `staged` names the files; `engine_dir` (always the canonical XDG cache)
+/// supplies the way-embed binary and GGUF models. The two differ only when
+/// `ways corpus --output <dir>` redirects an isolated build.
 fn auto_embed(
-    out_dir: &Path,
+    staged: &Staged,
     engine_dir: &Path,
-    corpus: &Path,
     verbose: bool,
     vlog: &dyn Fn(&str),
     log: &dyn Fn(&str),
-) -> Result<()> {
+) -> Result<Embedded> {
     let bin = match resolve_embed_bin(engine_dir) {
         Some(b) => b,
         None => {
-            log(&format!(
-                "ERROR: embedding engine required (ADR-125). Run: cd {} && make setup",
+            return Ok(Embedded::Failed(format!(
+                "embedding engine not installed (ADR-125); run: cd {} && make setup",
                 crate::paths::data_root().display()
-            ));
-            return Ok(());
+            )));
         }
     };
     vlog(&format!("way-embed: {}", bin.display()));
@@ -628,15 +692,16 @@ fn auto_embed(
 
     // Split corpus into EN and multilingual entries
     vlog("splitting corpus into en / multilingual lanes");
+    let corpus = &staged.combined.0;
     let corpus_content = std::fs::read_to_string(corpus)?;
-    let corpus_en = out_dir.join("ways-corpus-en.jsonl");
-    let corpus_multi = out_dir.join("ways-corpus-multi.jsonl");
+    let corpus_en = &staged.en.0;
+    let corpus_multi = &staged.multi.0;
     let mut en_count = 0usize;
     let mut multi_count = 0usize;
 
     {
-        let mut w_en = std::io::BufWriter::new(std::fs::File::create(&corpus_en)?);
-        let mut w_multi = std::io::BufWriter::new(std::fs::File::create(&corpus_multi)?);
+        let mut w_en = std::io::BufWriter::new(std::fs::File::create(corpus_en)?);
+        let mut w_multi = std::io::BufWriter::new(std::fs::File::create(corpus_multi)?);
 
         for line in corpus_content.lines() {
             if line.is_empty() { continue; }
@@ -655,27 +720,38 @@ fn auto_embed(
         }
     }
 
+    if !en_model.is_file() {
+        return Ok(Embedded::Failed(format!(
+            "English model missing at {}; run: cd {} && make setup",
+            en_model.display(),
+            crate::paths::data_root().display()
+        )));
+    }
+
     // Embed EN corpus
-    if en_model.is_file() && en_count > 0 {
+    if en_count > 0 {
         log(&format!("Embedding {en_count} ways with English model..."));
-        if let Some(t) = run_generate(&bin, &corpus_en, &en_model, "EN", verbose, vlog) {
-            log(&format!(
+        match run_generate(&bin, corpus_en, &en_model, "EN", verbose, vlog) {
+            Ok(t) => log(&format!(
                 "  EN embeddings: {}{}",
-                corpus_en.display(),
+                staged.en.1.display(),
                 elapsed_suffix(t, verbose)
-            ));
+            )),
+            Err(why) => return Ok(Embedded::Failed(why)),
         }
     }
 
-    // Embed multilingual corpus
+    // Embed multilingual corpus. Its model is installed on demand (ADR-139),
+    // so an absent model skips the lane rather than failing the build.
     if multi_model.is_file() && multi_count > 0 {
         log(&format!("Embedding {multi_count} ways with multilingual model..."));
-        if let Some(t) = run_generate(&bin, &corpus_multi, &multi_model, "multilingual", verbose, vlog) {
-            log(&format!(
+        match run_generate(&bin, corpus_multi, &multi_model, "multilingual", verbose, vlog) {
+            Ok(t) => log(&format!(
                 "  Multi embeddings: {}{}",
-                corpus_multi.display(),
+                staged.multi.1.display(),
                 elapsed_suffix(t, verbose)
-            ));
+            )),
+            Err(why) => return Ok(Embedded::Failed(why)),
         }
     } else if multi_count > 0 && !multi_model.is_file() {
         log(&format!("  {multi_count} multilingual ways found but model not installed"));
@@ -688,22 +764,21 @@ fn auto_embed(
     // This re-embeds every entry the two passes above already embedded — the
     // longest pass, and the last, which is why a silent build looks like it hung
     // right here.
-    if en_model.is_file() {
-        log("Generating combined corpus with English embeddings...");
-        vlog(&format!(
-            "re-embedding all {} entries (en {en_count} + multi {multi_count})",
-            en_count + multi_count
-        ));
-        if let Some(t) = run_generate(&bin, corpus, &en_model, "combined", verbose, vlog) {
-            log(&format!(
-                "Combined corpus: {}{}",
-                corpus.display(),
-                elapsed_suffix(t, verbose)
-            ));
-        }
+    log("Generating combined corpus with English embeddings...");
+    vlog(&format!(
+        "re-embedding all {} entries (en {en_count} + multi {multi_count})",
+        en_count + multi_count
+    ));
+    match run_generate(&bin, corpus, &en_model, "combined", verbose, vlog) {
+        Ok(t) => log(&format!(
+            "Combined corpus: {}{}",
+            staged.combined.1.display(),
+            elapsed_suffix(t, verbose)
+        )),
+        Err(why) => return Ok(Embedded::Failed(why)),
     }
 
-    Ok(())
+    Ok(Embedded::Complete)
 }
 
 /// Resolve real project path from Claude Code's encoded directory name.
@@ -1052,4 +1127,69 @@ fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -
             .filter_map(|s| s.parse().ok())
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch dir holding an optional previous corpus and a staged one.
+    fn scene(name: &str, previous: Option<&str>) -> (PathBuf, Staged) {
+        let dir = std::env::temp_dir().join(format!("ways-settle-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let staged = Staged::new(&dir);
+        if let Some(prev) = previous {
+            for (_, dest) in staged.pairs() {
+                std::fs::write(dest, prev).unwrap();
+            }
+        }
+        for (tmp, _) in staged.pairs() {
+            std::fs::write(tmp, "staged").unwrap();
+        }
+        (dir, staged)
+    }
+
+    fn read(p: &Path) -> String {
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    #[test]
+    fn complete_embed_promotes_every_staged_file() {
+        let (dir, staged) = scene("complete", Some("previous"));
+        settle(&staged, Embedded::Complete).unwrap();
+        for (tmp, dest) in staged.pairs() {
+            assert_eq!(read(dest), "staged", "{} not promoted", dest.display());
+            assert!(!tmp.exists(), "{} left behind", tmp.display());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_embed_keeps_the_previous_corpus_and_errors() {
+        let (dir, staged) = scene("keep", Some("previous"));
+        let err = settle(&staged, Embedded::Failed("EN embedding generation failed (signal: 4)".into()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("signal: 4"), "reason lost: {err}");
+        assert!(err.contains("kept the previous corpus"), "{err}");
+        for (tmp, dest) in staged.pairs() {
+            assert_eq!(read(dest), "previous", "{} replaced", dest.display());
+            assert!(!tmp.exists(), "{} left behind", tmp.display());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_embed_with_no_previous_corpus_writes_the_raw_one_and_errors() {
+        let (dir, staged) = scene("fresh", None);
+        let err = settle(&staged, Embedded::Failed("embedding engine not installed".into()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("keyword-only"), "{err}");
+        for (_, dest) in staged.pairs() {
+            assert_eq!(read(dest), "staged", "{} not written", dest.display());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

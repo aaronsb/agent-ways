@@ -30,13 +30,19 @@ pub fn run(json_output: bool) -> Result<()> {
     let user_ways_dir = crate::paths::user_ways_root();
     let (user_total, user_semantic) = count_ways(&user_ways_dir);
 
-    // Corpus stats
-    let corpus_count = if corpus_exists {
+    // Corpus stats. Entries without an embedding match on keywords only, so
+    // report both counts: a corpus whose embedding pass never succeeded looks
+    // complete by entry count alone (#645).
+    let (corpus_count, corpus_embedded) = if corpus_exists {
         std::fs::read_to_string(&corpus_path)
-            .map(|c| c.lines().filter(|l| !l.is_empty()).count())
-            .unwrap_or(0)
+            .map(|c| {
+                let lines: Vec<&str> = c.lines().filter(|l| !l.is_empty()).collect();
+                let embedded = lines.iter().filter(|l| l.contains("\"embedding\"")).count();
+                (lines.len(), embedded)
+            })
+            .unwrap_or((0, 0))
     } else {
-        0
+        (0, 0)
     };
 
     // Manifest data
@@ -105,6 +111,7 @@ pub fn run(json_output: bool) -> Result<()> {
                 "path": corpus_path.display().to_string(),
                 "exists": corpus_exists,
                 "entries": corpus_count,
+                "embedded": corpus_embedded,
             },
             "calibration": {
                 "present": cal_en_auc.is_some(),
@@ -157,7 +164,18 @@ pub fn run(json_output: bool) -> Result<()> {
 
         // Corpus
         if corpus_exists {
-            println!("Corpus:    {} ({} entries)", corpus_path.display(), corpus_count);
+            let note = if corpus_embedded < corpus_count {
+                " — entries without embeddings match on keywords only; run `ways corpus`"
+            } else {
+                ""
+            };
+            println!(
+                "Corpus:    {} ({} entries, {} embedded){}",
+                corpus_path.display(),
+                corpus_count,
+                corpus_embedded,
+                note
+            );
         } else {
             println!("Corpus:    MISSING — run `ways corpus` to generate");
         }
