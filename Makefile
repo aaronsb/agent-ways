@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-lang test-locales test-multilingual test-live release purge-attend-state
+.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-lang test-locales test-multilingual test-live release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -49,10 +49,11 @@ help:
 	@echo "  make attend       Build attend binary"
 	@echo "  make attend-rebuild Force rebuild attend from source"
 	@echo "  make lint         Run clippy on Rust workspace (warnings = errors)"
-	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr)"
+	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr + statusline)"
 	@echo "  make test-unit    Run Rust unit tests"
 	@echo "  make test-sim     Run session simulator (8 scenarios)"
 	@echo "  make test-adr     Run adr tool tests (lint, archive, golden, import, macro)"
+	@echo "  make test-statusline  Test statusline.sh segments against stub attend builds"
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
@@ -349,7 +350,7 @@ way-embed-rebuild:
 
 # --- Test ---
 
-test: lint test-smoke test-unit test-sim test-adr
+test: lint test-smoke test-unit test-sim test-adr test-statusline
 	@echo "All tests passed."
 
 lint:
@@ -378,6 +379,10 @@ test-adr:
 	@docs/scripts/adr lint --check >/dev/null || { docs/scripts/adr lint; exit 1; }
 	@docs/scripts/adr cite --check >/dev/null || { docs/scripts/adr cite; exit 1; }
 	@echo "adr tool tests passed."
+
+test-statusline:
+	@echo "Running statusline tests..."
+	@bash tests/statusline-test.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."
