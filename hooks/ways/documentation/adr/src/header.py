@@ -65,7 +65,7 @@ except ImportError:
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "2.2.0"
+TOOL_VERSION = "2.3.0"
 
 # The record contract this tool writes (ADR-304). `adr contract --upgrade`
 # brings adr.yaml to it, and the way macro reads this line to tell a config

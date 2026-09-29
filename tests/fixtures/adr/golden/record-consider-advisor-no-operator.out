@@ -1,0 +1,2 @@
+Error: --via names an advisor or an unattended run; pass --operator explicitly (e.g. --operator advisor) so the answer is not attributed to the git user.
+[exit 1]

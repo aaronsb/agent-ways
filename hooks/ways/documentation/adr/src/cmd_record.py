@@ -92,6 +92,10 @@ def probe_names(adr) -> list:
         names.append('inversion')
     return names
 
+# A --via naming an advisor or an unattended run means the answer did not come
+# from the git user, so the default attribution would be wrong (#624).
+_NON_HUMAN_VIA = re.compile(r'advisor|skeptic|subagent|model|/goal', re.IGNORECASE)
+
 def cmd_consider(args):
     """Append one considered entry: the operator's answer to the Summary
     (ADR-304 §12), on a record in any status."""
@@ -103,6 +107,10 @@ def cmd_consider(args):
         if value is None or not value.strip():
             print(f"Error: {flag} is required: {what}.", file=sys.stderr)
             return 1
+    if not args.operator and _NON_HUMAN_VIA.search(args.via):
+        print("Error: --via names an advisor or an unattended run; pass --operator explicitly "
+              "(e.g. --operator advisor) so the answer is not attributed to the git user.", file=sys.stderr)
+        return 1
     operator = args.operator or _detect_git_user()
     if not operator:
         print("Error: no operator given and none detected from gh or git; pass --operator NAME.", file=sys.stderr)

@@ -719,6 +719,9 @@ capture record-consider-no-names      consider 101 --said ok --via PR --operator
 capture record-consider-no-said       consider 115 --via PR --operator developer
 capture record-consider-no-via        consider 115 --said ok --via "  " --operator developer
 capture record-consider-v0            consider 110 --said ok --via PR --operator developer
+capture record-consider-advisor-no-operator consider 115 --said "fits the goal" --via "skeptic subagent (fixture-model), /goal run"
+capture record-consider-advisor       consider 115 --said "fits the goal" --via "skeptic subagent (fixture-model), /goal run" --operator advisor --covers band-hint
+keep record-consider-advisor-file.md "$S/ADR-115-named-probes.md"
 
 fresh v1
 capture record-set              set 106 "capability=[search, ingest]" "related=[ADR-100, ADR-101]" extends-=ADR-100 date=2025-05-17

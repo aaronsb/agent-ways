@@ -1,9 +1,9 @@
 # adr-consider: the operator approves a decision they started before its
-# probes were put to them. The consider way fires; the agent records the
-# approval with nothing covered, accepts, and puts the probes to the operator
+# intent check was put to them. The consider way fires; the agent records the
+# approval with nothing covered, accepts, and asks or offers the intent check
 # in the same reply without waiting; the record then lints clean (ADR-304 §12
-# and its note of 2026-09-28). Each outcome is asserted hard, so an agent that
-# does nothing fails.
+# and its notes of 2026-09-28). Each record outcome is asserted hard, so an
+# agent that does nothing, or halts to ask first, fails.
 
 fired documentation/adr/consider
 
@@ -37,10 +37,13 @@ lint=$(cd "$PROJ" && docs/scripts/adr lint --check "${REC#$PROJ/}" 2>&1); rc=$?
 echo "$lint" > "$OUT/lint.txt"
 if [[ $rc -eq 0 ]]; then ok "record lints clean"; else fail "record lints clean" "$(grep '❌' <<<"$lint" | head -3)"; fi
 
-# $ANSWER is the reply's result text. A probe counts only when it is asked:
-# its words and a question mark in the same sentence. A plain acceptance
-# report alone scores 1 and fails.
-rubric "asks a probe as a question"        '(latency|stal)[^.?]*\?'
-rubric "asks the inversion as a question"  '(middle|inversion|cach(e|es|ing) (nothing|everything))[^.?]*\?'
-rubric "reports acceptance"                'accept'
+# $ANSWER is the reply's result text. The intent check counts when the reply
+# asks it or offers it: its words and a question mark in the same sentence,
+# or its words and an offer such as "if you have a view, say so" on the same
+# line (grep matches per line). A bare "let me know" is not an offer, since a
+# plain report ends with one. The inversion is not
+# required: the way puts it to the operator only when it turns on what they
+# want. A plain acceptance report alone scores 1 and fails.
+rubric "puts the intent check to the operator" '(stal|30 ?s|seconds old|\bfresh)[^.?]*\?|(stal|30 ?s|seconds old|\bfresh).*(say so|if you (have|want to weigh|disagree|see)|your (view|take))|(say so|if you (have|want to weigh|disagree|see)|your (view|take)).*(stal|30 ?s|seconds old|\bfresh)'
+rubric "reports acceptance"                    'accept'
 rubric_threshold 2

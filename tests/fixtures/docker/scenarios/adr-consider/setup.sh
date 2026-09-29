@@ -1,5 +1,6 @@
 # adr-consider setup: a project on the adr/v1 contract with one proposed
-# decision the operator started, whose named probes the consider way puts to them.
+# decision the operator started. Its one probe checks the operator's intent
+# (ADR-304 §12, note of 2026-09-28 on #624).
 mkdir -p docs/scripts docs/architecture/system
 cp "$HOME/.claude/hooks/ways/documentation/adr/adr-tool" docs/scripts/adr
 chmod +x docs/scripts/adr
@@ -49,8 +50,8 @@ basis:
 - **Decided:** cache list-endpoint responses for 30 seconds.
 - **Trades away:** up to 30 seconds of staleness on lists.
 - **One-way?** No. The cache is behind a flag.
-- **Probes:** *Confident (latency):* the latency win is real. *Not confident (staleness):* whether 30 seconds of staleness is acceptable to users.
-- **Inversion:** one end caches nothing and scales the database; the other caches everything with invalidation. This sits between. Is the middle right?
+- **Probes:** *Confident (fresh-enough):* you asked for faster list pages; is list data up to 30 seconds old fine for what you need?
+- **Inversion:** one end caches nothing and scales the database; the other caches everything with invalidation. This sits between them.
 
 ## 1. Decision
 
