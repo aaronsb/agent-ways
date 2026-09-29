@@ -36,6 +36,14 @@ pub fn context_chars(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
+/// The static text `way_scored` injects for a way: the body after the
+/// frontmatter. Macro output is added at fire time and is not part of it.
+/// `ways lint` measures this against [`HOOK_CONTEXT_CAP`], so the show path and
+/// the size rule read one definition of a way's delivered body.
+pub fn static_way_body(content: &str) -> String {
+    body_text(content)
+}
+
 /// Room left in one hook invocation's `additionalContext`.
 ///
 /// A scan lane hands one budget to every way and check it shows, in match
@@ -406,7 +414,7 @@ pub fn way_scored(
     }
     // A closed budget withholds the way before its macro runs, and so does a
     // static body that cannot fit: the macro only adds to it.
-    let body = body_text(&content);
+    let body = static_way_body(&content);
     if let Some(b) = budget.as_deref_mut() {
         if !b.fits(&body) {
             b.close();
