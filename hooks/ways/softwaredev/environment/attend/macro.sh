@@ -8,9 +8,31 @@ if ! command -v attend &>/dev/null; then
   exit 0
 fi
 
-# Check if attend is running
-RUNNING=$(ps --no-headers -eo args 2>/dev/null | grep -c "attend run" | grep -v grep)
-if [[ "$RUNNING" -gt 0 ]]; then
+# Check if attend is running for this session: an `attend run` process whose
+# ancestry reaches the claude process that runs this hook. Another session's
+# attend doesn't count.
+session_pid() {
+  local p=$PPID
+  while [[ -n "$p" && "$p" -gt 1 ]]; do
+    [[ "$(ps -o comm= -p "$p" 2>/dev/null)" == claude ]] && { echo "$p"; return; }
+    p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+  done
+}
+attend_running() {
+  local claude a p
+  claude=$(session_pid)
+  [[ -n "$claude" ]] || return 1
+  for a in $(pgrep -x attend 2>/dev/null); do
+    [[ "$(ps -o args= -p "$a" 2>/dev/null)" == "attend run"* ]] || continue
+    p=$a
+    while [[ -n "$p" && "$p" -gt 1 ]]; do
+      [[ "$p" == "$claude" ]] && return 0
+      p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+    done
+  done
+  return 1
+}
+if attend_running; then
   echo "**Status**: attend is running"
 else
   echo "**Status**: attend is not running — start with \`/attend\` or \`Monitor: attend run\`"
