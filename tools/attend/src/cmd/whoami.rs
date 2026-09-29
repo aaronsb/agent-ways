@@ -10,10 +10,14 @@
 //! The display name (nickname + instance suffix) appears in the
 //! human table as context, but is deliberately absent from machine
 //! output: ordinals are presentation and must never become keys.
+//!
+//! `--display` prints the display name alone, for status lines and
+//! prompts that render it. It is the presentation accessor, kept apart
+//! from `--machine` so the key contract stays free of ordinals.
 
 use agent_identity::{Identity, TermCaps};
 
-pub(crate) fn cmd_whoami(machine: bool) {
+pub(crate) fn cmd_whoami(machine: bool, display: bool) {
     let ident = attend_session::identity();
 
     if machine {
@@ -23,14 +27,11 @@ pub(crate) fn cmd_whoami(machine: bool) {
         return;
     }
 
-    let caps = TermCaps::detect();
-    let display = Identity::for_cwd(&ident.origin_path, caps);
-    let instance = attend_instances::Registry::new()
-        .lookup(&ident.origin_path, &ident.session_id);
-    let rendered = match &instance {
-        Some(suffix) => format!("{}-{}", display.nickname, suffix),
-        None => display.nickname.to_string(),
-    };
+    let rendered = display_name(&ident);
+    if display {
+        println!("{rendered}");
+        return;
+    }
 
     let mut t = agent_fmt::Table::new(&["", "Value"]);
     t.add(vec!["session", ident.session_id.as_str()]);
@@ -53,6 +54,22 @@ pub(crate) fn cmd_whoami(machine: bool) {
             "\n[attend] identity is not fully resolved — the instance roster will \
              exclude this process; sends and group membership use the fallback id"
         );
+    }
+}
+
+/// The rendered display name: the origin path's nickname, plus the
+/// instance suffix when several sessions share that origin.
+fn display_name(ident: &attend_session::SessionIdentity) -> String {
+    let nickname = Identity::for_cwd(&ident.origin_path, TermCaps::detect()).nickname;
+    let instance = attend_instances::Registry::new()
+        .lookup(&ident.origin_path, &ident.session_id);
+    join_display(nickname, instance.as_deref())
+}
+
+fn join_display(nickname: &str, instance: Option<&str>) -> String {
+    match instance {
+        Some(suffix) => format!("{nickname}-{suffix}"),
+        None => nickname.to_string(),
     }
 }
 
@@ -91,5 +108,11 @@ mod tests {
         );
         // Contract guard: no display/ordinal fields may creep in.
         assert!(lines.iter().all(|l| !l.contains("display") && !l.contains("instance")));
+    }
+
+    #[test]
+    fn display_name_carries_the_instance_suffix_when_present() {
+        assert_eq!(join_display("Chaucer", None), "Chaucer");
+        assert_eq!(join_display("Chaucer", Some("2")), "Chaucer-2");
     }
 }
