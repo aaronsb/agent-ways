@@ -279,15 +279,17 @@ fi
 # every session — including sessions whose system prompt carried the trailer.
 # A surface that asserts a fact it never read is worse than no surface.
 #
-# Precedence approximates Claude Code's resolution order (project-local >
-# project > user-global, highest wins). Each sub-key resolves INDEPENDENTLY, on
-# the documented merge law that objects deep-merge key by key (recorded in
-# ADR-147, retired by ADR-169 with its compile.rs mirror) — so a project file setting  # adr-cite-ignore
-# .commit must not hide a user file setting .sessionUrl. NOTE: that law is
-# documented for settings merging generally; its application to `attribution`
-# ACROSS SCOPES is inferred, not verified. If Claude Code instead replaces the
-# whole object at the highest-precedence file, per-key resolution reports the
-# wrong source at that seam (the common single-file case is unaffected).
+# Precedence follows Claude Code's documented order for these three files
+# (project-local > project > user, highest wins; "Settings files and
+# precedence", https://code.claude.com/docs/en/settings). That page states that
+# a key set at a higher level overrides the same key lower down, and that list
+# keys such as permissions.allow combine across files. It does not state
+# whether an object key such as `attribution` merges sub-key by sub-key across
+# files. This section resolves each sub-key INDEPENDENTLY — so a project file
+# setting .commit does not hide a user file setting .sessionUrl — which is an
+# assumption, not verified behaviour. If Claude Code instead takes the whole
+# object from the highest-precedence file, per-key resolution reports the wrong
+# source at that seam (the common single-file case is unaffected).
 # Managed/enterprise policy and command-line overrides are not accounted for.
 
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)

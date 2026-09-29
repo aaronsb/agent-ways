@@ -2,7 +2,7 @@
 
 Focus groups are attend's mechanism for **named signal scopes** that agents can join and leave dynamically. In workspace-awareness terms (Dourish & Bellotti, CSCW), they scope who sees whose activity — the job a named channel does in a chat system. They solve the problem of "how do three agents talking about a deploy keep their signals scoped to each other without broadcasting to everyone else working on unrelated things."
 
-This page covers the group model, how membership works, the on-disk layout, and how groups interact with the action potential engagement model. The authoritative source is **ADR-118**.
+This page covers the group model, how membership works, the on-disk layout, and how groups relate to message delivery. The authoritative source is **ADR-118**.
 
 ## The problem
 
@@ -24,7 +24,7 @@ Groups compose naturally with the other two scopes:
 | Focus group | `@<name>/` | anyone who joined the named group |
 | Broadcast | `_broadcast/` | everyone with attend running |
 
-A single `attend send` can fan out to multiple scopes via flags; the default (ADR-119) is broadcast. <!-- adr-cite-ignore -->
+`attend send` with no routing flag writes to `_broadcast/`; `--channel <name>` writes to a group and `--to <path>` to a project scope (ADR-401).
 
 ## CLI surface
 
@@ -101,28 +101,25 @@ This means group membership is **self-reported**. An agent adds itself to a grou
 
 The provider mechanism is simple: when `sensor-peers` is registered during startup, it receives a closure that clones the `Groups` handle. On each scan, it calls the closure, which returns the current list of joined group directories. The closure closes over an owned clone of `Groups` so it doesn't hold a borrow into the main loop state.
 
-## Interaction with action potential (ADR-123)
+## Groups and message delivery (ADR-136)
 
-Focus groups and engagement compose cleanly. Groups scope **which signals reach the agent**; engagement governs **how the agent responds once they arrive**. They operate at different layers:
+Groups scope **which signals reach the agent**. Once a signal reaches a session, delivery does not depend on engagement state. Signals are authored messages, so they ride attend's message lane: every signal a session scans is surfaced once, and the action-potential refractory and salience decay that throttle the event lane (the git and process sensors) do not apply to them (ADR-136). See [`signals.md`](signals.md) for the delivery lifecycle.
 
-- `attend focus on deploy` — agent now receives `@deploy` signals as well as project + broadcast
-- New signals accumulate normally against the (possibly refractory-elevated) threshold
-- If the agent just finished a burst of `@deploy` conversation, refractory is elevated, so only high-magnitude follow-ups break through
-- The agent naturally disengages from fading deploy chatter while still picking up urgent signals
+- `attend focus on deploy` — the agent now receives `@deploy` signals as well as project and broadcast signals
+- Each unseen `@deploy` signal surfaces on the next peer poll; more than 8 in one poll are coalesced into a digest line
+- Leaving the group stops the scan of `@deploy/`. If members remain, the signals stay on disk for them. If the leave empties the group and it is not pinned, attend removes `@deploy/` and its signals (`tools/attend-groups/src/lib.rs:184-197`)
 
-The per-peer engagement boost (see [`engagement.md`](engagement.md)) also applies across focus group boundaries. A peer you've been actively chatting with in `@deploy` gets their messages boosted globally, not just within that group. This is usually the right shape — "I've been talking to this agent a lot" is a conversation-level state, not a group-level state.
+## Broadcast by default
 
-## The routing simplification from ADR-119 <!-- adr-cite-ignore -->
+`attend send` with no routing flag writes to `_broadcast/`, which every session with attend running scans. The sender does not have to choose between a group, a project, and broadcast for an ordinary message. ADR-401 records this default: `attend send <msg>` (and `--broadcast`) lands in `_broadcast/`, and `attend send --channel <name>` lands in `@<name>/`. `--focus` is a deprecated alias for `--channel`.
 
-ADR-119 collapsed attend's peer-messaging routing down to a single default: **broadcast**. Before ADR-119, an agent had to reason about where to send messages — "should this go to a focus group? to a specific cwd? to broadcast?" — and routinely got it wrong. After ADR-119, the agent sends to broadcast and lets the engagement model sort out who pays attention. <!-- adr-cite-ignore -->
-
-Focus groups still exist and are still useful, but their role has shifted. They're not the primary routing mechanism anymore; the action potential's per-peer boost handles most "which agents should engage with this" decisions automatically. Groups are now better understood as **explicit scoping for cases where the engagement model isn't enough**:
+Groups are **explicit scoping** for cases where broadcast is too wide:
 
 - Multi-project coordination where you want signals visible to three specific agents and invisible to a fourth
-- Long-lived coordination channels that should persist across session restarts (via `--pin`)
-- Cases where you want to guarantee delivery regardless of engagement state
+- Long-lived coordination channels that should keep existing with no members (via `--pin`); a scene change still leaves pinned groups, but the group and its directory remain for the next join
+- Conversations that would otherwise add traffic to every session's broadcast scan
 
-For ad-hoc conversations, broadcast + engagement boost is sufficient and simpler. For structured scopes, use groups.
+For ad-hoc conversations, broadcast is sufficient. For structured scopes, use groups.
 
 ## The TUI sidebar
 
@@ -133,9 +130,8 @@ Importantly, clicking a group in the sidebar is a TUI-local filter — it doesn'
 ## Related
 
 - **ADR-118** — the decision to build focus groups
-- **ADR-123** — action potential engagement
-- **ADR-119** — routing simplification (superseded by ADR-123) <!-- adr-cite-ignore -->
+- **ADR-136** — the message lane that delivers group signals
 - [`signals.md`](signals.md) — how `@<name>/` dirs fit into the overall signal layout
-- [`engagement.md`](engagement.md) — per-peer boost and refractory
+- [`engagement.md`](engagement.md) — refractory on the event lane
 - [`tui.md`](tui.md) — the sidebar UI for groups
 - `tools/attend/src/groups.rs` — the implementation

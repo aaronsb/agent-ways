@@ -145,9 +145,11 @@ A few readings that turn raw fields into judgement:
 ## Where this fits
 
 The event log is the *telemetry* layer — fine-grained, per-fire, recent (it
-tail-compacts past ~32 MiB, so it forgets its oldest tail). It is not the durable
-memory of the project; that's the **session ledger** ([[ADR-112]]), which records <!-- adr-cite-ignore -->
-*what was understood* rather than *what fired*. The two are complementary: the
-ledger is the journal, the event log is the instrument trace. This cluster is
-about the instrument trace — for the journal and the rest of the architecture,
-read [the cognitive loop](../../cognitive-loop.md).
+tail-compacts past ~32 MiB, so it forgets its oldest tail). It records *what fired*,
+not *what was understood*. What was understood is kept in the repository's own
+artifacts — ADRs, ways, issues, commit messages — and `ways init` seeds Claude
+Code's auto-memory to route project knowledge there ([[ADR-128]]). `ways introspect`
+joins the event log to the session transcripts to show which ways fired on which
+turn ([[ADR-153]], [[ADR-154]]). This cluster is about the event log — for the
+repo artifacts and the rest of the architecture, read
+[the cognitive loop](../../cognitive-loop.md).
