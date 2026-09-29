@@ -176,6 +176,19 @@ pub fn run(json_output: bool) -> Result<()> {
                 corpus_embedded,
                 note
             );
+            // The last build did not fully embed: the corpus above may be
+            // a kept earlier one, so its counts can look healthy (#645).
+            let last_embedded = manifest
+                .as_ref()
+                .and_then(|m| m["embedded"].as_bool())
+                .unwrap_or(true);
+            if !last_embedded {
+                let reason = manifest
+                    .as_ref()
+                    .and_then(|m| m["reason"].as_str())
+                    .unwrap_or("reason not recorded");
+                println!("           last build did not fully embed: {reason}; run `ways corpus`");
+            }
         } else {
             println!("Corpus:    MISSING — run `ways corpus` to generate");
         }

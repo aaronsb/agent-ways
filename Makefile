@@ -114,7 +114,9 @@ setup: ways ways-audit attend attend-chat
 	@bash tools/mmaid/download-mmaid.sh || echo "  (mmaid optional — skipping)"
 	@echo ""
 	@echo "Generating corpus..."
-	@$(WAYS_BIN) corpus --quiet
+	@# A failed embedding pass keeps the install going like a missing engine
+	@# does above: ways fall back to keyword matching until `ways corpus` works.
+	@$(WAYS_BIN) corpus --quiet || echo "  ⚠ Corpus built without embeddings (see above); keyword ways still work."
 
 # Idempotent (re)linking of the suite binaries onto PATH. Only links what exists
 # in bin/, so it is safe to run before every binary is built and safe to re-run.

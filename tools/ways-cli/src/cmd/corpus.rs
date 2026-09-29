@@ -68,7 +68,7 @@ pub fn run(
             let bin = resolve_embed_bin(&engine_dir);
             let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
             if !is_stale(&manifest, &global_dir, &project_dir)
-                && !engine_changed_since_failure(&manifest, &engine)
+                && !retry_due(&manifest, &engine, unix_now())
             {
                 vlog("corpus is fresh — nothing to do");
                 return Ok(());
@@ -232,13 +232,14 @@ pub fn run(
     };
     let outcome = auto_embed(&staged, bin.as_deref(), &engine_dir, &generate, verbose, &vlog, &log)?;
     let complete = matches!(outcome, Embedded::Complete);
+    let promote = matches!(outcome, Embedded::Complete | Embedded::Degraded(_));
     let manifest_path = out_dir.join("embed-manifest.json");
     let previous_calibration: ways_core::calibration::Calibration = read_manifest(&manifest_path)
         .and_then(|m| m.get("calibration").cloned())
         .and_then(|c| serde_json::from_value(c).ok())
         .unwrap_or_default();
     vlog(&format!("settling corpus: {}", corpus_path.display()));
-    let settled = settle(&staged, complete)?;
+    let settled = settle(&staged, promote)?;
 
     let total = global_count + user_count + project_total;
     log(&format!(
@@ -254,10 +255,13 @@ pub fn run(
         Settled::WroteRaw => Default::default(),
     };
 
-    // The manifest records whether the corpus is embedded and which engine
-    // built it. An unembedded corpus stays fresh for `--if-stale` until the
-    // ways or the engine change, so a broken engine is not retried on every
-    // session start.
+    // The manifest records whether every lane embedded, why not, when it
+    // failed, and which engine built it. `--if-stale` retries a failed build
+    // when the engine changes or a day has passed, not on every session start.
+    let reason = match &outcome {
+        Embedded::Complete => None,
+        Embedded::Degraded(why) | Embedded::Unavailable(why) | Embedded::Failed(why) => Some(why.clone()),
+    };
     let manifest = json!({
         "global_hash": global_hash,
         "global_count": global_count,
@@ -267,6 +271,8 @@ pub fn run(
         "projects": manifest_projects,
         "calibration": calibration,
         "embedded": complete,
+        "reason": reason,
+        "failed_at": if complete { None } else { Some(unix_now()) },
         "engine": engine,
     });
     vlog("writing manifest");
@@ -284,13 +290,24 @@ pub fn run(
     };
     match outcome {
         Embedded::Complete => Ok(()),
+        // An optional lane failed; the rest was promoted.
+        Embedded::Degraded(why) => {
+            eprintln!("warning: {why}; kept the previous multilingual corpus");
+            Ok(())
+        }
         // No engine is an install state: say so, and exit 0 so `make setup`
         // and keyword-only installs carry on.
         Embedded::Unavailable(why) => {
             eprintln!("warning: {why}; {what_happened}");
             Ok(())
         }
-        // A pass that ran and failed is an error the caller should see.
+        // A pass that ran and failed is an error for a caller who asked for a
+        // build. The SessionStart hook (`--if-stale`) reports it and exits 0:
+        // hooks must not fail, and `ways status` carries the reason.
+        Embedded::Failed(why) if if_stale => {
+            eprintln!("warning: {why}; {what_happened}");
+            Ok(())
+        }
         Embedded::Failed(why) => bail!("{why}; {what_happened}"),
     }
 }
@@ -387,6 +404,17 @@ impl Staged {
     fn pairs(&self) -> [&(PathBuf, PathBuf); 3] {
         [&self.en, &self.multi, &self.combined]
     }
+
+    /// Refresh the staged files' mtimes, so a concurrent build's debris sweep
+    /// never takes them for leftovers while a long pass runs.
+    fn touch(&self) {
+        let now = std::time::SystemTime::now();
+        for (tmp, _) in self.pairs() {
+            if let Ok(f) = std::fs::File::options().append(true).open(tmp) {
+                let _ = f.set_modified(now);
+            }
+        }
+    }
 }
 
 /// Remove staging files a killed build left behind: `*.tmp` from this module
@@ -414,10 +442,11 @@ fn sweep_staging_debris(out_dir: &Path) {
 /// How the embedding passes went.
 #[derive(Debug)]
 enum Embedded {
-    /// Every pass that had a model ran and succeeded. A failed multilingual
-    /// pass still counts: its model is optional (ADR-139), and the previous
-    /// multilingual corpus is kept.
+    /// Every pass that had a model ran and succeeded.
     Complete,
+    /// The multilingual pass failed. Its model is optional (ADR-139), so the
+    /// English lanes are promoted and the previous multilingual corpus kept.
+    Degraded(String),
     /// No engine or English model is installed: an install state, not a fault.
     Unavailable(String),
     /// A pass ran and failed; the reason, for the operator.
@@ -487,13 +516,28 @@ fn read_manifest(path: &Path) -> Option<serde_json::Value> {
         .and_then(|c| serde_json::from_str(&c).ok())
 }
 
-/// True when the manifest records an unembedded corpus and the engine has
-/// changed since, so a repaired engine gets a rebuild. Manifests written
-/// before the `embedded` field count as embedded.
-fn engine_changed_since_failure(manifest: &Path, engine: &str) -> bool {
+/// How long a failed build waits before `--if-stale` retries it on its own.
+const RETRY_AFTER_SECS: u64 = 24 * 3600;
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// True when the manifest records a build that did not fully embed and a
+/// retry is due: the engine changed since (a repair), or a day has passed (a
+/// transient failure). Manifests written before the `embedded` field count as
+/// embedded.
+fn retry_due(manifest: &Path, engine: &str, now: u64) -> bool {
     let Some(m) = read_manifest(manifest) else { return false };
-    let embedded = m.get("embedded").and_then(|v| v.as_bool()).unwrap_or(true);
-    !embedded && m.get("engine").and_then(|v| v.as_str()) != Some(engine)
+    if m.get("embedded").and_then(|v| v.as_bool()).unwrap_or(true) {
+        return false;
+    }
+    let engine_changed = m.get("engine").and_then(|v| v.as_str()) != Some(engine);
+    let failed_at = m.get("failed_at").and_then(|v| v.as_u64()).unwrap_or(0);
+    engine_changed || now.saturating_sub(failed_at) >= RETRY_AFTER_SECS
 }
 
 /// Embed one project's `.claude/ways/` under namespace `key`.
@@ -841,6 +885,7 @@ fn auto_embed(
     // Embed EN corpus
     if en_count > 0 {
         log(&format!("Embedding {en_count} ways with English model..."));
+        staged.touch();
         match generate(bin, corpus_en, &en_model, "EN") {
             Ok(t) => log(&format!(
                 "  EN embeddings: {}{}",
@@ -854,8 +899,10 @@ fn auto_embed(
     // Embed multilingual corpus. Its model is installed on demand (ADR-139):
     // an absent model skips the lane, and a failed pass keeps the previous
     // multilingual corpus instead of holding back the English lanes.
+    let mut multi_failure = None;
     if multi_model.is_file() && multi_count > 0 {
         log(&format!("Embedding {multi_count} ways with multilingual model..."));
+        staged.touch();
         match generate(bin, corpus_multi, &multi_model, "multilingual") {
             Ok(t) => log(&format!(
                 "  Multi embeddings: {}{}",
@@ -863,8 +910,8 @@ fn auto_embed(
                 elapsed_suffix(t, verbose)
             )),
             Err(why) => {
-                eprintln!("warning: {why}; kept the previous multilingual corpus");
                 let _ = std::fs::remove_file(corpus_multi);
+                multi_failure = Some(why);
             }
         }
     } else if multi_count > 0 && !multi_model.is_file() {
@@ -883,6 +930,7 @@ fn auto_embed(
         "re-embedding all {} entries (en {en_count} + multi {multi_count})",
         en_count + multi_count
     ));
+    staged.touch();
     match generate(bin, corpus, &en_model, "combined") {
         Ok(t) => log(&format!(
             "Combined corpus: {}{}",
@@ -892,7 +940,10 @@ fn auto_embed(
         Err(why) => return Ok(Embedded::Failed(why)),
     }
 
-    Ok(Embedded::Complete)
+    Ok(match multi_failure {
+        Some(why) => Embedded::Degraded(why),
+        None => Embedded::Complete,
+    })
 }
 
 /// Resolve real project path from Claude Code's encoded directory name.
@@ -1319,16 +1370,18 @@ mod tests {
     }
 
     #[test]
-    fn engine_change_after_a_failure_marks_the_corpus_stale() {
+    fn a_failed_build_is_retried_on_engine_change_or_after_a_day() {
         let dir = scratch("stale");
         let manifest = dir.join("embed-manifest.json");
-        std::fs::write(&manifest, r#"{"embedded": false, "engine": "A"}"#).unwrap();
-        assert!(!engine_changed_since_failure(&manifest, "A"), "same engine retried");
-        assert!(engine_changed_since_failure(&manifest, "B"), "changed engine not retried");
+        let t0 = 1_000_000u64;
+        std::fs::write(&manifest, format!(r#"{{"embedded": false, "engine": "A", "failed_at": {t0}}}"#)).unwrap();
+        assert!(!retry_due(&manifest, "A", t0 + 60), "same engine retried within the day");
+        assert!(retry_due(&manifest, "B", t0 + 60), "changed engine not retried");
+        assert!(retry_due(&manifest, "A", t0 + RETRY_AFTER_SECS), "transient failure never retried");
         std::fs::write(&manifest, r#"{"embedded": true, "engine": "A"}"#).unwrap();
-        assert!(!engine_changed_since_failure(&manifest, "B"), "embedded corpus rebuilt on engine change");
+        assert!(!retry_due(&manifest, "B", t0 + RETRY_AFTER_SECS), "embedded corpus retried");
         std::fs::write(&manifest, r#"{"global_hash": "x"}"#).unwrap();
-        assert!(!engine_changed_since_failure(&manifest, "B"), "pre-field manifest treated as failed");
+        assert!(!retry_due(&manifest, "B", t0), "pre-field manifest treated as failed");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1403,7 +1456,10 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
 
         let (o, calls, staged, d) = embed_case("multi-fails", true, true, true, Some("multilingual"));
-        assert!(matches!(o, Embedded::Complete), "multilingual failure held back the English lanes: {o:?}");
+        assert!(
+            matches!(o, Embedded::Degraded(ref w) if w.contains("multilingual")),
+            "multilingual failure not reported as degraded: {o:?}"
+        );
         assert_eq!(calls, ["EN", "multilingual", "combined"]);
         assert!(!staged.multi.0.exists(), "failed multilingual lane still staged for promotion");
         std::fs::remove_dir_all(d).unwrap();

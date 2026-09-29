@@ -101,7 +101,9 @@ enum Commands {
         /// names the step it stalled in.
         #[arg(long, short)]
         verbose: bool,
-        /// Only regenerate if corpus is stale (newer way files exist)
+        /// Only regenerate if corpus is stale (newer way files exist, or a
+        /// failed build is due a retry). The SessionStart hook runs this:
+        /// a failed embedding pass is reported on stderr and exits 0.
         #[arg(long)]
         if_stale: bool,
     },
