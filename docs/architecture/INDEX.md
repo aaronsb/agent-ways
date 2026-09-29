@@ -139,6 +139,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-185](./platform/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | accepted |
 | [ADR-186](./platform/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
 | [ADR-500](./platform/ADR-500-settings-json-three-way-merge-spec-and-peer-writer-coexistence-contract.md) | settings.json three-way merge: spec and peer-writer coexistence contract | accepted |
+| [ADR-501](./platform/ADR-501-ways-check-is-the-single-authoring-gate.md) | ways check is the single authoring gate | proposed |
 
 ## Practice
 _The ways method, way authoring, the development loop_
