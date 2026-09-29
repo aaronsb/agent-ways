@@ -306,7 +306,8 @@ fn working_tree_build_groups(app: &Path) -> (bool, bool) {
     classify_build_groups(String::from_utf8_lossy(&out.stdout).lines())
 }
 
-/// Regenerate the corpus (best-effort — it self-heals on the next session) and
+/// Regenerate the corpus (best-effort — a failure keeps the previous corpus and
+/// the next session retries) and
 /// reproject `~/.claude` with the installed ways binary. This is where the pulled
 /// content (ways, skills, hooks, core.md) reaches the projection, so it runs on
 /// every update path — including the content-only fast path.
@@ -316,7 +317,7 @@ fn reproject(app: &Path, ways_bin: &Path) -> Result<()> {
     }
     eprintln!("==> regenerate corpus");
     if let Err(e) = run_step(Command::new(ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
-        eprintln!("  ⚠ corpus not regenerated now ({e}); it self-heals on the next session.");
+        eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
     }
     eprintln!("==> reconcile projection");
     run_step(Command::new(ways_bin).arg("reconcile").current_dir(app), "ways reconcile")
@@ -437,7 +438,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     }
     eprintln!("==> regenerate corpus");
     if let Err(e) = run_step(Command::new(&ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
-        eprintln!("  ⚠ corpus not regenerated now ({e}); it self-heals on the next session.");
+        eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
     }
     eprintln!("==> reconcile projection");
     run_step(Command::new(&ways_bin).arg("reconcile").current_dir(app), "ways reconcile")?;

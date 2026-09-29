@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
@@ -65,7 +65,11 @@ pub fn run(
         if manifest.is_file() && corpus.is_file() {
             let project_dir = std::env::var("CLAUDE_PROJECT_DIR").unwrap_or_default();
             vlog("staleness check (walks core + user + project ways)");
-            if !is_stale(&manifest, &global_dir, &project_dir) {
+            let bin = resolve_embed_bin(&engine_dir);
+            let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
+            if !is_stale(&manifest, &global_dir, &project_dir)
+                && !retry_due(&manifest, &engine, unix_now())
+            {
                 vlog("corpus is fresh — nothing to do");
                 return Ok(());
             }
@@ -75,10 +79,14 @@ pub fn run(
     }
     std::fs::create_dir_all(&out_dir)?;
     let corpus_path = out_dir.join("ways-corpus.jsonl");
+    sweep_staging_debris(&out_dir);
 
-    let tmpfile = corpus_path.with_extension("jsonl.tmp");
+    // All three corpus files are written to staging siblings; `settle` moves
+    // them into place according to how the embedding passes went.
+    let staged = Staged::new(&out_dir);
+    let tmpfile = &staged.combined.0;
     let mut w = BufWriter::new(
-        std::fs::File::create(&tmpfile)
+        std::fs::File::create(tmpfile)
             .with_context(|| format!("creating {}", tmpfile.display()))?,
     );
 
@@ -216,9 +224,22 @@ pub fn run(
     w.flush()?;
     drop(w);
 
-    // Atomic move
-    vlog(&format!("writing corpus: {}", corpus_path.display()));
-    std::fs::rename(&tmpfile, &corpus_path)?;
+    // A failed pass never replaces an embedded corpus (#645).
+    let bin = resolve_embed_bin(&engine_dir);
+    let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
+    let generate = |bin: &Path, corpus: &Path, model: &Path, what: &str| {
+        run_generate(bin, corpus, model, what, verbose, &vlog)
+    };
+    let outcome = auto_embed(&staged, bin.as_deref(), &engine_dir, &generate, verbose, &vlog, &log)?;
+    let complete = matches!(outcome, Embedded::Complete);
+    let promote = matches!(outcome, Embedded::Complete | Embedded::Degraded(_));
+    let manifest_path = out_dir.join("embed-manifest.json");
+    let previous_calibration: ways_core::calibration::Calibration = read_manifest(&manifest_path)
+        .and_then(|m| m.get("calibration").cloned())
+        .and_then(|c| serde_json::from_value(c).ok())
+        .unwrap_or_default();
+    vlog(&format!("settling corpus: {}", corpus_path.display()));
+    let settled = settle(&staged, promote)?;
 
     let total = global_count + user_count + project_total;
     log(&format!(
@@ -226,13 +247,21 @@ pub fn run(
         corpus_path.display()
     ));
 
-    // Auto-embed if way-embed binary and model are available
-    auto_embed(&out_dir, &engine_dir, &corpus_path, verbose, &vlog, &log)?;
-
     // Fit per-model calibration g(s)=σ(a·s+b) from the probe corpus (ADR-156).
-    let calibration = fit_calibration(&out_dir, &engine_dir, verbose, &vlog, &log);
+    // It needs embeddings: a kept corpus keeps its calibration, a raw one has none.
+    let calibration = match settled {
+        Settled::Promoted => fit_calibration(&out_dir, &engine_dir, verbose, &vlog, &log),
+        Settled::KeptPrevious => previous_calibration,
+        Settled::WroteRaw => Default::default(),
+    };
 
-    // Write manifest
+    // The manifest records whether every lane embedded, why not, when it
+    // failed, and which engine built it. `--if-stale` retries a failed build
+    // when the engine changes or a day has passed, not on every session start.
+    let reason = match &outcome {
+        Embedded::Complete => None,
+        Embedded::Degraded(why) | Embedded::Unavailable(why) | Embedded::Failed(why) => Some(why.clone()),
+    };
     let manifest = json!({
         "global_hash": global_hash,
         "global_count": global_count,
@@ -241,14 +270,46 @@ pub fn run(
         "total_count": total,
         "projects": manifest_projects,
         "calibration": calibration,
+        "embedded": complete,
+        "reason": reason,
+        "failed_at": if complete { None } else { Some(unix_now()) },
+        "engine": engine,
     });
-    let manifest_path = out_dir.join("embed-manifest.json");
     vlog("writing manifest");
     std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
     log(&format!("Manifest written: {}", manifest_path.display()));
     vlog("done");
 
-    Ok(())
+    let what_happened = match settled {
+        Settled::Promoted => String::new(),
+        Settled::KeptPrevious => format!("kept the previous corpus at {}", corpus_path.display()),
+        Settled::WroteRaw => format!(
+            "wrote {} without embeddings, so matching is keyword-only until `ways corpus` succeeds",
+            corpus_path.display()
+        ),
+    };
+    match outcome {
+        Embedded::Complete => Ok(()),
+        // An optional lane failed; the rest was promoted.
+        Embedded::Degraded(why) => {
+            eprintln!("warning: {why}; kept the previous multilingual corpus");
+            Ok(())
+        }
+        // No engine is an install state: say so, and exit 0 so `make setup`
+        // and keyword-only installs carry on.
+        Embedded::Unavailable(why) => {
+            eprintln!("warning: {why}; {what_happened}");
+            Ok(())
+        }
+        // A pass that ran and failed is an error for a caller who asked for a
+        // build. The SessionStart hook (`--if-stale`) reports it and exits 0:
+        // hooks must not fail, and `ways status` carries the reason.
+        Embedded::Failed(why) if if_stale => {
+            eprintln!("warning: {why}; {what_happened}");
+            Ok(())
+        }
+        Embedded::Failed(why) => bail!("{why}; {what_happened}"),
+    }
 }
 
 /// Child stderr policy for a `way-embed` subprocess.
@@ -282,7 +343,8 @@ fn elapsed_suffix(t: Instant, verbose: bool) -> String {
     }
 }
 
-/// Run one `way-embed generate` pass, returning the elapsed time on success.
+/// Run one `way-embed generate` pass, returning the elapsed time on success
+/// and the reason on failure.
 ///
 /// `what` names the pass in diagnostics. Under `--verbose` the exact argv is
 /// echoed, so a stalled pass can be rerun standalone outside the corpus build.
@@ -293,7 +355,7 @@ fn run_generate(
     what: &str,
     verbose: bool,
     vlog: &dyn Fn(&str),
-) -> Option<Instant> {
+) -> std::result::Result<Instant, String> {
     vlog(&format!(
         "exec: {} generate --corpus {} --model {}",
         bin.display(),
@@ -310,16 +372,172 @@ fn run_generate(
         .status();
 
     match status {
-        Ok(s) if s.success() => Some(t),
-        Ok(s) => {
-            eprintln!("WARNING: {what} embedding generation failed ({s})");
-            None
-        }
-        Err(e) => {
-            eprintln!("WARNING: {what} embedding generation could not start: {e}");
-            None
+        Ok(s) if s.success() => Ok(t),
+        Ok(s) => Err(format!("{what} embedding generation failed ({s})")),
+        Err(e) => Err(format!("{what} embedding generation could not start: {e}")),
+    }
+}
+
+/// The three corpus files, each staged beside its final path first:
+/// `(staged, final)` pairs for the combined corpus and the two model lanes.
+/// Staging names carry the process id, so two concurrent builds never write
+/// or promote each other's files.
+struct Staged {
+    combined: (PathBuf, PathBuf),
+    en: (PathBuf, PathBuf),
+    multi: (PathBuf, PathBuf),
+}
+
+impl Staged {
+    fn new(out_dir: &Path) -> Self {
+        let pid = std::process::id();
+        let pair = |name: &str| (out_dir.join(format!("{name}.{pid}.tmp")), out_dir.join(name));
+        Staged {
+            combined: pair("ways-corpus.jsonl"),
+            en: pair("ways-corpus-en.jsonl"),
+            multi: pair("ways-corpus-multi.jsonl"),
         }
     }
+
+    /// Promotion order: the lane splits first, the combined corpus last, so a
+    /// rename that fails partway leaves the old combined corpus in place.
+    fn pairs(&self) -> [&(PathBuf, PathBuf); 3] {
+        [&self.en, &self.multi, &self.combined]
+    }
+
+    /// Refresh the staged files' mtimes, so a concurrent build's debris sweep
+    /// never takes them for leftovers while a long pass runs.
+    fn touch(&self) {
+        let now = std::time::SystemTime::now();
+        for (tmp, _) in self.pairs() {
+            if let Ok(f) = std::fs::File::options().append(true).open(tmp) {
+                let _ = f.set_modified(now);
+            }
+        }
+    }
+}
+
+/// Remove staging files a killed build left behind: `*.tmp` from this module
+/// and `*.tmp.tmp` from `way-embed generate`. Only files older than an hour
+/// go, so a build running concurrently keeps its own.
+fn sweep_staging_debris(out_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(out_dir) else { return };
+    let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("ways-corpus") && name.contains(".tmp")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t < hour_ago)
+            .unwrap_or(false);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// How the embedding passes went.
+#[derive(Debug)]
+enum Embedded {
+    /// Every pass that had a model ran and succeeded.
+    Complete,
+    /// The multilingual pass failed. Its model is optional (ADR-139), so the
+    /// English lanes are promoted and the previous multilingual corpus kept.
+    Degraded(String),
+    /// No engine or English model is installed: an install state, not a fault.
+    Unavailable(String),
+    /// A pass ran and failed; the reason, for the operator.
+    Failed(String),
+}
+
+/// What reached the corpus paths.
+#[derive(Debug, PartialEq)]
+enum Settled {
+    /// The staged files replaced the corpus.
+    Promoted,
+    /// Embedding did not complete and a previous corpus exists; it stays,
+    /// since its vectors still match and a raw corpus would drop matching to
+    /// keywords.
+    KeptPrevious,
+    /// Embedding did not complete and there was no previous corpus; the raw
+    /// one was written, keyword matching being better than none.
+    WroteRaw,
+}
+
+/// Move the staged corpus into place, or keep what is there (#645).
+fn settle(staged: &Staged, complete: bool) -> Result<Settled> {
+    if !complete && staged.combined.1.is_file() {
+        for (tmp, _) in staged.pairs() {
+            let _ = std::fs::remove_file(tmp);
+        }
+        return Ok(Settled::KeptPrevious);
+    }
+    for (tmp, dest) in staged.pairs() {
+        if tmp.is_file() {
+            std::fs::rename(tmp, dest)
+                .with_context(|| format!("moving {} into place", dest.display()))?;
+        } else if !complete && dest != &staged.combined.1 {
+            // A split from an older build must not sit beside a new raw corpus.
+            let _ = std::fs::remove_file(dest);
+        }
+    }
+    Ok(if complete { Settled::Promoted } else { Settled::WroteRaw })
+}
+
+/// A string that changes when the engine binary or either model changes:
+/// path, size and mtime of each, or `absent`.
+fn engine_fingerprint(bin: Option<&Path>, engine_dir: &Path) -> String {
+    let describe = |p: &Path| match p.metadata() {
+        Ok(m) => {
+            let secs = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            format!("{}:{}:{secs}", p.display(), m.len())
+        }
+        Err(_) => format!("{}:absent", p.display()),
+    };
+    [
+        bin.map(describe).unwrap_or_else(|| "way-embed:absent".to_string()),
+        describe(&engine_dir.join("minilm-l6-v2.gguf")),
+        describe(&engine_dir.join("multilingual-minilm-l12-v2-q8.gguf")),
+    ]
+    .join("|")
+}
+
+fn read_manifest(path: &Path) -> Option<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+}
+
+/// How long a failed build waits before `--if-stale` retries it on its own.
+const RETRY_AFTER_SECS: u64 = 24 * 3600;
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// True when the manifest records a build that did not fully embed and a
+/// retry is due: the engine changed since (a repair), or a day has passed (a
+/// transient failure). Manifests written before the `embedded` field count as
+/// embedded.
+fn retry_due(manifest: &Path, engine: &str, now: u64) -> bool {
+    let Some(m) = read_manifest(manifest) else { return false };
+    if m.get("embedded").and_then(|v| v.as_bool()).unwrap_or(true) {
+        return false;
+    }
+    let engine_changed = m.get("engine").and_then(|v| v.as_str()) != Some(engine);
+    let failed_at = m.get("failed_at").and_then(|v| v.as_u64()).unwrap_or(0);
+    engine_changed || now.saturating_sub(failed_at) >= RETRY_AFTER_SECS
 }
 
 /// Embed one project's `.claude/ways/` under namespace `key`.
@@ -587,29 +805,31 @@ fn resolve_embed_bin(engine_dir: &Path) -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// Shell out to way-embed generate for embedding vectors.
-/// Generates two corpus files: one with EN model embeddings, one with multilingual.
+/// One `way-embed generate` pass: (binary, corpus, model, pass name) to the
+/// elapsed time, or the reason it failed.
+type GeneratePass<'a> = dyn Fn(&Path, &Path, &Path, &str) -> std::result::Result<Instant, String> + 'a;
+
+/// Shell out to way-embed generate for embedding vectors, on the staged files.
+/// Splits the staged combined corpus into EN and multilingual lanes, embeds
+/// each with its model, then embeds the combined corpus with the EN model.
 ///
-/// `out_dir` receives the split corpora; `engine_dir` (always the canonical XDG
-/// cache) supplies the way-embed binary and GGUF models. The two differ only
-/// when `ways corpus --output <dir>` redirects an isolated build.
+/// `bin` is the resolved way-embed binary; `engine_dir` (always the canonical
+/// XDG cache) supplies the GGUF models. `generate` runs one pass (bin, corpus,
+/// model, pass name) — `run_generate` in production, a fake in tests.
 fn auto_embed(
-    out_dir: &Path,
+    staged: &Staged,
+    bin: Option<&Path>,
     engine_dir: &Path,
-    corpus: &Path,
+    generate: &GeneratePass<'_>,
     verbose: bool,
     vlog: &dyn Fn(&str),
     log: &dyn Fn(&str),
-) -> Result<()> {
-    let bin = match resolve_embed_bin(engine_dir) {
-        Some(b) => b,
-        None => {
-            log(&format!(
-                "ERROR: embedding engine required (ADR-125). Run: cd {} && make setup",
-                crate::paths::data_root().display()
-            ));
-            return Ok(());
-        }
+) -> Result<Embedded> {
+    let setup_hint = format!("run: cd {} && make setup", crate::paths::data_root().display());
+    let Some(bin) = bin else {
+        return Ok(Embedded::Unavailable(format!(
+            "embedding engine not installed (ADR-125); {setup_hint}"
+        )));
     };
     vlog(&format!("way-embed: {}", bin.display()));
 
@@ -625,18 +845,25 @@ fn auto_embed(
         multi_model.display(),
         if multi_model.is_file() { "present" } else { "absent" }
     ));
+    if !en_model.is_file() {
+        return Ok(Embedded::Unavailable(format!(
+            "English model missing at {}; {setup_hint}",
+            en_model.display()
+        )));
+    }
 
     // Split corpus into EN and multilingual entries
     vlog("splitting corpus into en / multilingual lanes");
+    let corpus = &staged.combined.0;
     let corpus_content = std::fs::read_to_string(corpus)?;
-    let corpus_en = out_dir.join("ways-corpus-en.jsonl");
-    let corpus_multi = out_dir.join("ways-corpus-multi.jsonl");
+    let corpus_en = &staged.en.0;
+    let corpus_multi = &staged.multi.0;
     let mut en_count = 0usize;
     let mut multi_count = 0usize;
 
     {
-        let mut w_en = std::io::BufWriter::new(std::fs::File::create(&corpus_en)?);
-        let mut w_multi = std::io::BufWriter::new(std::fs::File::create(&corpus_multi)?);
+        let mut w_en = std::io::BufWriter::new(std::fs::File::create(corpus_en)?);
+        let mut w_multi = std::io::BufWriter::new(std::fs::File::create(corpus_multi)?);
 
         for line in corpus_content.lines() {
             if line.is_empty() { continue; }
@@ -656,26 +883,36 @@ fn auto_embed(
     }
 
     // Embed EN corpus
-    if en_model.is_file() && en_count > 0 {
+    if en_count > 0 {
         log(&format!("Embedding {en_count} ways with English model..."));
-        if let Some(t) = run_generate(&bin, &corpus_en, &en_model, "EN", verbose, vlog) {
-            log(&format!(
+        staged.touch();
+        match generate(bin, corpus_en, &en_model, "EN") {
+            Ok(t) => log(&format!(
                 "  EN embeddings: {}{}",
-                corpus_en.display(),
+                staged.en.1.display(),
                 elapsed_suffix(t, verbose)
-            ));
+            )),
+            Err(why) => return Ok(Embedded::Failed(why)),
         }
     }
 
-    // Embed multilingual corpus
+    // Embed multilingual corpus. Its model is installed on demand (ADR-139):
+    // an absent model skips the lane, and a failed pass keeps the previous
+    // multilingual corpus instead of holding back the English lanes.
+    let mut multi_failure = None;
     if multi_model.is_file() && multi_count > 0 {
         log(&format!("Embedding {multi_count} ways with multilingual model..."));
-        if let Some(t) = run_generate(&bin, &corpus_multi, &multi_model, "multilingual", verbose, vlog) {
-            log(&format!(
+        staged.touch();
+        match generate(bin, corpus_multi, &multi_model, "multilingual") {
+            Ok(t) => log(&format!(
                 "  Multi embeddings: {}{}",
-                corpus_multi.display(),
+                staged.multi.1.display(),
                 elapsed_suffix(t, verbose)
-            ));
+            )),
+            Err(why) => {
+                let _ = std::fs::remove_file(corpus_multi);
+                multi_failure = Some(why);
+            }
         }
     } else if multi_count > 0 && !multi_model.is_file() {
         log(&format!("  {multi_count} multilingual ways found but model not installed"));
@@ -688,22 +925,25 @@ fn auto_embed(
     // This re-embeds every entry the two passes above already embedded — the
     // longest pass, and the last, which is why a silent build looks like it hung
     // right here.
-    if en_model.is_file() {
-        log("Generating combined corpus with English embeddings...");
-        vlog(&format!(
-            "re-embedding all {} entries (en {en_count} + multi {multi_count})",
-            en_count + multi_count
-        ));
-        if let Some(t) = run_generate(&bin, corpus, &en_model, "combined", verbose, vlog) {
-            log(&format!(
-                "Combined corpus: {}{}",
-                corpus.display(),
-                elapsed_suffix(t, verbose)
-            ));
-        }
+    log("Generating combined corpus with English embeddings...");
+    vlog(&format!(
+        "re-embedding all {} entries (en {en_count} + multi {multi_count})",
+        en_count + multi_count
+    ));
+    staged.touch();
+    match generate(bin, corpus, &en_model, "combined") {
+        Ok(t) => log(&format!(
+            "Combined corpus: {}{}",
+            staged.combined.1.display(),
+            elapsed_suffix(t, verbose)
+        )),
+        Err(why) => return Ok(Embedded::Failed(why)),
     }
 
-    Ok(())
+    Ok(match multi_failure {
+        Some(why) => Embedded::Degraded(why),
+        None => Embedded::Complete,
+    })
 }
 
 /// Resolve real project path from Claude Code's encoded directory name.
@@ -1052,4 +1292,186 @@ fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -
             .filter_map(|s| s.parse().ok())
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ways-corpus-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn read(p: &Path) -> String {
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    /// Finals holding `previous` (if any) and every staged file holding "staged".
+    fn scene(name: &str, previous: Option<&str>) -> (PathBuf, Staged) {
+        let dir = scratch(name);
+        let staged = Staged::new(&dir);
+        for (tmp, dest) in staged.pairs() {
+            if let Some(prev) = previous {
+                std::fs::write(dest, prev).unwrap();
+            }
+            std::fs::write(tmp, "staged").unwrap();
+        }
+        (dir, staged)
+    }
+
+    #[test]
+    fn complete_promotes_every_staged_file() {
+        let (dir, staged) = scene("complete", Some("previous"));
+        assert_eq!(settle(&staged, true).unwrap(), Settled::Promoted);
+        for (tmp, dest) in staged.pairs() {
+            assert_eq!(read(dest), "staged", "{} not promoted", dest.display());
+            assert!(!tmp.exists(), "{} left behind", tmp.display());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn incomplete_keeps_the_previous_corpus() {
+        let (dir, staged) = scene("keep", Some("previous"));
+        assert_eq!(settle(&staged, false).unwrap(), Settled::KeptPrevious);
+        for (tmp, dest) in staged.pairs() {
+            assert_eq!(read(dest), "previous", "{} replaced", dest.display());
+            assert!(!tmp.exists(), "{} left behind", tmp.display());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn incomplete_with_no_previous_corpus_writes_the_raw_one_and_drops_old_splits() {
+        let dir = scratch("raw");
+        let staged = Staged::new(&dir);
+        // Only the combined corpus was staged (the engine was missing), and a
+        // split from an older build is lying around.
+        std::fs::write(&staged.combined.0, "raw").unwrap();
+        std::fs::write(&staged.en.1, "old split").unwrap();
+        assert_eq!(settle(&staged, false).unwrap(), Settled::WroteRaw);
+        assert_eq!(read(&staged.combined.1), "raw");
+        assert!(!staged.en.1.exists(), "stale EN split survived beside the raw corpus");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn staging_names_are_per_process() {
+        let staged = Staged::new(Path::new("/x"));
+        let pid = std::process::id().to_string();
+        for (tmp, dest) in staged.pairs() {
+            assert!(tmp.to_string_lossy().contains(&pid), "{}", tmp.display());
+            assert_ne!(tmp, dest);
+        }
+    }
+
+    #[test]
+    fn a_failed_build_is_retried_on_engine_change_or_after_a_day() {
+        let dir = scratch("stale");
+        let manifest = dir.join("embed-manifest.json");
+        let t0 = 1_000_000u64;
+        std::fs::write(&manifest, format!(r#"{{"embedded": false, "engine": "A", "failed_at": {t0}}}"#)).unwrap();
+        assert!(!retry_due(&manifest, "A", t0 + 60), "same engine retried within the day");
+        assert!(retry_due(&manifest, "B", t0 + 60), "changed engine not retried");
+        assert!(retry_due(&manifest, "A", t0 + RETRY_AFTER_SECS), "transient failure never retried");
+        std::fs::write(&manifest, r#"{"embedded": true, "engine": "A"}"#).unwrap();
+        assert!(!retry_due(&manifest, "B", t0 + RETRY_AFTER_SECS), "embedded corpus retried");
+        std::fs::write(&manifest, r#"{"global_hash": "x"}"#).unwrap();
+        assert!(!retry_due(&manifest, "B", t0), "pre-field manifest treated as failed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Run auto_embed against a staged corpus with one EN and one multilingual
+    /// way, a fake `generate` that fails the named pass, and the given models.
+    /// Returns the outcome, the passes called in order, and the staged files.
+    fn embed_case(
+        name: &str,
+        bin: bool,
+        en_model: bool,
+        multi_model: bool,
+        fail: Option<&str>,
+    ) -> (Embedded, Vec<String>, Staged, PathBuf) {
+        let dir = scratch(name);
+        let engine = dir.join("engine");
+        std::fs::create_dir_all(&engine).unwrap();
+        if en_model {
+            std::fs::write(engine.join("minilm-l6-v2.gguf"), "m").unwrap();
+        }
+        if multi_model {
+            std::fs::write(engine.join("multilingual-minilm-l12-v2-q8.gguf"), "m").unwrap();
+        }
+        let staged = Staged::new(&dir);
+        std::fs::write(
+            &staged.combined.0,
+            "{\"id\":\"a\"}\n{\"id\":\"b\",\"embed_model\":\"multilingual\"}\n",
+        )
+        .unwrap();
+        let calls = RefCell::new(Vec::new());
+        let generate = |_: &Path, _: &Path, _: &Path, what: &str| {
+            calls.borrow_mut().push(what.to_string());
+            if Some(what) == fail {
+                Err(format!("{what} embedding generation failed (signal: 4)"))
+            } else {
+                Ok(Instant::now())
+            }
+        };
+        let bin_path = dir.join("way-embed");
+        let outcome = auto_embed(
+            &staged,
+            bin.then_some(bin_path.as_path()),
+            &engine,
+            &generate,
+            false,
+            &|_| {},
+            &|_| {},
+        )
+        .unwrap();
+        (outcome, calls.into_inner(), staged, dir)
+    }
+
+    #[test]
+    fn auto_embed_outcomes() {
+        let (o, calls, _, d) = embed_case("all-ok", true, true, true, None);
+        assert!(matches!(o, Embedded::Complete), "{o:?}");
+        assert_eq!(calls, ["EN", "multilingual", "combined"]);
+        std::fs::remove_dir_all(d).unwrap();
+
+        let (o, calls, _, d) = embed_case("no-bin", false, true, true, None);
+        assert!(matches!(o, Embedded::Unavailable(ref w) if w.contains("engine not installed")), "{o:?}");
+        assert!(calls.is_empty());
+        std::fs::remove_dir_all(d).unwrap();
+
+        let (o, calls, _, d) = embed_case("no-en-model", true, false, true, None);
+        assert!(matches!(o, Embedded::Unavailable(ref w) if w.contains("English model missing")), "{o:?}");
+        assert!(calls.is_empty());
+        std::fs::remove_dir_all(d).unwrap();
+
+        let (o, calls, _, d) = embed_case("en-fails", true, true, true, Some("EN"));
+        assert!(matches!(o, Embedded::Failed(ref w) if w.contains("EN embedding")), "{o:?}");
+        assert_eq!(calls, ["EN"]);
+        std::fs::remove_dir_all(d).unwrap();
+
+        let (o, calls, staged, d) = embed_case("multi-fails", true, true, true, Some("multilingual"));
+        assert!(
+            matches!(o, Embedded::Degraded(ref w) if w.contains("multilingual")),
+            "multilingual failure not reported as degraded: {o:?}"
+        );
+        assert_eq!(calls, ["EN", "multilingual", "combined"]);
+        assert!(!staged.multi.0.exists(), "failed multilingual lane still staged for promotion");
+        std::fs::remove_dir_all(d).unwrap();
+
+        let (o, calls, _, d) = embed_case("no-multi-model", true, true, false, None);
+        assert!(matches!(o, Embedded::Complete), "{o:?}");
+        assert_eq!(calls, ["EN", "combined"]);
+        std::fs::remove_dir_all(d).unwrap();
+
+        let (o, calls, _, d) = embed_case("combined-fails", true, true, true, Some("combined"));
+        assert!(matches!(o, Embedded::Failed(ref w) if w.contains("combined")), "{o:?}");
+        assert_eq!(calls, ["EN", "multilingual", "combined"]);
+        std::fs::remove_dir_all(d).unwrap();
+    }
 }
