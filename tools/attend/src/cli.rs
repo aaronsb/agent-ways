@@ -80,7 +80,8 @@ pub(crate) enum Commands {
         machine: bool,
         /// Print only the display name, for status lines and prompts.
         /// Presentation only: it can change between sessions, so never
-        /// key state on it.
+        /// key state on it. An unresolved identity prints the name of
+        /// the process cwd, with no notice.
         #[arg(long)]
         display: bool,
     },

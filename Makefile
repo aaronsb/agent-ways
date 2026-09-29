@@ -49,10 +49,11 @@ help:
 	@echo "  make attend       Build attend binary"
 	@echo "  make attend-rebuild Force rebuild attend from source"
 	@echo "  make lint         Run clippy on Rust workspace (warnings = errors)"
-	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr)"
+	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr + statusline)"
 	@echo "  make test-unit    Run Rust unit tests"
 	@echo "  make test-sim     Run session simulator (8 scenarios)"
 	@echo "  make test-adr     Run adr tool tests (lint, archive, golden, import, macro)"
+	@echo "  make test-statusline  Test statusline.sh segments against stub attend builds"
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
@@ -379,7 +380,7 @@ test-adr:
 	@docs/scripts/adr cite --check >/dev/null || { docs/scripts/adr cite; exit 1; }
 	@echo "adr tool tests passed."
 
-test-statusline: ## Test statusline.sh segments against stub attend builds
+test-statusline:
 	@echo "Running statusline tests..."
 	@bash tests/statusline-test.sh
 

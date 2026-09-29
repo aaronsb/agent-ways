@@ -141,7 +141,7 @@ Print this session's canonical bus identity (issue #378)
 ###### **Options:**
 
 * `--machine` — Emit the stable key as `key=value` lines for scripts/hooks (session_id, origin_path, resolved) instead of the human-readable table. Downstream state must key on these fields — the display name is presentation, never a key
-* `--display` — Print only the display name, for status lines and prompts. Presentation only: it can change between sessions, so never key state on it
+* `--display` — Print only the display name, for status lines and prompts. Presentation only: it can change between sessions, so never key state on it. An unresolved identity prints the name of the process cwd, with no notice
 
 
 
