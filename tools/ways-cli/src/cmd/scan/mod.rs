@@ -27,6 +27,7 @@ pub use state::state;
 
 use anyhow::Result;
 use regex::Regex;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::session;
@@ -296,8 +297,12 @@ fn scan_prompt_surface(
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
     // Fired ways are collected, then admitted in a fixed order (scan/order.rs).
-    // Payload: (channel, matched span).
-    let mut hits: Vec<Hit<(String, Option<String>)>> = Vec::new();
+    // Payload: (channel, matched span, fired only on this scan's parent boost).
+    let mut hits: Vec<Hit<(String, Option<String>, bool)>> = Vec::new();
+    // Ids fired so far in this scan. Candidates arrive in tree order, so a
+    // parent is decided before its children and can boost them (see
+    // `effective_thresholds_in_scan`).
+    let mut fired_ids: HashSet<String> = HashSet::new();
 
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
@@ -311,7 +316,7 @@ fn scan_prompt_surface(
         // mask as well as the gate, so a strict pattern can target URL or
         // code-fence content the mask would otherwise hide (ADR-155 §2).
         let regex_text: &str = if way.pattern_strict { query } else { &masked };
-        let thresholds = effective_thresholds(way, session_id);
+        let (thresholds, scan_boost) = effective_thresholds_in_scan(way, session_id, &fired_ids);
 
         // Additive matching: pattern OR semantic
         let mut outcome = match_prompt(
@@ -328,8 +333,10 @@ fn scan_prompt_surface(
         );
 
         // Gate re-check against the prompt alone before accepting the veto.
+        let mut used_prompt_only = false;
         if let PromptMatch::KeywordGated(_) = outcome {
             if response_contributed {
+                used_prompt_only = true;
                 let scores = prompt_only_scores.get_or_insert_with(|| {
                     batch_embed_score(&reduce::reduce_for_embed(query, BUDGET_PROMPT))
                 });
@@ -348,9 +355,39 @@ fn scan_prompt_surface(
             }
         }
 
+        // A fire that needed this scan's parent boost is shown only if that
+        // parent is shown too: without it the child would not have fired.
+        let needs_parent = scan_boost
+            && matches!(outcome, PromptMatch::Fired { .. })
+            && !matches!(
+                match_prompt(
+                    regex_text,
+                    &way.pattern,
+                    way.pattern_strict,
+                    way.embeddable(),
+                    &way.corpus_id,
+                    effective_thresholds(way, session_id),
+                    match (used_prompt_only, prompt_only_scores.as_ref()) {
+                        (true, Some(scores)) => scores,
+                        _ => &embed_matches,
+                    },
+                    near_miss_margin,
+                    keyword_floor,
+                    verdicts.as_ref(),
+                ),
+                PromptMatch::Fired { .. }
+            );
+
         match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
-                hits.push(Hit { id: way.id.clone(), score, payload: (channel, matched_span) });
+                fired_ids.insert(way.id.clone());
+                let hit = match (&matched_span, way.pattern.as_deref()) {
+                    (Some(span), Some(pat)) if score.is_none() => {
+                        Hit::explicit(&way.id, pat, span, (channel, matched_span.clone(), needs_parent))
+                    }
+                    _ => Hit::scored(&way.id, score, (channel, matched_span, needs_parent)),
+                };
+                hits.push(hit);
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "prompt", &scope, &project_dir, session_id);
@@ -363,8 +400,12 @@ fn scan_prompt_surface(
     }
 
     order_hits(&mut hits);
+    let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
-        let (channel, matched_span) = &hit.payload;
+        let (channel, matched_span, needs_parent) = &hit.payload;
+        if *needs_parent && !has_shown_ancestor(&hit.id, &shown) {
+            continue;
+        }
         let out = capture_show_way(
             &hit.id,
             session_id,
@@ -375,6 +416,7 @@ fn scan_prompt_surface(
             Some(&mut budget),
         );
         if !out.is_empty() {
+            shown.insert(hit.id.clone());
             context.push_str(&out);
             context.push_str("\n\n");
             budget.charge("\n\n");
@@ -473,8 +515,14 @@ pub fn task(
             keyword_floor,
             verdicts.as_ref(),
         ) {
-            PromptMatch::Fired { channel, score, .. } => {
-                hits.push(Hit { id: way.id.clone(), score, payload: channel })
+            PromptMatch::Fired { channel, score, matched_span } => {
+                let hit = match (&matched_span, way.pattern.as_deref()) {
+                    (Some(span), Some(pat)) if score.is_none() => {
+                        Hit::explicit(&way.id, pat, span, channel)
+                    }
+                    _ => Hit::scored(&way.id, score, channel),
+                };
+                hits.push(hit);
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "task", task_scope, &project_dir, session_id);
@@ -561,8 +609,9 @@ pub fn command(
 
     // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
     // Hits are collected, then admitted in a fixed order (scan/order.rs).
-    // Payload: (channel, matched span).
-    let mut hits: Vec<Hit<(&'static str, Option<String>)>> = Vec::new();
+    // Payload: (channel, matched span, fired only on this scan's parent boost).
+    let mut hits: Vec<Hit<(&'static str, Option<String>, bool)>> = Vec::new();
+    let mut fired_ids: HashSet<String> = HashSet::new();
     for way in &candidates {
         if !session::scope_matches(&way.scope, &scope) {
             continue;
@@ -572,20 +621,21 @@ pub fn command(
         }
 
         // Commands regex first, then the description pattern — capture the span
-        // of whichever matched (ADR-153 §3).
-        let matched_span = way
+        // of whichever matched (ADR-153 §3), with the pattern that matched it.
+        let matched = way
             .commands
             .as_deref()
-            .and_then(|p| regex_span(p, cmd))
+            .and_then(|p| regex_span(p, cmd).map(|s| (p, s)))
             .or_else(|| match (description, way.pattern.as_deref()) {
                 // Pattern compiles case-insensitively (ADR-157), so match the
                 // description in its original case for a truer captured span.
-                (Some(desc), Some(pat)) => regex_span(pat, desc),
+                (Some(desc), Some(pat)) => regex_span(pat, desc).map(|s| (pat, s)),
                 _ => None,
             });
 
-        if let Some(span) = matched_span {
-            hits.push(Hit { id: way.id.clone(), score: None, payload: ("bash", Some(span)) });
+        if let Some((pat, span)) = matched {
+            fired_ids.insert(way.id.clone());
+            hits.push(Hit::explicit(&way.id, pat, &span, ("bash", Some(span.clone()), false)));
             continue;
         }
 
@@ -600,7 +650,7 @@ pub fn command(
         if way.trigger.is_some() {
             continue;
         }
-        let t = effective_thresholds(way, session_id);
+        let (t, scan_boost) = effective_thresholds_in_scan(way, session_id, &fired_ids);
         let prob_en = embed_matches.prob_en(&way.corpus_id, way.embeddable());
         let prob_multi = embed_matches.prob_multi(&way.corpus_id, way.embeddable());
         // `semantic:` prefix keeps every consumer that special-cases semantic
@@ -614,12 +664,20 @@ pub fn command(
             None
         };
         if let Some((channel, score)) = fired {
-            hits.push(Hit { id: way.id.clone(), score, payload: (channel, None) });
+            // Fired only on this scan's parent boost: shown only with that parent.
+            let base = effective_thresholds(way, session_id).semantic;
+            let needs_parent = scan_boost && !score.is_some_and(|p| p >= base);
+            fired_ids.insert(way.id.clone());
+            hits.push(Hit::scored(&way.id, score, (channel, None, needs_parent)));
         }
     }
     order_hits(&mut hits);
+    let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
-        let (channel, span) = &hit.payload;
+        let (channel, span, needs_parent) = &hit.payload;
+        if *needs_parent && !has_shown_ancestor(&hit.id, &shown) {
+            continue;
+        }
         // A regex hit carries its span and no surface; a semantic hit carries
         // the embedded surface and no span.
         let surface = if span.is_some() { None } else { Some(reduced_for_embed.as_str()) };
@@ -633,6 +691,7 @@ pub fn command(
             Some(&mut budget),
         );
         if !out.is_empty() {
+            shown.insert(hit.id.clone());
             context.push_str(&out);
         }
     }
@@ -708,7 +767,7 @@ pub fn file(
 
         if let Some(ref files_pattern) = way.files {
             if let Some(span) = regex_span(files_pattern, filepath) {
-                hits.push(Hit { id: way.id.clone(), score: None, payload: span });
+                hits.push(Hit::explicit(&way.id, files_pattern, &span, span.clone()));
             }
         }
     }
@@ -1024,28 +1083,46 @@ struct EffectiveThresholds {
 /// `parent_boost_floor`. The floor prevents cascading boosts from pushing
 /// children into the noise band. All values are calibrated probabilities.
 fn effective_thresholds(way: &WayCandidate, session_id: &str) -> EffectiveThresholds {
+    effective_thresholds_in_scan(way, session_id, &HashSet::new()).0
+}
+
+/// Proper ancestors of a way id, nearest first (`a/b/c` → `a/b`, `a`).
+fn ancestors(id: &str) -> impl Iterator<Item = &str> {
+    let mut path = id;
+    std::iter::from_fn(move || {
+        let idx = path.rfind('/')?;
+        path = &path[..idx];
+        Some(path)
+    })
+}
+
+fn has_shown_ancestor(id: &str, shown: &HashSet<String>) -> bool {
+    ancestors(id).any(|a| shown.contains(a))
+}
+
+/// [`effective_thresholds`], also boosting a way whose ancestor fired earlier
+/// in the same scan (`fired_in_scan`). Lanes show their hits after matching
+/// (scan/order.rs), so an ancestor fired in this scan has no session marker yet;
+/// the lanes walk candidates in tree order, so the ancestor is decided first.
+/// The flag is true when only this scan's ancestor supplied the boost: the
+/// caller then shows the way only if that ancestor is shown.
+fn effective_thresholds_in_scan(
+    way: &WayCandidate,
+    session_id: &str,
+    fired_in_scan: &HashSet<String>,
+) -> (EffectiveThresholds, bool) {
     let cfg = crate::config::global();
     let base = cfg.semantic_fire_probability;
 
-    let ancestor_shown = {
-        let mut path = way.id.as_str();
-        let mut found = false;
-        while let Some(idx) = path.rfind('/') {
-            path = &path[..idx];
-            if session::way_is_shown(path, session_id) {
-                found = true;
-                break;
-            }
-        }
-        found
-    };
+    let by_session = ancestors(&way.id).any(|a| session::way_is_shown(a, session_id));
+    let by_scan = !by_session && ancestors(&way.id).any(|a| fired_in_scan.contains(a));
 
-    let semantic = if ancestor_shown {
+    let semantic = if by_session || by_scan {
         (base * cfg.parent_threshold_multiplier).max(cfg.parent_boost_floor)
     } else {
         base
     };
-    EffectiveThresholds { semantic }
+    (EffectiveThresholds { semantic }, by_scan)
 }
 
 /// Semantic score for a check, taking the higher of the two model paths
@@ -1568,5 +1645,20 @@ mod queued_tests {
         std::fs::write(dir.join(".claude/ways.yaml"), "ways: {}\n").unwrap();
         assert!(super::enabled_for(Some(dir.to_str().unwrap())));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ancestors_walk_up_nearest_first() {
+        let got: Vec<&str> = super::ancestors("a/b/c").collect();
+        assert_eq!(got, vec!["a/b", "a"]);
+        assert_eq!(super::ancestors("top").count(), 0);
+    }
+
+    #[test]
+    fn shown_ancestor_is_any_level_up() {
+        let shown: std::collections::HashSet<String> = ["a".to_string()].into_iter().collect();
+        assert!(super::has_shown_ancestor("a/b/c", &shown));
+        assert!(!super::has_shown_ancestor("a", &shown), "a way is not its own ancestor");
+        assert!(!super::has_shown_ancestor("ab/c", &shown), "a text prefix is not an ancestor");
     }
 }

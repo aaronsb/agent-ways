@@ -645,7 +645,7 @@ enum ShowCommand {
         /// Characters of the hook's additionalContext already spent by the
         /// caller (check-post.sh assembles one context across several calls).
         /// Charges the way against the 10,000-character hook cap; a value
-        /// past the cap means the caller's budget is closed. When the way is
+        /// at or past the cap leaves no room. When the way is
         /// withheld for the cap, nothing is printed, nothing is recorded, and
         /// the exit status is 3.
         #[arg(long)]
@@ -924,7 +924,7 @@ fn run() -> Result<()> {
                 let out = cmd::show::way_scored(&id, &session, &trigger, None, None, None, Some(&mut budget))?;
                 if !out.is_empty() {
                     print!("{out}");
-                } else if budget.is_closed() {
+                } else if budget.refusals() > 0 {
                     std::process::exit(3);
                 }
                 Ok(())
