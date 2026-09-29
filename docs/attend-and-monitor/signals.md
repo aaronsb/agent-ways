@@ -63,7 +63,7 @@ Three kinds of subdirectories:
 
 **Reserved names:**
 
-- Anything starting with `_` (e.g., `_broadcast`, `_groups.yaml`, `_last_banner`) is a system file or dir. Never touched by cleanup, never interpreted as a project dir.
+- Anything starting with `_` (e.g., `_broadcast`, `_groups.yaml`, `_last_banner`) is a system file or dir, never interpreted as a project dir. Cleanup never removes these directories or non-`.signal` files; it can remove individual `.signal` files inside `_broadcast/` (see Phase 5).
 - Anything starting with `@` is a focus group dir. Managed by `attend focus` commands, self-cleaning on leave/dissolve.
 
 ## Filename convention
@@ -94,71 +94,61 @@ Readers that see `<filename>` are guaranteed to read complete, consistent conten
 
 ## The full lifecycle
 
-A signal's journey from creation to deletion:
+A signal's journey from creation to deletion. Signals carry authored messages, so they ride attend's message lane: they are delivered once, never aged out, and removed only when the project that owns them is gone (ADR-136).
 
 ```mermaid
 flowchart LR
-    Create[attend send<br/>or sensor emit]
+    Create[attend send<br/>or attend chat]
     Write[write .tmp<br/>rename to .signal]
-    Scan[peer sensor scans<br/>reads new files]
+    Scan[peer sensor scans<br/>reads unseen files]
     Present[present to agent<br/>via Monitor]
-    Age[age over time<br/>ADR-123 salience decay]
-    Below[below presentation floor<br/>no longer shown]
-    Cleanup[auto-cleanup sweep<br/>every 10 min]
-    Delete[file removed<br/>after 30 days]
+    Seen[marked seen<br/>file stays on disk]
+    Cleanup[cleanup sweep<br/>every 10 min]
+    Delete[file removed<br/>when its project is gone]
 
     Create --> Write
     Write --> Scan
     Scan --> Present
-    Present --> Age
-    Age --> Below
-    Age -->|re-engaged| Present
-    Below --> Cleanup
+    Present --> Seen
+    Seen --> Cleanup
     Cleanup --> Delete
 
     classDef core fill:#7c3aed,stroke:#4a5568,color:#ffffff
     classDef process fill:#2d7d9a,stroke:#4a5568,color:#ffffff
     classDef store fill:#2d8e5e,stroke:#4a5568,color:#ffffff
-    classDef caution fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
 
     class Create core
-    class Write store
+    class Write,Seen store
     class Scan,Present,Cleanup process
-    class Age,Below caution
     class Delete store
 ```
 
-**Phase 1 — creation.** The sender (an agent via `attend send`, a sensor via an internal emit path, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--broadcast` → `_broadcast/`, `--focus <name>` → `@<name>/`, `--to <path>` → the encoded path, no flags → the sender's own project scope. The threading flag composes with any routing flag.
+**Phase 1 — creation.** The sender (an agent via `attend send`, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--focus <name>` → `@<name>/`, `--to <path>` → the encoded path, and no flag (or `--broadcast`) → `_broadcast/`. The threading flag composes with any routing flag.
 
-**Phase 2 — scanning.** Every peer sensor poll (default 30 seconds), `sensor-peers` walks its scan directories: own project scope, `_broadcast`, every `@group` the session has joined (refreshed per-poll since issue #15). New `.signal` files (not in the seen-set) are read and parsed into observations.
+**Phase 2 — scanning.** Every peer sensor poll (default 30 seconds), `sensor-peers` walks its scan directories: its own project scope, `_broadcast`, and every `@group` the session has joined. A file whose path is not in the session's seen-set is read, parsed, and added to the seen-set. On a session's first scan with no restored checkpoint, every existing file is added to the seen-set without being shown, so a fresh start does not replay the backlog. A session that restarts restores its seen-set from its checkpoint and surfaces only the files that arrived while it was down.
 
-**Phase 3 — presentation.** Observations become events in the peer sensor's accumulator, feed into engagement/governor, and if they survive all the gates, emit as Monitor notification lines into the conversation. The agent sees them; the human (if running `attend chat`) sees them in the TUI.
+**Phase 3 — presentation.** Unseen messages from one poll are emitted as Monitor notification lines. If a single poll finds more than 8, they are coalesced into one digest line that gives the count, and `attend inbox` holds the detail. The message lane skips the salience gate and the action-potential refractory, and it uses a permissive governor with a flat cooldown instead of the event lane's governor, so a message is never dropped for arriving at a busy moment. The agent sees the notification; the human (if running `attend chat`) sees the message in the TUI.
 
-**Phase 4 — salience decay (ADR-123).** Once presented, a signal carries a salience that decays as time passes. After its salience drops below the presentation floor, the signal stops appearing in notifications — but the file stays on disk. Re-engagement (a reply or reference) resets salience to 1.0 and the signal is visible again.
+**Phase 4 — retention.** Reading a signal marks it seen in that session's own seen-set; it does not delete the file. The file stays on disk for other peers and for `attend inbox`. Nothing removes a signal because of its age.
 
-**Phase 5 — auto-cleanup.** Every `cleanup.interval` seconds (default 10 minutes), the attend loop runs a sweep of the signals base. Any `.signal` file older than `cleanup.retention` (default 30 days) is removed. Empty project subdirs left behind after the file removal are also cleaned up.
+**Phase 5 — auto-cleanup.** Every `cleanup.interval` seconds (default 600, ten minutes), the attend loop sweeps the signals base when `cleanup.enabled` is true. A project is live while `~/.claude/projects/<encoded-cwd>/` exists. The sweep removes every signal in a project-scope directory whose project is gone, and removes a signal in `_broadcast/` or an `@group/` directory when the project named by its sender `cwd` field is gone. It then removes project directories left empty. `_broadcast/` and `@group/` directories are never removed.
 
-**Phase 6 — manual cleanup.** The operator can also run `attend cleanup` at any time to force an immediate sweep. Flags:
+**Phase 6 — manual cleanup.** The operator can run `attend cleanup` at any time to run the same sweep immediately. Flags:
 
-- `--older-than <dur>` — override the retention cutoff (e.g., `5m`, `1h`, `1d`, `30d`)
 - `--dry-run` / `-n` — list what would be removed without deleting
-- `--all` — remove every signal regardless of age (nuclear option)
+- `--all` — remove every signal regardless of project liveness
 
-## Two TTLs: disk vs attention
+## Disk lifetime and presentation
 
-Signals have **two different retention windows** that operate at different scales for different purposes:
+A signal's time on disk and its presentation are separate:
 
-| | Disk retention | Attention window |
+| | Disk | Presentation |
 |---|---|---|
-| **Unit** | Time (30 days) | Turns (half-life 20, per ADR-121) | <!-- adr-cite-ignore -->
-| **Purpose** | Bulk storage hygiene | Presentation relevance |
-| **Controlled by** | `cleanup.retention` config | `attention.half_life` (planned) |
-| **Observable in** | Disk usage | Which signals Monitor notifies about |
-| **Resets on** | Nothing; strict cutoff | Re-engagement — reply or reference |
+| **Ends when** | The owning project leaves `~/.claude/projects/` | The session has marked the signal seen |
+| **Controlled by** | `cleanup.enabled`, `cleanup.interval` | The session's seen-set, persisted in its checkpoint |
+| **Scope** | Shared by every session | Per session |
 
-The short answer on why two units: **precision where it matters, convenience where it doesn't.** Attention works in turns because turn pacing varies too much to use wall-clock time at fine grain. Disk retention works in time because at 30-day horizons the variance averages out and "30 days" is a human-readable unit everyone intuits.
-
-See [`salience.md`](salience.md) for the attention side and the ADR-123 decay curve math.
+Salience decay by age applies to the event lane (git, process, and similar sensors), not to signals. See [`salience.md`](salience.md) for that mechanism.
 
 ## Reading signals in tooling
 
@@ -176,8 +166,8 @@ Reading from `_broadcast/` gives you cross-agent visibility. Reading from `@<nam
 - **ADR-113** — the original attend design, including signal dir conventions
 - **ADR-118** — focus groups, `@<name>` directories
 - **ADR-120** — `attend chat`, the `re:` threading field
-- **ADR-123** — salience decay on the presentation side
+- **ADR-136** — the message lane: delivery, retention, and cleanup by project liveness
 - [`loop.md`](loop.md) — where signals are scanned and emitted in the loop
 - [`tui.md`](tui.md) — how the TUI reads and writes signals
-- [`focus-groups.md`](focus-groups.md) *(planned)* — `@<name>` dir management in detail
-- [`salience.md`](salience.md) *(planned)* — presentation-layer aging
+- [`focus-groups.md`](focus-groups.md) — `@<name>` dir management in detail
+- [`salience.md`](salience.md) — salience decay on the event lane

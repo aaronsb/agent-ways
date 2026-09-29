@@ -1,6 +1,6 @@
 # The cognitive loop: how agent-ways works
 
-This document is a walk-through of the agent-ways cognitive architecture. It assumes you know what Claude Code is and nothing beyond that. It is the document to read when you want to understand how the pieces fit together — ways, progressive disclosure, the session ledger, optional memory projections, and the awareness layer — without diving into the individual ADRs.
+This document is a walk-through of the agent-ways cognitive architecture. It assumes you know what Claude Code is and nothing beyond that. It is the document to read when you want to understand how the pieces fit together — ways, progressive disclosure, what persists across sessions, and the awareness layer — without diving into the individual ADRs.
 
 If you want to decide a specific tradeoff, read an ADR. If you want the theoretical framing, read the [cognitive loop and awareness layer design note](architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md). If you want to build a way, read the [hooks-and-ways guide](hooks-and-ways/README.md). This document sits one level above all of those: it tells the story of how the system composes.
 
@@ -25,8 +25,7 @@ The most important thing to understand is that agent-ways treats Claude's reason
 This pattern runs through every layer of the system:
 
 - **Way scoring** is a compiled Rust binary doing embedding math. Claude never decides which ways are relevant; a tiny program does it before Claude sees anything.
-- **Ledger writing** is shell extracting prose from a transcript and appending to a file. Claude doesn't "save" anything manually.
-- **KG ingestion** (when configured) is a file copy into a FUSE mount. No inference is invoked to decide what's worth ingesting.
+- **Event logging** is the `ways` binary appending one JSON line per fire or near-miss to a file, with no inference involved. Claude doesn't record anything manually.
 - **Sensor observation** (the awareness layer) is a background script emitting stdout lines when state transitions are worth surfacing. The heavy lifting of turning raw events into discrete observations happens entirely below Claude's token budget.
 
 Most of what happens in an agent-ways session is happening in cheap substrates. Claude only pays tokens for what requires reasoning, and the cheap substrates prepare the ground so that reasoning is aimed at real problems instead of housekeeping.
@@ -45,8 +44,7 @@ flowchart LR
         Attend["attend<br/>(salience, insistence, state)"]:::cheap
         Matcher["ways matcher<br/>(embedding)"]:::cheap
         Gate["disclosure gate<br/>(ADR-123 habituation)"]:::cheap
-        Ledger["ledger writer"]:::cheap
-        Memory["memory projection<br/>(optional, e.g. KG)"]:::cheap
+        Log["event log<br/>(events.jsonl)"]:::cheap
     end
 
     subgraph Del["delivery"]
@@ -67,8 +65,7 @@ flowchart LR
     Monitor --> Claude
     Hooks --> Claude
 
-    Claude -->|"writes reflections"| Ledger
-    Ledger --> Memory
+    Gate -->|"fires, near-misses"| Log
     Claude -->|"invokes ways show"| Matcher
 ```
 
@@ -139,25 +136,23 @@ One report-only subcommand reads this record:
 
 Both report by default. Vocabulary is never auto-applied — it re-shapes the embedding neighborhood and stays authorial. The threshold apply slice is deferred until the `fire_score` population accumulates (tracked as issue #123); it would adjust the global `semantic_fire_probability` (τ_s, default 0.5) in the ways config, which is also where `keyword_floor_probability` (τ_k) and `near_miss_margin` live. See [engine-reference.md](hooks-and-ways/engine-reference.md) for the fire rule and the current config keys.
 
-## Memory across sessions: ledger and optional projections
+## Memory across sessions: the event log and repo artifacts
 
-Ways handle the *current* session. Memory handles what persists across sessions.
+Ways handle the *current* session. Two things persist across sessions: the event log, which records what fired, and the repository's own artifacts, which record what was understood.
 
-The **session ledger** ([ADR-112](architecture/archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) Tier 1) is a durable, chronological stream of epoch reflections. An epoch is a window of work between context-threshold boundaries: at roughly 30% context, Claude writes what it's orienting toward; at 50%, what has changed; at 70%, what has consolidated; at pre-compaction, a handoff note. The reflection way fires at these thresholds and Claude writes a short prose reflection. The Stop hook captures the prose and appends it to the ledger as one entry. <!-- adr-cite-ignore -->
+The **event log** (`$XDG_STATE/agent-ways/events.jsonl`) is the durable record of ways activity. A SessionStart hook appends a `session_start` line when a session begins, the `ways` binary appends a `way_fired` or `way_nearmiss` line at each fire or near-miss, and every writer and reader resolves the file through one path (`ways events-log-path`, [ADR-153](architecture/ways/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md)). It survives compaction and the end of a session. `ways introspect` reads it together with the Claude Code session transcripts to answer which ways fired on which turn and why: `list` enumerates sessions, `replay` animates one, `dump` writes its reconstruction as JSON for an agent, and `fires` lists its fires with their scores, lowest first ([ADR-154](architecture/ways/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md)). The log records activity, not content: it does not hold what Claude reasoned about.
 
-The ledger is **what was understood**, not **what was observed**. Entries are small, hand-curated, high-signal. One ledger per project; sessions contribute to the same chronological stream. When a new session starts, the ledger is the project's history — Claude reads recent entries to orient, and the ledger represents lived experience of the project across all sessions.
+**What was understood** persists in the repository, not in a session-side store. Decisions go into ADRs, working knowledge into ways, open work into GitHub issues, and change history into commit messages and PR descriptions. Claude Code's auto-memory (`MEMORY.md`) loads at every session start, so `ways init` seeds it with routing guidance that sends project knowledge to those artifacts and keeps memory for short cross-project facts about the user ([ADR-128](architecture/practice/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md)). Those artifacts travel with the repository, pass review and lint, and are read by teammates and CI as well as by later sessions.
 
-**Memory projections** (ADR-112 Tier 2, optional) are a second layer built on top of the ledger. The most developed example is knowledge-graph ingestion: ledger entries are copied via FUSE mount into a KG, which extracts concepts, deduplicates them against prior sessions, and builds associative structure. When a later session enters a new domain, the KG can surface concepts Claude learned in an earlier session that are relevant to the current work. <!-- adr-cite-ignore -->
+Before compaction, the awareness layer prompts the capture. At 90% context, attend's context sensor points Claude at `ways show attend context-pressure`, which lists what to do before the window closes: commit work, update tasks, and record decisions and their reasons.
 
-Memory projections are **configurable and never required**. The KG is one example; a user could attach a different memory tool with the same general shape, or none at all. The system is memory-tool-agnostic: it works with whatever projection (or none) is configured, and the ledger is the stable foundation underneath.
-
-The **forgetting principle** is the critical counterpart. Most of what passes through a session is not worth keeping. Reflection captures what was reasoned about; everything else evaporates when the session ends. This keeps the ledger a journal rather than a log. The gate is: *did Claude actually reason about this?* If yes, eligible for ledger. If no, it dies with the session.
+The **forgetting principle** is the counterpart. Most of what passes through a session is not worth keeping. What Claude writes into a repo artifact persists; everything else ends with the session. The event log keeps only the record of what fired, not the reasoning around it.
 
 The same principle bounds the raw telemetry. The fire/near-miss log (`$XDG_STATE/agent-ways/events.jsonl`, the input to the tuning loop above) is append-only, so it needs a ceiling: when it exceeds ~32 MiB, `log_event` tail-compacts it to the most recent ~24 MiB at a line boundary via an atomic temp-and-rename. The rewrite is rare, lossy on the oldest events only, and invisible to readers — tuning works from recent behavior, so the old tail is the part safe to forget.
 
 ## Active perception: the awareness layer
 
-The pieces described so far are *reactive*: they respond to things Claude is doing. Ways fire on hook events. The ledger is written during reflection. Memory is read at session start. All of this happens on Claude's own timeline — tied to events inside Claude's loop.
+The pieces described so far are *reactive*: they respond to things Claude is doing. Ways fire on hook events. The event log is written at each fire. Memory and repo artifacts are read at session start. All of this happens on Claude's own timeline — tied to events inside Claude's loop.
 
 But some things happen *outside* Claude's loop. A background build finishes. A peer Claude Code session modifies a file Claude is editing. Context pressure approaches a critical threshold five turns from now. These are events Claude cannot observe without burning reasoning tokens to check, and that the hook system cannot surface because they do not correspond to Claude's own actions.
 
@@ -229,14 +224,14 @@ flowchart TB
 
     Start((session<br/>start))
 
-    W["<b>Wake</b><br/>project pulse<br/>ledger orientation<br/>attend state restored"]:::cheap
+    W["<b>Wake</b><br/>core ways injected<br/>memory seed checked<br/>attend state restored"]:::cheap
     P["<b>Perception</b><br/>sensors observe<br/>environment + self"]:::cheap
     D["<b>Delivery</b><br/>Monitor delivers<br/>async notifications<br/>hooks deliver<br/>sync injections"]:::cheap
     At["<b>Attention</b><br/>disclosure gate<br/>salience scoring<br/>habituation"]:::cheap
     R["<b>Reasoning</b><br/>Claude integrates<br/>observations +<br/>guidance"]:::expensive
     Ac["<b>Action</b><br/>tools, edits,<br/>responses"]:::expensive
-    Ca["<b>Capture</b><br/>reflection ways fire<br/>ledger entries<br/>optional KG ingest"]:::cheap
-    Co["<b>Consolidation</b><br/>compaction distills<br/>working context<br/>ledger persists"]:::mixed
+    Ca["<b>Capture</b><br/>fires logged<br/>decisions recorded<br/>in repo artifacts"]:::cheap
+    Co["<b>Consolidation</b><br/>compaction distills<br/>working context<br/>event log persists"]:::mixed
 
     Start --> W
     W --> P
@@ -255,17 +250,17 @@ flowchart TB
 
 Stage by stage:
 
-- **Wake.** A new session begins. Project pulse surfaces recent ledger entries to orient Claude. `attend` is invoked via `Monitor` at session start and restores its prior state from disk. Claude reads the orientation context and begins working.
+- **Wake.** A new session begins. SessionStart hooks inject the core ways, and `ways init` checks the memory seed. `attend` is invoked via `Monitor` at session start and restores its prior state from disk. Claude reads the orientation context and begins working.
 - **Perception.** `attend` runs its sensors in the background, watching Claude's context state, workspace files, peer sessions, and approaching consequences. Most observations are silent; only state transitions worth surfacing reach stdout.
 - **Delivery.** Two paths operate in parallel. `Monitor` delivers `attend`'s stdout lines as asynchronous notifications. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, etc.). Both paths land on Claude's attention surface.
 - **Attention.** The disclosure gate ([ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)) applies habituation rules. Recently-disclosed ways are suppressed or re-surfaced tersely. Fresh signals get full weight. The cheap substrate decides what reaches Claude's reasoning in what form.
 - **Reasoning.** Claude integrates observations and guidance into its working model and decides what to do.
 - **Action.** Claude acts — edits files, runs tools, responds to the user.
-- **Capture.** At context-threshold boundaries, the reflection way fires. Claude writes a short prose reflection. The Stop hook captures it and appends to the ledger. If a memory projection is configured, the entry is also handed off to it. Separately, every fire and near-miss this turn is logged as cheap telemetry; offline, that record drives the empirical tuning of thresholds and half-lives (ADR-134) without touching the loop.
-- **Consolidation.** When context fills, compaction distills the working window. The ledger, memory projections, and `attend`'s state survive the pass. The next turn begins with a compressed but coherent working context.
+- **Capture.** Every fire and near-miss this turn is logged to the event log. As context fills, the context-pressure guidance prompts Claude to commit work and record decisions in repo artifacts. The event log is cheap telemetry; offline, that record drives the empirical tuning of thresholds and half-lives (ADR-134) without touching the loop.
+- **Consolidation.** When context fills, compaction distills the working window. The event log, the repo artifacts, and `attend`'s state survive the pass. The next turn begins with a compressed but coherent working context.
 - **Back to Wake.** At the next session, the loop restarts with the updated state as its foundation.
 
-The loop is **turn-driven, not time-driven**. Each Claude turn is a tick. Between turns, the cheap substrate (sensors, scripts, ledger state) keeps running. When the next turn arrives, Claude wakes into a richer context than the turn before — not because time passed, but because observations accumulated and were filtered by the cheap substrates into summary form.
+The loop is **turn-driven, not time-driven**. Each Claude turn is a tick. Between turns, the cheap substrate (sensors, scripts, the event log) keeps running. When the next turn arrives, Claude wakes into a richer context than the turn before — not because time passed, but because observations accumulated and were filtered by the cheap substrates into summary form.
 
 Every stage of the loop has an appropriate substrate. Only the Reasoning and Action stages use inference. Everything else runs in deterministic code: shell scripts, a Rust binary, file I/O, tool invocations. This is what makes the whole system affordable to run continuously for a full workday — the cost is bounded by what Claude actually reasons about, not by what the system observes.
 
@@ -292,10 +287,12 @@ Ordered roughly by how specific the topic is to your interest:
 - [ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) — firing dynamics, including token-gated re-disclosure
 - [ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md) — progressive disclosure for way trees
 - [ADR-108](architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — embedding-based way matching
-- [ADR-112](architecture/archive/system/ADR-112-session-ledger-and-knowledge-graph-integration.md) — session ledger and optional KG integration (archived) <!-- adr-cite-ignore -->
+- [ADR-128](architecture/practice/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md) — memory routing: project knowledge belongs in repo artifacts
 - [ADR-113](architecture/attend/ADR-113-attend-active-awareness-module.md) — the `attend` binary
 - [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md) — the way trigger schema for `attend` signals
 - [ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) — empirical auto-tuning from fire and near-miss telemetry
+- [ADR-153](architecture/ways/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md) — the session-introspection substrate over the event log
+- [ADR-154](architecture/ways/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md) — `ways introspect`
 
 **If you want to build ways or operate the system:**
 - [hooks-and-ways/README.md](hooks-and-ways/README.md) — start here for way authoring

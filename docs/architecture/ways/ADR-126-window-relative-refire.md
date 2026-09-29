@@ -361,3 +361,9 @@ Dividing by 1M gives `refire: 0.03`, which preserves the broken 22-fires
 behavior currently observed on Opus rather than the original 3-fires intent.
 Using each file's window-at-tuning-time as the reference captures intent
 faithfully at a cost of two buckets in Phase 2 (hacked and unhacked).
+
+## Note (2026-09-28): "ADR-127" in this record means PR #70's narrow-tune (#601)
+
+Appended to Context, Migration, and Alternatives Considered. The text above is unchanged.
+
+Three places above name the 2026-04-22 narrow-tune "ADR-127": Context ("PR #70, ADR-127"), Migration ("ADR-127 narrow-tune, committed in PR #70 `f93bb74`"), and Alternatives Considered ("ADR-127 the narrow-tune sweep"). The narrow-tune has no ADR. It is the `half_life` bump in PR #70, whose commit message calls it "a localized hack against stale tuning" pending this record. ADR-127 is a different decision that shipped in the same PR: the rejection of a full-body embedding corpus for way matching. Read each of the three references as "the PR #70 narrow-tune".
