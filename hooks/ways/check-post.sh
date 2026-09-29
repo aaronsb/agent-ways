@@ -42,6 +42,7 @@ fi
 WAYS_ROOTS+=("${HOME}/.claude/hooks/ways")
 
 CONTEXT=""
+CLOSED=""
 # Track way IDs already fired this tick so two postchecks under the
 # same way directory don't double-fire.
 declare -A FIRED=()
@@ -65,10 +66,24 @@ for WAYS_ROOT in "${WAYS_ROOTS[@]}"; do
     # 0 = "please fire"; anything else = "no match, move on." stderr
     # is swallowed to keep the hook output clean.
     if printf '%s' "$INPUT" | "$postcheck" >/dev/null 2>&1; then
-      # Let the engine decide whether refractory permits firing.
+      # Let the engine decide whether refractory permits firing, and whether
+      # the way fits in what is left of the 10,000-character additionalContext
+      # cap. USED is counted in bytes, an upper bound on the UTF-16 length
+      # Claude Code measures. Exit 3 = withheld for the cap (not recorded as
+      # fired); from then on the budget is closed for this hook.
+      if [[ -n "$CLOSED" ]]; then USED=10001; else USED=$(( $(printf '%s' "$CONTEXT" | LC_ALL=C wc -c) )); fi
       OUT=$("${HOME}/.claude/bin/ways" show way "$way_id" \
         --session "$SESSION_ID" \
-        --trigger "postcheck" 2>/dev/null)
+        --trigger "postcheck" --budget-used="$USED" 2>/dev/null)
+      STATUS=$?
+      if [[ $STATUS -eq 2 ]]; then
+        # Deploy-order skew: a binary older than this hook rejects the flag.
+        OUT=$("${HOME}/.claude/bin/ways" show way "$way_id" \
+          --session "$SESSION_ID" \
+          --trigger "postcheck" 2>/dev/null)
+      elif [[ $STATUS -eq 3 ]]; then
+        CLOSED=1
+      fi
       if [[ -n "$OUT" ]]; then
         CONTEXT+="$OUT"$'\n\n'
         FIRED[$way_id]=1

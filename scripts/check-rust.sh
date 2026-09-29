@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Precheck: building agent-ways from source needs Rust/Cargo >= 1.85.
+# Precheck: building agent-ways from source needs Rust/Cargo >= 1.89 (see MIN_MINOR).
 #
 # A transitive dependency (getrandom) uses Rust edition 2024, which was
 # stabilized in 1.85. On older toolchains `cargo build` fails deep in dependency
@@ -11,7 +11,9 @@
 
 set -u
 MIN_MAJOR=1
-MIN_MINOR=85
+# 1.89: the ways binary locks per-way engagement state with std::fs::File::lock
+# (stable since 1.89) so parallel hooks cannot both fire one way (#528).
+MIN_MINOR=89
 
 command -v cargo >/dev/null 2>&1 || exit 0   # no cargo → build target reports it
 
@@ -43,7 +45,7 @@ if [ "$maj" -lt "$MIN_MAJOR" ] || { [ "$maj" -eq "$MIN_MAJOR" ] && [ "$min" -lt 
   ERROR: agent-ways needs Rust/Cargo >= ${MIN_MAJOR}.${MIN_MINOR} to build from source.
 
     you have:  cargo ${ver}
-    why:       a dependency (getrandom) uses Rust edition 2024 (stabilized in 1.85)
+    why:       std::fs::File::lock (stable in 1.89); a dependency uses edition 2024 (1.85)
 
     fix:       ${fix}
 

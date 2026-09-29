@@ -14,7 +14,8 @@ mod engagement;
 // `session::way_fire_outcome`, etc. — no call-site churn from the
 // structural split (issue #52).
 pub use engagement::{
-    record_way_fire, way_fire_outcome, way_refire_threshold_k, FireOutcome, REFIRE_FLOOR,
+    first_suppression_in_window, lock_engagement, record_way_fire, way_fire_outcome,
+    way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
 
 // ── Session directory ──────────────────────────────────────────

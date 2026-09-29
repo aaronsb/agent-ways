@@ -275,8 +275,17 @@ NZ=$(nonzero_hooks); if [[ -z "$NZ" ]]; then ok "every UserPromptSubmit hook exi
 
 section "hooks: PreToolUse Bash"
 OUT=$(run_event PreToolUse Bash "$FIX/payloads/pre-tool-use-bash.json")
-assert_contains "hookSpecificOutput emitted" '"hookEventName":"PreToolUse"' "$OUT"
-assert_contains "gitconfig way disclosed on git config --global" "# Global Git Config" "$OUT"
+# Every PreToolUse hook's stdout is one JSON object; slurp the stream (#528).
+if jq -se 'any(.[]; .hookSpecificOutput.hookEventName == "PreToolUse" and (.hookSpecificOutput.additionalContext // "" | contains("# Global Git Config")))' <<<"$OUT" >/dev/null; then
+  ok "gitconfig way delivered in hookSpecificOutput.additionalContext"
+else
+  fail "gitconfig way delivered in hookSpecificOutput.additionalContext" "output: $OUT"
+fi
+if jq -se 'all(.[]; has("decision") | not)' <<<"$OUT" >/dev/null; then
+  ok "no top-level decision"
+else
+  fail "no top-level decision" "output: $OUT"
+fi
 NZ=$(nonzero_hooks); if [[ -z "$NZ" ]]; then ok "every PreToolUse Bash hook exits 0"; else fail "every PreToolUse Bash hook exits 0" "$NZ"; fi
 
 section "hooks: PreToolUse Edit"
