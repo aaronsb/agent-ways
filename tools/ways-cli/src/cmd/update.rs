@@ -177,8 +177,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // same `refresh_component` path so the whole collection updates uniformly —
     // no separate lifecycle for any one tool.
     if cargo_changed {
-        eprintln!("==> refresh ways-audit/attend/attend-chat (pre-built first)");
-        for comp in ["ways-audit", "attend", "attend-chat"] {
+        eprintln!("==> refresh ways-audit/ways-mcp/attend/attend-chat (pre-built first)");
+        for comp in ["ways-audit", "ways-mcp", "attend", "attend-chat"] {
             if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
                 eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
             }

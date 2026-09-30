@@ -156,6 +156,10 @@ pub fn run(json_output: bool) -> Result<()> {
         } else {
             println!("  way-embed: not found");
         }
+        println!("  ways-mcp:  {}", mcp_binary_line());
+        for t in install_targets().0.iter().filter(|t| t.enabled) {
+            println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
+        }
         println!();
 
         // Model
@@ -354,6 +358,27 @@ fn install_json() -> serde_json::Value {
             "enabled": t.enabled,
             "observe": t.observes(),
             "state": crate::cmd::config_cmd::target_state(t),
+            "mcp_command": crate::cmd::mcp_register::status(&t.dir(), &crate::paths::projection_root()),
         })).collect::<Vec<_>>(),
     })
+}
+
+/// The installed ways-mcp and its version: what new sessions start. A running
+/// session reports its own server's version through `ways_status`.
+fn mcp_binary_line() -> String {
+    let bin = crate::paths::data_root().join("bin").join("ways-mcp");
+    match std::process::Command::new(&bin).arg("--version").output() {
+        Ok(out) if out.status.success() => {
+            format!("{} ({})", bin.display(), String::from_utf8_lossy(&out.stdout).trim())
+        }
+        _ => "not installed (`make ways-mcp` in the app directory, or `ways update`)".to_string(),
+    }
+}
+
+/// Whether a target has the agent-ways MCP server registered.
+fn mcp_registration(dir: &std::path::Path) -> String {
+    match crate::cmd::mcp_register::status(dir, &crate::paths::projection_root()) {
+        Some(cmd) => format!("{} → {cmd}", crate::cmd::mcp_register::SERVER),
+        None => format!("{} not registered (`ways reconcile` registers it)", crate::cmd::mcp_register::SERVER),
+    }
 }

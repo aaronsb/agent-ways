@@ -30,7 +30,7 @@ const PROJECTED_TREES: &[&str] = &["skills", "agents", "commands", "hooks/ways"]
 const PROJECTED_FILES: &[&str] = &["hooks/check-config-updates.sh"];
 
 /// Built binaries (NOT git-tracked) projected from `bin/`.
-const PROJECTED_BINS: &[&str] = &["ways", "attend", "attend-chat", "way-embed"];
+const PROJECTED_BINS: &[&str] = &["ways", "ways-mcp", "attend", "attend-chat", "way-embed"];
 
 /// The granularity at which the reconciler *materializes* the projection.
 ///
