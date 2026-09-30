@@ -46,3 +46,5 @@ A one-way channel server of about a hundred lines of Node, with no SDK, speaking
 - One host, one Claude Code version, one session. The channel extension is a research preview; the capability name, the notification method and the flag can change.
 - The test did not show a channel-started turn calling Monitor. Finding 4 kept the model from trying.
 - Channel permission relay (`claude/channel/permission`) and two-way reply tools were not exercised.
+- Two conditions outside the test can keep a channel from loading while the flag is present: Claude Code's v2 client runtime does not register a channel server that connects on the 2026-07-28 protocol revision, and an organization can turn channels off with the `channelsEnabled` setting.
+- Only the `server:` form of the flag, naming a server from a project `.mcp.json`, was tested. A server registered at user scope is named the same way; one bundled in a plugin is named `plugin:<name>@<marketplace>`.

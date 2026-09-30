@@ -157,4 +157,4 @@ flowchart LR
 
 ## Closure
 
-Abandoned 2026-09-30: Replaced before acceptance by ADR-501: one agent-ways MCP server (ways-mcp) with attend as a module, and Claude Code channels as an optional inbound conduit (ADR-402), which removes this record's premise that inbound cannot use MCP. Items 3, 4, 5, 7, 8, 9, 10, 11 and 12 continue under ADR-501.
+Abandoned 2026-09-30: Replaced before acceptance by ADR-501: one agent-ways MCP server (ways-mcp) with attend as a module, and Claude Code channels as an optional inbound conduit (ADR-402), which removes this record's premise that inbound cannot use MCP. Items 3, 4, 5, 7, 8, 9, 10, 11 and 12 continue under ADR-501. Item 2's tool set continues as the attend module's tools, except `keepwarm`, which ADR-501 moves into its keepalive module. Item 6's per-tool permission rules continue under the module-prefixed names; its registration through the settings.json merge does not, because Claude Code reads user-scope MCP servers from `.claude.json` only (ADR-501 item 9).
