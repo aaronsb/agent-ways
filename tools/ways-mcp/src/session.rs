@@ -2,90 +2,87 @@
 //! call (ADR-187 item 5).
 
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use std::process::Command;
 
-/// The launch flag that loads a development channel, and the value naming this
-/// server (ADR-402).
+/// The launch flag that loads development channels, and the value naming this
+/// server (ADR-402). The flag takes one or more values, space-separated.
 const CHANNEL_FLAG: &str = "--dangerously-load-development-channels";
 const CHANNEL_NAME: &str = "server:agent-ways";
 
-fn sessions_dir() -> PathBuf {
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".claude"));
-    base.join("sessions")
-}
-
-/// The pid of the claude process whose session record carries `session_id`:
-/// the records are named `<pid>.json`.
-fn claude_pid(session_id: &str) -> Option<u32> {
-    let needle = format!("\"sessionId\":\"{session_id}\"");
-    std::fs::read_dir(sessions_dir()).ok()?.flatten().find_map(|e| {
-        let text = std::fs::read_to_string(e.path()).ok()?;
-        if !text.contains(&needle) {
-            return None;
-        }
-        e.path().file_stem()?.to_str()?.parse().ok()
-    })
-}
-
-/// Whether `argv` loads this server as a development channel. The flag takes
-/// a comma-separated list, and `--flag=value` is accepted as well.
-pub fn loads_channel(argv: &[String]) -> bool {
-    let names = argv.iter().enumerate().find_map(|(i, a)| {
+/// Whether `argv` names this server under the development-channels flag. This
+/// reads the launch command only: organization policy or the protocol revision
+/// can still keep the channel from loading.
+pub fn has_channel_flag(argv: &[String]) -> bool {
+    let mut values: Vec<&str> = Vec::new();
+    let mut in_flag = false;
+    for a in argv {
         if a == CHANNEL_FLAG {
-            argv.get(i + 1).cloned()
-        } else {
-            a.strip_prefix(&format!("{CHANNEL_FLAG}=")).map(str::to_string)
+            in_flag = true;
+        } else if let Some(v) = a.strip_prefix(&format!("{CHANNEL_FLAG}=")) {
+            values.push(v);
+            in_flag = false;
+        } else if a.starts_with('-') {
+            in_flag = false;
+        } else if in_flag {
+            values.push(a);
         }
-    });
-    names.is_some_and(|v| v.split(',').any(|n| n.trim() == CHANNEL_NAME))
+    }
+    values.iter().flat_map(|v| v.split(',')).any(|n| n.trim() == CHANNEL_NAME)
 }
 
-/// The command line of `pid`, split on whitespace. `ps` works on Linux and
-/// macOS alike; an argument containing spaces is split, which the flag check
-/// tolerates.
+/// The command line of `pid`. Linux reads `/proc` exactly; elsewhere `ps -ww`
+/// prints it untruncated, split on whitespace, which the flag check tolerates.
 fn argv_of(pid: u32) -> Option<Vec<String>> {
-    let out = Command::new("ps").args(["-o", "args=", "-p", &pid.to_string()]).output().ok()?;
-    out.status.success().then(|| {
-        String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect()
-    })
+    if let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) {
+        return Some(
+            raw.split(|&b| b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect(),
+        );
+    }
+    let out = Command::new("ps").args(["-ww", "-o", "args=", "-p", &pid.to_string()]).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect())
 }
 
-/// The session this server belongs to, and which inbound conduits it has.
+/// The session this server belongs to, and whether it was launched with this
+/// server as a development channel.
 pub fn describe() -> Value {
-    let ident = attend_session::identity_for_pid(std::process::id());
-    let pid = ident.session_resolved.then(|| claude_pid(&ident.session_id)).flatten();
-    let channel = pid.and_then(argv_of).map(|argv| loads_channel(&argv));
-    json!({
-        "session_id": ident.session_resolved.then_some(ident.session_id),
-        "origin_path": ident.origin_path,
-        "claude_pid": pid,
-        "channel_loaded": channel,
-    })
+    match attend_session::find_own_session(std::process::id()) {
+        Some((sid, pid)) => json!({
+            "origin_path": attend_session::origin_path(&sid),
+            "session_id": sid,
+            "claude_pid": pid,
+            "channel_flag": argv_of(pid).map(|argv| has_channel_flag(&argv)),
+        }),
+        None => json!({ "session_id": null, "claude_pid": null, "channel_flag": null, "origin_path": null }),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::loads_channel;
+    use super::has_channel_flag;
 
     fn argv(s: &str) -> Vec<String> {
         s.split_whitespace().map(str::to_string).collect()
     }
 
     #[test]
-    fn detects_the_channel_flag_in_its_forms() {
-        assert!(loads_channel(&argv("claude --dangerously-load-development-channels server:agent-ways")));
-        assert!(loads_channel(&argv("claude --dangerously-load-development-channels=server:agent-ways")));
-        assert!(loads_channel(&argv("claude --dangerously-load-development-channels server:other,server:agent-ways")));
+    fn detects_the_flag_in_its_forms() {
+        assert!(has_channel_flag(&argv("claude --dangerously-load-development-channels server:agent-ways")));
+        assert!(has_channel_flag(&argv("claude --dangerously-load-development-channels=server:agent-ways")));
+        assert!(has_channel_flag(&argv(
+            "claude --dangerously-load-development-channels server:webhook server:agent-ways --model opus"
+        )));
+        assert!(has_channel_flag(&argv("claude --dangerously-load-development-channels server:webhook,server:agent-ways")));
     }
 
     #[test]
-    fn other_channels_and_no_flag_do_not_count() {
-        assert!(!loads_channel(&argv("claude")));
-        assert!(!loads_channel(&argv("claude --dangerously-load-development-channels server:other")));
-        assert!(!loads_channel(&argv("claude --dangerously-load-development-channels")));
-        assert!(!loads_channel(&argv("claude server:agent-ways")));
+    fn other_servers_and_later_arguments_do_not_count() {
+        assert!(!has_channel_flag(&argv("claude")));
+        assert!(!has_channel_flag(&argv("claude --dangerously-load-development-channels server:webhook")));
+        assert!(!has_channel_flag(&argv("claude --dangerously-load-development-channels")));
+        assert!(!has_channel_flag(&argv("claude server:agent-ways")));
+        // A value after another option belongs to that option.
+        assert!(!has_channel_flag(&argv(
+            "claude --dangerously-load-development-channels server:webhook --resume server:agent-ways"
+        )));
     }
 }

@@ -5,7 +5,7 @@ use crate::util::{count_signals, encode_project, get_groups, signals_base};
 pub(crate) fn cmd_status() {
     // Check if attend run is already active
     let output = std::process::Command::new("ps")
-        .args(["--no-headers", "-eo", "pid,args"])
+        .args(["-ww", "-eo", "pid=,args="])
         .output()
         .ok();
 
