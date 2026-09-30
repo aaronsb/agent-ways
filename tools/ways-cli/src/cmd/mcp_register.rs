@@ -61,14 +61,33 @@ pub fn plan_withdraw(existing: Option<&str>) -> Step {
     }
 }
 
-/// The `CLAUDE_CONFIG_DIR` to run the CLI under, and the file it writes. The
-/// default target runs without the variable, as Claude Code itself does.
-fn config_for(dest_root: &Path, default_root: &Path) -> (Option<PathBuf>, PathBuf) {
-    if super::reconcile::same_path(dest_root, default_root) {
-        let file = default_root.parent().unwrap_or(default_root).join(".claude.json");
-        (None, file)
+/// The `CLAUDE_CONFIG_DIR` to run the CLI under, and the directory whose
+/// config file it writes. Claude Code reads `$CLAUDE_CONFIG_DIR/.claude.json`,
+/// or `~/.claude.json` when the variable is unset. The default target runs
+/// without it, unless the operator's own environment already points it at
+/// that target.
+fn config_for(dest_root: &Path, default_root: &Path, inherited: Option<&Path>) -> (Option<PathBuf>, PathBuf) {
+    let same = super::reconcile::same_path;
+    if same(dest_root, default_root) && !inherited.is_some_and(|d| same(d, dest_root)) {
+        (None, default_root.parent().unwrap_or(default_root).to_path_buf())
     } else {
-        (Some(dest_root.to_path_buf()), dest_root.join(".claude.json"))
+        (Some(dest_root.to_path_buf()), dest_root.to_path_buf())
+    }
+}
+
+fn config_dir(dest_root: &Path, default_root: &Path) -> (Option<PathBuf>, PathBuf) {
+    let inherited = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+    config_for(dest_root, default_root, inherited.as_deref())
+}
+
+/// The file Claude Code reads in `dir`: a legacy `.config.json` wins when one
+/// exists, as it does for Claude Code.
+fn config_file(dir: &Path) -> PathBuf {
+    let legacy = dir.join(".config.json");
+    if legacy.is_file() {
+        legacy
+    } else {
+        dir.join(".claude.json")
     }
 }
 
@@ -79,13 +98,26 @@ fn registered_command(file: &Path) -> Option<String> {
     json.get("mcpServers")?.get(SERVER)?.get("command")?.as_str().map(str::to_string)
 }
 
-/// The `claude` binary: `WAYS_CLAUDE_BIN` when set (tests), else `claude` on PATH.
+fn is_executable(p: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        p.is_file()
+    }
+}
+
+/// The `claude` binary: `WAYS_CLAUDE_BIN` when set (tests), else the first
+/// executable `claude` on PATH.
 fn claude_bin() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("WAYS_CLAUDE_BIN") {
         return Some(PathBuf::from(p));
     }
     std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).map(|d| d.join("claude")).find(|p| p.is_file())
+        std::env::split_paths(&paths).map(|d| d.join("claude")).find(|p| is_executable(p))
     })
 }
 
@@ -106,13 +138,14 @@ fn run_claude(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result
 
 /// Register the server for an enabled target. Returns a line to report, or
 /// `None` when nothing changed.
-pub fn converge(dest_root: &Path, default_root: &Path, dry_run: bool) -> Option<String> {
-    let desired = dest_root.join(BIN);
-    if !desired.exists() {
-        return Some(format!("mcp: {SERVER} not registered: {} is not built", desired.display()));
+pub fn converge(source_root: &Path, dest_root: &Path, default_root: &Path, dry_run: bool) -> Option<String> {
+    // Built means present in the source; a dry run has not linked it yet.
+    if !source_root.join(BIN).exists() {
+        return Some(format!("mcp: {SERVER} not registered: {} is not built", source_root.join(BIN).display()));
     }
-    let desired = desired.to_string_lossy().to_string();
-    let (config_dir, file) = config_for(dest_root, default_root);
+    let desired = dest_root.join(BIN).to_string_lossy().to_string();
+    let (config_dir, dir) = config_dir(dest_root, default_root);
+    let file = config_file(&dir);
     let step = plan_converge(registered_command(&file).as_deref(), &desired);
     let verb = match &step {
         Step::Current => return None,
@@ -141,13 +174,19 @@ pub fn converge(dest_root: &Path, default_root: &Path, dry_run: bool) -> Option<
     })();
     Some(match result {
         Ok(()) => format!("mcp: {verb}ed {SERVER} → {desired}"),
+        // Registered in a file this check did not read (a variant name some
+        // builds use): Claude Code has it, so there is nothing to do.
+        Err(e) if e.contains("already exists") => {
+            format!("mcp: {SERVER} is registered in a config file other than {}; left as it is", file.display())
+        }
         Err(e) => format!("mcp: ⚠ could not {verb} {SERVER}: {e}"),
     })
 }
 
 /// Remove the server's registration from a disabled target, when it is ours.
 pub fn withdraw(dest_root: &Path, default_root: &Path, dry_run: bool) -> Option<String> {
-    let (config_dir, file) = config_for(dest_root, default_root);
+    let (config_dir, dir) = config_dir(dest_root, default_root);
+    let file = config_file(&dir);
     match plan_withdraw(registered_command(&file).as_deref()) {
         Step::Absent | Step::Foreign(_) => None,
         _ if dry_run => Some(format!("mcp: would remove {SERVER}")),
@@ -168,7 +207,7 @@ pub fn withdraw(dest_root: &Path, default_root: &Path, dry_run: bool) -> Option<
 
 /// For `ways status`: the command registered for `dest_root`, if any.
 pub fn status(dest_root: &Path, default_root: &Path) -> Option<String> {
-    registered_command(&config_for(dest_root, default_root).1)
+    registered_command(&config_file(&config_dir(dest_root, default_root).1))
 }
 
 #[cfg(test)]
@@ -192,14 +231,29 @@ mod tests {
     }
 
     #[test]
-    fn default_target_uses_the_sibling_file_and_no_config_dir() {
+    fn default_target_uses_the_home_file_and_no_config_dir() {
         let home = Path::new("/home/u/.claude");
-        assert_eq!(config_for(home, home), (None, PathBuf::from("/home/u/.claude.json")));
+        assert_eq!(config_for(home, home, None), (None, PathBuf::from("/home/u")));
         let other = Path::new("/work/claude-b");
-        assert_eq!(
-            config_for(other, home),
-            (Some(other.to_path_buf()), PathBuf::from("/work/claude-b/.claude.json"))
-        );
+        assert_eq!(config_for(other, home, None), (Some(other.to_path_buf()), other.to_path_buf()));
+    }
+
+    #[test]
+    fn an_inherited_config_dir_naming_the_default_target_is_honoured() {
+        let home = Path::new("/home/u/.claude");
+        assert_eq!(config_for(home, home, Some(home)), (Some(home.to_path_buf()), home.to_path_buf()));
+        // One naming somewhere else leaves the default target's file alone.
+        assert_eq!(config_for(home, home, Some(Path::new("/elsewhere"))), (None, PathBuf::from("/home/u")));
+    }
+
+    #[test]
+    fn a_legacy_config_file_is_the_one_read() {
+        let dir = std::env::temp_dir().join(format!("ways-mcp-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(config_file(&dir), dir.join(".claude.json"));
+        std::fs::write(dir.join(".config.json"), "{}").unwrap();
+        assert_eq!(config_file(&dir), dir.join(".config.json"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

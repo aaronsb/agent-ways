@@ -466,7 +466,7 @@ fn converge_one(
     }
 
     // The MCP server registration (ADR-501), after the links it points at.
-    if let (Some(line), false) = (crate::cmd::mcp_register::converge(dest_root, &paths::projection_root(), dry_run), quiet) {
+    if let (Some(line), false) = (crate::cmd::mcp_register::converge(source_root, dest_root, &paths::projection_root(), dry_run), quiet) {
         eprintln!("{line}");
     }
 

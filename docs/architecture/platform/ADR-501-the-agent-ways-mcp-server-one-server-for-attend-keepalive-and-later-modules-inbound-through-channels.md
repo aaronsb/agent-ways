@@ -32,7 +32,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "lets merge it"
+    via: "session 2026-09-30, approving the merge of PR #651 after the review remediation; the two probes (umbrella, keepalive-end) were asked twice and not answered"
+status: accepted
 date: 2026-09-30
 deciders:
   - aaronsb
@@ -96,7 +100,7 @@ The operator also widened the scope. The server is agent-ways' server, and atten
 
 9. **Lifecycle.** `ways-mcp` changes often, so it follows the path every suite binary takes rather than one of its own:
    - **Build and install.** `make ways-mcp` downloads the prebuilt for the platform and falls back to cargo; the install links it onto PATH, and reconcile projects it into each target as `bin/ways-mcp`. Until a module depends on the server, an install that can neither download nor build it warns and continues.
-   - **Register.** A user-scope MCP server lives in Claude Code's `.claude.json`, which running sessions rewrite and settings.json cannot declare. `ways reconcile` therefore changes it only through `claude mcp add-json` and `claude mcp remove` at user scope: without `CLAUDE_CONFIG_DIR` for the default target, whose file is `~/.claude.json`, and with it for any other target, whose file is `<target>/.claude.json`. The registered command is the target's own `bin/ways-mcp`. A current registration is left alone, one naming another `ways-mcp` path is replaced, and an `agent-ways` entry that runs anything else is reported and kept. A missing `claude` binary or build is reported and never fails the reconcile.
+   - **Register.** A user-scope MCP server lives in Claude Code's `.claude.json`, which running sessions rewrite and settings.json cannot declare. `ways reconcile` therefore changes it only through `claude mcp add-json` and `claude mcp remove` at user scope: without `CLAUDE_CONFIG_DIR` for the default target, whose file is `~/.claude.json`, and with it for any other target, whose file is `<target>/.claude.json`. An operator who exports `CLAUDE_CONFIG_DIR` naming the default target gets the same treatment as any other target, since that is the file their sessions read; a legacy `.config.json` in the directory is read in place of `.claude.json`, as Claude Code does. The registered command is the target's own `bin/ways-mcp`. A current registration is left alone, one naming another `ways-mcp` path is replaced, and an `agent-ways` entry that runs anything else is reported and kept. A missing `claude` binary or build is reported and never fails the reconcile.
    - **Update.** `ways update` refreshes it with the other cargo components. The registration names the projected symlink, so it does not change on update. A running session keeps the server it started with until it restarts.
    - **Release.** `ways-mcp` is a release component with its own tags (`ways-mcp-vX`), build workflow and checksums, cut through `make cut-release` like the others.
    - **See.** `ways status` reports the installed version and each enabled target's registration; `ways_status` reports the version a session is running, which shows a session still on an older server.

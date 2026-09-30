@@ -70,6 +70,8 @@ pub trait Module: Send + Sync {
     /// Called once, after the client's `notifications/initialized`. A module
     /// that pushes events starts its work here; events sent before the client
     /// is initialized would be lost.
+    /// It runs on the thread that reads requests, so it must return promptly:
+    /// long-running work belongs on a thread the module spawns.
     fn start(&self, _outbox: Outbox) {}
 }
 
