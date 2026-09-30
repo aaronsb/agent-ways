@@ -10,7 +10,7 @@ basis:
 agent:
   name: Claude
   model: unrecorded
-status: proposed
+status: abandoned
 date: 2026-09-19
 deciders:
   - aaronsb
@@ -154,3 +154,7 @@ flowchart LR
 - **Activate the #536 guards by default.** Rejected under ADR-181: neither misuse produces an irreversible or disclosing outcome.
 - **An attend-owned activation switch for the guards, such as a `permissions` sub-verb.** Rejected. ADR-184 makes the target the unit of activation; a second switch beside it would be a state the reconciler does not model.
 - **Leave the three prose sources as they are and add the tool descriptions on top.** Rejected. That makes a fourth copy of the mechanical guidance and preserves the drift the lockstep comment exists to warn about.
+
+## Closure
+
+Abandoned 2026-09-30: Replaced before acceptance by ADR-501: one agent-ways MCP server (ways-mcp) with attend as a module, and Claude Code channels as an optional inbound conduit (ADR-402), which removes this record's premise that inbound cannot use MCP. Items 3, 4, 5, 7, 8, 9, 10, 11 and 12 continue under ADR-501.
