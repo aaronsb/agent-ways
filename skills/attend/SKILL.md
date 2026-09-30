@@ -41,12 +41,15 @@ Call the Monitor tool with exactly these parameters:
 
 - **command**: `attend run`
 - **description**: `attend: git, peers, processes`
-- **persistent**: `true`
-- **timeout_ms**: `3600000`
+- **timeout_ms**: `1800000`
 
 Do NOT run `attend run` with the Bash tool. Do NOT use `run_in_background`. Only Monitor delivers stdout lines as async notifications into the conversation.
 
 On startup, attend emits a usage summary notification. After that, notifications arrive only on meaningful state changes.
+
+## Step 3: Re-arm on expiry
+
+Monitor kills its command at 30 minutes, the most `timeout_ms` allows, and sends one notice that the monitor expired. The notice wakes an idle session. When it names the attend monitor, call Monitor again with the Step 2 parameters, without asking. attend resumes from its saved state and reports `restarted (unchanged)`. Stop re-arming when the operator turns attend off.
 
 ## Sensors
 

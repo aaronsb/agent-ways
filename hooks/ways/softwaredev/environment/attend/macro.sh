@@ -8,9 +8,37 @@ if ! command -v attend &>/dev/null; then
   exit 0
 fi
 
-# Check if attend is running
-RUNNING=$(ps --no-headers -eo args 2>/dev/null | grep -c "attend run" | grep -v grep)
-if [[ "$RUNNING" -gt 0 ]]; then
+# Check if attend is running for this session: an `attend run` process whose
+# ancestry reaches the claude process that runs this hook. Another session's
+# attend doesn't count. The claude pid comes from the session record that
+# carries CLAUDE_SESSION_ID (set by `ways` for every macro); without one, the
+# nearest ancestor named claude stands in.
+session_pid() {
+  local dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions" f
+  [[ -n "${CLAUDE_SESSION_ID:-}" ]] || return 0
+  f=$(grep -l "\"sessionId\":\"$CLAUDE_SESSION_ID\"" "$dir"/*.json 2>/dev/null | head -1)
+  [[ -n "$f" ]] && basename "$f" .json
+}
+attend_running() {
+  ps -A -o pid=,ppid=,args= 2>/dev/null | awk -v claude="$(session_pid)" -v self="$$" '
+    function base(w) { sub(/.*\//, "", w); return w }
+    {
+      parent[$1] = $2
+      if (base($3) == "attend" && $4 == "run") attend[$1] = 1
+      if (base($3) == "claude") named[$1] = 1
+    }
+    END {
+      if (claude == "")
+        for (p = self; p != "" && p != 0 && hops++ < 15; p = parent[p])
+          if (p in named) { claude = p; break }
+      if (claude == "") exit 1
+      for (a in attend)
+        for (p = a; p != "" && p != 0 && n[a]++ < 15; p = parent[p])
+          if (p == claude) exit 0
+      exit 1
+    }'
+}
+if attend_running; then
   echo "**Status**: attend is running"
 else
   echo "**Status**: attend is not running — start with \`/attend\` or \`Monitor: attend run\`"
