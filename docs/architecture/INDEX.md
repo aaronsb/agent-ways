@@ -106,9 +106,10 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-172](./attend/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md) | Turn-boundary inbound delivery via a CLI-owned drain checkpoint | accepted |
 | [ADR-173](./attend/ADR-173-chat-idiom-convergence-for-the-attend-command-surfaces.md) | Chat-idiom convergence for the attend command surfaces | accepted |
 | [ADR-182](./attend/ADR-182-keepwarm-attend-keeps-the-prompt-cache-warm-with-a-wake-floor.md) | Keepwarm: attend keeps the prompt cache warm with a wake floor | accepted |
-| [ADR-187](./attend/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | proposed |
+| [ADR-187](./attend/ADR-187-attend-mcp-server-mode-outbound-and-queries-as-typed-tools-inbound-stays-on-monitor-and-the-stop-hook.md) | Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook | abandoned |
 | [ADR-400](./attend/ADR-400-attend-messaging-disclosure-with-token-gated-reheat.md) | Attend messaging disclosure with token-gated reheat | accepted |
 | [ADR-401](./attend/ADR-401-attend-envelope-fields-sender-kind-principal-and-addressee-on-every-signal.md) | Attend envelope fields: sender kind, principal, and addressee on every signal | accepted |
+| [ADR-402](./attend/ADR-402-claude-code-channels-deliver-mcp-server-events-into-the-model-s-turn-and-wake-an-idle-session.md) | Claude Code channels deliver MCP server events into the model's turn and wake an idle session | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
@@ -139,6 +140,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-185](./platform/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md) | CLI output contract: structured output for people, JSON for machines | accepted |
 | [ADR-186](./platform/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
 | [ADR-500](./platform/ADR-500-settings-json-three-way-merge-spec-and-peer-writer-coexistence-contract.md) | settings.json three-way merge: spec and peer-writer coexistence contract | accepted |
+| [ADR-501](./platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) | The agent-ways MCP server: one server for attend, keepalive and later modules, inbound through channels | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_

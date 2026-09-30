@@ -435,13 +435,31 @@ claimed_teams() {
 }
 
 # Start time in ms of the nearest ancestor named claude, or nothing.
+# Seconds since `pid` started. GNU ps has `etimes`; BSD ps only `etime`,
+# formatted [[dd-]hh:]mm:ss.
+elapsed_seconds() {
+  local e d=0 h=0 m=0 sec
+  e="$(ps -o etimes= -p "$1" 2>/dev/null | tr -d ' ')"
+  if [[ "$e" =~ ^[0-9]+$ ]]; then printf '%s' "$e"; return 0; fi
+  e="$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"
+  [[ "$e" == *-* ]] && { d=${e%%-*}; e=${e#*-}; }
+  IFS=: read -r -a parts <<< "$e"
+  case ${#parts[@]} in
+    3) h=${parts[0]}; m=${parts[1]}; sec=${parts[2]} ;;
+    2) m=${parts[0]}; sec=${parts[1]} ;;
+    *) return 0 ;;
+  esac
+  printf '%s' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$sec ))
+}
+
 process_start_ms() {
   local pid=$$ comm age i
   for ((i = 0; i < 12; i++)); do
     comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
     [[ -n "$comm" ]] || return 0
+    comm="${comm##*/}"   # macOS prints the full path
     if [[ "$comm" == claude* ]]; then
-      age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+      age="$(elapsed_seconds "$pid")"
       [[ "$age" =~ ^[0-9]+$ ]] || return 0
       printf '%s' $(( ($(now) - age) * 1000 ))
       return 0

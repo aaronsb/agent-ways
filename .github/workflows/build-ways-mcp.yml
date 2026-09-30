@@ -1,0 +1,141 @@
+name: Build ways-mcp
+
+on:
+  push:
+    branches: [main]
+    tags: ['ways-mcp-v*']
+    paths:
+      - 'tools/ways-mcp/**'
+      - 'tools/attend-session/**'
+      - 'tools/Cargo.toml'
+      - 'tools/Cargo.lock'
+      - '.github/workflows/build-ways-mcp.yml'
+  pull_request:
+    paths:
+      - 'tools/ways-mcp/**'
+      - 'tools/attend-session/**'
+      - 'tools/Cargo.toml'
+      - 'tools/Cargo.lock'
+      - '.github/workflows/build-ways-mcp.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            platform: darwin-x86_64
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            platform: darwin-arm64
+            os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild (Linux cross-compile)
+        if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build (native)
+        if: "!(runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu')"
+        run: cargo build --release --manifest-path tools/Cargo.toml -p ways-mcp --target ${{ matrix.target }}
+
+      - name: Build (zigbuild cross-compile)
+        if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p ways-mcp --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp tools/target/${{ matrix.target }}/release/ways-mcp dist/ways-mcp-${{ matrix.platform }}
+
+      # Native builds can run directly; cross-compiled binaries can only be verified with `file`
+      - name: Smoke test
+        if: "!(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') && !(matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
+        run: dist/ways-mcp-${{ matrix.platform }} --version
+
+      - name: Verify binary (cross-compiled — can't execute on this runner)
+        if: "(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') || (matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
+        run: |
+          file dist/ways-mcp-${{ matrix.platform }}
+          ls -lh dist/ways-mcp-${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ways-mcp-${{ matrix.platform }}
+          path: dist/ways-mcp-${{ matrix.platform }}
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # attend-session's ancestry walk is how the server finds its session;
+      # its ps invocation has to work on BSD ps as well as GNU.
+      - name: Run unit tests (ways-mcp + attend-session)
+        run: cargo test --manifest-path tools/Cargo.toml -p ways-mcp -p attend-session
+
+  collect:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd binaries
+          sha256sum ways-mcp-* > checksums.txt
+          cat checksums.txt
+          ls -lh
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ways-mcp-all-platforms
+          path: binaries/
+
+  release:
+    needs: collect
+    if: startsWith(github.ref, 'refs/tags/ways-mcp-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: ways-mcp-all-platforms
+          path: binaries
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "ways-mcp ${TAG#ways-mcp-}" \
+            --notes "Pre-built ways-mcp binaries for 4 platforms.
+
+          Build from source: \`make ways-mcp\`" \
+            binaries/*

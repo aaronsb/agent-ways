@@ -139,6 +139,17 @@ pub fn find_own_session_id(own_pid: u32) -> Option<String> {
 
 /// Test-seam counterpart to [`find_own_session_id`].
 pub fn find_session_id_in(dir: &Path, own_pid: u32) -> Option<String> {
+    find_session_in(dir, own_pid).map(|(sid, _)| sid)
+}
+
+/// The session owning `own_pid` and the ancestor pid whose record matched:
+/// the Claude Code process itself.
+pub fn find_own_session(own_pid: u32) -> Option<(String, u32)> {
+    find_session_in(&sessions_dir(), own_pid)
+}
+
+/// Test-seam counterpart to [`find_own_session`].
+pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
     let mut pid_to_session: HashMap<u32, String> = HashMap::new();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -159,7 +170,7 @@ pub fn find_session_id_in(dir: &Path, own_pid: u32) -> Option<String> {
     let mut pid = own_pid;
     for _ in 0..15 {
         if let Some(sid) = pid_to_session.get(&pid) {
-            return Some(sid.clone());
+            return Some((sid.clone(), pid));
         }
         if pid <= 1 {
             break;
@@ -220,7 +231,7 @@ fn sessions_dir() -> PathBuf {
 #[cfg(not(windows))]
 fn get_parent_pid(pid: u32) -> Option<u32> {
     let output = Command::new("ps")
-        .args(["--no-headers", "-p", &pid.to_string(), "-o", "ppid"])
+        .args(["-p", &pid.to_string(), "-o", "ppid="])
         .output()
         .ok()?;
     if output.status.success() {
@@ -289,6 +300,15 @@ mod tests {
         ));
         fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn find_session_in_returns_the_matched_ancestor_pid() {
+        let dir = tempdir_like();
+        let parent = get_parent_pid(std::process::id()).expect("a parent pid");
+        write_session(&dir, "sess-parent", parent, "/via/hop");
+        assert_eq!(find_session_in(&dir, std::process::id()), Some(("sess-parent".to_string(), parent)));
+        fs::remove_dir_all(&dir).ok();
     }
 
     fn write_session(dir: &Path, sid: &str, pid: u32, cwd: &str) {

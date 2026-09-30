@@ -15,6 +15,7 @@ pub mod manifest;
 pub mod match_cmd;
 pub mod memory_seed;
 pub mod permissions;
+pub mod mcp_register;
 pub mod reconcile;
 pub mod reflow;
 pub mod render;

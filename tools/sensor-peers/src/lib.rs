@@ -822,7 +822,7 @@ fn parse_session_file(content: &str) -> Option<SessionFile> {
 #[cfg(not(windows))]
 fn pid_is_claude(pid: u32) -> bool {
     let output = Command::new("ps")
-        .args(["--no-headers", "-p", &pid.to_string(), "-o", "args"])
+        .args(["-ww", "-p", &pid.to_string(), "-o", "args="])
         .output()
         .ok();
 

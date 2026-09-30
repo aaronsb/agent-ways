@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-lang test-locales test-multilingual test-live release purge-attend-state
+.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-lang test-locales test-multilingual test-live release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -25,6 +25,7 @@ endif
 
 WAYS_BIN = bin/ways
 WAYS_AUDIT_BIN = bin/ways-audit
+WAYS_MCP_BIN = bin/ways-mcp
 ATTEND_BIN = bin/attend
 ATTEND_CHAT_BIN = bin/attend-chat
 WAY_EMBED_BIN = bin/way-embed
@@ -99,6 +100,9 @@ deps:
 
 # Build ways CLI + set up embedding engine + generate initial corpus.
 setup: ways ways-audit attend attend-chat
+	@# The MCP server (ADR-501) is optional until a module depends on it: a
+	@# missing prebuilt with no cargo warns instead of failing the install.
+	@$(MAKE) -s --no-print-directory ways-mcp || echo "  ⚠ ways-mcp not installed; the agent-ways MCP server stays unregistered."
 	@echo "Setting up embedding engine..."
 	@# Optional accelerator — if its build deps are missing, warn and continue so
 	@# the rest of install (incl. the PATH symlinks) still completes. Without it,
@@ -126,7 +130,7 @@ setup: ways ways-audit attend attend-chat
 # way-embed lives in $(CLAUDE_BIN).
 relink:
 	@mkdir -p "$(XDG_BIN)"
-	@for b in ways ways-audit attend attend-chat; do \
+	@for b in ways ways-audit ways-mcp attend attend-chat; do \
 		if [ -e "$(CURDIR)/bin/$$b" ]; then \
 			$(LINK) "$(CURDIR)/bin/$$b" "$(XDG_BIN)/$$b"; \
 		fi; \
@@ -144,6 +148,7 @@ install: hooks-executable setup hooks-install
 	@echo "Install complete."
 	@echo "  ways binary:        $(XDG_BIN)/ways → $(CURDIR)/$(WAYS_BIN)"
 	@echo "  ways-audit binary:  $(XDG_BIN)/ways-audit → $(CURDIR)/$(WAYS_AUDIT_BIN)"
+	@echo "  ways-mcp binary:    $(XDG_BIN)/ways-mcp → $(CURDIR)/$(WAYS_MCP_BIN)"
 	@echo "  attend binary:      $(XDG_BIN)/attend → $(CURDIR)/$(ATTEND_BIN)"
 	@echo "  attend-chat binary: $(XDG_BIN)/attend-chat → $(CURDIR)/$(ATTEND_CHAT_BIN)"
 	@echo "  way-embed binary:   $(CLAUDE_BIN)/way-embed → $(CURDIR)/$(WAY_EMBED_BIN)"
@@ -162,8 +167,8 @@ hooks-install:
 
 # Remove symlink from PATH.
 uninstall:
-	@rm -f "$(XDG_BIN)/ways" "$(XDG_BIN)/ways-audit" "$(XDG_BIN)/attend" "$(XDG_BIN)/attend-chat"
-	@echo "Removed $(XDG_BIN)/ways $(XDG_BIN)/ways-audit $(XDG_BIN)/attend $(XDG_BIN)/attend-chat"
+	@rm -f "$(XDG_BIN)/ways" "$(XDG_BIN)/ways-audit" "$(XDG_BIN)/ways-mcp" "$(XDG_BIN)/attend" "$(XDG_BIN)/attend-chat"
+	@echo "Removed $(XDG_BIN)/ways $(XDG_BIN)/ways-audit $(XDG_BIN)/ways-mcp $(XDG_BIN)/attend $(XDG_BIN)/attend-chat"
 
 # Pull upstream and re-setup. scripts/update.sh wraps the pull so machine-local
 # changes (settings.json, stale build artifacts) and merged branches don't abort
@@ -192,7 +197,7 @@ sync-to-home-test:
 # on the same `make update` run that pulls the change — sub-makes
 # re-read the Makefile, but the in-memory `update:` recipe is fixed at
 # make-process startup.
-update-binaries: ways-rebuild ways-audit-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
+update-binaries: ways-rebuild ways-audit-rebuild ways-mcp-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
 
 # --- Build ---
 
@@ -260,6 +265,36 @@ ways-audit-rebuild:
 	@mkdir -p bin
 	@$(LINK) "$(CURDIR)/tools/target/release/ways-audit$(EXE)" $(WAYS_AUDIT_BIN)
 	@echo "Built: $(WAYS_AUDIT_BIN) ($$(ls -lh $(WAYS_AUDIT_BIN) | awk '{print $$5}'))"
+
+ways-mcp:
+	@if [ -x $(WAYS_MCP_BIN) ] && $(WAYS_MCP_BIN) --version >/dev/null 2>&1; then \
+		echo "ways-mcp already installed: $$($(WAYS_MCP_BIN) --version)"; \
+	elif bash tools/ways-mcp/download-ways-mcp.sh; then \
+		echo "Pre-built ways-mcp binary installed."; \
+	elif command -v cargo >/dev/null 2>&1; then \
+		echo "Pre-built unavailable (see above) — building ways-mcp from source..."; \
+		bash scripts/check-rust.sh || exit 1; \
+		cargo build --release --manifest-path tools/Cargo.toml -p ways-mcp; \
+		mkdir -p bin; \
+		$(LINK) "$(CURDIR)/tools/target/release/ways-mcp$(EXE)" $(WAYS_MCP_BIN); \
+		echo "Built: $(WAYS_MCP_BIN) ($$(ls -lh $(WAYS_MCP_BIN) | awk '{print $$5}'))"; \
+	else \
+		echo "error: No pre-built binary and cargo not found."; \
+		echo "Install Rust: https://rustup.rs/"; \
+		exit 1; \
+	fi
+
+# Force rebuild ways-mcp from source (ignores existing binary and download).
+ways-mcp-rebuild:
+	@if ! command -v cargo >/dev/null 2>&1; then \
+		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
+		exit 1; \
+	fi
+	@bash scripts/check-rust.sh
+	cargo build --release --manifest-path tools/Cargo.toml -p ways-mcp
+	@mkdir -p bin
+	@$(LINK) "$(CURDIR)/tools/target/release/ways-mcp$(EXE)" $(WAYS_MCP_BIN)
+	@echo "Built: $(WAYS_MCP_BIN) ($$(ls -lh $(WAYS_MCP_BIN) | awk '{print $$5}'))"
 
 # Build attend binary from workspace.
 attend:

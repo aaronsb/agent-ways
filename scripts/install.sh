@@ -214,7 +214,7 @@ print_migration_steps() {
 link_path_binaries() {
   mkdir -p "$XDG_BIN"
   local b
-  for b in ways attend attend-chat; do
+  for b in ways ways-audit ways-mcp attend attend-chat; do
     if [[ -e "$APP_DIR/bin/$b" ]]; then
       ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
     fi

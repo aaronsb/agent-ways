@@ -12,6 +12,7 @@ members = [
     "sensor-disclosure",
     "sensor-keepwarm",
     "ways-cli",
+    "ways-mcp",
     "attend",
     "attend-chat",
     "attend-groups",

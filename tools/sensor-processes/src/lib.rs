@@ -187,7 +187,7 @@ impl ProcessSensor {
         let mut apps: HashMap<String, u32> = HashMap::new();
 
         let output = Command::new("ps")
-            .args(["--no-headers", "-u", &whoami(), "-o", "comm"])
+            .args(["-u", &whoami(), "-o", "comm="])
             .output();
 
         let output = match output {

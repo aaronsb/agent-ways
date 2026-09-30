@@ -465,6 +465,11 @@ fn converge_one(
         }
     }
 
+    // The MCP server registration (ADR-501), after the links it points at.
+    if let (Some(line), false) = (crate::cmd::mcp_register::converge(source_root, dest_root, &paths::projection_root(), dry_run), quiet) {
+        eprintln!("{line}");
+    }
+
     Ok(())
 }
 
@@ -493,6 +498,8 @@ fn withdraw_one(
             settings_summary = Some(crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?);
         }
     }
+    // The MCP registration goes before the links, so it never names a removed binary.
+    let mcp_line = crate::cmd::mcp_register::withdraw(dest_root, &paths::projection_root(), dry_run);
     let mut outcomes = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);
@@ -523,6 +530,9 @@ fn withdraw_one(
     report(&outcomes, source_root, dest_root, dry_run, quiet, true);
     if let (Some(summary), false) = (settings_summary, quiet) {
         eprintln!("{summary}");
+    }
+    if let (Some(line), false) = (mcp_line, quiet) {
+        eprintln!("{line}");
     }
     Ok(())
 }
@@ -632,7 +642,7 @@ fn move_aside(p: &Path) -> Result<PathBuf> {
 
 /// Best-effort path equality: canonicalize both, fall back to lexical compare
 /// (the link may resolve to a path that doesn't exist during a dry run).
-fn same_path(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => a == b,
