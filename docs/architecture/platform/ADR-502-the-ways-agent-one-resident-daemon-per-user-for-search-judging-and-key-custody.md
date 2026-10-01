@@ -118,3 +118,13 @@ Hooks start a process per call. The current embedder is cheap to load: one `way-
 - **Host the services in `ways-mcp`.** Rejected: it runs once per Claude Code session, so models and connections would be duplicated per session, and other agent tools cannot use it.
 - **One daemon per session.** Rejected for the same duplication, which grows with the number of sessions an operator runs.
 - **OS keychain only for the key.** Deferred: it adds a platform dependency per OS. The 0600 file is the minimum viable store, with the keychain as a later backend.
+
+## Addendum, 2026-10-01: as built in the first release
+
+Appended after acceptance; nothing above is changed. The first release (PRs #669–#671, #673) differs from the text above in these places.
+
+- **§4, versions.** Each reply names the agent's version and the binary it runs from. The agent exits once nothing is open when its own binary is replaced on disk, and a client that would start a different binary asks the running agent to stop after it answers. The next prompt then starts the current one. The request carries a protocol number, and a mismatch is answered with an error the hook logs as a fallback.
+- **§6, keys.** An agent started by a hook takes no provider key variable from the hook's environment, so the first session's `ANTHROPIC_API_KEY` cannot become every session's; it reads the key file. The variables still override the file for `ways agent` commands and for an agent started by hand or by a service unit with them set. Each key check is recorded with the key file's modification time and length. The agent judges only with a key whose recorded check is valid, and checks a new or replaced key once on first use.
+- **§1, the socket directory.** The directory holding the socket must be a real directory owned by the user, with no group or other access. The agent creates it that way and refuses one that is not; the client sends nothing to a socket that fails the same check.
+- **§7, control.** `ways agent load` starts the agent and reports it; `unload` stops it. Status reports version, binary, engine, mode, requests, fallbacks by reason, slots in use and latency; the last key check is reported by `ways agent key status` and `ways status`.
+- **Crates.** Profiles, keys, the judge's question, the protocol and the client are in `ways-agent-core`, which carries no network code and is what `ways` links. The provider clients and the server are in `ways-agent`.
