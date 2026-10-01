@@ -56,6 +56,7 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-195](./ways/ADR-195-evidence-a-yes-no-relevance-judge-over-live-way-fires.md) | Evidence: a yes/no relevance judge over live way fires | accepted |
 | [ADR-196](./ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md) | A yes/no relevance gate on way injection, judged by a hosted model | accepted |
 | [ADR-197](./ways/ADR-197-cap-the-candidates-the-relevance-gate-judges-per-request.md) | Cap the candidates the relevance gate judges per request | accepted |
+| [ADR-198](./ways/ADR-198-uninstall-is-a-lifecycle-command-that-keeps-what-the-operator-owns.md) | Uninstall is a lifecycle command that keeps what the operator owns | accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
