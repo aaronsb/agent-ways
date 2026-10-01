@@ -84,7 +84,7 @@ enum Commands {
     },
     /// Generate the ways corpus for matching engines
     Corpus {
-        /// Ways root directory (default: the shipped ways, $XDG_DATA_HOME/agent-ways/hooks/ways)
+        /// Ways root directory (default: ~/.claude/hooks/ways, or $XDG_DATA_HOME/agent-ways/hooks/ways before the projection exists)
         #[arg(long)]
         ways_dir: Option<String>,
         /// Output directory for corpus artifacts (default: canonical XDG cache).
