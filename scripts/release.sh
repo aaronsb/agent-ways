@@ -10,8 +10,8 @@
 #           then builds every platform and creates the GitHub Release.
 #
 # Usage:
-#   scripts/release.sh bump <ways|ways-audit|ways-mcp|attend|attend-chat> <patch|minor|major>
-#   scripts/release.sh tag  <ways|ways-audit|ways-mcp|attend|attend-chat> [--push]
+#   scripts/release.sh bump <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> <patch|minor|major>
+#   scripts/release.sh tag  <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> [--push]
 #
 # `tag` without --push creates the annotated tag locally and prints the push
 # command (keeps the publish deliberate); `--push` pushes it. way-embed is out of
@@ -25,9 +25,10 @@ manifest_for() {
     ways)        echo "tools/ways-cli/Cargo.toml" ;;
     ways-audit)  echo "tools/ways-audit/Cargo.toml" ;;
     ways-mcp)    echo "tools/ways-mcp/Cargo.toml" ;;
+    ways-agent)  echo "tools/ways-agent/Cargo.toml" ;;
     attend)      echo "tools/attend/Cargo.toml" ;;
     attend-chat) echo "tools/attend-chat/Cargo.toml" ;;
-    *) die "unknown component '$1' (ways|ways-audit|ways-mcp|attend|attend-chat)" ;;
+    *) die "unknown component '$1' (ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat)" ;;
   esac
 }
 
@@ -48,7 +49,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 MODE="${1:-}"; COMPONENT="${2:-}"
-[[ -n "$MODE" && -n "$COMPONENT" ]] || die "usage: release.sh <bump|tag> <ways|ways-audit|ways-mcp|attend|attend-chat> ..."
+[[ -n "$MODE" && -n "$COMPONENT" ]] || die "usage: release.sh <bump|tag> <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> ..."
 MANIFEST="$(manifest_for "$COMPONENT")"
 PKG="$COMPONENT"   # package name == component name for every component
 TAG_PREFIX="${COMPONENT}-v"

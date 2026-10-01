@@ -80,7 +80,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("      content-only update skips straight to reproject)");
         println!("  2. refresh ways               — if cargo source changed: download pre-built (guarded), else build");
         println!("  3. refresh way-embed          — if tools/way-embed changed: download pre-built, else build (optional)");
-        println!("  4. refresh ways-audit/ways-mcp/attend/attend-chat — if cargo source changed: download pre-built, else build");
+        println!("  4. refresh ways-audit/ways-mcp/ways-agent/attend/attend-chat — if cargo source changed: download pre-built, else build");
         println!("  5. make relink                — install any suite binary still missing, symlink the suite onto PATH");
         println!("  6. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
@@ -180,8 +180,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // same `refresh_component` path so the whole collection updates uniformly —
     // no separate lifecycle for any one tool.
     if cargo_changed {
-        eprintln!("==> refresh ways-audit/ways-mcp/attend/attend-chat (pre-built first)");
-        for comp in ["ways-audit", "ways-mcp", "attend", "attend-chat"] {
+        eprintln!("==> refresh ways-audit/ways-mcp/ways-agent/attend/attend-chat (pre-built first)");
+        for comp in ["ways-audit", "ways-mcp", "ways-agent", "attend", "attend-chat"] {
             if let Err(e) = refresh_component(&app, comp, &[comp], &app) {
                 eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
             }
@@ -216,7 +216,17 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("available and no build toolchain?). Your install still runs the previous binary —");
         println!("retry `ways update`, or `make update` with a toolchain, then restart Claude Code.");
     }
+    if no_agent_key() {
+        println!("\nOptional: turn on the relevance gate (Claude Haiku judges each matched way) with `ways agent key add --provider anthropic`");
+    }
     Ok(())
+}
+
+/// True when no provider has a key file: the agent reads only the file.
+fn no_agent_key() -> bool {
+    ways_agent_core::profile::Provider::ALL
+        .into_iter()
+        .all(|p| !ways_agent_core::keys::key_path(p).is_file())
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.
@@ -337,7 +347,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         println!("ways update --ref {git_ref} would, in {}:", app.display());
         println!("  1. git fetch origin {git_ref}");
         println!("  2. git checkout --detach       — pin the checkout to the ref");
-        println!("  3. make ways-rebuild ways-audit-rebuild [ways-mcp-rebuild] attend-rebuild attend-chat-rebuild  (source, needs cargo)");
+        println!("  3. make ways-rebuild ways-audit-rebuild [ways-mcp-rebuild] [ways-agent-rebuild] attend-rebuild attend-chat-rebuild  (source, needs cargo)");
         println!("  4. make -C tools/way-embed     — build way-embed from source (needs cmake; optional)");
         println!("  5. make relink                 — install any suite binary still missing, symlink the suite onto PATH");
         println!("  6. {} corpus + reconcile       — regenerate corpus, reproject ~/.claude", ways_bin.display());
@@ -392,6 +402,11 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     let mut targets = vec!["ways-rebuild", "ways-audit-rebuild", "attend-rebuild", "attend-chat-rebuild"];
     if has_make_target(app, "ways-mcp-rebuild") {
         targets.insert(2, "ways-mcp-rebuild");
+    }
+    // Likewise ways-agent (the relevance gate); older refs lack the target.
+    if has_make_target(app, "ways-agent-rebuild") {
+        let at = targets.iter().position(|t| *t == "attend-rebuild").unwrap_or(targets.len());
+        targets.insert(at, "ways-agent-rebuild");
     }
     eprintln!("==> build the suite from source ({})", targets.join(" "));
     run_step(Command::new("make").args(&targets).current_dir(app), "suite source build")?;

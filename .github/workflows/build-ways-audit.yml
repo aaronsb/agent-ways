@@ -49,7 +49,7 @@ jobs:
       - name: Install cargo-zigbuild (Linux cross-compile)
         if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          pip3 install ziglang
+          pip3 install --retries 10 --timeout 60 ziglang
           cargo install cargo-zigbuild
 
       - name: Build (native)

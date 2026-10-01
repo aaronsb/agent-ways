@@ -1,24 +1,24 @@
-name: Build ways CLI
+name: Build ways-agent
 
 on:
   push:
     branches: [main]
-    tags: ['ways-v*']
+    tags: ['ways-agent-v*']
     paths:
-      - 'tools/ways-cli/**'
+      - 'tools/ways-agent/**'
+      - 'tools/ways-agent-core/**'
       - 'tools/ways-core/**'
-      - 'tools/agent-fmt/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
-      - '.github/workflows/build-ways.yml'
+      - '.github/workflows/build-ways-agent.yml'
   pull_request:
     paths:
-      - 'tools/ways-cli/**'
+      - 'tools/ways-agent/**'
+      - 'tools/ways-agent-core/**'
       - 'tools/ways-core/**'
-      - 'tools/agent-fmt/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
-      - '.github/workflows/build-ways.yml'
+      - '.github/workflows/build-ways-agent.yml'
   workflow_dispatch:
 
 jobs:
@@ -56,50 +56,43 @@ jobs:
 
       - name: Build (native)
         if: "!(runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu')"
-        run: cargo build --release --manifest-path tools/Cargo.toml -p ways --target ${{ matrix.target }}
+        run: cargo build --release --manifest-path tools/Cargo.toml -p ways-agent --target ${{ matrix.target }}
 
       - name: Build (zigbuild cross-compile)
         if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p ways --target ${{ matrix.target }}
+        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p ways-agent --target ${{ matrix.target }}
 
       - name: Package binary
         run: |
           mkdir -p dist
-          cp tools/target/${{ matrix.target }}/release/ways dist/ways-${{ matrix.platform }}
+          cp tools/target/${{ matrix.target }}/release/ways-agent dist/ways-agent-${{ matrix.platform }}
 
       # Native builds can run directly; cross-compiled binaries can only be verified with `file`
       - name: Smoke test
         if: "!(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') && !(matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
-        run: dist/ways-${{ matrix.platform }} --version
+        run: dist/ways-agent-${{ matrix.platform }} --version
 
       - name: Verify binary (cross-compiled — can't execute on this runner)
         if: "(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') || (matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
         run: |
-          file dist/ways-${{ matrix.platform }}
-          ls -lh dist/ways-${{ matrix.platform }}
+          file dist/ways-agent-${{ matrix.platform }}
+          ls -lh dist/ways-agent-${{ matrix.platform }}
 
       - uses: actions/upload-artifact@v5
         with:
-          name: ways-${{ matrix.platform }}
-          path: dist/ways-${{ matrix.platform }}
+          name: ways-agent-${{ matrix.platform }}
+          path: dist/ways-agent-${{ matrix.platform }}
 
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run unit tests
-        run: cargo test --manifest-path tools/Cargo.toml -p ways
-      - name: Run simulation tests
-        run: cargo test --manifest-path tools/Cargo.toml -p ways --test session_sim -- --test-threads=1
-      - name: Lint way frontmatter
-        # Invokes the ways binary directly against the repo corpus. `ways lint`
-        # resolves its schema from hooks/ways/frontmatter-schema.yaml, so this
-        # needs no ~/.claude projection and no make target — a frontmatter error
-        # that would silently drop a way from matching fails the build here.
-        run: |
-          cargo build --manifest-path tools/Cargo.toml -p ways
-          tools/target/debug/ways lint --check hooks/ways
+      - name: Run unit tests (ways-agent)
+        run: cargo test --manifest-path tools/Cargo.toml -p ways-agent -p ways-agent-core
 
   collect:
     needs: [build, test]
@@ -113,25 +106,25 @@ jobs:
       - name: Generate checksums
         run: |
           cd binaries
-          sha256sum ways-* > checksums.txt
+          sha256sum ways-agent-* > checksums.txt
           cat checksums.txt
           ls -lh
 
       - uses: actions/upload-artifact@v5
         with:
-          name: ways-all-platforms
+          name: ways-agent-all-platforms
           path: binaries/
 
   release:
     needs: collect
-    if: startsWith(github.ref, 'refs/tags/ways-v')
+    if: startsWith(github.ref, 'refs/tags/ways-agent-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v5
         with:
-          name: ways-all-platforms
+          name: ways-agent-all-platforms
           path: binaries
 
       - name: Create GitHub Release
@@ -141,9 +134,8 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "ways ${TAG#ways-}" \
-            --notes "Pre-built ways CLI binaries for 4 platforms.
+            --title "ways-agent ${TAG#ways-agent-}" \
+            --notes "Pre-built ways-agent binaries for 4 platforms.
 
-          Install: \`bash tools/ways-cli/download-ways.sh\`
-          Or build from source: \`make ways\`" \
+          Build from source: \`make ways-agent\`" \
             binaries/*
