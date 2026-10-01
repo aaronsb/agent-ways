@@ -15,6 +15,9 @@ use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
+use ratatui::crossterm::event::DisableMouseCapture;
+use ratatui::crossterm::execute;
+
 fn main() -> std::io::Result<()> {
     let mut args = std::env::args().skip(1);
     let mut project = std::env::current_dir()?;
@@ -41,8 +44,17 @@ fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
+    // ratatui::init's panic hook restores raw mode and the screen but not
+    // mouse capture; this hook runs first and turns capture off.
     let mut term = ratatui::init();
-    let result = ui::App::new(format!(" ways settings — {} ", project.display()), roots).run(&mut term);
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        hook(info);
+    }));
+    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots).shape(ui::theme::Shape::from_env());
+    let result = app.run(&mut term);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     let session = result?;
     print!("{}", summary(&session.roots, &session.queue));

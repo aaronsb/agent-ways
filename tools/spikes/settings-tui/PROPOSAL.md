@@ -16,6 +16,8 @@ Four tabs run across the top: `ways`, `matching`, `gate`, `install`. Tab and Shi
 
 Try it on a provider key: go to the `gate` tab, open `keys` and press Enter on a provider to type a key (it shows only as dots), or `a` for set/rotate, remove and check. On the `install` tab, press `a` on `targets` to add or plan a target, on a target to enable, disable or remove it, and on `install` to reconcile. `c` shows the pending changes and queued actions together; `x` drops the last queued action.
 
+The mouse works too: click a tab or a row, click the selected row or its ▸/▾ to act, scroll with the wheel, and click a menu item or the `y`/`n` targets of a confirm. `m` turns mouse capture off so the terminal can select text.
+
 ## The problem
 
 `ways --help` lists 37 top-level commands. Two kinds are mixed together:
@@ -92,6 +94,20 @@ The spike splits into a generic half and an adapter:
 - `ways.rs`: the adapter that loads the four files into the tree.
 
 As a crate (`ways-tui`, or `agent-tui` beside `agent-fmt`), the first two serve `ways settings`, `ways-agent` (a separate binary that today only prints its config) and any later picker. The tree becomes the registry's view, and the adapter becomes the registry.
+
+### Look: the operator's status line
+
+The style comes from the operator's Claude Code status line (`statusline.sh`, `statusline-here.sh` and `statusline-sessions.sh` in their dotfiles). The repo's own `statusline.sh` is emoji text with no palette, so it is not the reference.
+
+The palette is the status line's colour tokens: ok green (ANSI 32), warn yellow (33), error red (31), hot orange (256-colour 208), muted grey (90), lozenge ink 16, lozenge text 255 and rule 239. The accent is one agent-ways identity colour, sky `#5ac8fa`, with the status line's two derived stages, dim `#367896` and shade `#033e59`.
+
+Tabs and the mode on the bottom line are powerline lozenges, built the way the status line builds a session cell. The shown tab is ink on the accent, the others text on dim, and a pending count is a badge segment on yellow. The bottom line then runs flat parts between thin `│` rules, as the status line's first line does.
+
+Each attribute means one thing: bold is something pending that needs you, and italic grey is secondary text such as hints. A changed value is bold yellow, a value off its default is dim accent, read-only is grey, a present key is green, a queued command is orange. The selected row sits on the accent shade with an accent `▌` beside it, and keeps its value's colour.
+
+The lozenge caps are Nerd Font glyphs. The TUI reads the status line's own `SESSIONS_SHAPE` setting, so `plain` drops the glyphs and leaves the coloured segments abutting.
+
+The theme is one module, `ui/theme.rs`, in the generic half. In the shared crate it becomes the look of every ways TUI. The ANSI tokens follow the terminal's palette, and every lozenge sets its own background, so the frames read on light and dark terminals; orange and yellow text are the weakest on a light ground.
 
 ## Why tabs
 
