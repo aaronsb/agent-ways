@@ -70,6 +70,14 @@ The random sample has only 4 relevant fires, so its relevant-lost figures are po
 
 Six ways in one llama.cpp request were no faster than six requests. The ROCm build of llama.cpp segfaulted at load and was not measured.
 
+## Significance, batching and agreement
+
+Added 2026-10-01; the numbers and their method are in ADR-195's addendum.
+
+- At threshold 0.3, across the 140 real fires of sets 1 and 2, precision of what is injected goes from 0.37 to 0.65 with one call per way and to 0.67 with one call per prompt (p < 0.0001 for each, paired bootstrap).
+- One call per prompt, the form the gate uses, discriminates as well as one call per way (AUC 0.936 against 0.924 on set 1) and costs 1.0 s for three or four candidates.
+- On set 3, judged from the trigger excerpt alone, Haiku's agreement with careful labels is kappa 0.26 against a 0.59 ceiling between labellers, and no better than chance on the 29 prompt-lane items. The excerpt is a weaker input than the conversation turns the gate sends; live `way_judged` events measure the deployed gate.
+
 ## Local model
 
 Why the 0.6B reranker failed, as inferred from the results:
