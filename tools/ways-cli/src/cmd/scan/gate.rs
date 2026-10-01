@@ -11,9 +11,9 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use ways_agent::judge::{way_text, Candidate, Role, Turn};
-use ways_agent::profile::{self, Mode, Settings};
-use ways_agent::protocol::{JudgeRequest, Judged, Reply, Request};
+use ways_agent_core::judge::{way_text, Candidate, Role, Turn};
+use ways_agent_core::profile::{self, Mode, Settings};
+use ways_agent_core::protocol::{JudgeRequest, Judged, Reply, Request};
 
 use crate::session;
 
@@ -50,14 +50,14 @@ pub(super) fn apply(
 ) -> HashSet<String> {
     let Some(settings) = settings() else { return HashSet::new() };
     run(pending, prompt, response_context, &settings, log, |req, timeout| {
-        ways_agent::client::call(Request::Judge(req), timeout, true)
+        ways_agent_core::client::call(Request::Judge(req), timeout, true)
     })
 }
 
 /// The gate's settings, read from key locations alone. `None` when the gate is
 /// off: no engine and no key, mode off, or a configuration error (logged).
 fn settings() -> Option<Settings> {
-    use ways_agent::keys;
+    use ways_agent_core::keys;
     let user = match profile::UserLayer::load(&profile::user_layer_path()) {
         Ok(u) => u,
         Err(e) => {
@@ -65,7 +65,10 @@ fn settings() -> Option<Settings> {
             return None;
         }
     };
-    match profile::resolve(&user, |p| keys::locate(p).is_some()) {
+    // The agent reads the key file, never a hook's environment, so only a key
+    // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
+    // must not send every prompt to an agent with no key to use.
+    match profile::resolve(&user, |p| keys::key_path(p).is_file()) {
         Ok(Some(s)) if s.mode != Mode::Off => Some(s),
         Ok(_) => None,
         Err(e) => {
@@ -173,8 +176,8 @@ fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ways_agent::profile::{Provider, UserLayer};
-    use ways_agent::protocol::Verdict;
+    use ways_agent_core::profile::{Provider, UserLayer};
+    use ways_agent_core::protocol::Verdict;
 
     fn settings(mode: Mode) -> Settings {
         let user = UserLayer { mode: Some(mode), ..Default::default() };
