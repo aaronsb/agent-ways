@@ -352,11 +352,7 @@ fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, cont
             let distance = current_epoch.saturating_sub(w.epoch_at_fire);
             let token_pos_k = w.token_pos / 1000;
             let token_distance_k = current_tokens_k.saturating_sub(token_pos_k);
-            let token_pct = if w.refire_threshold_k > 0 {
-                token_distance_k * 100 / w.refire_threshold_k
-            } else {
-                0
-            };
+            let token_pct = (token_distance_k * 100).checked_div(w.refire_threshold_k).unwrap_or(0);
             json!({
                 "id": w.id,
                 "epoch_at_fire": w.epoch_at_fire,

@@ -60,7 +60,7 @@ pub fn run(file: String, min_freq: u32) -> Result<()> {
 
     // Sort by frequency descending
     let mut entries: Vec<(&String, &(String, u32))> = body_tf.iter().collect();
-    entries.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.1 .1));
 
     // Output: GAPS
     let mut gap_count = 0;

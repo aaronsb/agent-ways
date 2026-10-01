@@ -141,32 +141,30 @@ fn build_frames(
                         new_events.push(format!("✓ check {}", ev.check));
                     }
                 }
-                "way_redisclosed" => {
-                    if !ev.way.is_empty() {
-                        new_events.push(format!("↻ {}", ev.way));
-                        // A redisclosure means the way is active (re-injected). Update it
-                        // if present; otherwise ADD it — after a compaction-window reset a
-                        // still-active way first reappears via redisclosure, not a fresh
-                        // fire, and must repopulate the window or it looks empty.
-                        active_ways
-                            .entry(ev.way.clone())
-                            .and_modify(|w| {
-                                w.epoch_fired = epoch;
-                                w.token_pos = token_k * 1000;
-                                w.is_redisclosed = true;
-                                w.is_new = false;
-                            })
-                            .or_insert_with(|| ActiveWay {
-                                id: ev.way.clone(),
-                                trigger: ev.trigger.clone(),
-                                epoch_fired: epoch,
-                                token_pos: token_k * 1000,
-                                check_fires: check_fires.get(&ev.way).copied().unwrap_or(0),
-                                is_new: false,
-                                is_redisclosed: true,
-                                refire_threshold_k: refire_for(&ev.way),
-                            });
-                    }
+                "way_redisclosed" if !ev.way.is_empty() => {
+                    new_events.push(format!("↻ {}", ev.way));
+                    // A redisclosure means the way is active (re-injected). Update it
+                    // if present; otherwise ADD it — after a compaction-window reset a
+                    // still-active way first reappears via redisclosure, not a fresh
+                    // fire, and must repopulate the window or it looks empty.
+                    active_ways
+                        .entry(ev.way.clone())
+                        .and_modify(|w| {
+                            w.epoch_fired = epoch;
+                            w.token_pos = token_k * 1000;
+                            w.is_redisclosed = true;
+                            w.is_new = false;
+                        })
+                        .or_insert_with(|| ActiveWay {
+                            id: ev.way.clone(),
+                            trigger: ev.trigger.clone(),
+                            epoch_fired: epoch,
+                            token_pos: token_k * 1000,
+                            check_fires: check_fires.get(&ev.way).copied().unwrap_or(0),
+                            is_new: false,
+                            is_redisclosed: true,
+                            refire_threshold_k: refire_for(&ev.way),
+                        });
                 }
                 _ => {}
             }
