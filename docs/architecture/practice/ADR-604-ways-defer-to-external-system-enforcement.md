@@ -36,7 +36,16 @@ basis:
 agent:
   name: claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "I thought we settled that in adjusting the ways"
+    via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #661"
+    covers: [strict-wins]
+  - operator: aaronsb
+    said: "yes (related to 5)"
+    via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #661"
+    covers: [propose-mechanism]
+status: accepted
 date: 2026-09-30
 deciders:
   - aaronsb

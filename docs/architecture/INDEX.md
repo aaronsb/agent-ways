@@ -165,7 +165,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-601](./practice/ADR-601-autonomy-as-a-layered-system-goals-signposts-and-the-initiation-pattern.md) | Autonomy as a layered system: goals, signposts, and the initiation pattern | accepted |
 | [ADR-602](./practice/ADR-602-ways-functional-audit-117-ways-against-the-firing-contract.md) | Ways functional audit: 117 ways against the firing contract | accepted |
 | [ADR-603](./practice/ADR-603-cypress-survey-what-a-node-routed-seed-teaches-a-hook-disclosed-corpus.md) | Cypress survey: what a node-routed seed teaches a hook-disclosed corpus | accepted |
-| [ADR-604](./practice/ADR-604-ways-defer-to-external-system-enforcement.md) | Ways defer to external system enforcement | proposed |
+| [ADR-604](./practice/ADR-604-ways-defer-to-external-system-enforcement.md) | Ways defer to external system enforcement | accepted |
 
 ## Archived
 
