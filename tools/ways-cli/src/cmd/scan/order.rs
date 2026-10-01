@@ -152,7 +152,7 @@ pub(crate) fn specificity(pattern: &str, span: &str) -> usize {
 }
 
 /// `ancestor` is a way above `id` in the tree.
-fn is_proper_ancestor(ancestor: &str, id: &str) -> bool {
+pub(crate) fn is_proper_ancestor(ancestor: &str, id: &str) -> bool {
     id.len() > ancestor.len() && id.starts_with(ancestor) && id.as_bytes()[ancestor.len()] == b'/'
 }
 

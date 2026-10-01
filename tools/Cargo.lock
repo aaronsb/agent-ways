@@ -2041,7 +2041,7 @@ dependencies = [
 
 [[package]]
 name = "ways"
-version = "1.25.0"
+version = "1.26.0"
 dependencies = [
  "agent-fmt",
  "anyhow",
@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "ways-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",

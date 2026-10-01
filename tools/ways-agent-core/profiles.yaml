@@ -4,7 +4,9 @@
 # Claude Haiku 4.5 judging the way's path and description against the last
 # turn, capped at 1,200 characters, with a threshold of 0.3 on P(yes).
 # Thresholds are per engine because each model's confidence sits on its own
-# scale.
+# scale. A judge call takes about 0.6 s plus 0.1 s per candidate (ADR-195,
+# second addendum), so a request carries at most max_candidates, in the
+# matcher's order, and keeps under the deadline.
 #
 # The user layer, $XDG_CONFIG_HOME/agent-ways/agent.yaml, overrides any field
 # of any profile and survives updates. `ways agent use` and `ways agent mode`
@@ -18,6 +20,7 @@ anthropic:
   turns: 1
   max_turn_chars: 1200
   concurrency: 8
+  max_candidates: 8
 
 openrouter:
   provider: openrouter
@@ -27,3 +30,4 @@ openrouter:
   turns: 1
   max_turn_chars: 1200
   concurrency: 8
+  max_candidates: 8

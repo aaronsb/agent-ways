@@ -48,6 +48,8 @@ struct GateSummary {
     passed: u64,
     blocked: u64,
     would_block: u64,
+    /// Ways past the profile's cap, passed without a verdict.
+    unjudged: u64,
     fallbacks: BTreeMap<String, u64>,
     gate_ms_p50: Option<u64>,
     gate_ms_p95: Option<u64>,
@@ -249,6 +251,9 @@ fn build_summary(
                 if let Some(ms) = v["gate_ms"].as_str().and_then(|s| s.parse().ok()) {
                     gate_ms.push(ms);
                 }
+            }
+            Some("gate_capped") => {
+                gate.unjudged += v["unjudged"].as_str().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
             }
             Some("gate_fallback") => {
                 let reason = v["reason"].as_str().unwrap_or("unknown");

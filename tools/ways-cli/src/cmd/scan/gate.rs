@@ -5,8 +5,11 @@
 //! conversation's last turns. In enforce mode a way judged below the engine's
 //! threshold is not shown and keeps its refire budget; in shadow mode every
 //! verdict is logged and nothing is blocked. Ways with `pattern_strict` are not
-//! judged. Every verdict and every fallback is logged to `events.jsonl`, and
-//! any failure fails open: the matcher's decision stands.
+//! judged. A request carries at most the profile's `max_candidates`, in the
+//! matcher's order: judge latency grows with each candidate, and past the cap
+//! the rest pass unjudged, except a way whose ancestor the judge blocked, which
+//! is blocked with it. Every verdict, cap and fallback is logged to
+//! `events.jsonl`, and any failure fails open: the matcher's decision stands.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -87,9 +90,24 @@ fn run(
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
 ) -> HashSet<String> {
-    let judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
+    let mut judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
     if judged.is_empty() {
         return HashSet::new();
+    }
+    let cap = settings.profile.max_candidates;
+    let mut unjudged: Vec<&str> = Vec::new();
+    if judged.len() > cap {
+        unjudged = judged.split_off(cap).iter().map(|p| p.id).collect();
+        (log.sink)(&[
+            ("event", "gate_capped"),
+            ("judged", &cap.to_string()),
+            ("unjudged", &unjudged.len().to_string()),
+            ("ways", &unjudged.join(",")),
+            ("hook", log.hook_event),
+            ("scope", log.scope),
+            ("project", log.project_dir),
+            ("session", log.session_id),
+        ]);
     }
     let request = JudgeRequest {
         session: log.session_id.to_string(),
@@ -104,7 +122,18 @@ fn run(
     let reply = call(request, Duration::from_millis(settings.profile.timeout_ms) + READ_GRACE);
     let elapsed_ms = begun.elapsed().as_millis().to_string();
     match reply {
-        Ok(Reply::Judged(j)) => decide(&j, log, &elapsed_ms),
+        Ok(Reply::Judged(j)) => {
+            let mut blocked = decide(&j, log, &elapsed_ms);
+            // A way's guidance presumes its parent's: an unjudged way under a
+            // blocked ancestor goes with it.
+            let orphaned: Vec<String> = unjudged
+                .iter()
+                .filter(|id| blocked.iter().any(|b| super::order::is_proper_ancestor(b, id)))
+                .map(|id| id.to_string())
+                .collect();
+            blocked.extend(orphaned);
+            blocked
+        }
         Ok(Reply::Fallback { reason, .. }) => fallback(&reason, judged.len(), log, &elapsed_ms),
         Ok(Reply::Error { message }) => fallback(&format!("agent_error: {message}"), judged.len(), log, &elapsed_ms),
         Ok(other) => fallback(&format!("unexpected_reply: {other:?}"), judged.len(), log, &elapsed_ms),
@@ -270,6 +299,73 @@ mod tests {
             assert_eq!(field(&events[0], "reason"), reason);
             assert_eq!(field(&events[0], "candidates"), "2");
         }
+    }
+
+    #[test]
+    fn past_the_cap_ways_pass_unjudged_and_the_cap_is_logged() {
+        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let many: Vec<Pending<'_>> =
+            ids.iter().map(|id| Pending { id, description: "d", pattern_strict: false }).collect();
+        let s = settings(Mode::Enforce);
+        assert_eq!(s.profile.max_candidates, 8);
+        let events = Events::default();
+        let sink = recorder(&events);
+        let blocked = run(&many, "q", None, &s, &log(&sink), |req, _| {
+            let sent: Vec<&str> = req.candidates.iter().map(|c| c.id.as_str()).collect();
+            assert_eq!(sent, ids[..8].iter().map(String::as_str).collect::<Vec<_>>());
+            let low: Vec<(&str, f64)> = sent.iter().map(|id| (*id, 0.05)).collect();
+            Ok(judged(Mode::Enforce, &low))
+        });
+        assert_eq!(blocked, ids[..8].iter().cloned().collect::<HashSet<_>>());
+        let events = events.borrow();
+        assert_eq!(field(&events[0], "event"), "gate_capped");
+        assert_eq!(field(&events[0], "unjudged"), "2");
+        assert_eq!(field(&events[0], "ways"), "w/8,w/9");
+        assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), 8);
+    }
+
+    fn pending_ids(ids: &[String], strict: usize) -> Vec<Pending<'_>> {
+        ids.iter()
+            .enumerate()
+            .map(|(i, id)| Pending { id, description: "d", pattern_strict: i < strict })
+            .collect()
+    }
+
+    #[test]
+    fn an_unjudged_way_under_a_blocked_ancestor_is_blocked_with_it() {
+        let mut ids: Vec<String> = (0..7).map(|i| format!("w/{i}")).collect();
+        ids.extend(["p".to_string(), "p/c".to_string(), "q/c".to_string()]);
+        let blocked = run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&|_| {}), |req, _| {
+            let v: Vec<(&str, f64)> =
+                req.candidates.iter().map(|c| (c.id.as_str(), if c.id == "p" { 0.05 } else { 0.9 })).collect();
+            Ok(judged(Mode::Enforce, &v))
+        });
+        assert_eq!(blocked, HashSet::from(["p".to_string(), "p/c".to_string()]));
+    }
+
+    #[test]
+    fn strict_ways_do_not_count_against_the_cap_and_a_full_request_is_not_capped() {
+        let ids: Vec<String> = (0..9).map(|i| format!("w/{i}")).collect();
+        let events = Events::default();
+        let sink = recorder(&events);
+        run(&pending_ids(&ids, 1), "q", None, &settings(Mode::Enforce), &log(&sink), |req, _| {
+            assert_eq!(req.candidates.len(), 8);
+            Ok(judged(Mode::Enforce, &[]))
+        });
+        assert!(events.borrow().iter().all(|e| field(e, "event") != "gate_capped"));
+    }
+
+    #[test]
+    fn a_fallback_after_the_cap_counts_the_candidates_sent() {
+        let ids: Vec<String> = (0..12).map(|i| format!("w/{i}")).collect();
+        let events = Events::default();
+        let sink = recorder(&events);
+        let blocked =
+            run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| Err("deadline".into()));
+        assert!(blocked.is_empty());
+        let events = events.borrow();
+        assert_eq!(field(&events[1], "event"), "gate_fallback");
+        assert_eq!(field(&events[1], "candidates"), "8");
     }
 
     #[test]

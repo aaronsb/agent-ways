@@ -510,6 +510,7 @@ fn show_config() -> Result<ExitCode> {
     println!("  provider {}  model {}", p.provider, p.model);
     println!("  mode {}  threshold {}  deadline {} ms", s.mode.as_str(), p.threshold, p.timeout_ms);
     println!("  context: last {} turn(s), {} chars each  concurrency {}", p.turns, p.max_turn_chars, p.concurrency);
+    println!("  candidates: at most {} judged per request; the rest pass unjudged", p.max_candidates);
     match keys::read(p.provider)? {
         Some((key, source)) => {
             println!("  key {} from {source}, {}", keys::tail(&key), check_note(p.provider, &source, &p.model));
