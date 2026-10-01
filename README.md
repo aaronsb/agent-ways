@@ -102,6 +102,8 @@ This stages the app into `$XDG_DATA_HOME/agent-ways`, builds the binaries and fe
 
 The built-in ways cover software development, but the framework is domain-agnostic. To customize, fork it and pass your fork to the installer, or set up a **[development checkout](docs/development.md)** — then replace the ways and add your own domains. For non-straightforward installs (existing forks, offline, custom prefixes), see the **[install guide](docs/install-guide.md)**.
 
+To remove it, `ways uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, unlink the commands, delete the app and its caches. `ways uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198).
+
 > **Upgrading a pre-1.0 in-place clone** (where `~/.claude` *is* the git repo)? Don't `git pull` it — run the gated, backup-first migrator, built from the `ways-v1.8.3` tag that still ships it. Your `projects/` and `settings.json` are preserved. See the **[Migration Guide](docs/migration-1.0.md)**.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.

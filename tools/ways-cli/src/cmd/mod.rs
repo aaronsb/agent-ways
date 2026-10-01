@@ -34,4 +34,5 @@ pub mod template;
 pub mod tree;
 pub mod tune;
 pub mod tune_precision;
+pub mod uninstall;
 pub mod update;

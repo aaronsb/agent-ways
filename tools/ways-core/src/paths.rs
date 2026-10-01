@@ -123,6 +123,14 @@ fn resolve_cache(base: &Path) -> PathBuf {
     normalize_path_sep(&preferred)
 }
 
+/// Every cache dir the app has written: `$XDG_CACHE/agent-ways` and the
+/// pre-1.0 `claude-ways`. Uninstall removes both; reads go through
+/// [`cache_root`].
+pub fn cache_roots_all() -> [PathBuf; 2] {
+    let base = xdg_cache_base();
+    [normalize_path_sep(&base.join(APP)), normalize_path_sep(&base.join(LEGACY_CACHE))]
+}
+
 /// The Claude-Code-owned projection floor (`~/.claude`). What *stays*:
 /// transcripts, auto-memory, and `settings.json` live here and are owned by
 /// Claude Code; agent-ways only reads them (and surgically merges settings).
