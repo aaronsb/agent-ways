@@ -81,7 +81,7 @@ related:
 
 ## Context
 
-Hooks start a process per call. Loading a model per call dominates its cost: about 0.8 s for one `way-embed` embedding, 2.3 s to load a reranker and judge six ways (ADR-195). An operator commonly runs many Claude Code sessions on one machine, each firing hooks, several in parallel per event, and agent-ways aims to serve other agent tools as well. A hosted judge (ADR-196) adds a provider key that should not be read by every hook, and a TLS handshake that a fresh process pays on every call. `ways-mcp` (ADR-501) is per session and Claude Code-specific, so it cannot hold shared state for the machine.
+Hooks start a process per call. The current embedder is cheap to load: one `way-embed` match, process start to scores, takes about 30 ms on the probe machine. Larger models are not: loading a 0.6B reranker and judging six ways took 2.3 s (ADR-195). An operator commonly runs many Claude Code sessions on one machine, each firing hooks, several in parallel per event, and agent-ways aims to serve other agent tools as well. A hosted judge (ADR-196) adds a provider key that should not be read by every hook, and a TLS handshake that a fresh process pays on every call. `ways-mcp` (ADR-501) is per session and Claude Code-specific, so it cannot hold shared state for the machine.
 
 ## Decision
 
