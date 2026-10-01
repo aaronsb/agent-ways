@@ -42,10 +42,11 @@ agent-ways had an install, an update, a repair (`ways reconcile`) and target wit
 ## Decision
 
 1. **One command.** `ways uninstall` takes the machine back to before the install, apart from what the operator owns.
-2. **Withdraw first.** It withdraws from every recorded target and from `~/.claude` the way a disabled target is withdrawn: our links, our hooks and permissions through the settings merge base (ADR-500), and our MCP entry. The installer projects into `~/.claude` whatever the target list says, so `~/.claude` is always included. Withdrawal leaves the config's target list unchanged, so a kept config activates the same targets on a later install. A failed withdrawal stops the command before anything is deleted.
-3. **What is removed.** The command links in the user bin directory that point into the app, the app (`$XDG_DATA_HOME/agent-ways`), and every cache dir the app has used (`agent-ways`, and the pre-1.0 `claude-ways`). The ways agent is asked to stop.
+2. **Withdraw first.** It withdraws from every recorded target and from `~/.claude` the way a disabled target is withdrawn: our links, our hooks and permissions through the settings merge base (ADR-500), and our MCP entry. The installer projects into `~/.claude` whatever the target list says, so `~/.claude` is always included. Withdrawal leaves the config's target list unchanged, so a kept config activates the same targets on a later install. A failed withdrawal stops the command before anything is deleted; targets withdrawn before the failure stay withdrawn, and a reinstall projects them again. When the app is already gone nothing can be withdrawn, and the command goes on to remove the links and caches.
+3. **What is removed.** The command links in `~/.local/bin` and `$XDG_BIN_HOME` that point into the app, every cache dir the app has used (`agent-ways`, and the pre-1.0 `claude-ways`), and last the app (`$XDG_DATA_HOME/agent-ways`), so a failure part way leaves `ways` in place to run again. The ways agent is asked to stop.
 4. **What is kept.** The operator's config (`$XDG_CONFIG_HOME/agent-ways`: their ways, API keys, settings) and state (`$XDG_STATE_HOME/agent-ways`: events, probe data). `--purge` deletes both.
 5. **Plan first.** Without `--yes` the command lists each path under withdraw, unlink, delete or keep, and exits having changed nothing.
+6. **Refused plans.** Every deleted path is absolute and named `agent-ways` or `claude-ways`, and none is, holds or sits inside a kept directory, `$HOME` or `~/.claude`. XDG directories set to the same place would otherwise put a kept directory on the delete list; the command refuses instead.
 
 ## Consequences
 
@@ -56,7 +57,7 @@ agent-ways had an install, an update, a repair (`ways reconcile`) and target wit
 
 ### Negative
 
-- A machine where the app was deleted by hand and the projection left in place cannot be withdrawn by this command, because withdrawal identifies our links by the app they point into. Reinstalling and then uninstalling clears it.
+- A machine where the app was deleted by hand and the projection left in place cannot be withdrawn by this command, because withdrawal identifies our links by the app they point into. The command still removes the links and caches and says so; reinstalling and then uninstalling clears the projection.
 - Kept config and state are invisible clutter to an operator who expected everything gone; the plan lists them and names `--purge`.
 
 ### Neutral
