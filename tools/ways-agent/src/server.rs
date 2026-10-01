@@ -325,7 +325,7 @@ impl State {
     fn verified(&self, provider: Provider, key: &str, source: &keys::Source, model: &str) -> Result<(), String> {
         let transient = |r: &str| matches!(r, "unreachable" | "rate_limited" | "failed");
         let record = match keys::last_check(provider) {
-            Some(r) if r.describes(source) && !(transient(&r.result) && r.age_s() >= 300) => r,
+            Some(r) if r.describes(source, model) && !(transient(&r.result) && r.age_s() >= 300) => r,
             _ => {
                 let _guard = self.check_lock.lock().unwrap_or_else(|e| e.into_inner());
                 let result = net::check(provider, key, model);
