@@ -141,9 +141,13 @@ The spike only simulates the run: each step goes pending, running, done on a sho
 
 Each tab's tree starts at its root's children, since the tab already names the root. The tab badge and every group badge count value changes plus queued actions under them. The root's own actions, such as `ways reconcile` on the install tab, open from `a` on any row that has none of its own.
 
-## The TUI for exploring, the CLI for knowing
+## The files are the settings; the TUI and the CLI are two ways in
 
-The TUI is where a person browses, edits, reviews and applies settings. The CLI serves agents, integrations, and people who know what they are changing: it assumes the caller wants the thing done and says nothing more.
+The config files are the source of truth. The TUI and the CLI read and write the same files through the same writer, so they are interchangeable: configure in the TUI and the file holds the result; copy a file to another machine and the CLI or TUI there reads it; inspect any copy with the CLI. The TUI suits browsing, setting and reviewing several changes at once. The CLI suits agents, integrations, and people who know what they are changing: it assumes the caller wants the thing done and says nothing more.
+
+- **One writer.** Every write goes through one settings layer that changes only the keys it sets and keeps the rest of the file, comments and order as they were, so a hand-edited or copied file survives a TUI or CLI edit.
+- **Any file.** `--file <path>` points `get`, `list` and the TUI at a file other than the live one, to inspect or prepare a copy before it is installed.
+- **Changes from outside.** When a file changes on disk while the TUI is open (a CLI `set`, a hand edit, a copy), the TUI reloads it. A tab with pending edits to that file shows the conflict in its review instead of overwriting the outside change.
 
 - **One help registry.** Each setting carries its doc line, type, range, default and the file it writes; each command carries a one-line summary and a longer body. The TUI's detail pane and help overlay and the CLI's `--help` render from the same registry, so the long help is the TUI's text replayed.
 - **Terse by default.** `ways settings get <key>` prints the value; `list [prefix]` prints `key=value` lines; `set` and `unset` print nothing on success and exit 0. `--json` adds source, default and the file written. The top-level `ways --help` lists one line per command.
