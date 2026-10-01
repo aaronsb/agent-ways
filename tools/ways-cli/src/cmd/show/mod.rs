@@ -230,7 +230,7 @@ pub fn set_firing_transcript(path: Option<&str>) {
     }
 }
 
-fn firing_transcript() -> Option<&'static str> {
+pub(crate) fn firing_transcript() -> Option<&'static str> {
     FIRING_TRANSCRIPT.get().map(String::as_str)
 }
 

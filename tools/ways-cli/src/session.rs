@@ -252,14 +252,15 @@ pub fn epoch_distance(way_id: &str, session_id: &str) -> u64 {
 
 // ── Token position (ADR-123/126 re-disclosure) ──────────────────────
 
-/// Read the token position from the most recent transcript.
-pub fn get_token_position(_session_id: &str) -> u64 {
+/// Read this session's token position from its transcript: the hook's own
+/// `transcript_path` when it names this session, else the session-id lookup.
+pub fn get_token_position(session_id: &str) -> u64 {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
-    let project_slug = project_dir.replace(['/', '.'], "-");
-    let conv_dir = home_dir().join(format!(".claude/projects/{project_slug}"));
-
-    let transcript = find_newest_jsonl(&conv_dir);
+    let transcript = crate::cmd::show::firing_transcript()
+        .map(PathBuf::from)
+        .filter(|t| t.file_stem().is_some_and(|s| s == session_id) && t.is_file())
+        .or_else(|| ways_core::transcript::find_transcript(&project_dir, session_id));
     let transcript = match transcript {
         Some(t) => t,
         None => return 0,
@@ -309,9 +310,9 @@ pub fn stamp_way_tokens(way_id: &str, session_id: &str, position: u64) {
 
 /// Detect context window for a specific session by project path and session ID.
 pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
-    let project_slug = project.replace(['/', '.'], "-");
-    let transcript = home_dir()
-        .join(format!(".claude/projects/{project_slug}/{session_id}.jsonl"));
+    let transcript = ways_core::paths::transcripts_root()
+        .join(ways_core::paths::project_slug(project))
+        .join(format!("{session_id}.jsonl"));
     context_window_from_transcript(&transcript)
 }
 
@@ -809,30 +810,6 @@ fn read_u64_path(path: &Path) -> u64 {
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
-}
-
-fn find_newest_jsonl(dir: &Path) -> Option<PathBuf> {
-    if !dir.is_dir() {
-        return None;
-    }
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(dir).ok()? {
-        let entry = entry.ok()?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        if path.to_str().is_some_and(|s| s.contains(".tmp")) {
-            continue;
-        }
-        if let Ok(meta) = entry.metadata() {
-            let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-            if newest.as_ref().is_none_or(|(t, _)| mtime > *t) {
-                newest = Some((mtime, path));
-            }
-        }
-    }
-    newest.map(|(_, p)| p)
 }
 
 use crate::util::home_dir;

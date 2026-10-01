@@ -84,14 +84,8 @@ pub fn apply(project_dir: &str) -> Result<()> {
 }
 
 fn project_memory_dir(project_dir: &str) -> PathBuf {
-    let normalized: String = project_dir
-        .chars()
-        .map(|c| if c == '/' || c == '.' { '-' } else { c })
-        .collect();
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
-        .join(".claude/projects")
-        .join(normalized)
+    ways_core::paths::transcripts_root()
+        .join(ways_core::paths::project_slug(project_dir))
         .join("memory")
 }
 

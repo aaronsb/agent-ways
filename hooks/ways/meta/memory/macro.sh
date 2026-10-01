@@ -14,8 +14,9 @@ if command -v ways &>/dev/null; then
   fi
 fi
 
-# MEMORY.md state
-NORMALIZED=$(echo "$PROJECT_DIR" | sed 's|[/.]|-|g')
+# MEMORY.md state. Claude Code names the project dir by mapping every
+# non-alphanumeric character to '-' (ways_core::paths::project_slug).
+NORMALIZED=$(printf '%s' "$PROJECT_DIR" | sed 's|[^A-Za-z0-9]|-|g')
 MEMORY_DIR="$HOME/.claude/projects/${NORMALIZED}/memory"
 MEMORY_FILE="$MEMORY_DIR/MEMORY.md"
 

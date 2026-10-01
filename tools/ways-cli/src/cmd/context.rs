@@ -191,8 +191,7 @@ fn resolve_transcript(
         .or_else(detect_project_dir)
         .unwrap_or_else(|| ".".to_string());
 
-    let project_slug = project.replace(['/', '.'], "-");
-    let conv_dir = projects_root.join(project_slug);
+    let conv_dir = projects_root.join(ways_core::paths::project_slug(&project));
 
     find_newest_transcript(&conv_dir)
         .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))

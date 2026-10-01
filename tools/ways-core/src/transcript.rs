@@ -13,7 +13,7 @@
 //! are normal (return empty), never an error.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One `UserPromptSubmit` injection resolved to the user message it augmented:
 /// the injection's timestamp (for matching to a turn's fires) and the keyed
@@ -24,24 +24,27 @@ pub struct PromptTurn {
     pub user_uuid: String,
 }
 
-/// Locate a session's transcript. First tries the lossy `/`,`.`→`-` slug Claude
-/// Code names project dirs with (matching `rethink::build_token_timeline` and
-/// `session.rs`); on a miss — the recorded project can differ from the dir the
-/// transcript actually lives in (subagent cwd, a `session_start` logged elsewhere)
-/// — falls back to scanning every `projects/*` dir, since session ids are globally
-/// unique. `None` if no matching transcript exists.
-fn transcript_path(project: &str, session_id: &str) -> Option<PathBuf> {
-    let root = crate::paths::transcripts_root();
+/// Locate a session's transcript. First tries the project's dir under
+/// [`crate::paths::project_slug`]; on a miss — the recorded project can differ
+/// from the dir the transcript actually lives in (subagent cwd, a
+/// `session_start` logged elsewhere, a slug Claude Code truncated) — falls back
+/// to scanning every `projects/*` dir, since session ids are globally unique.
+/// `None` if no matching transcript exists.
+pub fn find_transcript(project: &str, session_id: &str) -> Option<PathBuf> {
+    find_transcript_in(&crate::paths::transcripts_root(), project, session_id)
+}
+
+/// [`find_transcript`] against an explicit projects root, for tests.
+pub fn find_transcript_in(root: &Path, project: &str, session_id: &str) -> Option<PathBuf> {
     let file = format!("{session_id}.jsonl");
 
-    let slug = project.replace(['/', '.'], "-");
-    let direct = root.join(&slug).join(&file);
+    let direct = root.join(crate::paths::project_slug(project)).join(&file);
     if direct.is_file() {
         return Some(direct);
     }
 
     // Slug miss → the id is unique, so find it wherever it lives.
-    std::fs::read_dir(&root)
+    std::fs::read_dir(root)
         .ok()?
         .flatten()
         .map(|e| e.path().join(&file))
@@ -51,7 +54,7 @@ fn transcript_path(project: &str, session_id: &str) -> Option<PathBuf> {
 /// Resolve every `UserPromptSubmit` injection in a session's transcript to its
 /// triggering user message. Empty when the transcript is absent/unreadable.
 pub fn prompt_turns(project: &str, session_id: &str) -> Vec<PromptTurn> {
-    match transcript_path(project, session_id).and_then(|p| std::fs::read_to_string(p).ok()) {
+    match find_transcript(project, session_id).and_then(|p| std::fs::read_to_string(p).ok()) {
         Some(content) => prompt_turns_from_str(&content),
         None => Vec::new(),
     }

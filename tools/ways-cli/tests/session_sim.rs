@@ -1042,3 +1042,88 @@ fn scenario_16_readme_edit_delivers_validate_in_the_first_hook() {
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// ── Scenario 17: token position reads this session's transcript ──
+
+/// Write a transcript for `session` under Claude Code's projects dir for
+/// `slug`, whose one assistant turn reports `tokens` of context.
+fn write_transcript(home: &Path, slug: &str, session: &str, tokens: u64) {
+    let dir = home.join(".claude/projects").join(slug);
+    std::fs::create_dir_all(&dir).unwrap();
+    let line = format!(
+        r#"{{"type":"assistant","message":{{"model":"claude-opus-5-5","usage":{{"input_tokens":{tokens},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#
+    );
+    std::fs::write(dir.join(format!("{session}.jsonl")), format!("{line}\n")).unwrap();
+}
+
+/// `ways scan command` in `project`, with the isolation of
+/// [`scan_command_isolated`]; returns the `token_position` of each `way_fired`
+/// row for `session`.
+fn fired_token_positions(session: &str, project: &str, home: &Path, state: &Path) -> Vec<u64> {
+    Command::new(ways_bin())
+        .args([
+            "scan", "command",
+            "--command", "git commit -m x",
+            "--session", session,
+            "--project", project,
+        ])
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_STATE_HOME", state)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("CLAUDE_PROJECT_DIR", project)
+        .env_remove("CLAUDE_AGENT_ID")
+        .output()
+        .expect("Failed to run ways scan command");
+    let log = std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
+    log.lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "way_fired" && v["session"] == session)
+        .filter_map(|v| v["token_position"].as_str().and_then(|s| s.parse().ok()))
+        .collect()
+}
+
+#[test]
+fn scenario_17_token_position_ignores_a_newer_sibling_session() {
+    // Two sessions in one project: the other one wrote its transcript last.
+    // The firing session's tick must come from its own transcript.
+    let base = std::env::temp_dir().join(format!("ways-sim-tick-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    write_commit_way(&home.join(".claude/hooks/ways/tickdomain"), "tick", 200, None);
+
+    let project = "/srv/tick-project";
+    let session = format!("sim-s17-{}", std::process::id());
+    clean_markers(&session);
+    write_transcript(&home, "-srv-tick-project", &session, 40_000);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_transcript(&home, "-srv-tick-project", "other-session", 150_000);
+
+    assert_eq!(fired_token_positions(&session, project, &home, &state), vec![40_000]);
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn scenario_18_token_position_finds_an_underscore_project() {
+    // Claude Code maps every non-alphanumeric character of the project path
+    // to '-', so `_prod` is stored as `-prod`.
+    let base = std::env::temp_dir().join(format!("ways-sim-slug-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    write_commit_way(&home.join(".claude/hooks/ways/slugdomain"), "slug", 200, None);
+
+    let project = "/srv/mcp/_prod";
+    let session = format!("sim-s18-{}", std::process::id());
+    clean_markers(&session);
+    write_transcript(&home, "-srv-mcp--prod", &session, 40_000);
+
+    assert_eq!(fired_token_positions(&session, project, &home, &state), vec![40_000]);
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&base);
+}

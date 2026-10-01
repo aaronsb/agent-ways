@@ -279,6 +279,27 @@ pub fn transcripts_root() -> PathBuf {
     projection_root().join("projects")
 }
 
+/// The directory name Claude Code gives a project under [`transcripts_root`]:
+/// every character outside ASCII `[A-Za-z0-9]` becomes `-`, so `/a/_b.c` is
+/// `-a--b-c`. This is the one copy of the rule; read it, never re-derive it.
+///
+/// Claude Code applies `replace(/[^a-zA-Z0-9]/g, "-")` to the path's UTF-16
+/// code units, so a character outside the BMP yields two dashes; `len_utf16`
+/// keeps that. It also truncates a slug over 200 characters and appends a
+/// hash, which is not reproduced here: such paths resolve through the
+/// session-id scan in [`crate::transcript::find_transcript`].
+pub fn project_slug(project: &str) -> String {
+    let mut slug = String::with_capacity(project.len());
+    for c in project.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else {
+            slug.extend(std::iter::repeat_n('-', c.len_utf16()));
+        }
+    }
+    slug
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +316,17 @@ mod tests {
         assert!(data_root().ends_with("agent-ways"));
         assert!(config_root().ends_with("agent-ways"));
         assert!(state_root().ends_with("agent-ways"));
+    }
+
+    #[test]
+    fn project_slug_maps_every_non_alphanumeric_to_a_dash() {
+        // Observed in ~/.claude/projects: `_prod` is stored as `-prod`.
+        assert_eq!(project_slug("/home/a/Projects/ai/mcp/_prod"), "-home-a-Projects-ai-mcp--prod");
+        assert_eq!(project_slug("/home/a/.dotfiles"), "-home-a--dotfiles");
+        assert_eq!(project_slug("/x/llama.cpp-kv"), "-x-llama-cpp-kv");
+        assert_eq!(project_slug("/x/SWA - Delivery"), "-x-SWA---Delivery");
+        assert_eq!(project_slug("/x/é"), "-x--");
+        assert_eq!(project_slug("/x/🦀"), "-x---");
     }
 
     #[test]
