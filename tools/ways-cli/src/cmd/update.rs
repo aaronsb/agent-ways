@@ -729,14 +729,14 @@ fn compare_freshness(
     let (Some(cand), Some(src)) = (describe_sha(candidate), describe_sha(source)) else {
         return Freshness::Unknown;
     };
-    if cand == src {
+    // The shas are abbreviated, and git sizes the abbreviation by the repository's
+    // object count: the release build's shallow checkout gives 7 characters, a full
+    // clone of this repo 8. One sha prefixing the other is the same commit. Without
+    // this, `is_ancestor` reports the commit as its own ancestor → `Older`, and an
+    // install with no toolchain keeps its previous binary.
+    if cand.starts_with(&src) || src.starts_with(&cand) {
         return Freshness::AtLeastAsNew;
     }
-    // The shas are abbreviated. If the *same* commit is abbreviated to different
-    // lengths on the two sides (git auto-lengthens on ambiguity), this fast path
-    // misses and we fall to `is_ancestor`, which returns true (a commit is its own
-    // ancestor) → `Older` → a needless but safe source rebuild. Same repo + default
-    // abbrev makes this rare; the failure is toward caution, never a downgrade.
     match is_ancestor(&cand, &src) {
         Some(true) => Freshness::Older,
         Some(false) => Freshness::AtLeastAsNew,
@@ -880,6 +880,16 @@ mod tests {
         assert_eq!(
             compare_freshness("ways-v1.0.0-0-gabc123", "ways-v1.0.0-1-gdef456", |_, _| None),
             Freshness::Unknown
+        );
+        // The same commit abbreviated to different lengths (shallow CI checkout vs a
+        // full clone) is the same commit, without consulting git.
+        assert_eq!(
+            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called")),
+            Freshness::AtLeastAsNew
+        );
+        assert_eq!(
+            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called")),
+            Freshness::AtLeastAsNew
         );
         // Unparseable candidate provenance (legacy binary → describe_sha None) → Unknown.
         assert_eq!(
