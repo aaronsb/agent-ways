@@ -1,0 +1,17 @@
+# The spike's own look: sky accent (RICH_PALETTE), status colours as the ANSI palette resolves them on a dark terminal.
+name = "agent-ways"
+label = "agent-ways"
+kind = "dark"
+background = "terminal"
+
+[slots]
+bg = "#1c1c1e"
+fg = "#d0d0d0"
+dim = "#6b6b6b"
+subtle = "#3a3a3c"
+accent = "#5ac8fa"
+info = "#3b8eea"
+ok = "#0dbc79"
+warn = "#e5e510"
+err = "#cd3131"
+alt = "#11a8cd"
