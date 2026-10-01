@@ -113,3 +113,11 @@ A model asked that question directly, with the way's path and description agains
 - **A Claude Code prompt hook as the judge.** Rejected: prompt hooks return only allow or block for the whole event, see only the event JSON, and run in parallel with the hook that injects ways, so they cannot select among candidates.
 - **One call per candidate.** Rejected as the default: it repeats the turns in every call and multiplies latency and cost; one call with all candidates sends them once.
 - **A cosine-keyed cache of verdicts.** Rejected: near-identical embeddings are exactly the cases a judge exists to separate. An exact-key cache is allowed.
+
+## Addendum, 2026-10-01: as built in the first release
+
+Appended after acceptance; nothing above is changed.
+
+- **§5.** The mode and the chosen engine live in the user layer beside the profiles rather than as profile fields. The key's source is not a profile field: the agent reads the provider's key file.
+- **§6.** "Once `key check` passes" is held by a recorded check. A key added without a check, or replaced by hand, is checked by the agent on first use; until a check passes, the gate falls back and logs `key_unverified`.
+- **§1.** The hook sends Claude's last reply and the prompt as the turns. Keyword fires on the prompt lane are judged with the semantic ones; only `pattern_strict` ways and ways the refire curve still holds back are not sent.
