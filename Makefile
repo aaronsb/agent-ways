@@ -6,7 +6,7 @@
 # Update:        make update
 
 .DEFAULT_GOAL := help
-.PHONY: setup install relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-lang test-locales test-multilingual test-live release purge-attend-state
+.PHONY: setup install link relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-lang test-locales test-multilingual test-live release purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -29,6 +29,8 @@ WAYS_MCP_BIN = bin/ways-mcp
 ATTEND_BIN = bin/attend
 ATTEND_CHAT_BIN = bin/attend-chat
 WAY_EMBED_BIN = bin/way-embed
+# The suite binaries `link` puts on PATH and `relink` installs when missing.
+SUITE_BINS = ways ways-audit ways-mcp attend attend-chat
 XDG_BIN = $(or $(XDG_BIN_HOME),$(HOME)/.local/bin)
 CLAUDE_BIN = $(HOME)/.claude/bin
 
@@ -122,15 +124,13 @@ setup: ways ways-audit attend attend-chat
 	@# does above: ways fall back to keyword matching until `ways corpus` works.
 	@$(WAYS_BIN) corpus --quiet || echo "  ⚠ Corpus built without embeddings (see above); keyword ways still work."
 
-# Idempotent (re)linking of the suite binaries onto PATH. Only links what exists
-# in bin/, so it is safe to run before every binary is built and safe to re-run.
-# Both `install` and `ways update` call this — that is what lets a binary NEWLY
-# ADDED to the suite get its PATH symlink without a fresh `make install`. The
-# suite binaries (ways, ways-audit, attend, attend-chat) link into $(XDG_BIN);
-# way-embed lives in $(CLAUDE_BIN).
-relink:
+# Idempotent linking of the suite binaries onto PATH. Only links what exists in
+# bin/, so it is safe to run before every binary is built and safe to re-run.
+# The suite binaries (ways, ways-audit, ways-mcp, attend, attend-chat) link into
+# $(XDG_BIN); way-embed lives in $(CLAUDE_BIN).
+link:
 	@mkdir -p "$(XDG_BIN)"
-	@for b in ways ways-audit ways-mcp attend attend-chat; do \
+	@for b in $(SUITE_BINS); do \
 		if [ -e "$(CURDIR)/bin/$$b" ]; then \
 			$(LINK) "$(CURDIR)/bin/$$b" "$(XDG_BIN)/$$b"; \
 		fi; \
@@ -141,9 +141,22 @@ relink:
 		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$(CLAUDE_BIN)/way-embed"; fi; \
 	fi
 
+# Install any suite binary the install lacks, then link. `ways update` runs this
+# after every pull, from the freshly pulled Makefile, so a component added to the
+# suite reaches an existing install even when the updater predates it: the 1.23.1
+# updater refreshes only the components it knew of, and ways-mcp arrives here.
+# Each component target is download-first, then cargo; a failure warns and the
+# rest of the suite still links.
+relink:
+	@for b in $(SUITE_BINS); do \
+		[ -e "$(CURDIR)/bin/$$b" ] || $(MAKE) -s --no-print-directory $$b \
+			|| echo "  ⚠ $$b not installed; run 'make $$b' in $(CURDIR) to retry."; \
+	done
+	@$(MAKE) -s --no-print-directory link
+
 # Full install: build, setup, symlink to PATH.
 install: hooks-executable setup hooks-install
-	@$(MAKE) -s --no-print-directory relink
+	@$(MAKE) -s --no-print-directory link
 	@echo ""
 	@echo "Install complete."
 	@echo "  ways binary:        $(XDG_BIN)/ways → $(CURDIR)/$(WAYS_BIN)"

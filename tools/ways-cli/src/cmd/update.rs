@@ -80,8 +80,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("      content-only update skips straight to reproject)");
         println!("  2. refresh ways               — if cargo source changed: download pre-built (guarded), else build");
         println!("  3. refresh way-embed          — if tools/way-embed changed: download pre-built, else build (optional)");
-        println!("  4. refresh ways-audit/attend/attend-chat — if cargo source changed: download pre-built, else build");
-        println!("  5. make relink                — ensure every suite binary is symlinked onto PATH");
+        println!("  4. refresh ways-audit/ways-mcp/attend/attend-chat — if cargo source changed: download pre-built, else build");
+        println!("  5. make relink                — install any suite binary still missing, symlink the suite onto PATH");
         println!("  6. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
         return Ok(());
@@ -120,8 +120,9 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // metadata pull must not trigger a cargo + cmake rebuild of the suite.
     if !cargo_changed && !way_embed_changed {
         eprintln!("==> binaries: no source change in this update — skipping suite rebuild");
-        // relink is idempotent and cheap; keep the prior behavior of self-healing a
-        // missing/broken suite PATH symlink on every update, not just rebuilds.
+        // relink is idempotent and cheap when the suite is complete. It runs on every
+        // update, not just rebuilds: it installs a suite binary the install lacks and
+        // self-heals a missing or broken PATH symlink.
         if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
             eprintln!(
                 "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
@@ -185,13 +186,11 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         }
     }
 
-    // Ensure every suite binary is linked onto PATH. Refreshing only updates
-    // `bin/`; a binary NEWLY ADDED to the suite (e.g. ways-audit for an install
-    // that predates it) has no `$XDG_BIN` symlink from the original `make install`,
-    // so without this it would sit in `bin/` unreachable. `make relink` is
-    // idempotent and only links what exists.
-    // Relink only when a build group changed — a binary NEWLY ADDED to the suite
-    // needs its PATH symlink. `make relink` is idempotent and only links what exists.
+    // Ensure every suite binary is installed and linked onto PATH. Refreshing only
+    // updates `bin/`; a binary NEWLY ADDED to the suite has no `$XDG_BIN` symlink
+    // from the original `make install`. `make relink` installs any suite binary
+    // missing from `bin/`, then links what exists. The pulled Makefile owns the
+    // suite list, so an updater older than a component still installs it here.
     if cargo_changed || way_embed_changed {
         eprintln!("==> relink suite binaries onto PATH");
         if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
@@ -336,9 +335,9 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         println!("ways update --ref {git_ref} would, in {}:", app.display());
         println!("  1. git fetch origin {git_ref}");
         println!("  2. git checkout --detach       — pin the checkout to the ref");
-        println!("  3. make ways-rebuild ways-audit-rebuild attend-rebuild attend-chat-rebuild  (source, needs cargo)");
+        println!("  3. make ways-rebuild ways-audit-rebuild [ways-mcp-rebuild] attend-rebuild attend-chat-rebuild  (source, needs cargo)");
         println!("  4. make -C tools/way-embed     — build way-embed from source (needs cmake; optional)");
-        println!("  5. make relink                 — symlink every suite binary onto PATH");
+        println!("  5. make relink                 — install any suite binary still missing, symlink the suite onto PATH");
         println!("  6. {} corpus + reconcile       — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
         return Ok(());
@@ -386,13 +385,14 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
 
     // 3. Build the Rust suite from source — force (no download for an
     //    unpublished ref). The *-rebuild targets each cargo-build and relink.
-    eprintln!("==> build ways/ways-audit/attend/attend-chat from source");
-    run_step(
-        Command::new("make")
-            .args(["ways-rebuild", "ways-audit-rebuild", "attend-rebuild", "attend-chat-rebuild"])
-            .current_dir(app),
-        "suite source build",
-    )?;
+    //    ways-mcp joins when the ref's Makefile has its target; a ref that
+    //    predates the server has none.
+    let mut targets = vec!["ways-rebuild", "ways-audit-rebuild", "attend-rebuild", "attend-chat-rebuild"];
+    if has_make_target(app, "ways-mcp-rebuild") {
+        targets.insert(2, "ways-mcp-rebuild");
+    }
+    eprintln!("==> build the suite from source ({})", targets.join(" "));
+    run_step(Command::new("make").args(&targets).current_dir(app), "suite source build")?;
 
     // 4. Build way-embed from source. Its default make target is a source build
     //    (cmake), unlike `rebuild-binary` which is download-first — so the ref's
@@ -422,7 +422,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         Err(e) => eprintln!("  ⚠ way-embed not rebuilt ({e}); semantic matching degrades to regex."),
     }
 
-    // 5. Ensure every suite binary is linked onto PATH.
+    // 5. Install any suite binary still missing and link the suite onto PATH.
     eprintln!("==> relink suite binaries onto PATH");
     if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(app), "relink") {
         eprintln!(
@@ -623,6 +623,18 @@ fn guard_action(verdict: &Freshness, had: bool, has_toolchain: bool) -> GuardAct
 }
 
 /// Run a `make` target in `dir`, returning whether it succeeded.
+/// Whether the Makefile in `dir` defines `target`. `make -n` exits 2 on a
+/// missing rule and 0 on a target it could run.
+fn has_make_target(dir: &Path, target: &str) -> bool {
+    Command::new("make")
+        .args(["-n", target])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn run_make(dir: &Path, args: &[&str]) -> bool {
     Command::new("make")
         .args(args)
