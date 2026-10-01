@@ -28,6 +28,10 @@ basis:
     level: directed
     said: "a good environment is low friction"
     via: chat, session 418e1be3, 2026-09-30
+  - operator: aaronsb
+    level: directed
+    said: "but a good environment also has purpose and shape"
+    via: chat, session 418e1be3, 2026-09-30
   - precedent: ADR-175
 agent:
   name: claude
@@ -66,8 +70,8 @@ The merge way's review gate surfaced the conflict. It gained an exemption that l
 3. **Unreadable means strict.** When the enforcement cannot be read (no forge CLI, no access, an unfamiliar host), the way assumes the stricter reading.
 4. **Detect, don't assume.** A way names how to find the forge, the default branch and the project's tooling, and gives detection for each host it supports. It says which hosts it does not cover.
 5. **Offer a mechanism for a rule that keeps recurring.** When a way's rule matters enough to keep restating in a project, the way offers to encode it as a mechanism the project owns. It installs nothing without the operator's go-ahead, and a mechanism the project adopts then outranks the way under rule 2.
-6. **Question the configuration, follow it while it stands.** Deferring does not mean endorsing. A way names enforcement that looks weak, broken, contradictory or needlessly strict as a concern to the operator, with the change that would fix it. Weak or broken: a default branch with no protection, a required check that never runs, CODEOWNERS pointing at people who left. Needlessly strict: friction that catches no defect, such as a required review on a version-only bump. Until the operator changes the configuration, the agent acts under it.
-7. **Setting up the system is the way's ground.** When the task is to configure the enforcement itself (initializing a repository, setting branch rules, adding hooks or CI gates), there is no prior policy to defer to for that change, and the way's guidance shapes the proposal. A good environment is low friction: the proposal is the lightest mechanism that enforces what the project needs, and each rule in it names the defect it stops. The change goes to the operator before it lands, since it binds everyone who works in the project.
+6. **Question the configuration, follow it while it stands.** Deferring does not mean endorsing. A way names enforcement that looks weak, broken, contradictory or needlessly strict as a concern to the operator, with the change that would fix it. Weak or broken: a default branch with no protection, a required check that never runs, CODEOWNERS pointing at people who left. Needlessly strict: friction that catches no defect, such as a required review on a version-only bump. Shapeless: mechanisms with no stated purpose, or configuration scattered where no one would look for it. Until the operator changes the configuration, the agent acts under it.
+7. **Setting up the system is the way's ground.** When the task is to configure the enforcement itself (initializing a repository, setting branch rules, adding hooks or CI gates), there is no prior policy to defer to for that change, and the way's guidance shapes the proposal. A good environment has a purpose, a shape and low friction. The proposal states what the project's enforcement is for, lays its configuration out where people expect to find it, and uses the lightest mechanism that serves that purpose. Each rule in it names the defect it stops. The change goes to the operator before it lands, since it binds everyone who works in the project.
 8. **The harness is an external system.** A denial from Claude Code's permission system or its classifier is enforcement. A way does not route around it, which is how ADR-175 treats the harness's delegation gate.
 
 ## Consequences
