@@ -3,7 +3,7 @@ name = "attend-groups"
 version = "0.1.0"
 edition = "2021"
 description = "Shared focus-group state I/O for attend and attend-chat (ADR-170)"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 
 [lib]
 name = "attend_groups"
