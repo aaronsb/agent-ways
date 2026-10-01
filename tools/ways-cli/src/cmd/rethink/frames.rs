@@ -166,6 +166,13 @@ fn build_frames(
                             refire_threshold_k: refire_for(&ev.way),
                         });
                 }
+                // ADR-196: a way the relevance gate kept out never fires, so
+                // without this line a rejection leaves no trace in the replay.
+                "way_judged" if !ev.way.is_empty() => match ev.verdict.as_str() {
+                    "block" => new_events.push(format!("⊘ {} (gate {})", ev.way, ev.p_yes)),
+                    "would_block" => new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes)),
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -259,6 +266,8 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 way: v["way"].as_str().unwrap_or("").to_string(),
                 trigger: v["trigger"].as_str().unwrap_or("").to_string(),
                 check: v["check"].as_str().unwrap_or("").to_string(),
+                p_yes: v["p_yes"].as_str().unwrap_or("").to_string(),
+                verdict: v["verdict"].as_str().unwrap_or("").to_string(),
             })
         })
         .collect();
@@ -313,6 +322,8 @@ mod tests {
             way: way.into(),
             trigger: "keyword".into(),
             check: String::new(),
+            p_yes: String::new(),
+            verdict: String::new(),
         };
         // Window 1: origin session_start + two fires. A second session_start
         // (a compaction) opens window 2, which starts fresh with one fire.
@@ -344,6 +355,24 @@ mod tests {
     }
 
     #[test]
+    fn gate_rejections_appear_in_their_epoch() {
+        let judged = |verdict: &str, way: &str| WayEvent {
+            ts: "2026-01-01T00:00:02Z".into(),
+            event: "way_judged".into(),
+            way: way.into(),
+            trigger: String::new(),
+            check: String::new(),
+            p_yes: "0.050".into(),
+            verdict: verdict.into(),
+        };
+        let events = vec![judged("block", "d/a"), judged("would_block", "d/b"), judged("pass", "d/c")];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].new_events, vec!["⊘ d/a (gate 0.050)", "◌ d/b (gate 0.050, shadow)"]);
+        assert!(frames[0].ways.is_empty());
+    }
+
+    #[test]
     fn redisclosure_repopulates_a_reset_window() {
         let ev = |ts: &str, event: &str, way: &str| WayEvent {
             ts: ts.into(),
@@ -351,6 +380,8 @@ mod tests {
             way: way.into(),
             trigger: "keyword".into(),
             check: String::new(),
+            p_yes: String::new(),
+            verdict: String::new(),
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no
         // fresh fire) in window 2 — as a mature window mostly does. It must still show

@@ -19,6 +19,9 @@ pub(crate) struct WayEvent {
     pub(super) way: String,
     pub(super) trigger: String,
     pub(super) check: String,
+    /// The relevance gate's P(yes) and verdict on a `way_judged` event (ADR-196).
+    pub(super) p_yes: String,
+    pub(super) verdict: String,
 }
 
 /// An active way at a given frame.
