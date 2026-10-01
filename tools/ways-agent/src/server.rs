@@ -76,18 +76,38 @@ pub fn serve(options: Options) -> Result<()> {
         state.conns.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
             state.touch();
-            let shutdown = handle(stream, &state);
+            let shutdown = {
+                // Released on every exit from this block, unwinding included.
+                let _conn = ConnGuard(&state);
+                handle(stream, &state)
+            };
             state.touch();
-            let others = state.conns.fetch_sub(1, Ordering::SeqCst) - 1;
+            if shutdown {
+                // Let other sessions' calls finish, for a few seconds at most.
+                let until = Instant::now() + Duration::from_secs(5);
+                while state.conns.load(Ordering::SeqCst) > 0 && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                leave(&sock);
+            }
             // A replaced binary exits once no connection is open; the
             // watchdog catches the case where another still was.
-            if shutdown || (others == 0 && exe.as_ref().is_some_and(Exe::replaced)) {
+            if state.conns.load(Ordering::SeqCst) == 0 && exe.as_ref().is_some_and(Exe::replaced) {
                 leave(&sock);
             }
         });
     }
     drop(lock);
     Ok(())
+}
+
+/// One open connection, counted until dropped.
+struct ConnGuard<'a>(&'a State);
+
+impl Drop for ConnGuard<'_> {
+    fn drop(&mut self) {
+        self.0.conns.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Removes the socket and exits. The lock goes with the process.
@@ -123,9 +143,15 @@ fn handle(stream: UnixStream, state: &State) -> bool {
             false,
         ),
         Ok(env) => match env.request {
+            Request::Judge(_) if state.draining.load(Ordering::SeqCst) => {
+                (Reply::Fallback { reason: "agent_stopping".into(), latency_ms: 0 }, false)
+            }
             Request::Judge(req) => (state.judge(req), false),
             Request::Status => (Reply::Status(state.status()), false),
-            Request::Shutdown => (Reply::Ok, true),
+            Request::Shutdown => {
+                state.draining.store(true, Ordering::SeqCst);
+                (Reply::Ok, true)
+            }
         },
     };
     let envelope = protocol::ReplyEnvelope { agent: agent_id(), reply };
@@ -139,6 +165,7 @@ fn handle(stream: UnixStream, state: &State) -> bool {
 fn agent_id() -> protocol::AgentId {
     protocol::AgentId {
         version: env!("CARGO_PKG_VERSION").to_string(),
+        core: protocol::CORE_VERSION.to_string(),
         exe: std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
     }
 }
@@ -205,6 +232,8 @@ struct State {
     started: Instant,
     /// Connections accepted and not yet answered. Exits wait for zero.
     conns: AtomicUsize,
+    /// Set by a shutdown: new judge requests fall back while open ones finish.
+    draining: std::sync::atomic::AtomicBool,
     last_activity: AtomicU64,
     http: ureq::Agent,
     slots: Mutex<usize>,
@@ -227,6 +256,7 @@ impl State {
         State {
             started: Instant::now(),
             conns: AtomicUsize::new(0),
+            draining: std::sync::atomic::AtomicBool::new(false),
             last_activity: AtomicU64::new(now_s()),
             http: net::agent(Duration::from_secs(60)),
             slots: Mutex::new(0),
@@ -323,15 +353,31 @@ impl State {
     /// or replaced since, is checked once here and the result recorded; a
     /// check that could not reach a verdict is retried after five minutes.
     fn verified(&self, provider: Provider, key: &str, source: &keys::Source, model: &str) -> Result<(), String> {
-        let transient = |r: &str| matches!(r, "unreachable" | "rate_limited" | "failed");
-        let record = match keys::last_check(provider) {
-            Some(r) if r.describes(source, model) && !(transient(&r.result) && r.age_s() >= 300) => r,
-            _ => {
+        // How long a result stands before it is checked again: a check that
+        // reached no verdict soon, a key without credit after an hour (it may
+        // have been topped up), a verdict on the key itself until it changes.
+        let retry_after = |r: &str| match r {
+            "unreachable" | "rate_limited" | "failed" => Some(300),
+            "no_credit" => Some(3600),
+            _ => None,
+        };
+        let current = |r: &keys::CheckRecord| {
+            r.describes(source, model) && retry_after(&r.result).is_none_or(|s| r.age_s() < s)
+        };
+        let record = match keys::last_check(provider).filter(current) {
+            Some(r) => r,
+            None => {
                 let _guard = self.check_lock.lock().unwrap_or_else(|e| e.into_inner());
-                let result = net::check(provider, key, model);
-                let record = keys::CheckRecord::now(result.record_word(), model, source);
-                keys::record_check(provider, &record);
-                record
+                // Another request may have checked while this one waited.
+                match keys::last_check(provider).filter(current) {
+                    Some(r) => r,
+                    None => {
+                        let result = net::check(provider, key, model);
+                        let record = keys::CheckRecord::now(result.record_word(), model, source);
+                        keys::record_check(provider, &record);
+                        record
+                    }
+                }
             }
         };
         match record.result.as_str() {

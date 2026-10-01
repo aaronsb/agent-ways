@@ -40,13 +40,18 @@ pub struct JudgeRequest {
     pub candidates: Vec<Candidate>,
 }
 
-/// Which agent answered: its version and the binary it runs from. A client
-/// that would start a different binary retires this agent (ADR-502 §4).
+/// Which agent answered: its version, the version of this shared crate it was
+/// built with, and the binary it runs from. A client built against a
+/// different shared crate retires the agent after it answers (ADR-502 §4).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentId {
     pub version: String,
+    pub core: String,
     pub exe: String,
 }
+
+/// This crate's version, which client and agent compare.
+pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A reply, wrapped with the identity of the agent that sent it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -111,7 +116,11 @@ pub fn socket_path() -> PathBuf {
         return PathBuf::from(p);
     }
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
-        return dir.join("agent-ways.sock");
+        // A runtime directory others can reach is not used; the per-user
+        // directory below is made safe instead.
+        if runtime_dir_private(&dir) {
+            return dir.join("agent-ways.sock");
+        }
     }
     std::env::temp_dir().join(format!("agent-ways-{}", user_id())).join("agent.sock")
 }
@@ -166,6 +175,17 @@ pub fn trusted_socket(sock: &Path) -> bool {
         })
 }
 
+#[cfg(unix)]
+fn runtime_dir_private(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(dir).is_ok_and(|m| m.is_dir() && m.uid() == user_id() && m.mode() & 0o077 == 0)
+}
+
+#[cfg(not(unix))]
+fn runtime_dir_private(_dir: &Path) -> bool {
+    true
+}
+
 #[cfg(not(unix))]
 fn user_id() -> u32 {
     0
@@ -195,7 +215,7 @@ mod tests {
         assert_eq!(status.request, Request::Status);
 
         let reply = ReplyEnvelope {
-            agent: AgentId { version: "0.1.0".into(), exe: "/x/ways-agent".into() },
+            agent: AgentId { version: "0.1.0".into(), core: "0.1.0".into(), exe: "/x/ways-agent".into() },
             reply: Reply::Fallback { reason: "no_key".into(), latency_ms: 0 },
         };
         let line = serde_json::to_string(&reply).unwrap();
