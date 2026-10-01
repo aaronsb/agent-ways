@@ -153,8 +153,9 @@ fn store_in(dir: &Path, provider: Provider, key: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-#[cfg(unix)]
-fn unique() -> u64 {
+/// A process-local sequence number, so temp files written by one process's
+/// threads never share a name.
+pub(crate) fn unique() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     N.fetch_add(1, Ordering::Relaxed)

@@ -232,7 +232,8 @@ impl UserLayer {
     }
 
     /// Writes the layer through a temporary file and a rename, so a reader
-    /// never sees half a file.
+    /// never sees half a file. The temp name is unique to this process and
+    /// call, so concurrent writers never rename each other's file.
     pub fn save(&self, path: &Path) -> Result<()> {
         let mut layer = self.clone();
         layer.profiles.retain(|_, p| !p.is_empty());
@@ -245,9 +246,13 @@ impl UserLayer {
         );
         let dir = path.parent().context("user layer path has no parent")?;
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let tmp = dir.join(".agent.yaml.tmp");
+        let tmp = dir.join(format!(".agent.yaml.{}.{}.tmp", std::process::id(), crate::keys::unique()));
         std::fs::write(&tmp, body).with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+        std::fs::rename(&tmp, path)
+            .inspect_err(|_| {
+                let _ = std::fs::remove_file(&tmp);
+            })
+            .with_context(|| format!("replacing {}", path.display()))
     }
 }
 
@@ -418,6 +423,31 @@ mod tests {
         assert_eq!(back.mode, Some(Mode::Off));
         assert!(back.profiles.is_empty());
         assert_eq!(UserLayer::load(&dir.join("missing.yaml")).unwrap(), UserLayer::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_saves_each_land_whole() {
+        // Two writers sharing one temp name rename it out from under each
+        // other: the loser's rename finds no file.
+        let dir = std::env::temp_dir().join(format!("ways-agent-profile-race-{}", std::process::id()));
+        let path = dir.join("agent.yaml");
+        let writers: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let mode = if i % 2 == 0 { Mode::Off } else { Mode::Shadow };
+                    let layer = UserLayer { mode: Some(mode), ..Default::default() };
+                    (0..50).map(|_| layer.save(&path)).collect::<Result<Vec<_>>>()
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap().unwrap();
+        }
+        assert!(UserLayer::load(&path).unwrap().mode.is_some());
+        let leftovers = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(leftovers, 1, "only agent.yaml remains");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
