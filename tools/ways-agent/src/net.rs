@@ -188,6 +188,97 @@ pub fn models(provider: Provider, key: Option<&str>) -> Result<Vec<ModelInfo>> {
         .collect())
 }
 
+/// Asks the engine one batched question: P(yes) per candidate, in order.
+/// `Err` carries a fallback reason: `deadline`, `provider_<status>: …`,
+/// `transport: …` or `answer: …`.
+pub fn judge(
+    http: &ureq::Agent,
+    provider: Provider,
+    key: &str,
+    model: &str,
+    prompt: &str,
+    n: usize,
+    timeout: Duration,
+) -> std::result::Result<Vec<f64>, String> {
+    use crate::judge;
+    let max_tokens = 64 + 48 * n;
+    let (url, body) = match provider {
+        Provider::Anthropic => (
+            format!("{ANTHROPIC}/v1/messages"),
+            serde_json::json!({
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": 0,
+                "system": judge::SYSTEM,
+                "tools": [{
+                    "name": judge::TOOL_NAME,
+                    "description": judge::TOOL_DESCRIPTION,
+                    "strict": true,
+                    "input_schema": judge::tool_schema(n),
+                }],
+                "tool_choice": {"type": "tool", "name": judge::TOOL_NAME},
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        ),
+        Provider::Openrouter => (
+            format!("{OPENROUTER}/chat/completions"),
+            serde_json::json!({
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": 0,
+                "messages": [
+                    {"role": "system", "content": judge::SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                "tools": [{"type": "function", "function": {
+                    "name": judge::TOOL_NAME,
+                    "description": judge::TOOL_DESCRIPTION,
+                    "parameters": judge::tool_schema(n),
+                }}],
+                "tool_choice": {"type": "function", "function": {"name": judge::TOOL_NAME}},
+            }),
+        ),
+    };
+    let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
+    req = match provider {
+        Provider::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
+        Provider::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
+    };
+    let mut resp = req.send_json(&body).map_err(transport_reason)?;
+    let status = resp.status().as_u16();
+    let text = resp.body_mut().read_to_string().map_err(transport_reason)?;
+    // Status first: an HTML error page from a proxy is still a provider error.
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if status != 200 {
+        return Err(format!("provider_{status}: {}", error_message(&reply)));
+    }
+    let input = match provider {
+        Provider::Anthropic => reply
+            .get("content")
+            .and_then(Value::as_array)
+            .and_then(|blocks| blocks.iter().find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")))
+            .and_then(|b| b.get("input"))
+            .cloned()
+            .ok_or_else(|| format!("answer: no tool_use block (stop_reason {})", reply["stop_reason"]))?,
+        Provider::Openrouter => {
+            let args = reply
+                .pointer("/choices/0/message/tool_calls/0/function/arguments")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "answer: no tool call".to_string())?;
+            serde_json::from_str(args).map_err(|e| format!("answer: arguments are not JSON: {e}"))?
+        }
+    };
+    judge::parse_judgements(&input, n).map_err(|e| format!("answer: {e}"))
+}
+
+fn transport_reason(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Timeout(_) => "deadline".to_string(),
+        ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => "deadline".to_string(),
+        other => format!("transport: {other}"),
+    }
+}
+
 /// GET with the provider's auth headers. Returns the status and the parsed
 /// body (Null when it is not JSON), or the transport error's text.
 fn get(http: &ureq::Agent, url: &str, auth: Option<Provider>, key: &str) -> std::result::Result<(u16, Value), String> {

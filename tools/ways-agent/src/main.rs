@@ -1,7 +1,8 @@
 //! `ways-agent`: the ways agent's command line. `ways agent …` runs it.
 //!
-//! This increment carries configuration: the API key lifecycle, the model
-//! picker, and the engine and mode settings (ADR-196 §5, ADR-502 §6).
+//! It runs the agent (`serve`, started on demand by hooks) and carries its
+//! controls: the API key lifecycle, the model picker, the engine and mode
+//! settings, and the agent's status (ADR-196 §5, ADR-502 §6-7).
 
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
@@ -48,6 +49,18 @@ enum Command {
     Mode { mode: String },
     /// Show the resolved settings and where each comes from.
     Config,
+    /// Run the agent in the foreground. Hooks start it on demand.
+    Serve {
+        /// Exit after this many minutes without a request.
+        #[arg(long, default_value_t = 30)]
+        idle_minutes: u64,
+    },
+    /// Report the running agent: engine, requests, fallbacks, latency.
+    Status,
+    /// Start the agent if it is not running, then report it.
+    Load,
+    /// Stop the running agent.
+    Unload,
 }
 
 #[derive(Subcommand)]
@@ -116,7 +129,62 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Use { profile, model } => use_profile(&profile, model),
         Command::Mode { mode } => set_mode(Mode::parse(&mode)?),
         Command::Config => show_config(),
+        Command::Serve { idle_minutes } => serve(idle_minutes),
+        Command::Status => agent_status(false),
+        Command::Load => {
+            ways_agent::client::clear_start_backoff();
+            agent_status(true)
+        }
+        Command::Unload => {
+            let stopped = ways_agent::server::stop()?;
+            println!("{}", if stopped { "agent stopped" } else { "no agent running" });
+            Ok(ExitCode::SUCCESS)
+        }
     }
+}
+
+// ---------------------------------------------------------------- the agent
+
+fn serve(idle_minutes: u64) -> Result<ExitCode> {
+    let options = ways_agent::server::Options { idle: std::time::Duration::from_secs(idle_minutes.max(1) * 60) };
+    if let Err(e) = ways_agent::server::serve(options) {
+        // Started by a hook with no terminal: leave the reason where status can point.
+        let log = ways_core::paths::state_root().join("ways-agent.log");
+        let _ = std::fs::create_dir_all(log.parent().unwrap_or(std::path::Path::new(".")));
+        let _ = std::fs::write(&log, format!("ways-agent serve failed: {e:#}\n"));
+        return Err(e);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn agent_status(start: bool) -> Result<ExitCode> {
+    use ways_agent::protocol::{Reply, Request};
+    let timeout = std::time::Duration::from_secs(5);
+    let status = match ways_agent::client::call(Request::Status, timeout, start) {
+        Ok(Reply::Status(s)) => s,
+        Ok(other) => bail!("unexpected reply: {other:?}"),
+        Err(reason) if reason == "agent_absent" => {
+            println!("no agent running; hooks start one on the next gated prompt (or run `ways agent load`)");
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(reason) => bail!("agent unreachable: {reason}"),
+    };
+    println!("ways-agent {} (pid {}), up {}s, socket {}", status.version, status.pid, status.uptime_s, ways_agent::protocol::socket_path().display());
+    match (&status.engine, &status.model, status.mode) {
+        (Some(e), Some(m), Some(mode)) => println!("engine {e} ({m}), mode {}", mode.as_str()),
+        _ => println!("gate off: no engine named and no key found"),
+    }
+    let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
+    let cap = if status.concurrency == 0 { "—".to_string() } else { status.concurrency.to_string() };
+    println!(
+        "requests {}, judged {}, in flight {}/{cap}, latency p50 {} p95 {}",
+        status.requests, status.judged, status.in_flight, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
+    );
+    if !status.fallbacks.is_empty() {
+        let list: Vec<String> = status.fallbacks.iter().map(|(k, v)| format!("{k} {v}")).collect();
+        println!("fallbacks: {}", list.join(", "));
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 // ---------------------------------------------------------------- keys
