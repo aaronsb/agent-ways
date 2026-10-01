@@ -409,8 +409,10 @@ fn gate_line() -> String {
         Ok(Some((s, source))) => {
             let key = match source {
                 Some(src) => match ways_agent_core::keys::last_check(s.profile.provider) {
-                    Some(r) if r.describes(&src) && r.result == "valid" => format!("key from {src}, checked valid"),
-                    Some(r) if r.describes(&src) => format!("key from {src}, last check {}: fails open", r.result),
+                    Some(r) if r.describes(&src, &s.profile.model) && r.result == "valid" => {
+                        format!("key from {src}, checked valid")
+                    }
+                    Some(r) if r.describes(&src, &s.profile.model) => format!("key from {src}, last check {}: fails open", r.result),
                     _ => format!("key from {src}, not checked yet: the agent checks it on first use"),
                 },
                 None => "no key: fails open".to_string(),
@@ -436,6 +438,11 @@ fn gate_json() -> serde_json::Value {
             "provider": s.profile.provider.as_str(),
             "model": s.profile.model,
             "threshold": s.profile.threshold,
+            "key_check": source.as_ref().and_then(|src| {
+                ways_agent_core::keys::last_check(s.profile.provider)
+                    .filter(|r| r.describes(src, &s.profile.model))
+                    .map(|r| r.result)
+            }),
             "key_source": source.map(|src| src.to_string()),
         }),
     }

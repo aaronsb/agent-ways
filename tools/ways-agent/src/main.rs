@@ -124,7 +124,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
 /// Whether a key may be written, given what its check found. A key the
 /// provider rejected is never stored. A stored key is replaced only by one the
 /// provider accepted, unless the operator forces it; a first key may be stored
-/// unconfirmed, and the gate stays off until a check passes.
+/// unconfirmed; the agent checks it on first use and gates only once it passes.
 fn may_store(result: Option<&net::Check>, replacing: bool, force: bool) -> Result<(), String> {
     match result {
         Some(net::Check::Invalid(message)) => Err(format!("the provider rejected the key ({message}); nothing was stored")),
@@ -157,7 +157,7 @@ fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: 
         println!("note: ${} is set and overrides this file", provider.key_env());
     }
     let Some(result) = result else {
-        println!("not checked: the gate stays off until `ways agent key check` passes");
+        println!("not checked: the agent checks it on first use, and gates only once it passes");
         return Ok(ExitCode::SUCCESS);
     };
     println!("check: {result}");
@@ -209,7 +209,8 @@ fn key_status() -> Result<ExitCode> {
     for provider in Provider::ALL {
         match keys::read(provider) {
             Ok(Some((key, source))) => {
-                println!("{provider}: {} from {source}, {}", keys::tail(&key), check_note(provider, &source));
+                let model = engine_model(provider)?;
+                println!("{provider}: {} from {source}, {}", keys::tail(&key), check_note(provider, &source, &model));
                 warn_exposure(&source);
             }
             Ok(None) => println!("{provider}: no key"),
@@ -219,10 +220,10 @@ fn key_status() -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// What the last check found, if it still describes this key.
-fn check_note(provider: Provider, source: &keys::Source) -> String {
+/// What the last check found, if it still describes this key and model.
+fn check_note(provider: Provider, source: &keys::Source, model: &str) -> String {
     match keys::last_check(provider) {
-        Some(r) if r.describes(source) => format!("checked {} ({} min ago)", r.result, r.age_s() / 60),
+        Some(r) if r.describes(source, model) => format!("checked {} ({} min ago)", r.result, r.age_s() / 60),
         _ => "not checked since it was stored; run `ways agent key check`".to_string(),
     }
 }
@@ -368,7 +369,14 @@ fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
     // the user defined keeps the model it names.
     let shipped_model = profile::shipped().get(name).map(|p| p.model.clone());
     match (&shipped_model, model) {
-        (Some(tuned), m) => user.profiles.entry(name.to_string()).or_default().model = m.filter(|m| m != tuned),
+        (Some(tuned), m) => {
+            let patch = user.profiles.entry(name.to_string()).or_default();
+            if m.is_none() {
+                // Back to the shipped profile: its provider and its model.
+                patch.provider = None;
+            }
+            patch.model = m.filter(|m| m != tuned);
+        }
         (None, Some(m)) => user.profiles.entry(name.to_string()).or_default().model = Some(m),
         (None, None) => {}
     }
@@ -381,7 +389,7 @@ fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
         keys::record_check(p.provider, &keys::CheckRecord::now(r.record_word(), &p.model, source));
     }
     if let Some(net::Check::ModelUnavailable(model)) = &result {
-        bail!("{} does not serve {model} to this key; the engine was not changed", p.provider);
+        bail!("{} does not offer model {model}; the engine was not changed", p.provider);
     }
     user.save(&path)?;
     println!("engine: {name} ({} {}), mode {}", p.provider, p.model, resolved.mode.as_str());
@@ -436,7 +444,7 @@ fn show_config() -> Result<ExitCode> {
     println!("  context: last {} turn(s), {} chars each  concurrency {}", p.turns, p.max_turn_chars, p.concurrency);
     match keys::read(p.provider)? {
         Some((key, source)) => {
-            println!("  key {} from {source}, {}", keys::tail(&key), check_note(p.provider, &source));
+            println!("  key {} from {source}, {}", keys::tail(&key), check_note(p.provider, &source, &p.model));
             warn_exposure(&source);
         }
         None => println!("  no {} key: the gate fails open until one is added", p.provider),

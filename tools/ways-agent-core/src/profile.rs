@@ -149,9 +149,8 @@ impl Profile {
 /// `anthropic/claude-haiku-4.5`, `…:batch`. It goes into request paths, so
 /// nothing else is allowed.
 pub fn valid_model_id(model: &str) -> bool {
-    !model.is_empty()
-        && !model.contains("..")
-        && !model.starts_with('/')
+    model.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && model.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
         && model.chars().all(|c| c.is_ascii_alphanumeric() || "._:/-".contains(c))
 }
 
@@ -385,7 +384,7 @@ mod tests {
     fn changing_provider_needs_a_model_and_ids_are_checked() {
         let user: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    provider: openrouter\n").unwrap();
         assert!(profiles(&user).is_err());
-        for bad in ["../messages", "a?b", "a#b", "/x", ""] {
+        for bad in ["../messages", "a?b", "a#b", "/x", "", ".", "a/./b", "a//b", "-x"] {
             assert!(!valid_model_id(bad), "{bad}");
         }
         for good in ["claude-haiku-4-5", "anthropic/claude-haiku-4.5", "anthropic/claude-haiku-4.5:batch"] {
