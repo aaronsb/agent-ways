@@ -351,8 +351,10 @@ fn ways_dir_without_output_warns_about_canonical() {
 #[test]
 fn user_way_shadows_core_way() {
     let env = Env::new("shadow");
-    // core ways at ~/.claude/hooks/ways (the default core root).
-    let core = env.home.join(".claude/hooks/ways");
+    // core ways at $XDG_DATA_HOME/agent-ways/hooks/ways (the default core root:
+    // the app itself, which exists before the ~/.claude projection does).
+    let xdg_data = env.home.join(".local/share");
+    let core = xdg_data.join("agent-ways/hooks/ways");
     Env::write_way(&core, "meta/foo", "CORE foo about deployment", "deploy ci release");
     Env::write_way(&core, "meta/bar", "core bar about migrations", "migrate schema sql");
     // user ways at $XDG_CONFIG/agent-ways/ways — foo shadows core foo, baz is unique.
@@ -362,6 +364,7 @@ fn user_way_shadows_core_way() {
 
     let mut cmd = Command::new(ways_bin());
     env.apply(&mut cmd);
+    cmd.env("XDG_DATA_HOME", &xdg_data);
     assert_corpus_ok(cmd.args(["corpus"]), "shadow");
 
     let ids = corpus_ids(&env.corpus_jsonl());
