@@ -124,7 +124,9 @@ setup: ways ways-audit attend attend-chat
 	@echo "Generating corpus..."
 	@# A failed embedding pass keeps the install going like a missing engine
 	@# does above: ways fall back to keyword matching until `ways corpus` works.
-	@$(WAYS_BIN) corpus --quiet || echo "  ⚠ Corpus built without embeddings (see above); keyword ways still work."
+	@# --ways-dir: the shipped ways, read from the app; the ~/.claude projection
+	@# does not exist yet on a fresh install.
+	@$(WAYS_BIN) corpus --quiet --ways-dir "$(CURDIR)/hooks/ways" || echo "  ⚠ Corpus built without embeddings (see above); keyword ways still work."
 
 # Idempotent linking of the suite binaries onto PATH. Only links what exists in
 # bin/, so it is safe to run before every binary is built and safe to re-run.

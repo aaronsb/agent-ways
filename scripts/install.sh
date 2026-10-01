@@ -237,7 +237,11 @@ PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 # acquired" — `ways status` reports Engine: embedding only when it truly works.
 embedding_engine_ok() {
   [[ -x "$APP_DIR/bin/ways" ]] || return 1
-  "$APP_DIR/bin/ways" status 2>/dev/null | grep -qiE '^Engine:[[:space:]]*embedding'
+  # Capture first: `grep -q` stops reading at its match, and `ways status`
+  # writing on into the closed pipe aborts, which pipefail reports as failure.
+  local status
+  status="$("$APP_DIR/bin/ways" status 2>/dev/null)" || true
+  grep -qiE '^Engine:[[:space:]]*embedding' <<<"$status"
 }
 
 # ADR-146 recovery card: shown when the projection is up but semantic matching is
@@ -367,6 +371,10 @@ echo ""
 echo -e "Building binaries + embedding model (${CYAN}make setup${RESET})..."
 echo -e "${DIM}(downloads ~21MB model + pre-built binary on first run)${RESET}"
 echo ""
+# The engine cache falls back to a pre-1.0 claude-ways dir while agent-ways does
+# not exist yet. Create it first, so the Makefile and the binary resolve the
+# same dir even on a machine with leftover legacy caches.
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user"
 make -C "$APP_DIR" setup || {
   echo ""
   echo -e "${YELLOW}Build had issues.${RESET} Ways will fall back to pattern/keyword matching."

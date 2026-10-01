@@ -30,10 +30,11 @@ pub fn run(
         }
     };
 
-    let global_dir = ways_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
+    // The shipped ways: the projection the scanner reads, or the app itself
+    // before the projection exists (a fresh install builds the corpus first).
+    let projected = home_dir().join(".claude/hooks/ways");
+    let default_core = if projected.is_dir() { projected } else { crate::paths::core_ways_root() };
+    let global_dir = ways_dir.as_ref().map(PathBuf::from).unwrap_or_else(|| default_core.clone());
 
     // The engine dir holds the way-embed binary + GGUF models — always canonical.
     let engine_dir = crate::paths::corpus_dir();
@@ -46,7 +47,12 @@ pub fn run(
 
     // Bug-C guard: an ad-hoc --ways-dir build that lands on the canonical corpus
     // re-embeds and wipes the global + project ways. Steer it to --output.
-    if ways_dir.is_some() && output_dir.is_none() && out_dir == engine_dir {
+    // Naming the shipped ways themselves, as setup does, is a canonical build.
+    let names_shipped = |d: &PathBuf| {
+        let same = |a: &Path, b: &Path| a.canonicalize().ok().zip(b.canonicalize().ok()).is_some_and(|(a, b)| a == b);
+        same(d, &default_core) || same(d, &crate::paths::core_ways_root())
+    };
+    if ways_dir.is_some() && output_dir.is_none() && out_dir == engine_dir && !names_shipped(&global_dir) {
         eprintln!(
             "[ways corpus] WARNING: --ways-dir regenerates the canonical corpus at {},",
             out_dir.display()

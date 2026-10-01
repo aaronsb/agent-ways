@@ -90,7 +90,7 @@ model-upstream:
 setup: setup-binary
 	@[ -f "$(MODEL_EN)" ] || bash "$(SRCDIR)download-model.sh" "$(MODEL_DIR)"
 	@echo "Regenerating corpus with embeddings..."
-	../../bin/ways corpus --quiet
+	../../bin/ways corpus --quiet --ways-dir ../../hooks/ways
 	@echo ""
 	@echo "Setup complete. Running verification..."
 	bash "$(SRCDIR)test-embedding.sh"
