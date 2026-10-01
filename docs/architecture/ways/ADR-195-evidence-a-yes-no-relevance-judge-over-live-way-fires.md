@@ -91,3 +91,28 @@ With about 4,000 characters of context and the session gist, set 1 goes from 0.4
 | Local reranker, 0.002 | 0.04 | 0.46 |
 
 By lane, Haiku's kappa was 0.31 on the tool lane (159 injections, 23 relevant) and −0.02 on the prompt lane (29 injections, 4 relevant). With a trigger excerpt as its only context, Haiku agreed with careful labels well below the ceiling, and on the small prompt-lane sample no better than chance. The gate sends the conversation's turns, the input measured on sets 1 and 2; set 3 says the excerpt alone is not enough, and the live `way_judged` events are the measure of the gate as deployed.
+
+## Addendum, 2026-10-01: request variants and latency
+
+Appended after acceptance; nothing above is changed. Measured against the deployed gate (ways 1.25.0, ways-agent 0.1.0, Haiku 4.5) and the same private labels. Scripts: `docs/research/yesno-relevance-gate/scripts/eval/` (`gate_bench.py`, `latency_probe.py`, `score_variants.py`, `analyze_variants.py`).
+
+**Latency follows candidate count.** Sent directly with the deployed request and no deadline, a call took 0.76 s with one candidate, 1.3 s with 6, 1.8 s with 10, 2.4 s with 15 and 2.5 s with 20, about 0.6 s plus 0.1 s per candidate. Output tokens grow with each candidate (55 at one, 435 at 20); input size barely matters. Through the hook, every deadline fallback in three runs (1, 4 and 12 prompts in parallel) was a prompt with 10 or more candidates. At 12 in parallel, above the 8-slot cap, no request fell back for a busy slot, and judge p50 moved from 1.2 s to 1.3 s. The hook adds about 65 ms to the judge call.
+
+**Verdicts depend on the candidate set.** At temperature 0, five repeats of one set returned the same verdicts. The same way under the same prompt scored differently in different sets: `data/migrations/numbering` for "write a database migration that adds a nullable column" scored 0.15 to 0.25 beside `data` and `data/migrations`, 0.85 beside `data` alone, and 0.15 alone.
+
+**Request variants.** Four requests scored the same 397 units in 238 prompt groups, one call per group: sets 1 and 2 with the last turn, and set 3 with its trigger excerpt. Intervals are a paired bootstrap over prompt groups.
+
+| Variant | AUC | ΔAUC, 95% CI | Precision at 0.3 | Recall at 0.3 | p50 / p95 | Output tokens per candidate |
+|---|---|---|---|---|---|---|
+| Deployed: `relevant` + `confidence` | 0.920 | | 0.56 | 0.89 | 0.82 / 1.27 s | 46.6 |
+| `p_relevant` alone | 0.925 | −0.015 to +0.026 | 0.54 | 0.95 | 0.80 / 1.38 s | 43.6 |
+| Described fields in order: subject, match, relevant, confidence | 0.914 | −0.033 to +0.019 | 0.59 | 0.83 | 1.07 / 2.06 s | 65.2 |
+| Way catalog in a cached system prompt, fixed 40-id schema | 0.927 | −0.023 to +0.033 | 0.71 | 0.89 | 0.91 / 1.32 s | 46.6 |
+
+No variant ranks better than the deployed request. Scores sit near 0 or 1, so precision barely moves between thresholds 0.3 and 0.7, and the yes or no decides the gate.
+
+- The catalog cut ways passed wrongly from 68 to 35 (precision +0.09 to +0.22) with recall unchanged. It read 7,926 cached tokens a call. Haiku 4.5 caches only a prefix of 4,096 tokens or more, so the deployed request, at about 1,000 tokens with a schema that changes with candidate count, cannot be cached.
+- The described fields lost recall (−0.10 to −0.01) and put p95 past the 2 s deadline. Their `match` field said `none` for 167 units, 165 of them labelled not relevant.
+- `p_relevant` alone saved 3 output tokens a candidate; the JSON keys and ids dominate the answer.
+
+The operator declined the catalog: halving wrong passes is not worth about 40% more input tokens and 90 ms a call. The deployed request stands. The cost the gate carries is fallbacks on prompts with many candidates.
