@@ -214,7 +214,7 @@ print_migration_steps() {
 link_path_binaries() {
   mkdir -p "$XDG_BIN"
   local b
-  for b in ways ways-audit ways-mcp attend attend-chat; do
+  for b in ways ways-audit ways-mcp ways-agent attend attend-chat; do
     if [[ -e "$APP_DIR/bin/$b" ]]; then
       ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
     fi
@@ -401,6 +401,12 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   # ADR-146 verify: the projection is up, but if semantic matching didn't come
   # up (no prebuilt way-embed for this platform / toolchain missing), guide recovery.
   embedding_engine_ok || print_recovery_card
+  # Optional relevance gate: a hint only. Never prompt; the installer runs from a pipe.
+  if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] \
+     && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/anthropic" ] && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/openrouter" ]; then
+    echo -e "  Optional: turn on the relevance gate (Claude Haiku judges each matched way) with ${CYAN}ways agent key add --provider anthropic${RESET}"
+    echo ""
+  fi
 else
   # No binary → don't create an empty ~/.claude. The app is staged; finish by hand.
   echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"
