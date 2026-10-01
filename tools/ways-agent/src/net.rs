@@ -214,7 +214,7 @@ pub fn judge(
                     "name": judge::TOOL_NAME,
                     "description": judge::TOOL_DESCRIPTION,
                     "strict": true,
-                    "input_schema": judge::tool_schema(),
+                    "input_schema": judge::tool_schema(n),
                 }],
                 "tool_choice": {"type": "tool", "name": judge::TOOL_NAME},
                 "messages": [{"role": "user", "content": prompt}],
@@ -233,7 +233,7 @@ pub fn judge(
                 "tools": [{"type": "function", "function": {
                     "name": judge::TOOL_NAME,
                     "description": judge::TOOL_DESCRIPTION,
-                    "parameters": judge::tool_schema(),
+                    "parameters": judge::tool_schema(n),
                 }}],
                 "tool_choice": {"type": "function", "function": {"name": judge::TOOL_NAME}},
             }),
@@ -246,7 +246,9 @@ pub fn judge(
     };
     let mut resp = req.send_json(&body).map_err(transport_reason)?;
     let status = resp.status().as_u16();
-    let reply: Value = resp.body_mut().read_json().map_err(transport_reason)?;
+    let text = resp.body_mut().read_to_string().map_err(transport_reason)?;
+    // Status first: an HTML error page from a proxy is still a provider error.
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status != 200 {
         return Err(format!("provider_{status}: {}", error_message(&reply)));
     }

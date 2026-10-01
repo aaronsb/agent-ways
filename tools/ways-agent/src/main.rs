@@ -172,9 +172,10 @@ fn agent_status(start: bool) -> Result<ExitCode> {
         _ => println!("gate off: no engine named and no key found"),
     }
     let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
+    let cap = if status.concurrency == 0 { "—".to_string() } else { status.concurrency.to_string() };
     println!(
-        "requests {}, judged {}, in flight {}/{}, latency p50 {} p95 {}",
-        status.requests, status.judged, status.in_flight, status.concurrency, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
+        "requests {}, judged {}, in flight {}/{cap}, latency p50 {} p95 {}",
+        status.requests, status.judged, status.in_flight, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
     );
     if !status.fallbacks.is_empty() {
         let list: Vec<String> = status.fallbacks.iter().map(|(k, v)| format!("{k} {v}")).collect();
