@@ -315,47 +315,41 @@ fn surface_snippet(surface: &str) -> String {
     format!("{head}…")
 }
 
-/// Like [`way`], but records the embedding score that caused a semantic fire
-/// onto the `way_fired` event (ADR-134 task D telemetry). `fire_score` is
-/// `Some` only for embedding-channel fires from the in-process scan path;
-/// keyword/state/CLI fires pass `None` and log no score (they have none). The
-/// firing model is already implicit in `trigger` (`semantic:embedding:en|multi`).
-///
-/// `surface` is the noise-stripped surface the matcher scored (the `reduce_for_embed`
-/// output common to both the late-interaction and single-vector paths). It is logged
-/// — bounded by [`surface_snippet`] — only alongside a `fire_score`, i.e. on semantic
-/// fires, giving the read-side precision instrument a judgeable record of what fired
-/// each way without re-embedding history. Keyword fires already carry `matched_span`.
-pub fn way_scored(
-    id: &str,
-    session_id: &str,
-    trigger: &str,
-    fire_score: Option<f64>,
-    matched_span: Option<&str>,
-    surface: Option<&str>,
-    mut budget: Option<&mut ContextBudget>,
-) -> Result<String> {
+/// What the show path resolves before it decides whether a way may fire.
+struct Fireable {
+    project_dir: String,
+    domain: String,
+    scope: String,
+    way_file: std::path::PathBuf,
+    is_project_local: bool,
+    content: String,
+    firing: &'static FiringContext,
+    curve: sensor_trait::Curve,
+}
+
+/// Resolves a way for firing: the disable switches, its file, its scope and
+/// its refire curve. `None` when it is disabled, missing or out of scope.
+fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
-    let domain = id.split('/').next().unwrap_or(id);
-    if session::domain_disabled(domain) || session::way_disabled(id) {
-        return Ok(String::new());
+    let domain = id.split('/').next().unwrap_or(id).to_string();
+    if session::domain_disabled(&domain) || session::way_disabled(id) {
+        return Ok(None);
     }
 
     // Scope check
     let scope = session::detect_scope(session_id);
-    let (way_file, is_project_local) = match session::resolve_way_file(id, &project_dir) {
-        Some(r) => r,
-        None => return Ok(String::new()),
+    let Some((way_file, is_project_local)) = session::resolve_way_file(id, &project_dir) else {
+        return Ok(None);
     };
 
     // Read frontmatter for scope field
     let content = std::fs::read_to_string(&way_file)?;
     let scope_field = extract_field(&content, "scope").unwrap_or_default();
     if !session::scope_matches(&scope_field, &scope) {
-        return Ok(String::new());
+        return Ok(None);
     }
 
     // Session firing gate: consult the engine with this way's resolved curve.
@@ -389,13 +383,53 @@ pub fn way_scored(
     // per process and shared by every way this invocation fires.
     let fm = frontmatter::parse(&way_file)?;
     let firing = firing_context(session_id, &project_dir);
-    let window = firing.window;
-    let curve = fm.resolved_curve(window).ok_or_else(|| {
+    let curve = fm.resolved_curve(firing.window).ok_or_else(|| {
         anyhow::anyhow!(
             "way {} is missing a `refire:` field in its frontmatter (ADR-126)",
             id
         )
     })?;
+    Ok(Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }))
+}
+
+/// Whether [`way_scored`] would show this way now, budget aside: not disabled,
+/// in scope, and allowed by its refire curve. Read-only. The relevance gate
+/// asks it so it judges only ways that would reach the agent (ADR-196 §1).
+pub(crate) fn would_fire(id: &str, session_id: &str) -> bool {
+    match fireable(id, session_id) {
+        Ok(Some(f)) => {
+            let tick = session::get_token_position(session_id);
+            session::way_fire_outcome(id, session_id, &f.curve, tick).outcome.is_allowed()
+        }
+        _ => false,
+    }
+}
+
+/// Like [`way`], but records the embedding score that caused a semantic fire
+/// onto the `way_fired` event (ADR-134 task D telemetry). `fire_score` is
+/// `Some` only for embedding-channel fires from the in-process scan path;
+/// keyword/state/CLI fires pass `None` and log no score (they have none). The
+/// firing model is already implicit in `trigger` (`semantic:embedding:en|multi`).
+///
+/// `surface` is the noise-stripped surface the matcher scored (the `reduce_for_embed`
+/// output common to both the late-interaction and single-vector paths). It is logged
+/// — bounded by [`surface_snippet`] — only alongside a `fire_score`, i.e. on semantic
+/// fires, giving the read-side precision instrument a judgeable record of what fired
+/// each way without re-embedding history. Keyword fires already carry `matched_span`.
+pub fn way_scored(
+    id: &str,
+    session_id: &str,
+    trigger: &str,
+    fire_score: Option<f64>,
+    matched_span: Option<&str>,
+    surface: Option<&str>,
+    mut budget: Option<&mut ContextBudget>,
+) -> Result<String> {
+    let Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }) =
+        fireable(id, session_id)?
+    else {
+        return Ok(String::new());
+    };
     // One transcript read per fire: the same tick feeds the fast-path decision,
     // the re-check under the lock, the recorded fire, and the stamps below.
     let token_pos = session::get_token_position(session_id);
@@ -407,7 +441,7 @@ pub fn way_scored(
         {
             return;
         }
-        log_way_suppressed("way", id, domain, trigger, why, &scope, &project_dir, session_id);
+        log_way_suppressed("way", id, &domain, trigger, why, &scope, &project_dir, session_id);
     };
 
     // Fast path, unlocked: most suppressed ways stop here without the lock.

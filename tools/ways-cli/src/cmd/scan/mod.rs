@@ -4,6 +4,7 @@
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
 pub(crate) mod candidates;
+mod gate;
 mod late_interaction;
 mod lookbehind;
 mod order;
@@ -400,10 +401,36 @@ fn scan_prompt_surface(
     }
 
     order_hits(&mut hits);
+
+    // ADR-196: the relevance gate judges the hits that would reach the agent
+    // (those the refire curve still holds back are not sent) and returns the
+    // ones it blocks. A blocked way is skipped before its fire is recorded, so
+    // it keeps its refire budget.
+    let by_id: std::collections::HashMap<&str, &WayCandidate> =
+        candidates.iter().map(|w| (w.id.as_str(), w)).collect();
+    let pending: Vec<gate::Pending<'_>> = hits
+        .iter()
+        .filter_map(|hit| by_id.get(hit.id.as_str()))
+        .filter(|way| crate::cmd::show::would_fire(&way.id, session_id))
+        .map(|way| gate::Pending { id: &way.id, description: &way.description, pattern_strict: way.pattern_strict })
+        .collect();
+    let blocked = gate::apply(
+        &pending,
+        query,
+        response_context,
+        &gate::LogContext {
+            session_id,
+            project_dir: &project_dir,
+            scope: &scope,
+            hook_event,
+            sink: &session::log_event,
+        },
+    );
+
     let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
         let (channel, matched_span, needs_parent) = &hit.payload;
-        if *needs_parent && !has_shown_ancestor(&hit.id, &shown) {
+        if blocked.contains(&hit.id) || (*needs_parent && !has_shown_ancestor(&hit.id, &shown)) {
             continue;
         }
         let out = capture_show_way(
