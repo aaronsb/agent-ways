@@ -479,9 +479,7 @@ fn flex_string(v: &Value) -> Option<String> {
 /// The YAML frontmatter block of a way file — the text between the first two
 /// `---` fences. `None` if the file doesn't open with a fence.
 fn frontmatter_block(content: &str) -> Option<String> {
-    let rest = content.strip_prefix("---\n")?;
-    let end = rest.find("\n---")?;
-    Some(rest[..end].to_string())
+    crate::frontmatter::split(content).map(|(yaml, _)| yaml)
 }
 
 // ── Corpus resolver ───────────────────────────────────────────
@@ -620,6 +618,12 @@ scope: subagent
         let fm = frontmatter_block(doc).unwrap();
         assert_eq!(fm, "pattern: x\nscope: y");
         assert!(frontmatter_block("no frontmatter here").is_none());
+    }
+
+    #[test]
+    fn frontmatter_block_reads_crlf() {
+        let doc = "---\r\npattern: x\r\nscope: y\r\n---\r\n# body\r\n";
+        assert_eq!(frontmatter_block(doc).unwrap(), "pattern: x\nscope: y");
     }
 
     #[test]

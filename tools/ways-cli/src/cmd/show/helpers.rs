@@ -27,37 +27,22 @@ pub(crate) fn extract_field(content: &str, name: &str) -> Option<String> {
     None
 }
 
-/// Return markdown body (everything after YAML frontmatter).
+/// The markdown body after the frontmatter (`ways_core::frontmatter::split`),
+/// `\n`-joined without a trailing newline. Empty when there is no frontmatter.
 pub(crate) fn body_text(content: &str) -> String {
-    let mut fm_count = 0;
-    let mut lines = Vec::new();
-    for line in content.lines() {
-        if line == "---" {
-            fm_count += 1;
-            continue;
-        }
-        if fm_count >= 2 {
-            lines.push(line);
-        }
-    }
-    lines.join("\n")
+    body_lines(content).join("\n")
+}
+
+fn body_lines(content: &str) -> Vec<&str> {
+    ways_core::frontmatter::split(content).map_or_else(Vec::new, |(_, body)| body.lines().collect())
 }
 
 /// Return check file sections (anchor and/or check).
 pub(crate) fn check_sections_text(content: &str, include_anchor: bool) -> String {
-    let mut fm_count = 0;
     let mut section = String::new();
     let mut lines = Vec::new();
 
-    for line in content.lines() {
-        if line == "---" {
-            fm_count += 1;
-            continue;
-        }
-        if fm_count < 2 {
-            continue;
-        }
-
+    for line in body_lines(content) {
         if line.starts_with("## anchor") {
             section = "anchor".to_string();
             continue;
@@ -190,5 +175,23 @@ mod tests {
         let content = "---\ntrigger:\n  type: attend\n---\nBody.";
         let signals = extract_attend_signals(content);
         assert!(signals.is_empty());
+    }
+
+    #[test]
+    fn body_text_keeps_horizontal_rules() {
+        let content = "---\ndescription: d\n---\n# Way\n\nabove\n\n---\n\nbelow\n";
+        assert_eq!(body_text(content), "# Way\n\nabove\n\n---\n\nbelow");
+    }
+
+    #[test]
+    fn body_text_reads_crlf_frontmatter() {
+        assert_eq!(body_text("---\r\ndescription: d\r\n---\r\n# Way\r\n"), "# Way");
+    }
+
+    #[test]
+    fn check_sections_keep_horizontal_rules() {
+        let content = "---\ndescription: d\n---\n## anchor\nA\n## check\nfirst\n---\nsecond\n";
+        assert_eq!(check_sections_text(content, false), "first\n---\nsecond");
+        assert_eq!(check_sections_text(content, true), "A\nfirst\n---\nsecond");
     }
 }
