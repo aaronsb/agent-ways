@@ -3,7 +3,7 @@ name = "ways"
 version = "1.27.0"
 edition = "2021"
 description = "Unified CLI for ways — knowledge guidance for Claude Code"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 
 [[bin]]
 name = "ways"

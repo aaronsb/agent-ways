@@ -3,7 +3,7 @@ name = "sensor-keepwarm"
 version = "0.1.0"
 edition = "2021"
 description = "keeps the prompt cache warm with one wake per idle stretch"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 
 [dependencies]
 sensor-trait = { path = "../sensor-trait" }

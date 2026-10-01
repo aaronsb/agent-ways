@@ -3,7 +3,7 @@ name = "ways-agent-core"
 version = "0.1.0"
 edition = "2021"
 description = "What the ways agent and its clients share: engine profiles and the key store (ADR-196, ADR-502). No network code, so the hook links no TLS."
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 
 [dependencies]
 anyhow = "1"

@@ -3,7 +3,7 @@ name = "ways-mcp"
 version = "0.1.0"
 edition = "2021"
 description = "The agent-ways MCP server: one stdio server hosting attend, keepalive and later modules (ADR-501)"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 
 [[bin]]
 name = "ways-mcp"
