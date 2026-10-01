@@ -123,10 +123,10 @@ pub(super) fn handle_timeline_key(player: &mut Player, key: KeyEvent) {
                 player.speed_idx += 1;
             }
         }
-        KeyEvent { code: KeyCode::Char('-'), .. } | KeyEvent { code: KeyCode::Char('_'), .. } => {
-            if player.speed_idx > 0 {
-                player.speed_idx -= 1;
-            }
+        KeyEvent { code: KeyCode::Char('-'), .. } | KeyEvent { code: KeyCode::Char('_'), .. }
+            if player.speed_idx > 0 =>
+        {
+            player.speed_idx -= 1;
         }
         _ => {}
     }

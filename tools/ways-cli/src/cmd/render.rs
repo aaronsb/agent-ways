@@ -297,11 +297,7 @@ pub fn write_token_timeline<W: WayRow>(
     let layout = Layout::detect();
     let bar_width = layout.bar_width;
 
-    let pct = if context_window_k > 0 {
-        (current_tokens_k * 100 / context_window_k).min(100)
-    } else {
-        0
-    };
+    let pct = (current_tokens_k * 100).checked_div(context_window_k).unwrap_or(0).min(100);
     let filled = (pct as usize * bar_width / 100).min(bar_width);
 
     struct RdPoint {
@@ -320,12 +316,10 @@ pub fn write_token_timeline<W: WayRow>(
         let redisclose_at_k = fire_pos_k + threshold_k;
         let past = current_tokens_k >= redisclose_at_k;
 
-        let full_bar_pos = if context_window_k > 0 {
-            ((redisclose_at_k * bar_width as u64) / context_window_k) as usize
-        } else {
-            0
-        }
-        .min(bar_width - 1);
+        let full_bar_pos = ((redisclose_at_k * bar_width as u64)
+            .checked_div(context_window_k)
+            .unwrap_or(0) as usize)
+            .min(bar_width - 1);
 
         let ci = cluster_of(full_bar_pos, unique_pos);
 
@@ -504,11 +498,7 @@ pub fn predict_next<W: WayRow>(
     let threshold_k = w.refire_threshold_k();
     let token_pos_k = w.token_pos() / 1000;
     let token_distance_k = current_tokens_k.saturating_sub(token_pos_k);
-    let token_pct = if threshold_k > 0 {
-        token_distance_k * 100 / threshold_k
-    } else {
-        0
-    };
+    let token_pct = (token_distance_k * 100).checked_div(threshold_k).unwrap_or(0);
 
     if token_pct >= 100 {
         return "\x1b[0;32m● now\x1b[0m".to_string();
