@@ -141,9 +141,9 @@ The spike only simulates the run: each step goes pending, running, done on a sho
 
 Each tab's tree starts at its root's children, since the tab already names the root. The tab badge and every group badge count value changes plus queued actions under them. The root's own actions, such as `ways reconcile` on the install tab, open from `a` on any row that has none of its own.
 
-## CLI for agents, TUI for people
+## The TUI for exploring, the CLI for knowing
 
-The TUI is where a person browses, edits, reviews and applies settings. The CLI serves integrations, agents and anyone who already knows the key: it assumes the caller wants the thing done and says nothing more.
+The TUI is where a person browses, edits, reviews and applies settings. The CLI serves agents, integrations, and people who know what they are changing: it assumes the caller wants the thing done and says nothing more.
 
 - **One help registry.** Each setting carries its doc line, type, range, default and the file it writes; each command carries a one-line summary and a longer body. The TUI's detail pane and help overlay and the CLI's `--help` render from the same registry, so the long help is the TUI's text replayed.
 - **Terse by default.** `ways settings get <key>` prints the value; `list [prefix]` prints `key=value` lines; `set` and `unset` print nothing on success and exit 0. `--json` adds source, default and the file written. The top-level `ways --help` lists one line per command.
