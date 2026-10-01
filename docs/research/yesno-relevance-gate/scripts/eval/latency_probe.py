@@ -81,7 +81,10 @@ def call(b, key):
         with urllib.request.urlopen(req, timeout=30) as r:
             reply = json.load(r)
     except urllib.error.HTTPError as e:
-        msg = json.load(e).get("error", {}).get("message", "?")
+        try:
+            msg = json.load(e).get("error", {}).get("message", "?")
+        except ValueError:
+            msg = "non-JSON error body"
         raise SystemExit(f"provider {e.code}: {msg}")
     ms = (time.monotonic() - t0) * 1000
     tu = next(c for c in reply["content"] if c["type"] == "tool_use")["input"]["judgements"]
@@ -158,6 +161,7 @@ def main():
             rows.append({"variant": a.variant, "set": name, "p": [r[2] for r in res], "ms": [r[0] for r in res]})
 
     out = os.path.join(os.path.expanduser('~/.local/state/agent-ways/probes/yesno-gate/eval'), f"latency_probe-{a.mode}-{a.variant}.json")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
         json.dump(rows, f)
 

@@ -108,6 +108,8 @@ def main():
     def run(variant, gi, k, members):
         guid = "\n\n".join(f'<guidance id="g{i+1}">\n{m["doc"].replace("<", "‹")}\n</guidance>'
                            for i, m in enumerate(members))
+        # The deployed request also turns `<` into `‹` in the conversation; the
+        # 2026-10-01 run did not (15 of 93 set-3 groups), equally for every variant.
         prompt = f"{INSTR}\n\n{guid}\n\n<conversation>\n{k[1]}\n</conversation>"
         per = {'compact': 24, 'structured': 72}.get(variant, 48)
         t0 = time.perf_counter(); err = None; js = []; usage = {}

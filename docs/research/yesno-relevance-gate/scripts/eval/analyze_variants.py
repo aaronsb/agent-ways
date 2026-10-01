@@ -15,6 +15,7 @@ by = collections.defaultdict(dict)           # variant -> (set, id) -> row
 for r in rows:
     by[r['variant']][(r['set'], r['id'])] = r
 variants = [v for v in ('base', 'compact', 'structured', 'catalog') if v in by]
+assert 'base' in variants, 'score the base variant first: every delta is against it'
 SUBSETS = {'s1+s2 (T1)': ('s1', 's2'), 's3 real fires (EX)': ('s3',), 'all': ('s1', 's2', 's3')}
 
 
@@ -36,32 +37,51 @@ def ci(xs):
     return xs[int(.025 * len(xs))], xs[int(.975 * len(xs)) - 1]
 
 
+def prec_rec(v, keys, t=THRESHOLD):
+    passed = [k for k in keys if by[v][k]['p_yes'] >= t]
+    tp = sum(labels[k[1]] for k in passed)
+    npos = sum(labels[k[1]] for k in keys)
+    return (tp / len(passed) if passed else float('nan'), tp / npos if npos else float('nan'), len(passed) - tp)
+
+
 random.seed(7)
 for name, sets in SUBSETS.items():
-    keys = set.intersection(*(set(scored(v, sets)) for v in variants))
+    # Sorted, so the seeded bootstrap draws the same groups in every process.
+    keys = sorted(set.intersection(*(set(scored(v, sets)) for v in variants)))
     groups = collections.defaultdict(list)
     for k in keys:
         groups[by['base'][k]['gkey']].append(k)
-    gl = list(groups.values())
+    gl = [groups[g] for g in sorted(groups)]
     npos = sum(labels[k[1]] for k in keys)
     print(f"\n## {name}: {len(keys)} units ({npos} relevant), {len(gl)} prompt groups")
     print(f"{'variant':11} {'AUC':>6} {'95% CI':>15} {'ΔAUC vs base [95% CI]':>28} {'prec':>5} {'rec':>5} {'block%':>6}")
     boots = {v: [] for v in variants}
+    prb = {v: [] for v in variants}
     for _ in range(2000):
         sample = [k for g in random.choices(gl, k=len(gl)) for k in g]
         for v in variants:
             boots[v].append(auc([(by[v][k]['p_yes'], labels[k[1]]) for k in sample]))
+            prb[v].append(prec_rec(v, sample))
     for v in variants:
         a = auc([(by[v][k]['p_yes'], labels[k[1]]) for k in keys])
         lo, hi = ci(boots[v])
         d = [x - y for x, y in zip(boots[v], boots['base'])]
         dlo, dhi = ci(d)
         delta = '' if v == 'base' else f"{a - auc([(by['base'][k]['p_yes'], labels[k[1]]) for k in keys]):+.3f} [{dlo:+.3f}, {dhi:+.3f}]"
-        passed = [k for k in keys if by[v][k]['p_yes'] >= THRESHOLD]
-        tp = sum(labels[k[1]] for k in passed)
-        prec = tp / len(passed) if passed else float('nan')
-        rec = tp / npos if npos else float('nan')
-        print(f"{v:11} {a:6.3f} [{lo:.3f}, {hi:.3f}] {delta:>28} {prec:5.2f} {rec:5.2f} {100 * (1 - len(passed) / len(keys)):6.1f}")
+        prec, rec, fp = prec_rec(v, keys)
+        blocked = sum(by[v][k]['p_yes'] < THRESHOLD for k in keys)
+        print(f"{v:11} {a:6.3f} [{lo:.3f}, {hi:.3f}] {delta:>28} {prec:5.2f} {rec:5.2f} {100 * blocked / len(keys):6.1f}")
+    print(f"  at {THRESHOLD}, paired against base:")
+    for v in variants[1:]:
+        dp = sorted(x[0] - y[0] for x, y in zip(prb[v], prb['base']))
+        dr = sorted(x[1] - y[1] for x, y in zip(prb[v], prb['base']))
+        a, b = prec_rec(v, keys), prec_rec('base', keys)
+        print(f"    {v:11} Δprecision {a[0] - b[0]:+.3f} [{dp[50]:+.3f}, {dp[1949]:+.3f}]  "
+              f"Δrecall {a[1] - b[1]:+.3f} [{dr[50]:+.3f}, {dr[1949]:+.3f}]  wrongly passed {b[2]} → {a[2]}")
+    print("  precision / recall by threshold:")
+    for v in variants:
+        print(f"    {v:11} " + "  ".join(f"{t}: {prec_rec(v, keys, t)[0]:.2f}/{prec_rec(v, keys, t)[1]:.2f}"
+                                       for t in (0.2, 0.3, 0.5, 0.7)))
 
 print("\n## cost and latency (one call per prompt group, 4 in parallel)")
 print(f"{'variant':11} {'calls':>5} {'err':>4} {'p50 ms':>7} {'p95 ms':>7} {'out tok/cand':>12} {'in tok':>7} {'cache_r':>8}")
