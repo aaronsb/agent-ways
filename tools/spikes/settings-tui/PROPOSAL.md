@@ -141,6 +141,20 @@ The spike only simulates the run: each step goes pending, running, done on a sho
 
 Each tab's tree starts at its root's children, since the tab already names the root. The tab badge and every group badge count value changes plus queued actions under them. The root's own actions, such as `ways reconcile` on the install tab, open from `a` on any row that has none of its own.
 
+### Helpers
+
+A job that takes several decisions gets a guided flow: a modal of three steps, `1 pick · 2 preview · 3 confirm`, with Back, Next and Cancel by key or click.
+
+The pick step is a filterable list whose rows carry a label, a detail line and a state badge, single or multi select, with an "Other…" row that takes a typed path. The preview step scrolls styled lines (kept, added, replaced, removed, refused). The confirm step lists the commands it will queue, with optional checkboxes.
+
+Finishing queues the flow's commands on the tab that launched it, so they go through that tab's review and apply like any other pending item. Cancel, or Esc on the first step, queues nothing.
+
+Activating agent-ways in Claude instances starts from the install tab, or from the hint that shows when no target is recorded. The picker offers the recorded targets, `~/.claude`, `$CLAUDE_CONFIG_DIR`, and directories under `$HOME` and `$XDG_CONFIG_HOME` named like Claude that hold `settings.json` or `projects/`, each badged active, disabled, available or not a Claude dir. The preview is the real `ways config target plan <dir>`, each root and settings entry by its verb, and a refused root in the error colour with the `--force` note. Finishing queues `ways config target add <dir>` for each pick, or `enable` for a disabled recorded target.
+
+Setting up a project starts from the ways tab. The picker offers the current directory, then projects with Claude sessions that still exist, badged `ways.yaml`, `ways/` or none. The preview lists what `ways init --project <dir>` writes and marks existing files as kept. Finishing queues `ways init --project <dir>`, with a checkbox that also queues `ways settings set ways.enabled true --project <dir>`.
+
+The Flow widget is in the generic half and knows nothing about ways, so it moves to the shared crate with `tree.rs` and `ui.rs`. An adapter supplies the candidates, the preview and the commands.
+
 ## The files are the settings; the TUI and the CLI are two ways in
 
 The config files are the source of truth. The TUI and the CLI read and write the same files through the same writer, so they are interchangeable: configure in the TUI and the file holds the result; copy a file to another machine and the CLI or TUI there reads it; inspect any copy with the CLI. The TUI suits browsing, setting and reviewing several changes at once. The CLI suits agents, integrations, and people who know what they are changing: it assumes the caller wants the thing done and says nothing more.

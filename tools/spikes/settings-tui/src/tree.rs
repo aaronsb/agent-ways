@@ -122,6 +122,10 @@ impl Node {
         self.open = true;
         self
     }
+    pub fn opened_if(mut self, open: bool) -> Self {
+        self.open |= open;
+        self
+    }
     pub fn with_actions(mut self, actions: Vec<Action>) -> Self {
         self.actions = actions;
         self
@@ -140,6 +144,10 @@ pub enum Arg {
     Text(String),
     /// Entered masked and handed to the command on stdin, never in argv.
     Secret,
+    /// A guided flow, named for the adapter that builds it. Finishing it
+    /// queues the flow's own commands, so the action's `command` is only a
+    /// description for the detail pane.
+    Flow(String),
 }
 
 /// Something a node can do that is not a value change: a named command line.
@@ -172,6 +180,7 @@ impl Action {
             Arg::None => self.command.clone(),
             Arg::Text(_) => self.command.replace("{}", &quote(text)),
             Arg::Secret => format!("{} < <stdin>", self.command),
+            Arg::Flow(_) => self.command.clone(),
         }
     }
 }

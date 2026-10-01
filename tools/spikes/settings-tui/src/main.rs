@@ -55,7 +55,7 @@ fn main() -> std::io::Result<()> {
     }));
     // Read once: SPIKE_FAIL_STEP=<n> makes the n-th apply step fail, to see the failure path.
     let fail_step = std::env::var("SPIKE_FAIL_STEP").ok().and_then(|v| v.parse().ok());
-    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots).shape(ui::theme::Shape::from_env()).fail_step(fail_step);
+    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots).shape(ui::theme::Shape::from_env()).fail_step(fail_step).helpers(ways::helpers(ways::Env::resolve(&paths, &project)));
     let result = app.run(&mut term);
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();

@@ -2,6 +2,7 @@
 //! filter, edit, run actions, review and apply. Key handling and state live here; drawing is in `render`.
 
 mod apply;
+pub mod flow;
 mod render;
 pub mod theme;
 
@@ -19,6 +20,7 @@ use ratatui::DefaultTerminal;
 
 use crate::tree::{self, Arg, Kind, Node, Queue, Queued, Row, SecretBuf};
 use apply::{Entry, Outcome, Run};
+use flow::{Flow, FlowEvent};
 
 enum Mode {
     Browse,
@@ -43,6 +45,8 @@ enum Mode {
     /// Quit was asked with items pending in any tab: go back, review, or
     /// quit and discard them all, which `confirm` asks a second time.
     Guard { confirm: bool },
+    /// A guided flow; finishing it queues its commands on the tab that launched it.
+    Flow(Box<Flow>),
 }
 
 /// The buttons of the review and the quit prompt.
@@ -55,6 +59,10 @@ enum Btn {
     Review,
     /// The quit prompt's quit-and-discard.
     Quit,
+    /// A flow's buttons: on to the next step, finish on the last, or drop it.
+    Next,
+    Finish,
+    Cancel,
 }
 
 impl Btn {
@@ -65,6 +73,8 @@ impl Btn {
             Btn::Discard | Btn::Quit => KeyCode::Char('D'),
             Btn::Back => KeyCode::Esc,
             Btn::Review => KeyCode::Char('r'),
+            Btn::Next | Btn::Finish => KeyCode::Right,
+            Btn::Cancel => KeyCode::Char('q'),
         }
     }
 }
@@ -131,7 +141,12 @@ pub struct App {
     mouse: bool,
     shape: theme::Shape,
     hits: Hits,
+    /// Builds the guided flow an action names; the adapter supplies it.
+    helpers: Option<Helpers>,
 }
+
+/// Turns the name an `Arg::Flow` carries into the flow.
+pub type Helpers = Box<dyn Fn(&str) -> Option<Flow>>;
 
 impl App {
     pub fn new(title: impl Into<String>, roots: Vec<Node>) -> Self {
@@ -152,7 +167,13 @@ impl App {
             mouse: true,
             shape: theme::Shape::ROUND,
             hits: Hits::default(),
+            helpers: None,
         }
+    }
+
+    pub fn helpers(mut self, h: impl Fn(&str) -> Option<Flow> + 'static) -> Self {
+        self.helpers = Some(Box::new(h));
+        self
     }
 
     pub fn shape(mut self, shape: theme::Shape) -> Self {
@@ -310,6 +331,37 @@ impl App {
         self.msg = tree::key(&self.roots, path);
     }
 
+    /// A flow ended: queue what it finished with, on the tab that launched it,
+    /// or drop it. Always true: a flow never ends the session.
+    fn flow_event(&mut self, ev: FlowEvent) -> bool {
+        match ev {
+            FlowEvent::Stay => {}
+            FlowEvent::Cancel => {
+                self.mode = Mode::Browse;
+                self.msg = "flow cancelled; nothing queued".into();
+            }
+            FlowEvent::Finish { key, outs } => {
+                self.mode = Mode::Browse;
+                self.msg = if outs.is_empty() { "flow finished; nothing to queue".into() } else { format!("queued {} from the flow", outs.len()) };
+                for o in outs {
+                    self.queue.push(Queued { key: key.clone(), label: o.label, command: o.command, confirm: o.confirm });
+                }
+            }
+        }
+        true
+    }
+
+    /// Open the flow an action names, launched from the node at `path`.
+    fn start_flow(&mut self, path: &[usize], name: &str) {
+        match self.helpers.as_ref().and_then(|h| h(name)) {
+            Some(mut flow) => {
+                flow.key = tree::key(&self.roots, path);
+                self.mode = Mode::Flow(Box::new(flow));
+            }
+            None => self.msg = format!("no guided flow named {name}"),
+        }
+    }
+
     /// Handle one key. False ends the session.
     fn key(&mut self, k: KeyEvent) -> bool {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
@@ -317,9 +369,20 @@ impl App {
             if matches!(&self.mode, Mode::Apply(r) if !r.finished()) || matches!(self.mode, Mode::Guard { .. }) {
                 return true;
             }
+            if matches!(self.mode, Mode::Flow(_)) {
+                return self.flow_event(FlowEvent::Cancel);
+            }
             return self.quit();
         }
         match std::mem::replace(&mut self.mode, Mode::Browse) {
+            Mode::Flow(mut flow) => {
+                let ev = flow.key(k);
+                if ev == FlowEvent::Stay {
+                    self.mode = Mode::Flow(flow);
+                } else {
+                    return self.flow_event(ev);
+                }
+            }
             Mode::Help => {}
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
@@ -573,6 +636,15 @@ impl App {
         };
         let click = m.kind == MouseEventKind::Down(MouseButton::Left);
         let press = |c| KeyEvent::new(c, KeyModifiers::NONE);
+        if let Mode::Flow(flow) = &mut self.mode {
+            let ev = match (wheel, click) {
+                (Some(k), _) => flow.key(press(k)),
+                (None, true) => flow.click(at),
+                _ => FlowEvent::Stay,
+            };
+            self.flow_event(ev);
+            return;
+        }
         match &mut self.mode {
             Mode::Browse => {
                 if let Some(k) = wheel {
@@ -727,10 +799,11 @@ impl App {
 
     /// An action was chosen: ask for its argument, or stage it at once.
     fn pick(&mut self, path: Vec<usize>, action: usize) {
-        match tree::get(&self.roots, &path).actions[action].arg {
+        match tree::get(&self.roots, &path).actions[action].arg.clone() {
             Arg::None => self.stage(&path, action, ""),
             Arg::Text(_) => self.mode = Mode::Arg { path, action, buf: String::new() },
             Arg::Secret => self.mode = Mode::Secret { path, action, buf: SecretBuf::default() },
+            Arg::Flow(name) => self.start_flow(&path, &name),
         }
     }
 
@@ -787,6 +860,9 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod flow_tests;
 
 #[cfg(test)]
 mod tests {

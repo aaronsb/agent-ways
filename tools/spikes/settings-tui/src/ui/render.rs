@@ -15,7 +15,7 @@ use super::{App, Btn, Focus, Mode};
 use crate::tree::{self, Arg, Kind, Row};
 
 /// A bordered pane in the theme: rule-coloured border, accent title.
-fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
+pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
 }
 
@@ -25,14 +25,16 @@ fn width(spans: &[Span]) -> u16 {
 
 /// Buttons on one line, each recorded as a click target. `focus` marks the
 /// one Enter would press.
-fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
+pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (b, label) in buttons {
         let (fg, bg) = match b {
             Btn::Apply => (theme::INK, theme::OK),
             Btn::Discard | Btn::Quit => (theme::INK, theme::ERR),
             Btn::Back => (theme::TEXT, theme::ACCENT_DIM),
-            Btn::Review => (theme::INK, theme::ACCENT),
+            Btn::Review | Btn::Next => (theme::INK, theme::ACCENT),
+            Btn::Finish => (theme::INK, theme::OK),
+            Btn::Cancel => (theme::TEXT, theme::RULE),
         };
         let on = focus == Some(*b);
         let seg = Seg::new(format!(" {} {label} ", if on { "›" } else { " " }), fg, bg);
@@ -58,7 +60,7 @@ fn answer_lozenges(sh: Shape, area: Rect, spans: &mut Vec<Span<'static>>, hits: 
 
 /// `text` cut in the middle with `…` to fit `room` columns, keeping the end,
 /// where a step's file name and key count sit.
-fn elide(text: &str, room: usize) -> String {
+pub(super) fn elide(text: &str, room: usize) -> String {
     let n = text.chars().count();
     if n <= room || room < 8 {
         return text.to_string();
@@ -111,6 +113,9 @@ impl App {
             self.draw_changes(f, right);
         } else if let Some(r) = rows.get(self.cursor) {
             self.draw_detail(f, right, &r.path);
+        }
+        if let Mode::Flow(flow) = &mut self.mode {
+            flow.draw(f, main, self.shape);
         }
         match &self.mode {
             Mode::Help => draw_help(f, main),
@@ -417,6 +422,7 @@ impl App {
             .map(|(i, a)| {
                 let tag = match (&a.arg, a.confirm) {
                     (Arg::Secret, _) => "  masked".to_string(),
+                    (Arg::Flow(_), _) => "  guided".to_string(),
                     (Arg::Text(p), true) => format!("  {p}, asks first"),
                     (Arg::Text(p), false) => format!("  {p}"),
                     (Arg::None, true) => "  asks first".to_string(),
@@ -503,6 +509,10 @@ impl App {
                 };
                 spans.extend(mode(label, bg));
                 spans.push(hint(text));
+            }
+            Mode::Flow(flow) => {
+                spans.extend(mode("flow", theme::ACCENT));
+                spans.push(hint(flow.hint()));
             }
             Mode::Guard { .. } => {
                 spans.extend(mode("quit", theme::WARN));
