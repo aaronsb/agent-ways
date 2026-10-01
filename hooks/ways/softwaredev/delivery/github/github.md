@@ -21,7 +21,7 @@ Every change lands through a PR, solo projects included. A PR with no reviewer i
 
 ## Review Before Merge
 
-Review after opening the PR without waiting to be asked. Review depth and whether a human reads first are the four-square decision in `delivery/merge`. At minimum dispatch a `code-reviewer` subagent; scale to a swarm for high-blast-radius changes, and gate on operator approval when the work sets direction. "Merge it" is a request for that review, so dispatch it (ADR-175). Merge strategy is a separate question and still gets asked.
+Review after opening the PR without waiting to be asked. Review depth and whether a human reads first are the four-square decision in `delivery/merge`. At minimum dispatch a `code-reviewer` subagent; scale to a swarm for high-blast-radius changes, and gate on operator approval when the work sets direction. "Merge it" is a request for that review, so dispatch it (ADR-175). Merge strategy is a separate question and still gets asked. The repository's own enforcement comes first, and a version-only release bump can skip review where nothing enforces it; see `delivery/merge`.
 
 ## Merge Strategy: Regular Merge by Default
 

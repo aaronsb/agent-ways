@@ -82,7 +82,7 @@ For multi-platform binaries, build per-platform and attach all of them to a sing
 
 ## Two-Step Release Under Branch Protection
 
-A protected `main` splits the release in two, and this is common enough to plan for. The bump — version file, lockfile, changelog — goes through a PR like any other change. Only after it merges does the tag land on `main`.
+A protected `main` splits the release in two, and this is common enough to plan for. The bump — version file, lockfile, changelog — goes through a PR. A bump limited to the version and lockfile merges on green CI without a review, unless the repository enforces one (`delivery/merge`). Only after it merges does the tag land on `main`.
 
 Tagging is then the single outward step, and CI usually takes it from there: a tag-triggered workflow builds each platform and creates the release. Check for that workflow before hand-building artifacts.
 

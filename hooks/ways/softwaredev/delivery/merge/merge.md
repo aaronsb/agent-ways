@@ -10,6 +10,17 @@ scope: agent
 
 Landing an increment is the **stable tail** of the develop loop: review → fix → merge → clean up. The **`merge` skill** runs it. The judgement this way carries is that the *review gate is not one policy* — how hard to review, and whether a human reads before merge, depend on the work.
 
+## The repository's enforcement decides first
+
+Every project sets its own review policy, and the strict ones encode it mechanically: a ruleset or protected branch that requires approvals, a CODEOWNERS file, required status checks, commit hooks. Before classifying, read what this repository enforces. That enforcement is the project's policy and it decides. The judgement below applies only where nothing enforces, and it can add review on top of a mechanism but never subtract from one. When the policy cannot be read (no forge CLI, no access, an unfamiliar host), treat review as required.
+
+| Where | What to read |
+|---|---|
+| Default branch | `git symbolic-ref --short refs/remotes/origin/HEAD` |
+| GitHub | `gh api repos/{owner}/{repo}/rules/branches/<branch>`; `gh api repos/{owner}/{repo}/branches/<branch>/protection` (a 404 means none) |
+| GitLab | `glab api projects/:id/protected_branches`; `glab api projects/:id/approval_rules` |
+| Any repository | `CODEOWNERS` at the root, `.github/`, `.gitlab/` or `docs/`; `git config core.hooksPath`; `.pre-commit-config.yaml`; `.husky/` |
+
 ## The four-square
 
 Classify the increment on two axes and pick the path:
@@ -27,6 +38,10 @@ Classify the increment on two axes and pick the path:
 When the classification is ambiguous, **surface the call** rather than silently picking a corner. Inside a `/goal` loop, bias toward the autonomous corners; outside one, ask.
 
 Whichever corner you land in, asking to merge is asking for the review this gate specifies — dispatch the reviewer rather than re-requesting permission to, and name the payoff in a clause as you do. The ambiguity worth surfacing is *which corner*, never *whether to review*. See ADR-175.
+
+## Version bumps merge on green CI
+
+A release bump PR whose diff is only the package's version line and its lockfile entry merges once CI passes, without a review. The code it releases was reviewed when it merged, and the bump adds nothing to read. A bump that carries anything else, such as a changelog entry or a fix, takes the gate like any other change. It holds only where the repository enforces no review and its policy could be read.
 
 ## Remediate before you merge
 
