@@ -71,21 +71,29 @@ enum KeyAction {
         provider: String,
         #[arg(long)]
         from_file: Option<PathBuf>,
-        /// Store without calling the provider to check the key.
+        /// Store without calling the provider to check the key. The gate
+        /// stays off until a check passes.
         #[arg(long)]
         no_check: bool,
+        /// Replace a stored key even when the provider could not be reached
+        /// to confirm the new one.
+        #[arg(long)]
+        force: bool,
     },
     /// Check stored keys with a call that costs nothing.
     Check {
         #[arg(long)]
         provider: Option<String>,
     },
-    /// Replace an existing key, then check the new one.
+    /// Replace an existing key, checking the new one first.
     Rotate {
         #[arg(long)]
         provider: String,
         #[arg(long)]
         from_file: Option<PathBuf>,
+        /// Replace even when the provider could not be reached to confirm it.
+        #[arg(long)]
+        force: bool,
     },
     /// Delete a stored key file.
     Remove {
@@ -109,8 +117,10 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Key { action } => match action {
-            KeyAction::Add { provider, from_file, no_check } => key_add(Provider::parse(&provider)?, from_file, !no_check, false),
-            KeyAction::Rotate { provider, from_file } => key_add(Provider::parse(&provider)?, from_file, true, true),
+            KeyAction::Add { provider, from_file, no_check, force } => {
+                key_add(Provider::parse(&provider)?, from_file, !no_check, false, force)
+            }
+            KeyAction::Rotate { provider, from_file, force } => key_add(Provider::parse(&provider)?, from_file, true, true, force),
             KeyAction::Check { provider } => key_check(provider.as_deref()),
             KeyAction::Remove { provider } => key_remove(Provider::parse(&provider)?),
             KeyAction::Status => key_status(),
@@ -162,9 +172,10 @@ fn agent_status(start: bool) -> Result<ExitCode> {
         _ => println!("gate off: no engine named and no key found"),
     }
     let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
+    let cap = if status.concurrency == 0 { "—".to_string() } else { status.concurrency.to_string() };
     println!(
-        "requests {}, judged {}, in flight {}/{}, latency p50 {} p95 {}",
-        status.requests, status.judged, status.in_flight, status.concurrency, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
+        "requests {}, judged {}, in flight {}/{cap}, latency p50 {} p95 {}",
+        status.requests, status.judged, status.in_flight, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
     );
     if !status.fallbacks.is_empty() {
         let list: Vec<String> = status.fallbacks.iter().map(|(k, v)| format!("{k} {v}")).collect();
@@ -175,22 +186,45 @@ fn agent_status(start: bool) -> Result<ExitCode> {
 
 // ---------------------------------------------------------------- keys
 
-fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: bool) -> Result<ExitCode> {
-    if rotate && !keys::key_path(provider).is_file() {
+/// Whether a key may be written, given what its check found. A key the
+/// provider rejected is never stored. A stored key is replaced only by one the
+/// provider accepted, unless the operator forces it; a first key may be stored
+/// unconfirmed, and the gate stays off until a check passes.
+fn may_store(result: Option<&net::Check>, replacing: bool, force: bool) -> Result<(), String> {
+    match result {
+        Some(net::Check::Invalid(message)) => Err(format!("the provider rejected the key ({message}); nothing was stored")),
+        Some(r) if replacing && !force && !r.key_authenticated() => {
+            Err(format!("could not confirm the new key ({r}); the stored key was kept. Retry, or pass --force"))
+        }
+        None if replacing && !force => Err("--no-check cannot replace a stored key without --force".to_string()),
+        _ => Ok(()),
+    }
+}
+
+fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: bool, force: bool) -> Result<ExitCode> {
+    let replacing = keys::key_path(provider).is_file();
+    if rotate && !replacing {
         bail!("no stored {provider} key to rotate; use `ways agent key add --provider {provider}`");
     }
     let key = keys::validate(&read_secret(provider, from_file)?)?;
-    // Check before writing: a rejected key never replaces a stored one.
-    let result = if check { Some(net::check(provider, &key, &engine_model(provider)?)) } else { None };
-    if let Some(net::Check::Invalid(message)) = &result {
-        bail!("{provider} rejected the key ({message}); nothing was stored");
-    }
+    let model = engine_model(provider)?;
+    // Check before writing, so a bad key cannot displace a working one.
+    let result = check.then(|| net::check(provider, &key, &model));
+    may_store(result.as_ref(), replacing, force).map_err(|e| anyhow::anyhow!("{provider}: {e}"))?;
     let path = keys::store(provider, &key)?;
     println!("{provider} key {} stored at {} (mode 0600)", keys::tail(&key), path.display());
+    let source = keys::Source::File(path);
+    match &result {
+        Some(r) => keys::record_check(provider, &keys::CheckRecord::now(r.record_word(), &model, &source)),
+        None => keys::clear_check(provider),
+    }
     if std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty()) {
         println!("note: ${} is set and overrides this file", provider.key_env());
     }
-    let Some(result) = result else { return Ok(ExitCode::SUCCESS) };
+    let Some(result) = result else {
+        println!("not checked: the gate stays off until `ways agent key check` passes");
+        return Ok(ExitCode::SUCCESS);
+    };
     println!("check: {result}");
     Ok(if result.is_valid() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
@@ -210,7 +244,9 @@ fn key_check(only: Option<&str>) -> Result<ExitCode> {
             continue;
         };
         checked += 1;
-        let result = net::check(provider, &key, &engine_model(provider)?);
+        let model = engine_model(provider)?;
+        let result = net::check(provider, &key, &model);
+        keys::record_check(provider, &keys::CheckRecord::now(result.record_word(), &model, &source));
         all_valid &= result.is_valid();
         println!("{provider}: {} from {source}: {result}", keys::tail(&key));
         warn_exposure(&source);
@@ -222,6 +258,7 @@ fn key_check(only: Option<&str>) -> Result<ExitCode> {
 }
 
 fn key_remove(provider: Provider) -> Result<ExitCode> {
+    keys::clear_check(provider);
     if keys::remove(provider)? {
         println!("removed {}", keys::key_path(provider).display());
     } else {
@@ -237,7 +274,7 @@ fn key_status() -> Result<ExitCode> {
     for provider in Provider::ALL {
         match keys::read(provider) {
             Ok(Some((key, source))) => {
-                println!("{provider}: {} from {source}", keys::tail(&key));
+                println!("{provider}: {} from {source}, {}", keys::tail(&key), check_note(provider, &source));
                 warn_exposure(&source);
             }
             Ok(None) => println!("{provider}: no key"),
@@ -245,6 +282,14 @@ fn key_status() -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// What the last check found, if it still describes this key.
+fn check_note(provider: Provider, source: &keys::Source) -> String {
+    match keys::last_check(provider) {
+        Some(r) if r.describes(source) => format!("checked {} ({} min ago)", r.result, r.age_s() / 60),
+        _ => "not checked since it was stored; run `ways agent key check`".to_string(),
+    }
 }
 
 fn warn_exposure(source: &keys::Source) {
@@ -267,27 +312,48 @@ fn read_secret(provider: Provider, from_file: Option<PathBuf>) -> Result<String>
         return Ok(s);
     }
     eprint!("Paste your {provider} API key (input hidden): ");
-    let line = read_hidden_line()?;
-    eprintln!();
-    Ok(line)
+    read_hidden_line()
+}
+
+/// The terminal settings to put back if Ctrl-C arrives mid-prompt.
+#[cfg(unix)]
+static mut SAVED_TERMIOS: Option<libc::termios> = None;
+
+#[cfg(unix)]
+extern "C" fn restore_and_exit(_signal: libc::c_int) {
+    // SAFETY: tcsetattr and _exit are async-signal-safe; SAVED_TERMIOS is
+    // written once before this handler is installed and only read here.
+    unsafe {
+        if let Some(t) = *std::ptr::addr_of!(SAVED_TERMIOS) {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &t);
+        }
+        libc::_exit(130);
+    }
 }
 
 #[cfg(unix)]
 fn read_hidden_line() -> Result<String> {
-    // SAFETY: tcgetattr/tcsetattr on stdin with a zeroed termios we fill first;
-    // the original settings are restored before returning.
+    // SAFETY: termios calls on stdin with a struct tcgetattr fills; the
+    // original settings are restored on every path, including Ctrl-C through
+    // the handler above. Echo is never left on: a failed switch reads nothing.
     unsafe {
         let mut original: libc::termios = std::mem::zeroed();
         if libc::tcgetattr(libc::STDIN_FILENO, &mut original) != 0 {
             bail!("cannot read terminal settings; pipe the key on stdin or use --from-file");
         }
+        *std::ptr::addr_of_mut!(SAVED_TERMIOS) = Some(original);
+        let previous = libc::signal(libc::SIGINT, restore_and_exit as *const () as libc::sighandler_t);
         let mut hidden = original;
         hidden.c_lflag &= !libc::ECHO;
         hidden.c_lflag |= libc::ECHONL;
-        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &hidden);
+        if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &hidden) != 0 {
+            libc::signal(libc::SIGINT, previous);
+            bail!("cannot turn off terminal echo; pipe the key on stdin or use --from-file");
+        }
         let mut line = String::new();
         let read = std::io::stdin().read_line(&mut line);
         libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &original);
+        libc::signal(libc::SIGINT, previous);
         read.context("reading the key")?;
         Ok(line)
     }
@@ -363,15 +429,22 @@ fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
     let path = profile::user_layer_path();
     let mut user = UserLayer::load(&path)?;
     user.engine = Some(name.to_string());
-    if let Some(model) = &model {
-        let shipped_model = profile::shipped().get(name).map(|p| p.model.clone());
-        let patch = user.profiles.entry(name.to_string()).or_default();
-        patch.model = (shipped_model.as_ref() != Some(model)).then(|| model.clone());
+    // Without --model a shipped profile returns to its tuned model; a profile
+    // the user defined keeps the model it names.
+    let shipped_model = profile::shipped().get(name).map(|p| p.model.clone());
+    match (&shipped_model, model) {
+        (Some(tuned), m) => user.profiles.entry(name.to_string()).or_default().model = m.filter(|m| m != tuned),
+        (None, Some(m)) => user.profiles.entry(name.to_string()).or_default().model = Some(m),
+        (None, None) => {}
     }
     let resolved = profile::resolve(&user, |_| true)?.context("an engine is named, so it resolves")?;
     let p = &resolved.profile;
     // Check before writing: a model the provider does not serve is not saved.
-    let result = keys::read(p.provider)?.map(|(key, _)| net::check(p.provider, &key, &p.model));
+    let key = keys::read(p.provider)?;
+    let result = key.as_ref().map(|(key, _)| net::check(p.provider, key, &p.model));
+    if let (Some((_, source)), Some(r)) = (&key, &result) {
+        keys::record_check(p.provider, &keys::CheckRecord::now(r.record_word(), &p.model, source));
+    }
     if let Some(net::Check::ModelUnavailable(model)) = &result {
         bail!("{} does not serve {model} to this key; the engine was not changed", p.provider);
     }
@@ -428,7 +501,7 @@ fn show_config() -> Result<ExitCode> {
     println!("  context: last {} turn(s), {} chars each  concurrency {}", p.turns, p.max_turn_chars, p.concurrency);
     match keys::read(p.provider)? {
         Some((key, source)) => {
-            println!("  key {} from {source}", keys::tail(&key));
+            println!("  key {} from {source}, {}", keys::tail(&key), check_note(p.provider, &source));
             warn_exposure(&source);
         }
         None => println!("  no {} key: the gate fails open until one is added", p.provider),
@@ -447,6 +520,26 @@ mod tests {
         assert!(cost_note(&opus, Some(&haiku)).contains("5.0×"));
         assert_eq!(cost_note(&haiku, Some(&haiku)), "  (untuned)");
         assert_eq!(cost_note(&opus, None), "  (untuned)");
+    }
+
+    #[test]
+    fn may_store_never_lets_an_unconfirmed_key_displace_a_stored_one() {
+        use net::Check::*;
+        let invalid = Invalid("bad".into());
+        let unreachable = Unreachable("down".into());
+        // A rejected key is never stored, forced or not.
+        assert!(may_store(Some(&invalid), false, true).is_err());
+        // Replacing needs an authenticated key, or --force.
+        for ok in [Valid, NoCredit, ModelUnavailable("m".into())] {
+            assert!(may_store(Some(&ok), true, false).is_ok());
+        }
+        for unconfirmed in [unreachable.clone(), RateLimited, Failed(500, "x".into())] {
+            assert!(may_store(Some(&unconfirmed), true, false).is_err());
+            assert!(may_store(Some(&unconfirmed), true, true).is_ok());
+            assert!(may_store(Some(&unconfirmed), false, false).is_ok());
+        }
+        assert!(may_store(None, true, false).is_err());
+        assert!(may_store(None, false, false).is_ok());
     }
 
     #[test]

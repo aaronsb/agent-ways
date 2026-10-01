@@ -4,7 +4,7 @@
 //! request carries the protocol number; the agent answers a different number
 //! with an error, and the hook falls back.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +38,22 @@ pub struct JudgeRequest {
     pub tool: String,
     pub turns: Vec<Turn>,
     pub candidates: Vec<Candidate>,
+}
+
+/// Which agent answered: its version and the binary it runs from. A client
+/// that would start a different binary retires this agent (ADR-502 §4).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentId {
+    pub version: String,
+    pub exe: String,
+}
+
+/// A reply, wrapped with the identity of the agent that sent it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReplyEnvelope {
+    pub agent: AgentId,
+    #[serde(flatten)]
+    pub reply: Reply,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,9 +117,53 @@ pub fn socket_path() -> PathBuf {
 }
 
 #[cfg(unix)]
-fn user_id() -> u32 {
+pub(crate) fn user_id() -> u32 {
     // SAFETY: getuid has no preconditions and cannot fail.
     unsafe { libc::getuid() }
+}
+
+/// Makes the socket's directory safe to serve from, or says why it is not.
+/// A missing directory is created mode 0700. An existing one must be a real
+/// directory (not a symlink), owned by this user, with no group or other
+/// access: anyone else able to write there could replace the socket and read
+/// the conversation turns hooks send.
+#[cfg(unix)]
+pub fn secure_dir(dir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    if !dir.exists() {
+        if let Some(parent) = dir.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("creating {}: {e}", parent.display()))?;
+        }
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    }
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(format!("{} is not a plain directory", dir.display()));
+    }
+    if meta.uid() != user_id() {
+        return Err(format!("{} is owned by uid {}, not this user", dir.display(), meta.uid()));
+    }
+    if meta.mode() & 0o077 != 0 {
+        return Err(format!("{} is mode {:o}; others can reach the socket", dir.display(), meta.mode() & 0o777));
+    }
+    Ok(())
+}
+
+/// True when the socket at `sock` is one this user's agent made: a socket,
+/// owned by this user, in a directory [`secure_dir`] accepts.
+#[cfg(unix)]
+pub fn trusted_socket(sock: &Path) -> bool {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let Ok(meta) = std::fs::symlink_metadata(sock) else { return false };
+    meta.file_type().is_socket()
+        && meta.uid() == user_id()
+        && sock.parent().is_some_and(|dir| {
+            std::fs::symlink_metadata(dir)
+                .is_ok_and(|d| d.is_dir() && d.uid() == user_id() && d.mode() & 0o077 == 0)
+        })
 }
 
 #[cfg(not(unix))]
@@ -134,9 +194,30 @@ mod tests {
         let status: Envelope = serde_json::from_str(r#"{"protocol":1,"op":"status"}"#).unwrap();
         assert_eq!(status.request, Request::Status);
 
-        let reply = Reply::Fallback { reason: "no_key".into(), latency_ms: 0 };
+        let reply = ReplyEnvelope {
+            agent: AgentId { version: "0.1.0".into(), exe: "/x/ways-agent".into() },
+            reply: Reply::Fallback { reason: "no_key".into(), latency_ms: 0 },
+        };
         let line = serde_json::to_string(&reply).unwrap();
-        assert!(line.contains("\"kind\":\"fallback\""));
-        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);
+        assert!(line.contains("\"kind\":\"fallback\"") && line.contains("\"exe\":\"/x/ways-agent\""));
+        assert_eq!(serde_json::from_str::<ReplyEnvelope>(&line).unwrap(), reply);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secure_dir_creates_0700_and_refuses_loose_or_linked_dirs() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("ways-agent-sock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = base.join("run");
+        secure_dir(&dir).unwrap();
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(secure_dir(&dir).is_err());
+        std::os::unix::fs::symlink(&dir, base.join("link")).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(secure_dir(&base.join("link")).is_err());
+        assert!(!trusted_socket(&dir.join("agent.sock")));
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

@@ -5,16 +5,9 @@ edition = "2021"
 description = "The ways agent: one resident daemon per user that judges way relevance and holds the provider key (ADR-196, ADR-502)"
 license = "MIT OR Apache-2.0"
 
-[features]
-default = ["net"]
-# Provider HTTP clients. The hook links this crate without it, keeping TLS
-# out of the per-prompt process.
-net = ["dep:ureq"]
-
 [[bin]]
 name = "ways-agent"
 path = "src/main.rs"
-required-features = ["net"]
 
 [dependencies]
 anyhow = "1"
@@ -22,6 +15,6 @@ clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+ways-agent-core = { path = "../ways-agent-core" }
 ways-core = { path = "../ways-core" }
-ureq = { version = "3", optional = true, features = ["json"] }
+ureq = { version = "3", features = ["json"] }

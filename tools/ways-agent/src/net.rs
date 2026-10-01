@@ -46,6 +46,25 @@ impl Check {
     pub fn is_valid(&self) -> bool {
         matches!(self, Check::Valid)
     }
+
+    /// The provider accepted the key, whatever else it said about the model
+    /// or the balance.
+    pub fn key_authenticated(&self) -> bool {
+        matches!(self, Check::Valid | Check::NoCredit | Check::ModelUnavailable(_))
+    }
+
+    /// The word a check record stores.
+    pub fn record_word(&self) -> &'static str {
+        match self {
+            Check::Valid => "valid",
+            Check::Invalid(_) => "invalid",
+            Check::NoCredit => "no_credit",
+            Check::RateLimited => "rate_limited",
+            Check::ModelUnavailable(_) => "model_unavailable",
+            Check::Unreachable(_) => "unreachable",
+            Check::Failed(..) => "failed",
+        }
+    }
 }
 
 impl std::fmt::Display for Check {
@@ -55,7 +74,7 @@ impl std::fmt::Display for Check {
             Check::Invalid(m) => write!(f, "invalid: {m}"),
             Check::NoCredit => write!(f, "no credit left on this key"),
             Check::RateLimited => write!(f, "rate-limited; try again shortly"),
-            Check::ModelUnavailable(m) => write!(f, "key valid, but model {m} is not available to it"),
+            Check::ModelUnavailable(m) => write!(f, "key valid, but the provider does not offer model {m}"),
             Check::Unreachable(m) => write!(f, "provider unreachable: {m}"),
             Check::Failed(code, m) => write!(f, "provider answered {code}: {m}"),
         }
@@ -195,7 +214,7 @@ pub fn judge(
                     "name": judge::TOOL_NAME,
                     "description": judge::TOOL_DESCRIPTION,
                     "strict": true,
-                    "input_schema": judge::tool_schema(),
+                    "input_schema": judge::tool_schema(n),
                 }],
                 "tool_choice": {"type": "tool", "name": judge::TOOL_NAME},
                 "messages": [{"role": "user", "content": prompt}],
@@ -214,7 +233,7 @@ pub fn judge(
                 "tools": [{"type": "function", "function": {
                     "name": judge::TOOL_NAME,
                     "description": judge::TOOL_DESCRIPTION,
-                    "parameters": judge::tool_schema(),
+                    "parameters": judge::tool_schema(n),
                 }}],
                 "tool_choice": {"type": "function", "function": {"name": judge::TOOL_NAME}},
             }),
@@ -227,7 +246,9 @@ pub fn judge(
     };
     let mut resp = req.send_json(&body).map_err(transport_reason)?;
     let status = resp.status().as_u16();
-    let reply: Value = resp.body_mut().read_json().map_err(transport_reason)?;
+    let text = resp.body_mut().read_to_string().map_err(transport_reason)?;
+    // Status first: an HTML error page from a proxy is still a provider error.
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status != 200 {
         return Err(format!("provider_{status}: {}", error_message(&reply)));
     }

@@ -16,5 +16,5 @@ pub fn run(args: &[String]) -> Result<()> {
 
 /// The `ways-agent` binary, found the way hooks find it to start the agent.
 pub(crate) fn resolve() -> Option<PathBuf> {
-    ways_agent::client::agent_binary()
+    ways_agent_core::client::agent_binary()
 }
