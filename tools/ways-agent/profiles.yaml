@@ -1,0 +1,29 @@
+# Engine profiles the ways agent ships (ADR-196 §5).
+#
+# Each profile is tuned at the operating point the probe measured (ADR-195):
+# Claude Haiku 4.5 judging the way's path and description against the last
+# turn, capped at 1,200 characters, with a threshold of 0.3 on P(yes).
+# Thresholds are per engine because each model's confidence sits on its own
+# scale.
+#
+# The user layer, $XDG_CONFIG_HOME/agent-ways/agent.yaml, overrides any field
+# of any profile and survives updates. `ways agent use` and `ways agent mode`
+# write it.
+
+anthropic:
+  provider: anthropic
+  model: claude-haiku-4-5
+  threshold: 0.3
+  timeout_ms: 2000
+  turns: 1
+  max_turn_chars: 1200
+  concurrency: 8
+
+openrouter:
+  provider: openrouter
+  model: anthropic/claude-haiku-4.5
+  threshold: 0.3
+  timeout_ms: 2000
+  turns: 1
+  max_turn_chars: 1200
+  concurrency: 8
