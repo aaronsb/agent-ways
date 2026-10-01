@@ -1,10 +1,12 @@
 //! The generic TUI over a settings tree: one tab per root, then browse,
-//! filter, edit, run actions, review. Key handling and state live here; drawing is in `render`.
+//! filter, edit, run actions, review and apply. Key handling and state live here; drawing is in `render`.
 
+mod apply;
 mod render;
 pub mod theme;
 
 use std::io;
+use std::time::Duration;
 
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
@@ -16,6 +18,7 @@ use ratatui::widgets::ListState;
 use ratatui::DefaultTerminal;
 
 use crate::tree::{self, Arg, Kind, Node, Queue, Queued, Row, SecretBuf};
+use apply::{Entry, Outcome, Run};
 
 enum Mode {
     Browse,
@@ -30,7 +33,51 @@ enum Mode {
     Secret { path: Vec<usize>, action: usize, buf: SecretBuf },
     /// y/n before the action is queued.
     Confirm { queued: Queued },
+    /// One tab's pending items, with the cursor on one of them. `discard`
+    /// asks y/n before the tab's items are dropped.
+    Review { tab: usize, cursor: usize, focus: Focus, discard: bool },
+    /// y/n before one tab's pending items are dropped.
+    DiscardTab { tab: usize },
+    /// The simulated apply, a step per tick.
+    Apply(Run),
+    /// Quit was asked with items pending in any tab: go back, review, or
+    /// quit and discard them all, which `confirm` asks a second time.
+    Guard { confirm: bool },
 }
+
+/// The buttons of the review and the quit prompt.
+#[derive(Clone, Copy, PartialEq)]
+enum Btn {
+    Apply,
+    Discard,
+    Back,
+    /// The quit prompt's jump to the first tab with pending items.
+    Review,
+    /// The quit prompt's quit-and-discard.
+    Quit,
+}
+
+impl Btn {
+    /// The key a click or Enter on the button stands for.
+    fn key(self) -> KeyCode {
+        match self {
+            Btn::Apply => KeyCode::Char('a'),
+            Btn::Discard | Btn::Quit => KeyCode::Char('D'),
+            Btn::Back => KeyCode::Esc,
+            Btn::Review => KeyCode::Char('r'),
+        }
+    }
+}
+
+/// What the review's keys act on: the item list or one of the buttons.
+#[derive(Clone, Copy, PartialEq)]
+enum Focus {
+    List,
+    Button(Btn),
+}
+
+/// How long a step stays in each state while an apply runs.
+const TICK: Duration = Duration::from_millis(350);
 
 /// Where the last frame drew what a click can hit.
 #[derive(Default)]
@@ -43,6 +90,16 @@ struct Hits {
     menu: Option<(Rect, Vec<Rect>)>,
     /// A confirm's answers: yes or no.
     answers: Vec<(Rect, bool)>,
+    /// The review's and the quit prompt's buttons.
+    buttons: Vec<(Rect, Btn)>,
+    /// The call to action on the bottom bar.
+    cta: Rect,
+    /// Each tab badge's discard mark, and its tab.
+    discard_tabs: Vec<(Rect, usize)>,
+    /// The review's item list inside its border, and the entry each of its
+    /// lines shows (none for a heading).
+    review: Rect,
+    review_lines: Vec<Option<usize>>,
 }
 
 /// What a session leaves behind: the edited tree and the queued actions.
@@ -66,6 +123,9 @@ pub struct App {
     msg: String,
     show_changes: bool,
     list: ListState,
+    rlist: ListState,
+    /// The 1-based step an apply fails at, to see the failure path.
+    fail_step: Option<usize>,
     /// Whether the terminal should report the mouse; `m` turns it off so the
     /// terminal's own text selection works.
     mouse: bool,
@@ -87,6 +147,8 @@ impl App {
             msg: "? keys · Tab 1-9 tabs · / filters all tabs".into(),
             show_changes: false,
             list: ListState::default(),
+            rlist: ListState::default(),
+            fail_step: None,
             mouse: true,
             shape: theme::Shape::ROUND,
             hits: Hits::default(),
@@ -95,6 +157,12 @@ impl App {
 
     pub fn shape(mut self, shape: theme::Shape) -> Self {
         self.shape = shape;
+        self
+    }
+
+    /// Make the apply step numbered `n` (from 1) fail.
+    pub fn fail_step(mut self, n: Option<usize>) -> Self {
+        self.fail_step = n;
         self
     }
 
@@ -112,6 +180,10 @@ impl App {
                 captured = self.mouse;
             }
             term.draw(|f| self.draw(f))?;
+            if matches!(&self.mode, Mode::Apply(r) if !r.finished()) && !event::poll(TICK)? {
+                self.tick();
+                continue;
+            }
             match event::read()? {
                 Event::Key(k) if k.kind == KeyEventKind::Press && !self.key(k) => {
                     return Ok(Session { roots: self.roots, queue: self.queue });
@@ -119,6 +191,84 @@ impl App {
                 Event::Mouse(m) => self.mouse(m),
                 _ => {}
             }
+        }
+    }
+
+    /// Value changes plus queued actions, in every tab.
+    fn pending(&self) -> usize {
+        (0..self.roots.len()).map(|t| self.pending_in(t)).sum()
+    }
+
+    fn pending_in(&self, tab: usize) -> usize {
+        tree::pending(&self.roots[tab], &self.queue)
+    }
+
+    /// One tick of a running apply.
+    fn tick(&mut self) {
+        let Mode::Apply(run) = &mut self.mode else { return };
+        if run.finished() {
+            return;
+        }
+        run.tick(&mut self.roots, &mut self.queue);
+        match run.outcome {
+            Outcome::Running => {}
+            Outcome::Done => self.msg = format!("applied {}", run.applied),
+            Outcome::Stopped(i) => {
+                let left = tree::pending(&self.roots[run.tab], &self.queue);
+                self.msg = format!("stopped at step {} of {}; {left} still pending", i + 1, run.steps.len());
+            }
+        }
+    }
+
+    /// Quit, or ask first when anything is pending in any tab.
+    fn quit(&mut self) -> bool {
+        if self.pending() == 0 {
+            return false;
+        }
+        self.mode = Mode::Guard { confirm: false };
+        true
+    }
+
+    fn open_review(&mut self, tab: usize) {
+        if self.pending_in(tab) == 0 {
+            self.msg = format!("nothing pending in {}", self.roots[tab].name);
+        } else {
+            self.mode = Mode::Review { tab, cursor: 0, focus: Focus::List, discard: false };
+        }
+    }
+
+    fn begin_apply(&mut self, tab: usize) {
+        let run = Run::plan(&self.roots, &self.queue, tab, self.fail_step);
+        if run.steps.is_empty() {
+            self.msg = format!("nothing pending in {}", self.roots[tab].name);
+        } else {
+            self.mode = Mode::Apply(run);
+        }
+    }
+
+    /// Revert one tab's values and unqueue its actions.
+    fn discard_tab(&mut self, tab: usize) {
+        self.msg = format!("discarded {} in {}", self.pending_in(tab), self.roots[tab].name);
+        tree::revert_all(&mut self.roots[tab..=tab]);
+        self.queue.remove_under(&self.roots[tab].name);
+    }
+
+    fn discard_all(&mut self) {
+        tree::revert_all(&mut self.roots);
+        self.queue.clear();
+    }
+
+    /// Drop one pending item of a tab: a value reverts to loaded, an action is unqueued.
+    fn drop_entry(&mut self, tab: usize, i: usize) {
+        match apply::entries(&self.roots, &self.queue, tab).get(i) {
+            Some(Entry::Value { path, .. }) => {
+                let s = tree::get_mut(&mut self.roots, path).setting.as_mut().expect("entries are settings");
+                s.value = s.loaded.clone();
+            }
+            Some(Entry::Action { index, .. }) => {
+                self.queue.remove(*index);
+            }
+            None => {}
         }
     }
 
@@ -163,7 +313,11 @@ impl App {
     /// Handle one key. False ends the session.
     fn key(&mut self, k: KeyEvent) -> bool {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
-            return false;
+            // A running apply is not interrupted; anything pending asks first.
+            if matches!(&self.mode, Mode::Apply(r) if !r.finished()) || matches!(self.mode, Mode::Guard { .. }) {
+                return true;
+            }
+            return self.quit();
         }
         match std::mem::replace(&mut self.mode, Mode::Browse) {
             Mode::Help => {}
@@ -244,17 +398,96 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.msg = "not queued".into(),
                 _ => self.mode = Mode::Confirm { queued },
             },
+            Mode::Review { tab, cursor, focus, discard } => self.review_key(k, tab, cursor, focus, discard),
+            Mode::DiscardTab { tab } => match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => self.discard_tab(tab),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
+                _ => self.mode = Mode::DiscardTab { tab },
+            },
+            Mode::Apply(run) if !run.finished() => self.mode = Mode::Apply(run),
+            Mode::Apply(run) => {
+                if matches!(run.outcome, Outcome::Stopped(_)) {
+                    self.open_review(run.tab);
+                }
+            }
+            Mode::Guard { confirm: false } => match k.code {
+                KeyCode::Char('r') => {
+                    let first = (0..self.roots.len()).find(|t| self.pending_in(*t) > 0).unwrap_or(self.tab);
+                    self.clear_filter();
+                    self.switch_tab(first);
+                    self.open_review(first);
+                }
+                KeyCode::Char('D') => self.mode = Mode::Guard { confirm: true },
+                KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
+                _ => self.mode = Mode::Guard { confirm: false },
+            },
+            Mode::Guard { confirm: true } => match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.discard_all();
+                    return false;
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Guard { confirm: false },
+                _ => self.mode = Mode::Guard { confirm: true },
+            },
             Mode::Browse => return self.browse(k),
         }
         true
+    }
+
+    /// The review's keys. Nothing is left to review once every item is dropped.
+    fn review_key(&mut self, k: KeyEvent, tab: usize, mut cursor: usize, mut focus: Focus, mut discard: bool) {
+        if discard {
+            match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => return self.discard_tab(tab),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => discard = false,
+                _ => {}
+            }
+            self.mode = Mode::Review { tab, cursor, focus, discard };
+            return;
+        }
+        let len = apply::entries(&self.roots, &self.queue, tab).len();
+        let stops = [Focus::List, Focus::Button(Btn::Apply), Focus::Button(Btn::Discard), Focus::Button(Btn::Back)];
+        let at = stops.iter().position(|f| *f == focus).unwrap_or(0);
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('b') => return,
+            KeyCode::Char('a') => return self.begin_apply(tab),
+            KeyCode::Char('D') => discard = true,
+            KeyCode::Up | KeyCode::Char('k') => match focus {
+                Focus::List => cursor = cursor.saturating_sub(1),
+                Focus::Button(_) => focus = Focus::List,
+            },
+            KeyCode::Down | KeyCode::Char('j') if focus == Focus::List => cursor = (cursor + 1).min(len.saturating_sub(1)),
+            KeyCode::Tab => focus = stops[(at + 1) % stops.len()],
+            KeyCode::BackTab => focus = stops[(at + stops.len() - 1) % stops.len()],
+            KeyCode::Left | KeyCode::Char('h') if at > 1 => focus = stops[at - 1],
+            KeyCode::Right | KeyCode::Char('l') if at > 0 && at + 1 < stops.len() => focus = stops[at + 1],
+            KeyCode::Char(' ') if focus == Focus::List => {
+                self.drop_entry(tab, cursor);
+                if self.pending_in(tab) == 0 {
+                    self.msg = format!("nothing pending in {}", self.roots[tab].name);
+                    return;
+                }
+                cursor = cursor.min(len - 2);
+            }
+            KeyCode::Enter => {
+                if let Focus::Button(b) = focus {
+                    self.mode = Mode::Review { tab, cursor, focus, discard };
+                    self.key(KeyEvent::new(b.key(), KeyModifiers::NONE));
+                    return;
+                }
+            }
+            _ => {}
+        }
+        self.mode = Mode::Review { tab, cursor, focus, discard };
     }
 
     fn browse(&mut self, k: KeyEvent) -> bool {
         let rows = self.rows();
         if rows.is_empty() {
             match k.code {
-                KeyCode::Char('q') => return false,
+                KeyCode::Char('q') => return self.quit(),
                 KeyCode::Esc => self.clear_filter(),
+                KeyCode::Char('w') => self.open_review(self.tab),
                 KeyCode::Char('/') => self.mode = Mode::Filter,
                 _ => {}
             }
@@ -264,9 +497,12 @@ impl App {
         let path = rows[self.cursor].path.clone();
         let last = rows.len() - 1;
         match k.code {
-            KeyCode::Char('q') => return false,
+            KeyCode::Char('q') => return self.quit(),
             KeyCode::Esc if !self.filter.is_empty() => self.clear_filter(),
-            KeyCode::Esc => return false,
+            KeyCode::Esc => return self.quit(),
+            KeyCode::Char('w') => self.open_review(self.tab),
+            KeyCode::Char('s') if k.modifiers.contains(KeyModifiers::CONTROL) => self.open_review(self.tab),
+            KeyCode::Char('X') => self.ask_discard(self.tab),
             KeyCode::Tab => self.switch_tab((self.tab + 1) % self.roots.len()),
             KeyCode::BackTab => self.switch_tab((self.tab + self.roots.len() - 1) % self.roots.len()),
             KeyCode::Char(c @ '1'..='9') => {
@@ -358,20 +594,65 @@ impl App {
                     }
                 }
             }
-            Mode::Confirm { .. } if click => {
+            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
                     self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
                 }
+            }
+            Mode::Review { discard: false, .. } => {
+                if let Some(k) = wheel {
+                    self.key(press(k));
+                } else if click {
+                    self.click_review(at);
+                }
+            }
+            Mode::Guard { confirm: false } if click => self.click_button(at),
+            Mode::Apply(run) if click && run.finished() => {
+                self.key(press(KeyCode::Enter));
             }
             Mode::Help if click => self.mode = Mode::Browse,
             _ => {}
         }
     }
 
-    /// A click while browsing: a tab switches to it; a row selects it, and a
-    /// second click on the selected row acts as Enter; a group's marker opens
-    /// or closes it.
+    /// A click on a button is the key it stands for.
+    fn ask_discard(&mut self, tab: usize) {
+        if self.pending_in(tab) == 0 {
+            self.msg = format!("nothing pending in {}", self.roots[tab].name);
+        } else {
+            self.mode = Mode::DiscardTab { tab };
+        }
+    }
+
+    fn click_button(&mut self, at: Position) {
+        if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
+            self.key(KeyEvent::new(b.key(), KeyModifiers::NONE));
+        }
+    }
+
+    /// A click in the review: a button, or an item, which takes the cursor.
+    fn click_review(&mut self, at: Position) {
+        self.click_button(at);
+        let list = self.hits.review;
+        if !list.contains(at) {
+            return;
+        }
+        let line = self.rlist.offset() + (at.y - list.y) as usize;
+        if let (Some(&Some(i)), Mode::Review { cursor, focus, .. }) = (self.hits.review_lines.get(line), &mut self.mode) {
+            (*cursor, *focus) = (i, Focus::List);
+        }
+    }
+
+    /// A click while browsing: the call to action opens the review; a tab
+    /// switches to it; a row selects it, and a second click on the selected
+    /// row acts as Enter; a group's marker opens or closes it.
     fn click_browse(&mut self, at: Position) {
+        if self.hits.cta.contains(at) {
+            return self.open_review(self.tab);
+        }
+        if let Some(&(_, tab)) = self.hits.discard_tabs.iter().find(|(r, _)| r.contains(at)) {
+            return self.ask_discard(tab);
+        }
         if let Some(&(_, tab)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
             return self.switch_tab(tab);
         }
@@ -433,7 +714,10 @@ impl App {
         }
     }
 
+    /// The row's actions, or the tab's when the row has none.
     fn open_menu(&mut self, path: &[usize]) {
+        let own = !tree::get(&self.roots, path).actions.is_empty();
+        let path = if own { path } else { &path[..1] };
         if tree::get(&self.roots, path).actions.is_empty() {
             self.msg = "no actions here".into();
         } else {
@@ -453,7 +737,7 @@ impl App {
     /// Build the queued command; ask first when the action needs confirming.
     fn stage(&mut self, path: &[usize], action: usize, text: &str) {
         let a = &tree::get(&self.roots, path).actions[action];
-        let queued = Queued { key: tree::key(&self.roots, path), label: a.label.clone(), command: a.render(text) };
+        let queued = Queued { key: tree::key(&self.roots, path), label: a.label.clone(), command: a.render(text), confirm: a.confirm };
         if a.confirm {
             self.mode = Mode::Confirm { queued };
         } else {
@@ -609,7 +893,7 @@ mod tests {
     fn action_only_node_opens_the_menu_on_enter() {
         let target = Node::leaf("/home/me/.claude", "", Setting::new(Kind::ReadOnly, "enabled", "user"))
             .with_actions(vec![Action::new("plan", "ways config target plan {}").arg(Arg::Text("dir".into()))]);
-        let mut app = App::new("t", vec![target]);
+        let mut app = App::new("t", vec![Node::group("install", "", vec![target]).opened()]);
         keys(&mut app, &[KeyCode::Enter, KeyCode::Enter]);
         type_str(&mut app, "/tmp/a b");
         keys(&mut app, &[KeyCode::Enter]);
@@ -623,7 +907,8 @@ mod tests {
     /// Three tabs: nested ways, a number, and a node with an action.
     fn tabbed() -> Vec<Node> {
         let ways = Node::group("ways", "", vec![flag("alpha"), flag("beta"), Node::group("deep", "", vec![flag("gamma")])]);
-        let matching = Node::group("matching", "", vec![Node::leaf("tau_s", "", Setting::new(Kind::Float { min: 0.0, max: 1.0 }, "0.5", "default").default("0.5"))]);
+        let tau = |name| Node::leaf(name, "", Setting::new(Kind::Float { min: 0.0, max: 1.0 }, "0.5", "default").default("0.5"));
+        let matching = Node::group("matching", "", vec![tau("tau_s"), tau("tau_k")]);
         let gate = Node::group("gate", "", vec![flag("language")]).with_actions(vec![Action::new("check", "ways agent status")]);
         vec![ways.opened(), matching.opened(), gate.opened()]
     }
@@ -654,14 +939,14 @@ mod tests {
     #[test]
     fn each_tab_keeps_its_cursor_and_open_state() {
         let mut app = App::new("t", tabbed());
-        // On ways: close `deep` at row 3, then move the cursor to it.
-        keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Down, KeyCode::Right]);
-        assert_eq!(app.cursor, 3);
+        // On ways: move the cursor to `deep` at row 2 and open it.
+        keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Right]);
+        assert_eq!(app.cursor, 2);
         assert!(screen(&mut app).contains("gamma"));
         keys(&mut app, &[KeyCode::Char('2'), KeyCode::Down]);
         assert_eq!(app.cursor, 1);
         keys(&mut app, &[KeyCode::Char('1')]);
-        assert_eq!(app.cursor, 3);
+        assert_eq!(app.cursor, 2);
         assert!(screen(&mut app).contains("gamma"), "open state kept");
         keys(&mut app, &[KeyCode::Char('2')]);
         assert_eq!(app.cursor, 1);
@@ -745,7 +1030,7 @@ mod tests {
 
         let beta = find(&mut app, "beta");
         click(&mut app, beta);
-        assert_eq!(app.cursor, 2);
+        assert_eq!(app.cursor, 1);
         assert!(tree::changes(&app.roots).is_empty(), "the first click only selects");
         click(&mut app, beta);
         assert_eq!(tree::changes(&app.roots)[0].0, "ways.beta", "a second click acts as Enter");
@@ -757,15 +1042,15 @@ mod tests {
         let (x, y) = find(&mut app, "▸ deep");
         click(&mut app, (x, y));
         assert!(screen(&mut app).contains("gamma"), "a click on ▸ opens the group");
-        assert_eq!(app.cursor, 3);
+        assert_eq!(app.cursor, 2);
         click(&mut app, (x + 1, y));
         assert!(!screen(&mut app).contains("gamma"), "the marker's second column closes it again");
 
         mouse_at(&mut app, MouseEventKind::ScrollUp, (0, 0));
         mouse_at(&mut app, MouseEventKind::ScrollUp, (0, 0));
-        assert_eq!(app.cursor, 1);
+        assert_eq!(app.cursor, 0);
         mouse_at(&mut app, MouseEventKind::ScrollDown, (0, 0));
-        assert_eq!(app.cursor, 2);
+        assert_eq!(app.cursor, 1);
     }
 
     #[test]
@@ -848,6 +1133,360 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_starts_at_its_roots_children() {
+        let mut app = App::new("t", tabbed());
+        let tree = frame(&mut app, 100, 24);
+        assert!(tree.iter().all(|l| !l.contains("▾ ways")), "the root has no row");
+        assert_eq!(app.rows().len(), 3);
+        assert_eq!(tree::key(&app.roots, &app.rows()[0].path), "ways.alpha");
+    }
+
+    #[test]
+    fn group_and_tab_badges_both_count_values_and_queued_actions() {
+        let mut app = App::new("t", tabbed());
+        // ways.deep.gamma changed, and a command queued under ways.deep.
+        keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Right, KeyCode::Down, KeyCode::Enter]);
+        app.queue.push(Queued { key: "ways.deep".into(), label: "x".into(), command: "ways x".into(), confirm: false });
+        let f = frame(&mut app, 100, 24);
+        let deep = f.iter().find(|l| l.contains("▾ deep")).unwrap();
+        assert!(deep.contains("●2"), "{deep}");
+        assert!(f[0].contains("●2"), "{}", f[0]);
+    }
+
+    /// Two tabs. `ways` has three bools in two files and a key node with
+    /// actions; `other` has one bool in a third file.
+    fn pending_tree() -> Vec<Node> {
+        let s = |file: &str, key: &str| Setting::new(Kind::Bool, "true", "user").default("true").store(file.into(), key);
+        let key = action_tree().remove(0).children.remove(0);
+        let ways = Node::group(
+            "ways",
+            "",
+            vec![
+                Node::leaf("alpha", "", s("/c/a.yaml", "alpha")),
+                Node::leaf("beta", "", s("/c/a.yaml", "beta")),
+                Node::leaf("gamma", "", s("/c/b.yaml", "gamma")),
+                key,
+            ],
+        );
+        let other = Node::group("other", "", vec![Node::leaf("delta", "", s("/c/c.yaml", "delta"))]);
+        vec![ways.opened(), other.opened()]
+    }
+
+    /// In `ways`: alpha, beta and gamma toggled; `check` queued, then `remove`
+    /// (confirmed). In `other`: delta toggled. Ends on `ways`: 5 and 1 pending.
+    fn pending_app() -> App {
+        let mut app = App::new("t", pending_tree());
+        keys(&mut app, &[KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down]);
+        keys(&mut app, &[KeyCode::Char('a'), KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+        keys(&mut app, &[KeyCode::Char('a'), KeyCode::Down, KeyCode::Enter, KeyCode::Char('y')]);
+        keys(&mut app, &[KeyCode::Char('2'), KeyCode::Enter, KeyCode::Char('1')]);
+        app
+    }
+
+    fn tick_out(app: &mut App) {
+        for _ in 0..40 {
+            app.tick();
+        }
+        assert!(matches!(&app.mode, Mode::Apply(r) if r.finished()));
+    }
+
+    fn bottom(app: &mut App, w: u16, h: u16) -> String {
+        frame(app, w, h)[h as usize - 1].clone()
+    }
+
+    fn delta_changed(app: &App) -> bool {
+        app.roots[1].children[0].setting.as_ref().unwrap().changed()
+    }
+
+    #[test]
+    fn the_call_to_action_shows_while_the_current_tab_has_pending_items() {
+        let mut app = App::new("t", pending_tree());
+        assert!(!bottom(&mut app, 100, 24).contains("unsaved"));
+        keys(&mut app, &[KeyCode::Enter]);
+        assert!(bottom(&mut app, 100, 24).contains("● 1 unsaved in ways · w review & apply"));
+        keys(&mut app, &[KeyCode::Enter]);
+        assert!(!bottom(&mut app, 100, 24).contains("unsaved"), "reverting the value clears it");
+        app.queue.push(Queued { key: "ways.anthropic".into(), label: "x".into(), command: "ways x".into(), confirm: false });
+        assert!(bottom(&mut app, 100, 24).contains("● 1 unsaved in ways"), "a queued action alone counts");
+        app.queue.clear();
+        assert!(!bottom(&mut app, 100, 24).contains("unsaved"));
+        app.queue.push(Queued { key: "other".into(), label: "x".into(), command: "ways x".into(), confirm: false });
+        assert!(!bottom(&mut app, 100, 24).contains("unsaved"), "pending in another tab is shown on its badge only");
+        assert!(frame(&mut app, 100, 24)[0].contains("●1 ↺"));
+        keys(&mut app, &[KeyCode::Char('2')]);
+        assert!(bottom(&mut app, 100, 24).contains("● 1 unsaved in other"));
+    }
+
+    #[test]
+    fn the_call_to_action_is_bold_hot_and_clicking_it_opens_the_review() {
+        let mut app = pending_app();
+        let (x, y) = find(&mut app, "● 5 unsaved in ways");
+        let mut term = Terminal::new(TestBackend::new(110, 24)).unwrap();
+        term.draw(|f| app.draw(f)).unwrap();
+        let c = &term.backend().buffer()[(x + 2, y)];
+        assert_eq!(c.bg, theme::HOT);
+        assert!(c.modifier.contains(Modifier::BOLD));
+        click(&mut app, (x + 3, y));
+        assert!(matches!(app.mode, Mode::Review { tab: 0, .. }));
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w')]);
+        assert!(matches!(app.mode, Mode::Review { tab: 0, .. }));
+        let mut app = pending_app();
+        assert!(app.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)));
+        assert!(matches!(app.mode, Mode::Review { .. }));
+        let mut app = App::new("t", pending_tree());
+        keys(&mut app, &[KeyCode::Char('w')]);
+        assert!(matches!(app.mode, Mode::Browse), "nothing to review");
+    }
+
+    #[test]
+    fn the_review_lists_one_tab_with_values_by_file_then_commands_in_order() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w')]);
+        let f = frame(&mut app, 100, 30).join("\n");
+        let at = |t: &str| f.find(t).unwrap_or_else(|| panic!("{t} missing:\n{f}"));
+        assert!(at("/c/a.yaml") < at("alpha: true → false") && at("alpha: true → false") < at("beta: true → false"));
+        assert!(at("beta: true → false") < at("/c/b.yaml") && at("/c/b.yaml") < at("gamma: true → false"));
+        assert!(at("gamma: true → false") < at("1. $ ways agent key check"));
+        assert!(at("1. $ ways agent key check") < at("2. $ ways agent key remove"));
+        let remove = f.lines().find(|l| l.contains("key remove")).unwrap();
+        assert!(remove.contains("asks first") && !f.lines().find(|l| l.contains("key check")).unwrap().contains("asks first"));
+        assert!(f.contains("Apply ways (a)") && f.contains("Discard ways (D)") && f.contains("Back (Esc)"));
+        assert!(!f.contains("Discard all") && !f.contains("delta") && !f.contains("/c/c.yaml"), "another tab's items stay out");
+        assert!(f.contains("review & apply ways — 3 changes, 2 commands"));
+    }
+
+    #[test]
+    fn space_drops_the_item_under_the_cursor() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Down, KeyCode::Char(' ')]);
+        assert_eq!(app.roots[0].children[1].setting.as_ref().unwrap().value, "true", "beta reverted");
+        assert_eq!(app.pending_in(0), 4);
+        // Entries are now alpha, gamma, check, remove: drop the last command.
+        keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Char(' ')]);
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.queue.items()[0].label, "check", "the dropped action was the later one");
+        keys(&mut app, &[KeyCode::Char(' '), KeyCode::Char(' '), KeyCode::Char(' ')]);
+        assert!(app.pending_in(0) == 0 && matches!(app.mode, Mode::Browse), "the last drop closes the review");
+        assert!(delta_changed(&app), "another tab is untouched");
+    }
+
+    #[test]
+    fn discard_in_the_review_asks_first_and_takes_only_its_tab() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('D')]);
+        assert!(bottom(&mut app, 100, 24).contains("discard 5 pending in ways?"));
+        keys(&mut app, &[KeyCode::Char('x'), KeyCode::Enter]);
+        assert_eq!(app.pending_in(0), 5, "other keys do not answer");
+        keys(&mut app, &[KeyCode::Char('n')]);
+        assert!(matches!(app.mode, Mode::Review { discard: false, .. }) && app.pending_in(0) == 5);
+        keys(&mut app, &[KeyCode::Char('D'), KeyCode::Char('y')]);
+        assert_eq!((app.pending_in(0), app.pending_in(1)), (0, 1));
+        assert!(matches!(app.mode, Mode::Browse) && delta_changed(&app));
+        let f = frame(&mut app, 100, 24);
+        assert!(!f[23].contains("unsaved") && f[0].contains("●1 ↺") && f[0].matches('●').count() == 1, "{}", f[0]);
+    }
+
+    #[test]
+    fn x_discards_the_current_tab_after_a_y_n_prompt() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('X')]);
+        assert!(bottom(&mut app, 100, 24).contains("discard 5 pending in ways?"));
+        keys(&mut app, &[KeyCode::Char('n')]);
+        assert_eq!(app.pending_in(0), 5);
+        keys(&mut app, &[KeyCode::Char('X'), KeyCode::Char('z')]);
+        assert_eq!(app.pending_in(0), 5, "only y answers yes");
+        keys(&mut app, &[KeyCode::Char('y')]);
+        assert_eq!((app.pending_in(0), app.pending_in(1)), (0, 1));
+        assert!(app.queue.is_empty() && delta_changed(&app));
+        keys(&mut app, &[KeyCode::Char('X')]);
+        assert!(matches!(app.mode, Mode::Browse), "nothing to discard in ways");
+        keys(&mut app, &[KeyCode::Char('2'), KeyCode::Char('X'), KeyCode::Char('y')]);
+        assert_eq!(app.pending(), 0);
+    }
+
+    #[test]
+    fn the_badge_mark_discards_that_tab_on_a_click_and_a_y() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('2')]);
+        let at = find(&mut app, "↺");
+        click(&mut app, at);
+        assert!(matches!(app.mode, Mode::DiscardTab { tab: 0 }), "the first badge is ways, though other is shown");
+        let at = find(&mut app, "n keep");
+        click(&mut app, at);
+        assert_eq!(app.pending_in(0), 5);
+        let at = find(&mut app, "↺");
+        click(&mut app, at);
+        let at = find(&mut app, "y discard");
+        click(&mut app, at);
+        assert_eq!((app.pending_in(0), app.pending_in(1)), (0, 1));
+    }
+
+    #[test]
+    fn buttons_take_focus_and_enter_and_clicks_press_them() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Tab, KeyCode::Tab, KeyCode::Enter]);
+        assert!(matches!(app.mode, Mode::Review { discard: true, .. }), "Tab twice focuses Discard");
+        keys(&mut app, &[KeyCode::Esc, KeyCode::Right, KeyCode::Enter]);
+        assert!(matches!(app.mode, Mode::Browse) && app.pending_in(0) == 5, "Back keeps everything");
+        keys(&mut app, &[KeyCode::Char('w')]);
+        let at = find(&mut app, "Apply ways (a)");
+        click(&mut app, at);
+        assert!(matches!(app.mode, Mode::Apply(_)));
+        tick_out(&mut app);
+        keys(&mut app, &[KeyCode::Char('x')]);
+        assert_eq!(app.pending_in(0), 0);
+
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w')]);
+        let at = find(&mut app, "Discard ways (D)");
+        click(&mut app, at);
+        let at = find(&mut app, "y discard");
+        click(&mut app, at);
+        assert_eq!(app.pending_in(0), 0);
+
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w')]);
+        let at = find(&mut app, "gamma");
+        click(&mut app, at);
+        let Mode::Review { cursor, .. } = app.mode else { panic!("left the review") };
+        assert_eq!(cursor, 2, "a click on an item moves the cursor");
+        let at = find(&mut app, "Back (Esc)");
+        click(&mut app, at);
+        assert!(matches!(app.mode, Mode::Browse));
+    }
+
+    #[test]
+    fn apply_writes_files_first_then_commands_and_leaves_other_tabs_alone() {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+        let steps = |app: &App| match &app.mode {
+            Mode::Apply(r) => r.steps.iter().map(|s| s.text.clone()).collect::<Vec<_>>(),
+            _ => panic!("not applying"),
+        };
+        assert_eq!(
+            steps(&app),
+            [
+                "would write /c/a.yaml (2 keys)",
+                "would write /c/b.yaml (1 key)",
+                "would run ways agent key check --provider anthropic",
+                "would run ways agent key remove --provider anthropic",
+            ]
+        );
+        let f = frame(&mut app, 100, 30).join("\n");
+        assert!(f.contains("○  1  would write /c/a.yaml"));
+        app.tick();
+        assert!(frame(&mut app, 100, 30).join("\n").contains("◐  1  would write /c/a.yaml"));
+        app.tick();
+        let f = frame(&mut app, 100, 30).join("\n");
+        assert!(f.contains("✓  1  would write /c/a.yaml") && f.contains("○  2"));
+        assert_eq!(app.pending_in(0), 3, "a finished write is applied at once");
+        tick_out(&mut app);
+        assert_eq!((app.pending_in(0), app.pending_in(1)), (0, 1));
+        assert!(delta_changed(&app));
+        assert!(frame(&mut app, 100, 30).join("\n").contains("applied 5"));
+        keys(&mut app, &[KeyCode::Char('x')]);
+        assert!(matches!(app.mode, Mode::Browse));
+        let f = frame(&mut app, 100, 24);
+        assert!(f[0].contains("●1 ↺") && f[0].matches('●').count() == 1, "{}", f[0]);
+        assert!(!f[23].contains("unsaved") && f[23].contains("applied 5"), "{}", f[23]);
+    }
+
+    #[test]
+    fn a_failing_write_step_keeps_it_and_everything_after_pending() {
+        let mut app = pending_app().fail_step(Some(2));
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+        tick_out(&mut app);
+        let f = frame(&mut app, 100, 30).join("\n");
+        assert!(f.contains("✓  1") && f.contains("✗  2") && f.contains("○  3") && f.contains("○  4"), "{f}");
+        assert!(f.contains("stopped at step 2") && f.contains("3 still pending"));
+        let alpha_beta_loaded = app.roots[0].children[..2].iter().all(|c| !c.setting.as_ref().unwrap().changed());
+        assert!(alpha_beta_loaded && app.roots[0].children[2].setting.as_ref().unwrap().changed());
+        assert_eq!(app.queue.len(), 2);
+        keys(&mut app, &[KeyCode::Char('x')]);
+        let Mode::Review { tab: 0, .. } = app.mode else { panic!("a key returns to the review") };
+        let f = frame(&mut app, 100, 30).join("\n");
+        assert!(f.contains("gamma: true → false") && !f.contains("alpha: true"), "{f}");
+    }
+
+    #[test]
+    fn a_failing_command_step_keeps_it_and_the_commands_after_it() {
+        let mut app = pending_app().fail_step(Some(3));
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+        tick_out(&mut app);
+        assert_eq!(app.roots[0].changes(), 0, "both writes landed");
+        assert_eq!(app.queue.len(), 2, "the failed command and the one after stay queued");
+        assert!(bottom(&mut app, 100, 30).contains("stopped"));
+    }
+
+    #[test]
+    fn quit_with_pending_in_any_tab_lists_each_and_discarding_needs_a_second_confirm() {
+        let mut app = App::new("t", pending_tree());
+        assert!(!app.key(press(KeyCode::Char('q'))), "nothing pending quits");
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('2')]);
+        assert!(app.key(press(KeyCode::Char('q'))));
+        let f = frame(&mut app, 100, 24).join("\n");
+        for t in ["6 unsaved in 2 tabs", "ways", "●5", "other", "●1", "Back (Esc)", "Review ways (r)", "Quit and discard all (D)"] {
+            assert!(f.contains(t), "{t} missing:\n{f}");
+        }
+        keys(&mut app, &[KeyCode::Esc]);
+        assert!(matches!(app.mode, Mode::Browse) && app.pending() == 6);
+        assert!(app.key(press(KeyCode::Esc)) && matches!(app.mode, Mode::Guard { .. }), "Esc asks too");
+        let at = find(&mut app, "Back (Esc)");
+        click(&mut app, at);
+        assert!(matches!(app.mode, Mode::Browse));
+
+        keys(&mut app, &[KeyCode::Char('q'), KeyCode::Char('r')]);
+        assert!(matches!(app.mode, Mode::Review { tab: 0, .. }) && app.tab == 0, "Review jumps to the first tab with pending");
+
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('q'), KeyCode::Char('D')]);
+        assert!(matches!(app.mode, Mode::Guard { confirm: true }) && app.pending() == 6, "one D discards nothing");
+        assert!(bottom(&mut app, 100, 24).contains("quit and discard all 6 pending?"));
+        keys(&mut app, &[KeyCode::Esc]);
+        assert!(matches!(app.mode, Mode::Guard { confirm: false }));
+        keys(&mut app, &[KeyCode::Char('D')]);
+        assert!(!app.key(press(KeyCode::Char('y'))), "the second confirm quits");
+        assert_eq!(app.pending(), 0);
+    }
+
+    #[test]
+    fn ctrl_c_meets_the_guard_when_anything_is_pending() {
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let mut app = App::new("t", pending_tree());
+        assert!(!app.key(ctrl_c), "nothing pending quits");
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('2')]);
+        assert!(app.key(ctrl_c) && matches!(app.mode, Mode::Guard { confirm: false }));
+        assert!(app.key(ctrl_c), "a second ^C does not quit past the prompt");
+        let at = find(&mut app, "Quit and discard all (D)");
+        click(&mut app, at);
+        let at = find(&mut app, "y quit");
+        assert_eq!(app.pending(), 6);
+        click(&mut app, at);
+        assert_eq!(app.pending(), 0);
+    }
+
+    #[test]
+    fn a_typed_secret_never_reaches_the_review_or_the_apply_screens() {
+        const SECRET: &str = "Q#Z9@X!";
+        let mut app = App::new("t", action_tree());
+        keys(&mut app, &[KeyCode::Enter]);
+        type_str(&mut app, SECRET);
+        keys(&mut app, &[KeyCode::Enter, KeyCode::Char('w')]);
+        let review = frame(&mut app, 100, 30).join("\n");
+        assert!(review.contains("< <stdin>") && !review.chars().any(|c| SECRET.contains(c)), "{review}");
+        keys(&mut app, &[KeyCode::Char('a')]);
+        for _ in 0..4 {
+            let f = frame(&mut app, 100, 30).join("\n");
+            assert!(f.contains("<stdin>") && !f.chars().any(|c| SECRET.contains(c)), "{f}");
+            app.tick();
+        }
+        assert!(!format!("{:?}", app.queue).contains(SECRET));
+    }
+
+    #[test]
     fn m_toggles_mouse_capture_and_the_status_line_says_so() {
         let mut app = App::new("t", tabbed());
         assert!(app.mouse && screen(&mut app).contains("mouse on"));
@@ -895,6 +1534,60 @@ mod tests {
         shot(&mut app, "ways-80x25", 80, 25);
         keys(&mut app, &[KeyCode::Char('c')]);
         shot(&mut app, "ways-pending-80x25", 80, 25);
+    }
+
+    /// Frames of the review flow on the real tree, as `snap_frames` writes them:
+    /// `SNAP_DIR=dir cargo test snap_review -- --ignored`.
+    #[test]
+    #[ignore]
+    fn snap_review() {
+        let out = std::path::PathBuf::from(std::env::var("SNAP_DIR").expect("SNAP_DIR"));
+        let dir = std::env::current_dir().unwrap();
+        let mut app = App::new(" ways settings ", crate::ways::build(&crate::ways::Paths::resolve(&dir), &dir));
+        // Change up to two bools or numbers in each of three files.
+        let mut per_file: std::collections::BTreeMap<std::path::PathBuf, usize> = Default::default();
+        fn walk(n: &mut Node, per_file: &mut std::collections::BTreeMap<std::path::PathBuf, usize>) {
+            if let Some(s) = n.setting.as_mut() {
+                if let Some(st) = &s.store {
+                    let k = per_file.entry(st.file.clone()).or_default();
+                    if *k < 2 && per_file.len() <= 3 {
+                        match &s.kind {
+                            Kind::Bool => s.value = if s.value == "true" { "false" } else { "true" }.into(),
+                            Kind::Float { .. } => s.value = "0.6".into(),
+                            _ => return,
+                        }
+                        *per_file.get_mut(&st.file).unwrap() += 1;
+                    }
+                }
+            }
+            n.children.iter_mut().for_each(|c| walk(c, per_file));
+        }
+        app.roots.iter_mut().for_each(|r| walk(r, &mut per_file));
+        let queued = [
+            ("gate.keys.anthropic", "set", "ways agent key add --provider anthropic < <stdin>", false),
+            ("install", "reconcile", "ways reconcile", true),
+            ("install.targets", "add", "ways config target add ~/work/.claude", true),
+        ];
+        for (key, label, command, confirm) in queued {
+            app.queue.push(Queued { key: key.into(), label: label.into(), command: command.into(), confirm });
+        }
+        let shot = |app: &mut App, name: &str, w: u16, h: u16| {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| app.draw(f)).unwrap();
+            let cells: Vec<String> =
+                term.backend().buffer().content().iter().map(|c| format!("{}\t{:?}\t{:?}\t{:?}", c.symbol(), c.fg, c.bg, c.modifier)).collect();
+            std::fs::write(out.join(format!("{name}.cells")), format!("{w} {h}\n{}\n", cells.join("\n"))).unwrap();
+        };
+        shot(&mut app, "cta-80x25", 80, 25);
+        keys(&mut app, &[KeyCode::Char('q')]);
+        shot(&mut app, "guard-100x30", 100, 30);
+        keys(&mut app, &[KeyCode::Esc, KeyCode::Char('3'), KeyCode::Char('w')]);
+        shot(&mut app, "review-100x30", 100, 30);
+        keys(&mut app, &[KeyCode::Char('a')]);
+        for _ in 0..3 {
+            app.tick();
+        }
+        shot(&mut app, "apply-100x30", 100, 30);
     }
 
     /// Prints one frame of the real tree for layout review: `cargo test frame_dump -- --nocapture --ignored`.

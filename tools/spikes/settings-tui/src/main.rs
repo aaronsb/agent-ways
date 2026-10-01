@@ -1,8 +1,9 @@
 //! Spike: every ways setting as one tree, browsed and edited in a TUI.
 //!
-//! Reads the real user, project and agent config. Writes nothing: on exit it
-//! prints the change set `ways settings` would write and the commands its
-//! queued actions would run.
+//! Reads the real user, project and agent config. Writes nothing: `w` reviews
+//! the pending items and walks a simulated apply, and on exit it prints what
+//! remains pending: the change set `ways settings` would write and the
+//! commands its queued actions would run.
 //!
 //!   ways-settings-spike [--project DIR]          the TUI
 //!   ways-settings-spike --print [FILTER]         the tree as text, for a pipe
@@ -52,7 +53,9 @@ fn main() -> std::io::Result<()> {
         let _ = execute!(std::io::stdout(), DisableMouseCapture);
         hook(info);
     }));
-    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots).shape(ui::theme::Shape::from_env());
+    // Read once: SPIKE_FAIL_STEP=<n> makes the n-th apply step fail, to see the failure path.
+    let fail_step = std::env::var("SPIKE_FAIL_STEP").ok().and_then(|v| v.parse().ok());
+    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots).shape(ui::theme::Shape::from_env()).fail_step(fail_step);
     let result = app.run(&mut term);
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
@@ -66,7 +69,7 @@ fn main() -> std::io::Result<()> {
 fn summary(roots: &[tree::Node], queue: &tree::Queue) -> String {
     let changes = tree::changes(roots);
     if changes.is_empty() && queue.is_empty() {
-        return "no changes\n".into();
+        return "nothing pending\n".into();
     }
     let mut out = String::new();
     if !changes.is_empty() {

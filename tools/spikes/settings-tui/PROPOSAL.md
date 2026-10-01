@@ -125,6 +125,42 @@ An action is confirmed (y/n) when it is destructive or reconciles: key remove, t
 
 Per-target state stays a read-only value because enabling or disabling reconciles. Way toggles under `project.ways` stay values; the real command for them is `ways disable <id>` and `ways enable <id>`.
 
+### Applying changes
+
+Save and discard are per tab. While the current tab has anything pending, a bold orange `● N unsaved in <tab> · w review & apply` segment sits at the right of the bottom bar. N counts the tab's value changes plus its queued actions, and an action belongs to the tab of the node that queued it. Clicking the segment, `w` and Ctrl-S open that tab's review. Every tab's badge stays on the tab bar, so pending elsewhere stays visible.
+
+The review is one full-width screen for the tab: value changes as `key: old → new` grouped by the file they write, then the queued commands in run order, with the confirmed ones marked `▲ asks first`. Space drops the item under the cursor: a value reverts to its loaded value and an action is unqueued. Apply <tab>, Discard <tab> and Back are buttons, pressed by Enter on a focused button, by `a`, `D` and Esc, or by a click. Discard asks y/n and names the tab and the count.
+
+Apply runs the tab's value writes first, one step per file, then its queued commands in order. A value write is atomic per file and cannot be half done, while a command can fail midway, so doing writes first leaves a failure with only commands to sort out. A failure stops the run. Steps before it count as applied and clear; the failed step and everything after it stay pending, and the screen says where it stopped. A key then returns to the review with what is left. Other tabs' pending items are not touched.
+
+The spike only simulates the run: each step goes pending, running, done on a short tick and reads "would write <file> (N keys)" or "would run <command>". `SPIKE_FAIL_STEP=<n>`, read once at startup, makes step n fail.
+
+`X` in browse, or a click on the `↺` in a tab's badge, discards that tab's pending items after a y/n prompt naming the tab and the count. Its values revert to loaded and its actions are unqueued.
+
+`q`, Esc and Ctrl-C with anything pending in any tab open an exit prompt. It lists each tab with pending items and its count, and offers Back (the default), Review of the first tab with pending (it jumps there and opens its review) and Quit and discard all, which asks a second confirm. With nothing pending anywhere, quit is immediate. A running apply is not interrupted by Ctrl-C. The exit summary prints what remains pending, or "nothing pending".
+
+Each tab's tree starts at its root's children, since the tab already names the root. The tab badge and every group badge count value changes plus queued actions under them. The root's own actions, such as `ways reconcile` on the install tab, open from `a` on any row that has none of its own.
+
+## CLI for agents, TUI for people
+
+The TUI is where a person browses, edits, reviews and applies settings. The CLI serves integrations, agents and anyone who already knows the key: it assumes the caller wants the thing done and says nothing more.
+
+- **One help registry.** Each setting carries its doc line, type, range, default and the file it writes; each command carries a one-line summary and a longer body. The TUI's detail pane and help overlay and the CLI's `--help` render from the same registry, so the long help is the TUI's text replayed.
+- **Terse by default.** `ways settings get <key>` prints the value; `list [prefix]` prints `key=value` lines; `set` and `unset` print nothing on success and exit 0. `--json` adds source, default and the file written. The top-level `ways --help` lists one line per command.
+- **Verbose on request.** `ways <command> --help` prints the long body; `ways settings help <key>` prints the detail pane for that key, and `ways settings help <tab>` for a whole tab.
+- **Comfortable for a person.** The same content on a terminal and in a pipe; a terminal gets colour and aligned columns, a pipe or `NO_COLOR` gets plain text. A failure is one line on stderr that names the problem and the command explaining it. Shell completion for commands and keys comes from the registry.
+- **Bare `ways settings` on a terminal opens the TUI.**
+
+Ways that teach agents about agent-ways point at `ways settings help <key>` instead of restating a setting's meaning. Hooks and scripts that parse today's prose output move to `--json`; old command names stay as hidden aliases for one release.
+
+## Themes
+
+agent-ways owns its themes: no runtime link to the shell's theme tool. A theme is a TOML file of ten slots (bg, fg, dim, subtle, accent, info, ok, warn, err, alt) and a light or dark kind, the slot set the operator's dotfiles palettes use. Derived colours (hot, rule, faded text, selection) are computed and can be pinned. A shared theme crate maps roles onto ratatui styles and plain ANSI and owns the NO_COLOR and colour-depth check; identity colours and the banner gradient stay outside themes.
+
+Bundled themes ship in the binary: an agent-ways default on the identity palette's sky, and a few lifted by hand from the dotfiles palettes as starting points. The operator's own live in `$XDG_CONFIG_HOME/agent-ways/themes/`, and `ui.theme` selects one. A theme tab manages them: new, copy, rename, delete and edit, with a slot editor (swatches, hue, saturation and lightness sliders, hex entry) and a live preview on the real UI. Bundled themes are read-only, so editing one starts a copy. Every theme file operation is a queued item applied through the tab's review.
+
+Surfaces move onto the crate one PR at a time: the settings TUI, then `rethink` and introspect, the `agent-fmt` tables and status output, `attend-chat` through an adapter to its own TUI library, and the attend CLI.
+
 ## Decided
 
 - **ratatui for every TUI.** The repo has a hand-rolled crossterm TUI (`rethink`, about 2,900 lines) and an iocraft one (`attend-chat`). The shared crate is built on ratatui, the maintained Rust TUI library, whose `TestBackend` renders frames in tests. Moving `rethink` and `attend-chat` onto it are separate increments.

@@ -191,6 +191,8 @@ pub struct Queued {
     pub key: String,
     pub label: String,
     pub command: String,
+    /// The action asked first: it is destructive or reconciles.
+    pub confirm: bool,
 }
 
 /// Queued actions, in the order they were chosen.
@@ -205,6 +207,13 @@ impl Queue {
     pub fn undo_last(&mut self) -> Option<Queued> {
         self.0.pop()
     }
+    /// Drop the action at `i`, wherever it sits.
+    pub fn remove(&mut self, i: usize) -> Option<Queued> {
+        (i < self.0.len()).then(|| self.0.remove(i))
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
     pub fn items(&self) -> &[Queued] {
         &self.0
     }
@@ -214,11 +223,23 @@ impl Queue {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-    /// Actions queued from nodes under the root named `root`.
+    /// Actions queued from nodes under the node keyed `root`.
     pub fn under(&self, root: &str) -> usize {
-        let dotted = format!("{root}.");
-        self.0.iter().filter(|q| q.key == root || q.key.starts_with(&dotted)).count()
+        self.0.iter().filter(|q| is_under(&q.key, root)).count()
     }
+    /// The place in the queue of the first action under `root`.
+    pub fn first_under(&self, root: &str) -> Option<usize> {
+        self.0.iter().position(|q| is_under(&q.key, root))
+    }
+    /// Unqueue every action under `root`.
+    pub fn remove_under(&mut self, root: &str) {
+        self.0.retain(|q| !is_under(&q.key, root));
+    }
+}
+
+/// Whether the dotted `key` is `root` or sits below it.
+pub fn is_under(key: &str, root: &str) -> bool {
+    key == root || key.strip_prefix(root).is_some_and(|r| r.starts_with('.'))
 }
 
 /// Typed secret text. Debug redacts, there is no Display, and the bytes are
@@ -303,19 +324,23 @@ pub fn key(roots: &[Node], path: &[usize]) -> String {
 /// Rows to draw. With a filter, every node whose key contains it is shown
 /// with its ancestors, whatever is open; each root heads its own matches.
 pub fn rows(roots: &[Node], filter: &str) -> Vec<Row> {
-    rows_in(roots, 0, roots.len(), filter)
-}
-
-/// The rows of one tab: the root at index `tab` and what is open under it.
-pub fn tab_rows(roots: &[Node], tab: usize) -> Vec<Row> {
-    rows_in(roots, tab, 1, "")
-}
-
-fn rows_in(roots: &[Node], skip: usize, take: usize, filter: &str) -> Vec<Row> {
     let mut out = Vec::new();
     let f = filter.to_lowercase();
-    for (i, n) in roots.iter().enumerate().skip(skip).take(take) {
+    for (i, n) in roots.iter().enumerate() {
         walk(n, vec![i], &n.name.to_lowercase(), &f, &mut out);
+    }
+    out
+}
+
+/// The rows of one tab: the children of the root at index `tab`, and what is
+/// open under them. The root is the tab itself and has no row.
+pub fn tab_rows(roots: &[Node], tab: usize) -> Vec<Row> {
+    let mut out = Vec::new();
+    for (i, c) in roots[tab].children.iter().enumerate() {
+        walk(c, vec![tab, i], "", "", &mut out);
+    }
+    for r in &mut out {
+        r.depth -= 1;
     }
     out
 }
@@ -352,6 +377,17 @@ fn walk(n: &Node, path: Vec<usize>, key: &str, f: &str, out: &mut Vec<Row>) -> b
     } else {
         false
     }
+}
+
+/// Put every changed setting back to its loaded value.
+pub fn revert_all(roots: &mut [Node]) {
+    fn go(n: &mut Node) {
+        if let Some(s) = n.setting.as_mut() {
+            s.value = s.loaded.clone();
+        }
+        n.children.iter_mut().for_each(go);
+    }
+    roots.iter_mut().for_each(go);
 }
 
 /// Every changed setting: (dotted key, store, from, to).
@@ -402,11 +438,15 @@ mod tests {
     fn tab_rows_cover_one_root_and_pending_counts_its_queue() {
         let mut t = sample();
         t.push(Node::group("gate", "", vec![]));
-        assert_eq!(tab_rows(&t, 1).len(), 1);
-        assert_eq!(rows(&t, "").len(), 2);
+        t[0].open = true;
+        let tab = tab_rows(&t, 0);
+        assert_eq!(tab.len(), 2, "the root has no row");
+        assert_eq!((tab[0].depth, key(&t, &tab[0].path)), (0, "matching.tau_s".to_string()));
+        assert!(tab_rows(&t, 1).is_empty());
+        assert_eq!(rows(&t, "").len(), 4);
         let mut q = Queue::default();
         for k in ["matching.scope", "gate", "gatekeeper"] {
-            q.push(Queued { key: k.into(), label: String::new(), command: String::new() });
+            q.push(Queued { key: k.into(), label: String::new(), command: String::new(), confirm: false });
         }
         assert_eq!((pending(&t[0], &q), pending(&t[1], &q)), (1, 1));
     }
@@ -416,7 +456,7 @@ mod tests {
         let mut q = Queue::default();
         let a = Action::new("add", "ways x add {}").arg(Arg::Text("dir".into()));
         for d in ["a", "b c"] {
-            q.push(Queued { key: "k".into(), label: a.label.clone(), command: a.render(d) });
+            q.push(Queued { key: "k".into(), label: a.label.clone(), command: a.render(d), confirm: a.confirm });
         }
         assert_eq!(q.items()[1].command, "ways x add 'b c'");
         assert_eq!(q.undo_last().unwrap().command, "ways x add 'b c'");
