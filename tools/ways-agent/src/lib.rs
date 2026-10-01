@@ -2,12 +2,9 @@
 //! a way the matcher picked is relevant to the conversation (ADR-196) and is
 //! the one process that reads the provider key.
 //!
-//! The library carries what both sides share: engine profiles and the key
-//! store. The `net` feature adds the provider HTTP clients; the hook links the
-//! crate without it.
+//! The shared pieces (profiles, the key store) live in `ways-agent-core`,
+//! which the hook links; this crate adds the provider HTTP clients.
 
-pub mod keys;
-pub mod profile;
+pub use ways_agent_core::{keys, profile};
 
-#[cfg(feature = "net")]
 pub mod net;

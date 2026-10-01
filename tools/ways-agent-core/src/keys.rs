@@ -65,14 +65,21 @@ pub fn read(provider: Provider) -> Result<Option<(String, Source)>> {
     Ok(Some((key, source)))
 }
 
-/// The last four characters, the most of a key anything may show.
+/// Provider keys are long; anything shorter is a mis-paste.
+pub const MIN_KEY_CHARS: usize = 20;
+
+/// The last four characters, the most of a key anything may show. A value too
+/// short to be a key shows nothing, since four characters would be most of it.
 pub fn tail(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();
-    let start = chars.len().saturating_sub(4);
-    format!("…{}", chars[start..].iter().collect::<String>())
+    if chars.len() < MIN_KEY_CHARS {
+        return "…(too short to be a key)".to_string();
+    }
+    format!("…{}", chars[chars.len() - 4..].iter().collect::<String>())
 }
 
-/// Checks a key's shape before it is stored: one non-empty line with no spaces.
+/// Checks a key's shape before it is stored: one line, no spaces, long enough
+/// to be a provider key.
 pub fn validate(key: &str) -> Result<String> {
     let key = key.trim();
     if key.is_empty() {
@@ -80,6 +87,9 @@ pub fn validate(key: &str) -> Result<String> {
     }
     if key.contains(char::is_whitespace) {
         bail!("the key contains whitespace; paste only the key");
+    }
+    if key.chars().count() < MIN_KEY_CHARS {
+        bail!("that is {} characters; provider keys are longer. Paste the whole key", key.chars().count());
     }
     Ok(key.to_string())
 }
@@ -96,6 +106,10 @@ fn store_in(dir: &Path, provider: Provider, key: &str) -> Result<PathBuf> {
 
     let key = validate(key)?;
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    // A symlinked keys directory would put the key wherever the link points.
+    if std::fs::symlink_metadata(dir)?.file_type().is_symlink() {
+        bail!("{} is a symbolic link; the key was not written", dir.display());
+    }
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
         .with_context(|| format!("setting {} to mode 0700", dir.display()))?;
     let dir_mode = mode(dir)?;
@@ -104,8 +118,8 @@ fn store_in(dir: &Path, provider: Provider, key: &str) -> Result<PathBuf> {
     }
 
     let path = dir.join(provider.as_str());
-    let tmp = dir.join(format!(".{}.tmp", provider.as_str()));
-    let _ = std::fs::remove_file(&tmp);
+    // A name of its own per write: two concurrent writes never share a file.
+    let tmp = dir.join(format!(".{}.{}.{}.tmp", provider.as_str(), std::process::id(), unique()));
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -128,8 +142,22 @@ fn store_in(dir: &Path, provider: Provider, key: &str) -> Result<PathBuf> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.context("the key was not written"));
     }
-    std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("replacing {}", path.display()));
+    }
+    // Persist the rename itself, so a crash cannot bring the old key back.
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
     Ok(path)
+}
+
+#[cfg(unix)]
+fn unique() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    N.fetch_add(1, Ordering::Relaxed)
 }
 
 #[cfg(not(unix))]
@@ -185,6 +213,89 @@ fn mode(path: &Path) -> Result<u32> {
         & 0o777)
 }
 
+/// What the last zero-cost check of a provider's key found, kept so the agent
+/// gates only on a key that worked (ADR-196 §6). The record names the key file
+/// it checked by modification time and length: replacing the file by hand
+/// invalidates it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CheckRecord {
+    /// `valid`, `invalid`, `no_credit`, `rate_limited`, `model_unavailable`,
+    /// `unreachable` or `failed`.
+    pub result: String,
+    /// The model checked against.
+    pub model: String,
+    /// Seconds since the Unix epoch.
+    pub at: u64,
+    /// Where the key came from, as `Source` displays it.
+    pub source: String,
+    /// The key file's (mtime seconds, length) when checked; `None` for an
+    /// environment variable.
+    pub file_stamp: Option<(u64, u64)>,
+}
+
+impl CheckRecord {
+    /// A record taken now for `source`.
+    pub fn now(result: &str, model: &str, source: &Source) -> CheckRecord {
+        CheckRecord {
+            result: result.to_string(),
+            model: model.to_string(),
+            at: now_s(),
+            source: source.to_string(),
+            file_stamp: file_stamp(source),
+        }
+    }
+
+    /// True when the record still describes the key `source` points at.
+    pub fn describes(&self, source: &Source) -> bool {
+        self.source == source.to_string() && self.file_stamp == file_stamp(source)
+    }
+
+    /// Seconds since the check.
+    pub fn age_s(&self) -> u64 {
+        now_s().saturating_sub(self.at)
+    }
+}
+
+fn file_stamp(source: &Source) -> Option<(u64, u64)> {
+    let Source::File(path) = source else { return None };
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some((mtime, meta.len()))
+}
+
+fn now_s() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn check_path(provider: Provider) -> PathBuf {
+    ways_core::paths::state_root().join("agent").join(format!("key-check-{}.json", provider.as_str()))
+}
+
+/// Records a check. Best effort: a failure to record only means the next use
+/// checks again.
+pub fn record_check(provider: Provider, record: &CheckRecord) {
+    let path = check_path(provider);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(text) = serde_json::to_string(record) {
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
+/// The last recorded check of this provider's key, if any.
+pub fn last_check(provider: Provider) -> Option<CheckRecord> {
+    serde_json::from_str(&std::fs::read_to_string(check_path(provider)).ok()?).ok()
+}
+
+/// Forgets the recorded check, as when the key is removed.
+pub fn clear_check(provider: Provider) {
+    let _ = std::fs::remove_file(check_path(provider));
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -199,14 +310,14 @@ mod tests {
     #[test]
     fn store_writes_0600_in_0700_and_replaces() {
         let dir = scratch("store").join("keys");
-        let path = store_in(&dir, Provider::Anthropic, "  sk-test-1234\n").unwrap();
+        let path = store_in(&dir, Provider::Anthropic, "  sk-test-1234-abcdefghijkl\n").unwrap();
         assert_eq!(mode(&path).unwrap(), 0o600);
         assert_eq!(mode(&dir).unwrap(), 0o700);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sk-test-1234\n");
-        store_in(&dir, Provider::Anthropic, "sk-test-5678").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sk-test-5678\n");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sk-test-1234-abcdefghijkl\n");
+        store_in(&dir, Provider::Anthropic, "sk-test-5678-abcdefghijkl").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sk-test-5678-abcdefghijkl\n");
         assert!(exposure(&path).is_empty());
-        assert!(!dir.join(".anthropic.tmp").exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temp file left behind");
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
@@ -215,7 +326,7 @@ mod tests {
         let dir = scratch("loose").join("keys");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        store_in(&dir, Provider::Openrouter, "or-key").unwrap();
+        store_in(&dir, Provider::Openrouter, "sk-or-v1-abcdefghijklmnop").unwrap();
         assert_eq!(mode(&dir).unwrap(), 0o700);
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
@@ -223,7 +334,7 @@ mod tests {
     #[test]
     fn exposure_names_a_readable_key() {
         let dir = scratch("exposed").join("keys");
-        let path = store_in(&dir, Provider::Anthropic, "k").unwrap();
+        let path = store_in(&dir, Provider::Anthropic, "sk-ant-abcdefghijklmnop").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let found = exposure(&path);
         assert_eq!(found.len(), 1, "{found:?}");
@@ -232,23 +343,48 @@ mod tests {
     }
 
     #[test]
-    fn validate_refuses_empty_and_spaced_keys() {
+    fn validate_refuses_empty_spaced_and_short_keys() {
         assert!(validate("  \n").is_err());
-        assert!(validate("sk a").is_err());
-        assert_eq!(validate("\tsk-a\n").unwrap(), "sk-a");
+        assert!(validate("sk-ant-abcdefghij klmnop").is_err());
+        assert!(validate("sk-a").is_err());
+        assert_eq!(validate("\tsk-ant-abcdefghijklmnop\n").unwrap(), "sk-ant-abcdefghijklmnop");
     }
 
     #[test]
-    fn tail_shows_at_most_four_characters() {
-        assert_eq!(tail("sk-ant-abcdef"), "…cdef");
-        assert_eq!(tail("ab"), "…ab");
+    fn tail_shows_at_most_four_characters_and_nothing_of_a_short_value() {
+        assert_eq!(tail("sk-ant-abcdefghijklmnop"), "…mnop");
+        assert_eq!(tail("ab"), "…(too short to be a key)");
+    }
+
+    #[test]
+    fn store_refuses_a_symlinked_keys_directory() {
+        let base = scratch("symlink");
+        let real = base.join("elsewhere");
+        std::fs::create_dir_all(&real).unwrap();
+        std::os::unix::fs::symlink(&real, base.join("keys")).unwrap();
+        assert!(store_in(&base.join("keys"), Provider::Anthropic, "sk-ant-abcdefghijklmnop").is_err());
+        assert_eq!(std::fs::read_dir(&real).unwrap().count(), 0);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_check_record_stops_describing_a_replaced_key_file() {
+        let dir = scratch("record").join("keys");
+        let path = store_in(&dir, Provider::Anthropic, "sk-ant-abcdefghijklmnop").unwrap();
+        let source = Source::File(path.clone());
+        let record = CheckRecord::now("valid", "m", &source);
+        assert!(record.describes(&source));
+        store_in(&dir, Provider::Anthropic, "sk-ant-abcdefghijklmnopqrstu").unwrap();
+        assert!(!record.describes(&source));
+        assert!(!record.describes(&Source::Env("ANTHROPIC_API_KEY")));
+        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn locate_prefers_the_file_when_no_env_is_set() {
         let dir = scratch("locate").join("keys");
         assert_eq!(locate_in(Provider::Openrouter, &dir), None.or(locate_env(Provider::Openrouter)));
-        let path = store_in(&dir, Provider::Openrouter, "k").unwrap();
+        let path = store_in(&dir, Provider::Openrouter, "sk-or-v1-abcdefghijklmnop").unwrap();
         if locate_env(Provider::Openrouter).is_none() {
             assert_eq!(locate_in(Provider::Openrouter, &dir), Some(Source::File(path)));
         }
