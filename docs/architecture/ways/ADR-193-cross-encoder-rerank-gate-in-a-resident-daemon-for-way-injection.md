@@ -8,7 +8,7 @@ basis:
 agent:
   name: claude
   model: unrecorded
-status: proposed
+status: abandoned
 date: 2026-09-24
 deciders:
   - aaronsb
@@ -173,3 +173,7 @@ Every model that generates or labels data for a shipped checkpoint is open-weigh
 - **A classifier head per way on a frozen encoder** (the stuntd pattern). Rejected. It needs about 300 labelled examples per question, which is about 48,000 across 161 ways, and every new way needs its own head.
 - **Remote reranker (Haiku or an API reranker).** Rejected. The requirement is local operation, and ADR-160's probe already showed that a remote model given thin evidence does not help.
 - **Upstream `llama-server --reranking` as the daemon.** Rejected as the shipped form. It needs no new code, but it cannot hold session context, embedder calls and version checks in one process. It is a reasonable way to prototype model selection in stage 5.
+
+## Closure
+
+Abandoned 2026-10-01: Replaced by ADR-196: the probe in ADR-195 found that a hosted judge discriminates where a local cross-encoder does not, and the daemon moves to ADR-502. A local engine remains open as #666.

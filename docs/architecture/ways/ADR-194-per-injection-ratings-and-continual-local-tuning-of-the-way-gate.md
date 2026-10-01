@@ -9,7 +9,7 @@ basis:
 agent:
   name: claude
   model: unrecorded
-status: proposed
+status: abandoned
 date: 2026-09-25
 deciders:
   - aaronsb
@@ -325,3 +325,7 @@ Methods cited above: Elkan & Noto (2008) and Bekker & Davis (2020) on positive-u
 - **A `/misfire` command for the person.** Rejected. It assumes the person notices misfires while working, which is the attention this design avoids asking for, and catching a slash command before it expands was never verified. The checkpoint interview supplies human labels at full weight instead.
 - **Explicit thumbs-up.** Rejected. It doubles the calls for the common case and adds little once per-band recall measures what silence is worth.
 - **Jev as the rater.** Rejected for the reasons in ADR-193: hosted, nondeterministic, and it would see transcript text on every prompt. Its terms on training from its output were not verified, which also rules it out as a labeller for shipped weights.
+
+## Closure
+
+Abandoned 2026-10-01: Replaced by ADR-196: the probe in ADR-195 found that a hosted judge discriminates where a local cross-encoder does not, and the daemon moves to ADR-502. A local engine remains open as #666.
