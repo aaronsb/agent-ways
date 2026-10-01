@@ -1,5 +1,14 @@
 ---
-status: Proposed
+contract: adr/v1
+kind: decision
+verb: add
+capability: matching
+basis:
+  - precedent: ADR-160
+agent:
+  name: claude
+  model: unrecorded
+status: proposed
 date: 2026-09-24
 deciders:
   - aaronsb
@@ -17,6 +26,10 @@ related:
   - ADR-187
   - ADR-188
   - ADR-194
+imported:
+  from: docs/architecture/ways/ADR-193-cross-encoder-rerank-gate-in-a-resident-daemon-for-way-injection.md
+  format: v0
+  status: Proposed
 ---
 
 # ADR-193: Cross-encoder rerank gate in a resident daemon for way injection

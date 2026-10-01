@@ -1,5 +1,15 @@
 ---
-status: Proposed
+contract: adr/v1
+kind: decision
+verb: add
+capability: matching
+basis:
+  - precedent: ADR-193
+  - precedent: ADR-160
+agent:
+  name: claude
+  model: unrecorded
+status: proposed
 date: 2026-09-25
 deciders:
   - aaronsb
@@ -11,8 +21,12 @@ related:
   - ADR-160
   - ADR-184
   - ADR-187
+  - ADR-501
   - ADR-193
-amends: ADR-187#11
+imported:
+  from: docs/architecture/ways/ADR-194-per-injection-ratings-and-continual-local-tuning-of-the-way-gate.md
+  format: v0
+  status: Proposed
 ---
 
 # ADR-194: Per-injection ratings and continual local tuning of the way gate

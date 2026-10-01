@@ -51,6 +51,8 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-190](./ways/ADR-190-the-lexical-gate-as-a-conditional-threshold.md) | The lexical gate as a conditional threshold | accepted |
 | [ADR-191](./ways/ADR-191-the-tool-use-channel-is-a-signal-problem-lookbehind-chunk-spread-and-winner-confirmation.md) | The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation | accepted |
 | [ADR-192](./ways/ADR-192-late-interaction-matching-the-flow.md) | Late-interaction matching: the flow | accepted |
+| [ADR-193](./ways/ADR-193-cross-encoder-rerank-gate-in-a-resident-daemon-for-way-injection.md) | Cross-encoder rerank gate in a resident daemon for way injection | proposed |
+| [ADR-194](./ways/ADR-194-per-injection-ratings-and-continual-local-tuning-of-the-way-gate.md) | Per-injection ratings and continual local tuning of the way gate | proposed |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
