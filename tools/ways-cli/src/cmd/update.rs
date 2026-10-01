@@ -222,11 +222,11 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// True when no provider has a key, from the environment or the key store.
+/// True when no provider has a key file: the agent reads only the file.
 fn no_agent_key() -> bool {
-    ways_agent::profile::Provider::ALL
+    ways_agent_core::profile::Provider::ALL
         .into_iter()
-        .all(|p| ways_agent::keys::locate(p).is_none())
+        .all(|p| !ways_agent_core::keys::key_path(p).is_file())
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.

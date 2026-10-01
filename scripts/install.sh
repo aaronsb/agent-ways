@@ -402,8 +402,9 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   # up (no prebuilt way-embed for this platform / toolchain missing), guide recovery.
   embedding_engine_ok || print_recovery_card
   # Optional relevance gate: a hint only. Never prompt; the installer runs from a pipe.
-  if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] \
-     && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/anthropic" ] && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/openrouter" ]; then
+  # The agent reads only the key file, so only a key file counts here.
+  if [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/anthropic" ] \
+     && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/openrouter" ]; then
     echo -e "  Optional: turn on the relevance gate (Claude Haiku judges each matched way) with ${CYAN}ways agent key add --provider anthropic${RESET}"
     echo ""
   fi

@@ -6,6 +6,7 @@ on:
     tags: ['ways-agent-v*']
     paths:
       - 'tools/ways-agent/**'
+      - 'tools/ways-agent-core/**'
       - 'tools/ways-core/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - 'tools/ways-agent/**'
+      - 'tools/ways-agent-core/**'
       - 'tools/ways-core/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
@@ -90,7 +92,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Run unit tests (ways-agent)
-        run: cargo test --manifest-path tools/Cargo.toml -p ways-agent
+        run: cargo test --manifest-path tools/Cargo.toml -p ways-agent -p ways-agent-core
 
   collect:
     needs: [build, test]
