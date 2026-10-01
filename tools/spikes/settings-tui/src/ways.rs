@@ -1,7 +1,8 @@
 //! The ways adapter: every setting agent-ways reads, as one tree, with the
 //! layer each value came from and the file an edit would write.
 //!
-//! Read-only. Key files are checked for existence and never opened.
+//! Read-only. Key files are checked for existence and never opened. Actions
+//! carry the real `ways` command lines; none is run.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde_yaml::Value;
 
-use crate::tree::{Kind, Node, Setting};
+use crate::tree::{quote, Action, Arg, Kind, Node, Setting};
 
 const SHIPPED_PROFILES: &str = include_str!("../../../ways-agent-core/profiles.yaml");
 
@@ -224,7 +225,11 @@ fn project_node(project: &Value, p: &Paths, project_dir: &Path) -> Node {
                     .default("true")
                     .store(p.project.clone(), "enabled"),
             ),
-            Node::group("ways", "Each way, on or off for this project only (ADR-131).", ways),
+            Node::group(
+                "ways",
+                "Each way, on or off for this project only (ADR-131). A toggle stays a value here; the real command maps to `ways disable <id>` and `ways enable <id>`.",
+                ways,
+            ),
         ],
     )
 }
@@ -281,11 +286,22 @@ fn gate(agent: &Value, p: &Paths) -> Node {
         .map(|name| {
             // Existence only: the key file is never opened.
             let present = p.keys.join(name).exists();
+            let key = |verb: &str| format!("ways agent key {verb} --provider {name}");
+            let mut actions = vec![if present {
+                Action::new("rotate", key("rotate")).arg(Arg::Secret)
+            } else {
+                Action::new("set", key("add")).arg(Arg::Secret)
+            }];
+            if present {
+                actions.push(Action::new("remove", key("remove")).confirm());
+            }
+            actions.push(Action::new("check", key("check")));
             Node::leaf(
                 name.clone(),
-                "Set, check, rotate or remove with `ways agent key`. The settings view never shows key material.",
-                Setting::new(Kind::ReadOnly, if present { "present" } else { "absent" }, "keys/"),
+                "Enter types the key masked and queues `ways agent key add|rotate`, which reads it from stdin: it never reaches argv or the screen, and the settings view never shows key material.",
+                Setting::new(Kind::Secret, if present { "present" } else { "absent" }, "keys/"),
             )
+            .with_actions(actions)
         })
         .collect();
     let mut choices = vec!["(auto)".to_string()];
@@ -309,7 +325,7 @@ fn gate(agent: &Value, p: &Paths) -> Node {
                     .store(p.agent.clone(), "mode"),
             ),
             Node::group("profiles", "Per-engine tuning. A user layer overrides any field.", profiles),
-            Node::group("keys", "Provider API keys, by presence.", keys),
+            Node::group("keys", "Provider API keys, by presence. Entry is masked.", keys),
         ],
     )
 }
@@ -323,21 +339,30 @@ fn install(user: &Value, p: &Paths) -> Node {
                 .filter_map(|t| {
                     let path = t.get("path").and_then(scalar)?;
                     let on = t.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                    Some(Node::leaf(
-                        path.clone(),
-                        "A Claude Code config directory agent-ways projects into (ADR-184). Enabling or disabling reconciles, so it stays a command: `ways config target enable|disable`.",
-                        Setting::new(Kind::ReadOnly, if on { "enabled" } else { "disabled" }, "user"),
-                    ))
+                    let target = |verb: &str| format!("ways config target {verb} {}", quote(&path));
+                    let toggle = if on { Action::new("disable", target("disable")).confirm() } else { Action::new("enable", target("enable")) };
+                    Some(
+                        Node::leaf(
+                            path.clone(),
+                            "A Claude Code config directory agent-ways projects into (ADR-184). The value is read-only: enabling, disabling and removing reconcile, so they are actions.",
+                            Setting::new(Kind::ReadOnly, if on { "enabled" } else { "disabled" }, "user"),
+                        )
+                        .with_actions(vec![toggle, Action::new("remove", target("remove")).confirm()]),
+                    )
                 })
                 .collect()
         })
         .unwrap_or_default();
     let deny_user = user.get("secret_path_deny").and_then(Value::as_bool);
+    let reconcile = Action::new("reconcile", "ways reconcile").confirm();
     Node::group(
         "install",
         "Where agent-ways is active and what the projection writes.",
         vec![
-            Node::group("targets", "Projection targets. Changing one is an action, so the tree shows them and the command changes them.", targets),
+            Node::group("targets", "Projection targets. Changing one is an action, so the tree shows them and the command changes them.", targets).with_actions(vec![
+                Action::new("add", "ways config target add {}").arg(Arg::Text("directory".into())).confirm(),
+                Action::new("plan", "ways config target plan {}").arg(Arg::Text("directory".into())),
+            ]),
             Node::leaf(
                 "secret_path_deny",
                 "Project the secret-path permissions.deny baseline into settings.json (ADR-152). Takes effect at the next `ways reconcile`.",
@@ -347,4 +372,5 @@ fn install(user: &Value, p: &Paths) -> Node {
             ),
         ],
     )
+    .with_actions(vec![reconcile])
 }

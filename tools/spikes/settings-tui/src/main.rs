@@ -1,7 +1,8 @@
 //! Spike: every ways setting as one tree, browsed and edited in a TUI.
 //!
 //! Reads the real user, project and agent config. Writes nothing: on exit it
-//! prints the change set `ways settings` would write.
+//! prints the change set `ways settings` would write and the commands its
+//! queued actions would run.
 //!
 //!   ways-settings-spike [--project DIR]          the TUI
 //!   ways-settings-spike --print [FILTER]         the tree as text, for a pipe
@@ -10,6 +11,7 @@ mod tree;
 mod ui;
 mod ways;
 
+use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -42,21 +44,40 @@ fn main() -> std::io::Result<()> {
     let mut term = ratatui::init();
     let result = ui::App::new(format!(" ways settings — {} ", project.display()), roots).run(&mut term);
     ratatui::restore();
-    let roots = result?;
+    let session = result?;
+    print!("{}", summary(&session.roots, &session.queue));
+    Ok(())
+}
 
-    let changes = tree::changes(&roots);
-    if changes.is_empty() {
-        println!("no changes");
-    } else {
-        println!("{} change(s); the spike wrote nothing. `ways settings` would write:", changes.len());
-        for (key, store, from, to) in changes {
-            match store {
-                Some(s) => println!("  {}  {}: {from} → {to}", s.file.display(), s.key),
-                None => println!("  {key}: {from} → {to}"),
-            }
+/// What a real `ways settings` would do: value changes by file, then the
+/// queued commands in order. Secrets appear only as `<stdin>`.
+fn summary(roots: &[tree::Node], queue: &tree::Queue) -> String {
+    let changes = tree::changes(roots);
+    if changes.is_empty() && queue.is_empty() {
+        return "no changes\n".into();
+    }
+    let mut out = String::new();
+    if !changes.is_empty() {
+        let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (key, store, from, to) in &changes {
+            let (file, key) = match store {
+                Some(s) => (s.file.display().to_string(), s.key.clone()),
+                None => ("(no store)".into(), key.clone()),
+            };
+            by_file.entry(file).or_default().push(format!("    {key}: {from} → {to}"));
+        }
+        out += &format!("{} change(s); the spike wrote nothing. `ways settings` would write:\n", changes.len());
+        for (file, lines) in by_file {
+            out += &format!("  {file}\n{}\n", lines.join("\n"));
         }
     }
-    Ok(())
+    if !queue.is_empty() {
+        out += &format!("{} action(s) queued; the spike ran none. A real `ways settings` would run, in order:\n", queue.len());
+        for (i, q) in queue.items().iter().enumerate() {
+            out += &format!("  {}. {}\n", i + 1, q.command);
+        }
+    }
+    out
 }
 
 /// Every row with groups expanded, as `key = value  (source)`.
