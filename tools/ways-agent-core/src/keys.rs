@@ -214,9 +214,10 @@ fn mode(path: &Path) -> Result<u32> {
 }
 
 /// What the last zero-cost check of a provider's key found, kept so the agent
-/// gates only on a key that worked (ADR-196 §6). The record names the key file
-/// it checked by modification time and length: replacing the file by hand
-/// invalidates it.
+/// gates only on a key that worked (ADR-196 §6). The record names the key it
+/// checked by a stamp (a file's modification time and length, or a variable's
+/// length and hash) and the model it checked against: a different key or a
+/// different model makes it stale.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CheckRecord {
     /// `valid`, `invalid`, `no_credit`, `rate_limited`, `model_unavailable`,
@@ -228,9 +229,8 @@ pub struct CheckRecord {
     pub at: u64,
     /// Where the key came from, as `Source` displays it.
     pub source: String,
-    /// The key file's (mtime seconds, length) when checked; `None` for an
-    /// environment variable.
-    pub file_stamp: Option<(u64, u64)>,
+    /// A key file's (mtime seconds, length), or a variable's (length, hash).
+    pub stamp: Option<(u64, u64)>,
 }
 
 impl CheckRecord {
@@ -241,13 +241,14 @@ impl CheckRecord {
             model: model.to_string(),
             at: now_s(),
             source: source.to_string(),
-            file_stamp: file_stamp(source),
+            stamp: stamp(source),
         }
     }
 
-    /// True when the record still describes the key `source` points at.
-    pub fn describes(&self, source: &Source) -> bool {
-        self.source == source.to_string() && self.file_stamp == file_stamp(source)
+    /// True when the record still describes the key `source` points at,
+    /// checked against `model`.
+    pub fn describes(&self, source: &Source, model: &str) -> bool {
+        self.source == source.to_string() && self.stamp == stamp(source) && self.model == model
     }
 
     /// Seconds since the check.
@@ -256,8 +257,18 @@ impl CheckRecord {
     }
 }
 
-fn file_stamp(source: &Source) -> Option<(u64, u64)> {
-    let Source::File(path) = source else { return None };
+fn stamp(source: &Source) -> Option<(u64, u64)> {
+    let path = match source {
+        Source::File(path) => path,
+        Source::Env(var) => {
+            // A hash, not the value: enough to notice the variable changed.
+            use std::hash::{Hash, Hasher};
+            let value = std::env::var(var).ok()?;
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            value.trim().hash(&mut h);
+            return Some((value.trim().len() as u64, h.finish()));
+        }
+    };
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
     Some((mtime, meta.len()))
@@ -373,10 +384,11 @@ mod tests {
         let path = store_in(&dir, Provider::Anthropic, "sk-ant-abcdefghijklmnop").unwrap();
         let source = Source::File(path.clone());
         let record = CheckRecord::now("valid", "m", &source);
-        assert!(record.describes(&source));
+        assert!(record.describes(&source, "m"));
+        assert!(!record.describes(&source, "other-model"));
         store_in(&dir, Provider::Anthropic, "sk-ant-abcdefghijklmnopqrstu").unwrap();
-        assert!(!record.describes(&source));
-        assert!(!record.describes(&Source::Env("ANTHROPIC_API_KEY")));
+        assert!(!record.describes(&source, "m"));
+        assert!(!record.describes(&Source::Env("ANTHROPIC_API_KEY"), "m"));
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
