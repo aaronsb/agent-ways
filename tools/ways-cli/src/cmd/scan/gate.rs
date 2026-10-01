@@ -5,8 +5,10 @@
 //! conversation's last turns. In enforce mode a way judged below the engine's
 //! threshold is not shown and keeps its refire budget; in shadow mode every
 //! verdict is logged and nothing is blocked. Ways with `pattern_strict` are not
-//! judged. Every verdict and every fallback is logged to `events.jsonl`, and
-//! any failure fails open: the matcher's decision stands.
+//! judged. A request carries at most the profile's `max_candidates`, in the
+//! matcher's order: judge latency grows with each candidate, and past the cap
+//! the rest pass unjudged. Every verdict, cap and fallback is logged to
+//! `events.jsonl`, and any failure fails open: the matcher's decision stands.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -87,9 +89,23 @@ fn run(
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
 ) -> HashSet<String> {
-    let judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
+    let mut judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
     if judged.is_empty() {
         return HashSet::new();
+    }
+    let cap = settings.profile.max_candidates;
+    if judged.len() > cap {
+        let unjudged: Vec<&str> = judged.split_off(cap).iter().map(|p| p.id).collect();
+        (log.sink)(&[
+            ("event", "gate_capped"),
+            ("judged", &cap.to_string()),
+            ("unjudged", &unjudged.len().to_string()),
+            ("ways", &unjudged.join(",")),
+            ("hook", log.hook_event),
+            ("scope", log.scope),
+            ("project", log.project_dir),
+            ("session", log.session_id),
+        ]);
     }
     let request = JudgeRequest {
         session: log.session_id.to_string(),
@@ -270,6 +286,29 @@ mod tests {
             assert_eq!(field(&events[0], "reason"), reason);
             assert_eq!(field(&events[0], "candidates"), "2");
         }
+    }
+
+    #[test]
+    fn past_the_cap_ways_pass_unjudged_and_the_cap_is_logged() {
+        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let many: Vec<Pending<'_>> =
+            ids.iter().map(|id| Pending { id, description: "d", pattern_strict: false }).collect();
+        let s = settings(Mode::Enforce);
+        assert_eq!(s.profile.max_candidates, 8);
+        let events = Events::default();
+        let sink = recorder(&events);
+        let blocked = run(&many, "q", None, &s, &log(&sink), |req, _| {
+            let sent: Vec<&str> = req.candidates.iter().map(|c| c.id.as_str()).collect();
+            assert_eq!(sent, ids[..8].iter().map(String::as_str).collect::<Vec<_>>());
+            let low: Vec<(&str, f64)> = sent.iter().map(|id| (*id, 0.05)).collect();
+            Ok(judged(Mode::Enforce, &low))
+        });
+        assert_eq!(blocked, ids[..8].iter().cloned().collect::<HashSet<_>>());
+        let events = events.borrow();
+        assert_eq!(field(&events[0], "event"), "gate_capped");
+        assert_eq!(field(&events[0], "unjudged"), "2");
+        assert_eq!(field(&events[0], "ways"), "w/8,w/9");
+        assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), 8);
     }
 
     #[test]

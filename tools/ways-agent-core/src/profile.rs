@@ -125,6 +125,9 @@ pub struct Profile {
     pub max_turn_chars: usize,
     /// Provider calls the agent runs at once, across all sessions.
     pub concurrency: usize,
+    /// Candidates judged per request, taken in the matcher's order. Judge
+    /// latency grows with each candidate, so the rest pass unjudged.
+    pub max_candidates: usize,
 }
 
 impl Profile {
@@ -135,8 +138,8 @@ impl Profile {
         if self.timeout_ms == 0 || self.timeout_ms > 60_000 {
             bail!("profile '{name}': timeout_ms {} is outside 1..60000", self.timeout_ms);
         }
-        if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 {
-            bail!("profile '{name}': turns, max_turn_chars and concurrency must be at least 1");
+        if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 || self.max_candidates == 0 {
+            bail!("profile '{name}': turns, max_turn_chars, concurrency and max_candidates must be at least 1");
         }
         if !valid_model_id(&self.model) {
             bail!("profile '{name}': model '{}' is not a model id (letters, digits and . _ : / - only)", self.model);
@@ -173,6 +176,8 @@ pub struct ProfilePatch {
     pub max_turn_chars: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_candidates: Option<usize>,
 }
 
 impl ProfilePatch {
@@ -189,6 +194,7 @@ impl ProfilePatch {
             turns: self.turns.unwrap_or(base.turns),
             max_turn_chars: self.max_turn_chars.unwrap_or(base.max_turn_chars),
             concurrency: self.concurrency.unwrap_or(base.concurrency),
+            max_candidates: self.max_candidates.unwrap_or(base.max_candidates),
         }
     }
 }
