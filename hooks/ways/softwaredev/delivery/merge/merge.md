@@ -10,6 +10,15 @@ scope: agent
 
 Landing an increment is the **stable tail** of the develop loop: review → fix → merge → clean up. The **`merge` skill** runs it. The judgement this way carries is that the *review gate is not one policy* — how hard to review, and whether a human reads before merge, depend on the work.
 
+## The repository's enforcement decides first
+
+Before classifying, read what the repository enforces mechanically: a ruleset or branch protection that requires approving reviews, a CODEOWNERS file covering the changed paths, required status checks, a git hook. That enforcement is the project's policy and it decides. The judgement below applies only where nothing enforces, and it can add review on top of a mechanism but never subtract from one.
+
+```bash
+gh api repos/{owner}/{repo}/rules/branches/main        # rulesets; a pull_request rule carries required_approving_review_count
+gh api repos/{owner}/{repo}/branches/main/protection   # classic protection; a 404 means none
+```
+
 ## The four-square
 
 Classify the increment on two axes and pick the path:
@@ -30,7 +39,7 @@ Whichever corner you land in, asking to merge is asking for the review this gate
 
 ## Version bumps merge on green CI
 
-A release bump PR whose diff is only the package's version line and its lockfile entry merges once CI passes, without a review. The code it releases was reviewed when it merged, and the bump adds nothing to read. A bump that carries anything else, such as a changelog entry or a fix, takes the gate like any other change.
+A release bump PR whose diff is only the package's version line and its lockfile entry merges once CI passes, without a review. The code it releases was reviewed when it merged, and the bump adds nothing to read. A bump that carries anything else, such as a changelog entry or a fix, takes the gate like any other change. The exemption holds only where the repository enforces no review.
 
 ## Remediate before you merge
 
