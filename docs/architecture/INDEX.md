@@ -55,6 +55,7 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-194](./ways/ADR-194-per-injection-ratings-and-continual-local-tuning-of-the-way-gate.md) | Per-injection ratings and continual local tuning of the way gate | abandoned |
 | [ADR-195](./ways/ADR-195-evidence-a-yes-no-relevance-judge-over-live-way-fires.md) | Evidence: a yes/no relevance judge over live way fires | accepted |
 | [ADR-196](./ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md) | A yes/no relevance gate on way injection, judged by a hosted model | accepted |
+| [ADR-197](./ways/ADR-197-cap-the-candidates-the-relevance-gate-judges-per-request.md) | Cap the candidates the relevance gate judges per request | accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
