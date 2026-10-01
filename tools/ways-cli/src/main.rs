@@ -443,6 +443,17 @@ enum Commands {
         #[arg(long = "ref", value_name = "REF")]
         git_ref: Option<String>,
     },
+    /// Remove agent-ways: withdraw from every target, stop the agent, unlink the
+    /// commands and delete the app. Your config and state stay unless --purge.
+    /// Prints the plan and changes nothing without --yes.
+    Uninstall {
+        /// Do it. Without this flag the plan is printed and nothing changes.
+        #[arg(long)]
+        yes: bool,
+        /// Also delete your config (your ways, API keys, settings) and state (events).
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1014,5 +1025,6 @@ fn run() -> Result<()> {
         }
         Commands::Agent { args } => cmd::agent::run(&args),
         Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
+        Commands::Uninstall { yes, purge } => cmd::uninstall::run(yes, purge),
     }
 }
