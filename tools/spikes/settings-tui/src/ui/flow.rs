@@ -14,7 +14,7 @@ use ratatui::widgets::{Clear, HighlightSpacing, List, ListItem, ListState, Parag
 use ratatui::Frame;
 
 use super::render::{button_row, elide, modal_rect, pane};
-use super::theme::{self, Shape};
+use super::theme::{self, Ground, Shape};
 use super::Btn;
 
 /// The colour family of a badge.
@@ -461,7 +461,7 @@ impl Flow {
     pub(super) fn draw(&mut self, f: &mut Frame, area: Rect, sh: Shape) {
         let r = modal_rect(area, 100, 26);
         f.render_widget(Clear, r);
-        let block = pane(self.title.clone()).border_style(Style::new().fg(theme::ACCENT_DIM));
+        let block = pane(self.title.clone()).border_style(theme::modal_border());
         let inner = block.inner(r);
         f.render_widget(block, r);
         let [head, sub, body, foot, btns] =
@@ -495,9 +495,9 @@ impl Flow {
             }
             let text = format!("{} {name}", i + 1);
             spans.push(if i == self.step {
-                Span::styled(text, Style::new().fg(theme::INK).bg(theme::ACCENT).add_modifier(Modifier::BOLD))
+                Span::styled(text, theme::picked())
             } else if i < self.step {
-                Span::styled(text, Style::new().fg(theme::OK))
+                Span::styled(text, Style::new().fg(theme::ok()))
             } else {
                 Span::styled(text, theme::read_only())
             });
@@ -519,7 +519,7 @@ impl Flow {
             _ => {}
         }
         if !self.note.is_empty() {
-            spans.push(Span::styled(format!("  {}", self.note), Style::new().fg(theme::WARN).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(format!("  {}", self.note), Style::new().fg(theme::warn()).add_modifier(Modifier::BOLD)));
         }
         Line::from(spans)
     }
@@ -553,7 +553,7 @@ impl Flow {
                 let pad = room.saturating_sub(left.chars().count() + badge_text.chars().count()).max(1);
                 let text_style = if pickable { Style::new() } else { theme::read_only() };
                 let mut first = vec![
-                    Span::styled(left.chars().take(5).collect::<String>(), if on { Style::new().fg(theme::ACCENT) } else { text_style }),
+                    Span::styled(left.chars().take(5).collect::<String>(), if on { Style::new().fg(theme::accent()) } else { text_style }),
                     Span::styled(left.chars().skip(5).collect::<String>(), text_style),
                     Span::raw(" ".repeat(pad)),
                 ];
@@ -567,7 +567,7 @@ impl Flow {
         // The selection is the item's own style, not the list's highlight, which
         // would repaint the badge's background.
         let list = List::new(items)
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, Style::new().fg(theme::ACCENT)))
+            .highlight_symbol(Line::styled(theme::SELECTED_MARK, Style::new().fg(theme::accent())))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(if rows == 0 { None } else { Some(self.cursor) });
         self.hits.list = body;
@@ -593,7 +593,7 @@ impl Flow {
         for (i, o) in outs.iter().enumerate() {
             let mut row = vec![Span::raw(format!("  {}. ", i + 1)), Span::styled(format!("$ {}", elide(&o.command, room.saturating_sub(24))), theme::queued())];
             if o.confirm {
-                row.push(Span::styled("  ▲ asks first", Style::new().fg(theme::WARN).add_modifier(Modifier::BOLD)));
+                row.push(Span::styled("  ▲ asks first", Style::new().fg(theme::warn()).add_modifier(Modifier::BOLD)));
             }
             lines.push(Line::from(row));
         }
@@ -605,7 +605,7 @@ impl Flow {
                 if y < body.y + body.height {
                     self.hits.checks.push((Rect { y, height: 1, ..body }, i));
                 }
-                let style = if i == self.check_at { Style::new().fg(theme::INK).bg(theme::ACCENT).add_modifier(Modifier::BOLD) } else { Style::new() };
+                let style = if i == self.check_at { theme::picked() } else { Style::new() };
                 lines.push(Line::styled(format!("  {} {}", if c.on { "[x]" } else { "[ ]" }, c.label), style));
             }
         }
@@ -615,11 +615,11 @@ impl Flow {
 
 fn badge_style(t: Tone) -> Style {
     match t {
-        Tone::Ok => Style::new().fg(theme::INK).bg(theme::OK),
-        Tone::Warn => Style::new().fg(theme::INK).bg(theme::WARN),
-        Tone::Err => Style::new().fg(theme::INK).bg(theme::ERR),
-        Tone::Accent => Style::new().fg(theme::INK).bg(theme::ACCENT),
-        Tone::Muted => Style::new().fg(theme::TEXT).bg(theme::RULE),
+        Tone::Ok => theme::badge(Ground::Ok),
+        Tone::Warn => theme::badge(Ground::Warn),
+        Tone::Err => theme::badge(Ground::Err),
+        Tone::Accent => theme::badge(Ground::Accent),
+        Tone::Muted => theme::badge(Ground::Rule),
     }
 }
 
@@ -630,10 +630,10 @@ fn verb_line(l: &PLine, room: usize) -> Line<'static> {
         Verb::Heading => ("", Style::new().add_modifier(Modifier::BOLD)),
         Verb::Plain => ("  ", Style::new()),
         Verb::Kept => (" = ", theme::read_only()),
-        Verb::Added => (" + ", Style::new().fg(theme::OK)),
-        Verb::Replaced => (" ~ ", Style::new().fg(theme::WARN)),
-        Verb::Removed => (" - ", Style::new().fg(theme::HOT)),
-        Verb::Refused => (" ✗ ", Style::new().fg(theme::ERR).add_modifier(Modifier::BOLD)),
+        Verb::Added => (" + ", Style::new().fg(theme::ok())),
+        Verb::Replaced => (" ~ ", Style::new().fg(theme::warn())),
+        Verb::Removed => (" - ", Style::new().fg(theme::hot())),
+        Verb::Refused => (" ✗ ", Style::new().fg(theme::err()).add_modifier(Modifier::BOLD)),
     };
     let text = format!("{mark}{}", l.text);
     let cut = if text.chars().count() > room { format!("{}…", text.chars().take(room.saturating_sub(1)).collect::<String>()) } else { text };

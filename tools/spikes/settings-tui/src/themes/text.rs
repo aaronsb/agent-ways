@@ -1,9 +1,7 @@
 //! The theme file format, and its parser and writer.
 //!
-//! TEMPORARY: this is a hand-written reader for exactly the format below
-//! (flat `key = "value"` lines, `[section]` headers, `#` comments). Phase 2
-//! replaces it with the `toml` crate (`toml = "0.8"`, features `parse` and
-//! `display`); the format is plain TOML so the files do not change.
+//! The file is TOML, read by the `toml` crate. Keys and values are read with
+//! their spans, so every problem names its line.
 //!
 //! ```toml
 //! # Source or note.
@@ -21,6 +19,9 @@
 //! ```
 
 use std::fmt;
+
+use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, Visitor};
+use toml::Spanned;
 
 use super::model::{Background, Kind, Overrides, Rgb, Slots, Theme};
 
@@ -49,17 +50,118 @@ impl fmt::Display for ThemeError {
     }
 }
 
-/// `key = "value"` with an optional trailing `# comment`.
-fn key_value(line: &str) -> Result<(&str, &str), String> {
-    let (k, rest) = line.split_once('=').ok_or("expected `key = \"value\"`")?;
-    let rest = rest.trim();
-    let body = rest.strip_prefix('"').ok_or("value must be a double-quoted string")?;
-    let end = body.find('"').ok_or("unterminated string")?;
-    let tail = body[end + 1..].trim();
-    if !tail.is_empty() && !tail.starts_with('#') {
-        return Err(format!("unexpected text after the value: `{tail}`"));
+/// A value as the theme format sees it: a string, or the name of the TOML
+/// type it has instead.
+enum Leaf {
+    Str(String),
+    Other(&'static str),
+}
+
+/// A top-level entry: a value, or a table of spanned keys and values.
+enum Entry {
+    Leaf(Leaf),
+    Table(Vec<(Spanned<String>, Spanned<Leaf>)>),
+}
+
+struct LeafVisitor;
+
+impl<'de> Visitor<'de> for LeafVisitor {
+    type Value = Leaf;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a value")
     }
-    Ok((k.trim(), &body[..end]))
+    fn visit_str<E>(self, v: &str) -> Result<Leaf, E> {
+        Ok(Leaf::Str(v.to_string()))
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<Leaf, E> {
+        Ok(Leaf::Other("a boolean"))
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<Leaf, E> {
+        Ok(Leaf::Other("a number"))
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<Leaf, E> {
+        Ok(Leaf::Other("a number"))
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<Leaf, E> {
+        Ok(Leaf::Other("a number"))
+    }
+    fn visit_seq<A: de::SeqAccess<'de>>(self, mut s: A) -> Result<Leaf, A::Error> {
+        while s.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Leaf::Other("an array"))
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Leaf, A::Error> {
+        while m.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Leaf::Other("a table or date"))
+    }
+}
+
+impl<'de> Deserialize<'de> for Leaf {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Leaf, D::Error> {
+        d.deserialize_any(LeafVisitor)
+    }
+}
+
+struct EntryVisitor;
+
+impl<'de> Visitor<'de> for EntryVisitor {
+    type Value = Entry;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a value or a table")
+    }
+    fn visit_str<E>(self, v: &str) -> Result<Entry, E> {
+        Ok(Entry::Leaf(Leaf::Str(v.to_string())))
+    }
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Entry, E> {
+        LeafVisitor.visit_bool(v).map(Entry::Leaf)
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Entry, E> {
+        LeafVisitor.visit_i64(v).map(Entry::Leaf)
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Entry, E> {
+        LeafVisitor.visit_u64(v).map(Entry::Leaf)
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Entry, E> {
+        LeafVisitor.visit_f64(v).map(Entry::Leaf)
+    }
+    fn visit_seq<A: de::SeqAccess<'de>>(self, s: A) -> Result<Entry, A::Error> {
+        LeafVisitor.visit_seq(s).map(Entry::Leaf)
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Entry, A::Error> {
+        let mut out = Vec::new();
+        while let Some(kv) = m.next_entry::<Spanned<String>, Spanned<Leaf>>()? {
+            out.push(kv);
+        }
+        Ok(Entry::Table(out))
+    }
+}
+
+impl<'de> Deserialize<'de> for Entry {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Entry, D::Error> {
+        d.deserialize_any(EntryVisitor)
+    }
+}
+
+/// The document's top level, in file order.
+struct Top(Vec<(Spanned<String>, Spanned<Entry>)>);
+
+impl<'de> Deserialize<'de> for Top {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Top, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Top;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a theme table")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Top, A::Error> {
+                let mut out = Vec::new();
+                while let Some(kv) = m.next_entry::<Spanned<String>, Spanned<Entry>>()? {
+                    out.push(kv);
+                }
+                Ok(Top(out))
+            }
+        }
+        d.deserialize_map(V)
+    }
 }
 
 fn valid_name(n: &str) -> bool {
@@ -67,74 +169,89 @@ fn valid_name(n: &str) -> bool {
 }
 
 /// Every error in `src`, empty when it is a valid theme.
+#[cfg(test)]
 pub fn validate(src: &str) -> Vec<ThemeError> {
     parse(src).err().unwrap_or_default()
 }
 
+/// The 1-based line of a byte offset.
+fn line_of(src: &str, at: usize) -> usize {
+    src[..at.min(src.len())].bytes().filter(|b| *b == b'\n').count() + 1
+}
+
+/// A syntax error, on its line. A value that is not a quoted string is the
+/// likely cause in this format, so the message says what a value must be.
+fn syntax(src: &str, e: &toml::de::Error) -> ThemeError {
+    let first = e.message().lines().next().unwrap_or("invalid TOML").trim().to_string();
+    let Some(span) = e.span() else { return ThemeError::whole(format!("not valid TOML: {first}")) };
+    let n = line_of(src, span.start);
+    let text = src.lines().nth(n - 1).unwrap_or("");
+    let value = text.split_once('=').map(|(_, v)| v.trim());
+    let hint = match value {
+        Some(v) if !v.starts_with('"') => "; values are double-quoted strings",
+        _ => "",
+    };
+    ThemeError::at(n, format!("{first}{hint}"))
+}
+
 pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
+    let top: Top = toml::from_str(src).map_err(|e| vec![syntax(src, &e)])?;
     let mut errs = Vec::new();
     let (mut name, mut label, mut kind, mut background) = (None, None, None, Background::Terminal);
     let mut slots: [Option<Rgb>; 10] = [None; 10];
     let mut overrides = Overrides::default();
-    let mut section = "";
+    let at = |s: &std::ops::Range<usize>| line_of(src, s.start);
 
-    for (i, raw) in src.lines().enumerate() {
-        let n = i + 1;
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some(h) = line.strip_prefix('[') {
-            match h.strip_suffix(']').map(str::trim) {
-                Some(s @ ("slots" | "overrides")) => section = s,
-                Some(s) => {
-                    errs.push(ThemeError::at(n, format!("unknown section [{s}] (expected [slots] or [overrides])")));
-                    section = "?";
+    for (k, v) in top.0 {
+        let (n, key) = (at(&k.span()), k.get_ref().as_str());
+        match v.get_ref() {
+            Entry::Table(entries) => {
+                if key != "slots" && key != "overrides" {
+                    errs.push(ThemeError::at(n, format!("unknown section [{key}] (expected [slots] or [overrides])")));
+                    continue;
                 }
-                None => errs.push(ThemeError::at(n, "unterminated section header")),
+                for (sk, sv) in entries {
+                    let (n, k) = (at(&sk.span()), sk.get_ref().as_str());
+                    let rgb = match sv.get_ref() {
+                        Leaf::Str(s) => match Rgb::from_hex(s) {
+                            Some(c) => c,
+                            None => {
+                                errs.push(ThemeError::at(n, format!("`{s}` is not a #rrggbb colour (key `{k}`)")));
+                                continue;
+                            }
+                        },
+                        Leaf::Other(t) => {
+                            errs.push(ThemeError::at(n, format!("`{k}` is {t}; a colour is a double-quoted \"#rrggbb\"")));
+                            continue;
+                        }
+                    };
+                    if key == "slots" {
+                        match Slots::NAMES.iter().position(|s| *s == k) {
+                            Some(p) => slots[p] = Some(rgb),
+                            None => errs.push(ThemeError::at(n, format!("unknown slot `{k}`"))),
+                        }
+                    } else if !overrides.set(k, rgb) {
+                        errs.push(ThemeError::at(n, format!("unknown override `{k}`")));
+                    }
+                }
             }
-            continue;
-        }
-        let (k, v) = match key_value(line) {
-            Ok(kv) => kv,
-            Err(m) => {
-                errs.push(ThemeError::at(n, m));
-                continue;
-            }
-        };
-        match section {
-            "" => match k {
-                "name" if valid_name(v) => name = Some(v.to_string()),
+            Entry::Leaf(Leaf::Other(t)) => errs.push(ThemeError::at(n, format!("`{key}` is {t}; it must be a double-quoted string"))),
+            Entry::Leaf(Leaf::Str(v)) => match key {
+                "name" if valid_name(v) => name = Some(v.clone()),
                 "name" => errs.push(ThemeError::at(n, format!("name `{v}` must be lowercase letters, digits and `-`"))),
-                "label" => label = Some(v.to_string()),
-                "kind" => match v {
+                "label" => label = Some(v.clone()),
+                "kind" => match v.as_str() {
                     "dark" => kind = Some(Kind::Dark),
                     "light" => kind = Some(Kind::Light),
                     _ => errs.push(ThemeError::at(n, format!("kind `{v}` must be dark or light"))),
                 },
-                "background" => match v {
+                "background" => match v.as_str() {
                     "terminal" => background = Background::Terminal,
                     "fill" => background = Background::Fill,
                     _ => errs.push(ThemeError::at(n, format!("background `{v}` must be terminal or fill"))),
                 },
-                _ => errs.push(ThemeError::at(n, format!("unknown key `{k}`"))),
+                _ => errs.push(ThemeError::at(n, format!("unknown key `{key}`"))),
             },
-            "slots" | "overrides" => {
-                let Some(rgb) = Rgb::from_hex(v) else {
-                    errs.push(ThemeError::at(n, format!("`{v}` is not a #rrggbb colour (key `{k}`)")));
-                    continue;
-                };
-                if section == "slots" {
-                    match Slots::NAMES.iter().position(|s| *s == k) {
-                        Some(p) if slots[p].is_some() => errs.push(ThemeError::at(n, format!("slot `{k}` set twice"))),
-                        Some(p) => slots[p] = Some(rgb),
-                        None => errs.push(ThemeError::at(n, format!("unknown slot `{k}`"))),
-                    }
-                } else if !overrides.set(k, rgb) {
-                    errs.push(ThemeError::at(n, format!("unknown override `{k}`")));
-                }
-            }
-            _ => {} // inside an unknown section, already reported
         }
     }
 
@@ -150,6 +267,7 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
         }
     }
     if !errs.is_empty() {
+        errs.sort_by_key(|e| e.line.unwrap_or(usize::MAX));
         return Err(errs);
     }
     let s: Vec<Rgb> = slots.iter().map(|c| c.unwrap()).collect();
@@ -168,7 +286,9 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
 pub fn to_toml(t: &Theme) -> String {
     let kind = if t.kind == Kind::Dark { "dark" } else { "light" };
     let bg = if t.background == Background::Fill { "fill" } else { "terminal" };
-    let mut out = format!("name = \"{}\"\nlabel = \"{}\"\nkind = \"{kind}\"\nbackground = \"{bg}\"\n\n[slots]\n", t.name, t.label);
+    // The label is the one free-text field; toml quotes and escapes it.
+    let label = toml::Value::String(t.label.clone());
+    let mut out = format!("name = \"{}\"\nlabel = {label}\nkind = \"{kind}\"\nbackground = \"{bg}\"\n\n[slots]\n", t.name);
     for n in Slots::NAMES {
         out.push_str(&format!("{n} = \"{}\"\n", t.slots.get(n).unwrap().hex()));
     }

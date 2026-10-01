@@ -1,77 +1,234 @@
 //! The look, taken from the operator's Claude Code status line
-//! (`~/.dotfiles/claude/statusline*.sh`): its colour tokens, its powerline
-//! lozenges, and one meaning per attribute. Every colour the TUI draws is
-//! named here.
+//! (`~/.dotfiles/claude/statusline*.sh`): its powerline lozenges and one
+//! meaning per attribute. The colours are the roles of the theme being
+//! shown, derived by the theme engine and brought down to the terminal's
+//! colour depth; under NO_COLOR nothing is coloured and a lozenge is reverse
+//! video.
 //!
 //! Attributes mean one thing each, as on the status line: bold needs you
 //! (a pending change), italic is secondary (hints, the `[a]` marker),
 //! strikethrough is a value that is going away, underline is unused.
 
+use std::cell::RefCell;
+
+use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 
-// The status line's SL_ tokens, by role. The ANSI ones follow the terminal's
-// own palette, so they track a light or dark theme.
-pub const OK: Color = Color::Green; // SL_OK 32
-pub const WARN: Color = Color::Yellow; // SL_WARN 33
-pub const ERR: Color = Color::Red; // SL_ERR 31
-pub const HOT: Color = Color::Indexed(208); // SL_HOT
-pub const MUTED: Color = Color::DarkGray; // SL_MUTED 90
-pub const INK: Color = Color::Indexed(16); // SL_INK: text on a lozenge
-pub const TEXT: Color = Color::Indexed(255); // SL_TEXT: text on a dark segment
-pub const RULE: Color = Color::Indexed(239); // SL_RULE: separators, borders
+use crate::themes::{self, Background, ColorDepth, Rgb, Roles, Theme, MIN_TEXT};
 
-// The accent is one agent-ways identity colour (RICH_PALETTE "sky") with the
-// two stages the status line derives from it: dim is 60% (`_ss_dim`), shade
-// is the hue at 18% lightness (`_ss_hsl .18`). Dim also tints icons and text
-// on the terminal ground, where it reads on light and dark backgrounds.
-pub const ACCENT: Color = Color::Rgb(90, 200, 250);
-pub const ACCENT_DIM: Color = Color::Rgb(54, 120, 150);
-pub const ACCENT_SHADE: Color = Color::Rgb(3, 62, 89);
+/// The roles of one theme at one colour depth: what a frame draws with.
+#[derive(Debug, Clone)]
+pub struct Palette {
+    pub roles: Roles,
+    pub depth: ColorDepth,
+    /// Paint the theme's bg behind every cell.
+    pub fill: bool,
+}
+
+impl Palette {
+    pub fn new(t: &Theme, depth: ColorDepth) -> Palette {
+        Palette { roles: Roles::derive(t), depth, fill: t.background == Background::Fill && depth != ColorDepth::None }
+    }
+
+    fn color(&self, c: Rgb) -> Color {
+        themes::color(c, self.depth).unwrap_or(Color::Reset)
+    }
+}
+
+impl Default for Palette {
+    /// The bundled agent-ways theme in truecolor: what tests draw with.
+    fn default() -> Palette {
+        Palette::new(&themes::parse(themes::BUNDLED[0].1).expect("bundled agent-ways parses"), ColorDepth::TrueColor)
+    }
+}
+
+thread_local! {
+    static CURRENT: RefCell<Palette> = RefCell::new(Palette::default());
+}
+
+/// Make `p` the palette the style functions read, for the frame being drawn.
+pub fn set(p: Palette) {
+    CURRENT.with(|c| *c.borrow_mut() = p);
+}
+
+fn role(f: impl Fn(&Roles) -> Rgb) -> Color {
+    CURRENT.with(|c| {
+        let p = c.borrow();
+        p.color(f(&p.roles))
+    })
+}
+
+/// NO_COLOR: every colour is the terminal's default.
+pub fn colourless() -> bool {
+    CURRENT.with(|c| c.borrow().depth == ColorDepth::None)
+}
+
+pub fn ok() -> Color {
+    role(|r| r.ok)
+}
+pub fn warn() -> Color {
+    role(|r| r.warn)
+}
+pub fn err() -> Color {
+    role(|r| r.err)
+}
+pub fn info() -> Color {
+    role(|r| r.info)
+}
+/// SL_HOT: warn and err halfway, kept clear of both.
+pub fn hot() -> Color {
+    role(|r| r.hot)
+}
+pub fn muted() -> Color {
+    role(|r| r.muted)
+}
+/// SL_RULE: separators, borders.
+pub fn rule_color() -> Color {
+    role(|r| r.rule)
+}
+pub fn accent() -> Color {
+    role(|r| r.accent)
+}
+pub fn accent_dim() -> Color {
+    role(|r| r.accent_dim)
+}
+/// The accent's shade on bg: the selected row's ground.
+pub fn shade() -> Color {
+    role(|r| r.selection_bg)
+}
+pub fn body() -> Color {
+    role(|r| r.body)
+}
+pub fn bg() -> Color {
+    role(|r| r.bg)
+}
+/// Any colour of the theme, at the frame's depth: a swatch or a slider.
+pub fn rgb(c: Rgb) -> Color {
+    CURRENT.with(|p| p.borrow().color(c))
+}
+
+/// The grounds a lozenge segment sits on. Its text is the theme's ink or
+/// text, whichever reads on that ground.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Ground {
+    Accent,
+    AccentDim,
+    Ok,
+    Warn,
+    Err,
+    Hot,
+    Info,
+    Rule,
+}
+
+impl Ground {
+    fn rgb(self, r: &Roles) -> Rgb {
+        match self {
+            Ground::Accent => r.accent,
+            Ground::AccentDim => r.accent_dim,
+            Ground::Ok => r.ok,
+            Ground::Warn => r.warn,
+            Ground::Err => r.err,
+            Ground::Hot => r.hot,
+            Ground::Info => r.info,
+            Ground::Rule => r.rule,
+        }
+    }
+
+    pub fn bg(self) -> Color {
+        role(|r| self.rgb(r))
+    }
+
+    /// The text that reads on this ground.
+    pub fn fg(self) -> Color {
+        role(|r| themes::text_on(self.rgb(r), &[r.ink, r.text], MIN_TEXT))
+    }
+}
+
+/// With background=fill, give every cell the frame left on the terminal's
+/// default its theme colour instead: bg behind, body for text.
+pub fn fill(buf: &mut Buffer) {
+    let (on, bg, fg) = CURRENT.with(|c| {
+        let p = c.borrow();
+        (p.fill, p.color(p.roles.bg), p.color(p.roles.body))
+    });
+    if !on {
+        return;
+    }
+    for cell in buf.content.iter_mut() {
+        if cell.bg == Color::Reset {
+            cell.bg = bg;
+        }
+        if cell.fg == Color::Reset {
+            cell.fg = fg;
+        }
+    }
+}
 
 /// Values in the tree, by state.
 pub fn changed() -> Style {
-    Style::new().fg(WARN).add_modifier(Modifier::BOLD)
+    Style::new().fg(warn()).add_modifier(Modifier::BOLD)
 }
 pub fn non_default() -> Style {
-    Style::new().fg(ACCENT_DIM)
+    Style::new().fg(accent_dim())
 }
 pub fn read_only() -> Style {
-    Style::new().fg(MUTED)
+    Style::new().fg(muted())
 }
 pub fn secret(present: bool) -> Style {
-    Style::new().fg(if present { OK } else { MUTED })
+    Style::new().fg(if present { ok() } else { muted() })
 }
 pub fn queued() -> Style {
-    Style::new().fg(HOT)
+    Style::new().fg(hot())
 }
 /// A pending change in review, as it was and as it will be: the old value
 /// struck through and muted, the new one green and bold.
 pub fn was() -> Style {
-    Style::new().fg(MUTED).add_modifier(Modifier::CROSSED_OUT)
+    Style::new().fg(muted()).add_modifier(Modifier::CROSSED_OUT)
 }
 pub fn will() -> Style {
-    Style::new().fg(OK).add_modifier(Modifier::BOLD)
+    Style::new().fg(ok()).add_modifier(Modifier::BOLD)
 }
-/// A tab with nothing pending while review is open.
-pub const DIM_TAB: Color = ACCENT_SHADE;
 pub fn hint() -> Style {
-    Style::new().fg(MUTED).add_modifier(Modifier::ITALIC)
+    Style::new().fg(muted()).add_modifier(Modifier::ITALIC)
 }
 pub fn rule() -> Style {
-    Style::new().fg(RULE)
+    Style::new().fg(rule_color())
 }
 pub fn title() -> Style {
-    Style::new().fg(ACCENT_DIM).add_modifier(Modifier::BOLD)
+    Style::new().fg(accent_dim()).add_modifier(Modifier::BOLD)
+}
+/// A modal's border.
+pub fn modal_border() -> Style {
+    Style::new().fg(accent_dim())
 }
 /// The selected row: the accent's shade under the row, a block in the accent
 /// beside it. The highlight sets no foreground, so a value keeps its state
-/// colour; `selected_text` is the row's base for text with none.
+/// colour; `selected_text` is the row's base for text with none. Without
+/// colour the row is reverse video.
 pub fn selected() -> Style {
-    Style::new().bg(ACCENT_SHADE).add_modifier(Modifier::BOLD)
+    if colourless() {
+        return Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED);
+    }
+    Style::new().bg(shade()).add_modifier(Modifier::BOLD)
 }
 pub fn selected_text() -> Style {
-    Style::new().fg(TEXT)
+    Style::new().fg(body())
+}
+/// A highlighted item in a menu or a checklist: text on the accent.
+pub fn picked() -> Style {
+    if colourless() {
+        return Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED);
+    }
+    Style::new().fg(Ground::Accent.fg()).bg(Ground::Accent.bg()).add_modifier(Modifier::BOLD)
+}
+/// A flat badge on a ground, as a flow's state badges are drawn.
+pub fn badge(g: Ground) -> Style {
+    if colourless() {
+        return Style::new().add_modifier(Modifier::REVERSED);
+    }
+    Style::new().fg(g.fg()).bg(g.bg())
 }
 pub const SELECTED_MARK: &str = "▌";
 
@@ -86,6 +243,10 @@ pub struct Seg {
 impl Seg {
     pub fn new(text: impl Into<String>, fg: Color, bg: Color) -> Self {
         Seg { text: text.into(), fg, bg, bold: false }
+    }
+    /// Text on `g`, in the colour that reads there.
+    pub fn on(text: impl Into<String>, g: Ground) -> Self {
+        Seg::new(text, g.fg(), g.bg())
     }
     pub fn bold(mut self) -> Self {
         self.bold = true;
@@ -125,10 +286,18 @@ impl Shape {
 
     /// Segments as one lozenge, built like a status line session cell: the
     /// cap in the first background, each join carrying one background into
-    /// the next, the last closing onto the terminal ground.
+    /// the next, the last closing onto the terminal ground. Without colour
+    /// the glyphs go and each segment is reverse video.
     pub fn lozenge(&self, segs: &[Seg]) -> Vec<Span<'static>> {
         let mut out = Vec::new();
         let Some(first) = segs.first() else { return out };
+        if colourless() {
+            for s in segs {
+                let st = Style::new().add_modifier(Modifier::REVERSED);
+                out.push(Span::styled(s.text.clone(), if s.bold { st.add_modifier(Modifier::BOLD) } else { st }));
+            }
+            return out;
+        }
         if !self.cap.is_empty() {
             out.push(Span::styled(self.cap, Style::new().fg(first.bg)));
         }
@@ -158,13 +327,24 @@ mod tests {
 
     #[test]
     fn a_lozenge_carries_each_background_into_the_next_join() {
-        let s = Shape::ROUND.lozenge(&[Seg::new(" a ", INK, ACCENT), Seg::new(" b ", TEXT, ACCENT_DIM)]);
+        set(Palette::default());
+        let s = Shape::ROUND.lozenge(&[Seg::on(" a ", Ground::Accent), Seg::on(" b ", Ground::AccentDim)]);
         let text: String = s.iter().map(|x| x.content.as_ref()).collect();
         assert_eq!(text, "\u{e0b6} a \u{e0b4} b \u{e0b4}");
-        assert_eq!((s[2].style.fg, s[2].style.bg), (Some(ACCENT), Some(ACCENT_DIM)));
-        assert_eq!((s[4].style.fg, s[4].style.bg), (Some(ACCENT_DIM), None));
-        let plain: String = Shape::PLAIN.lozenge(&[Seg::new(" a ", INK, ACCENT)]).iter().map(|x| x.content.as_ref()).collect();
+        assert_eq!((s[2].style.fg, s[2].style.bg), (Some(accent()), Some(accent_dim())));
+        assert_eq!((s[4].style.fg, s[4].style.bg), (Some(accent_dim()), None));
+        let plain: String = Shape::PLAIN.lozenge(&[Seg::on(" a ", Ground::Accent)]).iter().map(|x| x.content.as_ref()).collect();
         assert_eq!(plain, " a ");
         assert_eq!(Shape::named("anything"), Shape::ROUND);
+    }
+
+    #[test]
+    fn without_colour_a_lozenge_is_reverse_video_with_no_glyphs() {
+        set(Palette { depth: ColorDepth::None, ..Palette::default() });
+        let s = Shape::ROUND.lozenge(&[Seg::on(" a ", Ground::Accent).bold()]);
+        assert_eq!(s.len(), 1);
+        assert_eq!((s[0].style.fg, s[0].style.bg), (None, None));
+        assert!(s[0].style.add_modifier.contains(Modifier::REVERSED | Modifier::BOLD));
+        set(Palette::default());
     }
 }

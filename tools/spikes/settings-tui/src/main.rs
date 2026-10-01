@@ -1,13 +1,16 @@
 //! Spike: every ways setting as one tree, browsed and edited in a TUI.
 //!
-//! Reads the real user, project and agent config. Writes nothing: `w` reviews
+//! Reads the real user, project and agent config. Writes no setting: `w` reviews
 //! the pending items and walks a simulated apply, and on exit it prints what
 //! remains pending: the change set `ways settings` would write and the
-//! commands its queued actions would run.
+//! commands its queued actions would run. Theme files and the active theme
+//! are the exception: they are written, but only into the sandboxed themes
+//! directory (`$SPIKE_THEME_DIR`, else the session scratchpad).
 //!
 //!   ways-settings-spike [--project DIR]          the TUI
 //!   ways-settings-spike --print [FILTER]         the tree as text, for a pipe
 
+mod themes;
 mod tree;
 mod ui;
 mod ways;
@@ -55,13 +58,27 @@ fn main() -> std::io::Result<()> {
     }));
     // Read once: SPIKE_FAIL_STEP=<n> makes the n-th apply step fail, to see the failure path.
     let fail_step = std::env::var("SPIKE_FAIL_STEP").ok().and_then(|v| v.parse().ok());
-    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots).shape(ui::theme::Shape::from_env()).fail_step(fail_step).helpers(ways::helpers(ways::Env::resolve(&paths, &project)));
+    let themes = ui::Themes::new(Some(theme_dir()?), themes::ColorDepth::detect());
+    let app = ui::App::new(format!(" ways settings — {} ", project.display()), roots)
+        .shape(ui::theme::Shape::from_env())
+        .fail_step(fail_step)
+        .helpers(ways::helpers(ways::Env::resolve(&paths, &project)))
+        .themes(themes);
     let result = app.run(&mut term);
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     let session = result?;
     print!("{}", summary(&session.roots, &session.queue));
     Ok(())
+}
+
+/// Where theme files and the active choice are written: `$SPIKE_THEME_DIR`,
+/// else the session scratchpad. The spike writes no theme anywhere else.
+fn theme_dir() -> std::io::Result<PathBuf> {
+    const SCRATCH: &str = "/tmp/claude-1000/-home-aaron-Projects-ai-harness-agent-ways/02e97f86-6ea9-4ef1-83ea-c38209f57fb1/scratchpad/themes-user";
+    let dir = std::env::var_os("SPIKE_THEME_DIR").filter(|v| !v.is_empty()).map_or_else(|| PathBuf::from(SCRATCH), PathBuf::from);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 /// What a real `ways settings` would do: value changes by file, then the

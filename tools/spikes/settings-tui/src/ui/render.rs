@@ -4,12 +4,12 @@
 //! clickable parts landed, in `App::hits`.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::theme::{self, Seg, Shape};
+use super::theme::{self, Ground, Seg, Shape};
 use super::apply::Outcome;
 use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
@@ -28,16 +28,15 @@ fn width(spans: &[Span]) -> u16 {
 pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (b, label) in buttons {
-        let (fg, bg) = match b {
-            Btn::Apply => (theme::INK, theme::OK),
-            Btn::Discard | Btn::Quit => (theme::INK, theme::ERR),
-            Btn::Back => (theme::TEXT, theme::ACCENT_DIM),
-            Btn::Review | Btn::Next => (theme::INK, theme::ACCENT),
-            Btn::Finish => (theme::INK, theme::OK),
-            Btn::Cancel => (theme::TEXT, theme::RULE),
+        let ground = match b {
+            Btn::Apply | Btn::Finish | Btn::Save => Ground::Ok,
+            Btn::Discard | Btn::Quit | Btn::Drop => Ground::Err,
+            Btn::Back => Ground::AccentDim,
+            Btn::Review | Btn::Next => Ground::Accent,
+            Btn::Cancel => Ground::Rule,
         };
         let on = focus == Some(*b);
-        let seg = Seg::new(format!(" {} {label} ", if on { "›" } else { " " }), fg, bg);
+        let seg = Seg::on(format!(" {} {label} ", if on { "›" } else { " " }), ground);
         let target = sh.lozenge(&[if on { seg.bold() } else { seg }]);
         let x = at.x + width(&spans);
         hits.push((Rect { x, y: at.y, width: width(&target), height: 1 }.intersection(at), *b));
@@ -48,9 +47,9 @@ pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Bt
 }
 
 /// A confirm's two answers as lozenges, each recorded as a click target.
-fn answer_lozenges(sh: Shape, area: Rect, spans: &mut Vec<Span<'static>>, hits: &mut Vec<(Rect, bool)>, answers: [(bool, &'static str, Color); 2]) {
-    for (yes, text, bg) in answers {
-        let target = sh.lozenge(&[Seg::new(text, theme::INK, bg).bold()]);
+pub(super) fn answer_lozenges(sh: Shape, area: Rect, spans: &mut Vec<Span<'static>>, hits: &mut Vec<(Rect, bool)>, answers: [(bool, &'static str, Ground); 2]) {
+    for (yes, text, g) in answers {
+        let target = sh.lozenge(&[Seg::on(text, g).bold()]);
         let x = area.x + width(spans);
         hits.push((Rect { x, y: area.y, width: width(&target), height: 1 }.intersection(area), yes));
         spans.extend(target);
@@ -86,7 +85,16 @@ fn mask(n: usize) -> String {
 }
 
 impl App {
+    /// One frame in the theme shown: the active one, or on the theme tab the
+    /// one previewed or edited. With background=fill, every cell left on the
+    /// terminal's default gets the theme's.
     pub(super) fn draw(&mut self, f: &mut Frame) {
+        theme::set(self.themes.palette(self.shown_theme()));
+        self.draw_frame(f);
+        theme::fill(f.buffer_mut());
+    }
+
+    fn draw_frame(&mut self, f: &mut Frame) {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
         let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(main);
         self.hits.menu = None;
@@ -94,12 +102,31 @@ impl App {
         self.hits.buttons.clear();
         self.hits.cta = Rect::default();
         self.hits.discard_tabs.clear();
+        self.hits.sliders.clear();
+        self.hits.hex = Rect::default();
         // Review keeps the browser's layout; the tree and the detail show what is pending.
         if let Mode::Review { tab, .. } = &self.mode {
             let tab = *tab;
             self.draw_tabs(f, bar, tab, true);
             self.draw_review_tree(f, left, tab);
             self.draw_review_detail(f, right, tab);
+            return self.draw_status(f, status);
+        }
+        if self.on_theme_tab() {
+            self.draw_tabs(f, bar, self.tab, false);
+            self.draw_theme_tab(f, left, right);
+            match &self.mode {
+                Mode::Help => draw_help(f, main),
+                Mode::Guard { .. } => self.draw_guard(f, main),
+                Mode::ThemeMenu { sel } => {
+                    let sel = *sel;
+                    let items = self.theme_acts().iter().map(|a| (a.label().to_string(), self.theme_act_tag(*a))).collect();
+                    let title = format!("actions: theme {}", self.themes.under_cursor().0.name);
+                    self.draw_menu_items(f, main, title, items, sel);
+                }
+                Mode::ThemeUnsaved => self.draw_unsaved(f, main),
+                _ => {}
+            }
             return self.draw_status(f, status);
         }
         let rows = self.rows();
@@ -140,14 +167,14 @@ impl App {
             let label = format!(" {} {} ", i + 1, r.name);
             let pending = tree::pending(r, &self.queue);
             let mut segs = vec![if i == active {
-                Seg::new(label, theme::INK, theme::ACCENT).bold()
+                Seg::on(label, Ground::Accent).bold()
             } else if review && pending == 0 {
-                Seg::new(label, theme::MUTED, theme::DIM_TAB)
+                Seg::new(label, theme::muted(), theme::shade())
             } else {
-                Seg::new(label, theme::TEXT, theme::ACCENT_DIM)
+                Seg::on(label, Ground::AccentDim)
             }];
             if pending > 0 {
-                segs.push(Seg::new(format!(" ●{pending} ↺ "), theme::INK, theme::WARN).bold());
+                segs.push(Seg::on(format!(" ●{pending} ↺ "), Ground::Warn).bold());
             }
             let tab = self.shape.lozenge(&segs);
             let x = area.x + width(&spans);
@@ -162,6 +189,22 @@ impl App {
             spans.extend(tab);
             spans.push(Span::raw("  "));
         }
+        // The theme tab: no review, so dimmed there; a badge for unsaved edits, with no discard mark.
+        let i = self.theme_tab();
+        let label = format!(" {} theme ", i + 1);
+        let mut segs = vec![if i == active && !review {
+            Seg::on(label, Ground::Accent).bold()
+        } else if review {
+            Seg::new(label, theme::muted(), theme::shade())
+        } else {
+            Seg::on(label, Ground::AccentDim)
+        }];
+        if self.theme_dirty() {
+            segs.push(Seg::on(" ●1 ", Ground::Warn).bold());
+        }
+        let tab = self.shape.lozenge(&segs);
+        self.hits.tabs.push((Rect { x: area.x + width(&spans), y: area.y, width: width(&tab), height: 1 }.intersection(area), i));
+        spans.extend(tab);
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
@@ -204,7 +247,7 @@ impl App {
                 }
                 let c = n.changes() + self.queue.under(&tree::key(&self.roots, &r.path));
                 if c > 0 && !n.children.is_empty() {
-                    spans.push(Span::styled(format!("  ●{c}"), Style::new().fg(theme::WARN)));
+                    spans.push(Span::styled(format!("  ●{c}"), Style::new().fg(theme::warn())));
                 }
                 ListItem::new(Line::from(spans)).style(if i == self.cursor { theme::selected_text() } else { Style::new() })
             })
@@ -215,7 +258,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, Style::new().fg(theme::ACCENT)))
+            .highlight_symbol(Line::styled(theme::SELECTED_MARK, Style::new().fg(theme::accent())))
             .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
         self.list.select(if rows.is_empty() { None } else { Some(self.cursor) });
         f.render_stateful_widget(list, area, &mut self.list);
@@ -223,7 +266,7 @@ impl App {
 
     fn draw_detail(&self, f: &mut Frame, area: Rect, path: &[usize]) {
         let n = tree::get(&self.roots, path);
-        let dim = Style::new().fg(theme::MUTED);
+        let dim = Style::new().fg(theme::muted());
         let mut lines = vec![Line::styled(tree::key(&self.roots, path), Style::new().add_modifier(Modifier::BOLD)), Line::raw("")];
         if !n.doc.is_empty() {
             lines.push(Line::raw(n.doc.clone()));
@@ -277,9 +320,9 @@ impl App {
                     let key = st.as_ref().map_or(k.clone(), |s| s.key.clone());
                     lines.push(Line::from(vec![
                         Span::raw(format!("  {key}: ")),
-                        Span::styled(from.clone(), Style::new().fg(theme::ERR)),
+                        Span::styled(from.clone(), Style::new().fg(theme::err())),
                         Span::raw(" → "),
-                        Span::styled(to.clone(), Style::new().fg(theme::OK)),
+                        Span::styled(to.clone(), Style::new().fg(theme::ok())),
                     ]));
                 }
             }
@@ -301,17 +344,21 @@ impl App {
     /// The quit prompt over the tree: every tab with pending items and its
     /// count, then the choices.
     fn draw_guard(&mut self, f: &mut Frame, area: Rect) {
-        let tabs: Vec<(usize, &str, usize)> =
-            self.roots.iter().enumerate().map(|(i, r)| (i, r.name.as_str(), self.pending_in(i))).filter(|t| t.2 > 0).collect();
-        let first = tabs.first().map_or(0, |t| t.0);
-        let mut lines = vec![Line::raw(""), Line::from(Span::styled(format!(" {} unsaved in {} tabs", self.pending(), tabs.len()), theme::changed()))];
-        lines.extend(tabs.iter().map(|(_, name, n)| Line::from(vec![Span::raw(format!("   {name:<12}")), Span::styled(format!("●{n}"), theme::changed())])));
+        let mut tabs: Vec<(&str, usize, String)> =
+            self.roots.iter().enumerate().map(|(i, r)| (r.name.as_str(), self.pending_in(i), String::new())).filter(|t| t.1 > 0).collect();
+        // Unsaved theme edits are listed last, as the theme tab is.
+        if let Some(e) = self.themes.editor.as_ref().filter(|e| e.dirty()) {
+            tabs.push(("theme", 1, format!("  edits to {}", e.theme.name)));
+        }
+        let total: usize = tabs.iter().map(|t| t.1).sum();
+        let mut lines = vec![Line::raw(""), Line::from(Span::styled(format!(" {total} unsaved in {} tabs", tabs.len()), theme::changed()))];
+        lines.extend(tabs.iter().map(|(name, n, note)| Line::from(vec![Span::raw(format!("   {name:<12}")), Span::styled(format!("●{n}"), theme::changed()), Span::styled(note.clone(), theme::hint())])));
         lines.push(Line::raw(""));
-        let name = self.roots[first].name.clone();
+        let name = tabs.first().map_or("", |t| t.0).to_string();
         let r = modal_rect(area, 74, lines.len() as u16 + 3);
         let inner = r.inner(ratatui::layout::Margin::new(1, 1));
         f.render_widget(Clear, r);
-        f.render_widget(Paragraph::new(lines.clone()).block(pane("quit with unsaved changes").border_style(Style::new().fg(theme::ACCENT_DIM))), r);
+        f.render_widget(Paragraph::new(lines.clone()).block(pane("quit with unsaved changes").border_style(theme::modal_border())), r);
         let row = Rect { y: inner.y + lines.len() as u16, height: 1, ..inner }.intersection(inner);
         let buttons = [(Btn::Back, "Back (Esc)".into()), (Btn::Review, format!("Review {name} (r)")), (Btn::Quit, "Quit and discard all (D)".into())];
         f.render_widget(Paragraph::new(button_row(self.shape, row, Some(Btn::Back), &buttons, &mut self.hits.buttons)), row);
@@ -319,13 +366,10 @@ impl App {
 
     fn draw_menu(&mut self, f: &mut Frame, area: Rect, path: &[usize], sel: usize) {
         let n = tree::get(&self.roots, path);
-        let r = modal_rect(area, 50, n.actions.len() as u16 + 2);
-        let w = r.width;
-        let lines: Vec<Line> = n
+        let items = n
             .actions
             .iter()
-            .enumerate()
-            .map(|(i, a)| {
+            .map(|a| {
                 let tag = match (&a.arg, a.confirm) {
                     (Arg::Secret, _) => "  masked".to_string(),
                     (Arg::Flow(_), _) => "  guided".to_string(),
@@ -334,17 +378,32 @@ impl App {
                     (Arg::None, true) => "  asks first".to_string(),
                     (Arg::None, false) => String::new(),
                 };
-                let style = if i == sel { Style::new().fg(theme::INK).bg(theme::ACCENT).add_modifier(Modifier::BOLD) } else { Style::new() };
+                (a.label.clone(), tag)
+            })
+            .collect();
+        let title = format!("actions: {}", tree::key(&self.roots, path));
+        self.draw_menu_items(f, area, title, items, sel);
+    }
+
+    /// A menu of (label, tag) items, the one at `sel` highlighted, each
+    /// recorded as a click target.
+    pub(super) fn draw_menu_items(&mut self, f: &mut Frame, area: Rect, title: String, items: Vec<(String, String)>, sel: usize) {
+        let r = modal_rect(area, 50, items.len() as u16 + 2);
+        let w = r.width;
+        let lines: Vec<Line> = items
+            .iter()
+            .enumerate()
+            .map(|(i, (label, tag))| {
+                let style = if i == sel { theme::picked() } else { Style::new() };
                 // Padded to the popup's inside, so the selection fills the row.
-                Line::styled(format!("{:<1$}", format!(" {:<10}{tag}", a.label), w.saturating_sub(2) as usize), style)
+                Line::styled(format!("{:<1$}", format!(" {label:<10}{tag}"), w.saturating_sub(2) as usize), style)
             })
             .collect();
         let inner = r.inner(ratatui::layout::Margin::new(1, 1));
-        let items = (0..lines.len() as u16).map(|i| Rect { y: inner.y + i, height: 1, ..inner }.intersection(inner)).collect();
-        self.hits.menu = Some((r, items));
+        let hits = (0..lines.len() as u16).map(|i| Rect { y: inner.y + i, height: 1, ..inner }.intersection(inner)).collect();
+        self.hits.menu = Some((r, hits));
         f.render_widget(Clear, r);
-        let title = format!("actions: {}", tree::key(&self.roots, path));
-        f.render_widget(Paragraph::new(lines).block(pane(title).border_style(Style::new().fg(theme::ACCENT_DIM))), r);
+        f.render_widget(Paragraph::new(lines).block(pane(title).border_style(theme::modal_border())), r);
     }
 
     /// The bottom line, built like the status line's first line: a mode
@@ -352,26 +411,26 @@ impl App {
     /// answers as lozenges and records them as click targets.
     fn draw_status(&mut self, f: &mut Frame, area: Rect) {
         let sh = self.shape;
-        let mode = |label: &str, bg: Color| sh.lozenge(&[Seg::new(format!(" {label} "), theme::INK, bg).bold()]);
+        let mode = |label: &str, g: Ground| sh.lozenge(&[Seg::on(format!(" {label} "), g).bold()]);
         let input = |text: String| Span::raw(format!(" {text}▏ "));
         let hint = |text: &str| Span::styled(text.to_string(), theme::hint());
         let msg = Span::styled(
             format!("  {}", self.msg),
-            if self.msg.starts_with("rejected") { Style::new().fg(theme::ERR).add_modifier(Modifier::BOLD) } else { Style::new() },
+            if self.msg.starts_with("rejected") { Style::new().fg(theme::err()).add_modifier(Modifier::BOLD) } else { Style::new() },
         );
         let mut spans: Vec<Span> = Vec::new();
         let mut cta = None;
         match &self.mode {
             Mode::Edit(buf) => {
-                spans.extend(mode("edit", theme::ACCENT));
+                spans.extend(mode("edit", Ground::Accent));
                 spans.extend([input(buf.clone()), hint(" Enter set · Esc cancel"), msg]);
             }
             Mode::Filter => {
-                spans.extend(mode("/", theme::ACCENT));
+                spans.extend(mode("/", Ground::Accent));
                 spans.extend([input(self.filter.clone()), hint(" Enter keep · Esc clear")]);
             }
             Mode::Menu { .. } => {
-                spans.extend(mode("action", theme::ACCENT));
+                spans.extend(mode("action", Ground::Accent));
                 spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
             }
             Mode::Arg { path, action, buf } => {
@@ -379,38 +438,38 @@ impl App {
                     Arg::Text(p) => p.clone(),
                     _ => "argument".into(),
                 };
-                spans.extend(mode(&prompt, theme::ACCENT));
+                spans.extend(mode(&prompt, Ground::Accent));
                 spans.extend([input(buf.clone()), hint(" Enter queue · Esc cancel")]);
             }
             Mode::Secret { buf, .. } => {
-                spans.extend(mode("secret", theme::HOT));
+                spans.extend(mode("secret", Ground::Hot));
                 spans.extend([input(mask(buf.len())), hint(" Enter queue (goes to stdin, never shown) · Esc cancel")]);
             }
             Mode::Confirm { queued } => {
-                spans.extend(mode("confirm", theme::WARN));
+                spans.extend(mode("confirm", Ground::Warn));
                 spans.push(Span::raw(format!(" {}  ", queued.command)));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y queue ", theme::OK), (false, " n cancel ", theme::ERR)]);
+                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y queue ", Ground::Ok), (false, " n cancel ", Ground::Err)]);
             }
             Mode::Review { tab: t, discard: true, .. } | Mode::DiscardTab { tab: t } => {
-                spans.extend(mode("confirm", theme::WARN));
+                spans.extend(mode("confirm", Ground::Warn));
                 spans.push(Span::raw(format!(" discard {} pending in {}?  ", self.pending_in(*t), self.roots[*t].name)));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y discard ", theme::ERR), (false, " n keep ", theme::OK)]);
+                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y discard ", Ground::Err), (false, " n keep ", Ground::Ok)]);
             }
             Mode::Guard { confirm: true } => {
-                spans.extend(mode("confirm", theme::WARN));
+                spans.extend(mode("confirm", Ground::Warn));
                 spans.push(Span::raw(format!(" quit and discard all {} pending?  ", self.pending())));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y quit ", theme::ERR), (false, " n back ", theme::OK)]);
+                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y quit ", Ground::Err), (false, " n back ", Ground::Ok)]);
             }
             Mode::Review { run: Some(run), .. } => {
                 let (label, text) = match run.outcome {
                     Outcome::Stopped(_) => ("stopped", "  the failed step and the rest stay pending"),
                     _ => ("applying", "  simulated: a step per tick"),
                 };
-                spans.extend(mode(label, theme::HOT));
+                spans.extend(mode(label, Ground::Hot));
                 spans.extend([hint(text), msg]);
             }
             Mode::Review { tab, .. } => {
-                spans.extend(mode("review", theme::HOT));
+                spans.extend(mode("review", Ground::Hot));
                 spans.push(Span::raw(" "));
                 // The tab's name goes when the message would not fit beside it.
                 let start = spans.len();
@@ -433,16 +492,37 @@ impl App {
                 }
                 spans.push(msg);
             }
+            Mode::ThemeName { op, buf } => {
+                spans.extend(mode(&op.prompt(), Ground::Accent));
+                spans.extend([input(buf.clone()), hint(" Enter · Esc cancel"), msg]);
+            }
+            Mode::ThemeDelete { name } => {
+                spans.extend(mode("confirm", Ground::Warn));
+                spans.push(Span::raw(format!(" delete theme {name}?  ")));
+                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y delete ", Ground::Err), (false, " n keep ", Ground::Ok)]);
+            }
+            Mode::ThemeMenu { .. } => {
+                spans.extend(mode("action", Ground::Accent));
+                spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
+            }
+            Mode::ThemeUnsaved => {
+                spans.extend(mode("unsaved", Ground::Warn));
+                spans.push(hint("  s save · d discard · Esc back to the editor"));
+            }
+            Mode::Browse | Mode::Help if self.on_theme_tab() => {
+                spans.extend(self.theme_status(sh));
+                spans.push(msg);
+            }
             Mode::Flow(flow) => {
-                spans.extend(mode("flow", theme::ACCENT));
+                spans.extend(mode("flow", Ground::Accent));
                 spans.push(hint(flow.hint()));
             }
             Mode::Guard { .. } => {
-                spans.extend(mode("quit", theme::WARN));
+                spans.extend(mode("quit", Ground::Warn));
                 spans.push(hint("  Esc back · r review · D quit and discard all"));
             }
             _ => {
-                spans.extend(mode(if self.filter.is_empty() { "browse" } else { "filter" }, theme::ACCENT));
+                spans.extend(mode(if self.filter.is_empty() { "browse" } else { "filter" }, Ground::Accent));
                 let changed = tree::changes(&self.roots).len();
                 spans.push(Span::raw(" "));
                 spans.push(if changed > 0 { Span::styled(format!("●{changed} changed"), theme::changed()) } else { hint("0 changed") });
@@ -453,7 +533,7 @@ impl App {
                 if pending > 0 {
                     // The bar is short: the call to action takes the mouse hint's room.
                     let text = format!(" ● {pending} unsaved in {} · w review & apply ", self.roots[self.tab].name);
-                    cta = Some(sh.lozenge(&[Seg::new(text, theme::INK, theme::HOT).bold()]));
+                    cta = Some(sh.lozenge(&[Seg::on(text, Ground::Hot).bold()]));
                 } else {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
@@ -472,6 +552,19 @@ impl App {
             None => area,
         };
         f.render_widget(Paragraph::new(Line::from(spans)), left);
+    }
+
+    /// Save, Discard or Back over the editor, Back focused.
+    fn draw_unsaved(&mut self, f: &mut Frame, area: Rect) {
+        let name = self.themes.editor.as_ref().map_or(String::new(), |e| e.theme.name.clone());
+        let lines = vec![Line::raw(""), Line::styled(format!(" {name} has unsaved edits"), theme::changed()), Line::raw("")];
+        let r = modal_rect(area, 56, lines.len() as u16 + 3);
+        let inner = r.inner(ratatui::layout::Margin::new(1, 1));
+        f.render_widget(Clear, r);
+        f.render_widget(Paragraph::new(lines.clone()).block(pane("close the editor").border_style(theme::modal_border())), r);
+        let row = Rect { y: inner.y + lines.len() as u16, height: 1, ..inner }.intersection(inner);
+        let buttons = [(Btn::Save, "Save (s)".into()), (Btn::Drop, "Discard (d)".into()), (Btn::Back, "Back (Esc)".into())];
+        f.render_widget(Paragraph::new(button_row(self.shape, row, Some(Btn::Back), &buttons, &mut self.hits.buttons)), row);
     }
 }
 
@@ -509,12 +602,12 @@ fn draw_help(f: &mut Frame, area: Rect) {
         "",
         "yellow = changed · blue = differs from default · grey = read-only",
         "[a] = has actions · orange = queued · y/n answers a confirm",
-        "any key closes",
+        "theme tab    ↑↓ preview · Enter use · a actions · e edit (^S saves)",
     ];
     let r = modal_rect(area, 72, lines.len() as u16 + 2);
     f.render_widget(Clear, r);
     f.render_widget(
-        Paragraph::new(lines.iter().map(|l| Line::raw(*l)).collect::<Vec<_>>()).block(pane("keys").border_style(Style::new().fg(theme::ACCENT_DIM))),
+        Paragraph::new(lines.iter().map(|l| Line::raw(*l)).collect::<Vec<_>>()).block(pane("keys · any key closes").border_style(theme::modal_border())),
         r,
     );
 }

@@ -3,6 +3,7 @@
 //! `gen_statusline` (lines 305-336); line numbers cite that file.
 
 use super::model::{Kind, Rgb, Theme};
+use super::oklab::{clip_chroma, delta_e, lch, Lch};
 
 /// WCAG 2.x relative luminance.
 fn luminance(c: Rgb) -> f64 {
@@ -28,15 +29,37 @@ fn passes(c: Rgb, bgs: &[Rgb], min: f64) -> bool {
     bgs.iter().all(|b| contrast(c, *b) >= min)
 }
 
-/// `c`, moved toward `toward` in 1% steps until it reaches `min` on every
-/// background. Returns `c` unchanged when it already does.
+/// `c`, made lighter or darker in OKLCH until it reaches `min` on every
+/// background: toward `toward`'s side of the first background, hue kept, and
+/// saturation (chroma over lightness) kept as far as sRGB can show it. Returns `c`
+/// unchanged when it already reads. When lightness alone cannot get there,
+/// it blends toward `toward` in 1% steps, as dottheme does.
+///
+/// The OKLCH move replaces the blend toward fg as the first resort: on Nord
+/// the blend greyed err, hot, warn and accent into one dusty pink.
 fn lift(c: Rgb, toward: Rgb, bgs: &[Rgb], min: f64) -> Rgb {
+    if passes(c, bgs, min) {
+        return c;
+    }
+    let p = lch(c);
+    let up = lch(toward).l >= bgs.first().map_or(0.0, |b| lch(*b).l);
+    let step = if up { 0.004 } else { -0.004 };
+    let mut l = p.l;
+    while (0.0..=1.0).contains(&(l + step)) {
+        l += step;
+        // Lighter at the same chroma reads paler; chroma grows with
+        // lightness so the colour keeps its saturation, as far as sRGB allows.
+        let x = clip_chroma(Lch { l, c: p.c * (l / p.l.max(0.01)).max(1.0), ..p });
+        if passes(x, bgs, min) {
+            return x;
+        }
+    }
     (0..=100).map(|p| Rgb::blend(toward, c, p)).find(|x| passes(*x, bgs, min)).unwrap_or(toward)
 }
 
 /// The first of `prefer` that reads on `bg`, else black or white, whichever
 /// reads better.
-fn text_on(bg: Rgb, prefer: &[Rgb], min: f64) -> Rgb {
+pub fn text_on(bg: Rgb, prefer: &[Rgb], min: f64) -> Rgb {
     let fallback = [Rgb(0, 0, 0), Rgb(255, 255, 255)];
     if let Some(c) = prefer.iter().find(|c| contrast(**c, bg) >= min) {
         return *c;
@@ -103,6 +126,39 @@ pub struct Roles {
 pub const MIN_TEXT: f64 = 4.5;
 pub const MIN_MUTED: f64 = 3.0;
 
+/// The least ΔE OK between any two status roles. 0.02 is a just-noticeable
+/// difference for patches side by side; status colours are read as thin
+/// glyphs, one word at a time and rarely beside each other, where colour
+/// discrimination is several times worse, so the floor is four JNDs.
+pub const MIN_DISTINCT: f64 = 0.08;
+
+/// `c` moved the least it can, in OKLCH, to sit `MIN_DISTINCT` from every
+/// colour in `settled` while still reading at `min` on `grounds`: hue turned
+/// up to 60°, lightness pushed away from the ground, chroma raised. Returns
+/// `c` when it is already clear, and `c` again when nothing in reach is.
+fn separate(c: Rgb, settled: &[Rgb], grounds: &[Rgb], min: f64) -> Rgb {
+    let clear = |x: Rgb| settled.iter().all(|f| delta_e(x, *f) >= MIN_DISTINCT) && passes(x, grounds, min);
+    if clear(c) {
+        return c;
+    }
+    let p = lch(c);
+    let away = if p.l >= grounds.first().map_or(0.0, |g| lch(*g).l) { 1.0 } else { -1.0 };
+    let mut best: Option<(f64, Rgb)> = None;
+    for dh in (-60..=60).step_by(3) {
+        for dl in 0..=10 {
+            for dc in 0..=5 {
+                let q = Lch { l: (p.l + away * 0.015 * dl as f64).clamp(0.0, 1.0), c: p.c + 0.02 * dc as f64, h: p.h + (dh as f64).to_radians() };
+                let x = clip_chroma(q);
+                let d = delta_e(x, c);
+                if best.is_none_or(|b| d < b.0) && clear(x) {
+                    best = Some((d, x));
+                }
+            }
+        }
+    }
+    best.map_or(c, |b| b.1)
+}
+
 impl Roles {
     pub fn derive(t: &Theme) -> Roles {
         let s = &t.slots;
@@ -115,6 +171,21 @@ impl Roles {
         let selection_bg = o.selection_bg.unwrap_or_else(|| Rgb::blend(s.accent, s.bg, 13));
         let grounds = [s.bg, selection_bg];
         let up = |c: Rgb, min: f64| lift(c, s.fg, &grounds, min);
+        // The status roles, lifted, then settled apart in the order of
+        // `Roles::status`: each keeps clear of the ones before it. An override
+        // is taken as given, and the roles after it keep clear of it.
+        let mut settled: Vec<Rgb> = Vec::new();
+        let mut settle = |c: Rgb, pinned: bool| {
+            let x = if pinned { c } else { separate(c, &settled, &grounds, MIN_TEXT) };
+            settled.push(x);
+            x
+        };
+        let accent = settle(up(s.accent, MIN_TEXT), false);
+        let err = settle(up(s.err, MIN_TEXT), false);
+        let ok = settle(up(s.ok, MIN_TEXT), false);
+        let warn = settle(up(s.warn, MIN_TEXT), false);
+        let info = settle(up(s.info, MIN_TEXT), false);
+        let hot = settle(o.hot.unwrap_or_else(|| up(Rgb::blend(s.warn, s.err, 50), MIN_TEXT)), o.hot.is_some());
 
         let ink = o.ink.unwrap_or(dark);
         let text = o.text.unwrap_or(light);
@@ -127,14 +198,14 @@ impl Roles {
         Roles {
             bg: s.bg,
             body: s.fg,
-            accent: up(s.accent, MIN_TEXT),
+            accent,
             accent_dim: o.accent_dim.unwrap_or_else(|| up(Rgb::blend(s.accent, s.bg, 60), MIN_TEXT)),
-            info: up(s.info, MIN_TEXT),
-            ok: up(s.ok, MIN_TEXT),
-            warn: up(s.warn, MIN_TEXT),
-            err: up(s.err, MIN_TEXT),
+            info,
+            ok,
+            warn,
+            err,
             alt: up(s.alt, MIN_TEXT),
-            hot: o.hot.unwrap_or_else(|| up(Rgb::blend(s.warn, s.err, 50), MIN_TEXT)),
+            hot,
             muted: o.muted.unwrap_or_else(|| up(s.dim, MIN_MUTED)),
             ink,
             text,
@@ -151,6 +222,41 @@ impl Roles {
             mode_review: seg(s.info),
             mode_apply: seg(s.ok),
         }
+    }
+
+    /// The roles that carry a status by colour alone, in the order `derive`
+    /// settles them.
+    pub fn status(&self) -> [(&'static str, Rgb); 6] {
+        [("accent", self.accent), ("err", self.err), ("ok", self.ok), ("warn", self.warn), ("info", self.info), ("hot", self.hot)]
+    }
+
+    /// Every pair of status roles closer than `MIN_DISTINCT`, with its ΔE OK.
+    pub fn too_close(&self) -> Vec<(&'static str, &'static str, f64)> {
+        let s = self.status();
+        let mut out = Vec::new();
+        for (i, (an, a)) in s.iter().enumerate() {
+            for (bn, b) in &s[i + 1..] {
+                let d = delta_e(*a, *b);
+                if d < MIN_DISTINCT {
+                    out.push((*an, *bn, d));
+                }
+            }
+        }
+        out
+    }
+
+    /// Every role below its contrast floor, as (name, colour, ground, ratio, floor).
+    pub fn unreadable(&self) -> Vec<(&'static str, Rgb, Rgb, f64, f64)> {
+        let mut out = Vec::new();
+        for (name, fg, grounds, min) in self.readable() {
+            for g in grounds {
+                let c = contrast(fg, g);
+                if c < min {
+                    out.push((name, fg, g, c, min));
+                }
+            }
+        }
+        out
     }
 
     /// Every (name, colour, ground set, minimum ratio) the contrast test and

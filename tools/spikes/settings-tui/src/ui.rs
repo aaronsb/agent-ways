@@ -7,6 +7,9 @@ pub mod flow;
 mod render;
 mod review;
 pub mod theme;
+mod themestate;
+mod themetab;
+mod themeview;
 
 use std::collections::BTreeSet;
 use std::io;
@@ -24,6 +27,8 @@ use ratatui::DefaultTerminal;
 use crate::tree::{self, Arg, Kind, Node, Queue, Queued, Row, SecretBuf};
 use apply::{Failure, Outcome, Run};
 use flow::{Flow, FlowEvent};
+pub use themestate::Themes;
+use themestate::NameOp;
 
 enum Mode {
     Browse,
@@ -49,6 +54,14 @@ enum Mode {
     Guard { confirm: bool },
     /// A guided flow; finishing it queues its commands on the tab that launched it.
     Flow(Box<Flow>),
+    /// The theme tab's action menu.
+    ThemeMenu { sel: usize },
+    /// A theme name typed for a new theme, a copy or a rename.
+    ThemeName { op: NameOp, buf: String },
+    /// y/n before a user theme's file is deleted.
+    ThemeDelete { name: String },
+    /// Esc in the editor with unsaved edits: save, discard, or back.
+    ThemeUnsaved,
 }
 
 /// The click targets of review's bar and the quit prompt, and a flow's buttons.
@@ -65,6 +78,9 @@ enum Btn {
     Next,
     Finish,
     Cancel,
+    /// The theme editor's save, and the unsaved prompt's save and discard.
+    Save,
+    Drop,
 }
 
 impl Btn {
@@ -78,6 +94,8 @@ impl Btn {
             Btn::Review => KeyCode::Char('r'),
             Btn::Next | Btn::Finish => KeyCode::Right,
             Btn::Cancel => KeyCode::Char('q'),
+            Btn::Save => KeyCode::Char('s'),
+            Btn::Drop => KeyCode::Char('d'),
         }
     }
 }
@@ -105,6 +123,9 @@ struct Hits {
     cta: Rect,
     /// Each tab badge's discard mark, and its tab.
     discard_tabs: Vec<(Rect, usize)>,
+    /// The theme editor's sliders, each with its channel, and its hex field.
+    sliders: Vec<(Rect, usize)>,
+    hex: Rect,
 }
 
 /// What a session leaves behind: the edited tree and the queued actions.
@@ -143,6 +164,10 @@ pub struct App {
     hits: Hits,
     /// Builds the guided flow an action names; the adapter supplies it.
     helpers: Option<Helpers>,
+    /// The theme tab: themes on offer, the active one, the editor.
+    themes: Themes,
+    /// The slider channel a mouse drag holds.
+    drag: Option<usize>,
 }
 
 /// Turns the name an `Arg::Flow` carries into the flow.
@@ -152,7 +177,7 @@ impl App {
     pub fn new(title: impl Into<String>, roots: Vec<Node>) -> Self {
         let roots_len = roots.len();
         App {
-            saved: vec![0; roots_len],
+            saved: vec![0; roots_len + 1],
             roots,
             queue: Queue::default(),
             title: title.into(),
@@ -171,7 +196,25 @@ impl App {
             shape: theme::Shape::ROUND,
             hits: Hits::default(),
             helpers: None,
+            themes: Themes::new(None, crate::themes::ColorDepth::TrueColor),
+            drag: None,
         }
+    }
+
+    /// The themes, their directory and the colour depth to draw at.
+    pub fn themes(mut self, t: Themes) -> Self {
+        self.themes = t;
+        self
+    }
+
+    /// The settings tabs and the theme tab.
+    fn tabs(&self) -> usize {
+        self.roots.len() + 1
+    }
+
+    fn toggle_mouse(&mut self) {
+        self.mouse = !self.mouse;
+        self.msg = if self.mouse { "mouse on" } else { "mouse off: the terminal selects text" }.into();
     }
 
     pub fn helpers(mut self, h: impl Fn(&str) -> Option<Flow> + 'static) -> Self {
@@ -292,9 +335,10 @@ impl App {
         };
     }
 
-    /// Quit, or ask first when anything is pending in any tab.
+    /// Quit, or ask first when anything is pending in any tab or the theme
+    /// editor holds unsaved edits.
     fn quit(&mut self) -> bool {
-        if self.pending() == 0 {
+        if self.pending() == 0 && !self.theme_dirty() {
             return false;
         }
         self.mode = Mode::Guard { confirm: false };
@@ -337,6 +381,7 @@ impl App {
     fn discard_all(&mut self) {
         tree::revert_all(&mut self.roots);
         self.queue.clear();
+        self.themes.editor = None;
     }
 
     /// The tab's rows, or with a filter the matches of every tab.
@@ -430,6 +475,38 @@ impl App {
                 }
             }
             Mode::Help => {}
+            Mode::ThemeMenu { sel } => {
+                let acts = self.theme_acts();
+                match k.code {
+                    KeyCode::Enter => self.theme_act(acts[sel.min(acts.len() - 1)]),
+                    KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::ThemeMenu { sel: sel.saturating_sub(1) },
+                    KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::ThemeMenu { sel: (sel + 1).min(acts.len() - 1) },
+                    KeyCode::Esc | KeyCode::Char('q' | 'a') => {}
+                    _ => self.mode = Mode::ThemeMenu { sel },
+                }
+            }
+            Mode::ThemeName { op, mut buf } => match k.code {
+                KeyCode::Esc => self.msg = "cancelled".into(),
+                KeyCode::Enter => self.theme_named(op, buf),
+                KeyCode::Backspace => {
+                    buf.pop();
+                    self.mode = Mode::ThemeName { op, buf };
+                }
+                KeyCode::Char(c) => {
+                    buf.push(c);
+                    self.mode = Mode::ThemeName { op, buf };
+                }
+                _ => self.mode = Mode::ThemeName { op, buf },
+            },
+            Mode::ThemeDelete { name } => match k.code {
+                KeyCode::Char('y' | 'Y') => {
+                    let r = self.themes.delete(&name);
+                    self.msg = r.unwrap_or_else(|e| format!("rejected: {e}"));
+                }
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => self.msg = "kept".into(),
+                _ => self.mode = Mode::ThemeDelete { name },
+            },
+            Mode::ThemeUnsaved => self.unsaved_key(k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
                 KeyCode::Enter => {}
@@ -515,10 +592,15 @@ impl App {
             },
             Mode::Guard { confirm: false } => match k.code {
                 KeyCode::Char('r') => {
-                    let first = (0..self.roots.len()).find(|t| self.pending_in(*t) > 0).unwrap_or(self.tab);
                     self.clear_filter();
-                    self.switch_tab(first);
-                    self.open_review(first);
+                    match (0..self.roots.len()).find(|t| self.pending_in(*t) > 0) {
+                        Some(first) => {
+                            self.switch_tab(first);
+                            self.open_review(first);
+                        }
+                        // Only theme edits are unsaved: their review is the editor.
+                        None => self.switch_tab(self.theme_tab()),
+                    }
                 }
                 KeyCode::Char('D') => self.mode = Mode::Guard { confirm: true },
                 KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
@@ -532,6 +614,7 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Guard { confirm: false },
                 _ => self.mode = Mode::Guard { confirm: true },
             },
+            Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
         }
         true
@@ -620,10 +703,7 @@ impl App {
                 _ => self.msg = READ_ONLY.into(),
             },
             KeyCode::Char('e' | 'd' | 'u' | 'x' | 'w' | 'c') => self.msg = READ_ONLY.into(),
-            KeyCode::Char('m') => {
-                self.mouse = !self.mouse;
-                self.msg = if self.mouse { "mouse on" } else { "mouse off: the terminal selects text" }.into();
-            }
+            KeyCode::Char('m') => self.toggle_mouse(),
             _ => {}
         }
     }
@@ -658,11 +738,11 @@ impl App {
             KeyCode::Char('w') => self.open_review(self.tab),
             KeyCode::Char('s') if k.modifiers.contains(KeyModifiers::CONTROL) => self.open_review(self.tab),
             KeyCode::Char('X') => self.ask_discard(self.tab),
-            KeyCode::Tab => self.switch_tab((self.tab + 1) % self.roots.len()),
-            KeyCode::BackTab => self.switch_tab((self.tab + self.roots.len() - 1) % self.roots.len()),
+            KeyCode::Tab => self.switch_tab((self.tab + 1) % self.tabs()),
+            KeyCode::BackTab => self.switch_tab((self.tab + self.tabs() - 1) % self.tabs()),
             KeyCode::Char(c @ '1'..='9') => {
                 let i = c as usize - '1' as usize;
-                if i < self.roots.len() {
+                if i < self.tabs() {
                     self.switch_tab(i);
                 }
             }
@@ -704,10 +784,7 @@ impl App {
                 None => self.msg = "no queued action".into(),
             },
             KeyCode::Char('c') => self.show_changes = !self.show_changes,
-            KeyCode::Char('m') => {
-                self.mouse = !self.mouse;
-                self.msg = if self.mouse { "mouse on" } else { "mouse off: the terminal selects text" }.into();
-            }
+            KeyCode::Char('m') => self.toggle_mouse(),
             KeyCode::Char('/') => self.mode = Mode::Filter,
             KeyCode::Char('?') => self.mode = Mode::Help,
             _ => {}
@@ -738,6 +815,7 @@ impl App {
             return;
         }
         match &mut self.mode {
+            Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
             Mode::Browse => {
                 if let Some(k) = wheel {
                     self.browse(press(k));
@@ -745,7 +823,7 @@ impl App {
                     self.click_browse(at);
                 }
             }
-            Mode::Menu { sel, .. } => {
+            Mode::Menu { sel, .. } | Mode::ThemeMenu { sel } => {
                 if let Some(k) = wheel {
                     self.key(press(k));
                 } else if click {
@@ -759,7 +837,7 @@ impl App {
                 }
             }
             Mode::Review { run: Some(_), .. } => {}
-            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
+            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ThemeDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
                     self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
                 }
@@ -771,7 +849,7 @@ impl App {
                     self.click_review(at);
                 }
             }
-            Mode::Guard { confirm: false } if click => self.click_button(at),
+            Mode::Guard { confirm: false } | Mode::ThemeUnsaved if click => self.click_button(at),
             Mode::Help if click => self.mode = Mode::Browse,
             _ => {}
         }
@@ -803,6 +881,10 @@ impl App {
             return;
         }
         if let Some(&(_, t)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
+            if t == self.theme_tab() {
+                self.msg = "a theme saves on its own; nothing of it is reviewed".into();
+                return;
+            }
             return self.review_to(Some(t));
         }
         if self.hits.buttons.iter().any(|(r, _)| r.contains(at)) {
@@ -976,6 +1058,9 @@ impl App {
 
 #[cfg(test)]
 mod flow_tests;
+
+#[cfg(test)]
+mod theme_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1308,17 +1393,17 @@ mod tests {
 
         // The tab bar: a round cap, the shown tab on the accent, its count on a warn badge.
         assert_eq!(buf[(0, 0)].symbol(), theme::Shape::ROUND.cap);
-        assert_eq!((at("1 ways", 0).fg, at("1 ways", 0).bg), (theme::INK, theme::ACCENT));
-        assert_eq!(at("●1", 0).bg, theme::WARN);
-        assert_eq!(at("2 matching", 0).bg, theme::ACCENT_DIM);
+        assert_eq!((at("1 ways", 0).fg, at("1 ways", 0).bg), (theme::Ground::Accent.fg(), theme::accent()));
+        assert_eq!(at("●1", 0).bg, theme::warn());
+        assert_eq!(at("2 matching", 0).bg, theme::accent_dim());
         // The selected row keeps the changed value's colour over the accent shade.
         let y = (0..25).find(|&y| row(y).contains(theme::SELECTED_MARK)).unwrap();
         let v = at("false", y);
-        assert_eq!((v.fg, v.bg), (theme::WARN, theme::ACCENT_SHADE));
+        assert_eq!((v.fg, v.bg), (theme::warn(), theme::shade()));
         assert!(v.modifier.contains(Modifier::BOLD));
         // The status line: a mode lozenge, then the count in the changed style.
-        assert_eq!(at("browse", 24).bg, theme::ACCENT);
-        assert_eq!(at("●1 changed", 24).fg, theme::WARN);
+        assert_eq!(at("browse", 24).bg, theme::accent());
+        assert_eq!(at("●1 changed", 24).fg, theme::warn());
     }
 
     #[test]
@@ -1444,7 +1529,7 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(110, 24)).unwrap();
         term.draw(|f| app.draw(f)).unwrap();
         let c = &term.backend().buffer()[(x + 2, y)];
-        assert_eq!(c.bg, theme::HOT);
+        assert_eq!(c.bg, theme::hot());
         assert!(c.modifier.contains(Modifier::BOLD));
         click(&mut app, (x + 3, y));
         assert_eq!(review_tab(&app), Some(0));
@@ -1505,9 +1590,9 @@ mod tests {
         let buf = term.backend().buffer();
         let bar: String = (0..110).map(|x| buf[(x, 0)].symbol().to_string()).collect();
         let at = |t: &str| &buf[(bar[..bar.find(t).unwrap()].chars().count() as u16, 0)];
-        assert_eq!((at("3 clean").fg, at("3 clean").bg), (theme::MUTED, theme::DIM_TAB), "a clean tab is dimmed");
-        assert_eq!(at("2 other").bg, theme::ACCENT_DIM);
-        assert_eq!(at("1 ways").bg, theme::ACCENT);
+        assert_eq!((at("3 clean").fg, at("3 clean").bg), (theme::muted(), theme::shade()), "a clean tab is dimmed");
+        assert_eq!(at("2 other").bg, theme::accent_dim());
+        assert_eq!(at("1 ways").bg, theme::accent());
 
         keys(&mut app, &[KeyCode::Tab]);
         assert_eq!(review_tab(&app), Some(1));
@@ -1585,8 +1670,8 @@ mod tests {
         term.draw(|f| app.draw(f)).unwrap();
         let buf = term.backend().buffer();
         let (was, will) = (&buf[(x + 10, y)], &buf[(x + 10 + 7, y)]);
-        assert!(was.modifier.contains(Modifier::CROSSED_OUT) && was.fg == theme::MUTED, "the old value is struck and muted");
-        assert!(will.modifier.contains(Modifier::BOLD) && will.fg == theme::OK, "the new value is green and bold");
+        assert!(was.modifier.contains(Modifier::CROSSED_OUT) && was.fg == theme::muted(), "the old value is struck and muted");
+        assert!(will.modifier.contains(Modifier::BOLD) && will.fg == theme::ok(), "the new value is green and bold");
     }
 
     #[test]

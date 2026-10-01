@@ -18,10 +18,10 @@ use crate::tree;
 pub(super) const GUTTER: u16 = 2;
 
 /// Width of a detail field's label column.
-const LABEL: usize = 10;
+pub(super) const LABEL: usize = 10;
 
 /// A label and its value, the value wrapped to `room` columns under itself.
-fn fields(label: &str, value: &str, style: Style, room: usize, dim: Style) -> Vec<Line<'static>> {
+pub(super) fn fields(label: &str, value: &str, style: Style, room: usize, dim: Style) -> Vec<Line<'static>> {
     let chars: Vec<char> = value.chars().collect();
     let mut chunks = chars.chunks(room.max(1)).map(|c| c.iter().collect::<String>());
     let mut out = vec![Line::from(vec![Span::styled(format!("{label:<LABEL$}"), dim), Span::styled(chunks.next().unwrap_or_default(), style)])];
@@ -63,9 +63,9 @@ impl App {
                 let (glyph, style) = match self.mark(tab, r) {
                     None => (" ", Style::new()),
                     Some(St::Pending) => ("·", theme::read_only()),
-                    Some(St::Running) => ("◐", Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
-                    Some(St::Done) => ("✓", Style::new().fg(theme::OK)),
-                    Some(St::Failed) => ("✗", Style::new().fg(theme::ERR).add_modifier(Modifier::BOLD)),
+                    Some(St::Running) => ("◐", Style::new().fg(theme::accent()).add_modifier(Modifier::BOLD)),
+                    Some(St::Done) => ("✓", Style::new().fg(theme::ok())),
+                    Some(St::Failed) => ("✗", Style::new().fg(theme::err()).add_modifier(Modifier::BOLD)),
                 };
                 let marker = match (r.toggles(), self.closed.contains(&r.path)) {
                     (false, _) => "  ",
@@ -88,7 +88,7 @@ impl App {
                                 Span::styled(elide(&c.to, half), theme::will()),
                             ]);
                         } else {
-                            spans.push(Span::styled(format!("●{below}"), Style::new().fg(theme::WARN)));
+                            spans.push(Span::styled(format!("●{below}"), Style::new().fg(theme::warn())));
                         }
                     }
                     RKind::Queued { count } => {
@@ -100,7 +100,7 @@ impl App {
                         let text = elide(command, room.saturating_sub(head.chars().count() + tail.chars().count()));
                         spans.extend([Span::raw(head), Span::styled(text, theme::queued())]);
                         if *confirm {
-                            spans.push(Span::styled(tail, Style::new().fg(theme::WARN).add_modifier(Modifier::BOLD)));
+                            spans.push(Span::styled(tail, Style::new().fg(theme::warn()).add_modifier(Modifier::BOLD)));
                         }
                     }
                 }
@@ -118,7 +118,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, Style::new().fg(theme::ACCENT)))
+            .highlight_symbol(Line::styled(theme::SELECTED_MARK, Style::new().fg(theme::accent())))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(cursor));
         f.render_stateful_widget(list, area, &mut self.list);
@@ -128,7 +128,7 @@ impl App {
     /// failed, its step.
     pub(super) fn draw_review_detail(&self, f: &mut Frame, area: Rect, tab: usize) {
         let rows = self.review_view(tab);
-        let dim = Style::new().fg(theme::MUTED);
+        let dim = Style::new().fg(theme::muted());
         let bold = Style::new().add_modifier(Modifier::BOLD);
         let room = (area.width as usize).saturating_sub(2 + LABEL);
         let field = |k: &str, v: String| fields(k, &v, Style::new(), room, dim);
@@ -185,7 +185,7 @@ impl App {
                 }
                 lines.extend(field("queued by", key.clone()));
                 lines.extend(if *confirm {
-                    fields("asks", "yes: it is destructive or reconciles", Style::new().fg(theme::WARN).add_modifier(Modifier::BOLD), room, dim)
+                    fields("asks", "yes: it is destructive or reconciles", Style::new().fg(theme::warn()).add_modifier(Modifier::BOLD), room, dim)
                 } else {
                     field("asks", "no".into())
                 });
@@ -202,10 +202,10 @@ impl App {
         if let Some((state @ (St::Running | St::Failed), text, error)) = step {
             lines.push(Line::raw(""));
             if state == St::Failed {
-                lines.extend(fields("step", &text, Style::new().fg(theme::ERR), room, dim));
-                lines.extend(fields("error", &error, Style::new().fg(theme::ERR).add_modifier(Modifier::BOLD), room, dim));
+                lines.extend(fields("step", &text, Style::new().fg(theme::err()), room, dim));
+                lines.extend(fields("error", &error, Style::new().fg(theme::err()).add_modifier(Modifier::BOLD), room, dim));
             } else {
-                lines.extend(fields("step", &text, Style::new().fg(theme::ACCENT), room, dim));
+                lines.extend(fields("step", &text, Style::new().fg(theme::accent()), room, dim));
             }
         }
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane("detail")), area);

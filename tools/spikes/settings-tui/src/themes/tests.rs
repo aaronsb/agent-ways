@@ -5,6 +5,8 @@ use ratatui::style::{Color, Style};
 use ratatui::Terminal;
 
 use super::depth::{nearest_16, nearest_256};
+use super::oklab::lch;
+use super::text::validate;
 use super::*;
 
 const MIN_TEXT_FLOOR: f64 = 4.5;
@@ -261,4 +263,59 @@ fn swatch_sheets() {
         let cells: Vec<String> = buf.content().iter().map(|c| format!("{}\t{:?}\t{:?}\t{:?}", c.symbol(), c.fg, c.bg, c.modifier)).collect();
         std::fs::write(out.join(format!("themes-{}.cells", t.name)), format!("{w} {h}\n{}\n", cells.join("\n"))).unwrap();
     }
+}
+
+#[test]
+fn status_roles_are_distinct_in_every_bundled_theme() {
+    for t in bundled() {
+        let r = Roles::derive(&t);
+        let set = r.status();
+        let mut worst = (f64::MAX, "", "");
+        for (i, (an, a)) in set.iter().enumerate() {
+            for (bn, b) in &set[i + 1..] {
+                let d = delta_e(*a, *b);
+                if d < worst.0 {
+                    worst = (d, an, bn);
+                }
+                assert!(d >= MIN_DISTINCT, "{}: {an} {} and {bn} {} are ΔE {d:.3} apart, need {MIN_DISTINCT}", t.name, a.hex(), b.hex());
+            }
+        }
+        println!("{:<18} closest status pair {}/{} ΔE {:.3}", t.name, worst.1, worst.2, worst.0);
+    }
+}
+
+#[test]
+fn the_lift_keeps_hue_on_nord() {
+    // The sRGB blend toward fg turned err, hot, warn and accent into one dusty pink.
+    let nord = parse(BUNDLED[1].1).unwrap();
+    let r = Roles::derive(&nord);
+    for (name, slot, role) in [("err", nord.slots.err, r.err), ("warn", nord.slots.warn, r.warn), ("accent", nord.slots.accent, r.accent)] {
+        let (a, b) = (lch(slot), lch(role));
+        let turn = (a.h - b.h).abs().to_degrees();
+        assert!(turn.min(360.0 - turn) < 20.0, "{name} turned {turn:.0}°: {} → {}", slot.hex(), role.hex());
+        assert!(b.c >= a.c * 0.9, "{name} lost chroma: {:.3} → {:.3}", a.c, b.c);
+    }
+}
+
+#[test]
+fn oklab_known_values() {
+    let w = lch(Rgb(255, 255, 255));
+    assert!((w.l - 1.0).abs() < 1e-3 && w.c < 1e-3);
+    assert!(lch(Rgb(0, 0, 0)).l.abs() < 1e-6);
+    // sRGB red is L 0.628, C 0.258, h 29.2° (Ottosson's reference values).
+    let red = lch(Rgb(255, 0, 0));
+    assert!((red.l - 0.628).abs() < 1e-3 && (red.c - 0.2577).abs() < 1e-3 && (red.h.to_degrees() - 29.23).abs() < 0.1);
+    assert!(delta_e(Rgb(10, 20, 30), Rgb(10, 20, 30)) == 0.0);
+}
+
+#[test]
+fn hsl_round_trips_every_bundled_slot() {
+    for t in bundled() {
+        for n in Slots::NAMES {
+            let c = t.slots.get(n).unwrap();
+            assert_eq!(Rgb::from_hsl(c.to_hsl()), c, "{} {n}", t.name);
+        }
+    }
+    assert_eq!(Rgb(255, 0, 0).to_hsl(), [0.0, 100.0, 50.0]);
+    assert_eq!(Rgb::from_hsl([120.0, 100.0, 25.0]), Rgb(0, 128, 0));
 }

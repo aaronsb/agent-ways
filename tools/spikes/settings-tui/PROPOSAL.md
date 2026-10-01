@@ -12,7 +12,7 @@ cargo run --manifest-path tools/spikes/settings-tui/Cargo.toml -- --print gate
 
 It reads your real user config, the project's `.claude/ways.yaml`, `agent.yaml` and the shipped engine profiles. Edits stay in memory. Actions are queued, not run. On exit it prints the change set, file by file, that a real `ways settings` would write, then the queued commands in order, with secrets shown as `<stdin>`. Key files are checked for existence and never opened. `?` lists the keys.
 
-Four tabs run across the top: `ways`, `matching`, `gate`, `install`. Tab and Shift-Tab or `1` to `4` switch between them, and each tab keeps its own cursor and open groups. A tab shows `●n` when it holds `n` value changes or queued actions. `/` filters every tab at once, with matches grouped under their tab's name, and Enter on a match jumps to it in its own tab.
+Four settings tabs run across the top, `ways`, `matching`, `gate` and `install`, then `theme`. Tab and Shift-Tab or `1` to `5` switch between them, and each tab keeps its own cursor and open groups. A tab shows `●n` when it holds `n` value changes or queued actions. `/` filters every tab at once, with matches grouped under their tab's name, and Enter on a match jumps to it in its own tab.
 
 Try it on a provider key: go to the `gate` tab, open `keys` and press Enter on a provider to type a key (it shows only as dots), or `a` for set/rotate, remove and check. On the `install` tab, press `a` on `targets` to add or plan a target, on a target to enable, disable or remove it, and on `install` to reconcile. `c` shows the pending changes and queued actions together; `x` drops the last queued action.
 
@@ -107,7 +107,7 @@ Each attribute means one thing: bold is something pending that needs you, and it
 
 The lozenge caps are Nerd Font glyphs. The TUI reads the status line's own `SESSIONS_SHAPE` setting, so `plain` drops the glyphs and leaves the coloured segments abutting.
 
-The theme is one module, `ui/theme.rs`, in the generic half. In the shared crate it becomes the look of every ways TUI. The ANSI tokens follow the terminal's palette, and every lozenge sets its own background, so the frames read on light and dark terminals; orange and yellow text are the weakest on a light ground.
+The look is one module, `ui/theme.rs`, in the generic half. It draws every colour from the shown theme's derived roles at the terminal's colour depth (see Themes). In the shared crate it becomes the look of every ways TUI.
 
 ## Why tabs
 
@@ -181,9 +181,23 @@ Ways that teach agents about agent-ways point at `ways settings help <key>` inst
 
 ## Themes
 
-agent-ways owns its themes: no runtime link to the shell's theme tool. A theme is a TOML file of ten slots (bg, fg, dim, subtle, accent, info, ok, warn, err, alt) and a light or dark kind, the slot set the operator's dotfiles palettes use. Derived colours (hot, rule, faded text, selection) are computed and can be pinned. A shared theme crate maps roles onto ratatui styles and plain ANSI and owns the NO_COLOR and colour-depth check; identity colours and the banner gradient stay outside themes.
+agent-ways owns its themes: no runtime link to the shell's theme tool. A theme is a TOML file of ten slots (bg, fg, dim, subtle, accent, info, ok, warn, err, alt), a light or dark kind and a background mode, the slot set the operator's dotfiles palettes use. Derived colours (hot, rule, faded text, selection) are computed and can be pinned. A shared theme crate maps roles onto ratatui styles and plain ANSI and owns the NO_COLOR and colour-depth check; identity colours and the banner gradient stay outside themes.
 
-Bundled themes ship in the binary: an agent-ways default on the identity palette's sky, and a few lifted by hand from the dotfiles palettes as starting points. The operator's own live in `$XDG_CONFIG_HOME/agent-ways/themes/`, and `ui.theme` selects one. A theme tab manages them: new, copy, rename, delete and edit, with a slot editor (swatches, hue, saturation and lightness sliders, hex entry) and a live preview on the real UI. Bundled themes are read-only, so editing one starts a copy. Every theme file operation is a queued item applied through the tab's review.
+Text roles are lifted until they read on bg and on the selection, 4.5:1 for text and 3:1 for muted. The lift moves lightness in OKLCH and keeps hue and saturation as far as sRGB allows; the earlier blend toward fg greyed Nord's err, hot, warn and accent into one dusty pink.
+
+The status roles (accent, err, ok, warn, info, hot) also stay at least 0.08 apart in ΔE OK, four just-noticeable differences, because each is read as a lone word in thin glyphs. Derivation settles them in that order, each moved the least that clears the ones before it by turning hue, raising chroma or pushing lightness away from the ground. Hot, halfway between warn and err, is the one it moves most often.
+
+The background mode is `terminal`, which keeps the terminal's own ground, or `fill`, which paints bg behind every cell of every screen. Under NO_COLOR nothing is coloured and lozenges are reverse video.
+
+Bundled themes ship in the binary: an agent-ways default on the identity palette's sky, and a few lifted by hand from the dotfiles palettes as starting points. The operator's own live in `$XDG_CONFIG_HOME/agent-ways/themes/`, with the active choice in a file beside them.
+
+A `theme` tab follows the settings tabs. It lists bundled and user themes, marks the active one and any user file that overrides a bundled name, and shows the selected theme's source, slots and checks. Moving the cursor previews a theme in place across the whole UI; leaving the tab or Esc returns to the active theme, and Enter makes the one under the cursor active.
+
+New, copy, rename, delete and edit run from the action menu. Bundled themes are read-only, so editing one starts a named copy. The editor lists the slots as swatches with their hex, and for the selected slot shows hue, saturation and lightness sliders, hex entry, the slot's role in context, and the contrast and distinctness results with any failing role named in the error colour. A failing check does not block saving.
+
+Theme files and the active choice save on their own, outside the settings review. Enter writes the choice, new, copy, rename and delete write at once, and Ctrl-S writes an edited theme. Unsaved edits badge the theme tab, Esc in the editor asks to save, discard or go back, and the exit prompt lists them beside the settings tabs.
+
+The spike writes theme files and the active choice for real, but only into `$SPIKE_THEME_DIR`, or the session scratchpad when that is unset. The theme tab's detail pane names the directory.
 
 Surfaces move onto the crate one PR at a time: the settings TUI, then `rethink` and introspect, the `agent-fmt` tables and status output, `attend-chat` through an adapter to its own TUI library, and the attend CLI.
 
@@ -209,4 +223,4 @@ The settings spike is the first user: its one render test today only checks that
 
 ## What the spike does not do
 
-It writes no files and runs no commands. It does not preserve YAML comments; the real writer would reuse the key-block replacement in `ways-core::config`. Validation is per field only; there are no cross-field checks such as `max_candidates` against `timeout_ms`. It reads the user ways root only through the projected corpus in `~/.claude/hooks/ways`.
+It writes no settings files and runs no commands; theme files are written only into the sandboxed themes directory. It does not preserve YAML comments; the real writer would reuse the key-block replacement in `ways-core::config`. Validation is per field only; there are no cross-field checks such as `max_candidates` against `timeout_ms`. It reads the user ways root only through the projected corpus in `~/.claude/hooks/ways`.
