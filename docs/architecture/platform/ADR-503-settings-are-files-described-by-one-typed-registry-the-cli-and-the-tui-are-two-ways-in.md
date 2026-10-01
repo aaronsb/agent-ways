@@ -45,6 +45,7 @@ basis:
     via: chat, session 02e97f86, 2026-10-01
   - evidence: every hook-run ways scan loads config::global(), which reads up to five files (~/.claude/ways.json, $XDG_CONFIG_HOME/ways/config.yaml, agent-ways/config.yaml, the current target config.yaml, .claude/ways.yaml; tools/ways-core/src/config.rs:16-25, :426-479), and the relevance gate loads agent.yaml (tools/ways-cli/src/cmd/scan/gate.rs:64)
   - evidence: 'schema types live in three places: ways in ways-core (config.rs), agent.yaml profiles in ways-agent-core (profile.rs:114-205), attend in the attend binary crate, which has no library target (tools/attend/Cargo.toml, src/config.rs, src/config_lint.rs)'
+  - evidence: ADR-505
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -71,7 +72,7 @@ status: proposed
 date: 2026-10-01
 deciders:
   - aaronsb
-related: [ADR-504, ADR-185, ADR-131, ADR-184, ADR-111, ADR-501]
+related: [ADR-504, ADR-185, ADR-131, ADR-184, ADR-111, ADR-501, ADR-505]
 ---
 
 # ADR-503: Settings are files described by one typed registry; the CLI and the TUI are two ways in

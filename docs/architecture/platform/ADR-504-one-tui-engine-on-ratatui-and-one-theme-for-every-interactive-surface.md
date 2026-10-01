@@ -88,6 +88,7 @@ basis:
     via: chat, session 02e97f86, 2026-10-01
   - evidence: 'non-Rust tools on these paths: tools/claude-projects (Python, linked onto PATH by scripts/install.sh:224) and the hook adapters hooks/ways/*.sh, of which check-post.sh:49-89 finds and runs postcheck.sh files and decides what to inject in bash; the spike reviewed frames through a Python/PIL script kept outside the repo; tools/scripts/fire-panel.py and probe-measure.py measure matching calibration and sit outside these paths'
   - upstream: 'Claude Code mods: TypeScript functions shipped in plugins, hot-reloaded, that run in-process before, after, instead of or around tool calls, permission requests and prompts, and can draw parts of the UI (https://claude.com/blog/claude-code-mods)'
+  - evidence: ADR-505
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -115,7 +116,7 @@ status: proposed
 date: 2026-10-01
 deciders:
   - aaronsb
-related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184]
+related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505]
 ---
 
 # ADR-504: One TUI engine on ratatui and one theme for every interactive surface
