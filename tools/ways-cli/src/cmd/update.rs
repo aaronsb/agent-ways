@@ -891,6 +891,14 @@ mod tests {
             compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called")),
             Freshness::AtLeastAsNew
         );
+        // Different lengths that are not prefixes are different commits: git decides.
+        assert_eq!(
+            compare_freshness("ways-v1.0.0-0-gabc1234", "ways-v1.0.0-3-gabd12345", |a, b| {
+                assert_eq!((a, b), ("abc1234", "abd12345"));
+                Some(true)
+            }),
+            Freshness::Older
+        );
         // Unparseable candidate provenance (legacy binary → describe_sha None) → Unknown.
         assert_eq!(
             compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called")),
