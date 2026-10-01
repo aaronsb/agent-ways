@@ -45,7 +45,11 @@ considered:
   - operator: aaronsb
     said: "a key that works is an implicit approval to use the gate. shadow mode is something we can activate (defeating the gate)"
     via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #667"
-status: proposed
+  - operator: aaronsb
+    said: "this is a significant improvement"
+    via: chat, session 418e1be3, 2026-10-01, after the failure rates at threshold 0.3 were shown
+    covers: [quality]
+status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb

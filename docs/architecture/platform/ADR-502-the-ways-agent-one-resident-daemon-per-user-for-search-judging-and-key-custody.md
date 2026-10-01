@@ -57,7 +57,7 @@ considered:
   - operator: aaronsb
     said: "yes"
     via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #667; on the daemon's crate being named ways-agent"
-status: proposed
+status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb

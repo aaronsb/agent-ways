@@ -2,7 +2,7 @@
 contract: adr/v1
 kind: evidence
 capability: matching
-status: proposed
+status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb
