@@ -45,6 +45,18 @@ basis:
 agent:
   name: claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "yes"
+    via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #667"
+    covers: [shape]
+  - operator: aaronsb
+    said: "embedding search for now remains as just the atomic ways invocation as it is now. we'll track moving that as an issue that is medium to high priority"
+    via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #667"
+    covers: [scope]
+  - operator: aaronsb
+    said: "yes"
+    via: "chat, session 418e1be3, 2026-10-01, answering the probes on PR #667; on the daemon's crate being named ways-agent"
 status: proposed
 date: 2026-10-01
 deciders:
@@ -61,7 +73,7 @@ related:
 
 ## Summary
 
-- **Decided:** agent-ways runs one resident daemon per user, the ways agent, modelled on ssh-agent. It listens on a socket under `$XDG_RUNTIME_DIR`, serves every session and agent tool on the machine concurrently, holds the matcher's embedder and corpus embeddings (the search service) and the relevance judge (the judge service, ADR-196), and is the only process that reads the provider API key. Engine profiles are shipped tuned and overridden in a user layer. The key is acquired, stored and checked through the lifecycle commands; the first release stores it in a 0600 file inside a 0700 directory. Hooks fall back silently to today's behaviour whenever the daemon cannot answer.
+- **Decided:** agent-ways runs one resident daemon per user, the ways agent, modelled on ssh-agent. It listens on a socket under `$XDG_RUNTIME_DIR`, serves every session and agent tool on the machine concurrently, holds the matcher's embedder and corpus embeddings (the search service, from a later increment) and the relevance judge (the judge service, ADR-196), and is the only process that reads the provider API key. Engine profiles are shipped tuned and overridden in a user layer. The key is acquired, stored and checked through the lifecycle commands; the first release stores it in a 0600 file inside a 0700 directory. Hooks fall back silently to today's behaviour whenever the daemon cannot answer.
 - **Trades away:** A long-lived process to start, upgrade and supervise, and a socket protocol to version, in exchange for loading models once and keeping provider connections warm.
 - **One-way?** No. Hooks keep today's path as the fallback, so removing the daemon restores current behaviour.
 - **Probes:** *Confident (shape):* one shared daemon for all your sessions and tools, used like ssh-agent, is what you had in mind. *Not confident (scope):* the first release ships the judge service only, with search moving into the daemon in a later increment.
@@ -74,7 +86,7 @@ Hooks start a process per call. Loading a model per call dominates its cost: abo
 ## Decision
 
 1. **One per user, on the ssh-agent model.** The socket defaults to `$XDG_RUNTIME_DIR/agent-ways.sock`, overridable by `WAYS_AGENT_SOCK`. The socket is mode 0600 and every connection is checked for the same uid by peer credentials. It is started by a systemd user unit or launchd where installed, otherwise by the first hook that finds none, under a lock so two hooks never start two daemons. It exits after an idle period.
-2. **Two services behind one socket.** *search* holds the embedder and the corpus embeddings and answers which ways match a text. *judge* holds the configured engine and answers P(yes) per candidate (ADR-196). A hook asks search and then judge on one connection. Each service loads and reports separately. The first release ships judge; search moves in when the embedder runs resident.
+2. **Two services behind one socket.** *search* holds the embedder and the corpus embeddings and answers which ways match a text. *judge* holds the configured engine and answers P(yes) per candidate (ADR-196). A hook asks search and then judge on one connection. Each service loads and reports separately. The first release ships judge only. Search stays in each hook's own `ways` invocation, as today, and moves into the daemon in a later increment (#668).
 3. **Concurrency.** Requests are self-contained: session id, agent tool, turns, candidates. The daemon holds no per-session state beyond optional context keyed by tool and session. It serves many clients at once, keeps provider connections open, caps CPU threads for local engines with one machine-wide budget, and gives every request a deadline. A request past its deadline gets the fallback.
 4. **Versioning.** Client and daemon exchange versions on connect. A daemon from another release is replaced, not served from, so an update takes effect without a manual restart.
 5. **Engine profiles.** Profiles ship with tuned defaults (ADR-196 §5). A user layer overrides any field and survives updates. Providers are adapters behind one request and response contract; the first are Anthropic and OpenRouter.
