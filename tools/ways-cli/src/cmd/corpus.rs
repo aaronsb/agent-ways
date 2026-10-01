@@ -30,10 +30,9 @@ pub fn run(
         }
     };
 
-    let global_dir = ways_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
+    // The shipped ways, read from the app itself: on a fresh install the
+    // corpus is built before the ~/.claude projection exists.
+    let global_dir = ways_dir.as_ref().map(PathBuf::from).unwrap_or_else(crate::paths::core_ways_root);
 
     // The engine dir holds the way-embed binary + GGUF models — always canonical.
     let engine_dir = crate::paths::corpus_dir();

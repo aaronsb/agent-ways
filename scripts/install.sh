@@ -367,6 +367,10 @@ echo ""
 echo -e "Building binaries + embedding model (${CYAN}make setup${RESET})..."
 echo -e "${DIM}(downloads ~21MB model + pre-built binary on first run)${RESET}"
 echo ""
+# The engine cache falls back to a pre-1.0 claude-ways dir while agent-ways does
+# not exist yet. Create it first, so the Makefile and the binary resolve the
+# same dir even on a machine with leftover legacy caches.
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user"
 make -C "$APP_DIR" setup || {
   echo ""
   echo -e "${YELLOW}Build had issues.${RESET} Ways will fall back to pattern/keyword matching."
