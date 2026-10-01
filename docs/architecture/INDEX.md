@@ -51,6 +51,10 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-190](./ways/ADR-190-the-lexical-gate-as-a-conditional-threshold.md) | The lexical gate as a conditional threshold | accepted |
 | [ADR-191](./ways/ADR-191-the-tool-use-channel-is-a-signal-problem-lookbehind-chunk-spread-and-winner-confirmation.md) | The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation | accepted |
 | [ADR-192](./ways/ADR-192-late-interaction-matching-the-flow.md) | Late-interaction matching: the flow | accepted |
+| [ADR-193](./ways/ADR-193-cross-encoder-rerank-gate-in-a-resident-daemon-for-way-injection.md) | Cross-encoder rerank gate in a resident daemon for way injection | abandoned |
+| [ADR-194](./ways/ADR-194-per-injection-ratings-and-continual-local-tuning-of-the-way-gate.md) | Per-injection ratings and continual local tuning of the way gate | abandoned |
+| [ADR-195](./ways/ADR-195-evidence-a-yes-no-relevance-judge-over-live-way-fires.md) | Evidence: a yes/no relevance judge over live way fires | accepted |
+| [ADR-196](./ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md) | A yes/no relevance gate on way injection, judged by a hosted model | accepted |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
@@ -141,6 +145,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-186](./platform/ADR-186-live-integration-fixture-install-path-test-levels-and-the-tier-2-gate.md) | Live integration fixture: install-path test levels and the tier 2 gate | Accepted |
 | [ADR-500](./platform/ADR-500-settings-json-three-way-merge-spec-and-peer-writer-coexistence-contract.md) | settings.json three-way merge: spec and peer-writer coexistence contract | accepted |
 | [ADR-501](./platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) | The agent-ways MCP server: one server for attend, keepalive and later modules, inbound through channels | accepted |
+| [ADR-502](./platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) | The ways agent: one resident daemon per user for search, judging and key custody | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
