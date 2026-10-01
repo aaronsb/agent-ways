@@ -237,7 +237,11 @@ PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 # acquired" — `ways status` reports Engine: embedding only when it truly works.
 embedding_engine_ok() {
   [[ -x "$APP_DIR/bin/ways" ]] || return 1
-  "$APP_DIR/bin/ways" status 2>/dev/null | grep -qiE '^Engine:[[:space:]]*embedding'
+  # Capture first: `grep -q` stops reading at its match, and `ways status`
+  # writing on into the closed pipe aborts, which pipefail reports as failure.
+  local status
+  status="$("$APP_DIR/bin/ways" status 2>/dev/null)" || true
+  grep -qiE '^Engine:[[:space:]]*embedding' <<<"$status"
 }
 
 # ADR-146 recovery card: shown when the projection is up but semantic matching is
