@@ -1,4 +1,4 @@
-//! Drawing for the TUI: the tree, the detail and pending panes, the action
+//! Drawing for the TUI: the tab bar, the tree, the detail and pending panes, the action
 //! menu, the status line and the key help.
 
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -18,12 +18,15 @@ fn mask(n: usize) -> String {
 
 impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
-        let [main, status] = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
+        let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
         let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(main);
         let rows = self.rows();
         if !rows.is_empty() {
             self.cursor = self.cursor.min(rows.len() - 1);
         }
+        // While a filter shows every tab's matches, the cursor's tab is the active one.
+        let active = if self.filter.is_empty() { self.tab } else { rows.get(self.cursor).map_or(self.tab, |r| r.path[0]) };
+        self.draw_tabs(f, bar, active);
         self.draw_tree(f, left, &rows);
         if self.show_changes {
             self.draw_changes(f, right);
@@ -36,6 +39,24 @@ impl App {
             _ => {}
         }
         f.render_widget(Paragraph::new(self.status_line()), status);
+    }
+
+    /// One label per root: its number, name, and pending count when non-zero.
+    fn draw_tabs(&self, f: &mut Frame, area: Rect, active: usize) {
+        let mut spans = Vec::new();
+        for (i, r) in self.roots.iter().enumerate() {
+            let on = i == active;
+            let base = if on { Style::new().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::new() };
+            let pending = tree::pending(r, &self.queue);
+            spans.push(Span::styled(format!(" {} {}", i + 1, r.name), base));
+            if pending > 0 {
+                let dot = if on { base } else { Style::new().fg(Color::Yellow) };
+                spans.push(Span::styled(format!(" ●{pending}"), dot));
+            }
+            spans.push(Span::styled(" ", base));
+            spans.push(Span::raw(" "));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn draw_tree(&mut self, f: &mut Frame, area: Rect, rows: &[Row]) {
@@ -237,12 +258,14 @@ fn kind_label(k: &Kind) -> String {
 
 fn draw_help(f: &mut Frame, area: Rect) {
     let lines = [
+        "Tab S-Tab 1-9  switch tab; each keeps its cursor and open groups",
         "↑↓ / j k     move          PgUp PgDn g G   jump",
         "→ / l        open group    ← / h           close / parent",
         "Enter Space  toggle bool, cycle choice, edit value, open group;",
         "             on a secret, masked entry; on an action-only node, its menu",
         "e            edit as text  d               set to default",
-        "u            revert        /               filter by key",
+        "u            revert        /               filter all tabs by key",
+        "Enter        on a filter hit: jump to it in its tab (Space acts)",
         "a            actions menu  x               unqueue the last action",
         "c            pending pane (changes and queued actions)",
         "q Esc        quit (prints the change set and queued commands)",

@@ -12,7 +12,9 @@ cargo run --manifest-path tools/spikes/settings-tui/Cargo.toml -- --print gate
 
 It reads your real user config, the project's `.claude/ways.yaml`, `agent.yaml` and the shipped engine profiles. Edits stay in memory. Actions are queued, not run. On exit it prints the change set, file by file, that a real `ways settings` would write, then the queued commands in order, with secrets shown as `<stdin>`. Key files are checked for existence and never opened. `?` lists the keys.
 
-Try it on a provider key: open `gate.keys` and press Enter on a provider to type a key (it shows only as dots), or `a` for set/rotate, remove and check. Press `a` on `install.targets` to add or plan a target, on a target to enable, disable or remove it, and on `install` to reconcile. `c` shows the pending changes and queued actions together; `x` drops the last queued action.
+Four tabs run across the top: `ways`, `matching`, `gate`, `install`. Tab and Shift-Tab or `1` to `4` switch between them, and each tab keeps its own cursor and open groups. A tab shows `●n` when it holds `n` value changes or queued actions. `/` filters every tab at once, with matches grouped under their tab's name, and Enter on a match jumps to it in its own tab.
+
+Try it on a provider key: go to the `gate` tab, open `keys` and press Enter on a provider to type a key (it shows only as dots), or `a` for set/rotate, remove and check. On the `install` tab, press `a` on `targets` to add or plan a target, on a target to enable, disable or remove it, and on `install` to reconcile. `c` shows the pending changes and queued actions together; `x` drops the last queued action.
 
 ## The problem
 
@@ -40,14 +42,14 @@ Settings live in four files, each with its own writer:
 
 ### 1. `ways settings`: one tree, one schema
 
-Every setting gets a dotted key in one tree:
+Every setting gets a dotted key in one tree. Its four roots are the tabs of the TUI:
 
 ```
+ways.enabled                              .claude/ways.yaml
+ways.domains.itops                        config.yaml   disabled_domains
+ways.project.softwaredev.code.quality     .claude/ways.yaml   ways:
 matching.semantic_fire_probability        config.yaml
-disclosure.refire_presets.normal          config.yaml
-domains.itops                             config.yaml   disabled_domains
-project.enabled                           .claude/ways.yaml
-project.ways.softwaredev.code.quality     .claude/ways.yaml   ways:
+matching.disclosure.refire_presets.normal config.yaml
 gate.mode                                 agent.yaml
 gate.profiles.anthropic.max_candidates    agent.yaml
 gate.keys.anthropic                       present / absent; actions set, rotate, remove, check
@@ -85,11 +87,15 @@ Hooks, scripts and skills call 25 distinct `ways` subcommands today (`lint` 22 t
 
 The spike splits into a generic half and an adapter:
 
-- `tree.rs`: typed settings (bool, bounded float and int, choice, text, read-only, secret), a node that may be both a setting and a group (a way with child ways), actions and their queue, filtering, and the change set.
-- `ui.rs` and `ui/render.rs`: browse, filter, edit with validation, reset to default, revert, the action menu, confirm and masked entry, the pending pane. It knows nothing about ways.
+- `tree.rs`: the roots as tabs, typed settings (bool, bounded float and int, choice, text, read-only, secret), a node that may be both a setting and a group (a way with child ways), actions and their queue, filtering, and the change set.
+- `ui.rs` and `ui/render.rs`: the tab bar with pending counts, browse, filter across tabs, edit with validation, reset to default, revert, the action menu, confirm and masked entry, the pending pane. It knows nothing about ways.
 - `ways.rs`: the adapter that loads the four files into the tree.
 
 As a crate (`ways-tui`, or `agent-tui` beside `agent-fmt`), the first two serve `ways settings`, `ways-agent` (a separate binary that today only prints its config) and any later picker. The tree becomes the registry's view, and the adapter becomes the registry.
+
+## Why tabs
+
+One tree mixes separate concerns: which ways are on, how matching is tuned, the relevance gate, and where ways install. The ways list alone is about 200 rows, and it pushed everything else off screen. Each root is now a tab with its own cursor and open groups, so a concern is one keypress away and the pending count on each tab shows where edits sit. The pending pane and the filter still span every tab.
 
 ## Actions and keys
 
@@ -120,7 +126,7 @@ The settings spike is the first user: its one render test today only checks that
 ## Decisions this spike leaves open
 
 1. **Where `set` writes when a project overrides.** The spike writes the user file and shows the source layer. A project override then hides the edit. The options are `--project` on `set`, or writing to whichever layer currently wins.
-2. **Domain switches by project.** `disabled_domains` is user scope and `ways:` is project scope (ADR-131), so the tree has `domains.*` and `project.ways.*` side by side. One switch per scope at every level of the tree would be simpler to read, at the cost of changing ADR-131.
+2. **Domain switches by project.** `disabled_domains` is user scope and `ways:` is project scope (ADR-131), so the `ways` tab has `ways.domains.*` and `ways.project.*` side by side. One switch per scope at every level of the tree would be simpler to read, at the cost of changing ADR-131.
 3. **An ADR.** The command regrouping and the settings schema are decisions other tools and docs depend on; both go through `docs/scripts/adr` before implementation.
 
 ## What the spike does not do

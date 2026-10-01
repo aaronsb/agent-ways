@@ -1,5 +1,6 @@
-//! The ways adapter: every setting agent-ways reads, as one tree, with the
-//! layer each value came from and the file an edit would write.
+//! The ways adapter: every setting agent-ways reads, as one tree whose four
+//! roots are tabs, with the layer each value came from and the file an edit
+//! would write.
 //!
 //! Read-only. Key files are checked for existence and never opened. Actions
 //! carry the real `ways` command lines; none is run.
@@ -72,12 +73,10 @@ pub fn build(p: &Paths, project_dir: &Path) -> Vec<Node> {
     let agent = load(&p.agent);
 
     vec![
+        ways_tab(&user, &project, p, project_dir).opened(),
         matching(&user, &project, p).opened(),
-        disclosure(&user, &project, p),
-        domains(&user, p),
-        project_node(&project, p, project_dir),
-        gate(&agent, p),
-        install(&user, p),
+        gate(&agent, p).opened(),
+        install(&user, p).opened(),
     ]
 }
 
@@ -91,6 +90,7 @@ fn matching(user: &Value, project: &Value, p: &Paths) -> Node {
             cfg("parent_threshold_multiplier", "Once a parent way fired, a child's bar is multiplied by this. 1.0 disables the boost.", prob(), "0.8", user, project, p),
             cfg("parent_boost_floor", "The lowest a boosted child's bar may go.", prob(), "0.3", user, project, p),
             cfg("near_miss_margin", "Logging only: a way that missed by less than this is recorded as a near miss.", Kind::Float { min: 0.0, max: 0.5 }, "0.05", user, project, p),
+            disclosure(user, project, p),
         ],
     )
 }
@@ -154,7 +154,7 @@ fn domains(user: &Value, p: &Paths) -> Node {
             )
         })
         .collect();
-    Node::group("domains", "Switch a whole domain of ways on or off, user-wide.", children)
+    Node::group("domains", "Switch a whole domain of ways on or off. User-wide: it applies to every project.", children)
 }
 
 /// The `description:` line of a way file's frontmatter.
@@ -196,7 +196,7 @@ fn way_tree(dir: &Path, id: &str, disabled: &BTreeMap<String, bool>, p: &Paths) 
     }
 }
 
-fn project_node(project: &Value, p: &Paths, project_dir: &Path) -> Node {
+fn ways_tab(user: &Value, project: &Value, p: &Paths, project_dir: &Path) -> Node {
     let mut disabled = BTreeMap::new();
     if let Some(m) = project.get("ways").and_then(Value::as_mapping) {
         for (k, v) in m {
@@ -215,8 +215,8 @@ fn project_node(project: &Value, p: &Paths, project_dir: &Path) -> Node {
         .filter_map(|d| way_tree(&p.corpus.join(&d), &d, &disabled, p))
         .collect();
     Node::group(
-        "project",
-        format!("This project: {}\nToday: `ways disable` / `ways enable` and .claude/ways.yaml.", project_dir.display()),
+        "ways",
+        format!("Which ways are on: this project's switch, the user-wide domains, then each way here.\nProject: {}\nToday: `ways disable` / `ways enable` and .claude/ways.yaml.", project_dir.display()),
         vec![
             Node::leaf(
                 "enabled",
@@ -225,8 +225,9 @@ fn project_node(project: &Value, p: &Paths, project_dir: &Path) -> Node {
                     .default("true")
                     .store(p.project.clone(), "enabled"),
             ),
+            domains(user, p),
             Node::group(
-                "ways",
+                "project",
                 "Each way, on or off for this project only (ADR-131). A toggle stays a value here; the real command maps to `ways disable <id>` and `ways enable <id>`.",
                 ways,
             ),

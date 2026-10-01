@@ -214,6 +214,11 @@ impl Queue {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+    /// Actions queued from nodes under the root named `root`.
+    pub fn under(&self, root: &str) -> usize {
+        let dotted = format!("{root}.");
+        self.0.iter().filter(|q| q.key == root || q.key.starts_with(&dotted)).count()
+    }
 }
 
 /// Typed secret text. Debug redacts, there is no Display, and the bytes are
@@ -296,14 +301,28 @@ pub fn key(roots: &[Node], path: &[usize]) -> String {
 }
 
 /// Rows to draw. With a filter, every node whose key contains it is shown
-/// with its ancestors, whatever is open.
+/// with its ancestors, whatever is open; each root heads its own matches.
 pub fn rows(roots: &[Node], filter: &str) -> Vec<Row> {
+    rows_in(roots, 0, roots.len(), filter)
+}
+
+/// The rows of one tab: the root at index `tab` and what is open under it.
+pub fn tab_rows(roots: &[Node], tab: usize) -> Vec<Row> {
+    rows_in(roots, tab, 1, "")
+}
+
+fn rows_in(roots: &[Node], skip: usize, take: usize, filter: &str) -> Vec<Row> {
     let mut out = Vec::new();
     let f = filter.to_lowercase();
-    for (i, n) in roots.iter().enumerate() {
+    for (i, n) in roots.iter().enumerate().skip(skip).take(take) {
         walk(n, vec![i], &n.name.to_lowercase(), &f, &mut out);
     }
     out
+}
+
+/// What a tab has pending: value changes plus queued actions under its root.
+pub fn pending(root: &Node, queue: &Queue) -> usize {
+    root.changes() + queue.under(&root.name)
 }
 
 fn walk(n: &Node, path: Vec<usize>, key: &str, f: &str, out: &mut Vec<Row>) -> bool {
@@ -377,6 +396,19 @@ mod tests {
         let r = rows(&t, "tau");
         assert_eq!(r.len(), 2);
         assert_eq!(key(&t, &r[1].path), "matching.tau_s");
+    }
+
+    #[test]
+    fn tab_rows_cover_one_root_and_pending_counts_its_queue() {
+        let mut t = sample();
+        t.push(Node::group("gate", "", vec![]));
+        assert_eq!(tab_rows(&t, 1).len(), 1);
+        assert_eq!(rows(&t, "").len(), 2);
+        let mut q = Queue::default();
+        for k in ["matching.scope", "gate", "gatekeeper"] {
+            q.push(Queued { key: k.into(), label: String::new(), command: String::new() });
+        }
+        assert_eq!((pending(&t[0], &q), pending(&t[1], &q)), (1, 1));
     }
 
     #[test]

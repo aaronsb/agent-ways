@@ -1,5 +1,5 @@
-//! The generic TUI over a settings tree: browse, filter, edit, run actions,
-//! review. Key handling and state live here; drawing is in `render`.
+//! The generic TUI over a settings tree: one tab per root, then browse,
+//! filter, edit, run actions, review. Key handling and state live here; drawing is in `render`.
 
 mod render;
 
@@ -36,7 +36,12 @@ pub struct App {
     pub roots: Vec<Node>,
     queue: Queue,
     title: String,
+    /// The tab shown: an index into `roots`.
+    tab: usize,
+    /// The cursor in the rows on screen: the tab's, or the filter's.
     cursor: usize,
+    /// Each tab's cursor while another tab, or a filter, is shown.
+    saved: Vec<usize>,
     mode: Mode,
     filter: String,
     msg: String,
@@ -47,13 +52,15 @@ pub struct App {
 impl App {
     pub fn new(title: impl Into<String>, roots: Vec<Node>) -> Self {
         App {
+            saved: vec![0; roots.len()],
             roots,
             queue: Queue::default(),
             title: title.into(),
+            tab: 0,
             cursor: 0,
             mode: Mode::Browse,
             filter: String::new(),
-            msg: "? for keys".into(),
+            msg: "? keys · Tab 1-9 tabs · / filters all tabs".into(),
             show_changes: false,
             list: ListState::default(),
         }
@@ -70,8 +77,42 @@ impl App {
         }
     }
 
+    /// The tab's rows, or with a filter the matches of every tab.
     fn rows(&self) -> Vec<Row> {
-        tree::rows(&self.roots, &self.filter)
+        if self.filter.is_empty() {
+            tree::tab_rows(&self.roots, self.tab)
+        } else {
+            tree::rows(&self.roots, &self.filter)
+        }
+    }
+
+    fn switch_tab(&mut self, to: usize) {
+        if !self.filter.is_empty() {
+            self.msg = "Esc clears the filter before switching tabs".into();
+            return;
+        }
+        self.saved[self.tab] = self.cursor;
+        self.tab = to;
+        self.cursor = self.saved[to];
+    }
+
+    fn clear_filter(&mut self) {
+        if !self.filter.is_empty() {
+            self.filter.clear();
+            self.cursor = self.saved[self.tab];
+        }
+    }
+
+    /// Show the node at `path` in its own tab, opening what hides it.
+    fn jump(&mut self, path: &[usize]) {
+        self.filter.clear();
+        for i in 1..path.len() {
+            tree::get_mut(&mut self.roots, &path[..i]).open = true;
+        }
+        self.tab = path[0];
+        self.cursor = self.rows().iter().position(|r| r.path == path).unwrap_or(0);
+        self.saved[self.tab] = self.cursor;
+        self.msg = tree::key(&self.roots, path);
     }
 
     /// Handle one key. False ends the session.
@@ -82,13 +123,19 @@ impl App {
         match std::mem::replace(&mut self.mode, Mode::Browse) {
             Mode::Help => {}
             Mode::Filter => match k.code {
-                KeyCode::Esc => self.filter.clear(),
+                KeyCode::Esc => self.clear_filter(),
                 KeyCode::Enter => {}
                 KeyCode::Backspace => {
                     self.filter.pop();
+                    if self.filter.is_empty() {
+                        self.cursor = self.saved[self.tab];
+                    }
                     self.mode = Mode::Filter;
                 }
                 KeyCode::Char(c) => {
+                    if self.filter.is_empty() {
+                        self.saved[self.tab] = self.cursor;
+                    }
                     self.filter.push(c);
                     self.cursor = 0;
                     self.mode = Mode::Filter;
@@ -162,7 +209,7 @@ impl App {
         if rows.is_empty() {
             match k.code {
                 KeyCode::Char('q') => return false,
-                KeyCode::Esc => self.filter.clear(),
+                KeyCode::Esc => self.clear_filter(),
                 KeyCode::Char('/') => self.mode = Mode::Filter,
                 _ => {}
             }
@@ -173,8 +220,16 @@ impl App {
         let last = rows.len() - 1;
         match k.code {
             KeyCode::Char('q') => return false,
-            KeyCode::Esc if !self.filter.is_empty() => self.filter.clear(),
+            KeyCode::Esc if !self.filter.is_empty() => self.clear_filter(),
             KeyCode::Esc => return false,
+            KeyCode::Tab => self.switch_tab((self.tab + 1) % self.roots.len()),
+            KeyCode::BackTab => self.switch_tab((self.tab + self.roots.len() - 1) % self.roots.len()),
+            KeyCode::Char(c @ '1'..='9') => {
+                let i = c as usize - '1' as usize;
+                if i < self.roots.len() {
+                    self.switch_tab(i);
+                }
+            }
             KeyCode::Up | KeyCode::Char('k') => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => self.cursor = (self.cursor + 1).min(last),
             KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(10),
@@ -202,6 +257,7 @@ impl App {
                     }
                 }
             }
+            KeyCode::Enter if !self.filter.is_empty() => self.jump(&path),
             KeyCode::Enter | KeyCode::Char(' ') => self.activate(&path),
             KeyCode::Char('e') => self.begin_edit(&path),
             KeyCode::Char('d') => self.reset(&path, true),
@@ -437,5 +493,110 @@ mod tests {
         type_str(&mut app, "/tmp/a b");
         keys(&mut app, &[KeyCode::Enter]);
         assert_eq!(app.queue.items()[0].command, "ways config target plan '/tmp/a b'");
+    }
+
+    fn flag(name: &str) -> Node {
+        Node::leaf(name, "", Setting::new(Kind::Bool, "true", "default").default("true"))
+    }
+
+    /// Three tabs: nested ways, a number, and a node with an action.
+    fn tabbed() -> Vec<Node> {
+        let ways = Node::group("ways", "", vec![flag("alpha"), flag("beta"), Node::group("deep", "", vec![flag("gamma")])]);
+        let matching = Node::group("matching", "", vec![Node::leaf("tau_s", "", Setting::new(Kind::Float { min: 0.0, max: 1.0 }, "0.5", "default").default("0.5"))]);
+        let gate = Node::group("gate", "", vec![flag("language")]).with_actions(vec![Action::new("check", "ways agent status")]);
+        vec![ways.opened(), matching.opened(), gate.opened()]
+    }
+
+    fn frame(app: &mut App, w: u16, h: u16) -> Vec<String> {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| app.draw(f)).unwrap();
+        let buf = term.backend().buffer();
+        buf.content().chunks(w as usize).map(|r| r.iter().map(|c| c.symbol()).collect()).collect()
+    }
+
+    #[test]
+    fn tab_bar_names_every_root_and_tab_keys_switch_the_tree() {
+        let mut app = App::new("t", tabbed());
+        let bar = frame(&mut app, 100, 24)[0].clone();
+        assert!(["1 ways", "2 matching", "3 gate"].iter().all(|t| bar.contains(t)), "{bar}");
+        assert!(screen(&mut app).contains("alpha") && !screen(&mut app).contains("tau_s"));
+        keys(&mut app, &[KeyCode::Tab]);
+        assert!(screen(&mut app).contains("tau_s") && !screen(&mut app).contains("alpha"));
+        keys(&mut app, &[KeyCode::Char('3')]);
+        assert!(screen(&mut app).contains("language"));
+        keys(&mut app, &[KeyCode::BackTab, KeyCode::BackTab]);
+        assert!(screen(&mut app).contains("alpha"));
+        keys(&mut app, &[KeyCode::Char('9')]);
+        assert!(screen(&mut app).contains("alpha"), "a digit past the last tab is ignored");
+    }
+
+    #[test]
+    fn each_tab_keeps_its_cursor_and_open_state() {
+        let mut app = App::new("t", tabbed());
+        // On ways: close `deep` at row 3, then move the cursor to it.
+        keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Down, KeyCode::Right]);
+        assert_eq!(app.cursor, 3);
+        assert!(screen(&mut app).contains("gamma"));
+        keys(&mut app, &[KeyCode::Char('2'), KeyCode::Down]);
+        assert_eq!(app.cursor, 1);
+        keys(&mut app, &[KeyCode::Char('1')]);
+        assert_eq!(app.cursor, 3);
+        assert!(screen(&mut app).contains("gamma"), "open state kept");
+        keys(&mut app, &[KeyCode::Char('2')]);
+        assert_eq!(app.cursor, 1);
+    }
+
+    #[test]
+    fn filter_hit_in_another_tab_jumps_there_on_enter() {
+        let mut app = App::new("t", tabbed());
+        keys(&mut app, &[KeyCode::Char('/')]);
+        type_str(&mut app, "language");
+        let hits = screen(&mut app);
+        assert!(hits.contains("gate") && hits.contains("language") && !hits.contains("alpha"));
+        keys(&mut app, &[KeyCode::Enter]);
+        assert_eq!(app.filter, "language");
+        keys(&mut app, &[KeyCode::Down, KeyCode::Enter]);
+        assert!(app.filter.is_empty());
+        assert_eq!(app.tab, 2);
+        assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "gate.language");
+        // Esc from a filter returns to the tab's own cursor.
+        keys(&mut app, &[KeyCode::Char('1'), KeyCode::Down, KeyCode::Char('/')]);
+        type_str(&mut app, "tau");
+        keys(&mut app, &[KeyCode::Esc]);
+        assert_eq!((app.tab, app.cursor), (0, 1));
+    }
+
+    #[test]
+    fn pending_count_shows_on_the_edited_tab_only() {
+        let mut app = App::new("t", tabbed());
+        keys(&mut app, &[KeyCode::Down, KeyCode::Enter]);
+        let bar = frame(&mut app, 100, 24)[0].clone();
+        assert!(bar.contains("1 ways ●1") && !bar.contains("matching ●") && !bar.contains("gate ●"), "{bar}");
+        keys(&mut app, &[KeyCode::Char('3'), KeyCode::Char('a'), KeyCode::Enter]);
+        let bar = frame(&mut app, 100, 24)[0].clone();
+        assert!(bar.contains("3 gate ●1"), "{bar}");
+        keys(&mut app, &[KeyCode::Char('c')]);
+        assert!(screen(&mut app).contains("pending (1 changes, 1 actions)"));
+    }
+
+    #[test]
+    fn minimum_size_fits_the_tab_bar_and_the_selected_row() {
+        let mut app = App::new("t", tabbed());
+        keys(&mut app, &[KeyCode::Down, KeyCode::Down]);
+        let f = frame(&mut app, 80, 25);
+        assert!(["1 ways", "2 matching", "3 gate"].iter().all(|t| f[0].contains(t)));
+        assert!(f.iter().any(|l| l.contains("beta")), "{f:#?}");
+        keys(&mut app, &[KeyCode::Char('?')]);
+        frame(&mut app, 80, 25);
+    }
+
+    /// Prints one frame of the real tree for layout review: `cargo test frame_dump -- --nocapture --ignored`.
+    #[test]
+    #[ignore]
+    fn frame_dump() {
+        let dir = std::env::current_dir().unwrap();
+        let mut app = App::new(" ways settings ", crate::ways::build(&crate::ways::Paths::resolve(&dir), &dir));
+        keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Right, KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+        println!("{}", frame(&mut app, 100, 30).join("\n"));
     }
 }
