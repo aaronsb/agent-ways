@@ -1,71 +1,17 @@
 //! `attend inbox` — read pending messages from peers.
 //!
-//! Owns the `ParsedSignal` ADR-120 wire-format parser because `cmd_inbox`
-//! / `cmd_inbox_read` are its hottest callers. `cmd::send` re-uses
-//! `is_valid_signal_id` from here when validating `--re` ids, which is
-//! the right direction of dependency: the parser owns what a valid id
-//! looks like, senders consult it.
+//! Re-exports agent-identity's ADR-120 wire-format parser for its callers
+//! here; `cmd::send` consults `is_valid_signal_id` when validating `--re`
+//! ids, so the parser owns what a valid id looks like.
 
 use attend_identity_view::{render_sender_label, render_sender_label_plain};
 use attend_instances::SnapshotCache;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 use agent_identity::TermCaps;
 
-/// Parsed signal record (ADR-120 wire format).
-///
-/// Legacy signals have no `reply_to`; threaded replies carry the original
-/// signal's ID in that field. Borrows from the input to keep the parse
-/// allocation-free at the hot path.
-pub(crate) struct ParsedSignal<'a> {
-    pub(crate) from: &'a str,
-    /// Parsed but currently unread by any caller. Retained so future
-    /// sender-hint rendering (non-cwd) can read it without re-parsing.
-    #[allow(dead_code)]
-    pub(crate) project: &'a str,
-    pub(crate) cwd: &'a str,
-    pub(crate) reply_to: Option<&'a str>,
-    pub(crate) message: &'a str,
-}
-
-/// Signal IDs are filename stems in the form `<sender-id>-<timestamp>`,
-/// which is always `[A-Za-z0-9_-]+`. Using this char class as the
-/// discriminator fence keeps legacy prose that happens to start with
-/// "re:" from being misparsed as threaded — e.g. `attend send "re: the
-/// thing we discussed|still open"` stays a 4-field legacy message
-/// because `the thing we discussed` has a space.
-pub(crate) fn is_valid_signal_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-/// Parse a single-line signal. Accepts both the legacy 4-field format and
-/// the 5-field threaded format; the discriminator is a `re:<id>|` prefix
-/// on the field that follows `cwd`, where `<id>` matches
-/// `is_valid_signal_id`. A malformed or ambiguous `re:` prefix degrades
-/// to legacy interpretation so real prose round-trips cleanly.
-pub(crate) fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
-    let parts: Vec<&str> = content.splitn(4, '|').collect();
-    if parts.len() < 4 {
-        return None;
-    }
-    let tail = parts[3];
-    let (reply_to, message) = match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
-        Some((id, msg)) if is_valid_signal_id(id) => (Some(id), msg),
-        // Either not threaded, or the `re:` prefix is followed by text
-        // that doesn't look like a signal id — fall back to legacy so
-        // prose like "re: the thing we discussed" stays intact.
-        _ => (None, tail),
-    };
-    Some(ParsedSignal {
-        from: parts[0],
-        project: parts[1],
-        cwd: parts[2],
-        reply_to,
-        message,
-    })
-}
+// The ADR-120 wire-format parser lives in agent-identity, shared with the
+// attend-chat TUI so both read a `re:` prefix the same way.
+pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
 pub(crate) fn cmd_inbox_read(msg_id: &str) {
     let base = signals_base();
