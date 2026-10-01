@@ -13,6 +13,8 @@ members = [
     "sensor-keepwarm",
     "ways-cli",
     "ways-mcp",
+    "ways-agent-core",
+    "ways-agent",
     "attend",
     "attend-chat",
     "attend-groups",

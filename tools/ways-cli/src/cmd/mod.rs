@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod banner;
 pub mod compositor;
 pub mod config_cmd;

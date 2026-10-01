@@ -1,0 +1,234 @@
+//! Provider HTTP calls: the zero-cost key check and the model list (ADR-502 §6).
+//!
+//! Requests go over ureq with rustls. Error text returned here comes from the
+//! provider's error body or the transport, never from the request, so a key
+//! cannot leak through it.
+
+use std::time::Duration;
+
+use anyhow::{bail, Context, Result};
+use serde_json::Value;
+
+use crate::profile::Provider;
+
+const ANTHROPIC: &str = "https://api.anthropic.com";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+const OPENROUTER: &str = "https://openrouter.ai/api/v1";
+
+/// An HTTP agent that reports 4xx and 5xx as responses, so callers can name
+/// the status. Clones share one connection pool.
+pub fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(timeout))
+        .user_agent(concat!("ways-agent/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into()
+}
+
+/// What a key check found.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Check {
+    /// The key works and the model is served.
+    Valid,
+    Invalid(String),
+    NoCredit,
+    RateLimited,
+    /// The key works; the provider does not serve this model to it.
+    ModelUnavailable(String),
+    /// The provider could not be reached.
+    Unreachable(String),
+    /// Any other status, with the provider's message.
+    Failed(u16, String),
+}
+
+impl Check {
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Check::Valid)
+    }
+
+    /// The provider accepted the key, whatever else it said about the model
+    /// or the balance.
+    pub fn key_authenticated(&self) -> bool {
+        matches!(self, Check::Valid | Check::NoCredit | Check::ModelUnavailable(_))
+    }
+
+    /// The word a check record stores.
+    pub fn record_word(&self) -> &'static str {
+        match self {
+            Check::Valid => "valid",
+            Check::Invalid(_) => "invalid",
+            Check::NoCredit => "no_credit",
+            Check::RateLimited => "rate_limited",
+            Check::ModelUnavailable(_) => "model_unavailable",
+            Check::Unreachable(_) => "unreachable",
+            Check::Failed(..) => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for Check {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Check::Valid => write!(f, "valid"),
+            Check::Invalid(m) => write!(f, "invalid: {m}"),
+            Check::NoCredit => write!(f, "no credit left on this key"),
+            Check::RateLimited => write!(f, "rate-limited; try again shortly"),
+            Check::ModelUnavailable(m) => write!(f, "key valid, but the provider does not offer model {m}"),
+            Check::Unreachable(m) => write!(f, "provider unreachable: {m}"),
+            Check::Failed(code, m) => write!(f, "provider answered {code}: {m}"),
+        }
+    }
+}
+
+/// Checks the key and the model with calls that cost nothing: a model lookup
+/// on Anthropic; the key-info and model-endpoints lookups on OpenRouter.
+pub fn check(provider: Provider, key: &str, model: &str) -> Check {
+    let http = agent(Duration::from_secs(15));
+    match provider {
+        Provider::Anthropic => {
+            let url = format!("{ANTHROPIC}/v1/models/{model}");
+            match get(&http, &url, Some(provider), key) {
+                Err(e) => Check::Unreachable(e),
+                Ok((200, _)) => Check::Valid,
+                Ok((404, _)) => Check::ModelUnavailable(model.to_string()),
+                Ok((status, body)) => status_check(status, &body),
+            }
+        }
+        Provider::Openrouter => {
+            let info = match get(&http, &format!("{OPENROUTER}/key"), Some(provider), key) {
+                Err(e) => return Check::Unreachable(e),
+                Ok((200, body)) => body,
+                Ok((status, body)) => return status_check(status, &body),
+            };
+            let remaining = info.pointer("/data/limit_remaining").and_then(Value::as_f64);
+            if remaining.is_some_and(|r| r <= 0.0) {
+                return Check::NoCredit;
+            }
+            match get(&http, &format!("{OPENROUTER}/models/{model}/endpoints"), None, "") {
+                Err(e) => Check::Unreachable(e),
+                Ok((200, _)) => Check::Valid,
+                Ok((404, _)) => Check::ModelUnavailable(model.to_string()),
+                Ok((status, body)) => status_check(status, &body),
+            }
+        }
+    }
+}
+
+fn status_check(status: u16, body: &Value) -> Check {
+    let message = error_message(body);
+    match status {
+        401 | 403 => Check::Invalid(message),
+        402 => Check::NoCredit,
+        429 => Check::RateLimited,
+        _ => Check::Failed(status, message),
+    }
+}
+
+/// The provider's own error message, from either provider's error shape.
+pub(crate) fn error_message(body: &Value) -> String {
+    body.pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or("no message")
+        .chars()
+        .take(300)
+        .collect()
+}
+
+/// A model a provider offers, with prices per million tokens when known.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub input_per_mtok: Option<f64>,
+    pub output_per_mtok: Option<f64>,
+}
+
+/// The provider's model list. Anthropic's needs the key and carries no prices;
+/// OpenRouter's is public and priced.
+pub fn models(provider: Provider, key: Option<&str>) -> Result<Vec<ModelInfo>> {
+    let http = agent(Duration::from_secs(20));
+    let (url, auth) = match provider {
+        Provider::Anthropic => {
+            let Some(key) = key else { bail!("listing Anthropic's models needs a key; run `ways agent key add --provider anthropic`") };
+            (format!("{ANTHROPIC}/v1/models?limit=1000"), Some((provider, key)))
+        }
+        Provider::Openrouter => (format!("{OPENROUTER}/models"), None),
+    };
+    let (status, body) = match auth {
+        Some((p, k)) => get(&http, &url, Some(p), k),
+        None => get(&http, &url, None, ""),
+    }
+    .map_err(anyhow::Error::msg)
+    .context("listing models")?;
+    if status != 200 {
+        bail!("listing models: provider answered {status}: {}", error_message(&body));
+    }
+    let per_mtok = |v: Option<&Value>| {
+        v.and_then(Value::as_str).and_then(|s| s.parse::<f64>().ok()).map(|p| p * 1e6)
+    };
+    let list = body.get("data").and_then(Value::as_array).context("model list has no data array")?;
+    Ok(list
+        .iter()
+        .filter_map(|m| {
+            let id = m.get("id")?.as_str()?.to_string();
+            let name = m
+                .get("display_name")
+                .or_else(|| m.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or(&id)
+                .to_string();
+            Some(ModelInfo {
+                id,
+                name,
+                input_per_mtok: per_mtok(m.pointer("/pricing/prompt")),
+                output_per_mtok: per_mtok(m.pointer("/pricing/completion")),
+            })
+        })
+        .collect())
+}
+
+/// GET with the provider's auth headers. Returns the status and the parsed
+/// body (Null when it is not JSON), or the transport error's text.
+fn get(http: &ureq::Agent, url: &str, auth: Option<Provider>, key: &str) -> std::result::Result<(u16, Value), String> {
+    let mut req = http.get(url);
+    match auth {
+        Some(Provider::Anthropic) => {
+            req = req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION);
+        }
+        Some(Provider::Openrouter) => {
+            req = req.header("Authorization", &format!("Bearer {key}"));
+        }
+        None => {}
+    }
+    let mut resp = req.call().map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
+    let text = resp
+        .body_mut()
+        .with_config()
+        .limit(64 * 1024 * 1024)
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+    Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn statuses_map_to_checks() {
+        let body = json!({"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}});
+        assert_eq!(status_check(401, &body), Check::Invalid("invalid x-api-key".into()));
+        assert_eq!(status_check(402, &json!({})), Check::NoCredit);
+        assert_eq!(status_check(429, &Value::Null), Check::RateLimited);
+        assert_eq!(status_check(500, &Value::Null), Check::Failed(500, "no message".into()));
+    }
+
+    #[test]
+    fn error_message_reads_both_provider_shapes() {
+        assert_eq!(error_message(&json!({"error": {"message": "No auth", "code": 401}})), "No auth");
+        assert_eq!(error_message(&json!({"type": "error", "error": {"message": "bad"}})), "bad");
+    }
+}

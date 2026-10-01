@@ -99,9 +99,11 @@ pub fn run(json_output: bool) -> Result<()> {
             "engine": {
                 "active": engine,
             },
+            "gate": gate_json(),
             "binaries": {
                 "ways": std::env::current_exe().ok().map(|p| p.display().to_string()),
                 "way_embed": way_embed.as_ref().map(|p| p.display().to_string()),
+                "ways_agent": crate::cmd::agent::resolve().map(|p| p.display().to_string()),
             },
             "model": {
                 "path": model_path.display().to_string(),
@@ -143,6 +145,7 @@ pub fn run(json_output: bool) -> Result<()> {
 
         // Engine & language
         println!("Engine:    {engine}");
+        println!("Gate:      {}", gate_line());
         println!("Language:  {output_language}");
         println!();
 
@@ -157,6 +160,10 @@ pub fn run(json_output: bool) -> Result<()> {
             println!("  way-embed: not found");
         }
         println!("  ways-mcp:  {}", mcp_binary_line());
+        match crate::cmd::agent::resolve() {
+            Some(p) => println!("  ways-agent: {}", p.display()),
+            None => println!("  ways-agent: not found — the relevance gate is off until `ways update` installs it"),
+        }
         for t in install_targets().0.iter().filter(|t| t.enabled) {
             println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
         }
@@ -380,5 +387,63 @@ fn mcp_registration(dir: &std::path::Path) -> String {
     match crate::cmd::mcp_register::status(dir, &crate::paths::projection_root()) {
         Some(cmd) => format!("{} → {cmd}", crate::cmd::mcp_register::SERVER),
         None => format!("{} not registered (`ways reconcile` registers it)", crate::cmd::mcp_register::SERVER),
+    }
+}
+
+/// The relevance gate's settings (ADR-196), read without touching the key:
+/// `ways` only checks where a key would come from.
+fn gate_settings() -> Result<Option<(ways_agent_core::profile::Settings, Option<ways_agent_core::keys::Source>)>> {
+    use ways_agent_core::{keys, profile};
+    let user = profile::UserLayer::load(&profile::user_layer_path())?;
+    let settings = profile::resolve(&user, |p| keys::locate(p).is_some())?;
+    Ok(settings.map(|s| {
+        let source = keys::locate(s.profile.provider);
+        (s, source)
+    }))
+}
+
+fn gate_line() -> String {
+    match gate_settings() {
+        Err(e) => format!("config error: {e:#}"),
+        Ok(None) => "off — no key (`ways agent key add --provider anthropic`)".to_string(),
+        Ok(Some((s, source))) => {
+            let key = match source {
+                Some(src) => match ways_agent_core::keys::last_check(s.profile.provider) {
+                    Some(r) if r.describes(&src, &s.profile.model) && r.result == "valid" => {
+                        format!("key from {src}, checked valid")
+                    }
+                    Some(r) if r.describes(&src, &s.profile.model) => format!("key from {src}, last check {}: fails open", r.result),
+                    _ => format!("key from {src}, not checked yet: the agent checks it on first use"),
+                },
+                None => "no key: fails open".to_string(),
+            };
+            format!(
+                "{} — {} {} at threshold {}, {key}",
+                s.mode.as_str(),
+                s.profile.provider,
+                s.profile.model,
+                s.profile.threshold
+            )
+        }
+    }
+}
+
+fn gate_json() -> serde_json::Value {
+    match gate_settings() {
+        Err(e) => json!({ "error": format!("{e:#}") }),
+        Ok(None) => json!({ "mode": "off", "reason": "no key" }),
+        Ok(Some((s, source))) => json!({
+            "mode": s.mode.as_str(),
+            "engine": s.engine,
+            "provider": s.profile.provider.as_str(),
+            "model": s.profile.model,
+            "threshold": s.profile.threshold,
+            "key_check": source.as_ref().and_then(|src| {
+                ways_agent_core::keys::last_check(s.profile.provider)
+                    .filter(|r| r.describes(src, &s.profile.model))
+                    .map(|r| r.result)
+            }),
+            "key_source": source.map(|src| src.to_string()),
+        }),
     }
 }

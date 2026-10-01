@@ -354,6 +354,13 @@ enum Commands {
     /// hooks from hardcoding a path that drifts from `paths::events_log()` after
     /// the ADR-142 XDG migration (ADR-153 §1).
     EventsLogPath,
+    /// The ways agent: API keys, the judge's engine and mode (ADR-196, ADR-502).
+    /// Runs `ways-agent`; `ways agent --help` lists its commands.
+    #[command(disable_help_flag = true)]
+    Agent {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Manage configuration (init/show/path)
     Config {
         #[command(subcommand)]
@@ -1005,6 +1012,7 @@ fn run() -> Result<()> {
                 PermissionsCommand::Audit => cmd::permissions::audit(global),
             }
         }
+        Commands::Agent { args } => cmd::agent::run(&args),
         Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
     }
 }
