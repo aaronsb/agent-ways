@@ -3,7 +3,7 @@ name = "ways-agent"
 version = "0.2.0"
 edition = "2021"
 description = "The ways agent: one resident daemon per user that judges way relevance and holds the provider key (ADR-196, ADR-502)"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 
 [[bin]]
 name = "ways-agent"

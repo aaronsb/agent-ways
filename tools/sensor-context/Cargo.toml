@@ -3,7 +3,7 @@ name = "sensor-context"
 version = "0.6.0"
 edition = "2021"
 description = "tracks context window usage and projects compaction"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 sensor-trait = { path = "../sensor-trait" }

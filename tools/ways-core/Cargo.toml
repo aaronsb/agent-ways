@@ -3,7 +3,7 @@ name = "ways-core"
 version = "1.0.0"
 edition = "2021"
 description = "Shared engine for the ways toolchain — discovery, frontmatter, paths, config"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [lib]
 name = "ways_core"

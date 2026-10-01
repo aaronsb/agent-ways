@@ -3,7 +3,7 @@ name = "sensor-git"
 version = "0.6.0"
 edition = "2021"
 description = "tracks dirty files, branch changes, and upstream divergence"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 sensor-trait = { path = "../sensor-trait" }

@@ -67,6 +67,7 @@ _Provenance, traceability, controls, compliance mapping_
 | [ADR-151](./governance/ADR-151-extract-ways-core-crate-and-ways-audit-sibling-binary.md) | Extract ways-core crate and ways-audit sibling binary | accepted |
 | [ADR-200](./governance/ADR-200-compliance-claims-and-session-derived-findings.md) | Compliance claims and session-derived findings | accepted |
 | [ADR-201](./governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md) | Findings assembled as classifier-ready assessment records | accepted |
+| [ADR-202](./governance/ADR-202-license-agent-ways-under-gpl-3-0-or-later.md) | License agent-ways under GPL-3.0-or-later | accepted |
 
 ## Documentation
 _Documentation structure, tooling, coherence_

@@ -3,7 +3,7 @@ name = "agent-fmt"
 version = "0.6.0"
 edition = "2021"
 description = "Shared terminal formatting for agent-ways tools"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 figlet-rs = "1.0.0"

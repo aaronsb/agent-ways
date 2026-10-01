@@ -3,7 +3,7 @@ name = "sensor-trait"
 version = "0.6.0"
 edition = "2021"
 description = "Sensor trait and runtime types for attend"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

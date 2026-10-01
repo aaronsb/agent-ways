@@ -331,4 +331,6 @@ If your organization clones this repo under a different name without forking on 
 
 ## License
 
-MIT
+Copyright (C) 2025-2026 Aaron Bockelie and the agent-ways contributors.
+
+agent-ways is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE). Everything released before 2026-10-01 was published under the MIT License and remains available under it. Third-party components keep their own licenses: the fonts in `tools/agent-fmt/fonts/` and the vendored `llama.cpp` (MIT).
