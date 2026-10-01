@@ -12,8 +12,11 @@
 # 2. This script reads the stash, emits way content as additionalContext
 #
 # Way content is emitted WITHOUT marker checks - subagents get fresh
-# context regardless of what the parent already triggered.
+# context regardless of what the parent already triggered. The binary
+# resolves, disable-checks and renders each way (`ways show way --subagent`),
+# so the ways roots and macro trust live in one place.
 
+source "$(dirname "$0")/require-ways.sh"
 source "$(dirname "$0")/sessions-root.sh"
 source "$(dirname "$0")/events-log.sh"
 
@@ -58,20 +61,6 @@ fi
 
 [[ -z "$WAYS" ]] && exit 0
 
-# Collect project-scope disabled ways once per invocation (ADR-131).
-# Delegate to the `ways` CLI so the bash gate sees exactly what the Rust
-# config parser sees — any divergence here is a subtle cross-path bug
-# where the same overlay disables a way in one path but not the other.
-DISABLED_WAYS=""
-DISABLED_DOMAINS=""
-if command -v ways >/dev/null 2>&1; then
-  DISABLED_WAYS=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" ways disable --list --names-only 2>/dev/null)
-  # Disabled DOMAINS from the same CLI, so this gate honors the FULL config chain
-  # ($XDG_CONFIG/agent-ways/config.yaml `disabled_domains` + legacy ways.json), not
-  # just the legacy JSON — same cross-path-consistency reasoning as the ways above.
-  DISABLED_DOMAINS=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" ways status --json 2>/dev/null | jq -r '.disabled_domains[]?' 2>/dev/null)
-fi
-
 # Emit way content for each matched way (bypassing markers)
 CONTEXT=""
 WAY_IDX=0
@@ -80,63 +69,10 @@ while IFS= read -r waypath; do
   [[ -z "$waypath" ]] && continue
   MATCH_CH="${CHANNEL_ARR[$WAY_IDX]:-prompt}"
   ((WAY_IDX++))
-
-  # Resolve way file (project-local > global)
-  WAY_FILE=""
-  WAY_DIR=""
-  # Find way file — any .md with frontmatter in the way directory
-  for _base in "$PROJECT_DIR/.claude/ways" "${HOME}/.claude/hooks/ways"; do
-    [[ -d "${_base}/${waypath}" ]] || continue
-    for _f in "${_base}/${waypath}"/*.md; do
-      [[ -f "$_f" ]] && head -1 "$_f" 2>/dev/null | grep -q '^---$' && {
-        WAY_FILE="$_f"
-        WAY_DIR="${_base}/${waypath}"
-        break 2
-      }
-    done
-  done
-  [[ -z "$WAY_FILE" ]] && continue
-
-  # Check domain disabled (user scope) — full config chain, resolved by the CLI above.
   DOMAIN="${waypath%%/*}"
-  if [[ -n "$DISABLED_DOMAINS" ]] && grep -qxF "$DOMAIN" <<< "$DISABLED_DOMAINS"; then
-    continue
-  fi
 
-  # Check per-way disabled in project overlay (ADR-131)
-  if [[ -n "$DISABLED_WAYS" ]] && grep -qxF "$waypath" <<< "$DISABLED_WAYS"; then
-    continue
-  fi
-
-  # Extract macro position
-  MACRO_POS=$(awk '/^---$/{p=!p; next} p && /^macro:/{gsub(/^macro: */, ""); print; exit}' "$WAY_FILE")
-  MACRO_FILE="${WAY_DIR}/macro.sh"
-  MACRO_OUT=""
-
-  if [[ -n "$MACRO_POS" && -x "$MACRO_FILE" ]]; then
-    # Project-local macros need trust check
-    if [[ "$WAY_FILE" == "${HOME}/.claude/hooks/ways/"* ]]; then
-      MACRO_OUT=$("$MACRO_FILE" 2>/dev/null)
-    else
-      # Check project trust for project-local macros
-      trust_file="${HOME}/.claude/trusted-project-macros"
-      if [[ -f "$trust_file" ]] && grep -qxF "$PROJECT_DIR" "$trust_file"; then
-        MACRO_OUT=$("$MACRO_FILE" 2>/dev/null)
-      fi
-    fi
-  fi
-
-  # Build way output
-  WAY_CONTENT=""
-  if [[ "$MACRO_POS" == "prepend" && -n "$MACRO_OUT" ]]; then
-    WAY_CONTENT+="$MACRO_OUT"$'\n'
-  fi
-
-  WAY_CONTENT+=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm!=1' "$WAY_FILE")
-
-  if [[ "$MACRO_POS" == "append" && -n "$MACRO_OUT" ]]; then
-    WAY_CONTENT+=$'\n'"$MACRO_OUT"
-  fi
+  WAY_CONTENT=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" "$WAYS_BIN" show way "$waypath" \
+    --session "$SESSION_ID" --subagent 2>/dev/null)
 
   if [[ -n "$WAY_CONTENT" ]]; then
     CONTEXT+="$WAY_CONTENT"$'\n\n'

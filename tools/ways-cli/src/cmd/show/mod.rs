@@ -392,6 +392,73 @@ fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
     Ok(Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }))
 }
 
+/// A way's delivered text: its static `body` with the `macro:` output prepended
+/// or appended. A project-local macro runs only for a trusted project.
+fn render_way(
+    body: &str,
+    content: &str,
+    way_file: &Path,
+    is_project_local: bool,
+    project_dir: &str,
+    session_id: &str,
+) -> String {
+    let macro_pos = extract_field(content, "macro");
+    let way_dir = way_file.parent().unwrap_or(Path::new("."));
+    let macro_file = way_dir.join("macro.sh");
+    let macro_out = if macro_pos.is_some() && macro_file.is_file() {
+        if is_project_local && !is_project_trusted(project_dir) {
+            Some(format!(
+                "**Note**: Project-local macro skipped (add {} to ~/.claude/trusted-project-macros to enable)",
+                project_dir
+            ))
+        } else {
+            run_macro(&macro_file, session_id)
+        }
+    } else {
+        None
+    };
+
+    let mut output = String::new();
+
+    if macro_pos.as_deref() == Some("prepend") {
+        if let Some(ref out) = macro_out {
+            output.push_str(out);
+            output.push_str("\n\n");
+        }
+    }
+
+    output.push_str(body);
+
+    if macro_pos.as_deref() == Some("append") {
+        if let Some(ref out) = macro_out {
+            output.push('\n');
+            output.push_str(out);
+        }
+    }
+    output
+}
+
+/// A way as a subagent receives it at SubagentStart (`inject-subagent.sh`):
+/// disable-checked, resolved across the project, user and core roots, and
+/// rendered as [`way_scored`] renders it, but with no scope check, refire gate
+/// or fire record. The matching `ways scan task` already chose the way for the
+/// subagent's scope, and the subagent starts with fresh context whatever the
+/// parent session has already been shown. Empty when disabled or missing.
+pub fn subagent_way(id: &str, session_id: &str) -> Result<String> {
+    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
+        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let domain = id.split('/').next().unwrap_or(id);
+    if session::domain_disabled(domain) || session::way_disabled(id) {
+        return Ok(String::new());
+    }
+    let Some((way_file, is_project_local)) = session::resolve_way_file(id, &project_dir) else {
+        return Ok(String::new());
+    };
+    let content = std::fs::read_to_string(&way_file)?;
+    let body = static_way_body(&content);
+    Ok(render_way(&body, &content, &way_file, is_project_local, &project_dir, session_id))
+}
+
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
 /// in scope, and allowed by its refire curve. Read-only. The relevance gate
 /// asks it so it judges only ways that would reach the agent (ADR-196 §1).
@@ -461,42 +528,9 @@ pub fn way_scored(
         }
     }
 
-    // Macro handling. Runs outside the engagement lock: a macro may call git
-    // or gh, and holding the lock across it would serialize parallel hooks.
-    let macro_pos = extract_field(&content, "macro");
-    let way_dir = way_file.parent().unwrap_or(Path::new("."));
-    let macro_file = way_dir.join("macro.sh");
-    let macro_out = if macro_pos.is_some() && macro_file.is_file() {
-        if is_project_local && !is_project_trusted(&project_dir) {
-            Some(format!(
-                "**Note**: Project-local macro skipped (add {} to ~/.claude/trusted-project-macros to enable)",
-                project_dir
-            ))
-        } else {
-            run_macro(&macro_file, session_id)
-        }
-    } else {
-        None
-    };
-
-    // Build output
-    let mut output = String::new();
-
-    if macro_pos.as_deref() == Some("prepend") {
-        if let Some(ref out) = macro_out {
-            output.push_str(out);
-            output.push_str("\n\n");
-        }
-    }
-
-    output.push_str(&body);
-
-    if macro_pos.as_deref() == Some("append") {
-        if let Some(ref out) = macro_out {
-            output.push('\n');
-            output.push_str(out);
-        }
-    }
+    // The macro runs outside the engagement lock: a macro may call git or gh,
+    // and holding the lock across it would serialize parallel hooks.
+    let output = render_way(&body, &content, &way_file, is_project_local, &project_dir, session_id);
 
     // Critical section: re-check, admit, record. Parallel tool calls run
     // concurrent hooks, and another process may have fired this way while the

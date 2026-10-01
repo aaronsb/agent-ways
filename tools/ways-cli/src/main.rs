@@ -670,6 +670,10 @@ enum ShowCommand {
         /// the exit status is 3.
         #[arg(long)]
         budget_used: Option<usize>,
+        /// Render the way for a subagent's SubagentStart: no scope check,
+        /// refire gate or fire record (inject-subagent.sh).
+        #[arg(long, conflicts_with = "budget_used")]
+        subagent: bool,
     },
     /// Display a check (with scoring curve)
     Check {
@@ -934,12 +938,16 @@ fn run() -> Result<()> {
             }
         },
         Commands::Show { what } => match what {
-            ShowCommand::Way { id, session, trigger, budget_used: None } => {
+            ShowCommand::Way { id, session, subagent: true, .. } => {
+                print!("{}", cmd::show::subagent_way(&id, &session)?);
+                Ok(())
+            }
+            ShowCommand::Way { id, session, trigger, budget_used: None, .. } => {
                 let out = cmd::show::way(&id, &session, &trigger)?;
                 if !out.is_empty() { print!("{out}"); }
                 Ok(())
             }
-            ShowCommand::Way { id, session, trigger, budget_used: Some(used) } => {
+            ShowCommand::Way { id, session, trigger, budget_used: Some(used), .. } => {
                 let mut budget = cmd::show::ContextBudget::hook_with_used(used);
                 let out = cmd::show::way_scored(&id, &session, &trigger, None, None, None, Some(&mut budget))?;
                 if !out.is_empty() {

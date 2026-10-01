@@ -472,6 +472,7 @@ test-statusline:
 
 test-hooks:
 	@echo "Running hook script tests..."
+	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
 
 test-unit:
