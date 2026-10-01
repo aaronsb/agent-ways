@@ -605,12 +605,10 @@ fn apply_config(config: &mut Config, content: &str) {
                                 sensor.requires = parse_inline_list(inner);
                             }
                         }
-                        "watch" => {
-                            // Inline array: watch: [cargo, rustc, mix]
-                            if value.starts_with('[') && value.ends_with(']') {
-                                let inner = &value[1..value.len() - 1];
-                                sensor.watch = Some(parse_inline_list(inner));
-                            }
+                        // Inline array: watch: [cargo, rustc, mix]
+                        "watch" if value.starts_with('[') && value.ends_with(']') => {
+                            let inner = &value[1..value.len() - 1];
+                            sensor.watch = Some(parse_inline_list(inner));
                         }
                         _ => {}
                     }

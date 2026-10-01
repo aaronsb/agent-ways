@@ -21,7 +21,7 @@ pub(crate) fn cmd_tune(apply: bool) {
             }
         }
     }
-    proj_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+    proj_dirs.sort_by_key(|e| std::cmp::Reverse(e.1));
     proj_dirs.truncate(10);
 
     // For each project, take the 5 most-recent .jsonl files.
@@ -41,7 +41,7 @@ pub(crate) fn cmd_tune(apply: bool) {
                 in_proj.push((path, mt));
             }
         }
-        in_proj.sort_by(|a, b| b.1.cmp(&a.1));
+        in_proj.sort_by_key(|e| std::cmp::Reverse(e.1));
         in_proj.truncate(5);
         sessions.extend(in_proj.into_iter().map(|(p, _)| p));
     }
