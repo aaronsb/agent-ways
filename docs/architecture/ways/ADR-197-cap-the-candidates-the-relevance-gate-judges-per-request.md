@@ -44,8 +44,8 @@ The operator ruled out spending more latency or cost per prompt for a better gat
 ## Decision
 
 1. **The cap.** A profile field, `max_candidates`, bounds the candidates in one judge request. The shipped profiles set 8, which the measurement puts near 1.4 s, inside the 2 s deadline. A user layer may override it like any other profile field.
-2. **Which candidates.** The gate takes the first `max_candidates` of the ways it would judge, in the order the matcher ranks its hits: parents before children, siblings by their best score. Ways with `pattern_strict` are still not judged and do not count against the cap.
-3. **The rest.** Candidates past the cap get no verdict and pass, as they did before the gate existed. This amends ADR-196 §1 and §2: one request per prompt carries up to the cap rather than every candidate.
+2. **Which candidates.** The gate takes the first `max_candidates` of the ways it would judge, in the matcher's admission order: hits from an explicit trigger (`files:`, `commands:`, a keyword `pattern:`) before scored hits, each tree whole before the next, parents before children, siblings by their best score. Ways with `pattern_strict` are still not judged and do not count against the cap.
+3. **The rest.** Candidates past the cap get no verdict and pass, as they did before the gate existed, except a way whose ancestor the judge blocked: a way's guidance presumes its parent's, so it is blocked with the parent. This amends ADR-196 §1 and §2: one request per prompt carries up to the cap rather than every candidate.
 4. **Logging.** A request that hits the cap logs one `gate_capped` event with the number judged, the number left unjudged and their ids. `ways introspect dump` counts unjudged ways in its gate summary beside the verdicts and fallbacks.
 
 ## Consequences
@@ -59,10 +59,11 @@ The operator ruled out spending more latency or cost per prompt for a better gat
 
 - The lowest-ranked candidates on a busy prompt pass unfiltered. The `gate_capped` events show how often and which ways.
 - The cap is a second knob beside the deadline. Raising one without the other brings the fallbacks back.
+- The admission order fills the cap with explicit-trigger hits first, so on a prompt with many of them the overflow is semantic hits, the kind the gate filters most. Whether the cap should fill with semantic hits first is open, and the `gate_capped` events are the data for it.
 
 ### Neutral
 
-- `max_candidates` is a new profile field in `ways-agent-core`, which both the `ways` hook and the agent parse with `deny_unknown_fields`. Both binaries ship together in the release that adds it.
+- `max_candidates` is a new profile field in `ways-agent-core`, which both the `ways` hook and the agent parse with `deny_unknown_fields`. Both binaries ship together in the release that adds it. An older agent given a user layer that sets the field rejects the file on every request, and the gate fails open with `agent_error` logged. The cap is applied by the client; the agent only reports it.
 
 ## Alternatives Considered
 
