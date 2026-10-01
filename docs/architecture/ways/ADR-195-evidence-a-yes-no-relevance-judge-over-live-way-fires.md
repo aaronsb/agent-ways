@@ -64,3 +64,30 @@ Haiku is ahead of the local model by about 0.09 AUC on matched configurations, o
 - Set 2 holds only 4 relevant fires, so relevant-lost on the random sample is poorly bounded.
 - Way summaries are from the corpus at probe time, not the version that fired.
 - Only sessions from August to October 2026 still had transcripts.
+
+## Addendum, 2026-10-01: significance, batching and agreement
+
+Appended after acceptance; nothing above is changed. Computed from the same private data, plus 145 Haiku calls for the batched form.
+
+**Significance.** Precision of the injected ways at threshold 0.3, Haiku with the way's path and description against the last turn. The interval and the one-sided p-value come from a paired bootstrap (10,000 resamples) of the precision difference; the bound on relevant ways lost is one-sided Clopper-Pearson at 95%.
+
+| Fires | n | Precision before → after | Difference, 95% CI | p | Relevant lost (upper bound) |
+|---|---|---|---|---|---|
+| Set 1 real fires | 100 | 0.48 → 0.68 | +0.14 to +0.28 | < 0.0001 | 1 of 48 (≤ 10%) |
+| Set 2 random live fires | 40 | 0.10 → 0.44 | +0.09 to +0.68 | 0.016 | 0 of 4 (≤ 53%) |
+| Both | 140 | 0.37 → 0.65 | +0.22 to +0.36 | < 0.0001 | 1 of 52 (≤ 9%) |
+
+With about 4,000 characters of context and the session gist, set 1 goes from 0.48 to 0.83, losing 5 of 48 relevant ways (≤ 21%).
+
+**One call per prompt.** The gate sends every candidate of a prompt in one request. Run that way, grouping the same items by prompt (145 calls, 105 items sharing a prompt with at least one other), Haiku reached AUC 0.936 on set 1, against 0.924 for one call per way, and 0.973 against 0.950 on the items that shared a prompt. On set 2 it reached 0.889 against 0.941; set 2 has 4 relevant fires, so one item moving changes that figure. At 0.3, over both sets, precision went from 0.37 to 0.67 (95% CI of the difference +0.23 to +0.38, p < 0.0001), losing 3 of 52 relevant ways (≤ 14%). A call took 0.82 s with one candidate, 1.0 s with three or four, and 2.7 s with five; p95 over the run was 2.4 s, so a 2 s deadline fails open on about 5% of calls at that load.
+
+**Agreement with careful labels** (set 3, 189 injections from one session, judged against the trigger excerpt rather than the conversation turns):
+
+| Rater | Cohen's kappa against the main session's labels | Agreement |
+|---|---|---|
+| Second labeller | 0.59 | 0.90 |
+| Haiku, path + description, 0.3 | 0.26 | 0.77 |
+| Local reranker, 0.5 | 0.16 | 0.85 |
+| Local reranker, 0.002 | 0.04 | 0.46 |
+
+By lane, Haiku's kappa was 0.31 on the tool lane (159 injections, 23 relevant) and −0.02 on the prompt lane (29 injections, 4 relevant). With a trigger excerpt as its only context, Haiku agreed with careful labels well below the ceiling, and on the small prompt-lane sample no better than chance. The gate sends the conversation's turns, the input measured on sets 1 and 2; set 3 says the excerpt alone is not enough, and the live `way_judged` events are the measure of the gate as deployed.
