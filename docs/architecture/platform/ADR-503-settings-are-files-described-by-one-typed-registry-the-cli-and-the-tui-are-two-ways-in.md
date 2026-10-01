@@ -39,6 +39,12 @@ basis:
     level: guided
     said: and attend will likely get thinner as we expand the ways mcp
     via: chat, session 02e97f86, 2026-10-01
+  - operator: aaronsb
+    level: directed
+    said: I want to address items 1-4 now and the two other items
+    via: chat, session 02e97f86, 2026-10-01
+  - evidence: every hook-run ways scan loads config::global(), which reads up to five files (~/.claude/ways.json, $XDG_CONFIG_HOME/ways/config.yaml, agent-ways/config.yaml, the current target config.yaml, .claude/ways.yaml; tools/ways-core/src/config.rs:16-25, :426-479), and the relevance gate loads agent.yaml (tools/ways-cli/src/cmd/scan/gate.rs:64)
+  - evidence: 'schema types live in three places: ways in ways-core (config.rs), agent.yaml profiles in ways-agent-core (profile.rs:114-205), attend in the attend binary crate, which has no library target (tools/attend/Cargo.toml, src/config.rs, src/config_lint.rs)'
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -59,6 +65,8 @@ observable:
   - 'see: a hand-edited config.yaml with one illegal section loads every other section as written, and the diagnostic names the file, line and section'
   - 'run: ways settings emit <section> prints a fragment that ways settings apply --file accepts unchanged'
   - 'run: ways settings set <key> <value outside its range> exits 3 and writes nothing'
+  - 'run: cargo tree shows ways-cli depending on attend-config and not on attend, and agent-settings depending on none of ways-core, ways-agent-core and attend-config'
+  - 'run: hook latency for ways scan prompt, scan command and scan file stays within the budget and method of ADR-504 §11 against the commit before the change'
 status: proposed
 date: 2026-10-01
 deciders:
@@ -70,7 +78,7 @@ related: [ADR-504, ADR-185, ADR-131, ADR-184, ADR-111, ADR-501]
 
 ## Summary
 
-- **Decided:** The settings of `ways` and `attend` are one typed structure, a schema per application, held in a shared `agent-settings` crate that also loads the layers, lints and writes the files. The schema's defaults are the canonical settings, and any part of the canonical or effective settings can be emitted as a fragment shaped like the file. The files stay the source of truth. Loading degrades per section: a section that fails the schema falls back to canonical with a diagnostic, and a missing part is filled from canonical. `ways settings` has a quiet property mode that reports through exit codes and a verbose object mode that takes a settings object and returns lint findings, acceptance and the fragment written. The settings TUI (ADR-504) reads and writes through the same schema and writer, and the CLI's long help is the schema text the TUI shows.
+- **Decided:** The settings of `ways` and `attend` are one typed structure. Each component defines its schema in a crate it owns, `ways` in `ways-core`, the agent daemon's profiles in `ways-agent-core` and `attend` in a new `attend-config`, and a shared `agent-settings` crate holds the registry machinery that loads the layers, lints and writes the files. The schema's defaults are the canonical settings, and any part of the canonical or effective settings can be emitted as a fragment shaped like the file. The files stay the source of truth. Loading degrades per section: a section that fails the schema falls back to canonical with a diagnostic, and a missing part is filled from canonical. `ways settings` has a quiet property mode that reports through exit codes and a verbose object mode that takes a settings object and returns lint findings, acceptance and the fragment written. The settings TUI (ADR-504) reads and writes through the same schema and writer, and the CLI's long help is the schema text the TUI shows. The commands hooks run load only the sections they read, within a latency budget.
 - **Trades away:** Each tool's freedom to define a setting where it reads it: a key not in the schema cannot be read or written. The strict parse of `agent.yaml`, in which an unknown key rejects the file. The prose output of `ways config show`, `ways agent config` and `attend config show`, which scripts may parse.
 - **One-way?** No for the files: their paths and formats stay, loading never rewrites them, and the writer keeps everything it does not set. In part for the CLI: the exit codes and the object-mode shape become contracts with scripts and agents, and a script that parses today's prose breaks. Old command names stay as hidden aliases for one release; old output shapes do not.
 - **Probes:** *Confident (files):* you expect to edit a settings file by hand or copy it to another machine, and have both the CLI and the TUI pick it up with your comments intact. *Not confident (quiet):* you are content for `ways settings set` to print nothing when it succeeds, at a terminal as well as in a script.
@@ -80,31 +88,35 @@ related: [ADR-504, ADR-185, ADR-131, ADR-184, ADR-111, ADR-501]
 
 `ways` settings live in four files, each with its own writer: `config.yaml` (hand edits; `ways config target`), `.claude/ways.yaml` (`ways disable` and `ways enable`, ADR-131), `agent.yaml` (`ways agent use` and `mode`; hand edits) and `keys/<provider>` (`ways agent key`). `ways config show` lists the first and `ways agent config` the third; no command shows all of them, and most values can only be set by editing YAML. `agent.yaml` is parsed with `deny_unknown_fields` (`tools/ways-agent-core/src/profile.rs`), so one unknown key rejects the whole file. Only the targets writer in `ways-core` locks, writes atomically and replaces just its own block (`tools/ways-core/src/config.rs`, `TargetsLock` and `write_targets_to`).
 
-`attend` reads `~/.config/attend/config.yaml` and `.claude/attend.yaml` with a hand-written indent parser (`tools/attend/src/config.rs`, `apply_config`). Its keys are defined three times: in that parser, in the arrays of `config_lint.rs`, and in `config show`. `attend tune --apply` rewrites the whole `engagement:` block without a lock, drops comments and hardcodes two values (`tools/attend/src/cmd/tune.rs`, `apply_engagement_tune`); `attend config init` overwrites the file.
+`attend` reads `~/.config/attend/config.yaml` and `.claude/attend.yaml` with a hand-written indent parser (`tools/attend/src/config.rs`, `apply_config`). Its keys are defined three times: in that parser, in the arrays of `config_lint.rs`, and in `config show`. `attend tune --apply` rewrites the whole `engagement:` block without a lock, drops comments and hardcodes two values (`tools/attend/src/cmd/tune.rs`, `apply_engagement_tune`); `attend config init` overwrites the file. `attend` is a binary crate with no library target, so no other crate can use its config types.
 
 `ways --help` lists 37 top-level commands, mixing the ones an operator runs with authoring, tuning and hook plumbing.
 
-The operator set the terms: the TUI is for setting too; both ways of changing config set the files, so they are interchangeable, and the files can be copied and inspected with the CLI. The CLI serves agents, integrations and people who know what they are changing, with less explanatory text by default and a `--help` that replays the TUI's help. Settings are a typed structure that can emit a settings object or part of one and lint it, so a hand-edited file falls back per section and a missing part is rebuilt from canonical. Setting one property reports through an exit code; an object mode accepts a settings object and returns lint results, acceptance and a fragment that fits back into the structure. `attend` uses the same config model and conventions, in one settings app with `ways`.
+Hooks run `ways scan` on every prompt and tool call (ADR-504 §11). Each run loads `config::global()`, which reads up to five files (`tools/ways-core/src/config.rs`, `Config::load`), and the relevance gate also loads `agent.yaml` (`tools/ways-cli/src/cmd/scan/gate.rs`).
+
+The operator set the terms: the TUI is for setting too; both ways of changing config set the files, so they are interchangeable, and the files can be copied and inspected with the CLI. The CLI serves agents, integrations and people who know what they are changing, with less explanatory text by default and a `--help` that replays the TUI's help. Settings are a typed structure that can emit a settings object or part of one and lint it, so a hand-edited file falls back per section and a missing part is rebuilt from canonical. Setting one property reports through an exit code; an object mode accepts a settings object and returns lint results, acceptance and a fragment that fits back into the structure. `attend` uses the same config model and conventions, in one settings app with `ways`. The operator asked that schema ownership and the hook paths be settled in this decision.
 
 A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) loaded the real `ways` files into one tree of four roots, with typed values, queued actions and masked key entry, and printed the change set a real writer would make.
 
 ## Decision
 
-1. **The typed settings structure.** A shared crate, `agent-settings`, holds one schema per application, `ways` and `attend`, registered at build time. The schema names every section and key. Each key has a dotted name, a type (bool, bounded int or float, choice, text, path, read-only, secret), a range, a default, a one-line and a long doc, a scope (user, project or both), the layers it reads, and the file and key path it writes. The defaults together are the canonical settings. Parsing, validation, lint, show, help and shell completion all derive from the schema; no tool keeps a second list of its keys.
+1. **The typed settings structure.** Each component owns its settings schema in its own crate: `ways` in `ways-core`, the agent daemon's profiles (`agent.yaml`) in `ways-agent-core`, and `attend` in `attend-config`, a new library crate holding what `tools/attend/src/config.rs` and `config_lint.rs` define today. `attend-config` lets `ways` depend on `attend`'s schema without depending on the `attend` binary, so `attend` and the daemon stay separable as they move toward MCP and daemon roles. A shared crate, `agent-settings`, holds only the machinery: schema types, the registry, layered loading, fallback, lint, emit and the writer; it depends on none of the three. `ways-cli` composes the three registries for `ways settings` and its screens, at build time, and defines no other component's keys. A schema names every section and key. Each key has a dotted name, a type (bool, bounded int or float, choice, text, path, read-only, secret), a range, a default, a one-line and a long doc, a scope (user, project or both), the layers it reads, and the file and key path it writes. The defaults together are the canonical settings. Parsing, validation, lint, show, help and shell completion all derive from the schema; no tool keeps a second list of its keys.
 
-2. **Objects and fragments.** From the schema the crate emits the canonical settings object, the effective object (resolved through the layers), or a fragment of either selected by section or key prefix. A fragment has the shape of the file it belongs to, so it can be pasted into that file or passed to object mode (§8). Lint checks a file against the schema and reports each finding with its file, line, section and key: a value of the wrong type or out of range, an unknown key, a missing section.
+2. **Objects and fragments.** From the schemas `agent-settings` emits the canonical settings object, the effective object (resolved through the layers), or a fragment of either selected by section or key prefix. A fragment has the shape of the file it belongs to, so it can be pasted into that file or passed to object mode (§9). Lint checks a file against the schema and reports each finding with its file, line, section and key: a value of the wrong type or out of range, an unknown key, a missing section.
 
 3. **Layered loading with provenance.** A value resolves through its layers (default, user file, project file, and environment where a key declares one), and keeps the layer it came from.
 
 4. **Loading degrades per section.** A section that fails the schema loads as its canonical value, and the other sections of the file load as written. An unknown key is a lint finding and makes its section fall back. A missing section or key takes its canonical value. Each fallback produces a diagnostic naming the file, line and section, on stderr of the command that loaded it and in `ways status`, with the repair: `ways settings lint` to list the findings, and `ways settings fix <section>` to write the canonical fragment for that section through the writer. Loading never rewrites a file. This replaces the `deny_unknown_fields` parse of `agent.yaml`.
 
-5. **One writer.** Every write to a settings file goes through one writer, generalised from the `ways-core` targets writer: a lock file beside the target, a temporary file renamed into place, and a change to only the keys being set. Other keys, comments and order stay as they were. `ways disable` and `enable`, `ways agent use` and `mode`, the targets verbs, `settings fix`, `attend tune --apply` and `attend config init` all use it. `config init` creates a file only when none exists.
+5. **Hook paths load only what they read.** The commands hooks run (ADR-504 §11) load the sections they use through the registry, section by section: `ways`' matching, gating and project-overlay sections and the `agent.yaml` profile the gate reads. They run no lint, build no full tree and read no `attend` file. Validation is part of the typed parse those sections already go through, and a diagnostic is built only when a section fails, so per-section fallback adds no work when every section parses. Their latency is held to the budget and method of ADR-504 §11.
 
-6. **The files are the source of truth.** There is no settings store besides the files. A file written by the TUI, the CLI, a hand edit or a copy reads the same way to both front ends. `--file <path>` points `get`, `list`, `lint` and the TUI at a file other than the live one. A TUI that sees a file change on disk reloads it, and a tab holding pending edits to that file shows the conflict in its review.
+6. **One writer.** Every write to a settings file goes through one writer, generalised from the `ways-core` targets writer: a lock file beside the target, a temporary file renamed into place, and a change to only the keys being set. Other keys, comments and order stay as they were. `ways disable` and `enable`, `ways agent use` and `mode`, the targets verbs, `settings fix`, `attend tune --apply` and `attend config init` all use it. `config init` creates a file only when none exists.
 
-7. **Where `set` writes.** A key with one scope writes to it. A key with both scopes writes the user layer unless `--project <dir>` is given.
+7. **The files are the source of truth.** There is no settings store besides the files. A file written by the TUI, the CLI, a hand edit or a copy reads the same way to both front ends. `--file <path>` points `get`, `list`, `lint` and the TUI at a file other than the live one. A TUI that sees a file change on disk reloads it, and a tab holding pending edits to that file shows the conflict in its review.
 
-8. **The CLI.** `ways settings` has two modes over the same schema and writer.
+8. **Where `set` writes.** A key with one scope writes to it. A key with both scopes writes the user layer unless `--project <dir>` is given.
+
+9. **The CLI.** `ways settings` has two modes over the same schema and writer.
    - *Property mode*, for one key: `get <key>` prints the value, `list [prefix]` prints `key=value` lines, and `set <key> <value>` and `unset <key>` print nothing. It reports through exit codes:
 
      | Code | Meaning |
@@ -125,15 +137,15 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) loaded the
 
    `ways disable`, `ways enable`, `ways agent use`, `ways agent mode` and `ways config show|path|init` become aliases over `ways settings`.
 
-9. **One help text.** `ways --help` lists one line per command. `ways <command> --help`, `ways settings help <key>` and `ways settings help <tab>` print the schema's long text, which is the text of the TUI's detail pane and help overlay. Ways that teach agents about a setting point at `ways settings help <key>`.
+10. **One help text.** `ways --help` lists one line per command. `ways <command> --help`, `ways settings help <key>` and `ways settings help <tab>` print the schema's long text, which is the text of the TUI's detail pane and help overlay. Ways that teach agents about a setting point at `ways settings help <key>`.
 
-10. **Settings and actions.** A setting is a value `set` writes to one file. An action is a command whose effects reach past one file: target add, enable, disable and remove (they reconcile), key add, rotate, remove and check, `reconcile` and `update`. Actions stay commands. The schema attaches them to keys so the TUI can queue them, and the TUI runs the same command line the CLI does.
+11. **Settings and actions.** A setting is a value `set` writes to one file. An action is a command whose effects reach past one file: target add, enable, disable and remove (they reconcile), key add, rotate, remove and check, `reconcile` and `update`. Actions stay commands. The schema attaches them to keys so the TUI can queue them, and the TUI runs the same command line the CLI does.
 
-11. **Secrets.** A key's value never passes through argv, the screen, the schema or an emitted object. A provider key appears as present or absent. Entry goes on stdin to `ways agent key`.
+12. **Secrets.** A key's value never passes through argv, the screen, the schema or an emitted object. A provider key appears as present or absent. Entry goes on stdin to `ways agent key`.
 
-12. **attend.** `attend`'s keys move into the structure as its own schema, with their files and paths unchanged. The hand parser, the separate lint arrays and the `tune` writer are retired. `attend`'s settings are edited through `ways settings`, on the command line and on `attend`'s tabs in the settings app (ADR-504); `attend` has no settings UI of its own, since it is heading toward an MCP server mode (#538). Channels, scenes in effect, keepwarm, groups and instances under `~/.cache/attend` are runtime state and stay outside the structure. A setting that moves from `attend` to the ways MCP server (ADR-501) keeps its key.
+13. **attend.** `attend`'s keys move into `attend-config` as its schema, with their files and paths unchanged. The hand parser, the separate lint arrays and the `tune` writer are retired. `attend`'s settings are edited through `ways settings`, on the command line and on `attend`'s tabs in the settings app (ADR-504); `attend` has no settings UI of its own, since it is heading toward an MCP server mode (#538). Channels, scenes in effect, keepwarm, groups and instances under `~/.cache/attend` are runtime state and stay outside the structure. A setting that moves from `attend` to the ways MCP server (ADR-501) keeps its key.
 
-13. **The rest of the command surface is a separate decision.** This decision adds `settings` and folds the settings verbs into it. Regrouping the remaining commands (`target`, `session`, `author`, `tune`, a hidden `internal`, with old names as hidden aliases for one release) is a follow-up record. It depends on nothing here, and it moves the 25 subcommands that hooks, scripts and skills call today, which needs its own migration plan.
+14. **The rest of the command surface is a separate decision.** This decision adds `settings` and folds the settings verbs into it. Regrouping the remaining commands (`target`, `session`, `author`, `tune`, a hidden `internal`, with old names as hidden aliases for one release) is a follow-up record. It depends on nothing here, and it moves the 25 subcommands that hooks, scripts and skills call today, which needs its own migration plan.
 
 Open, and left to that record or a later one: whether domain switches (user scope) and way toggles (project scope, ADR-131) become one switch per scope at every level of the tree.
 
@@ -154,11 +166,14 @@ Open, and left to that record or a later one: whether domain switches (user scop
 - The exit codes and the object-mode shape are contracts; changing either breaks callers.
 - Scripts that parse today's prose output must move to `--json` or object mode.
 - A YAML writer that keeps comments and order has to be written and maintained; `serde_yaml` round-trips lose both.
-- `ways` and `attend` share a crate and release its changes together.
+- `ways` and `attend` share `agent-settings` and release its changes together.
+- `attend-config` is one more crate, and `ways` builds against `attend`'s schema, so a change to an `attend` key rebuilds `ways`.
+- A hook command that needs a new section has to name it; the section loader does not fall back to the full tree.
 
 ### Neutral
 
 - `ways-agent` reads `agent.yaml` through the schema and drops its own loader.
+- `ways-core` and `ways-agent-core` keep the settings types they own today and gain schema entries beside them.
 - ADR-131's file and schema are unchanged; its verbs become aliases.
 
 ## Alternatives Considered
@@ -169,4 +184,6 @@ Open, and left to that record or a later one: whether domain switches (user scop
 - **Reject a file that fails the schema.** One typo disables everything the file configures, as `agent.yaml` does today.
 - **Repair the file on load.** It rewrites hand edits without the operator asking; `fix` does it on request instead.
 - **One combined file for `ways` and `attend`.** It moves paths that installs, docs and copies depend on, for no gain the schema does not already give.
-- **Folding the command regrouping into this record.** Rejected for the reason in §13.
+- **All schemas in `agent-settings`.** One crate would define every component's keys, so `attend` or the daemon could not change or ship a key without a release of the shared crate, and neither could leave the workspace on its own.
+- **`ways-cli` depends on the `attend` crate for its schema.** It pulls a binary crate and its dependencies into `ways` for a set of types.
+- **Folding the command regrouping into this record.** Rejected for the reason in §14.
