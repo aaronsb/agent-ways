@@ -131,7 +131,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Config => show_config(),
         Command::Serve { idle_minutes } => serve(idle_minutes),
         Command::Status => agent_status(false),
-        Command::Load => agent_status(true),
+        Command::Load => {
+            ways_agent::client::clear_start_backoff();
+            agent_status(true)
+        }
         Command::Unload => {
             let stopped = ways_agent::server::stop()?;
             println!("{}", if stopped { "agent stopped" } else { "no agent running" });
