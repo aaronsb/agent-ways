@@ -117,7 +117,9 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // Content-only update: nothing that feeds a binary changed. Skip the whole
     // download/build/relink dance and just reproject the pulled content (core.md,
     // ways, skills, hooks). This is the fast path the churn report was about — a
-    // metadata pull must not trigger a cargo + cmake rebuild of the suite.
+    // metadata pull must not trigger a cargo + cmake rebuild of the suite. The one
+    // build it allows is relink's for a suite binary the install lacks, when the
+    // pre-built download fails and cargo is present; it stops once the binary exists.
     if !cargo_changed && !way_embed_changed {
         eprintln!("==> binaries: no source change in this update — skipping suite rebuild");
         // relink is idempotent and cheap when the suite is complete. It runs on every
@@ -622,7 +624,6 @@ fn guard_action(verdict: &Freshness, had: bool, has_toolchain: bool) -> GuardAct
     }
 }
 
-/// Run a `make` target in `dir`, returning whether it succeeded.
 /// Whether the Makefile in `dir` defines `target`. `make -n` exits 2 on a
 /// missing rule and 0 on a target it could run.
 fn has_make_target(dir: &Path, target: &str) -> bool {
@@ -635,6 +636,7 @@ fn has_make_target(dir: &Path, target: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Run a `make` target in `dir`, returning whether it succeeded.
 fn run_make(dir: &Path, args: &[&str]) -> bool {
     Command::new("make")
         .args(args)
