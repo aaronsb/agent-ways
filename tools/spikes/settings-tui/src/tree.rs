@@ -30,6 +30,8 @@ impl Kind {
 /// Where an edit would land: a file and the key inside it.
 #[derive(Debug, Clone)]
 pub struct Store {
+    /// The layer the file belongs to: user or project.
+    pub layer: String,
     pub file: PathBuf,
     pub key: String,
 }
@@ -55,8 +57,8 @@ impl Setting {
         self.default = Some(d.into());
         self
     }
-    pub fn store(mut self, file: PathBuf, key: impl Into<String>) -> Self {
-        self.store = Some(Store { file, key: key.into() });
+    pub fn store(mut self, layer: impl Into<String>, file: PathBuf, key: impl Into<String>) -> Self {
+        self.store = Some(Store { layer: layer.into(), file, key: key.into() });
         self
     }
     pub fn changed(&self) -> bool {
@@ -159,11 +161,23 @@ pub struct Action {
     pub arg: Arg,
     /// Ask y/n before queueing: the action is destructive or reconciles.
     pub confirm: bool,
+    /// What it does, for the review's detail pane.
+    pub doc: String,
+    /// The files or directories it changes, when known.
+    pub touches: String,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, command: impl Into<String>) -> Self {
-        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false }
+        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new() }
+    }
+    pub fn doc(mut self, doc: impl Into<String>) -> Self {
+        self.doc = doc.into();
+        self
+    }
+    pub fn touches(mut self, touches: impl Into<String>) -> Self {
+        self.touches = touches.into();
+        self
     }
     pub fn arg(mut self, arg: Arg) -> Self {
         self.arg = arg;
@@ -318,6 +332,19 @@ pub fn get_mut<'a>(roots: &'a mut [Node], path: &[usize]) -> &'a mut Node {
     n
 }
 
+/// The node a dotted key names. Names may hold dots (a path), so each level
+/// matches by prefix.
+pub fn find<'a>(roots: &'a [Node], key: &str) -> Option<&'a Node> {
+    fn within<'a>(n: &'a Node, key: &str) -> Option<&'a Node> {
+        if key == n.name {
+            return Some(n);
+        }
+        let rest = key.strip_prefix(n.name.as_str())?.strip_prefix('.')?;
+        n.children.iter().find_map(|c| within(c, rest))
+    }
+    roots.iter().find_map(|n| within(n, key))
+}
+
 /// The dotted key of the node at `path`.
 pub fn key(roots: &[Node], path: &[usize]) -> String {
     let mut parts = Vec::new();
@@ -458,6 +485,13 @@ mod tests {
             q.push(Queued { key: k.into(), label: String::new(), command: String::new(), confirm: false });
         }
         assert_eq!((pending(&t[0], &q), pending(&t[1], &q)), (1, 1));
+    }
+
+    #[test]
+    fn find_resolves_a_key_whose_names_hold_dots() {
+        let t = vec![Node::group("install", "", vec![Node::group("targets", "", vec![Node::leaf("~/.claude", "", Setting::new(Kind::ReadOnly, "on", "user"))])])];
+        assert_eq!(find(&t, "install.targets.~/.claude").map(|n| n.name.as_str()), Some("~/.claude"));
+        assert!(find(&t, "install.nope").is_none() && find(&t, "installx").is_none());
     }
 
     #[test]

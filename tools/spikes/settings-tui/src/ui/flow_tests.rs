@@ -150,9 +150,12 @@ fn a_finished_flow_queues_on_its_tab_and_the_review_shows_it() {
     assert_eq!((app.pending_in(3), app.pending_in(0)), (1, 0), "it counts on the install tab only");
     press(&mut app, &[KeyCode::Char('w')]);
     let t = text(&mut app);
-    assert!(t.contains("review & apply install") && t.contains("$ ways config target add") && t.contains("asks first"), "{t}");
+    assert!(t.contains("review") && t.contains("queued") && t.contains("$ ways conf") && t.contains('▲'), "{t}");
+    press(&mut app, &[KeyCode::Down]);
+    let t = text(&mut app);
+    assert!(t.contains("asks") && t.contains("yes: it is"), "{t}");
     press(&mut app, &[KeyCode::Char('a')]);
-    assert!(matches!(&app.mode, Mode::Apply(r) if r.steps[0].text.starts_with("would run ways config target add")));
+    assert!(matches!(&app.mode, Mode::Review { run: Some(r), .. } if r.steps[0].text.starts_with("would run ways config target add")));
 }
 
 #[test]

@@ -63,7 +63,7 @@ fn cfg(name: &str, doc: &str, kind: Kind, default: &str, user: &Value, project: 
     } else {
         (default.to_string(), "default")
     };
-    Node::leaf(name, doc, Setting::new(kind, value, source).default(default).store(p.user.clone(), name))
+    Node::leaf(name, doc, Setting::new(kind, value, source).default(default).store("user", p.user.clone(), name))
 }
 
 fn prob() -> Kind {
@@ -111,7 +111,7 @@ fn disclosure(user: &Value, project: &Value, p: &Paths) -> Node {
             Node::leaf(
                 *name,
                 "Fraction of the session's context window before a way with this preset may fire again (ADR-126).",
-                Setting::new(Kind::Float { min: 0.0, max: 2.0 }, v, src).default(*d).store(p.user.clone(), format!("refire_presets.{name}")),
+                Setting::new(Kind::Float { min: 0.0, max: 2.0 }, v, src).default(*d).store("user", p.user.clone(), format!("refire_presets.{name}")),
             )
         })
         .collect();
@@ -153,7 +153,7 @@ fn domains(user: &Value, p: &Paths) -> Node {
             Node::leaf(
                 d.clone(),
                 format!("Every way under {d}/, for every project. Today: disabled_domains in the user config."),
-                Setting::new(Kind::Bool, on.to_string(), src).default("true").store(p.user.clone(), format!("disabled_domains[{d}]")),
+                Setting::new(Kind::Bool, on.to_string(), src).default("true").store("user", p.user.clone(), format!("disabled_domains[{d}]")),
             )
         })
         .collect();
@@ -188,7 +188,7 @@ fn way_tree(dir: &Path, id: &str, disabled: &BTreeMap<String, bool>, p: &Paths) 
             format!("{id}\n\n{}", way_description(&file)),
             Setting::new(Kind::Bool, (!off).to_string(), if off { "project" } else { "default" })
                 .default("true")
-                .store(p.project.clone(), format!("ways.{id}")),
+                .store("project", p.project.clone(), format!("ways.{id}")),
         );
         n.children = children;
         Some(n)
@@ -226,7 +226,7 @@ fn ways_tab(user: &Value, project: &Value, p: &Paths, project_dir: &Path) -> Nod
                 "false switches ways off in this project: the scan injects nothing (ADR-184).",
                 Setting::new(Kind::Bool, enabled.to_string(), if project.get("enabled").is_some() { "project" } else { "default" })
                     .default("true")
-                    .store(p.project.clone(), "enabled"),
+                    .store("project", p.project.clone(), "enabled"),
             ),
             domains(user, p),
             Node::group(
@@ -279,7 +279,7 @@ fn gate(agent: &Value, p: &Paths) -> Node {
                     Node::leaf(
                         f.clone(),
                         field_doc(f),
-                        Setting::new(field_kind(f), val, src).default(d).store(p.agent.clone(), format!("profiles.{name}.{f}")),
+                        Setting::new(field_kind(f), val, src).default(d).store("user", p.agent.clone(), format!("profiles.{name}.{f}")),
                     )
                 })
                 .collect();
@@ -292,15 +292,22 @@ fn gate(agent: &Value, p: &Paths) -> Node {
             // Existence only: the key file is never opened.
             let present = p.keys.join(name).exists();
             let key = |verb: &str| format!("ways agent key {verb} --provider {name}");
+            let file = p.keys.join(name).display().to_string();
             let mut actions = vec![if present {
-                Action::new("rotate", key("rotate")).arg(Arg::Secret)
+                Action::new("rotate", key("rotate"))
+                    .arg(Arg::Secret)
+                    .doc(format!("Replaces the stored {name} key with the one read from stdin."))
+                    .touches(file.clone())
             } else {
-                Action::new("set", key("add")).arg(Arg::Secret)
+                Action::new("set", key("add"))
+                    .arg(Arg::Secret)
+                    .doc(format!("Stores the {name} key read from stdin, so the gate can call that provider."))
+                    .touches(file.clone())
             }];
             if present {
-                actions.push(Action::new("remove", key("remove")).confirm());
+                actions.push(Action::new("remove", key("remove")).confirm().doc(format!("Deletes the stored {name} key; the gate cannot use that provider until a key is set again.")).touches(file));
             }
-            actions.push(Action::new("check", key("check")));
+            actions.push(Action::new("check", key("check")).doc(format!("Asks {name} whether the stored key is accepted. Writes nothing.")));
             Node::leaf(
                 name.clone(),
                 "Enter types the key masked and queues `ways agent key add|rotate`, which reads it from stdin: it never reaches argv or the screen, and the settings view never shows key material.",
@@ -320,14 +327,14 @@ fn gate(agent: &Value, p: &Paths) -> Node {
                 "The profile the agent uses. (auto): the first shipped profile with a key.",
                 Setting::new(Kind::Choice(choices), engine.clone().unwrap_or("(auto)".into()), if engine.is_some() { "user" } else { "default" })
                     .default("(auto)")
-                    .store(p.agent.clone(), "engine"),
+                    .store("user", p.agent.clone(), "engine"),
             ),
             Node::leaf(
                 "mode",
                 "enforce blocks, shadow only logs, off skips the judge.",
                 Setting::new(Kind::Choice(vec!["enforce".into(), "shadow".into(), "off".into()]), mode.clone().unwrap_or("enforce".into()), if mode.is_some() { "user" } else { "default" })
                     .default("enforce")
-                    .store(p.agent.clone(), "mode"),
+                    .store("user", p.agent.clone(), "mode"),
             ),
             Node::group("profiles", "Per-engine tuning. A user layer overrides any field.", profiles),
             Node::group("keys", "Provider API keys, by presence. Entry is masked.", keys),
@@ -345,21 +352,31 @@ fn install(user: &Value, p: &Paths) -> Node {
                     let path = t.get("path").and_then(scalar)?;
                     let on = t.get("enabled").and_then(Value::as_bool).unwrap_or(true);
                     let target = |verb: &str| format!("ways config target {verb} {}", quote(&path));
-                    let toggle = if on { Action::new("disable", target("disable")).confirm() } else { Action::new("enable", target("enable")) };
+                    let toggle = if on {
+                        Action::new("disable", target("disable")).confirm().doc("Stops projecting into this directory and withdraws what was projected.").touches(path.clone())
+                    } else {
+                        Action::new("enable", target("enable")).doc("Projects agent-ways into this directory again.").touches(path.clone())
+                    };
                     Some(
                         Node::leaf(
                             path.clone(),
                             "A Claude Code config directory agent-ways projects into (ADR-184). The value is read-only: enabling, disabling and removing reconcile, so they are actions.",
                             Setting::new(Kind::ReadOnly, if on { "enabled" } else { "disabled" }, "user"),
                         )
-                        .with_actions(vec![toggle, Action::new("remove", target("remove")).confirm()]),
+                        .with_actions(vec![
+                            toggle,
+                            Action::new("remove", target("remove")).confirm().doc("Forgets this directory and withdraws what was projected into it.").touches(path.clone()),
+                        ]),
                     )
                 })
                 .collect()
         })
         .unwrap_or_default();
     let deny_user = user.get("secret_path_deny").and_then(Value::as_bool);
-    let reconcile = Action::new("reconcile", "ways reconcile").confirm();
+    let reconcile = Action::new("reconcile", "ways reconcile")
+        .confirm()
+        .doc("Rewrites each recorded target's projection to match the settings: hooks, settings.json and the corpus.")
+        .touches("every recorded target directory");
     let activate = || Action::new("activate", "guided: pick Claude config directories, preview the plan").arg(Arg::Flow("activate".into()));
     // With nothing recorded the group would be empty, so it says how to start.
     let none = targets.is_empty();
@@ -377,8 +394,12 @@ fn install(user: &Value, p: &Paths) -> Node {
             Node::group("targets", "Projection targets. Changing one is an action, so the tree shows them and the command changes them.", targets)
                 .with_actions(vec![
                     activate(),
-                    Action::new("add", "ways config target add {}").arg(Arg::Text("directory".into())).confirm(),
-                    Action::new("plan", "ways config target plan {}").arg(Arg::Text("directory".into())),
+                    Action::new("add", "ways config target add {}")
+                        .arg(Arg::Text("directory".into()))
+                        .confirm()
+                        .doc("Records the directory as a target and projects agent-ways into it.")
+                        .touches("the directory given"),
+                    Action::new("plan", "ways config target plan {}").arg(Arg::Text("directory".into())).doc("Previews what adding the directory would write. Writes nothing."),
                 ])
                 .opened_if(none),
             Node::leaf(
@@ -386,7 +407,7 @@ fn install(user: &Value, p: &Paths) -> Node {
                 "Project the secret-path permissions.deny baseline into settings.json (ADR-152). Takes effect at the next `ways reconcile`.",
                 Setting::new(Kind::Bool, deny_user.unwrap_or(true).to_string(), if deny_user.is_some() { "user" } else { "default" })
                     .default("true")
-                    .store(p.user.clone(), "secret_path_deny"),
+                    .store("user", p.user.clone(), "secret_path_deny"),
             ),
         ],
     )

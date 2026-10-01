@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Clear, HighlightSpacing, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use super::render::{button_row, elide, pane};
+use super::render::{button_row, elide, modal_rect, pane};
 use super::theme::{self, Shape};
 use super::Btn;
 
@@ -459,8 +459,7 @@ impl Flow {
     }
 
     pub(super) fn draw(&mut self, f: &mut Frame, area: Rect, sh: Shape) {
-        let (w, h) = (area.width.min(100), area.height.min(26));
-        let r = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
+        let r = modal_rect(area, 100, 26);
         f.render_widget(Clear, r);
         let block = pane(self.title.clone()).border_style(Style::new().fg(theme::ACCENT_DIM));
         let inner = block.inner(r);

@@ -5,7 +5,7 @@
 //!
 //! Attributes mean one thing each, as on the status line: bold needs you
 //! (a pending change), italic is secondary (hints, the `[a]` marker),
-//! underline is unused.
+//! strikethrough is a value that is going away, underline is unused.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
@@ -45,6 +45,16 @@ pub fn secret(present: bool) -> Style {
 pub fn queued() -> Style {
     Style::new().fg(HOT)
 }
+/// A pending change in review, as it was and as it will be: the old value
+/// struck through and muted, the new one green and bold.
+pub fn was() -> Style {
+    Style::new().fg(MUTED).add_modifier(Modifier::CROSSED_OUT)
+}
+pub fn will() -> Style {
+    Style::new().fg(OK).add_modifier(Modifier::BOLD)
+}
+/// A tab with nothing pending while review is open.
+pub const DIM_TAB: Color = ACCENT_SHADE;
 pub fn hint() -> Style {
     Style::new().fg(MUTED).add_modifier(Modifier::ITALIC)
 }

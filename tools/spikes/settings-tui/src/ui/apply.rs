@@ -1,40 +1,150 @@
-//! What review and apply work on: the pending items as one list, and the
-//! simulated run over them. Nothing here writes or runs anything; a step only
-//! moves the tree's loaded values and the queue as the real step would.
+//! What review mode shows and applies: a tab's pending items as tree rows,
+//! and the simulated run over them. Nothing here writes or runs anything; a
+//! step only moves the tree's loaded values and the queue as the real step
+//! would.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::tree::{self, Node, Queue};
 
-/// One pending item. A value change carries its file; a queued command its
-/// place in the queue and whether it asked first.
-pub enum Entry {
-    Value { path: Vec<usize>, file: String, key: String, from: String, to: String },
-    Action { index: usize, command: String, confirm: bool },
+/// One pending value change: where it would be written, and what changes.
+#[derive(Clone)]
+pub struct Change {
+    pub file: String,
+    pub key: String,
+    /// The layer the file belongs to.
+    pub layer: String,
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone)]
+pub enum RKind {
+    /// A node that has changes: its own, below it, or both.
+    Node {
+        own: Option<Change>,
+        /// Changes in the nodes below.
+        below: usize,
+        /// Every file the changes at and below the node write, sorted.
+        files: Vec<String>,
+    },
+    /// The `queued` group that holds the tab's commands.
+    Queued { count: usize },
+    /// A queued command; `n` is its place in run order, from 1.
+    Action { n: usize, command: String, confirm: bool, key: String, label: String },
+}
+
+/// One row of review mode's tree. Rows come in tree order with the `queued`
+/// group last, so hiding what follows a closed row needs only the depth.
+#[derive(Clone)]
+pub struct RRow {
+    pub depth: usize,
+    /// The node a `Node` row stands for; the tab's root path for the `queued` group.
+    pub path: Vec<usize>,
+    pub name: String,
+    pub kind: RKind,
+}
+
+impl RRow {
+    /// Whether Enter and a click on its marker open and close it.
+    pub fn toggles(&self) -> bool {
+        match &self.kind {
+            RKind::Node { below, .. } => *below > 0,
+            RKind::Queued { .. } => true,
+            RKind::Action { .. } => false,
+        }
+    }
+
+    /// Whether it is an item an apply would write or run, not a group.
+    pub fn is_item(&self) -> bool {
+        matches!(&self.kind, RKind::Node { own: Some(_), .. } | RKind::Action { .. })
+    }
+}
+
+/// One tab's pending items as rows: changed settings under the groups that
+/// hold them, then the queued commands, which run after the writes, in the
+/// order they were queued.
+pub fn review_rows(roots: &[Node], queue: &Queue, tab: usize) -> Vec<RRow> {
+    let mut out = Vec::new();
+    for (i, c) in roots[tab].children.iter().enumerate() {
+        node_rows(roots, c, vec![tab, i], &mut out);
+    }
+    let queued: Vec<_> = queue.items().iter().filter(|q| tree::is_under(&q.key, &roots[tab].name)).collect();
+    if !queued.is_empty() {
+        out.push(RRow { depth: 0, path: vec![tab], name: "queued".into(), kind: RKind::Queued { count: queued.len() } });
+        for (i, q) in queued.iter().enumerate() {
+            let kind = RKind::Action { n: i + 1, command: q.command.clone(), confirm: q.confirm, key: q.key.clone(), label: q.label.clone() };
+            out.push(RRow { depth: 1, path: vec![tab], name: q.label.clone(), kind });
+        }
+    }
+    out
+}
+
+fn node_rows(roots: &[Node], n: &Node, path: Vec<usize>, out: &mut Vec<RRow>) {
+    if n.changes() == 0 {
+        return;
+    }
+    let own = n.setting.as_ref().filter(|s| s.changed()).map(|s| {
+        let (file, key, layer) = match &s.store {
+            Some(st) => (st.file.display().to_string(), st.key.clone(), st.layer.clone()),
+            None => ("(no store)".into(), tree::key(roots, &path), String::new()),
+        };
+        Change { file, key, layer, from: s.loaded.clone(), to: s.value.clone() }
+    });
+    let mut files = BTreeSet::new();
+    files_under(n, &mut files);
+    let below = n.children.iter().map(Node::changes).sum();
+    out.push(RRow { depth: path.len() - 2, path: path.clone(), name: n.name.clone(), kind: RKind::Node { own, below, files: files.into_iter().collect() } });
+    for (i, c) in n.children.iter().enumerate() {
+        let mut p = path.clone();
+        p.push(i);
+        node_rows(roots, c, p, out);
+    }
+}
+
+fn files_under(n: &Node, out: &mut BTreeSet<String>) {
+    if let Some(s) = n.setting.as_ref().filter(|s| s.changed()) {
+        out.insert(s.store.as_ref().map_or("(no store)".into(), |st| st.file.display().to_string()));
+    }
+    n.children.iter().for_each(|c| files_under(c, out));
+}
+
+/// The rows a cursor can reach: those not under a row in `closed`.
+pub fn visible(rows: &[RRow], closed: &BTreeSet<Vec<usize>>) -> Vec<RRow> {
+    let mut out = Vec::new();
+    let mut hidden: Option<usize> = None;
+    for r in rows {
+        if hidden.is_some_and(|d| r.depth > d) {
+            continue;
+        }
+        hidden = None;
+        if r.toggles() && closed.contains(&r.path) {
+            hidden = Some(r.depth);
+        }
+        out.push(r.clone());
+    }
+    out
+}
+
+/// One pending item of a tab, for planning a run.
+enum Entry {
+    Value { path: Vec<usize>, file: String },
+    Action { command: String },
 }
 
 /// One tab's pending items: value changes grouped by file (files sorted,
 /// keys in tree order), then its queued commands in run order.
-pub fn entries(roots: &[Node], queue: &Queue, tab: usize) -> Vec<Entry> {
+fn entries(roots: &[Node], queue: &Queue, tab: usize) -> Vec<Entry> {
     let mut by_file: BTreeMap<String, Vec<Entry>> = BTreeMap::new();
     let mut walk = Vec::new();
     collect(&roots[tab], &mut vec![tab], &mut walk);
     for path in walk {
-        let n = tree::get(roots, &path);
-        let s = n.setting.as_ref().expect("collected nodes have settings");
-        let (file, key) = match &s.store {
-            Some(st) => (st.file.display().to_string(), st.key.clone()),
-            None => ("(no store)".into(), tree::key(roots, &path)),
-        };
-        by_file.entry(file.clone()).or_default().push(Entry::Value { path, file, key, from: s.loaded.clone(), to: s.value.clone() });
+        let s = tree::get(roots, &path).setting.as_ref().expect("collected nodes have settings");
+        let file = s.store.as_ref().map_or("(no store)".into(), |st| st.file.display().to_string());
+        by_file.entry(file.clone()).or_default().push(Entry::Value { path, file });
     }
     let root = roots[tab].name.as_str();
-    let actions = queue
-        .items()
-        .iter()
-        .enumerate()
-        .filter(|(_, q)| tree::is_under(&q.key, root))
-        .map(|(index, q)| Entry::Action { index, command: q.command.clone(), confirm: q.confirm });
+    let actions = queue.items().iter().filter(|q| tree::is_under(&q.key, root)).map(|q| Entry::Action { command: q.command.clone() });
     by_file.into_values().flatten().chain(actions).collect()
 }
 
@@ -87,6 +197,9 @@ pub struct Run {
     pub outcome: Outcome,
     /// Items applied so far: keys written and commands run.
     pub applied: usize,
+    /// The review's rows as the run began, so a finished write keeps its row
+    /// on screen with its ✓ until the run ends.
+    pub rows: Vec<RRow>,
     /// The 1-based step that fails, for exercising the failure path.
     fail_step: Option<usize>,
 }
@@ -97,11 +210,11 @@ impl Run {
         let mut commands = Vec::new();
         for e in entries(roots, queue, tab) {
             match e {
-                Entry::Value { path, file, .. } => match files.last_mut() {
+                Entry::Value { path, file } => match files.last_mut() {
                     Some((f, paths)) if *f == file => paths.push(path),
                     _ => files.push((file, vec![path])),
                 },
-                Entry::Action { command, .. } => commands.push(command),
+                Entry::Action { command } => commands.push(command),
             }
         }
         let writes = files.into_iter().map(|(file, paths)| Step {
@@ -110,11 +223,35 @@ impl Run {
             work: Work::Write(paths),
         });
         let runs = commands.into_iter().map(|c| Step { text: format!("would run {c}"), state: St::Pending, work: Work::Run });
-        Run { tab, steps: writes.chain(runs).collect(), outcome: Outcome::Running, applied: 0, fail_step }
+        Run { tab, steps: writes.chain(runs).collect(), outcome: Outcome::Running, applied: 0, rows: review_rows(roots, queue, tab), fail_step }
     }
 
     pub fn finished(&self) -> bool {
         self.outcome != Outcome::Running
+    }
+
+    /// The step that writes or runs what `row` shows. A group has none.
+    pub fn step_of(&self, row: &RRow) -> Option<usize> {
+        match &row.kind {
+            RKind::Node { own: Some(_), .. } => self.steps.iter().position(|s| matches!(&s.work, Work::Write(p) if p.contains(&row.path))),
+            RKind::Action { n, .. } => self.steps.iter().enumerate().filter(|(_, s)| matches!(s.work, Work::Run)).nth(n - 1).map(|(i, _)| i),
+            _ => None,
+        }
+    }
+
+    /// Why the failing step failed.
+    pub fn error(&self) -> String {
+        format!("simulated failure: SPIKE_FAIL_STEP={}", self.fail_step.unwrap_or_default())
+    }
+
+    /// What a stopped run leaves for the review to mark: the failed step.
+    pub fn failure(&self) -> Option<Failure> {
+        let Outcome::Stopped(i) = self.outcome else { return None };
+        let paths = match &self.steps[i].work {
+            Work::Write(p) => p.clone(),
+            Work::Run => Vec::new(),
+        };
+        Some(Failure { tab: self.tab, paths, text: self.steps[i].text.clone(), error: self.error() })
     }
 
     /// Advance one state: start the next step, or finish the running one.
@@ -154,6 +291,26 @@ impl Run {
             s.state = St::Running;
         } else {
             self.outcome = Outcome::Done;
+        }
+    }
+}
+
+/// The step a stopped run failed at, kept so the review marks it while its
+/// rows are live again. No paths means the failed step ran a command, which
+/// is then the tab's first queued one.
+pub struct Failure {
+    pub tab: usize,
+    pub paths: Vec<Vec<usize>>,
+    pub text: String,
+    pub error: String,
+}
+
+impl Failure {
+    pub fn marks(&self, row: &RRow) -> bool {
+        match &row.kind {
+            RKind::Node { own: Some(_), .. } => self.paths.contains(&row.path),
+            RKind::Action { n, .. } => self.paths.is_empty() && *n == 1,
+            _ => false,
         }
     }
 }
