@@ -15,6 +15,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "I don't want dual licensing - I just want contributions back"
+    via: chat, session 02e97f86, 2026-10-01, asked whether a say over commercial hosting should mean dual licensing
+    covers: [veto]
 status: accepted
 date: 2026-10-01
 deciders:
@@ -60,7 +65,7 @@ What copyleft does and does not cover shaped the choice:
 ### Negative
 
 - Adopters who embed agent-ways in proprietary distributed work or a closed hosted service can no longer do so on the new releases. Some organizations bar AGPL software outright.
-- The tools ADR-177 has adopting repositories copy in (`adr-tool`, `doc-tool`, `chart-tool`) carry the AGPL into those repositories. Whether they keep it or take a permissive exception is open.
+- The tools ADR-177 has adopting repositories copy in (`adr-tool`, `doc-tool`, `chart-tool`) carry the AGPL into those repositories, with no permissive exception: the point is that improvements come back, and that holds for the copied tools as well.
 - A new dependency must be checked for AGPL-3.0 compatibility before it is added; a GPL-2.0-only dependency, for one, could not be combined.
 
 ### Neutral
