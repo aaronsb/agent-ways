@@ -28,6 +28,6 @@ agent-fmt = { path = "../agent-fmt" }
 sensor-trait = { path = "../sensor-trait" }
 ways-core = { path = "../ways-core" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
-ways-agent = { path = "../ways-agent", default-features = false }
+ways-agent-core = { path = "../ways-agent-core" }
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 

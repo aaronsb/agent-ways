@@ -138,11 +138,21 @@ impl Profile {
         if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 {
             bail!("profile '{name}': turns, max_turn_chars and concurrency must be at least 1");
         }
-        if self.model.trim().is_empty() {
-            bail!("profile '{name}': model is empty");
+        if !valid_model_id(&self.model) {
+            bail!("profile '{name}': model '{}' is not a model id (letters, digits and . _ : / - only)", self.model);
         }
         Ok(())
     }
+}
+
+/// A model id as providers write them: `claude-haiku-4-5`,
+/// `anthropic/claude-haiku-4.5`, `…:batch`. It goes into request paths, so
+/// nothing else is allowed.
+pub fn valid_model_id(model: &str) -> bool {
+    !model.is_empty()
+        && !model.contains("..")
+        && !model.starts_with('/')
+        && model.chars().all(|c| c.is_ascii_alphanumeric() || "._:/-".contains(c))
 }
 
 /// A user's change to one profile. Every field is optional; a profile name the
@@ -224,7 +234,8 @@ impl UserLayer {
         let body = format!(
             "# The ways agent's user layer (ADR-196 §5). Fields here override the\n\
              # shipped engine profiles and survive updates. `ways agent config`\n\
-             # shows the resolved settings.\n{}",
+             # shows the resolved settings. `ways agent use` and `mode` rewrite\n\
+             # this file, so comments added here do not survive them.\n{}",
             serde_yaml::to_string(&layer)?
         );
         let dir = path.parent().context("user layer path has no parent")?;
@@ -243,15 +254,23 @@ pub fn shipped() -> BTreeMap<String, Profile> {
 /// Every profile after the user's patches: shipped ones patched, new ones built
 /// from the shipped profile of the provider they name.
 pub fn profiles(user: &UserLayer) -> Result<BTreeMap<String, Profile>> {
-    let mut all = shipped();
+    let shipped = shipped();
+    let mut all = shipped.clone();
     for (name, patch) in &user.profiles {
-        let profile = match all.get(name) {
+        // A changed provider needs its own model id: the base's id belongs to
+        // the base's provider.
+        if patch.provider.is_some() && patch.model.is_none() {
+            bail!("profile '{name}' sets provider, so it must set model too");
+        }
+        let profile = match shipped.get(name) {
             Some(base) => patch.apply(base),
             None => {
                 let (Some(provider), Some(_)) = (patch.provider, patch.model.as_ref()) else {
                     bail!("profile '{name}' is not shipped, so it must set provider and model");
                 };
-                let base = all
+                // New profiles inherit the shipped values for their provider,
+                // never another user patch, whatever the names sort to.
+                let base = shipped
                     .get(provider.as_str())
                     .cloned()
                     .context("every provider has a shipped profile")?;
@@ -349,6 +368,29 @@ mod tests {
         let s = resolve(&user, |_| false).unwrap().unwrap();
         assert_eq!(s.profile.model, "claude-sonnet-5-5");
         assert_eq!(s.profile.threshold, 0.3);
+    }
+
+    #[test]
+    fn new_profiles_inherit_shipped_values_whatever_their_name() {
+        for name in ["a-fast", "mine"] {
+            let user: UserLayer = serde_yaml::from_str(&format!(
+                "profiles:\n  anthropic:\n    threshold: 0.5\n  {name}:\n    provider: anthropic\n    model: claude-sonnet-5-5\n"
+            ))
+            .unwrap();
+            assert_eq!(profiles(&user).unwrap()[name].threshold, 0.3, "{name}");
+        }
+    }
+
+    #[test]
+    fn changing_provider_needs_a_model_and_ids_are_checked() {
+        let user: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    provider: openrouter\n").unwrap();
+        assert!(profiles(&user).is_err());
+        for bad in ["../messages", "a?b", "a#b", "/x", ""] {
+            assert!(!valid_model_id(bad), "{bad}");
+        }
+        for good in ["claude-haiku-4-5", "anthropic/claude-haiku-4.5", "anthropic/claude-haiku-4.5:batch"] {
+            assert!(valid_model_id(good), "{good}");
+        }
     }
 
     #[test]

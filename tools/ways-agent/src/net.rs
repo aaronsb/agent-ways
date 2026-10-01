@@ -46,6 +46,25 @@ impl Check {
     pub fn is_valid(&self) -> bool {
         matches!(self, Check::Valid)
     }
+
+    /// The provider accepted the key, whatever else it said about the model
+    /// or the balance.
+    pub fn key_authenticated(&self) -> bool {
+        matches!(self, Check::Valid | Check::NoCredit | Check::ModelUnavailable(_))
+    }
+
+    /// The word a check record stores.
+    pub fn record_word(&self) -> &'static str {
+        match self {
+            Check::Valid => "valid",
+            Check::Invalid(_) => "invalid",
+            Check::NoCredit => "no_credit",
+            Check::RateLimited => "rate_limited",
+            Check::ModelUnavailable(_) => "model_unavailable",
+            Check::Unreachable(_) => "unreachable",
+            Check::Failed(..) => "failed",
+        }
+    }
 }
 
 impl std::fmt::Display for Check {
@@ -55,7 +74,7 @@ impl std::fmt::Display for Check {
             Check::Invalid(m) => write!(f, "invalid: {m}"),
             Check::NoCredit => write!(f, "no credit left on this key"),
             Check::RateLimited => write!(f, "rate-limited; try again shortly"),
-            Check::ModelUnavailable(m) => write!(f, "key valid, but model {m} is not available to it"),
+            Check::ModelUnavailable(m) => write!(f, "key valid, but the provider does not offer model {m}"),
             Check::Unreachable(m) => write!(f, "provider unreachable: {m}"),
             Check::Failed(code, m) => write!(f, "provider answered {code}: {m}"),
         }
