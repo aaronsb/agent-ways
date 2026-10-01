@@ -3,8 +3,8 @@
 //! A hook connects, sends one request, and reads one reply. When no agent is
 //! listening it starts one and waits briefly. A start that fails is not
 //! retried for a while, so a broken agent costs one wait, not one per prompt.
-//! An agent running from a different binary than this client would start is
-//! asked to stop after it answers, so the next prompt starts the current one.
+//! An agent built against a different version of this crate is asked to stop
+//! after it answers a judge request, so the next prompt starts a current one.
 //! Every failure comes back as a fallback reason; the hook then keeps the
 //! matcher's decision.
 
@@ -30,6 +30,12 @@ pub fn agent_binary() -> Option<PathBuf> {
     let on_path = std::env::var_os("PATH")
         .and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(&name)).find(|p| p.is_file()));
     [beside, projected, on_path].into_iter().flatten().find(|p| p.is_file())
+}
+
+/// Forgets a recorded start failure, so the next call tries again at once.
+/// An explicit `ways agent load` calls this; hooks keep the back-off.
+pub fn clear_start_backoff() {
+    let _ = std::fs::remove_file(ways_core::paths::state_root().join("agent").join("start-failed"));
 }
 
 /// Sends `request` and returns the reply, or a fallback reason. With `start`,
@@ -63,8 +69,11 @@ mod imp {
         if !crate::protocol::trusted_socket(&sock) {
             return Err("agent_untrusted: the socket or its directory is not this user's alone".to_string());
         }
+        let judging = matches!(request, Request::Judge(_));
         let envelope = exchange(stream, &Envelope { protocol: PROTOCOL, request }, timeout)?;
-        retire_if_foreign(&envelope.agent.exe);
+        if judging {
+            retire_if_foreign(&envelope.agent.core);
+        }
         Ok(envelope.reply)
     }
 
@@ -113,6 +122,9 @@ mod imp {
                 matches!(k.as_ref(), "HOME" | "PATH" | "USER" | "LOGNAME" | "LANG" | "TMPDIR" | "WAYS_AGENT_SOCK")
                     || k.starts_with("XDG_")
                     || k.starts_with("LC_")
+                    // The HTTP client honours these; behind a proxy the agent
+                    // reaches no provider without them.
+                    || matches!(k.to_ascii_uppercase().as_str(), "ALL_PROXY" | "HTTPS_PROXY" | "HTTP_PROXY" | "NO_PROXY")
             }));
         // SAFETY: setsid in the child before exec only detaches it from the
         // hook's session and terminal; it allocates nothing.
@@ -145,12 +157,11 @@ mod imp {
         }
     }
 
-    /// Asks an agent running from a different binary than this client would
-    /// start to stop, so the next prompt starts the current one.
-    fn retire_if_foreign(agent_exe: &str) {
-        let canon = |p: &std::path::Path| std::fs::canonicalize(p).ok();
-        let Some(ours) = agent_binary().and_then(|b| canon(&b)) else { return };
-        if canon(std::path::Path::new(agent_exe)).is_some_and(|theirs| theirs != ours) {
+    /// Asks an agent built against a different version of the shared crate to
+    /// stop, so the next prompt starts a current one. The agent's own binary
+    /// watch covers an update at the same version.
+    fn retire_if_foreign(agent_core: &str) {
+        if agent_core != crate::protocol::CORE_VERSION {
             let sock = crate::protocol::socket_path();
             if let Ok(stream) = UnixStream::connect(&sock) {
                 let _ = exchange(stream, &Envelope { protocol: PROTOCOL, request: Request::Shutdown }, Duration::from_secs(1));
