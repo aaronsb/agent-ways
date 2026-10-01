@@ -2056,7 +2056,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "walkdir",
- "ways-agent",
+ "ways-agent-core",
  "ways-core",
 ]
 
@@ -2069,8 +2069,20 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "serde_yaml",
  "ureq",
+ "ways-agent-core",
+ "ways-core",
+]
+
+[[package]]
+name = "ways-agent-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde",
+ "serde_json",
+ "serde_yaml",
  "ways-core",
 ]
 

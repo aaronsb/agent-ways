@@ -9,18 +9,18 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 
 use crate::judge::{self, Candidate};
-use crate::profile::{self, Mode, Settings, UserLayer};
+use crate::profile::{self, Mode, Provider, Settings, UserLayer};
 use crate::protocol::{self, Envelope, JudgeRequest, Judged, Reply, Request, Status, Verdict};
 use crate::{keys, net};
 
@@ -38,10 +38,7 @@ pub struct Options {
 pub fn serve(options: Options) -> Result<()> {
     let sock = protocol::socket_path();
     let dir = sock.parent().context("socket path has no parent")?.to_path_buf();
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-    }
+    protocol::secure_dir(&dir).map_err(anyhow::Error::msg)?;
     let lock_path = sock.with_extension("lock");
     let lock = std::fs::OpenOptions::new()
         .create(true)
@@ -53,8 +50,13 @@ pub fn serve(options: Options) -> Result<()> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Ok(());
     }
-    // Holding the lock, any socket file left behind is stale.
-    let _ = std::fs::remove_file(&sock);
+    // Holding the lock, a socket left behind is stale. Anything else at the
+    // path is not ours to delete.
+    match std::fs::symlink_metadata(&sock) {
+        Ok(m) if m.file_type().is_socket() => std::fs::remove_file(&sock)?,
+        Ok(_) => bail!("{} exists and is not a socket; not replacing it", sock.display()),
+        Err(_) => {}
+    }
     let listener = UnixListener::bind(&sock).with_context(|| format!("binding {}", sock.display()))?;
     std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
 
@@ -63,17 +65,23 @@ pub fn serve(options: Options) -> Result<()> {
     watchdog(Arc::clone(&state), sock.clone(), options.idle, exe.clone());
 
     for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+        let Ok(stream) = stream else {
+            // Out of descriptors, say: wait rather than spin.
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
+        };
         let state = Arc::clone(&state);
         let sock = sock.clone();
         let exe = exe.clone();
+        state.conns.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
             state.touch();
             let shutdown = handle(stream, &state);
             state.touch();
-            // A replaced binary exits once nothing is in flight; the
-            // watchdog catches the case where another request still was.
-            if shutdown || (state.in_flight() == 0 && exe.as_ref().is_some_and(Exe::replaced)) {
+            let others = state.conns.fetch_sub(1, Ordering::SeqCst) - 1;
+            // A replaced binary exits once no connection is open; the
+            // watchdog catches the case where another still was.
+            if shutdown || (others == 0 && exe.as_ref().is_some_and(Exe::replaced)) {
                 leave(&sock);
             }
         });
@@ -91,7 +99,7 @@ fn leave(sock: &Path) -> ! {
 fn watchdog(state: Arc<State>, sock: PathBuf, idle: Duration, exe: Option<Exe>) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(5));
-        let busy = state.in_flight() > 0;
+        let busy = state.conns.load(Ordering::SeqCst) > 0;
         if !busy && (state.idle_for() >= idle || exe.as_ref().is_some_and(Exe::replaced)) {
             leave(&sock);
         }
@@ -120,11 +128,19 @@ fn handle(stream: UnixStream, state: &State) -> bool {
             Request::Shutdown => (Reply::Ok, true),
         },
     };
-    if let Ok(mut text) = serde_json::to_string(&reply) {
+    let envelope = protocol::ReplyEnvelope { agent: agent_id(), reply };
+    if let Ok(mut text) = serde_json::to_string(&envelope) {
         text.push('\n');
         let _ = (&stream).write_all(text.as_bytes());
     }
     shutdown
+}
+
+fn agent_id() -> protocol::AgentId {
+    protocol::AgentId {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        exe: std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
+    }
 }
 
 /// True when the peer runs as this user.
@@ -178,8 +194,8 @@ impl Exe {
         Some((meta.modified().ok()?, meta.len()))
     }
 
-    /// Changed or gone. Linux reports a replaced binary's path with
-    /// " (deleted)", which no longer stats, so that counts as replaced.
+    /// Changed or gone: an update that swaps the file changes its stamp, and
+    /// one that removes it fails the stat.
     fn replaced(&self) -> bool {
         Self::stamp(&self.path) != Some(self.stamp)
     }
@@ -187,10 +203,14 @@ impl Exe {
 
 struct State {
     started: Instant,
+    /// Connections accepted and not yet answered. Exits wait for zero.
+    conns: AtomicUsize,
     last_activity: AtomicU64,
     http: ureq::Agent,
     slots: Mutex<usize>,
     freed: Condvar,
+    /// One key check at a time, so a burst of first prompts checks once.
+    check_lock: Mutex<()>,
     stats: Mutex<Stats>,
 }
 
@@ -200,17 +220,18 @@ struct Stats {
     judged: u64,
     fallbacks: BTreeMap<String, u64>,
     latencies: VecDeque<u64>,
-    concurrency: usize,
 }
 
 impl State {
     fn new() -> State {
         State {
             started: Instant::now(),
+            conns: AtomicUsize::new(0),
             last_activity: AtomicU64::new(now_s()),
             http: net::agent(Duration::from_secs(60)),
             slots: Mutex::new(0),
             freed: Condvar::new(),
+            check_lock: Mutex::new(()),
             stats: Mutex::new(Stats::default()),
         }
     }
@@ -268,9 +289,10 @@ impl State {
             return Err("off".to_string());
         }
         let p = &settings.profile;
-        let Some((key, _)) = keys::read(p.provider).map_err(|e| format!("key: {e:#}"))? else {
+        let Some((key, source)) = keys::read(p.provider).map_err(|e| format!("key: {e:#}"))? else {
             return Err("no_key".to_string());
         };
+        self.verified(p.provider, &key, &source, &p.model)?;
         let deadline = Duration::from_millis(p.timeout_ms);
         let _slot = self.acquire(p.concurrency, deadline.saturating_sub(begun.elapsed()))?;
         let remaining = deadline.saturating_sub(begun.elapsed());
@@ -296,10 +318,31 @@ impl State {
         })
     }
 
+    /// A working key is the operator's approval to gate (ADR-196 §6): judge
+    /// only with a key whose last recorded check passed. A key never checked,
+    /// or replaced since, is checked once here and the result recorded; a
+    /// check that could not reach a verdict is retried after five minutes.
+    fn verified(&self, provider: Provider, key: &str, source: &keys::Source, model: &str) -> Result<(), String> {
+        let transient = |r: &str| matches!(r, "unreachable" | "rate_limited" | "failed");
+        let record = match keys::last_check(provider) {
+            Some(r) if r.describes(source) && !(transient(&r.result) && r.age_s() >= 300) => r,
+            _ => {
+                let _guard = self.check_lock.lock().unwrap_or_else(|e| e.into_inner());
+                let result = net::check(provider, key, model);
+                let record = keys::CheckRecord::now(result.record_word(), model, source);
+                keys::record_check(provider, &record);
+                record
+            }
+        };
+        match record.result.as_str() {
+            "valid" => Ok(()),
+            other => Err(format!("key_unverified: last check {other}")),
+        }
+    }
+
     /// Waits up to `wait` for one of `cap` provider slots.
     fn acquire(&self, cap: usize, wait: Duration) -> Result<Slot<'_>, String> {
         let mut used = self.slots.lock().unwrap_or_else(|e| e.into_inner());
-        self.stats.lock().unwrap_or_else(|e| e.into_inner()).concurrency = cap;
         let until = Instant::now() + wait;
         while *used >= cap {
             let left = until.saturating_duration_since(Instant::now());
@@ -314,6 +357,9 @@ impl State {
 
     fn status(&self) -> Status {
         let settings = Self::settings().ok().flatten();
+        // Read before taking `stats`: `acquire` holds `slots`, and no thread
+        // may hold `stats` while it waits for `slots`.
+        let in_flight = self.in_flight();
         let stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         let mut sorted: Vec<u64> = stats.latencies.iter().copied().collect();
         sorted.sort_unstable();
@@ -328,8 +374,8 @@ impl State {
             requests: stats.requests,
             judged: stats.judged,
             fallbacks: stats.fallbacks.clone(),
-            in_flight: self.in_flight(),
-            concurrency: settings.as_ref().map(|s| s.profile.concurrency).unwrap_or(stats.concurrency),
+            in_flight,
+            concurrency: settings.as_ref().map(|s| s.profile.concurrency).unwrap_or(0),
             latency_p50_ms: pct(0.5),
             latency_p95_ms: pct(0.95),
         }
@@ -374,6 +420,34 @@ mod tests {
         drop(a);
         assert_eq!(state.in_flight(), 0);
         assert!(state.acquire(1, Duration::from_millis(10)).is_ok());
+    }
+
+    #[test]
+    fn status_and_acquire_run_concurrently_without_deadlock() {
+        let state = Arc::new(State::new());
+        let workers: Vec<_> = (0..4)
+            .map(|i| {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    for _ in 0..2000 {
+                        if i % 2 == 0 {
+                            drop(state.acquire(2, Duration::from_millis(5)));
+                        } else {
+                            let _ = state.status();
+                        }
+                    }
+                })
+            })
+            .collect();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        for w in workers {
+            while !w.is_finished() {
+                assert!(Instant::now() < deadline, "status and acquire deadlocked");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            w.join().unwrap();
+        }
+        assert_eq!(state.in_flight(), 0);
     }
 
     #[test]

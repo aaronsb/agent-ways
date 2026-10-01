@@ -1,8 +1,9 @@
 //! Non-interactive JSON dump of a session's way-firing timeline.
 //!
 //! `rethink` renders the replay through a TUI; this module emits the same
-//! reconstructed timeline — plus a session summary and the near-miss events the
-//! TUI omits — as a single JSON document on stdout, for agents and scripts.
+//! reconstructed timeline — plus a session summary, the relevance gate's work,
+//! and the near-miss events the TUI omits — as a single JSON document on
+//! stdout, for agents and scripts.
 //! It depends on no terminal feature, so it runs in headless / CI contexts
 //! where the interactive replay can't.
 
@@ -36,6 +37,21 @@ struct Summary {
     near_misses: u64,
     trigger_breakdown: BTreeMap<String, u64>,
     top_ways: Vec<TopWay>,
+    gate: GateSummary,
+}
+
+/// The relevance gate's work in this session (ADR-196): what it judged, what
+/// it kept out, and when it could not answer.
+#[derive(Serialize, Default)]
+struct GateSummary {
+    judged: u64,
+    passed: u64,
+    blocked: u64,
+    would_block: u64,
+    fallbacks: BTreeMap<String, u64>,
+    gate_ms_p50: Option<u64>,
+    gate_ms_p95: Option<u64>,
+    blocked_ways: BTreeMap<String, u64>,
 }
 
 #[derive(Serialize)]
@@ -202,6 +218,8 @@ fn build_summary(
     let mut checks_fired = 0u64;
     let mut triggers: BTreeMap<String, u64> = BTreeMap::new();
     let mut way_fires: BTreeMap<String, u64> = BTreeMap::new();
+    let mut gate = GateSummary::default();
+    let mut gate_ms: Vec<u64> = Vec::new();
 
     for v in session_events(content, session_id) {
         match v["event"].as_str() {
@@ -216,6 +234,30 @@ fn build_summary(
             }
             Some("way_redisclosed") => redisclosures += 1,
             Some("check_fired") => checks_fired += 1,
+            Some("way_judged") => {
+                gate.judged += 1;
+                match v["verdict"].as_str() {
+                    Some("block") => {
+                        gate.blocked += 1;
+                        if let Some(w) = v["way"].as_str() {
+                            *gate.blocked_ways.entry(w.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                    Some("would_block") => gate.would_block += 1,
+                    _ => gate.passed += 1,
+                }
+                if let Some(ms) = v["gate_ms"].as_str().and_then(|s| s.parse().ok()) {
+                    gate_ms.push(ms);
+                }
+            }
+            Some("gate_fallback") => {
+                let reason = v["reason"].as_str().unwrap_or("unknown");
+                let key = reason.split(':').next().unwrap_or(reason).to_string();
+                *gate.fallbacks.entry(key).or_insert(0) += 1;
+                if let Some(ms) = v["gate_ms"].as_str().and_then(|s| s.parse().ok()) {
+                    gate_ms.push(ms);
+                }
+            }
             _ => {}
         }
     }
@@ -240,6 +282,11 @@ fn build_summary(
         near_misses: near_miss_count as u64,
         trigger_breakdown: triggers,
         top_ways,
+        gate: {
+            gate_ms.sort_unstable();
+            let pct = |q: f64| (!gate_ms.is_empty()).then(|| gate_ms[((gate_ms.len() - 1) as f64 * q).round() as usize]);
+            GateSummary { gate_ms_p50: pct(0.5), gate_ms_p95: pct(0.95), ..gate }
+        },
     }
 }
 

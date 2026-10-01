@@ -392,8 +392,8 @@ fn mcp_registration(dir: &std::path::Path) -> String {
 
 /// The relevance gate's settings (ADR-196), read without touching the key:
 /// `ways` only checks where a key would come from.
-fn gate_settings() -> Result<Option<(ways_agent::profile::Settings, Option<ways_agent::keys::Source>)>> {
-    use ways_agent::{keys, profile};
+fn gate_settings() -> Result<Option<(ways_agent_core::profile::Settings, Option<ways_agent_core::keys::Source>)>> {
+    use ways_agent_core::{keys, profile};
     let user = profile::UserLayer::load(&profile::user_layer_path())?;
     let settings = profile::resolve(&user, |p| keys::locate(p).is_some())?;
     Ok(settings.map(|s| {
@@ -408,7 +408,11 @@ fn gate_line() -> String {
         Ok(None) => "off — no key (`ways agent key add --provider anthropic`)".to_string(),
         Ok(Some((s, source))) => {
             let key = match source {
-                Some(src) => format!("key from {src}"),
+                Some(src) => match ways_agent_core::keys::last_check(s.profile.provider) {
+                    Some(r) if r.describes(&src) && r.result == "valid" => format!("key from {src}, checked valid"),
+                    Some(r) if r.describes(&src) => format!("key from {src}, last check {}: fails open", r.result),
+                    _ => format!("key from {src}, not checked yet: the agent checks it on first use"),
+                },
                 None => "no key: fails open".to_string(),
             };
             format!(
