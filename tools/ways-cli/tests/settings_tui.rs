@@ -60,6 +60,18 @@ impl Fx {
         std::fs::write(p, text).unwrap();
     }
 
+    /// A project at `rel` with `ways`, which Claude Code knows: its
+    /// transcripts directory records the path it was named from.
+    fn known(&self, rel: &str, ways: &[&str]) {
+        let path = self.path(rel).display().to_string();
+        let slug: String = path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        self.file(&format!(".claude/projects/{slug}/sessions-index.json"), &format!("{{\"originalPath\": \"{path}\"}}"));
+        for id in ways {
+            let name = id.rsplit('/').next().unwrap();
+            self.file(&format!("{rel}/.claude/ways/{id}/{name}.md"), &format!("---\ndescription: the {name} way of {rel}\nvocabulary: {name}\n---\n"));
+        }
+    }
+
     fn read(&self, rel: &str) -> Option<String> {
         std::fs::read_to_string(self.path(rel)).ok()
     }
@@ -452,6 +464,16 @@ fn golden_frames() {
     way.file("proj/.claude/ways/api/dual/dual.md", "---\ndescription: Two modes for every endpoint, read and write.\nvocabulary: endpoint read write mode\npattern: \\bapi\\b\nmacro: prepend\nrefire: normal\n---\nbody\n");
     way.file("proj/.claude/ways/api/dual/macro.sh", "#!/bin/sh\n# lists the endpoints\nls src/routes\n");
     g.check_text("ways-project-way", &way.snap("ways", "end right down down right down", "100x30", "16"));
+    // Other projects Claude Code knows: hidden behind a row by default, a
+    // group each in the all projects view (picked from the menu).
+    let projects = Fx::new();
+    projects.known("proj", &["api/dual"]);
+    projects.known("Projects/gateway", &["api/auth", "api/rate-limit", "deploy/canary"]);
+    projects.known("Projects/notes", &["writing/tone"]);
+    projects.file("Projects/gateway/.claude/ways.yaml", "ways:\n  api/rate-limit: false\n");
+    g.check_text("ways-other-projects-hidden", &projects.snap("ways", "end right end", "100x30", "16"));
+    let all = "end right a down enter down down down down down down down right down right down down";
+    g.check_text("ways-all-projects", &projects.snap("ways", all, "100x30", "16"));
     let broken = Fx::new();
     broken.file(".config/agent-ways/config.yaml", BROKEN);
     g.check_text("matching-broken", &broken.snap("matching", "", "100x30", "16"));

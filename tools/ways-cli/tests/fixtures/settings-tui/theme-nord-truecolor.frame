@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme │ s set up                   |
+| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme │ s set up · p all projects  |
 styles
   0   0-7   #2e3440 #c99fc1 BOLD
   0  10-21  #2e3440 #bfa2c3 -
@@ -138,4 +138,6 @@ styles
  29  32-43  #7c8baa - ITALIC
  29  70-72  #434c5e - -
  29  73-74  #c99fc1 - -
- 29  75-80  #7c8baa - ITALIC
+ 29  75-83  #7c8baa - ITALIC
+ 29  84-85  #c99fc1 - -
+ 29  86-97  #7c8baa - ITALIC

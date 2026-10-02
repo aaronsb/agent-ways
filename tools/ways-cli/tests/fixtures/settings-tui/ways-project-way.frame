@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││           ls src/routes                   │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m) │ s set up                                             |
+| browse  0 changed │ 0 queued │ mouse on (m) │ s set up · p all projects                            |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -142,4 +142,6 @@ styles
  29  32-43  - - DIM|ITALIC
  29  44-46  - - DIM
  29  47-48  Cyan - -
- 29  49-54  - - DIM|ITALIC
+ 29  49-57  - - DIM|ITALIC
+ 29  58-59  Cyan - -
+ 29  60-71  - - DIM|ITALIC
