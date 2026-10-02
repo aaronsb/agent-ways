@@ -68,7 +68,7 @@ observable:
   - 'run: ways settings set <key> <value outside its range> exits 3 and writes nothing'
   - 'run: cargo tree shows ways-cli depending on attend-config and not on attend, and agent-settings depending on none of ways-core, ways-agent-core and attend-config'
   - 'run: hook latency for ways scan prompt, scan command and scan file stays within the budget and method of ADR-504 §11 against the commit before the change'
-status: proposed
+status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb

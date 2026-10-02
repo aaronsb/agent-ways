@@ -149,6 +149,9 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-500](./platform/ADR-500-settings-json-three-way-merge-spec-and-peer-writer-coexistence-contract.md) | settings.json three-way merge: spec and peer-writer coexistence contract | accepted |
 | [ADR-501](./platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) | The agent-ways MCP server: one server for attend, keepalive and later modules, inbound through channels | accepted |
 | [ADR-502](./platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) | The ways agent: one resident daemon per user for search, judging and key custody | accepted |
+| [ADR-503](./platform/ADR-503-settings-are-files-described-by-one-typed-registry-the-cli-and-the-tui-are-two-ways-in.md) | Settings are files described by one typed registry; the CLI and the TUI are two ways in | accepted |
+| [ADR-504](./platform/ADR-504-one-tui-engine-on-ratatui-and-one-theme-for-every-interactive-surface.md) | One TUI engine on ratatui and one theme for every interactive surface | accepted |
+| [ADR-505](./platform/ADR-505-duplicated-implementations-across-ways-attend-and-the-hooks-audited-2026-10-01.md) | Duplicated implementations across ways, attend and the hooks, audited 2026-10-01 | proposed |
 
 ## Practice
 _The ways method, way authoring, the development loop_

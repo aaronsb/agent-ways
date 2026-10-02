@@ -112,7 +112,7 @@ observable:
   - 'run: hook latency for ways scan prompt, scan command, scan file and attend inbox --drain stays within the budget of §11 against the commit before the change'
   - 'run: ways projects list, search, show, stats, cleanup --dry-run and relocate --dry-run report the same projects, sessions and sizes claude-projects reported on the same ~/.claude, and git ls-files shows no tools/claude-projects'
   - 'run: cargo test -p agent-theme fails on a raw SGR literal planted in a crate outside agent-theme, and passes once it is removed'
-status: proposed
+status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb
