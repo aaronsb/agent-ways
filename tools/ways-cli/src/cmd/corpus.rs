@@ -934,14 +934,17 @@ fn find_ways_dir(project_path: &str) -> Option<PathBuf> {
     None
 }
 
-/// Content hash of a directory: FNV-1a over the sorted file list and sizes,
-/// stable across Rust releases so a manifest written by one build matches the
-/// next build's hash of the same tree.
+/// Content hash of a directory: FNV-1a over the sorted file list (relative
+/// paths joined with `/`) and sizes, stable across Rust releases and
+/// platforms, so a manifest written by one build or OS matches another's hash
+/// of the same tree.
 fn content_hash(dir: &Path) -> String {
     let mut entries: Vec<(String, u64)> = crate::scanner::files(dir)
         .map(|path| {
             let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            let rel = path.strip_prefix(dir).unwrap_or(&path).display().to_string();
+            // `/`-joined on every OS: `display()` gives `\` on Windows, and the
+            // same tree must hash the same everywhere.
+            let rel = crate::util::path_to_id(path.strip_prefix(dir).unwrap_or(&path));
             (rel, size)
         })
         .collect();
@@ -1186,7 +1189,8 @@ mod tests {
     use super::*;
 
     /// The hash is a fixed function of the tree, not of the Rust release: a
-    /// known input pins its value. DefaultHasher made no such promise.
+    /// known input pins its value. DefaultHasher made no such promise. The
+    /// nested fixture also pins the `/` separator: Windows hashed `a\a.md`.
     #[test]
     fn content_hash_is_pinned_fnv1a() {
         let input = content_hash_input(&[("a/a.md".to_string(), 3)]);
