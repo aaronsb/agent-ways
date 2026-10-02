@@ -333,8 +333,7 @@ enum Commands {
     /// telemetry writer — the Rust `session::log_event` and the shell hooks
     /// (`clear-markers.sh`, `inject-subagent.sh` via `events-log.sh`) — and every
     /// reader (`firing::load_events`). Resolving through the binary keeps the
-    /// hooks from hardcoding a path that drifts from `paths::events_log()` after
-    /// the ADR-142 XDG migration (ADR-153 §1).
+    /// hooks from hardcoding a path that drifts from `paths::events_log()`.
     EventsLogPath,
     /// Print the directory name Claude Code gives a project under its projects
     /// dir (`ways_core::paths::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,

@@ -125,7 +125,7 @@ The mental model: **ways are a rate-limited stream of premises**. Claude does no
 
 The thresholds, half-lives, and vocabularies above were all set by authorial judgment. **Empirical auto-tuning** ([ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)) closes the loop by feeding the matcher's own firing record back into those settings. This is optional operational tooling, not part of the per-turn loop — but it is what keeps the precision-first discipline honest over time.
 
-Two signals accumulate in `$XDG_STATE/agent-ways/events.jsonl` (the legacy `~/.claude/stats/events.jsonl` is migrated forward), both written by the cheap substrate at fire time:
+Two signals accumulate in `$XDG_STATE/agent-ways/events.jsonl`, both written by the cheap substrate at fire time:
 
 - **`way_nearmiss` events** — a *recall* signal. When a way's calibrated relevance probability `g(s)` falls short of the semantic fire threshold τ_s (its effective value after any parent-boost) by no more than `near_miss_margin` (default 0.05) but does not fire, the matcher records the would-be miss (`prob_en`, `prob_multi`, `tau_s`, `margin`, `trigger`, `query_tokens`). The probabilities are already computed; this is persistence, not new work. False silences — the way that *should* have fired — were structurally invisible before this; now they are measurable.
 - **`fire_score` on `way_fired` events** — the calibrated relevance probability `g(s)` that cleared the semantic threshold τ_s, recorded on first-fires only (never on re-disclosures, whose score reflects the re-triggering prompt). This is the population the deferred ADR-134 threshold auto-tune would work from.

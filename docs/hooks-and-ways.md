@@ -432,7 +432,7 @@ sequenceDiagram
 
 ## Telemetry
 
-Firing activity is logged to `$XDG_STATE/agent-ways/events.jsonl` — one JSON object per line (legacy installs may still read `~/.claude/stats/events.jsonl`). Beyond the `way_fired`/`way_redisclosed` cadence events, two signals feed the precision and recall tuning above (ADR-134):
+Firing activity is logged to `$XDG_STATE/agent-ways/events.jsonl` — one JSON object per line. Beyond the `way_fired`/`way_redisclosed` cadence events, two signals feed the precision and recall tuning above (ADR-134):
 
 - **`fire_score`** — recorded on `way_fired` events for **first-fires only** (not redisclosures): the calibrated probability `g(s)` that cleared the threshold and admitted the way to the session. It is a recall/precision telemetry signal that feeds the **deferred** ADR-134 auto-tune — **not** the source of the `g(s)` calibration, which is fit at corpus-generation from the committed `calibration_probes.jsonl` (`ways-cli/src/cmd/corpus.rs`), never from this runtime stream.
 - **`way_nearmiss`** — emitted when a way scored within `near_miss_margin` *below* its effective semantic threshold `τ_s` but did **not** fire (`τ_s - margin ≤ p < τ_s`). Score fields: `prob_en`, `prob_multi`, `tau_s`, `margin`; plus `trigger`, `query_tokens`, and the `way_fired`-convention identity fields (`event`, `way`, `corpus_id`, `domain`, `scope`, `project`, `session`). This is a recall signal — it measures the likely false silences a `τ_s` drop would recover (`scan/mod.rs` `log_near_miss`).
@@ -487,7 +487,7 @@ flowchart TD
 
 ## Domain Enable/Disable
 
-`$XDG_CONFIG_HOME/agent-ways/config.yaml` controls which domains are active (a legacy `$XDG_CONFIG_HOME/ways/config.yaml`, and `~/.claude/ways.json` with `{"disabled": [...]}`, are still honored):
+`$XDG_CONFIG_HOME/agent-ways/config.yaml` controls which domains are active:
 
 ```yaml
 disabled_domains:

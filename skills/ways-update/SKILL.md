@@ -23,8 +23,7 @@ make update-binaries      # FORCE-rebuild ways/attend/way-embed (make setup skip
 
 The pull is done here (step 1/2), so this uses `make update-binaries` — a force
 rebuild — rather than `make setup`, which short-circuits any binary that already
-exists and would silently leave you on the old build. (The all-in-one `make update`
-bundles pull + rebuild + relink, but this skill does its own guarded pull first.)
+exists and would silently leave you on the old build. `ways update` bundles the pull and the rebuild, but this skill does its own guarded pull first.
 The embedding corpus self-heals on the next session via the `ways corpus --if-stale`
 `SessionStart` hook; regenerate it eagerly with `make -C "$APP" setup` if you want.
 
@@ -43,19 +42,11 @@ unknown at invocation:
 APP="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
 ```
 
-### 0. Guard: is this actually a projection install?
+### 0. Guard: is the app source present?
 
 ```bash
-# Legacy pre-1.0 in-place clone? ~/.claude is itself the agent-ways repo.
-# (Same triad as reconcile.rs is_legacy_in_place: own .git + ships tools/ + docs/.)
-if [ -d "$HOME/.claude/.git" ] && [ -d "$HOME/.claude/tools" ] && [ -d "$HOME/.claude/docs" ]; then
-  echo "~/.claude looks like a pre-1.0 in-place clone. Don't update it in place —"
-  echo "migrate to the 1.0 projection first. The migrator was removed in 1.9.0 and"
-  echo "lives at the ways-v1.8.3 tag; see docs/migration-1.0.md."
-  exit 1
-fi
-
 # The app source must exist and be a git checkout.
+# (A pre-1.0 in-place clone has none: see docs/migration-1.0.md.)
 grep -q 'agent-ways' "$APP/Makefile" 2>/dev/null && git -C "$APP" rev-parse --git-dir >/dev/null 2>&1 \
   || { echo "No agent-ways app source at $APP. (Re-run the installer to (re)stage it.)"; exit 1; }
 ```

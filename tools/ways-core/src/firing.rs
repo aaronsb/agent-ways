@@ -8,14 +8,10 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Load all firing events, one JSON object per line, unioned across every
-/// existing events-log file (ADR-153 §1).
+/// Load all firing events, one JSON object per line, from the events log.
 ///
 /// A missing or unreadable log is not an error — it contributes nothing (a fresh
-/// install simply has no firing history yet). The union recovers `session_start`
-/// lines that older shell hooks orphaned in the legacy `~/.claude/stats` file
-/// after the XDG migration; see [`crate::paths::events_log_sources`] for why the
-/// files never overlap.
+/// install simply has no firing history yet).
 pub fn load_events() -> Vec<Value> {
     crate::paths::events_log_sources()
         .iter()
@@ -29,13 +25,11 @@ pub fn load_events() -> Vec<Value> {
         .collect()
 }
 
-/// Concatenated raw text of every existing events-log file (ADR-153 §1 union).
+/// Raw text of the events log.
 ///
 /// The line-oriented timeline reconstruction in `ways rethink` works over raw
 /// JSONL lines rather than parsed values, so it needs the text, not
-/// [`load_events`]'s `Vec<Value>`. Same union guarantee: recovers `session_start`
-/// lines orphaned in the legacy log. Files are joined with a newline; the empty
-/// line any trailing newline produces is inert to line parsers.
+/// [`load_events`]'s `Vec<Value>`.
 pub fn load_events_text() -> String {
     crate::paths::events_log_sources()
         .iter()

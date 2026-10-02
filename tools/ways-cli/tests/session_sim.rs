@@ -652,7 +652,7 @@ fn scenario_8_epoch_integrity() {
 fn scenario_9_domain_disable() {
     let s = Session::new("s9");
 
-    // Create a fixture home with ways.json that disables "testdomain"
+    // Create a fixture home whose user config disables "testdomain"
     // (inside this process's sim root, so no other run shares it)
     let home = sim_root().join("home-s9");
     let _ = std::fs::remove_dir_all(&home);
@@ -667,12 +667,10 @@ fn scenario_9_domain_disable() {
     #[cfg(windows)]
     copy_dir_all(&fixture_ways_dir(), &ways_link).unwrap();
 
-    // Write ways.json disabling testdomain
-    std::fs::write(
-        claude_dir.join("ways.json"),
-        r#"{"disabled": ["testdomain"]}"#,
-    )
-    .unwrap();
+    // Write the user config disabling testdomain
+    let cfg_dir = home.join(".config/agent-ways");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(cfg_dir.join("config.yaml"), "disabled_domains: [testdomain]\n").unwrap();
 
     // Turn 1: prompt that would normally match testdomain/parent/child
     s.scan_prompt_with_home("write unit tests with good coverage", &home);

@@ -146,8 +146,6 @@ disabled_domains:
   - experimental
 ```
 
-(A legacy `~/.claude/ways.json` with `{"disabled": [...]}` is still honored for un-migrated installs.)
-
 All ways in disabled domains are silently skipped everywhere. The domain still appears in the Available Ways table but its ways won't fire. Domain-level disable is the right tool for "never anywhere"; project-scope per-way disable is the right tool for "not in this project."
 
 ### Creating a new domain

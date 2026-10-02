@@ -192,5 +192,44 @@ out=$(cd "$SUPER" && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=submodule.recurse GIT_C
     bash "$HOOKS/softwaredev/code/quality/macro.sh")
 check "quality macro skips submodule files under submodule.recurse" \
     '  600  long.rs' "$(grep -E '^ +[0-9]+  ' <<< "$out")"
+# check-config-updates.sh: only the native XDG app source is checked. The
+# cache path is fixed by the hook (and read by `ways show core`), so keep the
+# user's real one and put it back.
+CFG_CACHE="/tmp/.claude-config-update-state-$(id -u)"
+CFG_BAK="$WORK/cfg-cache.bak"
+[[ -f "$CFG_CACHE" ]] && cp "$CFG_CACHE" "$CFG_BAK"
+restore_cfg_cache() { if [[ -f "$CFG_BAK" ]]; then cp "$CFG_BAK" "$CFG_CACHE"; else rm -f "$CFG_CACHE"; fi; }
+
+rm -f "$CFG_CACHE"
+bash "$ROOT/hooks/check-config-updates.sh"
+check "config-updates: no app source writes no cache" "absent" "$([[ -e $CFG_CACHE ]] && echo present || echo absent)"
+
+APP="$XDG_DATA_HOME/agent-ways"
+mkdir -p "$APP"
+git -C "$APP" init -q
+git -C "$APP" -c user.email=t@t -c user.name=t commit -q --allow-empty -m one
+git -C "$APP" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
+git -C "$APP" remote add origin https://github.com/aaronsb/agent-ways.git
+git -C "$APP" update-ref refs/remotes/origin/main HEAD
+git -C "$APP" reset -q --hard HEAD~1
+# A fresh fetch stamp keeps the hook off the network.
+printf 'fetched=%s\ntype=clone\nbehind=9\n' "$(date +%s)" > "$CFG_CACHE"
+bash "$ROOT/hooks/check-config-updates.sh"
+check "config-updates: native app source is stamped native" "native" "$(sed -n 's/^type=//p' "$CFG_CACHE")"
+check "config-updates: behind count comes from the app source" "1" "$(sed -n 's/^behind=//p' "$CFG_CACHE")"
+check "config-updates: the native cache names the app dir" "$APP" "$(sed -n 's/^repo=//p' "$CFG_CACHE")"
+check "config-updates: show core nudges with ways update" "yes" \
+    "$("$WAYS_TEST_BIN" show core --session cfg-sess 2>/dev/null | grep -q 'ways update' && echo yes || echo no)"
+
+# An origin that is not upstream stamps behind=0: no nudge.
+git -C "$APP" remote set-url origin https://example.com/fork/agent-ways.git
+bash "$ROOT/hooks/check-config-updates.sh"
+check "config-updates: a non-upstream origin stamps behind=0" "0" "$(sed -n 's/^behind=//p' "$CFG_CACHE")"
+restore_cfg_cache
+rm -rf "$APP"
+
+# events-log.sh resolves the XDG state default when the binary is missing.
+EV=$(HOME="$WORK/nohome" XDG_STATE_HOME="$WORK/evstate" bash -c 'source "$1"; echo "$EVENTS_LOG"' _ "$HOOKS/events-log.sh")
+check "events-log.sh defaults to the XDG state log" "$WORK/evstate/agent-ways/events.jsonl" "$EV"
 
 exit $fail

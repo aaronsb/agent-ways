@@ -65,11 +65,9 @@ developing — **don't** put it ahead of your installed `ways` on `PATH` unless 
   caught real "the code claims X but does Y" bugs that green tests didn't.
 - **Releases are tag-driven:** bump `tools/ways-cli/Cargo.toml`, push a `ways-v*` tag, CI builds
   the per-platform artifacts. See the release way / `docs/architecture` for the pipeline.
-- **The transition fallbacks are load-bearing, not legacy cruft.** `paths::cache_root()` and
-  `events_log()` prefer the new XDG location but fall back to the pre-1.0 one so an un-migrated
-  install keeps working. When you touch cache/state paths, preserve the fallback. ADR-179
-  kept these when it removed the migrator — they are what lets a current binary read a
-  legacy install correctly.
+- **Paths have one location.** `paths::cache_root()` and `events_log()` resolve to the XDG
+  location only; the pre-1.0 fallbacks were removed (ADR-506). Do not add a read of an old
+  name or path for compatibility.
 
 ## See also
 

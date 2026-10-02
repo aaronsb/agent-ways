@@ -23,7 +23,7 @@ The move is performed by one gated, backup-first command — `ways migrate`.
 | `$XDG_DATA_HOME/agent-ways/` | **The application** — exactly what's on GitHub: ways, skills, hooks, `bin/`, docs. | Replaced wholesale on update. Losing it is a re-install, not data loss. |
 | `$XDG_CONFIG_HOME/agent-ways/` | **Your own** ways and macros, plus your config. | Durable; never touched by update. |
 | `$XDG_STATE_HOME/agent-ways/` | **Session substrate** — ledger, memory, focus. | Durable; survives a `~/.claude` wipe. |
-| `$XDG_CACHE_HOME/agent-ways/` | **Derived** — corpus, embeddings, model (renamed from `claude-ways/`). | Regenerable; safe to delete. |
+| `$XDG_CACHE_HOME/agent-ways/` | **Derived** — corpus, embeddings, model. | Regenerable; safe to delete. |
 | `~/.claude/` | **The projection** — a merged `settings.json` plus symlinks to the projected tree, and the files Claude Code owns (`projects/`, credentials). | The Claude-Code-owned floor; regenerable from the manifest. |
 
 The headline consequences:
@@ -134,11 +134,24 @@ would ship as a note here rather than as a new release of the command.
 The removal was slated for 1.1, deferred to 1.3, and executed at 1.9.0. Removing it took the
 assisted path, not the capability: the tag is immutable, so the command is always reachable.
 
-**An un-migrated install keeps working.** The transition fallbacks stayed behind — a current
-binary on a legacy in-place `~/.claude` reads core ways from the clone's own `hooks/ways`, its
-cache from the legacy `claude-ways` dir, and its events from `~/.claude/stats`. What it loses
-is `ways reconcile` and `ways update`, which both refuse to run against an in-place clone and
-point here.
+**An un-migrated install is not read.** The transition fallbacks are gone (ADR-506): a
+current binary reads only the 1.0 locations. It does not read the cache from the old
+`claude-ways` dir, events from `~/.claude/stats`, or config from `~/.claude/ways.json` and
+`$XDG_CONFIG_HOME/ways/config.yaml`. `ways reconcile` stops at a real directory where a
+projection root belongs, and `ways update` needs the app source in `$XDG_DATA_HOME`. Migrate
+first, or move your state by hand as below.
+
+## Moving state by hand
+
+Each of these was read by a pre-ADR-506 binary and is not read now. Move what you want to keep:
+
+| Old location | What it held | Move it to |
+|---|---|---|
+| `$XDG_CACHE_HOME/claude-ways/` | model, corpus (derived) | nothing to move; `make setup` rebuilds `$XDG_CACHE_HOME/agent-ways/`. To keep the model: `mv $XDG_CACHE_HOME/claude-ways $XDG_CACHE_HOME/agent-ways` |
+| `~/.claude/stats/events.jsonl` | firing history | `cat ~/.claude/stats/events.jsonl >> $XDG_STATE_HOME/agent-ways/events.jsonl` |
+| `~/.claude/ways.json` | `disabled` domains, `output_language` | `$XDG_CONFIG_HOME/agent-ways/config.yaml`: `disabled` becomes `disabled_domains`, `output_language` becomes `language` |
+| `$XDG_CONFIG_HOME/ways/config.yaml` | user config | `mv` it to `$XDG_CONFIG_HOME/agent-ways/config.yaml` |
+| `~/.claude/.claude-upstream` | upstream marker for renamed clones | nothing reads it; delete it |
 
 ## After migrating
 

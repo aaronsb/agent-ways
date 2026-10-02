@@ -191,23 +191,6 @@ is_agent_ways_repo() {
   return 1
 }
 
-# The migration route off a pre-1.0 in-place clone. `ways migrate` was removed in
-# 1.9.0 (ADR-179) and lives at the ways-v1.8.3 tag, so the user builds it from
-# there. Shared by both in-place branches below — same dead end, same help.
-print_migration_steps() {
-  echo "  Migrate to the new layout (gated, backs up first). The migrator was"
-  echo "  removed in 1.9.0 — build it from the last tag that ships it:"
-  echo ""
-  echo -e "    ${CYAN}git clone --branch ways-v1.8.3 ${UPSTREAM_URL} /tmp/ways-migrator${RESET}"
-  echo -e "    ${CYAN}cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml${RESET}"
-  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways migrate --what-if${RESET}   # preview (read-only)"
-  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways migrate --execute${RESET}   # convert (backs up first)"
-  echo -e "    ${CYAN}/tmp/ways-migrator/tools/target/release/ways update${RESET}              # then bring the app to current"
-  echo ""
-  echo -e "  Guide: ${CYAN}${UPSTREAM_URL}/blob/main/docs/migration-1.0.md${RESET}"
-  echo ""
-}
-
 # Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.
 # Uses `if` (not `&&`) and an explicit `return 0` so a missing binary in the last
 # loop iteration can't make the function return non-zero and trip `set -e`.
@@ -296,16 +279,6 @@ fi
 # --- Already installed (native XDG)? Update in place. ---
 
 if is_agent_ways_repo "$APP_DIR"; then
-  # If ~/.claude is itself a pre-1.0 in-place clone, reconciling over it would
-  # symlink projection roots on top of a live repo — that's a migration, not an
-  # update. Route to the gated migrator instead.
-  if is_agent_ways_repo "$DEST"; then
-    echo -e "${YELLOW}App is installed at ${APP_DIR}, but ~/.claude is still a pre-1.0 in-place clone.${RESET}"
-    echo "  Reconciling over it would symlink projection roots onto your live repo."
-    print_migration_steps
-    exit 1
-  fi
-
   echo -e "${GREEN}Already installed${RESET} (app at ${CYAN}${APP_DIR}${RESET}). Updating..."
   echo ""
   git -C "$APP_DIR" pull --ff-only 2>&1 || {
@@ -329,16 +302,6 @@ if is_agent_ways_repo "$APP_DIR"; then
     echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
     echo "  Fix the build (cd $APP_DIR && make setup), then run: ways reconcile"
   fi
-  exit 0
-fi
-
-# --- Legacy pre-1.0 in-place clone at ~/.claude? Point to the gated migrator. ---
-
-if is_agent_ways_repo "$DEST"; then
-  echo -e "${YELLOW}You have a pre-1.0 in-place agent-ways clone at ~/.claude.${RESET}"
-  echo ""
-  echo "  1.0 moved agent-ways to an XDG application projected into ~/.claude."
-  print_migration_steps
   exit 0
 fi
 
@@ -371,9 +334,8 @@ echo ""
 echo -e "Building binaries + embedding model (${CYAN}make setup${RESET})..."
 echo -e "${DIM}(downloads ~21MB model + pre-built binary on first run)${RESET}"
 echo ""
-# The engine cache falls back to a pre-1.0 claude-ways dir while agent-ways does
-# not exist yet. Create it first, so the Makefile and the binary resolve the
-# same dir even on a machine with leftover legacy caches.
+# Create the engine cache dir first, so the Makefile and the binary resolve the
+# same dir.
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user"
 make -C "$APP_DIR" setup || {
   echo ""

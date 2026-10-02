@@ -477,8 +477,7 @@ const MAX_EVENTS_BYTES: u64 = 32 * 1024 * 1024;
 /// compactions, so the rewrite is rare, not per-append.
 const KEEP_EVENTS_BYTES: u64 = 24 * 1024 * 1024;
 
-/// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl, with a
-/// legacy ~/.claude/stats fallback for un-migrated installs — see paths::events_log).
+/// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
     let events_file = crate::paths::events_log();
     if let Some(stats_dir) = events_file.parent() {

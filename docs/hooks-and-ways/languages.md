@@ -26,11 +26,10 @@ There are **two** different language settings; conflating them is the common mis
 
 | Config | Controls | Set by |
 |--------|----------|--------|
-| `language` in `~/.config/agent-ways/config.yaml` (overrides `output_language` in `~/.claude/ways.json`) | the **ways** intl mode + the output-language directive | `ways-localize` |
+| `language` in `~/.config/agent-ways/config.yaml` | the **ways** intl mode + the output-language directive | `ways-localize` |
 | `language` in Claude Code `settings.json` (a NAME, e.g. `"spanish"`) | Claude Code's **response** language | the operator (or `ways-localize`) |
 
-`ways.json output_language` (Layer 1) is **overridden** by `config.yaml language`
-(Layer 2, default `auto`), so the *effective* switch is the user-scope `language` —
+The *effective* switch is the user-scope `config.yaml language` (default `auto`) —
 the layer `ways-localize` writes. Merely setting Claude Code's `settings.json language`
 does **not** localize ways; that is deliberate work the `ways-localize` skill performs.
 

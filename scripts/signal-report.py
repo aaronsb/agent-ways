@@ -67,16 +67,9 @@ class Score:
 
 
 def _engine_dir() -> Path:
-    # Prefer the 1.0 cache name; fall back to legacy for un-migrated installs.
     # Matches paths::cache_root() in the binary.
     cache = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache"))
-    new = cache / "agent-ways/user"
-    if new.is_dir():
-        return new
-    legacy = cache / "claude-ways/user"
-    if legacy.is_dir():
-        return legacy
-    return new
+    return cache / "agent-ways/user"
 
 
 def way_embed_path() -> Path:

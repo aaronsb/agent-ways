@@ -134,11 +134,9 @@ disabled_domains:
   - itops
 ```
 
-A legacy `~/.claude/ways.json` (`{"disabled": [...]}`) is still honored as a lower-precedence layer for un-migrated installs.
-
 | Key | Purpose |
 |-------|---------|
-| `disabled_domains` | List of domain names to skip (e.g., `[itops, softwaredev]`) — in legacy `ways.json` this key is `disabled` |
+| `disabled_domains` | List of domain names to skip (e.g., `[itops, softwaredev]`) |
 
 Disabled domains are completely ignored — no pattern matching, no output.
 

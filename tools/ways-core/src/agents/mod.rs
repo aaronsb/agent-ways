@@ -15,14 +15,14 @@ pub trait AgentConfig {
 }
 
 /// Resolve output language with cascade:
-///   1. Config language field (from ways.json / XDG config / project overlay)
+///   1. Config language field (from the user config / project overlay)
 ///   2. Active agent's language setting
 ///   3. System locale ($LANG)
 ///   4. "en" fallback
 ///
 /// config::global() — future migration: ctx.config.language
 pub fn resolve_language() -> String {
-    // 1. Config (layered: ways.json → XDG → project)
+    // 1. Config (layered: user → project)
     let cfg_lang = &crate::config::global().language;
     if cfg_lang != "auto" {
         return normalize_language(cfg_lang);

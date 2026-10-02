@@ -37,3 +37,44 @@ fn match_corpus_flag_is_rejected() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("unexpected argument"), "stderr: {err}");
 }
+
+/// The pre-1.0 config layers (`~/.claude/ways.json`, `$XDG_CONFIG_HOME/ways/config.yaml`)
+/// are no longer read (ADR-506); only `$XDG_CONFIG_HOME/agent-ways/config.yaml` is.
+#[test]
+fn old_config_layers_are_not_read() {
+    let home = std::env::temp_dir().join(format!("ways-legacy-config-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(home.join(".config/ways")).unwrap();
+    std::fs::write(home.join(".claude/ways.json"), r#"{"disabled":["itops"],"output_language":"de"}"#).unwrap();
+    std::fs::write(home.join(".config/ways/config.yaml"), "language: fr\ndisabled_domains: [ea]\n").unwrap();
+
+    let show = |home: &std::path::Path| -> serde_json::Value {
+        let out = Command::new(env!("CARGO_BIN_EXE_ways"))
+            .args(["config", "show", "--effective", "--json"])
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_STATE_HOME", home.join(".local/state"))
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("CLAUDE_PROJECT_DIR", home.join("proj"))
+            .output()
+            .expect("run ways");
+        assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).expect("json")
+    };
+
+    let before = show(&home);
+    assert_eq!(before["disabled_domains"], serde_json::json!([]), "{before}");
+    assert_ne!(before["language"], "de", "{before}");
+    assert_ne!(before["language"], "fr", "{before}");
+
+    // Control: the current path is read, so the probe can see a config.
+    std::fs::create_dir_all(home.join(".config/agent-ways")).unwrap();
+    std::fs::write(home.join(".config/agent-ways/config.yaml"), "language: ja\ndisabled_domains: [itops]\n").unwrap();
+    let after = show(&home);
+    assert_eq!(after["language"], "ja", "{after}");
+    assert_eq!(after["disabled_domains"], serde_json::json!(["itops"]), "{after}");
+    let _ = std::fs::remove_dir_all(&home);
+}
