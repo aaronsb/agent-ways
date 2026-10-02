@@ -171,6 +171,9 @@ pub fn show(v: &Value) -> String {
     }
 }
 
+/// A check a key runs beyond its type, returning the message on failure.
+pub type Check = fn(&Value) -> Result<(), String>;
+
 /// A key's default.
 #[derive(Clone, Copy)]
 pub enum DefaultValue {
@@ -214,7 +217,7 @@ pub struct KeySpec {
     /// The long text `help` prints and the TUI's detail pane shows.
     pub long: &'static str,
     /// A check beyond the type, such as an id grammar.
-    pub check: Option<fn(&Value) -> Result<(), String>>,
+    pub check: Option<Check>,
     /// A value computed outside the files, such as whether a key file exists.
     pub computed: Option<fn(&[String]) -> Value>,
 }

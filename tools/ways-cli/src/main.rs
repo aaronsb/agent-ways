@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 // The shared engine now lives in the `ways-core` library crate (ADR-151).
 // Re-export it at the crate root so existing `crate::util::…`, `crate::paths::…`,
@@ -356,6 +357,12 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Read and change settings through their files (ADR-503). Exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden, 5 write failed
+    #[command(disable_help_subcommand = true)]
+    Settings {
+        #[command(subcommand)]
+        action: Option<SettingsCommand>,
+    },
     /// Manage configuration (init/show/path)
     Config {
         #[command(subcommand)]
@@ -701,6 +708,87 @@ enum ShowCommand {
 }
 
 #[derive(Subcommand)]
+enum SettingsCommand {
+    /// Print a key's value in effect
+    Get {
+        key: String,
+        /// The value with its layer, default and file
+        #[arg(long)]
+        json: bool,
+        /// Read this file alone instead of the live layers
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// The project whose .claude/ways.yaml is layered (default: CLAUDE_PROJECT_DIR, else the working directory)
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Write a key; prints nothing on success
+    Set {
+        key: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+        /// Write the project's .claude/ways.yaml instead of the user file
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Remove a key, so the layer below applies
+    Unset {
+        key: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// key=value lines for every key under a prefix
+    List {
+        prefix: Option<String>,
+        /// A file-shaped fragment and each key's layer, default and file; the stored view unless --effective
+        #[arg(long)]
+        json: bool,
+        /// With --json: every key as resolved, defaults included
+        #[arg(long)]
+        effective: bool,
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// What a key or a section does
+    Help { topic: Option<String> },
+    /// Print the canonical fragment under a section or prefix, shaped like its file
+    Emit {
+        prefix: Option<String>,
+        /// The values in effect instead of the canonical ones
+        #[arg(long)]
+        effective: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Check the settings files against the schema; exit 3 with findings
+    Lint {
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Write a settings object (YAML or JSON, from stdin or --file) and answer with a JSON report
+    Apply {
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Write nothing; report the fragment that would be written
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Rewrite one section of a file from canonical
+    Fix {
+        section: String,
+        /// Fix the project's .claude/ways.yaml instead of the user file
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum ConfigCommand {
     /// Initialize user config at XDG path
     Init,
@@ -961,6 +1049,23 @@ fn run() -> Result<()> {
                 Ok(())
             }
         },
+        Commands::Settings { action } => {
+            use cmd::settings as st;
+            cmd::settings::exit_with(match action {
+                None => st::bare(),
+                Some(SettingsCommand::Get { key, json, file, project }) => st::get(&key, json, file.as_deref(), project.as_deref()),
+                Some(SettingsCommand::Set { key, value, project }) => st::set(&key, &value, project.as_deref()),
+                Some(SettingsCommand::Unset { key, project }) => st::unset(&key, project.as_deref()),
+                Some(SettingsCommand::List { prefix, json, effective, file, project }) => {
+                    st::list(prefix.as_deref(), json, effective, file.as_deref(), project.as_deref())
+                }
+                Some(SettingsCommand::Help { topic }) => st::help(topic.as_deref()),
+                Some(SettingsCommand::Emit { prefix, effective, project }) => st::emit(prefix.as_deref(), effective, project.as_deref()),
+                Some(SettingsCommand::Lint { file, project }) => st::lint(file.as_deref(), project.as_deref()),
+                Some(SettingsCommand::Apply { file, dry_run, project }) => st::apply(file.as_deref(), dry_run, project.as_deref()),
+                Some(SettingsCommand::Fix { section, project }) => st::fix(&section, project.as_deref()),
+            })
+        }
         Commands::Config { action } => match action {
             ConfigCommand::Init => {
                 let path = config::Config::init_user_config();

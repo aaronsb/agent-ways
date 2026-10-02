@@ -92,6 +92,9 @@ pub fn run(json_output: bool) -> Result<()> {
     let disabled = crate::config::global().disabled_domains.clone();
     // ADR-131: project-scope per-way toggles
     let disabled_ways: Vec<String> = crate::config::global().disabled_ways().to_vec();
+    // ADR-503 §4: a section that fell back is reported here as well as on
+    // the stderr of the command that loaded it, which a hook hides.
+    let settings_findings = settings_findings();
 
     if json_output {
         let output = json!({
@@ -134,6 +137,7 @@ pub fn run(json_output: bool) -> Result<()> {
             "output_language": output_language,
             "disabled_domains": disabled,
             "disabled_ways": disabled_ways,
+            "settings_findings": settings_findings,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -245,6 +249,12 @@ pub fn run(json_output: bool) -> Result<()> {
         }
         if !disabled_ways.is_empty() {
             println!("Disabled ways:    {} (project scope, ADR-131)", disabled_ways.join(", "));
+        }
+        if !settings_findings.is_empty() {
+            println!("Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());
+            for f in &settings_findings {
+                println!("  {f}");
+            }
         }
         println!();
 
@@ -380,6 +390,18 @@ fn mcp_binary_line() -> String {
         }
         _ => "not installed (`make ways-mcp` in the app directory, or `ways update`)".to_string(),
     }
+}
+
+/// Findings in the live settings files: ways' and the agent's.
+fn settings_findings() -> Vec<String> {
+    let project = std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("PWD").ok())
+        .unwrap_or_else(|| ".".into());
+    let mut layers = ways_core::settings::layers(std::path::Path::new(&project));
+    layers.extend(ways_agent_core::settings::layers());
+    layers.iter().filter(|l| l.present).flat_map(|l| l.findings.iter().map(|f| f.to_string())).collect()
 }
 
 /// Whether a target has the agent-ways MCP server registered.

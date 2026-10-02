@@ -555,11 +555,6 @@ fn checked_text(text: &str, path: Option<&Path>, scope: LayerScope, sections: &[
     Some(serde_yaml::Value::Mapping(checked.accepted))
 }
 
-/// The findings in the live settings files, for `ways status`.
-pub fn diagnostics(project_dir: &Path) -> Vec<agent_settings::Finding> {
-    crate::settings::layers(project_dir).into_iter().flat_map(|l| l.findings).collect()
-}
-
 fn targets_value(list: &[Target]) -> serde_yaml::Value {
     serde_yaml::to_value(list).unwrap_or(serde_yaml::Value::Sequence(Vec::new()))
 }
