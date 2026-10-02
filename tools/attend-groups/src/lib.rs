@@ -366,10 +366,8 @@ impl Groups {
     /// writers `create_dir_all` their target, and the chat's group
     /// resolver falls back to the yaml entry.
     ///
-    /// Reserved names are never swept: a lingering `@open/` belongs
-    /// to the ADR-124 migration (`attend run` moves its signals into
-    /// `_broadcast/`), and sweeping it here would silently destroy
-    /// what that migration exists to preserve.
+    /// A reserved name (`open`, `broadcast`) can never be a group, so an
+    /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
     pub fn cleanup_stale(&self) {
         self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE);
     }
@@ -428,12 +426,7 @@ impl Groups {
             let Some(bare) = name.strip_prefix(GROUP_PREFIX) else {
                 continue;
             };
-            // Reserved names route elsewhere (`open` → the ADR-124
-            // migration) — never sweep them here.
-            if bare.is_empty() || bare == "open" || bare == "broadcast" {
-                continue;
-            }
-            if state.contains_key(bare) {
+            if bare.is_empty() || state.contains_key(bare) {
                 continue;
             }
             let path = entry.path();
@@ -850,16 +843,16 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_never_sweeps_reserved_open_dir() {
-        // `@open/` is the ADR-124 migration's responsibility — it
-        // moves pending legacy signals into `_broadcast/`. The sweep
-        // must not destroy them first, however old the dir is.
+    fn cleanup_sweeps_a_reserved_name_dir_as_an_orphan() {
+        // `open` and `broadcast` are reserved, so no group of that name
+        // can exist: an `@open/` dir is an orphan like any other. No
+        // migration reads it any more (ADR-506).
         let base = tempdir_like();
         fs::create_dir_all(base.join("@open")).unwrap();
         fs::write(base.join("@open").join("a.signal"), "from|p|/x|hi\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
         Groups::new(&base, "x").cleanup_stale_with(|_| true, std::time::Duration::ZERO);
-        assert!(base.join("@open").join("a.signal").exists());
+        assert!(!base.join("@open").exists());
     }
 }
 
