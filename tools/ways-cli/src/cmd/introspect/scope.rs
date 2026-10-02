@@ -36,11 +36,7 @@ pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<
 /// symlinked path — or a subdirectory `$PWD` — won't match and is simply absent
 /// from the list (not an error). Pass `--all` or an explicit `--project` to see it.
 pub(crate) fn project_matches(stored: &str, scope: &str) -> bool {
-    normalize_project_path(stored) == normalize_project_path(scope)
-}
-
-fn normalize_project_path(p: &str) -> String {
-    p.trim_end_matches('/').to_string()
+    ways_core::util::same_project(stored, scope)
 }
 
 #[cfg(test)]

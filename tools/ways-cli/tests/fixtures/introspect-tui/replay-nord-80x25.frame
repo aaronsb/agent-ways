@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| introspect    1 timeline    2 fires    3 spend                         |
+| session   1 timeline   2 fires   3 spend   4 stats   5 precision   |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                    |
 |epoch 3 · 200K ctx · 3 ways · window 1/2  ◇ injected · 1 judged out             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────┼ 3/4|
@@ -26,17 +26,23 @@ agent-tui frame 80x25
 | playing   ↑↓ select  ⏎ why  ←→ frame  space pause  +- 1.0s  f matched  q quit|
 styles
   0   0-0   #bfa2c3 - -
-  0   1-12  #2e3440 #bfa2c3 -
-  0  13-13  #bfa2c3 - -
-  0  16-16  #c99fc1 - -
-  0  17-28  #2e3440 #c99fc1 BOLD
-  0  29-29  #c99fc1 - -
-  0  32-32  #3f3f4e - -
-  0  33-41  #7c8baa #3f3f4e -
-  0  42-42  #3f3f4e - -
-  0  45-45  #3f3f4e - -
-  0  46-54  #7c8baa #3f3f4e -
-  0  55-55  #3f3f4e - -
+  0   1-9   #2e3440 #bfa2c3 -
+  0  10-10  #bfa2c3 - -
+  0  12-12  #c99fc1 - -
+  0  13-24  #2e3440 #c99fc1 BOLD
+  0  25-25  #c99fc1 - -
+  0  27-27  #3f3f4e - -
+  0  28-36  #7c8baa #3f3f4e -
+  0  37-37  #3f3f4e - -
+  0  39-39  #3f3f4e - -
+  0  40-48  #7c8baa #3f3f4e -
+  0  49-49  #3f3f4e - -
+  0  51-51  #3f3f4e - -
+  0  52-60  #7c8baa #3f3f4e -
+  0  61-61  #3f3f4e - -
+  0  63-63  #3f3f4e - -
+  0  64-76  #7c8baa #3f3f4e -
+  0  77-77  #3f3f4e - -
   1   0-7   - - BOLD
   1  44-59  #7c8baa - -
   2   0-39  #7c8baa - -

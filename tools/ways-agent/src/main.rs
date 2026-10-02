@@ -60,6 +60,9 @@ enum Command {
         /// Only this session id.
         #[arg(long)]
         session: Option<String>,
+        /// Only calls in this project path (exact, a trailing slash aside).
+        #[arg(long)]
+        project: Option<String>,
         /// Group rows by session, project, day or month.
         #[arg(long, value_enum, default_value = "day")]
         by: ways_agent_core::spend::By,
@@ -138,8 +141,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             ways_agent::client::clear_start_backoff();
             agent_status(true)
         }
-        Command::Cost { since, session, by, json } => {
-            report::run(since.as_deref(), session.as_deref(), by, json)?;
+        Command::Cost { since, session, project, by, json } => {
+            report::run(since.as_deref(), session.as_deref(), project.as_deref(), by, json)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Unload => {

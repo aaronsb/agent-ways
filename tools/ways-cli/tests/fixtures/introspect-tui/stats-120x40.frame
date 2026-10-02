@@ -1,0 +1,176 @@
+agent-tui frame 120x40
+| session   1 timeline   2 fires   3 spend   4 stats   5 precision                                                       |
+|Usage · 2 sessions · 3 fires · 0 re-disclosures · 2026-07-03 → 2026-07-03                                               |
+|┌ 2 ways in /home/dev/proj ────────────────────────────────────────────────────┐┌ how they fired ──────────────────────┐|
+|│ Way                                                                     Fires││Channel                               │|
+|│▌softwaredev/code/testing                                                    2││      2  semantic:embedding:en        │|
+|│ softwaredev/delivery/commits                                                1││      1  bash                         │|
+|│                                                                              ││Scope                                 │|
+|│                                                                              ││      3  agent                        │|
+|│                                                                              ││Checks                                │|
+|│                                                                              ││      0  fired, 0 anchored            │|
+|│                                                                              ││         mean distance 0.0            │|
+|│                                                                              ││Ways per invocation 1·2·3·4+          │|
+|│                                                                              ││  prompt 2·0·0·0, max 1               │|
+|│                                                                              ││  bash 1·0·0·0, max 1                 │|
+|│                                                                              ││Selected way by model                 │|
+|│                                                                              ││      2  (unstamped)                  │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|│                                                                              ││                                      │|
+|└ ways tune stats --json --project /home/dev/proj ─────────────────────────────┘└──────────────────────────────────────┘|
+| stats   ↑↓ select  q quit                                                                                              |
+styles
+  0   0-8   White Blue -
+  0  10-21  White DarkGray DIM
+  0  23-31  White DarkGray DIM
+  0  33-41  White DarkGray DIM
+  0  43-51  Black Cyan BOLD
+  0  53-65  White DarkGray DIM
+  1   0-4   - - BOLD
+  1   5-72  - - DIM
+  2   0-0   - - DIM
+  2   1-26  Blue - BOLD|DIM
+  2  27-80  - - DIM
+  2  81-96  Blue - BOLD|DIM
+  2  97-119 - - DIM
+  3   0-0   - - DIM
+  3   1-78  - - BOLD
+  3  79-80  - - DIM
+  3  81-87  - - BOLD
+  3 119-119 - - DIM
+  4   0-0   - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-78  - - BOLD|REVERSED
+  4  79-80  - - DIM
+  4 119-119 - - DIM
+  5   0-0   - - DIM
+  5  79-80  - - DIM
+  5 119-119 - - DIM
+  6   0-0   - - DIM
+  6  79-80  - - DIM
+  6  81-85  - - BOLD
+  6 119-119 - - DIM
+  7   0-0   - - DIM
+  7  79-80  - - DIM
+  7 119-119 - - DIM
+  8   0-0   - - DIM
+  8  79-80  - - DIM
+  8  81-86  - - BOLD
+  8 119-119 - - DIM
+  9   0-0   - - DIM
+  9  79-80  - - DIM
+  9 119-119 - - DIM
+ 10   0-0   - - DIM
+ 10  79-80  - - DIM
+ 10 119-119 - - DIM
+ 11   0-0   - - DIM
+ 11  79-80  - - DIM
+ 11  81-108 - - BOLD
+ 11 119-119 - - DIM
+ 12   0-0   - - DIM
+ 12  79-80  - - DIM
+ 12 119-119 - - DIM
+ 13   0-0   - - DIM
+ 13  79-80  - - DIM
+ 13 119-119 - - DIM
+ 14   0-0   - - DIM
+ 14  79-80  - - DIM
+ 14  81-101 - - BOLD
+ 14 119-119 - - DIM
+ 15   0-0   - - DIM
+ 15  79-80  - - DIM
+ 15 119-119 - - DIM
+ 16   0-0   - - DIM
+ 16  79-80  - - DIM
+ 16 119-119 - - DIM
+ 17   0-0   - - DIM
+ 17  79-80  - - DIM
+ 17 119-119 - - DIM
+ 18   0-0   - - DIM
+ 18  79-80  - - DIM
+ 18 119-119 - - DIM
+ 19   0-0   - - DIM
+ 19  79-80  - - DIM
+ 19 119-119 - - DIM
+ 20   0-0   - - DIM
+ 20  79-80  - - DIM
+ 20 119-119 - - DIM
+ 21   0-0   - - DIM
+ 21  79-80  - - DIM
+ 21 119-119 - - DIM
+ 22   0-0   - - DIM
+ 22  79-80  - - DIM
+ 22 119-119 - - DIM
+ 23   0-0   - - DIM
+ 23  79-80  - - DIM
+ 23 119-119 - - DIM
+ 24   0-0   - - DIM
+ 24  79-80  - - DIM
+ 24 119-119 - - DIM
+ 25   0-0   - - DIM
+ 25  79-80  - - DIM
+ 25 119-119 - - DIM
+ 26   0-0   - - DIM
+ 26  79-80  - - DIM
+ 26 119-119 - - DIM
+ 27   0-0   - - DIM
+ 27  79-80  - - DIM
+ 27 119-119 - - DIM
+ 28   0-0   - - DIM
+ 28  79-80  - - DIM
+ 28 119-119 - - DIM
+ 29   0-0   - - DIM
+ 29  79-80  - - DIM
+ 29 119-119 - - DIM
+ 30   0-0   - - DIM
+ 30  79-80  - - DIM
+ 30 119-119 - - DIM
+ 31   0-0   - - DIM
+ 31  79-80  - - DIM
+ 31 119-119 - - DIM
+ 32   0-0   - - DIM
+ 32  79-80  - - DIM
+ 32 119-119 - - DIM
+ 33   0-0   - - DIM
+ 33  79-80  - - DIM
+ 33 119-119 - - DIM
+ 34   0-0   - - DIM
+ 34  79-80  - - DIM
+ 34 119-119 - - DIM
+ 35   0-0   - - DIM
+ 35  79-80  - - DIM
+ 35 119-119 - - DIM
+ 36   0-0   - - DIM
+ 36  79-80  - - DIM
+ 36 119-119 - - DIM
+ 37   0-0   - - DIM
+ 37  79-80  - - DIM
+ 37 119-119 - - DIM
+ 38   0-0   - - DIM
+ 38   1-49  Blue - BOLD|DIM
+ 38  50-119 - - DIM
+ 39   0-6   Black Cyan BOLD
+ 39   9-10  Cyan - BOLD
+ 39  11-17  - - DIM|ITALIC
+ 39  20-20  Cyan - BOLD
+ 39  21-25  - - DIM|ITALIC

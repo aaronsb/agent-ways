@@ -387,6 +387,9 @@ enum SessionCommand {
         /// Also list the ways the relevance judge kept out
         #[arg(long)]
         matched: bool,
+        /// Machine-readable JSON output, for an agent tuning a way
+        #[arg(long)]
+        json: bool,
     },
     /// Clear session markers when ways stop firing or fire wrongly
     ///
@@ -562,10 +565,10 @@ enum TuneCommand {
     /// Audits fire relevance (ADR-134 Decision 3).
     Precision {
         /// Minimum sessions a way must have fired in before it's flagged
-        #[arg(long, default_value = "5")]
+        #[arg(long, default_value_t = cmd::tune_precision::MIN_SESSIONS)]
         min_sessions: usize,
         /// Off-class rate at or above which a way is flagged (0.0–1.0)
-        #[arg(long, default_value = "0.5")]
+        #[arg(long, default_value_t = cmd::tune_precision::FLAG_THRESHOLD)]
         flag_threshold: f64,
         /// Filter to events whose project path contains this substring
         #[arg(long)]
@@ -1080,8 +1083,8 @@ fn run() -> Result<()> {
                 let open = cmd::introspect::Open { keys, snap, depth };
                 cmd::introspect::live(session.as_deref(), project.as_deref(), &open)
             }
-            SessionCommand::Fires { session, project, all, max_score, limit, matched } => {
-                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit, matched)
+            SessionCommand::Fires { session, project, all, max_score, limit, matched, json } => {
+                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit, matched, json)
             }
             SessionCommand::Reset { session, all, confirm } => cmd::reset::run(session.as_deref(), all, confirm),
         },

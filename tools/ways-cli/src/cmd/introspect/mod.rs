@@ -148,10 +148,10 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
         r
     };
     let shown = scope.clone().unwrap_or_else(|| "every project".into());
-    let spend = report::Spend::new(ways_agent_core::spend::load(), scope.as_deref(), shown.clone());
+    let reports = report::Reports::new(&content, scope.as_deref(), shown.clone());
     let screen = match session {
         Some(id) => match Replay::load(&content, id, None, false) {
-            Ok(r) => Introspect::showing(with_speed(r), spend, palette, shape),
+            Ok(r) => Introspect::showing(with_speed(r), reports, palette, shape),
             Err(e) => {
                 println!("{e}");
                 return Ok(());
@@ -165,7 +165,7 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
             }
             sessions::find_transcripts(&mut found, &ways_core::paths::claude_dir());
             let opener: screen::Opener = Box::new(move |id| Replay::load(&content, id, None, false).map(with_speed));
-            Introspect::picking(Picker::new(found, shown), opener, spend, palette, shape)
+            Introspect::picking(Picker::new(found, shown), opener, reports, palette, shape)
         }
     };
     show(screen, open)
@@ -221,8 +221,8 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
             // The spend is scoped to the project's root, as judge calls record
             // it, though the monitor may have been launched in a subdirectory.
             let root = project.map(str::to_string).or_else(ways_core::util::project_root).unwrap_or_else(|| launch_project.clone());
-            let spend = report::Spend::new(ways_agent_core::spend::load(), Some(&root), root.clone());
-            show(Introspect::showing(r, spend, palette, shape), open)
+            let reports = report::Reports::new(&content, Some(&root), root.clone());
+            show(Introspect::showing(r, reports, palette, shape), open)
         }
         Err(_) => {
             println!("No events for the current session yet.");
@@ -316,10 +316,15 @@ pub fn fires(
     max_score: Option<f64>,
     limit: Option<usize>,
     matched: bool,
+    json: bool,
 ) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
-        println!("No events recorded yet.");
+        if json {
+            println!("{}", empty_fires_json(matched));
+        } else {
+            println!("No events recorded yet.");
+        }
         return Ok(());
     }
 
@@ -329,19 +334,27 @@ pub fn fires(
         None => match dump::most_recent_session(&content, scope.as_deref()) {
             Some(s) => s,
             None => {
-                println!("No sessions found in scope.");
+                if json {
+                    println!("{}", empty_fires_json(matched));
+                } else {
+                    println!("No sessions found in scope.");
+                }
                 return Ok(());
             }
         }
     };
 
-    print!("{}", fires_report(&content, &session_id, max_score, limit, matched));
+    if json {
+        println!("{}", serde_json::to_string_pretty(&fires_json(&content, &session_id, max_score, limit, matched))?);
+    } else {
+        print!("{}", fires_report(&content, &session_id, max_score, limit, matched));
+    }
     Ok(())
 }
 
 /// One semantic fire of a session: its score, the way, the text it
 /// matched, and whether it was a re-disclosure.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub(crate) struct SemanticFire {
     pub(crate) score: f64,
     pub(crate) way: String,
@@ -381,6 +394,30 @@ pub(crate) fn semantic_fires(content: &str, session_id: &str) -> Vec<SemanticFir
     }
     rows.sort_by(|a, b| a.score.total_cmp(&b.score));
     rows
+}
+
+/// The `fires` JSON when there is no session to list: the same keys, empty.
+fn empty_fires_json(matched: bool) -> serde_json::Value {
+    let mut out = serde_json::json!({"session": null, "total": 0, "fires": []});
+    if matched {
+        out["judge_blocks"] = serde_json::json!([]);
+    }
+    out
+}
+
+/// The `fires` listing as JSON: the session, its semantic fires lowest
+/// score first after `max_score` and `limit`, how many there were before
+/// the limit, and with `matched` the ways the relevance judge kept out.
+fn fires_json(content: &str, session_id: &str, max_score: Option<f64>, limit: Option<usize>, matched: bool) -> serde_json::Value {
+    let mut fires = semantic_fires(content, session_id);
+    fires.retain(|f| max_score.is_none_or(|cap| f.score <= cap));
+    let total = fires.len();
+    fires.truncate(limit.unwrap_or(total));
+    let mut out = serde_json::json!({"session": session_id, "total": total, "fires": fires});
+    if matched {
+        out["judge_blocks"] = serde_json::json!(ways_core::introspection::judge_blocks(content, session_id));
+    }
+    out
 }
 
 /// The `fires` listing of `session_id` from the event log `content`, and
@@ -447,11 +484,12 @@ fn judge_blocks_text(blocks: &[ways_core::introspection::JudgeBlock]) -> String 
 
 #[cfg(test)]
 mod fires_tests {
-    use super::fires_report;
+    use super::{fires_json, fires_report};
 
     const LOG: &str = concat!(
         r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","p_yes":"0.900","threshold":"0.30","verdict":"pass"}"#, "\n",
         r#"{"event":"way_fired","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"semantic:embedding:en","fire_score":"0.410","surface":"prompt"}"#, "\n",
+        r#"{"event":"way_fired","session":"s","ts":"2026-01-01T00:00:01Z","way":"d/e","trigger":"semantic:embedding:en","fire_score":"0.700","surface":"later"}"#, "\n",
         r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b","p_yes":"0.050","threshold":"0.30","verdict":"block"}"#, "\n",
         r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b/c","p_yes":"0.050","threshold":"0.30","verdict":"block","reason":"ancestor","ancestor":"d/b"}"#, "\n",
     );
@@ -466,5 +504,27 @@ mod fires_tests {
         assert!(matched.contains("2 kept out by the relevance judge in this session:\n  P(yes) 0.05 < 0.30  d/b\n  P(yes) 0.05 < 0.30  d/b/c (with d/b)\n"), "{matched}");
         let none = fires_report(LOG, "other", None, None, true);
         assert!(none.contains("No semantic fires") && none.contains("No way was kept out"), "{none}");
+    }
+
+    /// The JSON form carries what the text does, as data: the fires lowest
+    /// score first, the count before `--limit`, and with `--matched` the
+    /// judge's blocks.
+    #[test]
+    fn fires_json_lists_the_fires_and_the_judges_blocks() {
+        let j = fires_json(LOG, "s", None, Some(1), true);
+        assert_eq!(j["session"], "s");
+        let fires = j["fires"].as_array().unwrap();
+        assert_eq!(fires.len(), 1, "--limit cuts the list: {j}");
+        assert_eq!(j["total"], 2, "the count is taken before the limit");
+        assert_eq!(fires[0]["way"], "d/a");
+        assert_eq!(fires[0]["score"], 0.41);
+        let blocks = j["judge_blocks"].as_array().unwrap();
+        assert_eq!(blocks.iter().map(|b| b["way"].as_str().unwrap()).collect::<Vec<_>>(), ["d/b", "d/b/c"]);
+        assert!(fires_json(LOG, "s", None, None, false).get("judge_blocks").is_none());
+        let capped = fires_json(LOG, "s", Some(0.5), None, false);
+        assert_eq!(capped["total"], 1, "--max-score drops the 0.700 fire: {capped}");
+        assert_eq!(capped["fires"][0]["way"], "d/a");
+        // No session: the same keys, empty.
+        assert_eq!(super::empty_fires_json(true), serde_json::json!({"session": null, "total": 0, "fires": [], "judge_blocks": []}));
     }
 }

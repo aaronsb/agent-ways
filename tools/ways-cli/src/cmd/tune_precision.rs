@@ -77,7 +77,7 @@ fn family_of(way: &str) -> String {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Flag {
+pub(crate) enum Flag {
     Ok,
     LowN,
     MisTargeted,
@@ -85,7 +85,7 @@ enum Flag {
 }
 
 impl Flag {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Flag::Ok => "ok",
             Flag::LowN => "low-n",
@@ -93,7 +93,7 @@ impl Flag {
             Flag::CrossCutting => "cross-cutting",
         }
     }
-    fn remedy(self) -> &'static str {
+    pub(crate) fn remedy(self) -> &'static str {
         match self {
             Flag::Ok => "-",
             Flag::LowN => "insufficient sample",
@@ -103,14 +103,35 @@ impl Flag {
     }
 }
 
-struct WayPrecision {
-    way: String,
-    sessions: usize,
-    off_class: usize,
-    irrelevance: f64,
-    spread: usize,
-    top_off_trigger: String,
-    flag: Flag,
+/// The sessions a way must have fired in before it is flagged, unless
+/// `--min-sessions` says otherwise; the session screen's tab uses it too.
+pub(crate) const MIN_SESSIONS: usize = 5;
+/// The off-class rate at or above which a way is flagged, unless
+/// `--flag-threshold` says otherwise.
+pub(crate) const FLAG_THRESHOLD: f64 = 0.5;
+
+pub(crate) struct WayPrecision {
+    pub(crate) way: String,
+    pub(crate) sessions: usize,
+    pub(crate) off_class: usize,
+    pub(crate) irrelevance: f64,
+    pub(crate) spread: usize,
+    pub(crate) top_off_trigger: String,
+    pub(crate) flag: Flag,
+}
+
+/// The precision audit as data, for callers that render it themselves (the
+/// session TUI) rather than printing. `content` is the events-log text.
+/// `project` filters the fires loaded; `way` filters only the results, since a
+/// session's activity class needs every way that fired in it.
+pub(crate) fn report(
+    content: &str,
+    min_sessions: usize,
+    flag_threshold: f64,
+    project: Option<&str>,
+    way: Option<&str>,
+) -> Vec<WayPrecision> {
+    compute_precision(&load_fires(content, project), min_sessions, flag_threshold, way)
 }
 
 pub fn run(
@@ -138,7 +159,7 @@ pub fn run(
     let results = compute_precision(&fires, min_sessions, flag_threshold, way_filter.as_deref());
 
     if json_output {
-        emit_json(&results);
+        println!("{}", json_text(&results));
     } else {
         emit_report(&results, min_sessions, flag_threshold);
     }
@@ -348,23 +369,71 @@ fn compute_precision(
     out
 }
 
-fn emit_report(results: &[WayPrecision], min_sessions: usize, flag_threshold: f64) {
+/// The text report in three pieces: the table is printed by `agent_fmt`
+/// directly to stdout, so the text around it and its rows are built here.
+struct ReportText {
+    /// Everything before the table (the whole report when nothing is flagged).
+    head: String,
+    /// One row per flagged way, in table column order. Empty ⇒ no table.
+    rows: Vec<Vec<String>>,
+    /// Everything after the table (the summary line).
+    foot: String,
+}
+
+fn report_text(results: &[WayPrecision], min_sessions: usize, flag_threshold: f64) -> ReportText {
     let flagged: Vec<&WayPrecision> = results
         .iter()
         .filter(|r| matches!(r.flag, Flag::MisTargeted | Flag::CrossCutting))
         .collect();
 
-    println!();
-    println!(
-        "  Precision audit — heuristic relevance flags (min-sessions={min_sessions}, flag≥{:.0}%)",
+    let mut head = format!(
+        "\n  Precision audit — heuristic relevance flags (min-sessions={min_sessions}, flag≥{:.0}%)\n",
         flag_threshold * 100.0
     );
-    println!("  A flag is a place to look, not a verdict. Cross-cutting ways fire broadly by");
-    println!("  design and are expected here — never auto-narrow a way's vocabulary from this.");
+    head.push_str("  A flag is a place to look, not a verdict. Cross-cutting ways fire broadly by\n");
+    head.push_str("  design and are expected here — never auto-narrow a way's vocabulary from this.\n");
 
     if flagged.is_empty() {
-        println!();
-        println!("  no ways cleared the flag threshold. {} ways measured.", results.len());
+        head.push_str(&format!(
+            "\n  no ways cleared the flag threshold. {} ways measured.\n",
+            results.len()
+        ));
+        return ReportText { head, rows: Vec::new(), foot: String::new() };
+    }
+    head.push('\n');
+
+    let rows = flagged
+        .iter()
+        .map(|r| {
+            vec![
+                r.way.clone(),
+                r.sessions.to_string(),
+                r.off_class.to_string(),
+                format!("{:.0}%", r.irrelevance * 100.0),
+                r.spread.to_string(),
+                r.top_off_trigger.clone(),
+                r.flag.label().to_string(),
+                r.flag.remedy().to_string(),
+            ]
+        })
+        .collect();
+
+    let mis = flagged.iter().filter(|r| r.flag == Flag::MisTargeted).count();
+    let cross = flagged.iter().filter(|r| r.flag == Flag::CrossCutting).count();
+    let low_n = results.iter().filter(|r| r.flag == Flag::LowN).count();
+    let foot = format!(
+        "\n  {mis} mis-targeted, {cross} cross-cutting, {low_n} low-n (below min-sessions), \
+         {} ok of {} measured.\n",
+        results.len() - flagged.len() - low_n,
+        results.len()
+    );
+    ReportText { head, rows, foot }
+}
+
+fn emit_report(results: &[WayPrecision], min_sessions: usize, flag_threshold: f64) {
+    let parts = report_text(results, min_sessions, flag_threshold);
+    print!("{}", parts.head);
+    if parts.rows.is_empty() {
         return;
     }
 
@@ -375,36 +444,15 @@ fn emit_report(results: &[WayPrecision], min_sessions: usize, flag_threshold: f6
     t.align(3, Align::Right);
     t.align(4, Align::Right);
     t.max_width(7, 48);
-
-    for r in &flagged {
-        t.add_owned(vec![
-            r.way.clone(),
-            r.sessions.to_string(),
-            r.off_class.to_string(),
-            format!("{:.0}%", r.irrelevance * 100.0),
-            r.spread.to_string(),
-            r.top_off_trigger.clone(),
-            r.flag.label().to_string(),
-            r.flag.remedy().to_string(),
-        ]);
+    for row in parts.rows {
+        t.add_owned(row);
     }
-
-    println!();
     t.print();
-
-    let mis = flagged.iter().filter(|r| r.flag == Flag::MisTargeted).count();
-    let cross = flagged.iter().filter(|r| r.flag == Flag::CrossCutting).count();
-    let low_n = results.iter().filter(|r| r.flag == Flag::LowN).count();
-    println!();
-    println!(
-        "  {mis} mis-targeted, {cross} cross-cutting, {low_n} low-n (below min-sessions), \
-         {} ok of {} measured.",
-        results.len() - flagged.len() - low_n,
-        results.len()
-    );
+    print!("{}", parts.foot);
 }
 
-fn emit_json(results: &[WayPrecision]) {
+/// The `--json` form: a pretty-printed array, one object per way.
+fn json_text(results: &[WayPrecision]) -> String {
     let arr: Vec<serde_json::Value> = results
         .iter()
         .map(|r| {
@@ -419,7 +467,7 @@ fn emit_json(results: &[WayPrecision]) {
             })
         })
         .collect();
-    println!("{}", serde_json::to_string_pretty(&serde_json::Value::Array(arr)).unwrap_or_default());
+    serde_json::to_string_pretty(&serde_json::Value::Array(arr)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -566,5 +614,77 @@ mod tests {
         let w = r.iter().find(|w| w.way == "lonely/way").unwrap();
         assert_eq!(w.off_class, 0);
         assert!(matches!(w.flag, Flag::Ok));
+    }
+
+    /// Build an events-log text: five sessions, each with 6 docs ways plus one
+    /// migrations fire (off-class), plus a malformed line and a non-fire event.
+    fn log_fixture() -> String {
+        let mut lines = Vec::new();
+        let ev = |way: &str, session: &str, trigger: &str| {
+            serde_json::json!({
+                "event": "way_fired", "way": way, "session": session,
+                "trigger": trigger, "project": "proj",
+            })
+            .to_string()
+        };
+        for s in 0..5 {
+            let sid = format!("s{s}");
+            for i in 0..6 {
+                lines.push(ev(&format!("softwaredev/docs/w{i}"), &sid, "prompt"));
+            }
+            lines.push(ev("softwaredev/delivery/migrations", &sid, "bash"));
+        }
+        lines.push("not json".to_string());
+        lines.push(serde_json::json!({"event": "way_redisclosed", "way": "x/y", "session": "s0"}).to_string());
+        lines.join("\n")
+    }
+
+    #[test]
+    fn report_and_texts_on_synthetic_log() {
+        let r = report(&log_fixture(), 5, 0.5, None, None);
+        let mig = r.iter().find(|w| w.way == "softwaredev/delivery/migrations").unwrap();
+        assert_eq!((mig.sessions, mig.off_class, mig.spread), (5, 5, 1));
+        assert_eq!(mig.irrelevance, 1.0);
+        assert_eq!(mig.top_off_trigger, "bash");
+        assert!(matches!(mig.flag, Flag::MisTargeted));
+        let docs = r.iter().find(|w| w.way == "softwaredev/docs/w0").unwrap();
+        assert_eq!((docs.sessions, docs.off_class, docs.irrelevance), (5, 0, 0.0));
+        assert_eq!(docs.top_off_trigger, "-");
+        assert!(matches!(docs.flag, Flag::Ok));
+
+        // The way filter narrows results, and the project filter drops fires.
+        assert_eq!(report(&log_fixture(), 5, 0.5, None, Some("migrations")).len(), 1);
+        assert!(report(&log_fixture(), 5, 0.5, Some("other"), None).is_empty());
+
+        let json: serde_json::Value =
+            serde_json::from_str(&json_text(&report(&log_fixture(), 5, 0.5, None, Some("migrations")))).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!([{
+                "way": "softwaredev/delivery/migrations",
+                "sessions": 5,
+                "off_class": 5,
+                "irrelevance_rate": 1.0,
+                "spread": 1,
+                "top_off_trigger": "bash",
+                "flag": "mis-targeted",
+            }])
+        );
+
+        let text = report_text(&r, 5, 0.5);
+        assert!(text.head.starts_with("\n  Precision audit — heuristic relevance flags (min-sessions=5, flag≥50%)\n"));
+        assert_eq!(text.rows.len(), 1);
+        assert_eq!(
+            text.rows[0],
+            vec![
+                "softwaredev/delivery/migrations", "5", "5", "100%", "1", "bash", "mis-targeted",
+                "narrow vocab / scope trigger / demote keyword to vocabulary",
+            ]
+        );
+        assert_eq!(text.foot, "\n  1 mis-targeted, 0 cross-cutting, 0 low-n (below min-sessions), 6 ok of 7 measured.\n");
+
+        let clean = report_text(&report(&log_fixture(), 5, 0.5, None, Some("docs/w0")), 5, 0.5);
+        assert!(clean.rows.is_empty());
+        assert!(clean.head.ends_with("\n  no ways cleared the flag threshold. 1 ways measured.\n"));
     }
 }

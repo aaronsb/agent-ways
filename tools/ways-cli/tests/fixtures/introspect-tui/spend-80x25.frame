@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| introspect    1 timeline    2 fires    3 spend                                 |
+| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
 |Judge spend by day · the log holds calls from 2026-06-30                        |
 |┌ 3 judge calls in /home/dev/proj ─────────────────────────────────────────────┐|
 |│ Day        Calls     Input   Output     Cache Tokens                  Cost   │|
@@ -22,13 +22,15 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
-|└──────────────────────────────────────────────────────────────────────────────┘|
+|└ ways agent cost --json --project /home/dev/proj ─────────────────────────────┘|
 | spend   ↑↓ select  m by month  q quit                                          |
 styles
-  0   0-11  White Blue -
-  0  14-25  White DarkGray DIM
-  0  28-36  White DarkGray DIM
-  0  39-47  Black Cyan BOLD
+  0   0-8   White Blue -
+  0  10-21  White DarkGray DIM
+  0  23-31  White DarkGray DIM
+  0  33-41  Black Cyan BOLD
+  0  43-51  White DarkGray DIM
+  0  53-65  White DarkGray DIM
   1   0-17  - - BOLD
   1  18-55  - - DIM
   2   0-0   - - DIM
@@ -78,7 +80,9 @@ styles
  21  79-79  - - DIM
  22   0-0   - - DIM
  22  79-79  - - DIM
- 23   0-79  - - DIM
+ 23   0-0   - - DIM
+ 23   1-49  Blue - BOLD|DIM
+ 23  50-79  - - DIM
  24   0-6   Black Cyan BOLD
  24   9-10  Cyan - BOLD
  24  11-17  - - DIM|ITALIC

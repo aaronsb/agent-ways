@@ -22,12 +22,12 @@ pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, g
     }
 
     let content = ways_core::firing::load_events_text();
-    let events = parse_events(&content, days, project_filter);
+    let stats = report(&content, days, project_filter);
 
     if json_output {
-        print_json(&events);
+        print_json(&stats);
     } else {
-        print_human(&events, days, project_filter);
+        print_human(&stats, days, project_filter);
     }
 
     Ok(())
@@ -120,9 +120,9 @@ impl Event {
 // ── Per-model breakdown ─────────────────────────────────────────
 
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
-struct ModelTally {
-    fires: u32,
-    redisclosures: u32,
+pub(crate) struct ModelTally {
+    pub(crate) fires: u32,
+    pub(crate) redisclosures: u32,
 }
 
 /// Fires and re-disclosures per model, most fires first. Rows without the
@@ -178,11 +178,11 @@ fn trigger_channel(trigger: &str) -> &str {
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]
-struct InvocationLoad {
-    invocations: u32,
+pub(crate) struct InvocationLoad {
+    pub(crate) invocations: u32,
     /// Invocations that fired exactly 1, 2, 3 ways, then 4 or more.
-    buckets: [u32; INVOCATION_TAIL],
-    max: u32,
+    pub(crate) buckets: [u32; INVOCATION_TAIL],
+    pub(crate) max: u32,
 }
 
 /// How many ways each hook invocation fired, per channel. An invocation is
@@ -216,7 +216,48 @@ fn ways_per_invocation(events: &[Event]) -> Vec<(String, InvocationLoad)> {
     rows
 }
 
-fn print_json(events: &[Event]) {
+/// Everything `ways tune stats` prints, computed once. The JSON and human
+/// renderers format this, and the session screen's stats tab reads it
+/// directly. Count tables are sorted most-first, ties by name, so the output
+/// is stable run to run.
+#[derive(Default, Clone, PartialEq, Debug)]
+pub(crate) struct StatsReport {
+    pub(crate) total_events: usize,
+    pub(crate) sessions: u32,
+    pub(crate) fires: u32,
+    pub(crate) redisclosures: u32,
+    /// Timestamps of the first and last event in the period (full ISO text).
+    pub(crate) first_ts: Option<String>,
+    pub(crate) last_ts: Option<String>,
+    pub(crate) by_way: Vec<(String, u32)>,
+    pub(crate) by_trigger: Vec<(String, u32)>,
+    pub(crate) by_scope: Vec<(String, u32)>,
+    pub(crate) by_model: Vec<(String, ModelTally)>,
+    /// Per way, fires split by model.
+    pub(crate) by_way_model: BTreeMap<String, BTreeMap<String, u32>>,
+    pub(crate) ways_per_invocation: Vec<(String, InvocationLoad)>,
+    pub(crate) check_fires: u32,
+    pub(crate) by_check: Vec<(String, u32)>,
+    pub(crate) check_avg_distance: f64,
+    pub(crate) check_anchored: u32,
+    pub(crate) redisclose_avg_token_distance: f64,
+}
+
+/// Count table as rows, most first, ties by name.
+fn ranked(counts: HashMap<&str, u32>) -> Vec<(String, u32)> {
+    let mut rows: Vec<(String, u32)> =
+        counts.into_iter().map(|(k, n)| (k.to_string(), n)).collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    rows
+}
+
+/// Parse the events log text and aggregate it into a [`StatsReport`].
+pub(crate) fn report(content: &str, days: Option<u32>, project_filter: Option<&str>) -> StatsReport {
+    let events = parse_events(content, days, project_filter);
+    aggregate(&events)
+}
+
+fn aggregate(events: &[Event]) -> StatsReport {
     let mut by_way: HashMap<&str, u32> = HashMap::new();
     let mut by_trigger: HashMap<&str, u32> = HashMap::new();
     let mut by_scope: HashMap<&str, u32> = HashMap::new();
@@ -265,66 +306,99 @@ fn print_json(events: &[Event]) {
         redisclose_distances.iter().sum::<f64>() / redisclose_distances.len() as f64
     };
 
-    let by_model: serde_json::Map<String, serde_json::Value> = model_breakdown(events)
+    let by_way_model = way_model_split(events)
         .into_iter()
-        .map(|(m, t)| (m, json!({"fires": t.fires, "redisclosures": t.redisclosures})))
+        .map(|(way, split)| {
+            (
+                way.to_string(),
+                split.into_iter().map(|(m, n)| (m.to_string(), n)).collect(),
+            )
+        })
         .collect();
-    let by_way_model: serde_json::Map<String, serde_json::Value> = way_model_split(events)
-        .into_iter()
-        .map(|(way, split)| (way.to_string(), json!(split)))
+
+    StatsReport {
+        total_events: events.len(),
+        sessions,
+        fires,
+        redisclosures,
+        first_ts: events.first().map(|e| e.ts.clone()),
+        last_ts: events.last().map(|e| e.ts.clone()),
+        by_way: ranked(by_way),
+        by_trigger: ranked(by_trigger),
+        by_scope: ranked(by_scope),
+        by_model: model_breakdown(events),
+        by_way_model,
+        ways_per_invocation: ways_per_invocation(events),
+        check_fires,
+        by_check: ranked(by_check),
+        check_avg_distance: avg_check_dist,
+        check_anchored,
+        redisclose_avg_token_distance: avg_redisclose_dist,
+    }
+}
+
+/// A count table as a JSON object, keys in row order.
+fn counts_json(rows: &[(String, u32)]) -> serde_json::Map<String, serde_json::Value> {
+    rows.iter().map(|(k, n)| (k.clone(), json!(n))).collect()
+}
+
+/// The `--json` form of the report.
+fn json_value(r: &StatsReport) -> serde_json::Value {
+    let by_model: serde_json::Map<String, serde_json::Value> = r
+        .by_model
+        .iter()
+        .map(|(m, t)| (m.clone(), json!({"fires": t.fires, "redisclosures": t.redisclosures})))
         .collect();
-    let ways_per_invocation: serde_json::Map<String, serde_json::Value> =
-        ways_per_invocation(events)
-            .into_iter()
-            .map(|(channel, load)| {
-                (
-                    channel,
-                    json!({
-                        "invocations": load.invocations,
-                        "1": load.buckets[0],
-                        "2": load.buckets[1],
-                        "3": load.buckets[2],
-                        "4+": load.buckets[3],
-                        "max": load.max,
-                    }),
-                )
-            })
-            .collect();
+    let by_way_model: serde_json::Map<String, serde_json::Value> = r
+        .by_way_model
+        .iter()
+        .map(|(way, split)| (way.clone(), json!(split)))
+        .collect();
+    let ways_per_invocation: serde_json::Map<String, serde_json::Value> = r
+        .ways_per_invocation
+        .iter()
+        .map(|(channel, load)| {
+            (
+                channel.clone(),
+                json!({
+                    "invocations": load.invocations,
+                    "1": load.buckets[0],
+                    "2": load.buckets[1],
+                    "3": load.buckets[2],
+                    "4+": load.buckets[3],
+                    "max": load.max,
+                }),
+            )
+        })
+        .collect();
 
     let output = json!({
-        "total_events": events.len(),
-        "sessions": sessions,
-        "way_fires": fires,
-        "by_way": by_way,
-        "by_trigger": by_trigger,
-        "by_scope": by_scope,
+        "total_events": r.total_events,
+        "sessions": r.sessions,
+        "way_fires": r.fires,
+        "by_way": counts_json(&r.by_way),
+        "by_trigger": counts_json(&r.by_trigger),
+        "by_scope": counts_json(&r.by_scope),
         "by_model": by_model,
         "by_way_model": by_way_model,
         "ways_per_invocation": ways_per_invocation,
-        "check_fires": check_fires,
-        "by_check": by_check,
-        "check_avg_distance": avg_check_dist,
-        "check_anchored": check_anchored,
-        "redisclosures": redisclosures,
-        "redisclose_avg_token_distance": avg_redisclose_dist,
+        "check_fires": r.check_fires,
+        "by_check": counts_json(&r.by_check),
+        "check_avg_distance": r.check_avg_distance,
+        "check_anchored": r.check_anchored,
+        "redisclosures": r.redisclosures,
+        "redisclose_avg_token_distance": r.redisclose_avg_token_distance,
     });
-
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    output
 }
 
-fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>) {
-    let fires: Vec<&Event> = events.iter().filter(|e| e.event == "way_fired").collect();
-    let sessions: u32 = events
-        .iter()
-        .filter(|e| e.event == "session_start")
-        .count() as u32;
-    let redisclosures: u32 = events
-        .iter()
-        .filter(|e| e.event == "way_redisclosed")
-        .count() as u32;
+fn print_json(r: &StatsReport) {
+    println!("{}", serde_json::to_string_pretty(&json_value(r)).unwrap_or_default());
+}
 
-    let first_ts = events.first().map(|e| &e.ts[..10]).unwrap_or("?");
-    let last_ts = events.last().map(|e| &e.ts[..10]).unwrap_or("?");
+fn print_human(r: &StatsReport, days: Option<u32>, project_filter: Option<&str>) {
+    let first_ts = r.first_ts.as_deref().map(|t| &t[..10]).unwrap_or("?");
+    let last_ts = r.last_ts.as_deref().map(|t| &t[..10]).unwrap_or("?");
 
     println!("\nWays of Working — Usage Stats\n");
 
@@ -341,24 +415,16 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
     println!();
     println!(
         "  Sessions: {}  |  Way fires: {}  |  Re-disclosures: {}",
-        sessions,
-        fires.len(),
-        redisclosures
+        r.sessions, r.fires, r.redisclosures
     );
     println!();
 
     // Top ways
     println!("Top ways:");
-    let mut way_counts: HashMap<&str, u32> = HashMap::new();
-    for f in &fires {
-        *way_counts.entry(&f.way).or_insert(0) += 1;
-    }
-    let mut sorted: Vec<(&&str, &u32)> = way_counts.iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-    let max = sorted.first().map(|(_, c)| **c).unwrap_or(1);
+    let max = r.by_way.first().map(|(_, c)| *c).unwrap_or(1);
 
-    for (way, count) in sorted.iter().take(10) {
-        let bar_len = (**count as usize * 20) / max.max(1) as usize;
+    for (way, count) in r.by_way.iter().take(10) {
+        let bar_len = (*count as usize * 20) / max.max(1) as usize;
         let bar: String = "█".repeat(bar_len.max(1));
         println!("  {:<30} {:>3}  {bar}", way, count);
     }
@@ -366,28 +432,22 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
 
     // By trigger
     println!("By trigger:");
-    let mut trigger_counts: HashMap<&str, u32> = HashMap::new();
-    for f in &fires {
-        *trigger_counts.entry(&f.trigger).or_insert(0) += 1;
-    }
-    let mut sorted_t: Vec<(&&str, &u32)> = trigger_counts.iter().collect();
-    sorted_t.sort_by(|a, b| b.1.cmp(a.1));
-    let total_fires = fires.len().max(1);
-    for (trigger, count) in &sorted_t {
-        let pct = **count as usize * 100 / total_fires;
+    let total_fires = (r.fires as usize).max(1);
+    for (trigger, count) in &r.by_trigger {
+        let pct = *count as usize * 100 / total_fires;
         println!("  {:<10} {:>3} ({pct}%)", trigger, count);
     }
     println!();
 
     // By model: fires and re-disclosures per model id stamped at fire time.
-    let models = model_breakdown(events);
+    let models = &r.by_model;
     if !models.is_empty() {
         println!("By model:");
         let mut t = Table::new(&["Model", "Fires", "Re-disclosures"]);
         t.no_auto_fit();
         t.align(1, Align::Right);
         t.align(2, Align::Right);
-        for (model, tally) in &models {
+        for (model, tally) in models {
             t.add_owned(vec![
                 model.clone(),
                 tally.fires.to_string(),
@@ -401,7 +461,6 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
         println!();
 
         // Top ways by model: the same top-ten ways, one column per model.
-        let split = way_model_split(events);
         let model_cols: Vec<&str> = models.iter().map(|(m, _)| m.as_str()).collect();
         let mut headers = vec!["Way"];
         headers.extend(model_cols.iter().copied());
@@ -411,11 +470,11 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
         for col in 1..headers.len() {
             t.align(col, Align::Right);
         }
-        for (way, _) in sorted.iter().take(10) {
-            let per_model = split.get(**way);
+        for (way, _) in r.by_way.iter().take(10) {
+            let per_model = r.by_way_model.get(way);
             let mut row = vec![way.to_string()];
             for m in &model_cols {
-                let n = per_model.and_then(|s| s.get(m)).copied().unwrap_or(0);
+                let n = per_model.and_then(|s| s.get(*m)).copied().unwrap_or(0);
                 row.push(if n == 0 { "-".to_string() } else { n.to_string() });
             }
             t.add_owned(row);
@@ -425,7 +484,7 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
     }
 
     // Ways per hook invocation: how many ways one hook call delivered.
-    let loads = ways_per_invocation(events);
+    let loads = &r.ways_per_invocation;
     if !loads.is_empty() {
         println!("Ways per hook invocation:");
         let mut t = Table::new(&["Channel", "Invocations", "1", "2", "3", "4+", "Max"]);
@@ -433,7 +492,7 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
         for col in 1..7 {
             t.align(col, Align::Right);
         }
-        for (channel, load) in &loads {
+        for (channel, load) in loads {
             t.add_owned(vec![
                 channel.clone(),
                 load.invocations.to_string(),
@@ -450,16 +509,9 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
     }
 
     // Check stats
-    let check_events: Vec<&Event> = events.iter().filter(|e| e.event == "check_fired").collect();
-    if !check_events.is_empty() {
-        println!("Check fires: {}", check_events.len());
-        let mut check_counts: HashMap<&str, u32> = HashMap::new();
-        for c in &check_events {
-            *check_counts.entry(&c.check).or_insert(0) += 1;
-        }
-        let mut sorted_c: Vec<(&&str, &u32)> = check_counts.iter().collect();
-        sorted_c.sort_by(|a, b| b.1.cmp(a.1));
-        for (check, count) in sorted_c.iter().take(10) {
+    if r.check_fires > 0 {
+        println!("Check fires: {}", r.check_fires);
+        for (check, count) in r.by_check.iter().take(10) {
             println!("  {:<30} {:>3}", check, count);
         }
         println!();
@@ -595,5 +647,56 @@ mod tests {
         let channels: Vec<String> = ways_per_invocation(&evs).into_iter().map(|(c, _)| c).collect();
         // One invocation each: alphabetical.
         assert_eq!(channels, vec!["bash", "file", "prompt"]);
+    }
+
+    #[test]
+    fn report_aggregates_a_small_log() {
+        let rows = [
+            json!({"ts":"2026-09-01T09:00:00Z","event":"session_start","session":"s1"}),
+            json!({"ts":"2026-09-01T10:00:00Z","event":"way_fired","way":"d/a","trigger":"keyword","scope":"project","session":"s1","model":"claude-fable-5-1"}),
+            json!({"ts":"2026-09-01T10:00:00Z","event":"way_fired","way":"d/b","trigger":"semantic:embedding:en","scope":"project","session":"s1","model":"claude-fable-5-1"}),
+            json!({"ts":"2026-09-01T11:00:00Z","event":"way_fired","way":"d/a","trigger":"bash","session":"s2"}),
+            json!({"ts":"2026-09-01T11:05:00Z","event":"way_redisclosed","way":"d/a","session":"s2","token_distance":"0.5"}),
+            json!({"ts":"2026-09-02T08:00:00Z","event":"check_fired","check":"c/x","distance":"0.25","anchored":"true"}),
+            json!({"ts":"2026-09-02T08:01:00Z","event":"check_fired","check":"c/x","distance":"0.75"}),
+        ];
+        let text: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+        let r = report(&text.join("\n"), None, None);
+        assert_eq!(r.total_events, 7);
+        assert_eq!((r.sessions, r.fires, r.redisclosures), (1, 3, 1));
+        assert_eq!(r.first_ts.as_deref(), Some("2026-09-01T09:00:00Z"));
+        assert_eq!(r.last_ts.as_deref(), Some("2026-09-02T08:01:00Z"));
+        assert_eq!(r.by_way, vec![("d/a".to_string(), 2), ("d/b".to_string(), 1)]);
+        assert_eq!(r.by_trigger.len(), 3);
+        assert_eq!(r.by_scope, vec![("project".to_string(), 2), ("unknown".to_string(), 1)]);
+        assert_eq!(r.check_fires, 2);
+        assert_eq!(r.by_check, vec![("c/x".to_string(), 2)]);
+        assert_eq!(r.check_avg_distance, 0.5);
+        assert_eq!(r.check_anchored, 1);
+        assert_eq!(r.redisclose_avg_token_distance, 0.5);
+        assert_eq!(r.by_model[0].0, "claude-fable-5-1");
+        assert_eq!(r.by_model[0].1, ModelTally { fires: 2, redisclosures: 0 });
+        assert_eq!(r.by_way_model["d/a"][UNSTAMPED], 1);
+        // One invocation each, so alphabetical; the prompt one fired two ways.
+        assert_eq!(r.ways_per_invocation[1].0, "prompt");
+        assert_eq!(r.ways_per_invocation[1].1.max, 2);
+    }
+
+    /// Equal counts sort by name, in the report and in the JSON, so two runs
+    /// over one log print the same bytes: `--json` is an agent's tuning input.
+    #[test]
+    fn ties_sort_by_name_and_the_json_keeps_that_order() {
+        let fired = |way: &str, trigger: &str| json!({"ts":"2026-09-01T10:00:00Z","event":"way_fired","way":way,"trigger":trigger,"scope":"agent","session":"s1"});
+        let rows = [fired("d/zeta", "keyword"), fired("d/alpha", "bash"), fired("d/mid", "keyword"), fired("d/mid", "file")];
+        let text: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+        let r = report(&text.join("\n"), None, None);
+        let names = |v: &[(String, u32)]| v.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&r.by_way), ["d/mid", "d/alpha", "d/zeta"]);
+        assert_eq!(names(&r.by_trigger), ["keyword", "bash", "file"]);
+        let j = json_value(&r);
+        let keys = |k: &str| j[k].as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        assert_eq!(keys("by_way"), ["d/mid", "d/alpha", "d/zeta"]);
+        assert_eq!(keys("by_trigger"), ["keyword", "bash", "file"]);
+        assert_eq!(serde_json::to_string(&json_value(&report(&text.join("\n"), None, None))).unwrap(), serde_json::to_string(&j).unwrap());
     }
 }

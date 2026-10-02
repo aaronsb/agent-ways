@@ -231,3 +231,7 @@ Decision item 4 said the change rewrites the header `ways-agent-core` writes to 
 ## Note (2026-10-02): the top-level help may end with a judge footer
 
 Issue #751 adds a footer to the help that item 7 governs. The top-level help (a bare `ways`, `ways --help`, `ways help`) may end with a footer of at most two lines, each within 80 columns, saying the relevance judge cannot gate and how to fix it. It prints only when the judge cannot gate, read from stored state with no network call. Per-command help and hooks never print it.
+
+## Note (2026-10-02): every screen has a command an agent can run
+
+A screen is a view, for a person. An agent authors, refactors and tunes ways through commands, and reads their `--json` form to decide its next edit. So everything a screen shows comes from a command that runs without a terminal and has a `--json` form, scoped as the screen is: the session screen's tabs read what `ways session replay --json`, `ways session fires --json`, `ways agent cost --json`, `ways tune stats --json` and `ways tune precision --json` print, scoped as the tab is (#738). A screen may add navigation and nothing else. Its data stays with the command. A group that opens a screen when run bare on a terminal (#748) keeps every verb, and keeps item 7's help and exit 2 in a pipe.
