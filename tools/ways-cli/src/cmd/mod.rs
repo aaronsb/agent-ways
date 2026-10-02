@@ -1,6 +1,5 @@
 pub mod agent;
 pub mod banner;
-pub mod compositor;
 pub mod config_cmd;
 pub mod context;
 pub mod corpus;
@@ -22,8 +21,6 @@ pub mod reconcile;
 pub mod reflow;
 pub mod render;
 pub mod reset;
-pub mod rethink;
-pub mod rethink_dump;
 pub mod siblings;
 pub mod scan;
 pub mod settings;

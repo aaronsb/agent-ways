@@ -6,8 +6,7 @@
 //! moves in `A`-`H`). East-Asian double width and combining marks are not
 //! measured; that would need a dependency the lean binaries decline.
 //!
-//! The table renderer, `ways` render and the rethink compositor all measure
-//! through here.
+//! The table renderer and `ways` render measure through here.
 
 use agent_theme::RESET;
 

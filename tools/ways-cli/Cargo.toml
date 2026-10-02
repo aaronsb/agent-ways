@@ -9,10 +9,6 @@ license = "AGPL-3.0-or-later"
 name = "ways"
 path = "src/main.rs"
 
-[features]
-default = ["tui"]
-tui = ["crossterm", "dep:pulldown-cmark"]
-
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -23,7 +19,6 @@ anyhow = "1"
 glob = "0.3"
 regex = "1"
 rust-stemmers = "1.2"
-crossterm = { version = "0.29", optional = true }
 agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
 agent-theme = { path = "../agent-theme" }
@@ -33,10 +28,9 @@ claude-sessions = { path = "../claude-sessions" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
 ways-agent-core = { path = "../ways-agent-core" }
 agent-settings = { path = "../agent-settings" }
-# The settings screens (ADR-504 §8). Linked into `ways`, never called on a
-# hook path (§11).
+# The settings screens (ADR-504 §8) and the introspect screens (§9). Linked
+# into `ways`, never called on a hook path (§11).
 agent-tui = { path = "../agent-tui" }
-pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess).

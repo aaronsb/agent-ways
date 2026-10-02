@@ -19,7 +19,7 @@ exercised.
 
 The session: ninety-seven hours of work on a knowledge-graph project, spread
 across many sittings under a one-million-token context window. Pulled with
-`ways rethink --session <id> --json`, its summary reads:
+`ways introspect replay --session <id> --json`, its summary reads:
 
 ```
 epochs            342        distinct ways      78

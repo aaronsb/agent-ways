@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(s("2024-03-01T00:00:00Z") - s("2024-02-29T00:00:00Z"), 86_400);
     }
 
-    /// Only UTC is read. The rethink copy took the first 19 characters and
+    /// Only UTC is read. The replay's copy took the first 19 characters and
     /// read `+02:00` as UTC, two hours off; the event-log copy did the same
     /// with no zone at all.
     #[test]

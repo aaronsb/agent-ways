@@ -16,7 +16,10 @@
 
 pub mod adapter;
 pub mod app;
+pub mod markdown;
+pub mod screen;
 pub mod testkit;
+pub mod timeline;
 pub mod tree;
 
 use std::io;

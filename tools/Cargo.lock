@@ -66,8 +66,10 @@ version = "0.1.0"
 dependencies = [
  "agent-theme",
  "libc",
+ "pulldown-cmark",
  "ratatui",
  "signal-hook",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -2608,10 +2610,8 @@ dependencies = [
  "anyhow",
  "clap",
  "claude-sessions",
- "crossterm",
  "glob",
  "libc",
- "pulldown-cmark",
  "regex",
  "rust-stemmers",
  "sensor-trait",

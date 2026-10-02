@@ -1,17 +1,16 @@
-//! Non-interactive JSON dump of a session's way-firing timeline.
+//! The replay as JSON, and the session lists agents pick from.
 //!
-//! `rethink` renders the replay through a TUI; this module emits the same
-//! reconstructed timeline — plus a session summary, the relevance gate's work,
-//! and the near-miss events the TUI omits — as a single JSON document on
-//! stdout, for agents and scripts.
-//! It depends on no terminal feature, so it runs in headless / CI contexts
-//! where the interactive replay can't.
+//! `introspect replay` draws a session's frames on the screen; `replay
+//! --json` writes the same reconstructed timeline, with a session summary,
+//! the relevance gate's work and the near-miss events the screen omits, as
+//! one JSON document on stdout, for agents and scripts. It needs no
+//! terminal, so it runs where the screen cannot (ADR-504 §10).
 
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::rethink;
+use super::{frames, scope, sessions, Frame};
 use crate::session;
 
 // ── Output shape ──────────────────────────────────────────────
@@ -99,7 +98,7 @@ struct NearMiss {
 
 /// Emit a session's reconstructed timeline as a single pretty-printed JSON
 /// document. With no `session`, dumps the most recent session in scope.
-pub fn run_json(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
+pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
@@ -108,7 +107,7 @@ pub fn run_json(session: Option<&str>, project: Option<&str>, all: bool) -> Resu
 
     // Scope to the current project by default; emit a JSON error (not a bail) so
     // agent consumers get structured output even on the fail-loud path.
-    let scope = match rethink::resolve_project_scope(project, all) {
+    let scope = match scope::resolve_project_scope(project, all) {
         Ok(s) => s,
         Err(e) => {
             println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);
@@ -134,19 +133,19 @@ pub fn run_json(session: Option<&str>, project: Option<&str>, all: bool) -> Resu
     Ok(())
 }
 
-/// `ways rethink --list --json`: enumerate candidate sessions in scope as
+/// `ways introspect list --json`: enumerate candidate sessions in scope as
 /// structured data, so an agent can pick one before dumping it (ADR-154 §4).
 /// Newest first. `scope` is null when `--all` was passed.
 pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {
     let content = ways_core::firing::load_events_text();
-    let scope = match rethink::resolve_project_scope(project, all) {
+    let scope = match scope::resolve_project_scope(project, all) {
         Ok(s) => s,
         Err(e) => {
             println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);
             return Ok(());
         }
     };
-    let mut sessions = rethink::gather_sessions(&content, scope.as_deref());
+    let mut sessions = sessions::gather_sessions(&content, scope.as_deref());
     sessions.sort_by(|a, b| b.ts.cmp(&a.ts)); // newest first
     let out = serde_json::json!({
         "scope": scope,
@@ -161,14 +160,14 @@ pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {
 
 fn build_dump(content: &str, session_id: &str) -> Option<SessionDump> {
     let project =
-        rethink::find_session_project(content, session_id).unwrap_or_else(|| "unknown".to_string());
-    let events = rethink::load_session_events(content, session_id);
+        frames::find_session_project(content, session_id).unwrap_or_else(|| "unknown".to_string());
+    let events = frames::load_session_events(content, session_id);
     if events.is_empty() {
         return None;
     }
 
     let context_window = session::detect_context_window_for(&project, session_id);
-    let frames = rethink::reconstruct_frames(&events, &project, session_id, context_window);
+    let frames = frames::reconstruct_frames(&events, &project, session_id, context_window);
 
     let near_misses = build_near_misses(content, session_id, &frames);
     let summary = build_summary(content, session_id, &frames, near_misses.len());
@@ -184,7 +183,7 @@ fn build_dump(content: &str, session_id: &str) -> Option<SessionDump> {
     })
 }
 
-fn to_dump_frame(f: &rethink::Frame) -> DumpFrame {
+fn to_dump_frame(f: &Frame) -> DumpFrame {
     let active_ways = f
         .ways
         .iter()
@@ -212,7 +211,7 @@ fn to_dump_frame(f: &rethink::Frame) -> DumpFrame {
 fn build_summary(
     content: &str,
     session_id: &str,
-    frames: &[rethink::Frame],
+    frames: &[Frame],
     near_miss_count: usize,
 ) -> Summary {
     let mut total_fires = 0u64;
@@ -295,7 +294,7 @@ fn build_summary(
     }
 }
 
-fn build_near_misses(content: &str, session_id: &str, frames: &[rethink::Frame]) -> Vec<NearMiss> {
+fn build_near_misses(content: &str, session_id: &str, frames: &[Frame]) -> Vec<NearMiss> {
     session_events(content, session_id)
         .filter(|v| v["event"].as_str() == Some("way_nearmiss"))
         .map(|v| {
@@ -371,7 +370,7 @@ pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<
             _ => continue,
         };
         if let Some(sc) = scope {
-            if !rethink::project_matches(v["project"].as_str().unwrap_or(""), sc) {
+            if !scope::project_matches(v["project"].as_str().unwrap_or(""), sc) {
                 continue;
             }
         }
@@ -385,7 +384,7 @@ pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<
 
 /// Map a near-miss timestamp to the epoch of the frame it falls within —
 /// the last frame whose timestamp is at or before it.
-fn epoch_for_ts(frames: &[rethink::Frame], ts: &str) -> u64 {
+fn epoch_for_ts(frames: &[Frame], ts: &str) -> u64 {
     let mut epoch = frames.first().map(|f| f.epoch).unwrap_or(0);
     for f in frames {
         if f.timestamp.as_str() <= ts {
