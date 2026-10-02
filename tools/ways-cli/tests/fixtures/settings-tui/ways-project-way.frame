@@ -1,6 +1,6 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
-|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
+|┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││ways.project.api.dual                      │|
 |│     enabled                   true                  ││                                           │|
 |│     language                  auto                  ││value    true                              │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││           ls src/routes                   │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m) │ s set up                                             |
+| browse  0 changed │ 0 queued │ mouse on (m) │ s set up · p projects: all                           |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -38,8 +38,8 @@ styles
   0  59-69  White Blue -
   0  72-80  White Blue -
   1   0-0   - - DIM
-  1   1-24  Blue - BOLD|DIM
-  1  25-55  - - DIM
+  1   1-39  Blue - BOLD|DIM
+  1  40-55  - - DIM
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
@@ -142,4 +142,6 @@ styles
  29  32-43  - - DIM|ITALIC
  29  44-46  - - DIM
  29  47-48  Cyan - -
- 29  49-54  - - DIM|ITALIC
+ 29  49-57  - - DIM|ITALIC
+ 29  58-59  Cyan - -
+ 29  60-72  - - DIM|ITALIC

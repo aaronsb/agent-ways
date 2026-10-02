@@ -21,6 +21,13 @@ struct Probe {
     fresh: Rc<RefCell<Option<Vec<Node>>>>,
     reloads: Rc<Cell<usize>>,
     stamp: Rc<Cell<u64>>,
+    views: Rc<RefCell<Vec<String>>>,
+    /// A view was switched: its files join the watch when the tree is next
+    /// read, which changes the stamp.
+    widened: Rc<Cell<bool>>,
+    /// Each view switch's pending keys; a set refusal refuses the switch.
+    seen_pending: Rc<RefCell<Vec<Vec<String>>>>,
+    refuse: Rc<RefCell<Option<String>>>,
 }
 
 impl Adapter for Probe {
@@ -43,6 +50,9 @@ impl Adapter for Probe {
     }
     fn reload(&mut self) -> Option<Vec<Node>> {
         self.reloads.set(self.reloads.get() + 1);
+        if self.widened.replace(false) {
+            self.stamp.set(self.stamp.get() + 1);
+        }
         self.fresh.borrow().clone()
     }
     fn stamp(&self) -> Option<u64> {
@@ -50,6 +60,18 @@ impl Adapter for Probe {
     }
     fn help(&self, tab: &str) -> Option<String> {
         Some(format!("{tab}: what this tab holds\n  a line of {tab} help\n"))
+    }
+    fn view(&mut self, name: &str, pending: &[&Store]) -> Result<Option<String>, String> {
+        self.seen_pending.borrow_mut().push(pending.iter().map(|s| s.key.clone()).collect());
+        if let Some(why) = self.refuse.borrow().clone() {
+            return Err(why);
+        }
+        self.views.borrow_mut().push(name.to_string());
+        self.widened.set(true);
+        Ok(Some(format!("showing {name}")))
+    }
+    fn title(&self, tab: &str) -> Option<String> {
+        Some(format!("{tab} · {} views", self.views.borrow().len()))
     }
 }
 
@@ -199,6 +221,62 @@ fn a_reload_finds_the_cursor_closed_groups_and_failure_by_key() {
     *p.fresh.borrow_mut() = Some(fresh);
     app.reload();
     assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "matching.floor", "the cursor stays on its key");
+}
+
+#[test]
+fn a_view_action_switches_through_the_adapter_reloads_and_queues_nothing() {
+    let with_view = || {
+        let mut t = tree();
+        t[0].actions = vec![Action::new("wide", "view: everything").arg(Arg::View("wide".into()))];
+        t
+    };
+    let p = Probe::default();
+    let mut app = App::new("t", with_view()).adapter(p.clone());
+    press(&mut app, &[KeyCode::Down, KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.3");
+    press(&mut app, &[KeyCode::Enter]);
+    let mut fresh = with_view();
+    fresh[0].children.insert(0, Node::leaf("more", "", Setting::new(Kind::ReadOnly, "x", "user")));
+    *p.fresh.borrow_mut() = Some(fresh);
+    let key = tree::action_keys(&app.roots[0].actions)[0].unwrap();
+    press(&mut app, &[KeyCode::Char(key)]);
+    assert_eq!(*p.views.borrow(), ["wide"], "the key asked the adapter for the view");
+    assert_eq!(p.reloads.get(), 1, "then the tree reloaded");
+    assert!(app.queued().is_empty(), "a view queues nothing");
+    assert_eq!(app.pending(), 1, "the pending edit came through");
+    assert_eq!(app.roots[0].children[2].setting.as_ref().unwrap().value, "0.3");
+    assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "matching.floor", "the cursor stays on its key");
+    assert_eq!(app.message(), "showing wide");
+    assert_eq!(*p.seen_pending.borrow(), [vec!["matching.floor".to_string()]], "the adapter saw the pending edit's store");
+    assert!(text(&render(&mut app, 100, 20)).contains("matching · 1 views"), "the tree pane's title is the adapter's for the tab");
+    app.watch();
+    assert_eq!(p.reloads.get(), 1, "the files the view reads count as read");
+    // The menu picks it too.
+    press(&mut app, &[KeyCode::Char('a')]);
+    assert!(text(&render(&mut app, 100, 20)).contains("view"), "the menu tags it");
+    press(&mut app, &[KeyCode::Enter]);
+    assert_eq!(p.views.borrow().len(), 2);
+    assert!(app.queued().is_empty() && matches!(app.mode, Mode::Browse));
+}
+
+#[test]
+fn a_view_the_adapter_refuses_changes_nothing_and_says_why() {
+    let mut t = tree();
+    t[0].actions = vec![Action::new("wide", "view: everything").arg(Arg::View("wide".into()))];
+    let p = Probe::default();
+    *p.fresh.borrow_mut() = Some(t.clone());
+    *p.refuse.borrow_mut() = Some("1 pending change would vanish".into());
+    let mut app = App::new("t", t).adapter(p.clone());
+    press(&mut app, &[KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.4");
+    press(&mut app, &[KeyCode::Enter]);
+    let key = tree::action_keys(&app.roots[0].actions)[0].unwrap();
+    press(&mut app, &[KeyCode::Char(key)]);
+    assert_eq!(app.message(), "refused: 1 pending change would vanish");
+    assert_eq!(p.reloads.get(), 0, "a refused view reloads nothing");
+    assert!(p.views.borrow().is_empty() && app.pending() == 1 && app.queued().is_empty());
 }
 
 #[test]

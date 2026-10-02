@@ -79,6 +79,21 @@ pub trait Adapter {
         None
     }
 
+    /// Switch to the view an action's `Arg::View` names. `pending` holds
+    /// the store of each pending value edit: an adapter refuses, saying
+    /// why, a view in which one of them would no longer show, since the
+    /// reload would drop it. After a switch the shell reloads the tree; the
+    /// message, if any, goes to the bottom bar.
+    fn view(&mut self, _name: &str, _pending: &[&Store]) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    /// The tree pane's title on `tab`, such as one naming the view the tab
+    /// shows. Asked as the pane is drawn; `None` keeps the shell's.
+    fn title(&self, _tab: &str) -> Option<String> {
+        None
+    }
+
     /// The help text for a tab, as the application's own `--help` prints it
     /// (ADR-503 §10). The help overlay shows it below the keys.
     fn help(&self, _tab: &str) -> Option<String> {

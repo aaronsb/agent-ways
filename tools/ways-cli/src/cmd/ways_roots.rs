@@ -32,9 +32,13 @@ pub fn session_project_ways(dir: &Path) -> Option<PathBuf> {
 /// (resolving probes the filesystem, and an unreachable mount stalls there),
 /// and what was skipped and why.
 pub fn known_project_ways(progress: &dyn Fn(&str)) -> Vec<(String, PathBuf)> {
-    let root = ways_core::paths::transcripts_root();
+    known_project_ways_in(&ways_core::paths::transcripts_root(), progress)
+}
+
+/// [`known_project_ways`] under the transcripts directory `root`.
+pub fn known_project_ways_in(root: &Path, progress: &dyn Fn(&str)) -> Vec<(String, PathBuf)> {
     progress(&format!("enumerating projects: {}", root.display()));
-    let entries = match std::fs::read_dir(&root) {
+    let entries = match std::fs::read_dir(root) {
         Ok(e) => e,
         Err(e) => {
             progress(&format!("  cannot read {}: {e}", root.display()));
@@ -60,7 +64,7 @@ pub fn known_project_ways(progress: &dyn Fn(&str)) -> Vec<(String, PathBuf)> {
         }
         let encoded = entry.file_name().to_string_lossy().to_string();
         progress(&format!("  resolving {encoded}"));
-        let Some(project) = claude_sessions::resolve_project_path(&root, &encoded) else {
+        let Some(project) = claude_sessions::resolve_project_path(root, &encoded) else {
             progress("    unresolved — skipped");
             continue;
         };

@@ -145,14 +145,17 @@ pub struct Node {
     /// controls in the detail pane, under `about_title`.
     pub about: String,
     pub about_title: String,
+    /// What the detail pane heads the row with in place of its key: for a
+    /// row that stands for no setting, whose key would read as one.
+    pub heading: Option<String>,
 }
 
 impl Node {
     pub fn group(name: impl Into<String>, doc: impl Into<String>, children: Vec<Node>) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new() }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new(), heading: None }
     }
     pub fn leaf(name: impl Into<String>, doc: impl Into<String>, setting: Setting) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new() }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new(), heading: None }
     }
     /// Rows gathered under a header that names their columns, keyed as if
     /// they sat in the parent.
@@ -162,6 +165,10 @@ impl Node {
     pub fn about(mut self, title: impl Into<String>, text: impl Into<String>) -> Self {
         self.about_title = title.into();
         self.about = text.into();
+        self
+    }
+    pub fn headed(mut self, heading: impl Into<String>) -> Self {
+        self.heading = Some(heading.into());
         self
     }
     pub fn columns(mut self, (name, value): (&str, &str)) -> Self {
@@ -202,6 +209,9 @@ pub enum Arg {
     /// queues the flow's own commands, so the action's `command` is only a
     /// description for the detail pane.
     Flow(String),
+    /// A change of what the tree shows, named for the adapter
+    /// ([`crate::Adapter::view`]). Nothing is queued; the tree reloads.
+    View(String),
 }
 
 /// Something a node can do that is not a value change: a named command line.
@@ -253,7 +263,7 @@ impl Action {
             Arg::None => self.command.clone(),
             Arg::Text(_) => self.command.replace("{}", &quote(text)),
             Arg::Secret => format!("{} < <stdin>", self.command),
-            Arg::Flow(_) => self.command.clone(),
+            Arg::Flow(_) | Arg::View(_) => self.command.clone(),
         }
     }
 }

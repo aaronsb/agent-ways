@@ -144,12 +144,14 @@ fn segments(b: &Bound) -> Vec<String> {
 
 /// Where a way's file comes from, highest precedence first.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum WayScope {
+pub(super) enum WayScope {
     Project,
     User,
     Shipped,
     /// Named in a ways.yaml, found in no root.
     Missing,
+    /// Another project's, listed in the all projects view.
+    Other,
 }
 
 impl WayScope {
@@ -161,6 +163,7 @@ impl WayScope {
             WayScope::User => "your ways",
             WayScope::Shipped => "shipped",
             WayScope::Missing => "not found",
+            WayScope::Other => "another project",
         }
     }
 
@@ -171,28 +174,29 @@ impl WayScope {
             WayScope::User => format!("Your own ways, in {}. They survive updates and shadow a shipped way of the same id.", tilde(&ctx.user_ways, home)),
             WayScope::Shipped => "The ways agent-ways ships.".into(),
             WayScope::Missing => "Switches this project's ways.yaml names for ways no root holds any more.".into(),
+            WayScope::Other => "The ways of another project Claude Code knows.".into(),
         }
     }
 }
 
 /// A way's scope and its file.
-struct Located {
-    scope: WayScope,
+pub(super) struct Located {
+    pub(super) scope: WayScope,
     /// The root of its scope, which the detail names its file against.
-    root: PathBuf,
+    pub(super) root: PathBuf,
     /// None when the directory holds no way file sessions would read.
-    file: Option<PathBuf>,
+    pub(super) file: Option<PathBuf>,
 }
 
 /// A way's file, found as sessions find it: the first `.md` with
 /// frontmatter in `<root>/<id>/`, whatever its name.
-fn way_file(root: &Path, id: &str) -> Option<PathBuf> {
+pub(super) fn way_file(root: &Path, id: &str) -> Option<PathBuf> {
     crate::session::find_way_in_dir(&root.join(id))
 }
 
 /// What a way is, for the detail pane: its description, then the fields
 /// that decide when it fires, and its macro with the first lines it runs.
-fn way_about(w: &Located, home: &Path) -> String {
+pub(super) fn way_about(w: &Located, home: &Path) -> String {
     let row = |k: &str, v: String| format!("{k:<11}{v}");
     let Some(file) = &w.file else {
         return format!("No way file in this way's directory, so sessions skip it.\n\n{}", row("from", w.scope.label().into()));
@@ -221,7 +225,7 @@ fn way_about(w: &Located, home: &Path) -> String {
 /// Each group under `n` sums up its switches, as the files were read:
 /// how many ways, how many off. Only a row with a store is a switch.
 /// Returns `(ways, off)` for `n`.
-fn summarize(n: &mut Node) -> (usize, usize) {
+pub(super) fn summarize(n: &mut Node) -> (usize, usize) {
     let own = n.setting.as_ref().filter(|s| s.store.is_some()).map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
     if n.children.is_empty() {
         return own;
@@ -243,7 +247,7 @@ fn summarize(n: &mut Node) -> (usize, usize) {
 /// Put `leaf` at `path` under `root`, making the groups between. A node
 /// already there keeps its children and takes the leaf's setting: a way
 /// with ways under it is both.
-fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> String, prefix: &str) {
+pub(super) fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> String, prefix: &str) {
     let (first, rest) = path.split_first().expect("a key has a name");
     let name = format!("{prefix}.{first}");
     let at = match root.children.iter().position(|c| c.name == *first) {
@@ -295,7 +299,7 @@ impl Ways {
 
     /// The doc of a group: its section's, or for one of attend's sensors, a
     /// line on that sensor.
-    fn section_doc(&self, name: &str) -> String {
+    pub(super) fn section_doc(&self, name: &str) -> String {
         if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
             return attend_config::schema::sensor_doc(s);
         }
@@ -372,6 +376,7 @@ impl Ways {
         }
         if tab.name == "ways" {
             self.scope_sections(&mut root);
+            self.other_projects(&mut root);
         }
         self.headers(&mut root, tab.prefix);
         let mut found = self.findings(tab, &files, layers);
@@ -380,9 +385,7 @@ impl Ways {
             root.children.insert(0, found);
         }
         match tab.name {
-            "ways" => {
-                root.actions = vec![Action::new("set up", "guided: pick a project, preview what `ways init` writes there").arg(Arg::Flow("setup".into()))];
-            }
+            "ways" => root.actions = self.ways_actions(),
             "install" => {
                 root.actions = vec![
                     activate(),
@@ -438,6 +441,21 @@ impl Ways {
         sections.extend(std::mem::take(&mut project.children));
         project.children = sections;
         summarize(project);
+    }
+
+    /// The ways tab's actions: the setup flow, and the switch between this
+    /// project's ways and every known project's.
+    pub(super) fn ways_actions(&self) -> Vec<Action> {
+        let view = if self.all_projects.get() {
+            Action::new("projects: this one", "view: this project's ways").doc("Lists this project's ways again, beside your own and the shipped ones.")
+        } else {
+            Action::new("projects: all", "view: every known project's ways")
+                .doc("Lists the ways of every project Claude Code knows on this machine, a group per project under this one's. A switch there writes that project's .claude/ways.yaml.")
+        };
+        vec![
+            Action::new("set up", "guided: pick a project, preview what `ways init` writes there").arg(Arg::Flow("setup".into())),
+            view.arg(Arg::View("projects".into())),
+        ]
     }
 
     /// The row a project without ways of its own shows: how to start.

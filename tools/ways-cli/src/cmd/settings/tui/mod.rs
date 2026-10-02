@@ -10,10 +10,11 @@
 
 pub mod build;
 pub mod flows;
+pub mod others;
 #[cfg(test)]
 mod tests;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{IsTerminal, Read, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,6 +32,7 @@ use serde_yaml::Value;
 
 use super::{fail, live_layers, lookup, project_dir, registry, target_file, write_file, write_file_checked, Failure, Out};
 use build::{display, tilde, TABS};
+use others::Other;
 
 /// Where the screens look: the project, the home directory paths are shown
 /// under, the corpus whose ways get per-project toggles, and the places the
@@ -78,11 +80,17 @@ pub struct Ways {
     /// The files the tree was read from, for the change watch: found when
     /// the tree is built, so the watch reads metadata only.
     watched: RefCell<Vec<PathBuf>>,
+    /// Whether the ways tab lists every known project's ways, not only this
+    /// project's.
+    all_projects: Cell<bool>,
+    /// The other projects with ways, found once: finding them probes the
+    /// filesystem.
+    others: RefCell<Option<Rc<Vec<Other>>>>,
 }
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
-        Ways { ctx, reg: registry(), watched: RefCell::default() }
+        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default() }
     }
 
     pub fn layers(&self) -> Vec<Layer> {
@@ -90,6 +98,9 @@ impl Ways {
         let mut paths: Vec<PathBuf> = layers.iter().filter_map(|l| l.path.clone()).collect();
         paths.push(ways_agent_core::profile::user_layer_path());
         paths.push(ways_core::paths::config_root().join("keys"));
+        if self.all_projects.get() {
+            paths.extend(self.others().iter().map(|o| ways_core::settings::project_file(&o.project)));
+        }
         *self.watched.borrow_mut() = paths;
         layers
     }
@@ -153,9 +164,14 @@ impl Ways {
     /// value the tree read before it was edited, with `file` as `doc` now
     /// holds it. A difference is an outside change, which a write would
     /// overwrite unseen; it is refused, naming the key and both values.
-    fn unchanged(&self, file: &Path, doc: &agent_settings::yaml_edit::Doc, values: &[Write]) -> Result<(), String> {
+    fn unchanged(&self, file: &Path, project: &Path, doc: &agent_settings::yaml_edit::Doc, values: &[Write]) -> Result<(), String> {
         let text = doc.text();
-        let mut layers = live_layers(&self.ctx.project);
+        // Another project's switch was read from its own file alone.
+        let mut layers = if project == self.ctx.project {
+            live_layers(project)
+        } else {
+            vec![Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, file)]
+        };
         for l in layers.iter_mut().filter(|l| l.path.as_deref() == Some(file)) {
             *l = Layer::from_text(super::schema_of(l.file), &l.name.clone(), l.file, l.scope, Some(file), &text);
         }
@@ -202,12 +218,30 @@ impl Adapter for Ways {
     /// or a key that changed on disk since it was read, takes no write.
     fn write(&mut self, file: &Path, values: &[Write]) -> Result<(), String> {
         self.refuse_broken(file)?;
+        // A project-scope key may be another project's, from the all
+        // projects view: one of the projects listed there, whose file it
+        // names.
+        let mut project = self.ctx.project.clone();
         let mut edits = Vec::new();
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value).map_err(|m| format!("{}: {m}", w.store.key))?;
-            let project = (b.spec.scope == Scope::Project).then_some(self.ctx.project.as_path());
-            let (path, _) = target_file(&b, project).map_err(|f| f.message)?;
+            let at = |p: &Path| target_file(&b, (b.spec.scope == Scope::Project).then_some(p)).map(|t| t.0).map_err(|f| f.message);
+            let mut path = at(&self.ctx.project)?;
+            if path != file && b.spec.scope == Scope::Project {
+                match self.other_owning(file) {
+                    Some(other) => {
+                        project = other;
+                        path = file.to_path_buf();
+                    }
+                    None => {
+                        return Err(self.short(&format!(
+                            "{} is the ways.yaml of neither this project nor one Claude Code knows; nothing was written",
+                            file.display()
+                        )))
+                    }
+                }
+            }
             if path != file {
                 return Err(format!("{} is written to {}, not {}", w.store.key, path.display(), file.display()));
             }
@@ -215,7 +249,7 @@ impl Adapter for Ways {
         }
         // The wait for the lock is bounded: a writer that hangs holding it
         // must not freeze the screen's keys and signals.
-        match write_file_checked(file, &edits, Some(LOCK_WAIT), |doc| self.unchanged(file, doc, values)) {
+        match write_file_checked(file, &edits, Some(LOCK_WAIT), |doc| self.unchanged(file, &project, doc, values)) {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(conflict)) => Err(self.short(&conflict)),
             Err(f) => Err(self.short(&f.message)),
@@ -238,6 +272,9 @@ impl Adapter for Ways {
     /// with the line's arguments, a secret on stdin. It runs in the
     /// background; the screens poll it.
     fn start(&mut self, q: &Queued) -> Box<dyn Job> {
+        // A command, such as the `ways init` the setup flow queues, may give
+        // a project ways: the other projects are found again.
+        self.forget_others();
         let ended = |r: Result<(), String>| -> Box<dyn Job> { Box::new(Ended(Some(r))) };
         let line = q.command.strip_suffix(" < <stdin>").unwrap_or(&q.command).to_string();
         let argv = match split(&line) {
@@ -324,6 +361,30 @@ impl Adapter for Ways {
 
     fn flow(&self, name: &str) -> Option<Flow> {
         flows::flow(&self.env(), name)
+    }
+
+    /// `projects` switches the ways tab between this project's ways and
+    /// every known project's. Back to this project's is refused while an
+    /// edit to another project's file is pending, which it would drop.
+    /// Either way the other projects are found again.
+    fn view(&mut self, name: &str, pending: &[&Store]) -> Result<Option<String>, String> {
+        if name != "projects" {
+            return Ok(None);
+        }
+        let all = !self.all_projects.get();
+        if !all {
+            if let Some(why) = self.narrow_refusal(pending) {
+                return Err(why);
+            }
+        }
+        self.forget_others();
+        self.all_projects.set(all);
+        Ok(Some(if all { "all projects shown" } else { "this project shown" }.into()))
+    }
+
+    /// The ways tab names the view it shows.
+    fn title(&self, tab: &str) -> Option<String> {
+        (tab == "ways").then(|| title(&self.ctx, Some(if self.all_projects.get() { "all projects" } else { "this project" })))
     }
 
     fn help(&self, tab: &str) -> Option<String> {
@@ -486,13 +547,19 @@ fn depth_of(s: Option<&str>) -> Result<ColorDepth, Failure> {
 }
 
 /// The app over the live files, opened on `tab`.
+/// The tree pane's title: the project, and the view a tab names.
+fn title(ctx: &Ctx, view: Option<&str>) -> String {
+    let view = view.map(|v| format!(" · {v}")).unwrap_or_default();
+    format!(" ways settings — {}{view} ", tilde(&ctx.project, &ctx.home))
+}
+
 pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Failure> {
     let layers = ways.layers();
     let roots = ways.build(&layers);
     let active = ways.value("theme.active", &layers).and_then(|v| v.as_str().map(str::to_string));
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone());
-    let title = format!(" ways settings — {} ", tilde(&ways.ctx.project, &ways.ctx.home));
+    let title = title(&ways.ctx, None);
     let mut names: Vec<&str> = TABS.iter().map(|t| t.name).collect();
     names.push("theme");
     let at = match tab {

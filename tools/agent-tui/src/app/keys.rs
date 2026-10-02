@@ -597,7 +597,30 @@ impl App {
             Arg::Text(_) => self.mode = Mode::Arg { path, action, buf: String::new() },
             Arg::Secret => self.mode = Mode::Secret { path, action, buf: SecretBuf::default() },
             Arg::Flow(name) => self.start_flow(&path, &name),
+            Arg::View(name) => self.switch_view(&name),
         }
+    }
+
+    /// Change what the tree shows: the adapter switches, the tree reloads,
+    /// and pending edits and the cursor are found again by key.
+    /// The adapter may refuse a view in which a pending edit would not
+    /// show; nothing changes then and the bottom bar says why.
+    pub(super) fn switch_view(&mut self, name: &str) {
+        let changes = tree::changes(&self.roots);
+        let pending: Vec<&tree::Store> = changes.iter().filter_map(|c| c.1.as_ref()).collect();
+        let said = match self.adapter.view(name, &pending) {
+            Ok(said) => said,
+            Err(why) => {
+                self.msg = format!("refused: {why}");
+                return;
+            }
+        };
+        let r = self.reload();
+        // A view may read other files, which the watch now covers: stamp
+        // them as just read, so the watch does not reload a second time.
+        self.stamp = self.adapter.stamp();
+        let parts: Vec<String> = said.into_iter().chain((!r.is_clean()).then(|| r.message())).collect();
+        self.msg = if parts.is_empty() { format!("view: {name}") } else { parts.join(" · ") };
     }
 
     /// Build the queued command; ask first when the action needs confirming.

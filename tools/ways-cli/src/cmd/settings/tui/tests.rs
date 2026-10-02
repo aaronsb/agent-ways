@@ -449,6 +449,193 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
     assert_eq!(section(project, "not found").about, "1 way, 1 switched off as loaded.");
 }
 
+// ── other projects' ways ───────────────────────────────────────
+
+fn ctx_of(fx: &Fixture) -> Ctx {
+    Ctx {
+        project: fx.root.join("work/current"),
+        home: fx.root.clone(),
+        corpus: fx.root.join("corpus"),
+        user_ways: fx.root.join(".config/agent-ways/ways"),
+        themes: None,
+        xdg_config: fx.root.join(".config"),
+        claude_config_dir: None,
+        claude: fx.root.join(".claude"),
+    }
+}
+
+/// A project Claude Code knows, at `rel` under the fixture, with `ways`.
+fn known(fx: &Fixture, rel: &str, ways: &[&str]) -> PathBuf {
+    let dir = fx.dir(rel);
+    let path = dir.display().to_string();
+    // Serialized, not formatted: a Windows path's backslashes need escaping.
+    let index = serde_json::json!({ "originalPath": path }).to_string();
+    fx.file(&format!(".claude/projects/{}/sessions-index.json", claude_sessions::project_slug(&path)), &index);
+    fx.dir(&format!("{rel}/.claude/ways"));
+    for id in ways {
+        let name = id.rsplit('/').next().unwrap();
+        fx.file(&format!("{rel}/.claude/ways/{id}/{name}.md"), &format!("---\ndescription: {name} of {rel}\n---\n"));
+    }
+    dir
+}
+
+fn project_group(r: &[Node]) -> &Node {
+    r[0].children.iter().find(|n| n.name == "project").unwrap()
+}
+
+fn others(r: &[Node]) -> &Node {
+    section(project_group(r), "other projects")
+}
+
+/// The key the ways tab's view action runs, as the footer names it.
+fn view_key(r: &[Node]) -> char {
+    let actions = &r[0].actions;
+    let i = actions.iter().position(|a| matches!(a.arg, agent_tui::tree::Arg::View(_))).expect("the ways tab has a view action");
+    agent_tui::tree::action_keys(actions)[i].expect("a key of its own")
+}
+
+#[test]
+fn the_view_action_switches_between_this_project_and_every_known_one() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    known(&fx, "work/current", &["mine/here"]);
+    known(&fx, "work/other", &["api/dual", "api/dual/deep"]);
+    known(&fx, "lab/third", &["x/y"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    let r = ways.build(&[]);
+    assert!(others(&r).section, "the other projects gather under a header after this one's scopes");
+    assert_eq!(project_group(&r).children.last().unwrap().name, "other projects");
+    let hint = &others(&r).children[..];
+    assert_eq!(hint.len(), 1, "one row stands for them all");
+    let k = view_key(&r);
+    assert_eq!(hint[0].setting.as_ref().unwrap().value, format!("3 ways · {k} shows them"), "this project's own ways are not counted");
+    assert!(hint[0].doc.contains(&format!("3 more ways in 2 other projects. The projects: all action ({k})")), "{}", hint[0].doc);
+
+    assert_eq!(ways.view("projects", &[]), Ok(Some("all projects shown".into())));
+    let r = ways.build(&[]);
+    let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["other", "third"], "a group per other project, by name");
+    assert!(r[0].actions.iter().any(|a| a.label == "projects: this one"));
+    assert_eq!(view_key(&r), k, "one key switches both ways");
+    let other = section(others(&r), "other");
+    assert!(!other.section, "a project's name is part of its ways' keys");
+    assert_eq!(other.columns, Some(("way".into(), "enabled".into())));
+    assert!(other.doc.contains("writes ~/work/other/.claude/ways.yaml"), "{}", other.doc);
+    assert_eq!(other.about, "2 ways, 0 switched off as loaded.");
+    let keys: Vec<String> = agent_tui::tree::keyed(&r).into_iter().map(|(_, k)| k).collect();
+    assert!(keys.contains(&"ways.project.other.api.dual.deep".to_string()), "{keys:?}");
+
+    assert_eq!(ways.view("projects", &[]), Ok(Some("this project shown".into())));
+    assert_eq!(others(&ways.build(&[])).children[0].name, "(hidden)");
+}
+
+#[test]
+fn another_project_s_switch_reads_and_writes_that_project_s_file() {
+    let fx = Fixture::home();
+    let other = known(&fx, "work/other", &["api/dual", "api/rest"]);
+    fx.file("work/other/.claude/ways.yaml", "ways:\n  api/rest: false\n");
+    let mut ways = Ways::new(ctx_of(&fx));
+    ways.view("projects", &[]).unwrap();
+    let r = ways.build(&[]);
+    let api = &section(others(&r), "other").children[0];
+    let (dual, rest) = (&api.children[0], &api.children[1]);
+    let file = other.join(".claude/ways.yaml");
+    let st = rest.setting.as_ref().unwrap();
+    assert_eq!((st.value.as_str(), st.default.as_deref()), ("false", Some("true")), "the value is that project's");
+    assert_eq!(dual.setting.as_ref().unwrap().value, "true", "absent means on");
+    let store = st.store.as_ref().unwrap();
+    assert_eq!((store.file.as_path(), store.key.as_str(), store.shown.as_str()), (file.as_path(), "ways.project.api/rest", "~/work/other/.claude/ways.yaml"));
+    assert!(rest.about.contains("from       another project") && rest.about.contains("root       ~/work/other/.claude/ways"), "{}", rest.about);
+    // The write lands in that project's file, never this one's.
+    let dstore = dual.setting.as_ref().unwrap().store.clone().unwrap();
+    ways.write(&file, &[Write { store: &dstore, value: "false", loaded: "true" }]).expect("another project's file takes the write");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ways:\n  api/rest: false\n  api/dual: false\n");
+    assert!(!fx.root.join("work/current/.claude/ways.yaml").exists());
+    // An outside change to that file is caught against the file itself.
+    let e = ways.write(&file, &[Write { store: &dstore, value: "true", loaded: "true" }]).expect_err("it is false on disk now");
+    assert!(e.contains("ways.project.api/dual is false on disk"), "{e}");
+}
+
+#[test]
+fn no_hint_when_no_other_project_has_ways() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    known(&fx, "work/current", &["mine/here"]);
+    known(&fx, "work/empty", &[]);
+    let r = roots(&fx);
+    assert!(project_group(&r).children.iter().all(|n| n.name != "other projects"), "a project whose ways dir is empty has no ways");
+}
+
+#[test]
+fn projects_of_one_name_are_told_apart_by_their_parent() {
+    let fx = Fixture::home();
+    known(&fx, "a/app", &["x/y"]);
+    known(&fx, "b/app", &["x/y"]);
+    known(&fx, "c/api", &["x/y"]);
+    fx.file("work/current/.claude/ways/api/dual/dual.md", "---\ndescription: d\n---\n");
+    let mut ways = Ways::new(ctx_of(&fx));
+    ways.view("projects", &[]).unwrap();
+    let r = ways.build(&[]);
+    let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["a/app", "b/app", "c/api"], "`api` is this project's way, so the project named api takes its parent");
+}
+
+#[test]
+fn a_dotted_project_name_never_shares_a_key_with_another_project_s_way() {
+    let fx = Fixture::home();
+    known(&fx, "work/foo", &["js/x"]);
+    known(&fx, "work/foo.js", &["x"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    ways.view("projects", &[]).unwrap();
+    let r = ways.build(&[]);
+    let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["foo", "foo·js"]);
+    let keys: Vec<String> = agent_tui::tree::keyed(&r).into_iter().map(|(_, k)| k).filter(|k| k.ends_with(".x")).collect();
+    assert_eq!(keys, ["ways.project.foo.js.x", "ways.project.foo·js.x"], "each way keeps a key of its own");
+}
+
+#[test]
+fn back_to_this_project_is_refused_while_an_edit_elsewhere_is_pending() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    known(&fx, "work/other", &["api/dual"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    ways.view("projects", &[]).unwrap();
+    let r = ways.build(&[]);
+    let elsewhere = section(others(&r), "other").children[0].children[0].setting.clone().unwrap().store.unwrap();
+    let here = section(project_group(&r), "shipped").children[0].children[0].setting.clone().unwrap().store.unwrap();
+    let e = ways.view("projects", &[&here, &elsewhere]).expect_err("the edit to work/other would be dropped");
+    assert_eq!(e, "1 pending change to other projects' ways.yaml would be dropped; review and apply, or undo, it first");
+    assert_eq!(ways.title("ways").unwrap(), format!(" ways settings — ~/work/current · all projects "), "the view stays");
+    assert!(ways.view("projects", &[&here]).is_ok(), "an edit to this project's file shows in both views");
+    assert_eq!(ways.title("ways").unwrap(), " ways settings — ~/work/current · this project ");
+    assert_eq!(ways.title("matching"), None, "only the ways tab has views");
+}
+
+#[test]
+fn a_view_switch_finds_the_other_projects_again() {
+    let fx = Fixture::home();
+    known(&fx, "work/other", &["api/dual"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    assert_eq!(ways.others().len(), 1);
+    known(&fx, "work/later", &["x/y"]);
+    assert_eq!(ways.others().len(), 1, "kept between builds");
+    ways.view("projects", &[]).unwrap();
+    assert_eq!(ways.others().len(), 2);
+}
+
+#[test]
+fn a_write_to_a_ways_yaml_no_known_project_owns_is_refused() {
+    let fx = Fixture::home();
+    known(&fx, "work/other", &["api/dual"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    let file = fx.root.join("stray/.claude/ways.yaml");
+    let st = agent_tui::tree::Setting::new(agent_tui::tree::Kind::Bool, "true", "default").store("project", file.clone(), "ways.project.api/dual").store.unwrap();
+    let e = ways.write(&file, &[Write { store: &st, value: "false", loaded: "true" }]).expect_err("no known project owns it");
+    assert!(e.contains("stray/.claude/ways.yaml is the ways.yaml of neither this project nor one Claude Code knows"), "{e}");
+    assert!(!file.exists());
+}
+
 // ── the adapter's write, under the real paths ──────────────────
 //
 // `Ways::write` finds its files through the environment, which tests in one
