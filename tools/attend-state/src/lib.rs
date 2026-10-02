@@ -101,8 +101,7 @@ impl StateSnapshot {
             if let Some((key, value)) = line.split_once(": ") {
                 match key {
                     "seen_signal" => {
-                        // transition read: removed by #701 (ADR-506)
-                        state.seen_signals.insert(normalize_seen_key(&value.replace("\\n", "\n")));
+                        state.seen_signals.insert(value.replace("\\n", "\n"));
                     }
                     "disclosed_thresholds" => {
                         state.disclosed_thresholds = value.split(',')
@@ -135,17 +134,6 @@ impl StateSnapshot {
 /// another keeps its key and is not delivered twice.
 pub fn seen_key(filename: &str) -> String {
     filename.to_string()
-}
-
-// transition read: removed by #701 (ADR-506)
-/// A key written before keys were filenames, `<scan-dir>:<filename>`, read
-/// as its filename. Signal filenames never contain `:`, so the part after
-/// the last colon is the filename; a key with no colon is returned as is.
-pub fn normalize_seen_key(key: &str) -> String {
-    match key.rsplit_once(':') {
-        Some((_, file)) => file.to_string(),
-        None => key.to_string(),
-    }
 }
 
 /// The filenames of every signal under `signals_base`, one level of trays
@@ -530,14 +518,6 @@ mod tests {
         assert!(!after.seen_signals.contains(&dead_key),
             "mark for a deleted signal should be pruned");
         fs::remove_dir_all(&dir).ok();
-    }
-
-    /// A state file written with `<dir>:<filename>` keys reads as filenames.
-    #[test]
-    fn old_dir_keyed_marks_read_as_filenames() {
-        let back = StateSnapshot::deserialize("seen_signal: /home/u/.cache/attend/signals/-p:abc-1.signal\n");
-        assert!(back.seen_signals.contains("abc-1.signal"));
-        assert_eq!(normalize_seen_key("abc-1.signal"), "abc-1.signal");
     }
 
     /// "No session, no persistence": a store with no id never writes.

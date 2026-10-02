@@ -31,55 +31,6 @@ pub fn attend_key_slug(name: &str) -> Option<&str> {
     (!hash.is_empty()).then_some(slug)
 }
 
-// transition read: removed by #701 (ADR-506)
-/// `path` with `/ _ .` and the `extra` characters mapped to `-` and every
-/// other character kept: attend's naming before [`attend_key`].
-fn old_rule(path: &str, extra: &[char]) -> String {
-    path.chars()
-        .map(|c| if matches!(c, '/' | '_' | '.') || extra.contains(&c) { '-' } else { c })
-        .collect()
-}
-
-// transition read: removed by #701 (ADR-506)
-/// The names a project's signal tray had before [`attend_key`]. Trays were
-/// written under two rules: `attend` and `sensor-peers` mapped
-/// `/ _ . \ :` to `-`; `attend-chat` mapped only `/ _ .`. Both forms,
-/// without duplicates, none equal to the current key.
-pub fn legacy_tray_names(path: &str) -> Vec<String> {
-    if path.is_empty() {
-        return Vec::new();
-    }
-    let current = attend_key(path);
-    let mut out: Vec<String> = Vec::new();
-    for name in [old_rule(path, &['\\', ':']), old_rule(path, &[])] {
-        if name != current && !out.contains(&name) {
-            out.push(name);
-        }
-    }
-    out
-}
-
-// transition read: removed by #701 (ADR-506)
-/// The name `attend-instances` gave a project's registry before
-/// [`attend_key`]: it mapped only `/ _ .`. The wider tray rule is not
-/// probed: under it `/x/a:b` reads as `-x-a-b`, the registry of `/x/a/b`.
-pub fn legacy_registry_name(path: &str) -> Option<String> {
-    (!path.is_empty()).then(|| old_rule(path, &[]))
-}
-
-/// The tray names to read for the project at `path`: [`attend_key`] first,
-/// then, during the transition, [`legacy_tray_names`]. Empty for an empty
-/// path. Sends go to the first name only.
-pub fn attend_tray_names(path: &str) -> Vec<String> {
-    if path.is_empty() {
-        return Vec::new();
-    }
-    let mut names = vec![attend_key(path)];
-    // transition read: removed by #701 (ADR-506)
-    names.extend(legacy_tray_names(path));
-    names
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,22 +58,5 @@ mod tests {
     fn key_slug_rejects_legacy_names() {
         assert_eq!(attend_key_slug("-srv-my proj"), None);
         assert_eq!(attend_key_slug("nodash"), None);
-    }
-
-    #[test]
-    fn legacy_names_cover_both_old_rules() {
-        assert_eq!(legacy_tray_names("/home/a/.claude"), vec!["-home-a--claude".to_string()]);
-        assert_eq!(legacy_tray_names("/x/a b:c"), vec!["-x-a b-c".to_string(), "-x-a b:c".to_string()]);
-        assert!(legacy_tray_names("").is_empty());
-        // Registries were written under the narrow rule only.
-        assert_eq!(legacy_registry_name("/x/a:b").as_deref(), Some("-x-a:b"));
-        assert_eq!(legacy_registry_name(""), None);
-    }
-
-    #[test]
-    fn tray_names_put_the_key_first() {
-        let names = attend_tray_names("/x/a_b");
-        assert_eq!(names, vec![attend_key("/x/a_b"), "-x-a-b".to_string()]);
-        assert!(attend_tray_names("").is_empty());
     }
 }

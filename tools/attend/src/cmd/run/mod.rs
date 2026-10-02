@@ -47,19 +47,6 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
 
-    // Old-named trays are emptied into their attend-key trays before the
-    // first sweep or read.
-    // transition read: removed by #701 (ADR-506)
-    let moved = crate::cmd::cleanup::migrate_legacy_trays(
-        &signals_base(),
-        &crate::util::projects_base(),
-        &crate::cmd::cleanup::known_project_paths(),
-        false,
-    );
-    if moved > 0 {
-        emit::log(&format!("moved {moved} signal(s) from old-named trays"));
-    }
-
     // Initialize channels for signal routing (ADR-118)
     let session_id = ident.session_id.clone();
 

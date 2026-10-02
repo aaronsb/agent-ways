@@ -18,8 +18,6 @@ mod slug;
 pub mod usage;
 
 pub use attend::{attend_key, attend_key_slug};
-// transition read: removed by #701 (ADR-506)
-pub use attend::{attend_tray_names, legacy_registry_name, legacy_tray_names};
 pub use locate::{
     dir_belongs_to, find_project_dir_in, find_transcript_in, newest_transcript, prefix_candidates_in,
     project_dirs_in, resolve_project_path, transcripts_in,

@@ -35,8 +35,7 @@ pub(crate) fn cmd_status() {
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let broadcast_dir = base.join("_broadcast");
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let own_count: usize = claude_sessions::attend_tray_names(&cwd).iter().map(|n| count_signals(&base.join(n))).sum();
+    let own_count = count_signals(&base.join(claude_sessions::attend_key(&cwd)));
     let broadcast_count = count_signals(&broadcast_dir);
 
     let r = get_groups();

@@ -7,7 +7,7 @@
 use attend_identity_view::render_sender_label;
 use attend_instances::SnapshotCache;
 use crate::util::{get_groups, own_session_id, signals_base};
-use claude_sessions::attend_tray_names;
+use claude_sessions::attend_key;
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
@@ -15,9 +15,7 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let r = get_groups();
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let mut scan_dirs: Vec<_> = attend_tray_names(&cwd).iter().map(|n| base.join(n)).collect();
-    scan_dirs.push(base.join("_broadcast"));
+    let mut scan_dirs = vec![base.join(attend_key(&cwd)), base.join("_broadcast")];
     for name in r.joined_group_names() {
         scan_dirs.push(r.group_dir(&name));
     }
@@ -70,11 +68,9 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     let own_session_id = own_session_id().unwrap_or_default();
 
     // Scan same dirs as the peer sensor: own project + broadcast + focus group
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let own_trays = attend_tray_names(&cwd);
+    let own_tray = attend_key(&cwd);
     let r = get_groups();
-    let mut scan_dirs: Vec<_> = own_trays.iter().map(|n| base.join(n)).collect();
-    scan_dirs.push(base.join("_broadcast"));
+    let mut scan_dirs = vec![base.join(&own_tray), base.join("_broadcast")];
     // Add focus group dirs
     for name in r.joined_group_names() {
         scan_dirs.push(r.group_dir(&name));
@@ -107,7 +103,7 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
             .to_string();
         let scope = if dir_name == "_broadcast" {
             "#open"
-        } else if own_trays.contains(&dir_name) {
+        } else if dir_name == own_tray {
             "project"
         } else {
             "channel"
@@ -458,12 +454,10 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let mut scan_dirs: Vec<_> = attend_tray_names(&cwd)
-        .iter()
-        .map(|n| (base.join(n), "project".to_string()))
-        .collect();
-    scan_dirs.push((base.join("_broadcast"), "#open".to_string()));
+    let mut scan_dirs = vec![
+        (base.join(attend_key(&cwd)), "project".to_string()),
+        (base.join("_broadcast"), "#open".to_string()),
+    ];
     for name in r.joined_group_names() {
         // "@group" reads naturally as the channel name.
         let label = format!("@{name}");
@@ -780,10 +774,10 @@ mod drain_tests {
 
     #[test]
     fn a_signal_moved_between_trays_stays_seen() {
-        // Read in the old tray, then moved into the key tray by cleanup:
-        // keyed by directory it would be delivered again.
+        // Read in one tray, then moved into another: keyed by directory
+        // it would be delivered again. The key is the filename.
         let root = scan_fixture("moved");
-        let (old, new) = (root.join("-srv-my proj"), root.join("-srv-my-proj-bte5w6"));
+        let (old, new) = (root.join("tray-a"), root.join("tray-b"));
         std::fs::create_dir_all(&old).unwrap();
         std::fs::create_dir_all(&new).unwrap();
         let key = write_signal(&old, "m1", "claude:other-session", "once");

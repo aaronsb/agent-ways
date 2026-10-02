@@ -57,13 +57,6 @@ pub fn encode_cwd(path: &str) -> String {
     claude_sessions::attend_key(path)
 }
 
-/// The names of this cwd's own tray the watcher reads,
-/// `claude_sessions::attend_tray_names`: the key, then the old names.
-// transition read: removed by #701 (ADR-506)
-pub fn own_tray_names(path: &str) -> Vec<String> {
-    claude_sessions::attend_tray_names(path)
-}
-
 /// Directory that delivers signals to the claude session rooted at
 /// `cwd`. The peer sensor scans `signals_base/<encoded>/` for
 /// messages addressed specifically to it.
@@ -496,8 +489,6 @@ mod tests {
         // for a cwd's tray; drift here breaks direct routing silently.
         assert_eq!(encode_cwd("/srv/my proj"), "-srv-my-proj-bte5w6");
         assert_eq!(encode_cwd(""), "");
-        assert_eq!(own_tray_names("/srv/my proj"), vec!["-srv-my-proj-bte5w6".to_string(), "-srv-my proj".to_string()]);
-        assert!(own_tray_names("").is_empty());
     }
 
     #[test]

@@ -119,66 +119,6 @@ impl Registry {
         self.base_dir.join(format!("{}.yaml", claude_sessions::attend_key(cwd)))
     }
 
-    // transition read: removed by #701 (ADR-506)
-    /// The registry files attend wrote for `cwd` under its old naming
-    /// rules, with their lock files.
-    fn legacy_paths_for(&self, cwd: &str) -> Vec<(PathBuf, PathBuf)> {
-        claude_sessions::legacy_registry_name(cwd)
-            .into_iter()
-            .filter(|n| *n != claude_sessions::attend_key(cwd))
-            .map(|n| (self.base_dir.join(format!("{n}.yaml")), self.base_dir.join(format!("{n}.yaml.lock"))))
-            .collect()
-    }
-
-    // transition read: removed by #701 (ADR-506)
-    /// The file a read for `cwd` takes: [`Registry::path_for`], or, until
-    /// a register or touch migrates it, the file under attend's old name.
-    fn read_path_for(&self, cwd: &str) -> PathBuf {
-        let path = self.path_for(cwd);
-        if path.exists() {
-            return path;
-        }
-        self.legacy_paths_for(cwd)
-            .into_iter()
-            .map(|(p, _)| p)
-            .find(|p| p.exists())
-            .unwrap_or(path)
-    }
-
-    // transition read: removed by #701 (ADR-506)
-    /// Move the old-named registries for `cwd` into [`Registry::path_for`]
-    /// once. Called with the new file's lock held; takes each old file's
-    /// lock too, so an old binary's register cannot interleave. Every
-    /// entry moves, so sessions keep their instance names and peers that
-    /// have not registered since stay visible. Does nothing when the new
-    /// file exists.
-    fn migrate_legacy_locked(&self, cwd: &str, path: &Path) -> io::Result<()> {
-        if path.exists() {
-            return Ok(());
-        }
-        let mut map = BTreeMap::new();
-        let mut migrated: Vec<(PathBuf, fs::File)> = Vec::new();
-        for (legacy, lock) in self.legacy_paths_for(cwd) {
-            if !legacy.exists() {
-                continue;
-            }
-            let lock_file = fs::OpenOptions::new().create(true).truncate(false).write(true).open(&lock)?;
-            acquire_exclusive(&lock_file)?;
-            for (sid, entry) in parse_registry(&fs::read_to_string(&legacy).unwrap_or_default()) {
-                map.entry(sid).or_insert(entry);
-            }
-            migrated.push((legacy, lock_file));
-        }
-        if migrated.is_empty() {
-            return Ok(());
-        }
-        write_registry(path, &map)?;
-        for (legacy, _lock) in &migrated {
-            fs::remove_file(legacy).ok();
-        }
-        Ok(())
-    }
-
     /// Path to the sentinel lockfile for a cwd. The data file gets
     /// atomically renamed during commit; flock state lives on the
     /// open-file-description (i.e. inode), not the path, so a lock
@@ -195,9 +135,7 @@ impl Registry {
     /// only — no allocation, no GC, no write. Returns `None` when
     /// the registry file is absent or the session has no entry.
     pub fn lookup(&self, cwd: &str, session_id: &str) -> Option<String> {
-        // transition read: removed by #701 (ADR-506)
-        let path = self.read_path_for(cwd);
-        let content = fs::read_to_string(&path).ok()?;
+        let content = fs::read_to_string(self.path_for(cwd)).ok()?;
         let map = parse_registry(&content);
         map.get(session_id).map(|e| e.instance.clone())
     }
@@ -254,8 +192,6 @@ impl Registry {
             .write(true)
             .open(&lock_path)?;
         acquire_exclusive(&lock_file)?;
-        // transition read: removed by #701 (ADR-506)
-        self.migrate_legacy_locked(cwd, &path)?;
 
         // Read current state. Safe under the lock — no other
         // register/touch on this cwd can be mid-write.
@@ -361,9 +297,7 @@ impl Registry {
     /// Test seam for [`touch`].
     pub fn touch_at(&self, cwd: &str, session_id: &str, now: u64) -> io::Result<()> {
         let path = self.path_for(cwd);
-        // transition read: removed by #701 (ADR-506)
-        let legacy_exists = self.legacy_paths_for(cwd).iter().any(|(p, _)| p.exists());
-        if !path.exists() && !legacy_exists {
+        if !path.exists() {
             return Ok(());
         }
         // Same sentinel-lockfile discipline as `register_with_age`
@@ -377,8 +311,6 @@ impl Registry {
             .write(true)
             .open(&lock_path)?;
         acquire_exclusive(&lock_file)?;
-        // transition read: removed by #701 (ADR-506)
-        self.migrate_legacy_locked(cwd, &path)?;
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut map = parse_registry(&content);
         let Some(entry) = map.get_mut(session_id) else {
@@ -393,9 +325,7 @@ impl Registry {
     /// legend), not for hot per-render lookups (`lookup` is cheaper
     /// since it short-circuits as soon as it finds the row).
     pub fn snapshot(&self, cwd: &str) -> BTreeMap<String, InstanceEntry> {
-        // transition read: removed by #701 (ADR-506)
-        let path = self.read_path_for(cwd);
-        let content = match fs::read_to_string(&path) {
+        let content = match fs::read_to_string(self.path_for(cwd)) {
             Ok(c) => c,
             Err(_) => return BTreeMap::new(),
         };
@@ -837,73 +767,19 @@ sess-a:
     }
 
     #[test]
-    fn a_registry_under_the_old_name_migrates_whole() {
-        with_registry(|reg| {
-            // Written by attend before the attend key: the space kept.
-            fs::create_dir_all(&reg.base_dir).unwrap();
-            let legacy = reg.base_dir.join("-srv-a b.yaml");
-            let now = now_secs();
-            let entry = |instance: &str| InstanceEntry {
-                instance: instance.to_string(),
-                registered_at: 1,
-                last_seen: now,
-            };
-            write_registry(
-                &legacy,
-                &BTreeMap::from([("sess-a".to_string(), entry("beta")), ("sess-b".to_string(), entry("gamma"))]),
-            )
-            .unwrap();
-            assert_eq!(reg.lookup("/srv/a b", "sess-a").as_deref(), Some("beta"));
-            // The session keeps its name, its peer survives, and the old
-            // file is gone.
-            assert_eq!(reg.register("/srv/a b", "sess-a").unwrap(), "beta");
-            let snap = reg.snapshot("/srv/a b");
-            assert_eq!(snap.get("sess-b").map(|e| e.instance.as_str()), Some("gamma"));
-            assert!(!legacy.exists());
-            // A new session cannot be handed a migrated peer's name.
-            assert_eq!(reg.register("/srv/a b", "sess-c").unwrap(), "alpha");
-            assert_eq!(reg.register("/srv/a b", "sess-d").unwrap(), "delta");
-        });
-    }
-
-    #[test]
-    fn a_colon_path_does_not_take_a_siblings_registry() {
-        // `-x-a-b.yaml` is `/x/a/b`'s registry. Under the wider tray rule
-        // `/x/a:b` also reads as `-x-a-b`, but attend-instances never wrote
-        // that form, so registering in `/x/a:b` must leave it alone.
+    fn a_registry_under_an_old_name_is_not_read() {
+        // ADR-506: attend reads only `attend_key` names. A file written under
+        // the old rule (the space kept) is neither read nor moved.
         with_registry(|reg| {
             fs::create_dir_all(&reg.base_dir).unwrap();
-            let sibling = reg.base_dir.join("-x-a-b.yaml");
-            write_registry(
-                &sibling,
-                &BTreeMap::from([(
-                    "sess-ab".to_string(),
-                    InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: now_secs() },
-                )]),
-            )
-            .unwrap();
-            reg.register("/x/a:b", "sess-colon").unwrap();
-            assert!(!reg.snapshot("/x/a:b").contains_key("sess-ab"));
-            assert_eq!(reg.register("/x/a/b", "sess-ab").unwrap(), "beta");
-        });
-    }
-
-    #[test]
-    fn touch_migrates_an_old_registry() {
-        with_registry(|reg| {
-            fs::create_dir_all(&reg.base_dir).unwrap();
-            let legacy = reg.base_dir.join("-srv-t x.yaml");
-            write_registry(
-                &legacy,
-                &BTreeMap::from([(
-                    "sess-t".to_string(),
-                    InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: 1 },
-                )]),
-            )
-            .unwrap();
-            reg.touch_at("/srv/t x", "sess-t", 500).unwrap();
-            assert!(!legacy.exists());
-            assert_eq!(reg.snapshot("/srv/t x").get("sess-t").map(|e| e.last_seen), Some(500));
+            let old = reg.base_dir.join("-srv-a b.yaml");
+            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: now_secs() };
+            write_registry(&old, &BTreeMap::from([("sess-a".to_string(), entry)])).unwrap();
+            assert_eq!(reg.lookup("/srv/a b", "sess-a"), None);
+            reg.touch_at("/srv/a b", "sess-a", 500).unwrap();
+            assert!(reg.snapshot("/srv/a b").is_empty());
+            assert_eq!(reg.register("/srv/a b", "sess-a").unwrap(), "alpha");
+            assert!(old.exists(), "the old file is left alone");
         });
     }
 

@@ -248,12 +248,8 @@ impl PeerSensor {
         let base = signals_base();
 
         // Directories to scan: own project + broadcast + joined channels.
-        // The own tray is named by Claude Code's project slug; for one release
-        // the tray named under attend's old rule is read too (ADR-504).
-        // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-        let own_trays = claude_sessions::attend_tray_names(&focus.working_dir);
-        let mut scan_dirs: Vec<PathBuf> = own_trays.iter().map(|n| base.join(n)).collect();
-        scan_dirs.push(base.join("_broadcast"));
+        let own_tray = claude_sessions::attend_key(&focus.working_dir);
+        let mut scan_dirs: Vec<PathBuf> = vec![base.join(&own_tray), base.join("_broadcast")];
 
         // Focus group directories (ADR-118 — named signal namespaces)
         scan_dirs.extend(self.current_extra_scan_dirs());
@@ -332,7 +328,7 @@ impl PeerSensor {
                     let dir_name = dir.file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("");
-                    let base_magnitude: f64 = if own_trays.iter().any(|n| n == dir_name) {
+                    let base_magnitude: f64 = if dir_name == own_tray {
                         7.0 // directed to us — someone used --to
                     } else if dir_name == "_broadcast" {
                         4.0 // broadcast — important but not targeted
@@ -351,7 +347,7 @@ impl PeerSensor {
                     let boost = self.peer_engagement_boost(&from_owned);
                     let magnitude = base_magnitude * boost;
 
-                    let kind = if own_trays.iter().any(|n| n == dir_name) {
+                    let kind = if dir_name == own_tray {
                         MsgKind::Directed
                     } else if dir_name == "_broadcast" {
                         MsgKind::Open
@@ -733,8 +729,7 @@ impl Sensor for PeerSensor {
         }
         for (key, value) in state {
             match key.as_str() {
-                // transition read: removed by #701 (ADR-506)
-                "seen_signal" => { self.seen_signals.insert(attend_state::normalize_seen_key(value)); }
+                "seen_signal" => { self.seen_signals.insert(value.clone()); }
                 "reply_hint_shown" => { self.reply_hint_shown = value == "true"; }
                 // Legacy "signal_salience" rows (from before the message
                 // lane stopped using the per-signal gate) are ignored.
