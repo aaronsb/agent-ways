@@ -46,7 +46,7 @@ check "update-binaries rebuilds every suite binary and way-embed" "$expected_reb
 check "relink installs from the same list" "$(echo $bins)" "$(sed -n 's/^SUITE_BINS := //p' <<< "$db")"
 
 # Each caller's paths: filter lists its crate's workspace dependencies.
-paths_out=$(python3 "$ROOT/scripts/workflow-paths.py" --check 2>&1)
+paths_out=$(bash "$ROOT/scripts/workflow-paths.sh" --check 2>&1)
 check "build-*.yml paths match cargo metadata" "0" "$?"
 [[ -z $paths_out ]] || echo "$paths_out" | sed 's/^/    /'
 
