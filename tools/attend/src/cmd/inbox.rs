@@ -431,7 +431,16 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // empty drain (below), so continuations forced by OTHER Stop hooks
     // cannot inflate it across turns.
     let stop_active = hook_mode && stdin_stop_hook_active();
-    let rounds = bump_drain_rounds(&session_id, stop_active);
+    // The ceiling fails closed: a forced continuation that cannot record
+    // its round (state dir unwritable) would read round 1 forever.
+    let rounds = match bump_drain_rounds(&session_id, stop_active) {
+        Some(r) => r,
+        None if stop_active => {
+            eprintln!("(cannot record the drain round — deferring to the Monitor conduit)");
+            return;
+        }
+        None => 1,
+    };
     if rounds > MAX_DRAIN_ROUNDS {
         eprintln!("(drain round {rounds} > {MAX_DRAIN_ROUNDS} — deferring to the Monitor conduit)");
         return;
@@ -439,10 +448,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 
     let store = attend_state::StateStore::new(Some(session_id.clone()));
 
-    // Cold start = no state file. Load once; existence decides the
-    // baselining branch and the same snapshot supplies the seen-set.
+    // Cold start = no conduit has applied the cold-start rule yet: no
+    // state file, or one without `baselined` (the peers sensor checkpoints
+    // on its first poll, before it scans messages). Load once; the same
+    // snapshot supplies the seen-set.
     let snapshot = store.load();
-    let baselining = snapshot.is_none();
+    let baselining = !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
@@ -522,6 +533,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 /// `note` is the cold start's count of messages it held back; it rides the
 /// first delivery after enrollment, or goes alone when nothing else does.
 fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>) -> String {
+    if delivered.is_empty() {
+        return format!("[attend] {}", note.unwrap_or("no peer messages"));
+    }
     let mut out = format!(
         "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain):\n",
         delivered.len()
@@ -617,7 +631,8 @@ fn drain_rounds_path(session_id: &str) -> std::path::PathBuf {
     attend_presence::cache::state_dir().join(format!("{session_id}.drain-rounds"))
 }
 
-fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
+/// The round this drain is, or `None` when the counter cannot be written.
+fn bump_drain_rounds(session_id: &str, stop_active: bool) -> Option<u32> {
     let path = drain_rounds_path(session_id);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).ok();
@@ -634,10 +649,8 @@ fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
     // tmp + rename: a torn write that parses as garbage would read as
     // "fresh boundary" forever and quietly disable the ceiling.
     let tmp = path.with_extension(format!("drain-rounds.tmp.{}", std::process::id()));
-    if std::fs::write(&tmp, rounds.to_string()).is_ok() {
-        std::fs::rename(&tmp, &path).ok();
-    }
-    rounds
+    let written = std::fs::write(&tmp, rounds.to_string()).is_ok() && std::fs::rename(&tmp, &path).is_ok();
+    written.then_some(rounds)
 }
 
 /// An empty drain ends the boundary chain: remove the counter (also the

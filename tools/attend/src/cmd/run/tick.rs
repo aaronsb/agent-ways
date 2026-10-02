@@ -217,6 +217,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
                     .seen_signals
                     .into_iter()
                     .map(|k| ("seen_signal".to_string(), k))
+                    .chain(snap.baselined.then(|| ("baselined".to_string(), "true".to_string())))
                     .collect();
                 if !marks.is_empty() {
                     s.slots[i].import_state(&marks);
@@ -451,6 +452,9 @@ pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSna
                 }
                 "context_pct" => {
                     snapshot.context_pct = value.parse().ok();
+                }
+                "baselined" => {
+                    snapshot.baselined |= value == "true";
                 }
                 _ => {}
             }

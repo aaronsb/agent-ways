@@ -185,6 +185,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
                         "reply_hint_shown".to_string(),
                         snapshot.reply_hint_shown.to_string(),
                     )))
+                    .chain(snapshot.baselined.then(|| ("baselined".to_string(), "true".to_string())))
                     .collect(),
                 "context" => snapshot
                     .disclosed_thresholds

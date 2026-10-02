@@ -699,20 +699,27 @@ impl Sensor for PeerSensor {
             state.push(("seen_signal".to_string(), sig.clone()));
         }
         state.push(("reply_hint_shown".to_string(), self.reply_hint_shown.to_string()));
+        // Warm only once a conduit applied the cold-start rule: this
+        // sensor (its first message scan) or a drain it imported.
+        if self.message_baseline_done || self.checkpoint_loaded {
+            state.push(("baselined".to_string(), "true".to_string()));
+        }
         state
     }
 
     fn import_state(&mut self, state: &[(String, String)]) {
-        // Any persisted rows mean this is a warm restart: the seen-set is
-        // being restored, so the cold-start backlog baseline is skipped and
-        // down-gap messages surface as unseen. Guarded to the FIRST import:
-        // ADR-172's per-poll drain-mark refresh also lands here, and it must
-        // neither re-log the restore banner every poll nor retroactively
-        // flip `checkpoint_loaded` mid-run.
+        // A `baselined` row means a conduit already applied the cold-start
+        // rule for this session (a warm restart, or a drain that ran before
+        // this sensor's first message scan): the seen-set is restored, the
+        // rule is not applied again, and down-gap messages surface as
+        // unseen. Any other rows (the first poll checkpoints before it scans
+        // messages) leave the session cold. ADR-172's per-poll drain-mark
+        // refresh also lands here; it may make the sensor warm before its
+        // first scan, never cold again, and does not re-log the banner.
         let first_import = !self.state_imported;
         self.state_imported = true;
-        if first_import {
-            self.checkpoint_loaded = !state.is_empty();
+        if !self.message_baseline_done && state.iter().any(|(k, v)| k == "baselined" && v == "true") {
+            self.checkpoint_loaded = true;
         }
         for (key, value) in state {
             match key.as_str() {
