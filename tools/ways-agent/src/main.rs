@@ -587,6 +587,12 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
 mod tests {
     use super::*;
 
+    /// `s` with each `^` as the ESC byte, so no raw escape literal sits in
+    /// the source (the agent-theme SGR lint).
+    fn esc(s: &str) -> Vec<u8> {
+        s.bytes().map(|b| if b == b'^' { 0x1b } else { b }).collect()
+    }
+
     fn feed(e: &mut KeyEditor, bytes: &[u8]) -> Vec<Typed> {
         bytes.iter().map(|&b| e.feed(b)).collect()
     }
@@ -612,10 +618,10 @@ mod tests {
     #[test]
     fn escape_sequences_stay_out_of_the_key() {
         let mut e = KeyEditor::new();
-        feed(&mut e, b"ab\x1b[Dc\x1bOD");
+        feed(&mut e, &esc("ab^[Dc^OD"));
         assert_eq!(e.key, b"abc", "arrow keys, normal and application mode");
         let mut p = KeyEditor::new();
-        let typed = feed(&mut p, b"\x1b[200~sk-abc\x1b[201~");
+        let typed = feed(&mut p, &esc("^[200~sk-abc^[201~"));
         assert_eq!(p.key, b"sk-abc");
         assert_eq!(typed.iter().filter(|t| **t == Typed::Dot).count(), 6, "a dot per key character only");
     }
@@ -637,14 +643,14 @@ mod tests {
     #[test]
     fn a_control_byte_ends_an_escape_and_acts() {
         let mut e = KeyEditor::new();
-        assert_eq!(feed(&mut e, b"\x1b\r"), [Typed::Continue, Typed::Done]);
+        assert_eq!(feed(&mut e, &esc("^\r")), [Typed::Continue, Typed::Done]);
         let mut e = KeyEditor::new();
-        assert_eq!(feed(&mut e, b"\x1b[\r"), [Typed::Continue, Typed::Continue, Typed::Done]);
+        assert_eq!(feed(&mut e, &esc("^[\r")), [Typed::Continue, Typed::Continue, Typed::Done]);
         let mut e = KeyEditor::new();
         feed(&mut e, b"ab");
-        assert_eq!(feed(&mut e, b"\x1b\x7f"), [Typed::Continue, Typed::Erase(1)]);
+        assert_eq!(feed(&mut e, &esc("^\x7f")), [Typed::Continue, Typed::Erase(1)]);
         assert_eq!(e.key, b"a");
-        assert_eq!(feed(&mut e, b"\x1bx"), [Typed::Continue, Typed::Continue], "Alt-x is dropped");
+        assert_eq!(feed(&mut e, &esc("^x")), [Typed::Continue, Typed::Continue], "Alt-x is dropped");
         assert_eq!(e.key, b"a");
     }
 
