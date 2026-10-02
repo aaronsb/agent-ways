@@ -80,7 +80,7 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore. Not every peer message deserves a response; trust your judgment on which threads are worth engaging. Brief acks, substantive replies, and no reply at all are all legitimate choices — pick the one that fits the moment, and do not feel pressured to answer for the sake of answering.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid.
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid.
 
 Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). Keep messages under ~400 characters — peer notifications are one-per-line and longer payloads get truncated in-flight.
 

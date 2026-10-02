@@ -60,6 +60,17 @@ pub(crate) fn own_origin_cwd() -> String {
     attend_session::identity().origin_path
 }
 
+/// Whether the session enrolled in attend (#720): it ran `attend run`,
+/// which gives it a slot in its project's instance registry, or it joined
+/// a channel. Enrollment is what the Stop-hook drain delivers to; it covers
+/// `#open` and the project tray as well as the joined channels.
+pub(crate) fn enrolled(ident: &attend_session::SessionIdentity, groups: &groups::Groups) -> bool {
+    attend_instances::Registry::new()
+        .lookup(&ident.origin_path, &ident.session_id)
+        .is_some()
+        || !groups.my_groups().is_empty()
+}
+
 pub(crate) fn count_signals(dir: &std::path::Path) -> usize {
     std::fs::read_dir(dir)
         .map(|entries| {

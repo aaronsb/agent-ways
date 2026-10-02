@@ -421,6 +421,15 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         return;
     }
     let session_id = ident.session_id.clone();
+    let base = signals_base();
+    let r = crate::groups::Groups::new(&base, &session_id);
+
+    // Enrollment gate (#720): a session that never ran attend and joined
+    // no channel has chosen not to take part, so the drain delivers it
+    // nothing and writes nothing, not even the heartbeat below.
+    if !crate::util::enrolled(&ident, &r) {
+        return;
+    }
 
     // Liveness: a drain-only session (no Monitor running) must still
     // look alive to /purge's consumer consult, or the Decision 5
@@ -448,9 +457,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let baselining = snapshot.is_none();
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
-    let base = signals_base();
-    let cwd = crate::util::own_origin_cwd();
-    let r = get_groups();
+    let cwd = ident.origin_path.clone();
     // transition read: removed by #701 (ADR-506) — the old tray names after the key.
     let mut scan_dirs: Vec<_> = attend_tray_names(&cwd)
         .iter()

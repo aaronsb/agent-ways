@@ -109,7 +109,7 @@ Read pending messages from peers
 
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: no-op under an unresolved identity, and on a cold start (no seen-set) baselines the backlog without delivering
+* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session that never ran attend and joined no channel (#720), and on a cold start (no seen-set) baselines the backlog without delivering
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable) or `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`)
 
   Default value: `plain`
