@@ -28,6 +28,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["language", "default_scope"],
         per_entry: false, entry: None, repair: None,
+        columns: None,
         doc: "The language ways are written in and the default scope of a way.",
     },
     SectionSpec {
@@ -35,6 +36,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["enabled"],
         per_entry: false, entry: None, repair: None,
+        columns: None,
         doc: "Whether ways run at all; false in a project's .claude/ways.yaml switches them off there.",
     },
     SectionSpec {
@@ -42,6 +44,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["disabled_domains"],
         per_entry: false, entry: None, repair: None,
+        columns: None,
         doc: "Domains switched off everywhere.",
     },
     SectionSpec {
@@ -56,6 +59,7 @@ const SECTIONS: &[SectionSpec] = &[
             "refire_presets",
         ],
         per_entry: false, entry: None, repair: None,
+        columns: None,
         doc: "When a way fires: the calibrated probabilities, the parent boost, and how often a way may fire again.",
     },
     SectionSpec {
@@ -64,6 +68,7 @@ const SECTIONS: &[SectionSpec] = &[
         top: &["targets"],
         per_entry: true, entry: None,
         repair: Some("`ways target add|enable|disable|remove <dir>`"),
+        columns: None,
         doc: "Where agent-ways is active. Changed by `ways target`, which reconciles.",
     },
     SectionSpec {
@@ -71,6 +76,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["secret_path_deny"],
         per_entry: false, entry: None, repair: None,
+        columns: None,
         doc: "Whether the secret-path permissions.deny baseline is merged into settings.json.",
     },
     SectionSpec {
@@ -78,6 +84,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["ways"],
         per_entry: true, entry: None, repair: None,
+        columns: Some(("way", "enabled")),
         doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
     },
     // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11). Declared

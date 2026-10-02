@@ -108,6 +108,35 @@ fn activate(fx: &Fixture) -> App {
     app
 }
 
+fn nodes(n: &Node) -> Vec<&Node> {
+    std::iter::once(n).chain(n.children.iter().flat_map(nodes)).collect()
+}
+
+#[test]
+fn every_action_on_every_tab_has_one_key_of_its_own() {
+    let fx = Fixture::home();
+    let roots = roots(&fx);
+    let with_actions: Vec<&Node> = roots.iter().flat_map(nodes).filter(|n| !n.actions.is_empty()).collect();
+    assert!(with_actions.len() >= 3, "the sweep reached the install and gate actions");
+    for n in with_actions {
+        let bad = agent_tui::tree::key_conflicts(&n.actions);
+        assert!(bad.is_empty(), "{}: {bad:?}", n.name);
+    }
+}
+
+#[test]
+fn the_footer_names_the_selection_s_actions_and_their_keys_run_them() {
+    let fx = Fixture::home();
+    let mut app = app(&fx);
+    press(&mut app, &[KeyCode::Char('4')]);
+    let last = frame(&mut app, 100, 30).last().cloned().unwrap();
+    assert!(last.contains("t activate · A add · p plan"), "{last}");
+    press(&mut app, &[KeyCode::Char('p')]);
+    assert!(text(&mut app).contains("directory"), "p asks for plan's directory");
+    press(&mut app, &[KeyCode::Esc, KeyCode::Char('t')]);
+    assert_eq!(flow(&app).key, "install.targets");
+}
+
 #[test]
 fn the_install_tab_launches_the_activation_flow_from_its_menu() {
     let fx = Fixture::home();

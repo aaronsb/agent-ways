@@ -78,46 +78,33 @@ impl App {
 
         // Open state and pending edits, by key.
         let mut kept: Kept = HashMap::new();
-        fn collect(n: &Node, key: String, out: &mut Kept) {
+        for (path, key) in tree::keyed(&self.roots) {
+            let n = tree::get(&self.roots, &path);
             let pending = n.setting.as_ref().filter(|s| s.changed()).map(|s| (s.loaded.clone(), s.value.clone()));
-            for c in &n.children {
-                collect(c, format!("{key}.{}", c.name), out);
-            }
-            out.insert(key, (n.open, pending));
-        }
-        for r in &self.roots {
-            collect(r, r.name.clone(), &mut kept);
+            kept.insert(key, (n.open, pending));
         }
         let mut report = Reloaded::default();
         let mut seen = HashSet::new();
-        fn restore(n: &mut Node, key: String, kept: &Kept, seen: &mut HashSet<String>, report: &mut Reloaded) {
-            if let Some((open, pending)) = kept.get(&key) {
-                seen.insert(key.clone());
-                n.open = *open;
-                if let Some((loaded, value)) = pending {
-                    match n.setting.as_mut() {
-                        Some(s) if s.editable() => {
-                            if s.loaded != *loaded {
-                                report.moved.push(key.clone());
-                            }
-                            s.value = value.clone();
+        for (path, key) in tree::keyed(&fresh) {
+            let Some((open, pending)) = kept.get(&key) else { continue };
+            seen.insert(key.clone());
+            let n = tree::get_mut(&mut fresh, &path);
+            n.open = *open;
+            if let Some((loaded, value)) = pending {
+                match n.setting.as_mut() {
+                    Some(s) if s.editable() => {
+                        if s.loaded != *loaded {
+                            report.moved.push(key.clone());
                         }
-                        Some(s) => {
-                            let why = s.locked.clone().unwrap_or_else(|| "it can no longer be changed here".into());
-                            report.dropped.push((key.clone(), why));
-                        }
-                        None => report.dropped.push((key.clone(), "it is no longer a setting".into())),
+                        s.value = value.clone();
                     }
+                    Some(s) => {
+                        let why = s.locked.clone().unwrap_or_else(|| "it can no longer be changed here".into());
+                        report.dropped.push((key.clone(), why));
+                    }
+                    None => report.dropped.push((key.clone(), "it is no longer a setting".into())),
                 }
             }
-            for c in &mut n.children {
-                let k = format!("{key}.{}", c.name);
-                restore(c, k, kept, seen, report);
-            }
-        }
-        for r in &mut fresh {
-            let k = r.name.clone();
-            restore(r, k, &kept, &mut seen, &mut report);
         }
         let mut gone: Vec<_> = kept.iter().filter(|(k, (_, p))| p.is_some() && !seen.contains(*k)).map(|(k, _)| k.clone()).collect();
         gone.sort();

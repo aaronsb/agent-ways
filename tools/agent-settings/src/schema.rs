@@ -358,6 +358,9 @@ pub struct SectionSpec {
     /// The command that repairs this section, when `ways settings fix` cannot
     /// (an action command owns it). The diagnostic names it.
     pub repair: Option<&'static str>,
+    /// What the screens' header row calls the section's two columns, name
+    /// and value, where `setting` and `value` would mislead.
+    pub columns: Option<(&'static str, &'static str)>,
     pub doc: &'static str,
 }
 

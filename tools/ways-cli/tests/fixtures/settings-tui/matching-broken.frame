@@ -3,13 +3,13 @@ agent-tui frame 100x30
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│▌▾ findings                                          ││matching.findings                          │|
 |│     #1                        does not parse: the wh││                                           │|
-|│   semantic_fire_probability   0.5                   ││What `ways settings lint` finds in the     │|
-|│   keyword_floor_probability   0.15                  ││files this tab reads. A section with a     │|
-|│   parent_threshold_multiplier 0.8                   ││finding falls through to the layers        │|
-|│   parent_boost_floor          0.3                   ││beneath; a file that does not parse fails  │|
-|│   near_miss_margin            0.05                  ││closed.                                    │|
-|│ ▸ refire_presets                                    ││                                           │|
-|│                                                     ││1 entry, 0 changed                         │|
+|│ ▾ settings                    value                 ││What `ways settings lint` finds in the     │|
+|│     semantic_fire_probability 0.5                   ││files this tab reads. A section with a     │|
+|│     keyword_floor_probability 0.15                  ││finding falls through to the layers        │|
+|│     parent_threshold_multiplier 0.8                 ││beneath; a file that does not parse fails  │|
+|│     parent_boost_floor        0.3                   ││closed.                                    │|
+|│     near_miss_margin          0.05                  ││                                           │|
+|│ ▸ refire_presets · setting    value                 ││1 entry, 0 changed                         │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -52,6 +52,8 @@ styles
   3  32-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
+  4   2-11  - - BOLD
+  4  32-36  - - DIM
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
@@ -67,10 +69,12 @@ styles
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-17  - - BOLD
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-17  - - BOLD
+ 10  18-27  - - DIM
+ 10  32-36  - - DIM
  10  54-73  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM

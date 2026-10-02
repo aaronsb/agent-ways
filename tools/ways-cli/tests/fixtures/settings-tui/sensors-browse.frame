@@ -1,10 +1,10 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│ ▸ context                                           ││sensors.processes                          │|
-|│ ▸ git                                               ││                                           │|
-|│ ▸ peers                                             ││The built-in processes sensor. `attend     │|
-|│▌▾ processes                                         ││sensors` shows what it watches and whether │|
+|│ ▸ context · setting           value                 ││sensors.processes                          │|
+|│ ▸ git · setting               value                 ││                                           │|
+|│ ▸ peers · setting             value                 ││The built-in processes sensor. `attend     │|
+|│▌▾ processes · setting         value                 ││sensors` shows what it watches and whether │|
 |│     enabled                   true                  ││it runs.                                   │|
 |│     interval                  30                    ││                                           │|
 |│     min_interval              5                     ││7 entries, 0 changed                       │|
@@ -12,8 +12,8 @@ agent-tui frame 100x30
 |│     decay_threshold           5                     ││                                           │|
 |│     requires                  [Bash(ps:*)]          ││                                           │|
 |│     watch                     (built-in)            ││                                           │|
-|│ ▸ disclosure                                        ││                                           │|
-|│ ▸ keepwarm                                          ││                                           │|
+|│ ▸ disclosure · setting        value                 ││                                           │|
+|│ ▸ keepwarm · setting          value                 ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -44,20 +44,30 @@ styles
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   2-10  - - BOLD
+  2  11-20  - - DIM
+  2  32-36  - - DIM
   2  54-55  - - DIM
   2  56-72  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3   2-6   - - BOLD
+  3   7-16  - - DIM
+  3  32-36  - - DIM
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
   4   2-8   - - BOLD
+  4   9-18  - - DIM
+  4  32-36  - - DIM
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
   5   1-1   Cyan - BOLD|REVERSED
-  5   2-53  - - BOLD|REVERSED
+  5   2-12  - - BOLD|REVERSED
+  5  13-22  - - BOLD|DIM|REVERSED
+  5  23-31  - - BOLD|REVERSED
+  5  32-36  - - BOLD|DIM|REVERSED
+  5  37-53  - - BOLD|REVERSED
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
@@ -83,10 +93,14 @@ styles
  12  99-99  - - DIM
  13   0-0   - - DIM
  13   2-13  - - BOLD
+ 13  14-23  - - DIM
+ 13  32-36  - - DIM
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
  14   2-11  - - BOLD
+ 14  12-21  - - DIM
+ 14  32-36  - - DIM
  14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM

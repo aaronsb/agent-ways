@@ -626,9 +626,9 @@ mod tests {
     use crate::schema::*;
 
     const SECTIONS: &[SectionSpec] = &[
-        SectionSpec { per_entry: false, entry: None, repair: None, name: "general", file: "cfg", top: &["language"], doc: "" },
-        SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
-        SectionSpec { per_entry: true, entry: None, repair: None, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
+        SectionSpec { per_entry: false, entry: None, repair: None, name: "general", file: "cfg", top: &["language"], columns: None, doc: "" },
+        SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], columns: None, doc: "" },
+        SectionSpec { per_entry: true, entry: None, repair: None, name: "toggles", file: "cfg", top: &["ways"], columns: None, doc: "" },
     ];
     const BASE: KeySpec = KeySpec {
         name: "general.language",
@@ -806,8 +806,8 @@ mod tests {
         }
 
         const SECTIONS: &[SectionSpec] = &[
-            SectionSpec { per_entry: true, entry: Some(plain_name), repair: None, name: "sensors", file: "cfg", top: &["sensors"], doc: "" },
-            SectionSpec { per_entry: false, entry: None, repair: None, name: "cleanup", file: "cfg", top: &["cleanup"], doc: "" },
+            SectionSpec { per_entry: true, entry: Some(plain_name), repair: None, name: "sensors", file: "cfg", top: &["sensors"], columns: None, doc: "" },
+            SectionSpec { per_entry: false, entry: None, repair: None, name: "cleanup", file: "cfg", top: &["cleanup"], columns: None, doc: "" },
         ];
         const KEYS: &[KeySpec] = &[
             KeySpec { name: "sensors.*.enabled", section: "sensors", path: &["sensors", "*", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), instances: &["a", "b"], ..BASE },

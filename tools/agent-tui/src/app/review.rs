@@ -140,7 +140,7 @@ impl App {
         match &r.kind {
             RKind::Node { own, below, files } => {
                 let n = tree::get(&self.roots, &r.path);
-                lines.extend([Line::styled(tree::key(&self.roots, &r.path), bold), Line::raw("")]);
+                lines.extend([Line::styled(tree::label(&self.roots, &r.path), bold), Line::raw("")]);
                 if !n.doc.is_empty() {
                     lines.extend(n.doc.lines().map(|l| Line::raw(l.to_string())));
                     lines.push(Line::raw(""));

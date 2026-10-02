@@ -224,8 +224,19 @@ impl App {
                     left.clone(),
                     if n.setting.is_none() { Style::new().add_modifier(Modifier::BOLD) } else { Style::new() },
                 )];
-                let pad = value_col.saturating_sub(left.chars().count()).max(1);
+                // A header row: the name column's label after the name, the
+                // value column's in its column.
+                let (name_label, value_label) = match &n.columns {
+                    Some((a, b)) if a.is_empty() => (String::new(), Some(b.clone())),
+                    Some((a, b)) => (format!(" · {a}"), Some(b.clone())),
+                    None => (String::new(), None),
+                };
+                spans.push(Span::styled(name_label.clone(), theme::muted()));
+                let pad = value_col.saturating_sub(left.chars().count() + name_label.chars().count()).max(1);
                 spans.push(Span::raw(" ".repeat(pad)));
+                if let Some(v) = value_label {
+                    spans.push(Span::styled(v, theme::muted()));
+                }
                 if let Some(s) = &n.setting {
                     let style = if s.changed() {
                         theme::changed()
@@ -268,7 +279,8 @@ impl App {
     fn draw_detail(&self, f: &mut Frame, area: Rect, path: &[usize]) {
         let n = tree::get(&self.roots, path);
         let dim = theme::muted();
-        let mut lines = vec![Line::styled(tree::key(&self.roots, path), Style::new().add_modifier(Modifier::BOLD)), Line::raw("")];
+        let title = tree::label(&self.roots, path);
+        let mut lines = vec![Line::styled(title, Style::new().add_modifier(Modifier::BOLD)), Line::raw("")];
         if !n.doc.is_empty() {
             lines.extend(n.doc.lines().map(|l| Line::raw(l.to_string())));
             lines.push(Line::raw(""));
@@ -304,10 +316,10 @@ impl App {
         }
         if !n.actions.is_empty() {
             lines.push(Line::raw(""));
-            lines.push(Line::styled("actions (a)", dim));
-            for a in &n.actions {
+            lines.push(Line::styled("actions", dim));
+            for (a, k) in n.actions.iter().zip(tree::action_keys(&n.actions)) {
                 let tag = if a.confirm { " (asks first)" } else { "" };
-                lines.push(Line::raw(format!("  {}{tag}", a.label)));
+                lines.push(Line::from(vec![Span::styled(format!("  {} ", k.unwrap_or(' ')), theme::accent()), Span::raw(format!("{}{tag}", a.label))]));
                 lines.push(Line::styled(format!("    {}", a.render("<arg>")), dim));
             }
         }
@@ -381,7 +393,8 @@ impl App {
         let items = n
             .actions
             .iter()
-            .map(|a| {
+            .zip(tree::action_keys(&n.actions))
+            .map(|(a, k)| {
                 let tag = match (&a.arg, a.confirm) {
                     (Arg::Secret, _) => "  masked".to_string(),
                     (Arg::Flow(_), _) => "  guided".to_string(),
@@ -390,10 +403,10 @@ impl App {
                     (Arg::None, true) => "  asks first".to_string(),
                     (Arg::None, false) => String::new(),
                 };
-                (a.label.clone(), tag)
+                (format!("{} {}", k.unwrap_or(' '), a.label), tag)
             })
             .collect();
-        let title = format!("actions: {}", tree::key(&self.roots, path));
+        let title = format!("actions: {}", tree::label(&self.roots, path));
         self.draw_menu_items(f, area, title, items, sel);
     }
 
@@ -549,6 +562,10 @@ impl App {
                 } else {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
+                if let Some(here) = self.footer_actions() {
+                    spans.push(theme::sep());
+                    spans.extend(here);
+                }
                 spans.push(msg);
             }
         }
@@ -564,6 +581,26 @@ impl App {
             None => area,
         };
         f.render_widget(Paragraph::new(Line::from(spans)), left);
+    }
+
+    /// The selected row's actions as `key label` pairs, from their
+    /// declaration: the row's own, else its tab's.
+    fn footer_actions(&self) -> Option<Vec<Span<'static>>> {
+        let rows = self.rows();
+        let path = self.actions_at(&rows.get(self.cursor)?.path);
+        let actions = &tree::get(&self.roots, &path).actions;
+        if actions.is_empty() {
+            return None;
+        }
+        let mut spans = Vec::new();
+        for (i, (a, k)) in actions.iter().zip(tree::action_keys(actions)).enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(" · ", theme::hint()));
+            }
+            spans.push(Span::styled(k.map_or(String::new(), |k| format!("{k} ")), theme::accent()));
+            spans.push(Span::styled(a.label.clone(), theme::hint()));
+        }
+        Some(spans)
     }
 
     /// Save, Discard or Back over the editor, Back focused.
@@ -602,7 +639,8 @@ pub const KEYS: &[&str] = &[
     "e            edit as text (^U clears)      d   set to default",
     "u            revert        /               filter all tabs by key",
     "Enter        on a filter hit: jump to it in its tab (Space acts)",
-    "a            actions of the row, or of the tab   x   unqueue the last",
+    "a            menu of the row's actions, or the tab's   x   unqueue the last",
+    "             each action's own key runs it; the footer and detail name them",
     "c            pending pane (changes and queued actions)",
     "w Ctrl-S     review this tab's pending items, read-only (or click the ●",
     "             bar): a applies the tab, X discards it, Tab next tab, Esc back",

@@ -155,9 +155,9 @@ fn a_change_applied_in_the_screens_writes_the_bytes_set_writes() {
     // write, one on gate, one on ways, each tab reviewed and applied.
     let left = tui.drive(
         "matching",
-        "/ text:near_miss enter down enter e ctrl-u text:0.1 enter \
-         / text:parent_boost enter down enter e ctrl-u text:0.25 enter w a \
-         3 down enter w a \
+        "/ text:near_miss enter down down enter e ctrl-u text:0.1 enter \
+         / text:parent_boost enter down down enter e ctrl-u text:0.25 enter w a \
+         3 down down enter w a \
          / text:incident enter end enter enter w a",
     );
     assert_eq!(left, "nothing pending\n", "every change applied");
@@ -418,22 +418,22 @@ fn golden_frames() {
     fx.file(".config/agent-ways/config.yaml", "# by hand\nnear_miss_margin: 0.1\n");
     let mut g = goldens();
     let shots: &[(&str, &str, &str, &str)] = &[
-        ("ways-browse", "ways", "down down down down right", "100x30"),
-        ("ways-edit", "ways", "down e", "100x30"),
-        ("ways-review", "ways", "enter / text:incident enter end enter enter w", "100x30"),
+        ("ways-browse", "ways", "down down down down down right", "100x30"),
+        ("ways-edit", "ways", "down down e", "100x30"),
+        ("ways-review", "ways", "down enter / text:incident enter end enter enter w", "100x30"),
         ("matching-browse", "matching", "", "100x30"),
-        ("matching-edit", "matching", "down e ctrl-u text:0.2", "100x30"),
-        ("matching-review", "matching", "e ctrl-u text:0.4 enter down down down down e ctrl-u text:0.2 enter w", "100x30"),
-        ("gate-browse", "gate", "down down right down right", "100x30"),
-        ("gate-edit", "gate", "e text:anthropic", "100x30"),
-        ("gate-review", "gate", "down enter / text:keys.anthropic enter end enter a down enter w", "100x30"),
+        ("matching-edit", "matching", "down down e ctrl-u text:0.2", "100x30"),
+        ("matching-review", "matching", "down e ctrl-u text:0.4 enter down down down down e ctrl-u text:0.2 enter w", "100x30"),
+        ("gate-browse", "gate", "down down down right down right", "100x30"),
+        ("gate-edit", "gate", "down e text:anthropic", "100x30"),
+        ("gate-review", "gate", "down down enter / text:keys.anthropic enter end enter a down enter w", "100x30"),
         ("install-browse", "install", "", "100x30"),
-        ("install-edit", "install", "down down e", "100x30"),
-        ("install-review", "install", "down down enter a down enter y w", "100x30"),
+        ("install-edit", "install", "down down down e", "100x30"),
+        ("install-review", "install", "down down down enter a down enter y w", "100x30"),
         ("theme-browse", "theme", "down down", "100x30"),
         ("theme-edit", "theme", "down down e text:mine enter down down down down down down down down enter", "100x30"),
         ("theme-review", "theme", "down down e text:mine enter q", "100x30"),
-        ("matching-80x25", "matching", "down", "80x25"),
+        ("matching-80x25", "matching", "down down", "80x25"),
         ("attend-browse", "attend", "down down right", "100x30"),
         ("attend-edit", "attend", "down down right down down down down e ctrl-u text:900", "100x30"),
         ("attend-review", "attend", "right down e ctrl-u text:30 enter w", "100x30"),

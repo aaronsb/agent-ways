@@ -1,20 +1,20 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│▌  enabled                     true                  ││ways.enabled                               │|
-|│   language                    auto                  ││                                           │|
-|│   default_scope               agent                 ││Whether hooks inject ways at all.          │|
-|│   disabled_domains            []                    ││                                           │|
-|│ ▸ project                                           ││Set false in a project's .claude/ways.yaml │|
-|│                                                     ││to switch ways off for that project: hooks │|
-|│                                                     ││inject nothing there (ADR-184).            │|
+|│▌▾ settings                    value                 ││ways · settings                            │|
+|│     enabled                   true                  ││                                           │|
+|│     language                  auto                  ││The tab's own keys.                        │|
+|│     default_scope             agent                 ││                                           │|
+|│     disabled_domains          []                    ││4 entries, 0 changed                       │|
+|│ ▸ project · way               enabled               ││                                           │|
 |│                                                     ││                                           │|
-|│                                                     ││value    true                              │|
-|│                                                     ││type     bool (Enter toggles)              │|
-|│                                                     ││default  true                              │|
-|│                                                     ││from     default                           │|
-|│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
-|│                                                     ││[ways.enabled]                             │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme                              |
+| browse  0 changed │ 0 queued │ mouse on (m) │ s set up  nord is the active theme                   |
 styles
   0   0-7   #2e3440 #c99fc1 BOLD
   0  10-21  #2e3440 #bfa2c3 -
@@ -44,9 +44,11 @@ styles
   1  62-99  #434c5e - -
   2   0-0   #434c5e - -
   2   1-1   #c99fc1 #3f3f4e BOLD
-  2   2-53  #d8dee9 #3f3f4e BOLD
+  2   2-31  #d8dee9 #3f3f4e BOLD
+  2  32-36  #7c8baa #3f3f4e BOLD
+  2  37-53  #d8dee9 #3f3f4e BOLD
   2  54-55  #434c5e - -
-  2  56-67  - - BOLD
+  2  56-70  - - BOLD
   2  99-99  #434c5e - -
   3   0-0   #434c5e - -
   3  54-55  #434c5e - -
@@ -58,10 +60,13 @@ styles
   5  54-55  #434c5e - -
   5  99-99  #434c5e - -
   6   0-0   #434c5e - -
-  6   2-10  - - BOLD
   6  54-55  #434c5e - -
+  6  56-75  #7c8baa - -
   6  99-99  #434c5e - -
   7   0-0   #434c5e - -
+  7   2-10  - - BOLD
+  7  11-16  #7c8baa - -
+  7  32-38  #7c8baa - -
   7  54-55  #434c5e - -
   7  99-99  #434c5e - -
   8   0-0   #434c5e - -
@@ -72,23 +77,18 @@ styles
   9  99-99  #434c5e - -
  10   0-0   #434c5e - -
  10  54-55  #434c5e - -
- 10  56-64  #7c8baa - -
  10  99-99  #434c5e - -
  11   0-0   #434c5e - -
  11  54-55  #434c5e - -
- 11  56-64  #7c8baa - -
  11  99-99  #434c5e - -
  12   0-0   #434c5e - -
  12  54-55  #434c5e - -
- 12  56-64  #7c8baa - -
  12  99-99  #434c5e - -
  13   0-0   #434c5e - -
  13  54-55  #434c5e - -
- 13  56-64  #7c8baa - -
  13  99-99  #434c5e - -
  14   0-0   #434c5e - -
  14  54-55  #434c5e - -
- 14  56-64  #7c8baa - -
  14  99-99  #434c5e - -
  15   0-0   #434c5e - -
  15  54-55  #434c5e - -
@@ -136,3 +136,6 @@ styles
  29  21-28  #7c8baa - ITALIC
  29  29-31  #434c5e - -
  29  32-43  #7c8baa - ITALIC
+ 29  44-46  #434c5e - -
+ 29  47-48  #c99fc1 - -
+ 29  49-54  #7c8baa - ITALIC

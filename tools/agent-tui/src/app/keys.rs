@@ -114,6 +114,10 @@ impl App {
                     KeyCode::Enter => self.pick(path, sel),
                     KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Menu { path, sel: sel.saturating_sub(1) },
                     KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::Menu { path, sel: (sel + 1).min(len - 1) },
+                    KeyCode::Char(c) => match self.action_for_key(&path, c) {
+                        Some(i) => self.pick(path, i),
+                        None => self.mode = Mode::Menu { path, sel },
+                    },
                     _ => self.mode = Mode::Menu { path, sel },
                 }
             }
@@ -360,6 +364,12 @@ impl App {
             KeyCode::Char('m') => self.toggle_mouse(),
             KeyCode::Char('/') => self.mode = Mode::Filter,
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
+            KeyCode::Char(c) => {
+                let target = self.actions_at(&path);
+                if let Some(i) = self.action_for_key(&target, c) {
+                    self.pick(target, i);
+                }
+            }
             _ => {}
         }
         true
@@ -560,13 +570,23 @@ impl App {
     }
 
     /// The row's actions, or the tab's when the row has none.
-    pub(super) fn open_menu(&mut self, path: &[usize]) {
+    /// The node whose actions apply at `path`: its own, else its tab's.
+    pub(super) fn actions_at(&self, path: &[usize]) -> Vec<usize> {
         let own = !tree::get(&self.roots, path).actions.is_empty();
-        let path = if own { path } else { &path[..1] };
-        if tree::get(&self.roots, path).actions.is_empty() {
+        if own { path } else { &path[..1] }.to_vec()
+    }
+
+    /// The action of the node at `path` that `c` runs, by [`tree::action_keys`].
+    pub(super) fn action_for_key(&self, path: &[usize], c: char) -> Option<usize> {
+        tree::action_keys(&tree::get(&self.roots, path).actions).iter().position(|k| *k == Some(c))
+    }
+
+    pub(super) fn open_menu(&mut self, path: &[usize]) {
+        let path = self.actions_at(path);
+        if tree::get(&self.roots, &path).actions.is_empty() {
             self.msg = "no actions here".into();
         } else {
-            self.mode = Mode::Menu { path: path.to_vec(), sel: 0 };
+            self.mode = Mode::Menu { path, sel: 0 };
         }
     }
 

@@ -1,9 +1,10 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│   engine                                            ││gate.profiles.anthropic                    │|
-|│   mode                        enforce               ││                                           │|
-|│ ▾ profiles                                          ││10 entries, 0 changed                      │|
+|│ ▾ settings                    value                 ││gate.profiles.anthropic                    │|
+|│     engine                                          ││                                           │|
+|│     mode                      enforce               ││10 entries, 0 changed                      │|
+|│ ▾ profiles · setting          value                 ││                                           │|
 |│▌  ▾ anthropic                                       ││                                           │|
 |│       provider                anthropic             ││                                           │|
 |│       model                   claude-haiku-4-5      ││                                           │|
@@ -16,8 +17,7 @@ agent-tui frame 100x30
 |│       price_in_per_mtok                             ││                                           │|
 |│       price_out_per_mtok                            ││                                           │|
 |│   ▸ openrouter                                      ││                                           │|
-|│ ▸ keys                                              ││                                           │|
-|│                                                     ││                                           │|
+|│ ▸ keys · provider             key                   ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -43,6 +43,8 @@ styles
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  32-36  - - DIM
   2  54-55  - - DIM
   2  56-78  - - BOLD
   2  99-99  - - DIM
@@ -50,15 +52,17 @@ styles
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4   2-11  - - BOLD
   4  54-76  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   1-1   Cyan - BOLD|REVERSED
-  5   2-53  - - BOLD|REVERSED
+  5   2-11  - - BOLD
+  5  12-21  - - DIM
+  5  32-36  - - DIM
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
+  6   1-1   Cyan - BOLD|REVERSED
+  6   2-53  - - BOLD|REVERSED
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
@@ -89,14 +93,16 @@ styles
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16   2-15  - - BOLD
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17   2-7   - - BOLD
+ 17   2-15  - - BOLD
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
+ 18   2-7   - - BOLD
+ 18   8-18  - - DIM
+ 18  32-34  - - DIM
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM

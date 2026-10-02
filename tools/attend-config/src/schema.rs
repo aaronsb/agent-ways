@@ -60,6 +60,7 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: false,
         entry: None,
         repair: None,
+        columns: None,
         doc: "Rate limits on disclosures across every sensor.",
     },
     SectionSpec {
@@ -69,6 +70,7 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: false,
         entry: None,
         repair: None,
+        columns: None,
         doc: "The action potential model: how a sensor quiets after a burst (ADR-123). `attend tune --apply` writes it.",
     },
     SectionSpec {
@@ -78,6 +80,7 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: false,
         entry: None,
         repair: None,
+        columns: None,
         doc: "The background sweep of signals whose project is gone (ADR-136).",
     },
     SectionSpec {
@@ -87,6 +90,7 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: true,
         entry: Some(check_sensor_name),
         repair: None,
+        columns: None,
         doc: "Each sensor's polling, threshold and permissions; a sensor of your own names a script. Each sensor falls back alone.",
     },
 ];

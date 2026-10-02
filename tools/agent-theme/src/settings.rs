@@ -23,6 +23,7 @@ pub const SECTION: SectionSpec = SectionSpec {
     per_entry: false,
     entry: None,
     repair: None,
+    columns: None,
     doc: "The look of the interactive screens: the active theme and the lozenge shape (ADR-504).",
 };
 
