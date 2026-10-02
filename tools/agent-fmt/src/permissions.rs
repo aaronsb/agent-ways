@@ -117,16 +117,10 @@ fn scope_contains(grant_scope: &str, req_scope: &str) -> bool {
     }
     // Tilde expansion: "~/.claude/**" matches "/home/user/.claude/foo"
     if grant_scope.starts_with("~/") {
-        if let Some(home) = home_dir() {
-            let expanded = format!("{}{}", home.display(), &grant_scope[1..]);
-            return scope_contains(&expanded, req_scope);
-        }
+        let expanded = format!("{}{}", claude_sessions::home_dir().display(), &grant_scope[1..]);
+        return scope_contains(&expanded, req_scope);
     }
     false
-}
-
-fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var("HOME").ok().map(std::path::PathBuf::from)
 }
 
 /// Load permissions from settings.json.

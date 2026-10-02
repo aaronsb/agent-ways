@@ -29,6 +29,7 @@ name = "agent-fmt"
 version = "0.6.0"
 dependencies = [
  "agent-theme",
+ "claude-sessions",
  "figlet-rs",
  "libc",
  "serde_json",
