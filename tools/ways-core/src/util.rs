@@ -79,7 +79,8 @@ pub fn env_project_dir() -> Option<String> {
 }
 
 /// The directory a command acts on: `CLAUDE_PROJECT_DIR` when set, else
-/// `$PWD`, else the current directory, else `.`.
+/// `$PWD` when it names the current directory (bash's rule, which keeps the
+/// logical path through a symlink), else the current directory, else `.`.
 pub fn project_dir() -> String {
     project_dir_from(
         env_project_dir(),
@@ -89,9 +90,34 @@ pub fn project_dir() -> String {
 }
 
 fn project_dir_from(env: Option<String>, pwd: Option<String>, cwd: Option<PathBuf>) -> String {
-    env.or_else(|| pwd.filter(|s| !s.is_empty()))
-        .or_else(|| cwd.map(|p| p.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| ".".to_string())
+    if let Some(env) = env {
+        return env;
+    }
+    let pwd = pwd.filter(|s| !s.is_empty());
+    match (pwd, cwd) {
+        (Some(pwd), Some(cwd)) if same_dir(Path::new(&pwd), &cwd) => pwd,
+        (_, Some(cwd)) => cwd.to_string_lossy().into_owned(),
+        // No current directory to check against: $PWD is all there is.
+        (Some(pwd), None) => pwd,
+        (None, None) => ".".to_string(),
+    }
+}
+
+/// Whether two paths name the same directory: device and inode on Unix,
+/// canonical paths elsewhere.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    }
 }
 
 /// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
@@ -188,6 +214,26 @@ pub fn is_excluded_path(path: &Path, excluded_segments: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `$PWD` stands only when it names the current directory (bash's rule);
+    /// a stale one inherited from a non-shell parent gives way to the real cwd.
+    #[test]
+    fn project_dir_ignores_a_stale_pwd() {
+        let cwd = std::env::temp_dir().join(format!("ways-pwd-{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let stale = Some("/nonexistent/stale/pwd".to_string());
+        assert_eq!(project_dir_from(None, stale, Some(cwd.clone())), cwd.to_string_lossy());
+        #[cfg(unix)]
+        {
+            let link = std::env::temp_dir().join(format!("ways-pwd-link-{}", std::process::id()));
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&cwd, &link).unwrap();
+            let logical = link.to_string_lossy().into_owned();
+            assert_eq!(project_dir_from(None, Some(logical.clone()), Some(cwd.clone())), logical);
+            let _ = std::fs::remove_file(&link);
+        }
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
 
     /// An empty `CLAUDE_PROJECT_DIR` is unset. Most readers used to take it as
     /// the project, so a hook that exported an empty cwd scoped to "".
