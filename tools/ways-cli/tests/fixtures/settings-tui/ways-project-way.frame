@@ -19,14 +19,14 @@ agent-tui frame 100x30
 |│                                                     ││write.                                     │|
 |│                                                     ││                                           │|
 |│                                                     ││from       this project                    │|
-|│                                                     ││           ~/proj/.claude/ways/api/dual/dua│|
-|│                                                     ││l.md                                       │|
+|│                                                     ││root       ~/proj/.claude/ways             │|
+|│                                                     ││file       api/dual/dual.md                │|
 |│                                                     ││vocabulary endpoint read write mode        │|
 |│                                                     ││pattern    \bapi\b                         │|
 |│                                                     ││refire     normal                          │|
-|│                                                     ││macro      prepend                         │|
-|│                                                     ││           ~/proj/.claude/ways/api/dual/mac│|
-|│                                                     ││ro.sh                                      │|
+|│                                                     ││macro      prepend · macro.sh              │|
+|│                                                     ││           ls src/routes                   │|
+|│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
 | browse  0 changed │ 0 queued │ mouse on (m) │ s set up                                             |
 styles

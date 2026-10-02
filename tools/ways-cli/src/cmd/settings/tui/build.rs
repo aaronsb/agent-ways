@@ -178,6 +178,8 @@ impl WayScope {
 /// A way's scope and its file.
 struct Located {
     scope: WayScope,
+    /// The root of its scope, which the detail names its file against.
+    root: PathBuf,
     /// None when the directory holds no way file sessions would read.
     file: Option<PathBuf>,
 }
@@ -199,7 +201,8 @@ fn way_about(w: &Located, home: &Path) -> String {
     let field = |name: &str| ways_core::frontmatter::field_in(&text, name).filter(|v| !v.is_empty());
     let mut out = vec![field("description").unwrap_or_else(|| "(no description)".into()), String::new()];
     out.push(row("from", w.scope.label().into()));
-    out.push(row("", tilde(file, home)));
+    out.push(row("root", tilde(&w.root, home)));
+    out.push(row("file", file.strip_prefix(&w.root).unwrap_or(file).display().to_string()));
     for k in ["vocabulary", "pattern", "files", "commands", "trigger", "scope", "refire"] {
         if let Some(v) = field(k) {
             out.push(row(k, v));
@@ -207,8 +210,7 @@ fn way_about(w: &Located, home: &Path) -> String {
     }
     if let Some(m) = field("macro") {
         let script = file.with_file_name("macro.sh");
-        out.push(row("macro", m));
-        out.push(row("", tilde(&script, home)));
+        out.push(row("macro", format!("{m} · macro.sh")));
         let body = std::fs::read_to_string(&script).unwrap_or_default();
         let runs = body.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(3);
         out.extend(runs.map(|l| row("", l.to_string())));
@@ -408,7 +410,7 @@ impl Ways {
         for (scope, root) in roots {
             let Some(root) = root else { continue };
             for id in crate::cmd::scan::candidates::way_ids(&root) {
-                out.entry(id.clone()).or_insert_with(|| Located { scope, file: way_file(&root, &id) });
+                out.entry(id.clone()).or_insert_with(|| Located { scope, file: way_file(&root, &id), root: root.clone() });
             }
         }
         out

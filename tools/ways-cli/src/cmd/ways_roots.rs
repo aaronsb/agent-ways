@@ -50,8 +50,13 @@ pub fn known_project_ways(progress: &dyn Fn(&str)) -> Vec<(String, PathBuf)> {
                 continue;
             }
         };
-        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-            continue;
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => {}
+            Ok(_) => continue,
+            Err(e) => {
+                progress(&format!("  {} skipped: {e}", entry.file_name().to_string_lossy()));
+                continue;
+            }
         }
         let encoded = entry.file_name().to_string_lossy().to_string();
         progress(&format!("  resolving {encoded}"));
