@@ -292,6 +292,7 @@ test-hooks:
 	@bash tests/prebuilt-lib-test.sh
 	@bash tests/download-prebuilt-test.sh
 	@bash tests/gh-tasks-test.sh
+	@bash tests/workflow-crates-test.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."
