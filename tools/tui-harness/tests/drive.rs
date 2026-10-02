@@ -168,7 +168,7 @@ fn orphans_are_listed_and_pruned_per_root() {
     assert!(orphans.contains(&format!("tui-{mine}")), "{orphans:?}");
     assert!(!orphans.contains(&format!("tui-{theirs}")), "{orphans:?}");
 
-    let (killed, _) = a.prune().unwrap();
+    let killed = a.prune(false).unwrap().killed;
     assert_eq!(killed, vec![format!("tui-{mine}")]);
     assert!(!s_mine.alive());
     assert!(s_theirs.alive(), "root A's prune killed root B's orphan");

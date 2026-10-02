@@ -8,8 +8,13 @@
 //! so a personal `~/.tmux.conf` never changes what a test sees. All roots
 //! share that server and the `tui-<name>` namespace, so each session is
 //! tagged with the root that launched it ([`ROOT_OPTION`]) and only that
-//! root kills it.
+//! root drives or kills it.
+//!
+//! A launched command starts under the harness binary's hidden
+//! `__exec-env` subcommand ([`exec_env`]), which reads its environment and
+//! working directory from a file, deletes the file, and execs the command.
 
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -30,6 +35,22 @@ pub const ROOT_OPTION: &str = "@tui_harness_root";
 
 /// The prefix of every harness session's tmux name.
 const PREFIX: &str = "tui-";
+
+/// The hidden subcommand of the `tui-harness` binary that starts a
+/// launched command (see [`exec_env`]).
+pub const EXEC_ENV: &str = "__exec-env";
+
+/// The file in a session's state directory holding the command's
+/// environment until the command starts.
+const ENVIRON: &str = "environ";
+
+/// Where [`exec_env`] reports a command it could not start.
+const EXEC_ERR: &str = "exec.err";
+
+/// How old an `environ` file or a metadata-less state directory must be
+/// before `prune` treats it as left by an interrupted launch rather than a
+/// launch in progress. A launch gives up after 5 s.
+const STALE_AFTER: Duration = Duration::from_secs(10);
 
 /// Server-wide options, applied in the same command list that creates a
 /// session, so they hold before the first pane exists (`history-limit` only
@@ -69,7 +90,10 @@ fn server_env_keeps(name: &str) -> bool {
 /// A `tmux` command aimed at the private server.
 fn tmux_command() -> Command {
     let mut c = Command::new("tmux");
-    c.args(["-L", TMUX_SOCKET]);
+    // `-f /dev/null` matters only if this call starts the server, and then
+    // it keeps the user's config (and plugins such as session restorers)
+    // off the private server.
+    c.args(["-L", TMUX_SOCKET, "-f", "/dev/null"]);
     c
 }
 
@@ -77,21 +101,14 @@ fn tmux_command() -> Command {
 /// command at any argument ending in `;`, and strips one backslash from a
 /// trailing `\;`. So a trailing `;` gets one backslash before it, and tmux
 /// hands the original back. No other character in an argument is special
-/// to it: `{`, `}`, `#{...}`, `%`, `~` and `$` pass through `send-keys -l`,
-/// `new-session` commands and `-e` unchanged (checked against tmux 3.7).
-/// Options that tmux expands as formats (`-c`) also need
-/// [`format_literal`].
+/// to it: `{`, `}`, `#{...}`, `%`, `~` and `$` pass through `send-keys -l`
+/// and `new-session` commands unchanged (checked against tmux 3.7). The
+/// working directory never goes through tmux, whose `-c` expands formats.
 pub fn tmux_literal(arg: &str) -> String {
     match arg.strip_suffix(';') {
         Some(head) => format!("{head}\\;"),
         None => arg.to_string(),
     }
-}
-
-/// Escape `#` for an option tmux expands as a format, such as
-/// `new-session -c`, so `#{...}` in a path stays literal.
-fn format_literal(s: &str) -> String {
-    s.replace('#', "##")
 }
 
 /// The caller's environment, less the variables in [`ENV_SKIP`] and any that
@@ -108,50 +125,202 @@ pub fn inherited_env() -> Vec<(String, String)> {
 /// The arguments after `tmux` that create a detached session on the private
 /// server and tag it: no user config, the options, `new-session`, then
 /// `set-option` with the root.
-/// The shell program every launched command runs under. tmux starts it
-/// with the pane's own `TERM`, `TMUX` and `TMUX_PANE`; it clears every other
-/// variable, sources the environment file (`$1`), deletes it, and execs the
-/// command. A one-word command runs through `$SHELL -c`, as tmux runs one.
-/// The file, not `new-session -e`, carries the environment: a full
-/// environment overflows tmux's message size ("command too long").
-const ENV_WRAPPER: &str = r#"f=$1; shift
-exec env -i TERM="$TERM" TMUX="$TMUX" TMUX_PANE="$TMUX_PANE" COLORTERM=truecolor /bin/sh -c '. "$0" && rm -f -- "$0"
-if [ $# -eq 1 ]; then exec "${SHELL:-/bin/sh}" -c "$1"; fi
-exec "$@"' "$f" "$@""#;
-
-/// Write `env` as a file `/bin/sh` can source: one `export` per variable,
-/// values single-quoted. Names that are not shell identifiers are dropped,
-/// since no shell could export them. The file is private to the user.
-fn write_env_file(path: &Path, env: &[(String, String)]) -> Result<()> {
-    let mut body = String::new();
-    for (k, v) in env {
-        let ident = k
-            .chars()
-            .next()
-            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
-            && k.chars().all(|c| c == '_' || c.is_ascii_alphanumeric());
-        if ident {
-            body.push_str(&format!("export {k}='{}'\n", v.replace('\'', r"'\''")));
-        }
+/// Write the file [`exec_env`] reads: NUL-separated records, the first the
+/// working directory (empty for none), then one `KEY=VALUE` per variable.
+/// Created with `O_EXCL` and mode 0600, so it is private to the user and
+/// never follows a planted link.
+fn write_exec_file(path: &Path, cwd: Option<&Path>, env: &[(String, String)]) -> Result<()> {
+    let mut body: Vec<u8> = Vec::new();
+    if let Some(cwd) = cwd {
+        body.extend_from_slice(&os_bytes(cwd.as_os_str()));
     }
-    let mut file = std::fs::OpenOptions::new();
-    file.write(true).create_new(true);
+    body.push(0);
+    for (k, v) in env {
+        body.extend_from_slice(k.as_bytes());
+        body.push(b'=');
+        body.extend_from_slice(v.as_bytes());
+        body.push(0);
+    }
+    write_private(path, &body)
+}
+
+/// Create `path` with `O_EXCL` and mode 0600 and write `body`.
+fn write_private(path: &Path, body: &[u8]) -> Result<()> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        file.mode(0o600);
+        opts.mode(0o600);
     }
-    let mut f = file
+    let mut f = opts
         .open(path)
         .with_context(|| format!("creating {}", path.display()))?;
-    std::io::Write::write_all(&mut f, body.as_bytes())
-        .with_context(|| format!("writing {}", path.display()))
+    std::io::Write::write_all(&mut f, body).with_context(|| format!("writing {}", path.display()))
+}
+
+#[cfg(unix)]
+fn os_bytes(s: &OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    s.as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn os_bytes(s: &OsStr) -> Vec<u8> {
+    s.to_string_lossy().into_owned().into_bytes()
+}
+
+#[cfg(unix)]
+fn bytes_os(b: &[u8]) -> OsString {
+    use std::os::unix::ffi::OsStrExt;
+    OsStr::from_bytes(b).to_os_string()
+}
+
+#[cfg(not(unix))]
+fn bytes_os(b: &[u8]) -> OsString {
+    OsString::from(String::from_utf8_lossy(b).into_owned())
+}
+
+/// Start a launched command: the body of `tui-harness __exec-env FILE --
+/// CMD...`, which tmux runs as the pane's process.
+///
+/// It reads `file` (see [`write_exec_file`]) and deletes it before anything
+/// else, then builds the command's environment from nothing: the pane's
+/// `TERM`, `TMUX` and `TMUX_PANE`, `COLORTERM=truecolor`, then every pair in
+/// the file, which wins. Pairs the OS would refuse (an empty name, or one
+/// holding `=`) are skipped. It changes to the recorded directory and execs
+/// the command, searching the new `PATH`. A one-word command runs through
+/// `$SHELL -c` (else `/bin/sh -c`), as tmux runs one. No shell parses the
+/// file, so any name or value, readonly in bash or not, arrives intact.
+///
+/// It returns only on failure. The error is also appended to `exec.err`
+/// beside the file, where `launch` looks for it.
+pub fn exec_env(file: &Path, cmd: &[OsString]) -> std::io::Error {
+    let err = exec_env_inner(file, cmd);
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file.with_file_name(EXEC_ERR))
+        .and_then(|mut f| {
+            std::io::Write::write_all(
+                &mut f,
+                format!("tui-harness: cannot start the command: {err}\n").as_bytes(),
+            )
+        });
+    err
+}
+
+fn exec_env_inner(file: &Path, cmd: &[OsString]) -> std::io::Error {
+    let bytes = match std::fs::read(file) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    if let Err(e) = std::fs::remove_file(file) {
+        return e;
+    }
+    let mut records = bytes.split(|b| *b == 0);
+    let cwd = records.next().unwrap_or_default();
+    let pairs: Vec<(OsString, OsString)> = records
+        .filter_map(|r| {
+            let eq = r.iter().position(|b| *b == b'=')?;
+            let (k, v) = (&r[..eq], &r[eq + 1..]);
+            (!k.is_empty()).then(|| (bytes_os(k), bytes_os(v)))
+        })
+        .collect();
+    let Some((program, args)) = cmd.split_first() else {
+        return std::io::Error::new(std::io::ErrorKind::InvalidInput, "no command");
+    };
+    let mut command = if args.is_empty() {
+        let shell = pairs
+            .iter()
+            .rev()
+            .find(|(k, _)| k == "SHELL")
+            .map(|(_, v)| v.clone())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| OsString::from("/bin/sh"));
+        let mut c = Command::new(shell);
+        c.arg("-c").arg(program);
+        c
+    } else {
+        let mut c = Command::new(program);
+        c.args(args);
+        c
+    };
+    command.env_clear();
+    for k in ["TERM", "TMUX", "TMUX_PANE"] {
+        if let Some(v) = std::env::var_os(k) {
+            command.env(k, v);
+        }
+    }
+    command.env("COLORTERM", "truecolor");
+    command.envs(pairs);
+    if !cwd.is_empty() {
+        command.current_dir(bytes_os(cwd));
+    }
+    exec(command)
+}
+
+#[cfg(unix)]
+fn exec(mut command: Command) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    command.exec()
+}
+
+#[cfg(not(unix))]
+fn exec(mut command: Command) -> std::io::Error {
+    match command.status() {
+        Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+        Err(e) => e,
+    }
+}
+
+/// The `tui-harness` binary that runs [`exec_env`] in the pane: `explicit`
+/// if given, else `$TUI_HARNESS_BIN`, else the running program if it is
+/// `tui-harness`, else a `tui-harness` beside it or one directory up (a
+/// test binary in `target/<profile>/deps`), else one on `PATH`.
+pub fn helper_binary(explicit: Option<&Path>) -> Result<PathBuf> {
+    if let Some(p) = explicit {
+        return Ok(p.to_path_buf());
+    }
+    if let Some(p) = std::env::var_os("TUI_HARNESS_BIN").filter(|p| !p.is_empty()) {
+        return Ok(PathBuf::from(p));
+    }
+    let exe_name = format!("tui-harness{}", std::env::consts::EXE_SUFFIX);
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.file_name().is_some_and(|n| n == exe_name.as_str()) {
+            return Ok(exe);
+        }
+        let near = exe
+            .parent()
+            .into_iter()
+            .flat_map(|d| [Some(d), d.parent()])
+            .flatten();
+        for dir in near {
+            let candidate = dir.join(&exe_name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(&exe_name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    bail!(
+        "the tui-harness binary was not found to start the command; build it \
+         (cargo build -p tui-harness) or set TUI_HARNESS_BIN"
+    )
 }
 
 fn new_session_args(
     tmux_name: &str,
     opts: &LaunchOptions,
     cmd: &[String],
+    helper: &Path,
     env_file: &Path,
     root_tag: &str,
 ) -> Vec<String> {
@@ -170,12 +339,10 @@ fn new_session_args(
         "-y".into(),
         opts.rows.to_string(),
     ]);
-    if let Some(cwd) = &opts.cwd {
-        args.push("-c".into());
-        args.push(tmux_literal(&format_literal(&cwd.display().to_string())));
-    }
-    args.extend(["/bin/sh", "-c", ENV_WRAPPER, "tui-harness"].map(tmux_literal));
+    args.push(tmux_literal(&helper.display().to_string()));
+    args.push(EXEC_ENV.into());
     args.push(tmux_literal(&env_file.display().to_string()));
+    args.push("--".into());
     args.extend(cmd.iter().map(|a| tmux_literal(a)));
     args.push(";".into());
     args.extend(["set-option", "-t", &format!("={tmux_name}:"), ROOT_OPTION].map(String::from));
@@ -222,10 +389,15 @@ pub struct LaunchOptions {
     /// `TMUX` and `TMUX_PANE`, and `COLORTERM` is `truecolor` unless set
     /// here. Nothing else reaches the command. It is passed through a file
     /// in the session's state directory, readable only by the user, which
-    /// the command's shell deletes once it has read it.
+    /// [`exec_env`] deletes before it starts the command.
     pub env: Vec<(String, String)>,
-    /// The command's working directory. The default is the caller's.
+    /// The command's working directory. The default is the caller's. Any
+    /// path works: it never passes through tmux's format expansion, and a
+    /// directory that cannot be entered fails the launch.
     pub cwd: Option<PathBuf>,
+    /// The `tui-harness` binary that starts the command. `None` finds it
+    /// (see [`helper_binary`]).
+    pub helper: Option<PathBuf>,
 }
 
 impl Default for LaunchOptions {
@@ -237,6 +409,7 @@ impl Default for LaunchOptions {
             size: DEFAULT_SIZE,
             env: inherited_env(),
             cwd: std::env::current_dir().ok(),
+            helper: None,
         }
     }
 }
@@ -251,6 +424,19 @@ pub enum DownOutcome {
     /// A session of that name belongs to another root (or to none) and was
     /// left running. Only this root's state was removed.
     LeftRunning { owner: Option<String> },
+    /// Only state from an interrupted launch was there; it was removed.
+    StaleState,
+}
+
+/// What [`Harness::prune`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PruneReport {
+    /// tmux names of the sessions killed.
+    pub killed: Vec<String>,
+    /// Names whose state directory was removed.
+    pub removed: Vec<String>,
+    /// `environ` files deleted from directories that stay.
+    pub scrubbed: Vec<PathBuf>,
 }
 
 /// A `tui-*` session on the private server.
@@ -323,8 +509,11 @@ impl Harness {
         opts.cols = opts.cols.clamp(1, MAX_CELLS);
         opts.rows = opts.rows.clamp(1, MAX_CELLS);
         let dir = self.sessions_dir().join(name);
-        if dir.exists() {
+        if dir.join("env").exists() {
             bail!("session '{name}' already exists (down it first)");
+        }
+        if dir.exists() {
+            bail!("state from an interrupted launch of '{name}' is in the way (run `down {name}` or `prune`)");
         }
         let tmux_name = format!("{PREFIX}{name}");
         if has_session(&tmux_name) {
@@ -332,14 +521,44 @@ impl Harness {
                 "tmux session '{tmux_name}' already exists (another root's, or an orphan: see ls)"
             );
         }
-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let root_tag = self.root_tag();
-        let env_file = dir.join("environ");
-        if let Err(e) = write_env_file(&env_file, &opts.env) {
+        if root_tag.contains(['\n', '\t']) {
+            bail!("the state root's path holds a newline or tab: {root_tag:?}");
+        }
+        let helper = helper_binary(opts.helper.as_deref())?;
+        if let Some(cwd) = &opts.cwd {
+            if !cwd.is_dir() {
+                bail!("working directory {} is not a directory", cwd.display());
+            }
+        }
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let session = Session {
+            name: name.to_string(),
+            tmux_name: tmux_name.clone(),
+            cols: opts.cols,
+            rows: opts.rows,
+            font: opts.font.clone(),
+            size: opts.size,
+            cmd: cmd
+                .iter()
+                .map(|a| shell_quote(a))
+                .collect::<Vec<_>>()
+                .join(" "),
+            root_tag: root_tag.clone(),
+            dir: dir.clone(),
+            shots_dir: self.shots_dir(),
+        };
+        // The metadata goes first, so that whatever interrupts the launch
+        // leaves state that ls, down and prune can see.
+        let env_file = dir.join(ENVIRON);
+        let written = session
+            .write_env()
+            .and_then(|_| write_exec_file(&env_file, opts.cwd.as_deref(), &opts.env));
+        if let Err(e) = written {
             let _ = std::fs::remove_dir_all(&dir);
             return Err(e);
         }
-        let tmux_args = new_session_args(&tmux_name, &opts, cmd, &env_file, &root_tag);
+        let tmux_args = new_session_args(&tmux_name, &opts, cmd, &helper, &env_file, &root_tag);
 
         // setsid -f so the tmux server survives the caller reaping our
         // descendants: a tmux server first started from a harness shell is
@@ -384,44 +603,50 @@ impl Harness {
             Err(e) => return Err(fail(format!("running tmux new-session: {e}"))),
         }
 
-        // setsid -f returns before tmux has made the session; wait for it
-        // and for its tag, which the same command list sets. Then wait for
-        // the command's shell to read and delete the environment file, so
-        // the command has started with its environment when launch returns.
+        // setsid -f returns before tmux has made the session. Wait until the
+        // session is up and tagged (the same command list tags it) or has
+        // already come and gone, then until the command has taken its
+        // environment file, then until it has started or failed to.
         let deadline = Instant::now() + Duration::from_secs(5);
-        while session_owner(&tmux_name).flatten().as_deref() != Some(root_tag.as_str()) {
-            if Instant::now() > deadline {
-                return Err(fail(format!(
-                    "tmux session '{tmux_name}' did not appear (did the command exit at once?)"
-                )));
+        let err_path = dir.join(EXEC_ERR);
+        let helper_name = helper
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        loop {
+            let tagged = session_owner(&tmux_name).flatten().as_deref() == Some(root_tag.as_str());
+            let taken = !env_file.exists();
+            if let Ok(msg) = std::fs::read_to_string(&err_path) {
+                if !msg.trim().is_empty() {
+                    return Err(fail(msg.trim().to_string()));
+                }
             }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        while env_file.exists() {
+            if taken
+                && (!has_session(&tmux_name)
+                    || (tagged
+                        && pane_command(&tmux_name).as_deref() != Some(helper_name.as_str())))
+            {
+                break;
+            }
             if Instant::now() > deadline {
-                return Err(fail(format!(
-                    "the command in '{tmux_name}' never read its environment file"
-                )));
+                let why = if !tagged {
+                    format!("tmux session '{tmux_name}' did not appear")
+                } else if !taken {
+                    format!("the command in '{tmux_name}' never took its environment file")
+                } else {
+                    format!("the command in '{tmux_name}' did not start")
+                };
+                return Err(fail(why));
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        let session = Session {
-            name: name.to_string(),
-            tmux_name,
-            cols: opts.cols,
-            rows: opts.rows,
-            font: opts.font.clone(),
-            size: opts.size,
-            cmd: cmd
-                .iter()
-                .map(|a| shell_quote(a))
-                .collect::<Vec<_>>()
-                .join(" "),
-            root_tag,
-            dir,
-            shots_dir: self.shots_dir(),
-        };
-        session.write_env()?;
+        // The helper writes its error before it exits, so a failure that
+        // ended the session is on disk by now.
+        if let Ok(msg) = std::fs::read_to_string(&err_path) {
+            if !msg.trim().is_empty() {
+                return Err(fail(msg.trim().to_string()));
+            }
+        }
         Ok(session)
     }
 
@@ -455,8 +680,17 @@ impl Harness {
 
     /// Every session with a state directory, sorted by name.
     pub fn list(&self) -> Result<Vec<Session>> {
+        Ok(self
+            .state_dirs()
+            .iter()
+            .filter_map(|n| self.session(n).ok())
+            .collect())
+    }
+
+    /// Names of every directory under `sessions/`, sorted.
+    fn state_dirs(&self) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(self.sessions_dir()) else {
-            return Ok(Vec::new());
+            return Vec::new();
         };
         let mut names: Vec<String> = entries
             .filter_map(|e| e.ok())
@@ -464,57 +698,126 @@ impl Harness {
             .filter_map(|e| e.file_name().into_string().ok())
             .collect();
         names.sort();
-        Ok(names.iter().filter_map(|n| self.session(n).ok()).collect())
+        names
     }
 
-    /// `tui-*` sessions on the private server with no state under this
-    /// root that are this root's or untagged: what `prune` would kill.
+    /// State directories with no `env` metadata: what an interrupted launch
+    /// leaves. They may hold the caller's environment in `environ`.
+    pub fn stale(&self) -> Vec<String> {
+        self.state_dirs()
+            .into_iter()
+            .filter(|n| !self.sessions_dir().join(n).join("env").exists())
+            .collect()
+    }
+
+    /// `tui-*` sessions on the private server tagged with this root but with
+    /// no state under it: what `prune` kills.
     pub fn orphans(&self) -> Vec<ServerSession> {
         let tag = self.root_tag();
         server_sessions()
             .into_iter()
-            .filter(|s| s.owner.as_deref().is_none_or(|o| o == tag))
+            .filter(|s| s.owner.as_deref() == Some(tag.as_str()))
             .filter(|s| !self.sessions_dir().join(s.name()).join("env").exists())
             .collect()
     }
 
-    /// Kill this root's orphans (see [`Harness::orphans`]) and remove state
-    /// whose session is gone. Returns the tmux names killed and the session
-    /// names whose state was removed.
-    pub fn prune(&self) -> Result<(Vec<String>, Vec<String>)> {
-        let mut killed = Vec::new();
-        for orphan in self.orphans() {
-            kill_session(&orphan.tmux_name);
-            killed.push(orphan.tmux_name);
-        }
-        let mut removed = Vec::new();
-        for s in self.list()? {
-            if !s.alive() {
-                std::fs::remove_dir_all(&s.dir)
-                    .with_context(|| format!("removing {}", s.dir.display()))?;
-                removed.push(s.name);
-            }
-        }
-        Ok((killed, removed))
+    /// `tui-*` sessions on the private server that no root tagged: from a
+    /// manual tmux command, an older harness, or a lost tag. No root owns
+    /// them, so nothing kills them but `prune --untagged`.
+    pub fn untagged(&self) -> Vec<ServerSession> {
+        server_sessions()
+            .into_iter()
+            .filter(|s| s.owner.is_none())
+            .collect()
     }
 
-    /// Down every session of this root, then prune its orphans. Other
-    /// roots' sessions are left running.
+    /// Clean up after this root: kill its orphans (and, with `untagged`,
+    /// every untagged `tui-*` session), remove state whose session is gone
+    /// and stale state from interrupted launches, and delete any `environ`
+    /// file a launch left behind. Files younger than a launch's timeout are
+    /// left alone, in case that launch is still running.
+    pub fn prune(&self, untagged: bool) -> Result<PruneReport> {
+        let mut report = PruneReport::default();
+        let mut targets = self.orphans();
+        if untagged {
+            targets.extend(self.untagged());
+        }
+        for s in targets {
+            kill_session(&s.tmux_name);
+            report.killed.push(s.tmux_name);
+        }
+        for name in self.state_dirs() {
+            let dir = self.sessions_dir().join(&name);
+            let gone = match self.session(&name) {
+                Ok(s) => !s.alive(),
+                Err(_) => older_than(&dir, STALE_AFTER),
+            };
+            if gone {
+                std::fs::remove_dir_all(&dir)
+                    .with_context(|| format!("removing {}", dir.display()))?;
+                report.removed.push(name);
+                continue;
+            }
+            let environ = dir.join(ENVIRON);
+            if environ.exists() && older_than(&environ, STALE_AFTER) {
+                std::fs::remove_file(&environ)
+                    .with_context(|| format!("removing {}", environ.display()))?;
+                report.scrubbed.push(environ);
+            }
+        }
+        Ok(report)
+    }
+
+    /// Stop `name`: [`Session::down`] when it has metadata, else remove the
+    /// stale state an interrupted launch left.
+    pub fn down(&self, name: &str) -> Result<DownOutcome> {
+        validate_name(name)?;
+        let dir = self.sessions_dir().join(name);
+        if dir.is_dir() && !dir.join("env").exists() {
+            std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
+            return Ok(DownOutcome::StaleState);
+        }
+        self.session(name)?.down()
+    }
+
+    /// Down every session of this root, then prune: its orphans, stale
+    /// state and stray `environ` files. Sessions of other roots and
+    /// untagged ones are left running.
     pub fn down_all(&self) -> Result<Vec<(String, DownOutcome)>> {
         let mut out = Vec::new();
         for s in self.list()? {
             let name = s.name.clone();
             out.push((name, s.down()?));
         }
-        for tmux_name in self.prune()?.0 {
+        let report = self.prune(false)?;
+        for tmux_name in report.killed {
             let name = tmux_name
                 .strip_prefix(PREFIX)
                 .unwrap_or(&tmux_name)
                 .to_string();
             out.push((name, DownOutcome::Killed));
         }
+        for name in report.removed {
+            out.push((name, DownOutcome::StaleState));
+        }
         Ok(out)
     }
+}
+
+/// Whether everything in `path` (a file, or a directory and its entries)
+/// was last modified more than `age` ago.
+fn older_than(path: &Path, age: Duration) -> bool {
+    let modified = |p: &Path| p.metadata().and_then(|m| m.modified()).ok();
+    // A directory's age is that of its newest entry (its own mtime moves
+    // whenever an entry is added or removed); an empty one uses its own.
+    let entries = std::fs::read_dir(path)
+        .map(|rd| rd.flatten().filter_map(|e| modified(&e.path())).max())
+        .ok()
+        .flatten();
+    entries
+        .or_else(|| modified(path))
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|elapsed| elapsed > age)
 }
 
 /// One launched session.
@@ -544,8 +847,7 @@ impl Session {
             self.size,
             one_line(&self.cmd),
         );
-        let path = self.dir.join("env");
-        std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))
+        write_private(&self.dir.join("env"), body.as_bytes())
     }
 
     fn pane(&self) -> String {
@@ -557,22 +859,72 @@ impl Session {
         has_session(&self.tmux_name)
     }
 
+    /// Who owns the running session of this name: `None` when none runs,
+    /// `Some(None)` when it runs untagged, else `Some(Some(root))`.
+    pub fn owner(&self) -> Option<Option<String>> {
+        session_owner(&self.tmux_name)
+    }
+
     /// Whether the running session of this name is this root's.
     pub fn owned(&self) -> bool {
         session_owner(&self.tmux_name).flatten().as_deref() == Some(self.root_tag.as_str())
     }
 
+    /// Fail unless the running session of this name is this root's.
+    fn ensure_owned(&self) -> Result<()> {
+        match session_owner(&self.tmux_name) {
+            None => bail!("session '{}' is not running", self.name),
+            Some(Some(owner)) if owner == self.root_tag => Ok(()),
+            Some(owner) => bail!(
+                "session '{}' belongs to {}, not this root; refusing to touch it",
+                self.name,
+                owner.as_deref().unwrap_or("no root")
+            ),
+        }
+    }
+
     /// Pass keys to `tmux send-keys`, same vocabulary: `"j"`, `"Enter"`,
-    /// `"C-c"`, or `"-l", "literal text"`. A key or text ending in `;` is
-    /// sent as typed (see [`tmux_literal`]).
+    /// `"C-c"`, or `"-l", "literal text"`. Only the leading flags `-l`,
+    /// `-H` and `-N <count>` are passed as flags (an optional `--` ends
+    /// them); everything after is a key, so text may begin with `-` and no
+    /// argument can retarget the command. A key or text ending in `;` is
+    /// sent as typed (see [`tmux_literal`]). Refuses a session of another
+    /// root.
     pub fn send<S: AsRef<str>>(&self, keys: &[S]) -> Result<()> {
+        self.ensure_owned()?;
+        let keys: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
         let mut args = vec!["send-keys".to_string(), "-t".into(), self.pane()];
-        args.extend(keys.iter().map(|k| tmux_literal(k.as_ref())));
+        let mut i = 0;
+        while i < keys.len() {
+            match keys[i] {
+                "-l" | "-H" => {
+                    args.push(keys[i].to_string());
+                    i += 1;
+                }
+                "-N" if i + 1 < keys.len() => {
+                    let count: u32 = keys[i + 1]
+                        .parse()
+                        .with_context(|| format!("-N needs a count, not {:?}", keys[i + 1]))?;
+                    args.push("-N".into());
+                    args.push(count.to_string());
+                    i += 2;
+                }
+                "--" => {
+                    i += 1;
+                    break;
+                }
+                _ => break,
+            }
+        }
+        args.push("--".into());
+        args.extend(keys[i..].iter().map(|k| tmux_literal(k)));
         tmux(&args).map(drop)
     }
 
-    /// The pane contents. With `ansi`, SGR escapes are kept.
+    /// The pane contents. With `ansi`, SGR escapes are kept. Refuses a
+    /// session of another root.
     pub fn text(&self, ansi: bool) -> Result<String> {
+        self.ensure_owned()?;
         let mut args = vec![
             "capture-pane".to_string(),
             "-p".into(),
@@ -682,13 +1034,22 @@ fn has_session(tmux_name: &str) -> bool {
 /// `None` when no such session runs; `Some(None)` when it runs untagged;
 /// `Some(Some(root))` when it runs tagged with `root`.
 fn session_owner(tmux_name: &str) -> Option<Option<String>> {
+    let tag = display(tmux_name, &format!("#{{{ROOT_OPTION}}}"))?;
+    Some((!tag.is_empty()).then_some(tag))
+}
+
+/// Expand `format` against the session `tmux_name`, or `None` when no such
+/// session runs. `display-message` answers a missing target with an empty
+/// line and exit 0 (tmux 3.7), so the session name is expanded alongside
+/// and checked.
+fn display(tmux_name: &str, format: &str) -> Option<String> {
     let out = tmux_command()
         .args([
             "display-message",
             "-p",
             "-t",
             &format!("={tmux_name}:"),
-            &format!("#{{{ROOT_OPTION}}}"),
+            &format!("#{{session_name}}\t{format}"),
         ])
         .stderr(Stdio::null())
         .output()
@@ -696,10 +1057,9 @@ fn session_owner(tmux_name: &str) -> Option<Option<String>> {
     if !out.status.success() {
         return None;
     }
-    let tag = String::from_utf8_lossy(&out.stdout)
-        .trim_end_matches('\n')
-        .to_string();
-    Some((!tag.is_empty()).then_some(tag))
+    let text = String::from_utf8_lossy(&out.stdout);
+    let (name, value) = text.trim_end_matches('\n').split_once('\t')?;
+    (name == tmux_name).then(|| value.to_string())
 }
 
 /// Every `tui-*` session on the private server with its tag.
@@ -718,13 +1078,20 @@ pub fn server_sessions() -> Vec<ServerSession> {
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| {
-            let (name, owner) = l.split_once('\t').unwrap_or((l, ""));
+            // A line without a tab is not one of ours (launch refuses a
+            // root path holding a newline or tab).
+            let (name, owner) = l.split_once('\t')?;
             name.starts_with(PREFIX).then(|| ServerSession {
                 tmux_name: name.to_string(),
                 owner: (!owner.is_empty()).then(|| owner.to_string()),
             })
         })
         .collect()
+}
+
+/// The pane's current command name, as tmux reports it.
+fn pane_command(tmux_name: &str) -> Option<String> {
+    display(tmux_name, "#{pane_current_command}")
 }
 
 fn kill_session(tmux_name: &str) {
@@ -825,7 +1192,6 @@ mod tests {
         assert_eq!(tmux_literal("b\\;"), "b\\\\;");
         assert_eq!(tmux_literal("x;y"), "x;y");
         assert_eq!(tmux_literal("#{session_name}"), "#{session_name}");
-        assert_eq!(format_literal("/d#{x}"), "/d##{x}");
     }
 
     #[test]
@@ -839,6 +1205,7 @@ mod tests {
             "tui-n",
             &opts,
             &["sleep".into(), "30;".into(), "new-session".into()],
+            Path::new("/bin/tui-harness;"),
             Path::new("/state/environ;"),
             "/root;",
         );
@@ -846,9 +1213,39 @@ mod tests {
         let separators = args.iter().filter(|a| a.as_str() == ";").count();
         assert_eq!(separators, SERVER_OPTIONS.len() + 2);
         assert!(args.contains(&"30\\;".to_string()));
+        assert!(args.contains(&"/bin/tui-harness\\;".to_string()));
         assert!(args.contains(&"/state/environ\\;".to_string()));
-        assert!(args.contains(&"/tmp/##{q}\\;".to_string()));
         assert_eq!(args.last().unwrap(), "/root\\;");
+        // Neither the environment nor the working directory goes to tmux.
+        assert!(!args
+            .iter()
+            .any(|a| a == "-c" || a == "-e" || a.contains("#{q}")));
+        let helper = args.iter().position(|a| a == EXEC_ENV).unwrap();
+        assert_eq!(args[helper + 2], "--");
+        assert_eq!(args[helper + 3], "sleep");
+    }
+
+    #[test]
+    fn exec_file_holds_cwd_then_pairs() {
+        let dir = std::env::temp_dir().join(format!("tui-harness-exec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(ENVIRON);
+        let env = vec![
+            ("UID".to_string(), "1000".to_string()),
+            ("V".to_string(), "a=b\n'$(x)'".to_string()),
+        ];
+        write_exec_file(&path, Some(Path::new("/d#[x]")), &env).unwrap();
+        let body = std::fs::read(&path).unwrap();
+        assert_eq!(body, b"/d#[x]\0UID=1000\0V=a=b\n'$(x)'\0");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // O_EXCL: a second write never reuses an existing file.
+        assert!(write_exec_file(&path, None, &env).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

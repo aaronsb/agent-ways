@@ -65,6 +65,7 @@ impl Drop for Scratch {
     }
 }
 
+#[allow(dead_code)] // not every test binary uses it
 pub fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

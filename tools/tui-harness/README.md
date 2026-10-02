@@ -13,14 +13,14 @@ harness (#722).
 
 ```
 tui-harness launch <name> [--cols N] [--rows M] [--font NAME] [--size PT] -- <cmd...>
-tui-harness send   <name> <keys...>      # tmux send-keys passthrough: j Enter C-c, or -l "text"
+tui-harness send   <name> [-l|-H|-N n]... <keys...>   # tmux send-keys keys: j Enter C-c, or -l "text"
 tui-harness shot   <name> [--out PATH]   # prints the PNG path
 tui-harness text   <name> [--ansi]       # pane contents; --ansi keeps SGR escapes
 tui-harness attach <name>                # look in from your terminal; detach with C-b d
 tui-harness down   <name>                # kills it only if this root launched it
-tui-harness down   --all                 # every session of this root, and its orphans
-tui-harness prune                        # kill this root's orphans, drop state of dead sessions
-tui-harness ls                           # STATE: up, gone, foreign, or orphan
+tui-harness down   --all                 # every session of this root, its orphans and stale state
+tui-harness prune  [--untagged]          # kill this root's orphans; drop dead and stale state
+tui-harness ls                           # STATE: up, gone, foreign, orphan, stale, untagged
 tui-harness render --out PATH [--in FILE] [--cols N] [--rows M] [--font NAME] [--size PT]
 ```
 
@@ -41,7 +41,19 @@ the pane open: `-- sh -c 'ways list; sleep 600'`.
 
 The command runs with the environment and working directory of the shell that
 ran `launch`, whoever started the tmux server. A key or text ending in `;`
-(`send app ';'`, `send app -l 'a;'`) is typed as is.
+(`send app ';'`, `send app -l 'a;'`) is typed as is. Only the leading flags
+`-l`, `-H` and `-N <count>` reach `send-keys` as flags; everything after them
+is keys, so text can start with `-` and nothing can retarget the command.
+
+`send`, `text` and `shot` act only on a session this root launched. Each
+session is tagged with its root, and a session of another root, or an untagged
+one, is refused.
+
+In `ls`, `foreign` is a name this root has state for but another root's
+session runs under, `orphan` is this root's session with no state left,
+`stale` is state from an interrupted launch, and `untagged` is a `tui-*`
+session no root tagged. `prune` and `down --all` never kill another root's
+session or an untagged one; `prune --untagged` kills untagged ones on request.
 
 ## Defaults
 
@@ -82,6 +94,12 @@ let text = s.text(false)?;
 let img = s.capture_image_with(&Renderer::without_fonts(8, 16))?; // fixed cells, no fonts
 s.down()?;
 ```
+
+`launch` starts the command through the `tui-harness` binary (its hidden
+`__exec-env` subcommand), so the binary must exist. From another crate's
+tests, run `cargo build -p tui-harness` first; the library finds the binary
+beside the test executable or on `PATH`. `TUI_HARNESS_BIN` or
+`LaunchOptions::helper` names it explicitly.
 
 `Renderer::without_fonts` gives fixed-size cells and draws no glyphs, so pixel
 checks on background colours hold on any machine. `Renderer` is `Send` and
@@ -125,8 +143,9 @@ fails rather than skips.
   harness starts is reaped when the spawning shell returns. Where `setsid` is
   missing, as on macOS, tmux runs directly.
 - Sessions run as `tui-<name>` on a private tmux server, socket
-  `agent-ways-tui`. That server starts with `-f /dev/null`, so your
-  `~/.tmux.conf` never changes what a test sees. Its options are set
+  `agent-ways-tui`. Every tmux call passes `-f /dev/null`, so whichever call
+  starts that server, your `~/.tmux.conf` and its plugins (a session restorer,
+  say) never load, and never change what a test sees. Its options are set
   explicitly: no status line, no pane border status, `history-limit 50000`,
   `default-terminal tmux-256color`, and `COLORTERM=truecolor` in the
   environment of the apps whose caller set none. To look in, use
@@ -135,11 +154,23 @@ fails rather than skips.
   tagged with the root that launched it (the `@tui_harness_root` option).
   `down` kills a session only when the tag is its own root; otherwise it
   removes its own stale state and leaves the session running. A launch that
-  times out kills what it started.
-- The command's environment travels in a file in its state directory,
-  readable only by you, which the command's shell sources and deletes before
-  `launch` returns. tmux's `new-session -e` cannot carry a full environment:
-  it overflows tmux's message size.
+  times out or whose command cannot start kills what it started and removes
+  its state. A root path holding a newline or tab is refused.
+- The pane's process is `tui-harness __exec-env FILE -- CMD...`. The file, in
+  the session's state directory and created `0600` with `O_EXCL`, holds the
+  working directory and the environment as NUL-separated records. The helper
+  deletes the file before anything else, builds the environment from nothing
+  (plus tmux's `TERM`, `TMUX`, `TMUX_PANE`), changes directory, and execs the
+  command. No shell reads the file, so names bash treats as readonly (`UID`,
+  `SHELLOPTS`) and a `PATH` without `rm` are fine, and the working directory
+  never passes through tmux's format expansion. `launch` returns once the
+  command has started, or fails with the helper's error. tmux's
+  `new-session -e` is not used: a full environment overflows tmux's message
+  size.
+- The session's `env` metadata (its geometry, font and command line) is
+  written `0600` before tmux starts, so an interrupted launch leaves state
+  that `ls` shows and `prune` removes, along with any `environ` file older
+  than a launch's timeout.
 - Only SGR is interpreted: 16, 256 and truecolor fg and bg, bold, dim, italic,
   underline (including the `4:n` styles, drawn as a single line), reverse,
   strikethrough and conceal. The underline colour (`58`, `59`) is parsed and

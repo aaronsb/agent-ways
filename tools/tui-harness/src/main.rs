@@ -1,13 +1,14 @@
 //! `tui-harness`: run a TUI in a detached tmux session, send it keys, and
 //! screenshot it as a PNG.
 
+use std::ffi::OsString;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tui_harness::render::{fc_has_family, MAX_CELLS, MAX_SIZE};
-use tui_harness::session::DownOutcome;
+use tui_harness::session::{exec_env, DownOutcome, PruneReport, EXEC_ENV};
 use tui_harness::{
     parse, Harness, LaunchOptions, Renderer, DEFAULT_COLS, DEFAULT_FONT, DEFAULT_ROWS, DEFAULT_SIZE,
 };
@@ -76,9 +77,14 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// Kill this root's orphan sessions and remove state for sessions that are gone
-    Prune,
-    /// List sessions, and orphans on the server with no state here
+    /// Kill this root's orphans, remove state of dead sessions and interrupted
+    /// launches, and delete stray environment files
+    Prune {
+        /// Also kill tui-* sessions no root tagged (any root's view of them)
+        #[arg(long)]
+        untagged: bool,
+    },
+    /// List sessions, this root's orphans, stale state, and untagged sessions
     Ls,
     /// Render ANSI text (a saved `capture-pane -ep`) from a file or stdin to a PNG
     Render {
@@ -101,6 +107,18 @@ enum Cmd {
 }
 
 fn main() {
+    // The pane's process for every launch: `tui-harness __exec-env FILE --
+    // CMD...`. Handled before clap so no argument of CMD is ever parsed.
+    let args: Vec<OsString> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|a| a == EXEC_ENV) {
+        if args.len() < 5 || args[3] != "--" {
+            eprintln!("usage: tui-harness {EXEC_ENV} FILE -- CMD...");
+            std::process::exit(2);
+        }
+        let err = exec_env(Path::new(&args[2]), &args[4..]);
+        eprintln!("tui-harness: cannot start the command: {err}");
+        std::process::exit(127);
+    }
     if let Err(e) = run(Cli::parse()) {
         eprintln!("error: {e:#}");
         std::process::exit(1);
@@ -173,7 +191,7 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Down {
             name: Some(name), ..
         } => {
-            let outcome = harness.session(&name)?.down()?;
+            let outcome = harness.down(&name)?;
             report_down(&name, &outcome);
         }
         Cmd::Down { name: None, .. } => {
@@ -185,43 +203,63 @@ fn run(cli: Cli) -> Result<()> {
                 report_down(&name, &outcome);
             }
         }
-        Cmd::Prune => {
-            let (killed, removed) = harness.prune()?;
-            for k in &killed {
-                println!("killed orphan: {k}");
+        Cmd::Prune { untagged } => {
+            let report = harness.prune(untagged)?;
+            for k in &report.killed {
+                println!("killed: {k}");
             }
-            for r in &removed {
-                println!("removed stale state: {r}");
+            for r in &report.removed {
+                println!("removed state: {r}");
             }
-            if killed.is_empty() && removed.is_empty() {
+            for f in &report.scrubbed {
+                println!("deleted stray environment file: {}", f.display());
+            }
+            if report == PruneReport::default() {
                 println!("nothing to prune");
             }
         }
         Cmd::Ls => {
             let sessions = harness.list()?;
+            let stale = harness.stale();
             let orphans = harness.orphans();
-            if sessions.is_empty() && orphans.is_empty() {
+            let untagged: Vec<_> = harness
+                .untagged()
+                .into_iter()
+                .filter(|u| !sessions.iter().any(|s| s.tmux_name == u.tmux_name))
+                .collect();
+            if sessions.is_empty() && stale.is_empty() && orphans.is_empty() && untagged.is_empty()
+            {
                 println!("(no sessions)");
                 return Ok(());
             }
             println!(
-                "{:<20} {:<10} {:<8} {:<25} CMD",
+                "{:<20} {:<10} {:<9} {:<25} CMD",
                 "NAME", "GEOMETRY", "STATE", "FONT"
             );
             for s in sessions {
-                let state = match (s.alive(), s.owned()) {
-                    (false, _) => "gone",
-                    (true, true) => "up",
-                    (true, false) => "foreign",
+                let state = match s.owner() {
+                    None => "gone",
+                    Some(None) => "untagged",
+                    Some(Some(_)) if s.owned() => "up",
+                    Some(Some(_)) => "foreign",
                 };
                 let geometry = format!("{}x{}", s.cols, s.rows);
                 println!(
-                    "{:<20} {:<10} {:<8} {:<25} {}",
+                    "{:<20} {:<10} {:<9} {:<25} {}",
                     s.name, geometry, state, s.font, s.cmd
                 );
             }
-            for o in orphans {
-                println!("{:<20} {:<10} {:<8} {:<25} -", o.name(), "-", "orphan", "-");
+            let row = |name: &str, state: &str| {
+                println!("{name:<20} {:<10} {state:<9} {:<25} -", "-", "-")
+            };
+            for name in &stale {
+                row(name, "stale");
+            }
+            for o in &orphans {
+                row(o.name(), "orphan");
+            }
+            for u in &untagged {
+                row(u.name(), "untagged");
             }
         }
         Cmd::Render {
@@ -263,6 +301,9 @@ fn report_down(name: &str, outcome: &DownOutcome) {
     match outcome {
         DownOutcome::Killed => println!("down: {name}"),
         DownOutcome::AlreadyGone => println!("down: {name} (was not running)"),
+        DownOutcome::StaleState => {
+            println!("down: {name} (removed state from an interrupted launch)")
+        }
         DownOutcome::LeftRunning { owner } => println!(
             "down: {name} (state removed; the running session belongs to {} and was left alone)",
             owner.as_deref().unwrap_or("no root")
