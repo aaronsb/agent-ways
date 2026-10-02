@@ -7,8 +7,8 @@ agent-tui frame 100x30
 |│ ▸ keys                                              ││                                           │|
 |│                                                     ││Unset: the first shipped profile whose     │|
 |│                                                     ││provider has a key (anthropic, then        │|
-|│                                                     ││openrouter). `ways agent use <profile>`    │|
-|│                                                     ││sets it and checks the model.              │|
+|│                                                     ││openrouter). `ways agent key check` checks │|
+|│                                                     ││the key against the profile's model.       │|
 |│                                                     ││                                           │|
 |│                                                     ││value                                      │|
 |│                                                     ││type     text (Enter edits)                │|

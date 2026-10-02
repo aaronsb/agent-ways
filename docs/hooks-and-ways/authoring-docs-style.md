@@ -104,7 +104,7 @@ shaped this way" in **explanation**.
 These describe live, unchanged mechanisms; leave them alone when purging threshold
 prose:
 
-- **`ways tune`** — the *locale* alias audit (fidelity / discrimination vs the English
+- **`ways tune locale`** — the *locale* alias audit (fidelity / discrimination vs the English
   root anchor, ADR-139/125). It never wrote relevance thresholds; it fixes stub
   quality by re-authoring.
 - **Salience / signal decay** — exponential decay over a progression axis (ADR-123), a model

@@ -107,12 +107,12 @@ fn queue_keeps_order_and_x_undoes_the_last() {
 #[test]
 fn action_only_node_opens_the_menu_on_enter() {
     let target = Node::leaf("/home/me/.claude", "", Setting::new(Kind::ReadOnly, "enabled", "user"))
-        .with_actions(vec![Action::new("plan", "ways config target plan {}").arg(Arg::Text("dir".into()))]);
+        .with_actions(vec![Action::new("plan", "ways target plan {}").arg(Arg::Text("dir".into()))]);
     let mut app = App::new("t", vec![Node::group("install", "", vec![target]).opened()]);
     keys(&mut app, &[KeyCode::Enter, KeyCode::Enter]);
     type_str(&mut app, "/tmp/a b");
     keys(&mut app, &[KeyCode::Enter]);
-    assert_eq!(app.queue.items()[0].command, "ways config target plan '/tmp/a b'");
+    assert_eq!(app.queue.items()[0].command, "ways target plan '/tmp/a b'");
 }
 
 fn flag(name: &str) -> Node {

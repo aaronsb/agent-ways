@@ -26,10 +26,10 @@ Installing stages the app and builds the binaries. Activation is what puts the p
 Before activating a directory, ask what it would do:
 
 ```
-ways config target plan ~/.claude-work
+ways target plan ~/.claude-work
 ```
 
-The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways config target add <dir>` prints the same plan and stops when something of yours would be refused or removed. `ways config target disable <dir>` withdraws the links and our hooks block through the same merge base that wrote them, and `ways config targets` shows where agent-ways is active. `ways status` says the same on its first line.
+The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways target add <dir>` prints the same plan and stops when something of yours would be refused or removed. `ways target disable <dir>` withdraws the links and our hooks block through the same merge base that wrote them, and `ways target list` shows where agent-ways is active. `ways status` says the same on its first line.
 
 Each target can carry its own configuration set, a `config.yaml` under `$XDG_CONFIG_HOME/agent-ways/targets/<key>/` with the same keys as the user config, layered over it for sessions under that directory. Two profiles on one machine can run different languages or disabled domains.
 

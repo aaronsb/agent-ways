@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Multilingual way matching test — validates locale stubs route correctly.
-# Runs each prompt through `ways match --json` and checks expected way is top-N.
+# Runs each prompt through `ways author match --json` and checks expected way is top-N.
 #
 # Usage: tests/test-multilingual.sh [--verbose]
 set -euo pipefail
@@ -34,7 +34,7 @@ check() {
 
   # Get matches (stderr separated), strip ANSI, skip header lines
   local raw output
-  raw=$("$WAYS_BIN" match "$prompt" 2>/dev/null) || true
+  raw=$("$WAYS_BIN" author match "$prompt" 2>/dev/null) || true
   output=$(echo "$raw" | sed 's/\x1b\[[0-9;]*m//g' | awk 'NR>3 && NF>0 {if(++n<=20)print}')
 
   if [[ -z "$output" ]]; then

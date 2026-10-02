@@ -37,7 +37,7 @@ $th down spike
 ```
 
 A command that prints and exits closes its session at once. To shoot one, keep
-the pane open: `-- sh -c 'ways list; sleep 600'`.
+the pane open: `-- sh -c 'ways session ways; sleep 600'`.
 
 The command runs with the environment and working directory of the shell that
 ran `launch`, whoever started the tmux server. A key or text ending in `;`

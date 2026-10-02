@@ -65,7 +65,7 @@ pub fn run(
         Some(l) => l,
         None => {
             eprintln!("English mode (output_language = en / auto): no localized language to audit.");
-            eprintln!("Localize first via the ways-localize skill; `ways tune` then audits the result.");
+            eprintln!("Localize first via the ways-localize skill; `ways tune locale` then audits the result.");
             return Ok(());
         }
     };

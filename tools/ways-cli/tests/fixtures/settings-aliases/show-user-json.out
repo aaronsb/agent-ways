@@ -1,7 +1,0 @@
-{
-  "language": "es",
-  "semantic_fire_probability": 0.4,
-  "refire_presets": {
-    "normal": 0.2
-  }
-}

@@ -32,7 +32,7 @@ graph TD
 
 - **Parent/child edges** — from the directory tree (`softwaredev/delivery/commits` is a child of `softwaredev/delivery`)
 - **See Also edges** — declared explicitly in a way's body prose
-- **Sibling edges** — computed by `ways siblings`, weighted by cosine similarity between canonical embeddings
+- **Sibling edges** — computed by `ways author siblings`, weighted by cosine similarity between canonical embeddings
 
 Every node carries one or more **coordinate aliases** — embeddings that route queries to it. The canonical alias comes from the English frontmatter (description + vocabulary). In **localized mode** (ADR-139), the node also carries a locale alias per localized language in `.locales.jsonl` plus the English root re-embedded with the multilingual model as the anchor; English installs carry only the canonical alias. All aliases on a node route to the same node's body content.
 

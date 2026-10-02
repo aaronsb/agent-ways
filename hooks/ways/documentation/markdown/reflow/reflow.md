@@ -17,7 +17,7 @@ You wrote it moments ago, so it is cheap to fix now and only gets more expensive
 **Or hand it to the tool:**
 
 ```bash
-ways reflow --fix <file>
+ways author reflow --fix <file>
 ```
 
 It copies the original aside first and prints that path, repairs only the paragraphs it detected, then reparses the result and compares. If anything moved beyond line breaks inside a paragraph, it writes nothing and reports what diverged.

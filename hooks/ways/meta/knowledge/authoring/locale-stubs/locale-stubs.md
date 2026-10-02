@@ -15,7 +15,7 @@ Ways can have native-language matching stubs stored in `{wayname}.locales.jsonl`
 
 No per-locale threshold field — and none per-node either. Firing is the global calibrated gate (`g(s)` against `τ_s` / `τ_k`) for every alias, English or localized; locale stubs correctly carry no threshold.
 
-**Audit your stubs** with `ways tune` — it measures fidelity (do sibling translations agree?) and discrimination (does another way's alias outrank yours?). Entries where a non-sibling confuser wins need the stub re-authored with sharper vocabulary. See `knowledge/optimization/tuning(meta)` for the full workflow and failure-mode categories. Full guide: `docs/hooks-and-ways/languages.md`.
+**Audit your stubs** with `ways tune locale` — it measures fidelity (do sibling translations agree?) and discrimination (does another way's alias outrank yours?). Entries where a non-sibling confuser wins need the stub re-authored with sharper vocabulary. See `knowledge/optimization/tuning(meta)` for the full workflow and failure-mode categories. Full guide: `docs/hooks-and-ways/languages.md`.
 
 ## See Also
 

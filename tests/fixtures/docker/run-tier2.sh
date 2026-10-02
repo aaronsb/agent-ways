@@ -156,7 +156,7 @@ run_turn() {
 
   ANSWER=$(jq -r '.result // empty' "$OUT/result$sfx.json" 2>/dev/null)
   SESSION=$(jq -r '.session_id // empty' "$OUT/result$sfx.json" 2>/dev/null)
-  (cd "$PROJ" && ways introspect dump --session "$SESSION" --all) > "$OUT/introspect$sfx.json" 2>"$OUT/introspect$sfx.err"
+  (cd "$PROJ" && ways session dump --session "$SESSION" --all) > "$OUT/introspect$sfx.json" 2>"$OUT/introspect$sfx.err"
   (cd "$PROJ" && git status --porcelain --untracked-files=all) > "$OUT/worktree$sfx.txt" 2>&1
   FIRED=$( { printf '%s\n' "$FIRED"; jq -r '[.turns[].fired_ways[]?.way_id] | unique | .[]' "$OUT/introspect$sfx.json" 2>/dev/null; } | sed '/^$/d' | sort -u)
   printf '%s\n' "$FIRED" > "$OUT/fired$sfx.txt"

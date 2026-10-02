@@ -200,7 +200,7 @@ pub fn projected_ways_root() -> PathBuf {
 
 /// The trusted-project-macros list: `~/.claude/trusted-project-macros`. The
 /// projects whose own macros may run; `ways show` reads it and `ways
-/// permissions audit` reports it.
+/// author permissions` reports it.
 pub fn trusted_project_macros() -> PathBuf {
     projection_root().join("trusted-project-macros")
 }

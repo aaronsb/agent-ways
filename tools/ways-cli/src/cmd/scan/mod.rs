@@ -461,7 +461,7 @@ fn scan_prompt_surface(
 pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DIAG_SHARE_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
-/// equivalent of the single-vector `ways match`. Reduces the query exactly as the
+/// equivalent of the single-vector `ways author match`. Reduces the query exactly as the
 /// prompt scan does (so the diagnostic sees the surface production sees), then
 /// returns the top candidates' evidence (peak / share / body-confirm / fired) with
 /// the reduced surface for context. `None` means late-interaction could not run
@@ -1023,7 +1023,7 @@ fn match_prompt(
 /// Emit a `way_nearmiss` telemetry event (ADR-134 Decision 1): a way that did
 /// not fire but scored within the near-miss margin of its threshold. This is
 /// persistence of already-computed scores, not new work — the tuning passes
-/// (`ways tune --cadence/--precision`) consume the stream. The leading fields
+/// (`ways tune locale --cadence/--precision`) consume the stream. The leading fields
 /// (`event`, `way`, `domain`, `trigger`, `scope`, `project`, `session`) follow
 /// the `way_fired` convention (scan/state.rs) for reader symmetry; the score
 /// fields are near-miss-specific. There is no `team` field — team attribution

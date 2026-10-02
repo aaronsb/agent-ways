@@ -15,7 +15,7 @@ Covers:
 - The marker state machine
 - Project-local way creation and override semantics
 - Domain enable/disable via `config.yaml` (global, user scope)
-- Per-way enable/disable via `.claude/ways.yaml` (project scope, ADR-131) — `ways disable <name>`
+- Per-way enable/disable via `.claude/ways.yaml` (project scope, ADR-131) — `ways settings set ways.project.<name> false`
 
 The knowledge way also draws the line between **ways** and **skills**:
 

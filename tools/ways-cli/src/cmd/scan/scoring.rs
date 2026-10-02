@@ -189,7 +189,7 @@ fn run_if_ready(
 
 /// `way-embed match` for one query against one corpus/model pair: every
 /// `(way_id, cosine)` row way-embed prints, in its order. The one runner for
-/// the single-query mode (the matcher and `ways tune`).
+/// the single-query mode (the matcher and `ways tune locale`).
 ///
 /// Passes `--threshold 0.0` so way-embed returns every score. Per-way
 /// thresholds and parent-boost (ADR-125) are applied in Rust at match time.

@@ -135,10 +135,10 @@ Use the stats to spot patterns: ways that fire too often (noisy triggers), ways 
 
 Two report-only commands read the event log and turn it back on the ways that produced it (ADR-134). Both write nothing — they surface a heuristic flag, not a verdict.
 
-`ways tune-precision` is a relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose actual activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate. It separates two failure modes that look identical to a naive counter: **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session — remedy: narrow the vocabulary or change the trigger channel, then re-measure; there is no per-way threshold to raise) versus **cross-cutting** (a way that fires broadly by design, like `meta/todos` — remedy: scope by trigger, and *never* auto-narrow its vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
+`ways tune precision` is a relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose actual activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate. It separates two failure modes that look identical to a naive counter: **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session — remedy: narrow the vocabulary or change the trigger channel, then re-measure; there is no per-way threshold to raise) versus **cross-cutting** (a way that fires broadly by design, like `meta/todos` — remedy: scope by trigger, and *never* auto-narrow its vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
 
 ```bash
-ways tune-precision
+ways tune precision
 ```
 
 There is no companion cadence-tuning command: `ways tune-curves` was removed in ADR-159. It suggested an absolute ADR-123 `half_life` (a legacy `curve:` block the schema no longer recognizes), a model superseded by `refire:` (a fraction of the context window, ADR-126). Cadence is now authored directly as `refire:` (numeric fraction or a preset like `normal`); telemetry-driven cadence tuning is the deferred ADR-134 auto-tune, which will target `refire:` rather than `half_life`.

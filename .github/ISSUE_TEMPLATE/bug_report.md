@@ -33,4 +33,4 @@ Paste any relevant error messages or hook output here
 ```
 
 **Additional context**
-Which way or hook is involved? Any relevant config (`ways config path` prints its location)?
+Which way or hook is involved? Any relevant config (`ways settings list --json` prints its location)?

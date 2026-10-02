@@ -47,7 +47,7 @@ pub(crate) struct Frame {
     pub(crate) new_events: Vec<String>,
     /// Which compaction window (1-based) this frame belongs to. A long session is
     /// segmented at each `session_start` boundary; epoch/distance restart per window
-    /// and the accumulated ways reset, so the latest window mirrors `ways list`. The
+    /// and the accumulated ways reset, so the latest window mirrors `ways session ways`. The
     /// boundary itself surfaces as a `⎯ compaction ⎯` entry in `new_events`.
     pub(crate) window: u64,
 }

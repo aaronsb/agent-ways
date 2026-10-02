@@ -49,7 +49,7 @@ pub struct UsageEntry {
 /// inside one sensor poll interval still fits with room to spare.
 pub const USAGE_TAIL_LEN: usize = 32;
 
-/// Get context info for the current session. Used by `ways context` and `ways list`.
+/// Get context info for the current session. Used by `ways context` and `ways session ways`.
 ///
 /// When `session_id` is provided, the transcript is located by scanning
 /// `~/.claude/projects/*/<session_id>.jsonl` — this is robust against
@@ -242,7 +242,7 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
     // Token-usage bar. The old "25% re-disclosure marker" was dropped
     // when ADR-123 moved firing dynamics onto per-way curves — no
     // single tick on a global context bar captures per-way behavior.
-    // Use `ways list` to see per-way re-fire points.
+    // Use `ways session ways` to see per-way re-fire points.
     let mut bar = String::new();
     for i in 0..bar_width {
         if i < filled {

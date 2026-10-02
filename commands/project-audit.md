@@ -243,7 +243,7 @@ This is informational, not a hard failure — not every domain needs a way.
 
 **Check: Way frontmatter valid?**
 
-From the project root, run `ways lint .claude/ways` (add `--check` for a non-zero exit on errors). It checks:
+From the project root, run `ways author lint .claude/ways` (add `--check` for a non-zero exit on errors). It checks:
 - Required fields present
 - Valid regex in `pattern:` fields
 - Unknown or misspelled fields and invalid values

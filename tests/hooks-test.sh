@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hook scripts under hooks/ways, run against a temp HOME, XDG dirs and
 # sessions root. Each script is an adapter over `ways hook <event>`: the
-# SessionStart clear and `ways reset` clear only a plain session id, the Stop
+# SessionStart clear and `ways session reset` clear only a plain session id, the Stop
 # hook records the last response, the post-tool scan runs postchecks,
 # inject-subagent.sh injects stashed ways from every ways root, and a macro
 # gets its session, scope and sessions root. The hooks call the ways binary
@@ -236,14 +236,14 @@ rm -rf "$APP"
 
 # ── ways hook (#702): the hooks are adapters over the binary ──────────────
 
-# `ways reset` and the SessionStart clear share one rule: a session id that
+# `ways session reset` and the SessionStart clear share one rule: a session id that
 # climbs out of the sessions root removes nothing.
 seed_sessions
 mkdir -p "$XDG_RUNTIME_DIR/victim"
-"$WAYS_TEST_BIN" reset --session ../victim --confirm >/dev/null 2>&1
-check "ways reset ignores a session id that escapes the root" "present" "$([[ -d $XDG_RUNTIME_DIR/victim ]] && echo present || echo absent)"
-"$WAYS_TEST_BIN" reset --session sess-a --confirm >/dev/null 2>&1
-check "ways reset clears the named session" "absent|present" \
+"$WAYS_TEST_BIN" session reset --session ../victim --confirm >/dev/null 2>&1
+check "ways session reset ignores a session id that escapes the root" "present" "$([[ -d $XDG_RUNTIME_DIR/victim ]] && echo present || echo absent)"
+"$WAYS_TEST_BIN" session reset --session sess-a --confirm >/dev/null 2>&1
+check "ways session reset clears the named session" "absent|present" \
     "$([[ -e $SESSIONS/sess-a ]] && echo present || echo absent)|$([[ -e $SESSIONS/sess-b ]] && echo present || echo absent)"
 
 # Stop records Claude's last response in the session's state, where the

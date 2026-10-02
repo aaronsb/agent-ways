@@ -1,5 +1,5 @@
 # Way frontmatter schema — single source of truth
-# Read by: ways lint, ways-tests skill, authoring way
+# Read by: ways author lint, ways-tests skill, authoring way
 #
 # Fields are categorized by role and marked required/recommended/optional.
 # "required" means the linter flags its absence as an error.
@@ -31,7 +31,7 @@
 #   scope, when.*   preconditions/gates (scan)
 #   refire          re-fire cadence (ADR-126 marker subsystem, not candidate parsing)
 #   macro           runs macro.sh (shell hook), not read by the Rust fire path
-#   requires        ADR-116 permission audit only (ways lint / permissions), not fire-time
+#   requires        ADR-116 permission audit only (ways author lint / permissions), not fire-time
 #   pattern_keep    pattern-hygiene lint directive only (ADR-155 §5), not fire-time
 #   scan_exclude    macro.sh scan filter only, not read by the Rust fire path
 

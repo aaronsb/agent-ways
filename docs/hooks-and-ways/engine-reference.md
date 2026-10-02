@@ -83,7 +83,7 @@ removal of the multiplier. τ_k (keyword floor) is global and is **not** parent-
 
 ## Still-current mechanisms (a separate concern from relevance scoring)
 
-- `ways tune` — locale alias audit (fidelity / discrimination vs the English root
+- `ways tune locale` — locale alias audit (fidelity / discrimination vs the English root
   anchor), ADR-139/125. Never writes relevance thresholds.
 - Salience / signal **decay** — ADR-123 exponential over a progression axis; a distinct model.
 - Progressive disclosure and token-gated re-fire (ADR-105/123/126); `refire` as a

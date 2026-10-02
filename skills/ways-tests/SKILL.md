@@ -43,9 +43,9 @@ the way files. The sections below say which.
 The live semantic matcher is **late interaction** (ADR-160): the prompt is split into
 chunks, each chunk is matched against every way, and a way is admitted on its summed
 softmax **share** or its **peak** chunk cosine, then **confirmed** against its own body
-prose. `ways match "prompt"` shows those quantities per candidate. The single-vector
+prose. `ways author match "prompt"` shows those quantities per candidate. The single-vector
 gate described next (ADR-156) is the fail-safe fallback, used when a surface is too
-sparse to chunk or the late-interaction path cannot run. `ways match` says so and
+sparse to chunk or the late-interaction path cannot run. `ways author match` says so and
 prints the single-vector view when that happens.
 
 A way has **two lanes** (ADR-156).
@@ -81,12 +81,12 @@ After editing any `description`/`vocabulary`, regenerate so scores reflect it:
 `ways corpus`. Then rank the whole corpus in one batch:
 
 ```bash
-ways match "$prompt"            # live matcher (ADR-160): peak · share · confirm · outcome per way
+ways author match "$prompt"            # live matcher (ADR-160): peak · share · confirm · outcome per way
                                 # QUERY is positional. There is no --threshold flag. The keyword
                                 # lane is the way's pattern: field, not a CLI option.
 ```
 
-`ways match` covers project-local ways too (`--project <dir>`, default the current
+`ways author match` covers project-local ways too (`--project <dir>`, default the current
 directory). Its outcome column reads `fired ✓`, `< gate` (admitted by neither share
 nor peak) or `< confirm` (admitted, but the way's body did not corroborate the chunk
 it won). For a single way, grep its id (path relative to the ways root, e.g.
@@ -141,7 +141,7 @@ At *scan* time (not here), when an ancestor has fired this session a child's eff
 semantic bar is lowered from `τ_s` to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)`
 — by default `max(0.5×0.8, 0.30) = 0.40`, in probability space (the multiplier boosts, the floor
 caps) — the progressive-disclosure mechanism (ADR-105/123/126). For multilingual
-stubs, `ways tune` reports locale fidelity/discrimination (see the
+stubs, `ways tune locale` reports locale fidelity/discrimination (see the
 `knowledge/optimization/tuning` way).
 
 ## Resolving way paths
@@ -153,33 +153,33 @@ match, list them and ask.
 ## Suggest — vocabulary gaps
 
 ```bash
-ways suggest "$wayfile" --min-freq 2
+ways author suggest "$wayfile" --min-freq 2
 ```
 
 Sections: GAPS (body terms missing from vocabulary), COVERAGE, UNUSED, VOCABULARY.
 UNUSED is usually *intentional* — vocabulary catches user-query terms that don't
-appear in the body, so don't auto-remove. `ways suggest` only reports; it takes one
+appear in the body, so don't auto-remove. `ways author suggest` only reports; it takes one
 file and has no flag that writes. Edit the `vocabulary:` line by hand, then
 `ways corpus` and re-score. To survey several ways, run it once per file.
 
 ## Lint — frontmatter
 
 ```bash
-ways lint            # project ways inside a project, else global
-ways lint --global   # global ways
-ways lint <path>     # one file or directory
-ways lint --check    # exit non-zero on errors (CI)
-ways lint --schema   # full field reference
+ways author lint            # project ways inside a project, else global
+ways author lint --global   # global ways
+ways author lint <path>     # one file or directory
+ways author lint --check    # exit non-zero on errors (CI)
+ways author lint --schema   # full field reference
 ```
 
 Checks: unknown/typo fields, invalid values, incomplete description↔vocabulary
 pairs, `when:` blocks, `*.check.md` structure, pattern hygiene, locale stubs,
 provenance. It does **not** flag absent *optional* fields, and it does not check tree
-health. For sibling overlap use `ways tree <path> --jaccard` (vocabulary) or `ways siblings <id>` (embedding cosine); for
-size and depth read `ways tree <path>` (see Tree and Budget below). `--all` only
+health. For sibling overlap use `ways author tree <path> --jaccard` (vocabulary) or `ways author siblings <id>` (embedding cosine); for
+size and depth read `ways author tree <path>` (see Tree and Budget below). `--all` only
 widens `--fix` to the whole corpus.
 
-## Tree — `ways tree <path>`
+## Tree — `ways author tree <path>`
 
 Structural analysis of a disclosure tree (depth, breadth, per-level vocabulary
 specificity). There are **no per-level thresholds** — firing uses the global
@@ -187,22 +187,22 @@ specificity). There are **no per-level thresholds** — firing uses the global
 floored at `parent_boost_floor`) plus how much more specific each level's vocabulary is than
 its parent's. Flag: **weak narrowing** (a
 child no more specific than its parent — nothing for progressive disclosure to earn),
-sibling **Jaccard > 0.15** (`ways tree <path> --jaccard`), **orphans** (a way file with no ancestor
+sibling **Jaccard > 0.15** (`ways author tree <path> --jaccard`), **orphans** (a way file with no ancestor
 way), **depth > 4** / **breadth > 7** (over-decomposed).
 
-## Jaccard — `ways tree <tree> --jaccard`
+## Jaccard — `ways author tree <tree> --jaccard`
 
 Vocabulary isolation between siblings — structural overlap, independent of any
 prompt. Flag **> 0.15** (siblings compete; move shared terms up to the parent or
 pick one owner) and **> 0.25** (collision; merge or split harder); show the shared
 terms so the author knows what to relocate. 0.00 across all pairs is perfect
 isolation — report it as a positive. (For one specific pair, diff the two
-vocabulary sets directly. `ways siblings <id>` is the embedding-space counterpart: way-vs-way cosine, default floor 0.3.)
+vocabulary sets directly. `ways author siblings <id>` is the embedding-space counterpart: way-vs-way cosine, default floor 0.3.)
 
 ## Crowding — corpus-wide contention
 
-No single subcommand. Steps: run `ways match` for the prompt, cluster candidates
-whose peak is within 0.05 of each other, and cross-check `ways siblings` /
+No single subcommand. Steps: run `ways author match` for the prompt, cluster candidates
+whose peak is within 0.05 of each other, and cross-check `ways author siblings` /
 vocabularies. Matters at 50+ ways, where
 embedding space gets contested. Flag: clusters of 3+ ways matching with overlapping
 *purpose*, Jaccard > 0.25 pairs, and terms appearing in 4+ vocabularies (too
@@ -211,14 +211,14 @@ generic). Distinguish **accidental** overlap (sharpen vocabularies apart) from
 
 ## Budget — token cost
 
-No subcommand computes the totals. `ways tree <path>` prints each way's Tokens
+No subcommand computes the totals. `ways author tree <path>` prints each way's Tokens
 (frontmatter-stripped body bytes ÷ 4). Steps: sum that column along each root→leaf
 path for the realistic cost, and over the whole tree for the worst case. Flag: per-way > 500 tokens (consider splitting), path > 1500,
 worst-case (all fire) > 5000, or one way accounting for > 40% of a tree's total.
 
 ## Compare — two trees side by side
 
-No subcommand. Steps: run `ways tree <path> --jaccard` on each tree, then present
+No subcommand. Steps: run `ways author tree <path> --jaccard` on each tree, then present
 depth, total ways, vocabulary-specificity narrowing, worst-case/avg tokens (from the
 Tokens column), and max sibling Jaccard for each, then assess which is more
 mature and whether the simpler one has room to grow. Useful for judging whether a
@@ -226,8 +226,8 @@ refactor helped.
 
 ## Metrics — session disclosure
 
-No subcommand computes these. Steps: read the session's firings with `ways list`
-(epoch per fired way; `--json` for the raw rows) or `ways introspect dump` (turns,
+No subcommand computes these. Steps: read the session's firings with `ways session ways`
+(epoch per fired way; `--json` for the raw rows) or `ways session dump` (turns,
 fired ways and their criteria), then group them by tree. Report per-tree coverage (which children fired, epoch distance) and
 parent-activated bar lowering (`parent_threshold_multiplier`, floored at `parent_boost_floor`). Flag: **orphaned roots** (root
 fires, no children), **instant cascades** (parent+child same epoch = co-disclosed,

@@ -94,7 +94,7 @@ make -C "$APP" update-binaries
 
 `make update-binaries` **force-rebuilds** ways/attend/attend-chat/way-embed. Do
 **not** use `make setup` here: `setup` skips any binary that already exists and runs
-(`ways already installed`), so after a pull it would leave the compiled binary
+("ways already installed"), so after a pull it would leave the compiled binary
 **stale** — the whole point of the update. Individual targets are re-runnable if one
 fails (`make -C "$APP" ways-rebuild`, `attend-rebuild`, …).
 

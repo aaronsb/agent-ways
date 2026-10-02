@@ -31,7 +31,7 @@ pub enum RefireSpec {
 impl RefireSpec {
     /// Resolve preset names against the supplied table. Unknown names
     /// fail-soft — fall back to the built-in `normal` value and log a
-    /// stderr warning. This is the runtime safety net; `ways lint` and
+    /// stderr warning. This is the runtime safety net; `ways author lint` and
     /// `ways corpus` both reject unknown preset names upstream so fire-time
     /// typos shouldn't happen in practice.
     pub fn fraction_with(&self, presets: &HashMap<String, f64>) -> f64 {
@@ -42,7 +42,7 @@ impl RefireSpec {
                 None => {
                     eprintln!(
                         "[ways] unknown refire preset `{}`; falling back to `normal` (0.15). \
-                        Run `ways lint` to locate the source.",
+                        Run `ways author lint` to locate the source.",
                         name
                     );
                     0.15
@@ -69,7 +69,7 @@ impl RefireSpec {
     }
 
     /// Strict validation for lint and corpus-generation paths. Returns an
-    /// error string (ready for a `ways lint` ERROR line) when the spec is
+    /// error string (ready for a `ways author lint` ERROR line) when the spec is
     /// malformed — numeric out of sane range, or preset name not in the
     /// supplied table. Fail-closed at these upstream gates so fire-time
     /// always sees a spec that resolves cleanly.
@@ -133,7 +133,7 @@ impl Frontmatter {
     /// authored cadence field since ADR-159 retired legacy `curve:`.
     ///
     /// Returns `None` when `refire:` is unset — static consumers like
-    /// `ways tune` and `ways corpus` that don't invoke the engine can still
+    /// `ways tune locale` and `ways corpus` that don't invoke the engine can still
     /// parse a way file without requiring it.
     pub fn resolved_curve(&self, window: u64) -> Option<Curve> {
         self.refire.as_ref().map(|spec| spec.to_curve(window))
@@ -147,13 +147,13 @@ impl Frontmatter {
 /// requires both fields together.
 ///
 /// **Adding a channel:** extending this list picks the new field up in
-/// `ways lint`'s fire-eligibility check automatically. The corresponding
+/// `ways author lint`'s fire-eligibility check automatically. The corresponding
 /// dispatch entry point in `cmd/scan/` still needs wiring separately — this
 /// const is the advisory declaration, not the dispatcher.
 pub const FIRE_BEARING_FIELDS: &[&str] = &["pattern", "files", "commands", "trigger"];
 
 /// Does this frontmatter wire the way into any firing channel?
-/// Used by `ways lint` to flag fire-bearing ways that lack a `refire:` field.
+/// Used by `ways author lint` to flag fire-bearing ways that lack a `refire:` field.
 ///
 /// Operates on the raw YAML string rather than the parsed [`Frontmatter`]
 /// struct because several channel fields (`pattern`, `files`, `commands`,
@@ -180,7 +180,7 @@ pub fn parse(path: &Path) -> Result<Frontmatter> {
 }
 
 /// Parse an already-extracted frontmatter YAML block. This is the single
-/// strict-parse path the matching pipeline relies on; `ways lint` calls it too
+/// strict-parse path the matching pipeline relies on; `ways author lint` calls it too
 /// so the gate can't pass a way the corpus/scanner would silently reject (e.g.
 /// an unquoted value containing ": ", which is invalid YAML).
 pub fn parse_str(yaml_str: &str) -> Result<Frontmatter> {
@@ -247,7 +247,7 @@ pub fn body_text(content: &str) -> String {
 
 /// The index, in `content.lines()`, of the line that closes the frontmatter
 /// block: the fence rule of [`split`] for the rewriters that edit a way file
-/// line by line (`ways lint --fix`). `None` when there is no closed block.
+/// line by line (`ways author lint --fix`). `None` when there is no closed block.
 pub fn closing_fence_line(content: &str) -> Option<usize> {
     let mut lines = content.lines();
     if lines.next()? != "---" {
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn refire_is_optional_for_static_consumers() {
-        // Static consumers like `ways tune` and `ways corpus` parse way
+        // Static consumers like `ways tune locale` and `ways corpus` parse way
         // frontmatter but don't invoke the firing engine, so a missing
         // refire: field must not error at parse time. The engine path in
         // session.rs enforces presence at the fire site.

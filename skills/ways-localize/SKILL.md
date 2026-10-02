@@ -51,7 +51,7 @@ the same bar the delivery skills hold.)
 ## 3. Flip the mode switch
 
 The **effective** switch is the user-scope `language` in
-`$XDG_CONFIG_HOME/agent-ways/config.yaml` (`ways config path` prints it). Set it to
+`$XDG_CONFIG_HOME/agent-ways/config.yaml` (`ways settings list --json` prints it). Set it to
 the code:
 
 ```bash
@@ -59,7 +59,7 @@ CFG="${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/config.yaml"
 mkdir -p "$(dirname "$CFG")"; touch "$CFG"
 # replace an existing `language:` line, else append
 grep -q '^language:' "$CFG" && sed -i "s/^language:.*/language: $CODE/" "$CFG" || printf 'language: %s\n' "$CODE" >> "$CFG"
-"$APP/bin/ways" language --json | jq -r '.resolved_language'   # confirm it resolves to $CODE
+"$APP/bin/ways" tune language --json | jq -r '.resolved_language'   # confirm it resolves to $CODE
 ```
 
 ## 4. Fetch the multilingual model (on-demand)
@@ -89,13 +89,13 @@ path if you prefer per-file stubs; the script is
 
 ```bash
 "$APP/bin/ways" corpus --quiet               # localized mode → multi corpus + English anchor
-"$APP/bin/ways" tune --lang "$CODE"          # root-anchored fidelity + discrimination
+"$APP/bin/ways" tune locale --lang "$CODE"          # root-anchored fidelity + discrimination
 ```
 
-`ways tune` is the **objective gate**: fidelity = alignment to the English root,
+`ways tune locale` is the **objective gate**: fidelity = alignment to the English root,
 discrimination = no collision with another way. Re-author flagged stubs, rebuild,
 re-tune **until clean**. Do not declare done while entries are flagged — show the
-clean `ways tune` output as the evidence.
+clean `ways tune locale` output as the evidence.
 
 ## 7. Switch Claude Code's own language
 
@@ -107,7 +107,7 @@ jq --arg L "$NAME" '.language = $L' "$ROOT/settings.json" > "$ROOT/settings.json
 
 ## 8. Report — in the operator's language
 
-Summarize in the **target language**: how many ways localized, that `ways tune` is
+Summarize in the **target language**: how many ways localized, that `ways tune locale` is
 clean, and that Claude Code's language takes effect next session.
 
 ## Not for

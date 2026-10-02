@@ -49,12 +49,12 @@ jobs:
       test: |
         cargo test --manifest-path tools/Cargo.toml -p ways
         cargo test --manifest-path tools/Cargo.toml -p ways --test session_sim -- --test-threads=1
-        # Lint way frontmatter: the ways binary against the repo corpus. `ways lint`
+        # Lint way frontmatter: the ways binary against the repo corpus. `ways author lint`
         # resolves its schema from hooks/ways/frontmatter-schema.yaml, so this needs
         # no ~/.claude projection and no make target. A frontmatter error that would
         # silently drop a way from matching fails the build here.
         cargo build --manifest-path tools/Cargo.toml -p ways
-        tools/target/debug/ways lint --check hooks/ways
+        tools/target/debug/ways author lint --check hooks/ways
       release-notes: |-
         Pre-built ways CLI binaries for 4 platforms.
 

@@ -122,7 +122,7 @@ pub fn run(
 ) -> Result<()> {
     if crate::paths::events_log_sources().is_empty() {
         println!("no events log found at {}", crate::paths::events_log().display());
-        println!("ways tune-precision needs real firing data — run ways for a few sessions first.");
+        println!("ways tune precision needs real firing data — run ways for a few sessions first.");
         return Ok(());
     }
 

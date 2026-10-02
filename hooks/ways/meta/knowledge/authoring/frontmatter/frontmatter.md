@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Way Frontmatter Fields
 
-All values must be single-line. `ways lint` validates each field against `frontmatter-schema.yaml`.
+All values must be single-line. `ways author lint` validates each field against `frontmatter-schema.yaml`.
 
 ## Pattern-based
 
@@ -43,7 +43,7 @@ Ways without a `when:` block fire everywhere (the default). Use `when:` sparingl
 
 ## Firing cadence (`refire:`)
 
-Fire-bearing ways should carry a `refire:` field: a fraction of the session's context window (`refire: 0.15`) or a preset name (`refire: normal`) that sets how soon the way re-discloses (ADR-126). `ways lint` warns when it is missing. Forms, presets, and common choices are in knowledge/authoring/refire(meta).
+Fire-bearing ways should carry a `refire:` field: a fraction of the session's context window (`refire: 0.15`) or a preset name (`refire: normal`) that sets how soon the way re-discloses (ADR-126). `ways author lint` warns when it is missing. Forms, presets, and common choices are in knowledge/authoring/refire(meta).
 
 ## Other
 

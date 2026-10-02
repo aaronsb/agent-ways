@@ -8,7 +8,7 @@
 //!
 //! These identity colours are agent-ways' one categorical palette: agent
 //! and group chips, and any output that tells unordered things apart by
-//! colour (`ways list` pins), draw from it. They are not theme roles.
+//! colour (`ways session ways` pins), draw from it. They are not theme roles.
 //!
 //! Philosophy: use **color** as the primary identity signal, and
 //! reserve **style bits** (bold / italic / underline) as secondary

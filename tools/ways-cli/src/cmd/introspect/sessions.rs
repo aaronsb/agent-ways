@@ -131,7 +131,7 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
         "{}",
         paint(
             Role::Muted,
-            format!("  {} sessions total. `ways introspect replay --session <id>` replays one; without --session it opens the picker.", sessions.len())
+            format!("  {} sessions total. `ways session replay --session <id>` replays one; without --session it opens the picker.", sessions.len())
         )
     );
     println!();

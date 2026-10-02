@@ -1,8 +1,8 @@
-//! `ways reflow` — detect and repair hard-wrapped markdown prose (#415).
+//! `ways author reflow` — detect and repair hard-wrapped markdown prose (#415).
 //!
 //! The thin caller over [`ways_core::reflow`]. The detector itself lives in the
 //! library because three callers share it: this command, the markdown way's
-//! `postcheck.sh`, and the `ways lint` rule. A separate implementation in any
+//! `postcheck.sh`, and the `ways author lint` rule. A separate implementation in any
 //! one of them would drift, and the failure mode is the ugly one — the way
 //! fires and then the tool reports the file clean.
 //!
@@ -36,7 +36,7 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
             match std::fs::read_to_string(&pb) {
                 Ok(text) => (Source::File(pb), text),
                 Err(e) => {
-                    eprintln!("ways reflow: reading {}: {e}", pb.display());
+                    eprintln!("ways author reflow: reading {}: {e}", pb.display());
                     std::process::exit(2);
                 }
             }
@@ -44,7 +44,7 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
         None => {
             let mut buf = String::new();
             if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
-                eprintln!("ways reflow: reading stdin: {e}");
+                eprintln!("ways author reflow: reading stdin: {e}");
                 std::process::exit(2);
             }
             (Source::Stdin, buf)
@@ -215,12 +215,12 @@ pub fn run(path: Option<String>, fix: bool, json: bool, quiet: bool) -> Result<(
             let backup = match write_backup(&p, &text) {
                 Ok(b) => b,
                 Err(e) => {
-                    eprintln!("ways reflow: backing up {}: {e:#}", p.display());
+                    eprintln!("ways author reflow: backing up {}: {e:#}", p.display());
                     std::process::exit(2);
                 }
             };
             if let Err(e) = std::fs::write(&p, &repaired) {
-                eprintln!("ways reflow: writing {}: {e}", p.display());
+                eprintln!("ways author reflow: writing {}: {e}", p.display());
                 eprintln!("  the original is preserved at {}", backup.display());
                 std::process::exit(2);
             }

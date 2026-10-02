@@ -89,7 +89,7 @@ impl Drop for Fx {
 #[test]
 fn the_picker_lists_the_project_s_sessions_and_opens_one() {
     let fx = Fx::new();
-    let picker = fx.snap(&["introspect", "replay", "--depth", "none", "--snap", "100x12"]);
+    let picker = fx.snap(&["session", "replay", "--depth", "none", "--snap", "100x12"]);
     assert!(picker.contains("2 sessions in"), "{picker}");
     let newest = picker.find("bbbbbbbb-000").expect("the newer session");
     let older = picker.find("aaaaaaaa-000").expect("the older session");
@@ -100,25 +100,25 @@ fn the_picker_lists_the_project_s_sessions_and_opens_one() {
 
     // Enter opens the selected session, at its first frame; the transcript
     // gives the token position and the model's window.
-    let replay = fx.snap(&["introspect", "replay", "--depth", "none", "--keys", "enter right", "--snap", "100x20"]);
+    let replay = fx.snap(&["session", "replay", "--depth", "none", "--keys", "enter right", "--snap", "100x20"]);
     assert!(replay.contains(&format!("Session {NEW}")), "{replay}");
     assert!(replay.contains("epoch 2 · 1000K ctx · 2 ways"), "{replay}");
     assert!(replay.contains("(90K / 1000K)"), "the gauge reads the transcript: {replay}");
     assert!(replay.contains("softwaredev/docs/adr"), "{replay}");
 
     // Esc goes back to the picker; Down then Enter opens the older one.
-    let back = fx.snap(&["introspect", "replay", "--depth", "none", "--keys", "enter esc down enter", "--snap", "100x20"]);
+    let back = fx.snap(&["session", "replay", "--depth", "none", "--keys", "enter esc down enter", "--snap", "100x20"]);
     assert!(back.contains(&format!("Session {OLD}")), "{back}");
 }
 
 #[test]
 fn a_session_opens_directly_and_live_follows_the_newest() {
     let fx = Fx::new();
-    let replay = fx.snap(&["introspect", "replay", "--session", OLD, "--depth", "none", "--snap", "100x20"]);
+    let replay = fx.snap(&["session", "replay", "--session", OLD, "--depth", "none", "--snap", "100x20"]);
     assert!(replay.contains(&format!("Session {OLD}")) && replay.contains("1/2"), "{replay}");
-    let live = fx.snap(&["introspect", "live", "--depth", "none", "--snap", "100x20"]);
+    let live = fx.snap(&["session", "live", "--depth", "none", "--snap", "100x20"]);
     assert!(live.contains(&format!("Session {NEW}")) && live.contains("● LIVE") && live.contains("2/2"), "{live}");
-    let why = fx.snap(&["introspect", "live", "--depth", "none", "--keys", "tab", "--snap", "100x20"]);
+    let why = fx.snap(&["session", "live", "--depth", "none", "--keys", "tab", "--snap", "100x20"]);
     assert!(why.contains("why it fired") && why.contains("Trigger"), "{why}");
 }
 
@@ -135,13 +135,13 @@ fn non_ascii_session_ids_do_not_panic() {
     text += &format!("{{\"ts\":\"2026-07-03T10:00:00Z\",\"event\":\"session_start\",\"session\":\"{odd}\",\"project\":\"{proj}\"}}\n");
     std::fs::write(&log, text).unwrap();
 
-    let (out, err, code) = fx.run(&["introspect", "list"]);
+    let (out, err, code) = fx.run(&["session", "list"]);
     assert_eq!(code, 0, "list: {err}");
     assert!(out.contains("aééééééééééé"), "{out}");
-    let (out, err, code) = fx.run(&["introspect", "fires", "--session", odd]);
+    let (out, err, code) = fx.run(&["session", "fires", "--session", odd]);
     assert_eq!(code, 0, "fires: {err}");
     assert!(out.contains("session aééééééééééé"), "{out}");
-    let (out, err, code) = fx.run(&["introspect", "replay", "--session", "zéééééééééééé", "--snap", "40x10"]);
+    let (out, err, code) = fx.run(&["session", "replay", "--session", "zéééééééééééé", "--snap", "40x10"]);
     assert_eq!(code, 0, "replay: {err}");
     assert!(out.contains("no events for session zééééééééééé"), "{out}");
 }
@@ -149,18 +149,18 @@ fn non_ascii_session_ids_do_not_panic() {
 #[test]
 fn without_a_terminal_the_screens_say_so_and_json_needs_none() {
     let fx = Fx::new();
-    let (out, err, code) = fx.run(&["introspect", "replay"]);
+    let (out, err, code) = fx.run(&["session", "replay"]);
     assert_ne!(code, 0, "{out}");
     assert!(err.contains("needs a terminal") && err.contains("replay --json"), "{err}");
 
-    let (out, err, code) = fx.run(&["introspect", "replay", "--session", NEW, "--json"]);
+    let (out, err, code) = fx.run(&["session", "replay", "--session", NEW, "--json"]);
     assert_eq!(code, 0, "{err}");
     let v: serde_json::Value = serde_json::from_str(&out).expect("json");
     assert_eq!(v["session"], NEW);
     assert_eq!(v["frames"].as_array().map(Vec::len), Some(2), "{v}");
     assert_eq!(v["summary"]["distinct_ways"], 2, "{v}");
 
-    let (out, err, code) = fx.run(&["introspect", "list"]);
+    let (out, err, code) = fx.run(&["session", "list"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("Transcript") && out.contains("bbbbbbbb-000"), "{out}");
 }

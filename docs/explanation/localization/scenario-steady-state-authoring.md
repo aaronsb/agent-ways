@@ -23,7 +23,7 @@ flowchart LR
     A[author / edit a way] --> E[English .md root<br/>source of truth]
     E --> L[regenerate its Spanish alias<br/>translate vs root · tune]
     L --> C[multi corpus rebuilt<br/>English anchor + Spanish layer]
-    C --> G{ways tune clean?}
+    C --> G{ways tune locale clean?}
     G -->|no| L
     G -->|yes| D[done — both layers current]
 
@@ -53,7 +53,7 @@ flowchart LR
   is re-translated against the (possibly updated) English root and re-tuned. A drifting
   English root pulls its Spanish alias back into alignment — the root leads, the
   localization follows.
-- **Tuning gates the change.** `ways tune` re-checks the touched alias: does it still
+- **Tuning gates the change.** `ways tune locale` re-checks the touched alias: does it still
   align to the English root, and does it still avoid colliding with another way? Clean →
   done; flagged → re-author the stub (see [[01.013.E]]).
 

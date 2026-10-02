@@ -179,7 +179,7 @@ fn multi_select_by_key_and_other_by_typed_path() {
     press(&mut app, &[KeyCode::Right, KeyCode::Right, KeyCode::Enter]);
     let q = queue(&app);
     assert_eq!(q.len(), 3, "{q:?}");
-    assert!(q.iter().all(|c| c.starts_with("ways config target add ")), "{q:?}");
+    assert!(q.iter().all(|c| c.starts_with("ways target add ")), "{q:?}");
 }
 
 /// A path as a queued command line carries it.
@@ -196,18 +196,18 @@ fn a_finished_flow_queues_on_its_tab_and_the_review_applies_it() {
     assert!(app.flow().is_none());
     let q = app.queued();
     assert_eq!(q.len(), 1);
-    assert_eq!(q[0].command, format!("ways config target add {}", arg(&fx.root.join(".claude-work"))));
+    assert_eq!(q[0].command, format!("ways target add {}", arg(&fx.root.join(".claude-work"))));
     assert!(q[0].confirm && q[0].key == "install.targets");
     assert_eq!((app.pending_in(3), app.pending_in(0)), (1, 0), "it counts on the install tab only");
     press(&mut app, &[KeyCode::Char('w')]);
     let t = text(&mut app);
-    assert!(t.contains("review") && t.contains("queued") && t.contains("$ ways conf") && t.contains('▲'), "{t}");
+    assert!(t.contains("review") && t.contains("queued") && t.contains("$ ways targ") && t.contains('▲'), "{t}");
     press(&mut app, &[KeyCode::Down]);
     let t = text(&mut app);
     assert!(t.contains("asks") && t.contains("yes: it is"), "{t}");
     press(&mut app, &[KeyCode::Char('a')]);
     agent_tui::testkit::finish_apply(&mut app);
-    assert_eq!(*ran.borrow(), [format!("ways config target add {}", arg(&fx.root.join(".claude-work")))]);
+    assert_eq!(*ran.borrow(), [format!("ways target add {}", arg(&fx.root.join(".claude-work")))]);
     assert_eq!(app.pending(), 0);
 }
 
@@ -221,7 +221,7 @@ fn a_disabled_recorded_target_is_enabled_not_added() {
     press(&mut app, &[KeyCode::Char('4'), KeyCode::Char('a'), KeyCode::Enter]);
     assert!(text(&mut app).contains("disabled"));
     press(&mut app, &[KeyCode::Char(' '), KeyCode::Right, KeyCode::Right, KeyCode::Enter]);
-    assert_eq!(queue(&app)[0], format!("ways config target enable {}", arg(&off)));
+    assert_eq!(queue(&app)[0], format!("ways target enable {}", arg(&off)));
 }
 
 #[test]

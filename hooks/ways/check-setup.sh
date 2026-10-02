@@ -67,12 +67,17 @@ fi
 # Silent when it works.
 probe_embed() {
   if command -v timeout >/dev/null 2>&1; then
-    timeout 10 "$WAYS_BIN" match "$1" 2>/dev/null
+    timeout 10 "$WAYS_BIN" author match "$1" 2>/dev/null
   else
-    "$WAYS_BIN" match "$1" 2>/dev/null
+    "$WAYS_BIN" author match "$1" 2>/dev/null
   fi
 }
-if ! probe_embed "embedding engine health probe" | grep -qE '[0-9]\.[0-9]'; then
+# Exit 2 is a usage error: a binary older than these scripts, which has no
+# `author match` yet (between a pull and the binary refresh, or after a failed
+# refresh). The updater reports that binary, so the probe gives no answer here
+# rather than calling the engine broken (ADR-507 §6).
+PROBE=$(probe_embed "embedding engine health probe"); PROBE_RC=$?
+if [[ $PROBE_RC -ne 2 ]] && ! grep -qE '[0-9]\.[0-9]' <<<"$PROBE"; then
   cat <<MSG
 
 ⚠  Embedding engine is NOT functional — semantic way matching is OFF.

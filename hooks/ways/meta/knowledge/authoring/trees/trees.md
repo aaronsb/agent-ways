@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Progressive Disclosure Trees
 
-When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language/tool-specific variants), decompose into a tree. The supply chain tree (`softwaredev/code/supplychain/`) is the reference implementation. A way whose delivered body is over the 10,000-character hook context cap must be split: `ways lint` reports it as an error.
+When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language/tool-specific variants), decompose into a tree. The supply chain tree (`softwaredev/code/supplychain/`) is the reference implementation. A way whose delivered body is over the 10,000-character hook context cap must be split: `ways author lint` reports it as an error.
 
 **How disclosure works now** (ADR-125): ways are nodes in a DAG. When a parent fires, a session marker is set. Whenever any ancestor has a marker, an in-domain child's semantic bar is lowered from `τ_s` to `(τ_s × config.parent_threshold_multiplier).max(config.parent_boost_floor)` — by default `max(0.5 × 0.8, 0.30) = 0.40` — so children fire on weaker signal once their domain is active. The multiplier (0.8) is the boost; the floor (0.30) stops cascading boosts from reaching the noise band; both operate in probability space (ADR-156). This is the mechanism behind "progressive disclosure": children are always candidates, but the boost makes in-domain children easier to fire. Full model in [hooks-and-ways/matching.md](../../../../../../docs/hooks-and-ways/matching.md).
 
@@ -16,7 +16,7 @@ When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language
 **Vocabulary isolation** — sibling ways MUST NOT share vocabulary:
 - Target Jaccard similarity < 0.15 between siblings
 - Each child owns its own keyword space
-- Use `ways tree <path> --jaccard` to verify; use `ways siblings <way-id>` for embedding similarity, and `ways tune --way <path>` to surface cross-way confusers in multilingual space
+- Use `ways author tree <path> --jaccard` to verify; use `ways author siblings <way-id>` for embedding similarity, and `ways tune locale --way <path>` to surface cross-way confusers in multilingual space
 
 **Token awareness** — aim for:
 - Realistic path (root→leaf): ~1200 tokens
@@ -27,7 +27,7 @@ When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language
 
 ## Tree Validation
 
-- `ways tree <path>` — structural analysis: depth, vocabulary size, and tokens per way
+- `ways author tree <path>` — structural analysis: depth, vocabulary size, and tokens per way
 - `/ways-tests tree <path>` — structural analysis (depth, breadth, disclosure boost)
 - `/ways-tests budget <path>` — token cost per way, per path, worst-case
 - `/ways-tests crowding "prompt"` — vocabulary overlap detection

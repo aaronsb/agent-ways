@@ -70,8 +70,8 @@ pub fn list(json: bool) -> Result<()> {
     }
     if list.is_empty() {
         println!("no targets: agent-ways is installed and inactive.");
-        println!("  ways config target plan <dir>   # what activating a Claude Code config dir would do");
-        println!("  ways config target add <dir>    # activate it (default dir: ~/.claude)");
+        println!("  ways target plan <dir>   # what activating a Claude Code config dir would do");
+        println!("  ways target add <dir>    # activate it (default dir: ~/.claude)");
         return Ok(());
     }
     let mut t = Table::new(&["Target", "Enabled", "Observe", "State", "Config"]);
@@ -215,7 +215,7 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
         eprintln!(
             "target recorded in {} but the reconcile failed; `ways reconcile` retries it, \
-             `ways config target remove` forgets it",
+             `ways target remove` forgets it",
             path.display()
         );
         return Err(e);
@@ -239,7 +239,7 @@ fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
         Some(list)
     })?;
     if missing {
-        bail!("{dir} is not a target; `ways config targets` lists them, `ways config target add` adds one");
+        bail!("{dir} is not a target; `ways target list` lists them, `ways target add` adds one");
     }
     let target = chosen.expect("set when found");
     if enabled && !target.dir().is_dir() {

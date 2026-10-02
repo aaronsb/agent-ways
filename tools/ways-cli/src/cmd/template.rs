@@ -95,7 +95,7 @@ This way activates when the user or agent is working with:
     eprintln!("Next steps:");
     eprintln!("  1. Edit {}", way_file.display());
     eprintln!("  2. ways corpus");
-    eprintln!("  3. ways lint --global");
+    eprintln!("  3. ways author lint --global");
 
     Ok(())
 }

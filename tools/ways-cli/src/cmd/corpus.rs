@@ -657,7 +657,7 @@ fn scan_ways_dir(
             // it silently, the way it always has been.
             Ok(None) => continue,
             // Frontmatter present but unparseable (e.g. an unquoted value containing
-            // ": ") would vanish from matching with no signal. `ways lint` is the hard
+            // ": ") would vanish from matching with no signal. `ways author lint` is the hard
             // gate (it now runs this same parse), but warn here too so a runtime
             // rebuild still surfaces it. See ADR-125.
             Err(e) => {
@@ -670,7 +670,7 @@ fn scan_ways_dir(
         // ADR-126: surface malformed refire specs at corpus time. Corpus is a
         // frequently-invoked gate (CI, local rebuilds), so typos caught here
         // don't have to wait for a session to misfire. Warnings are
-        // stderr-only — `ways lint` is the hard gate and escalates.
+        // stderr-only — `ways author lint` is the hard gate and escalates.
         if let Some(spec) = &fm.refire {
             if let Err(msg) = spec.validate(presets) {
                 let rel = path.strip_prefix(dir).unwrap_or(path);

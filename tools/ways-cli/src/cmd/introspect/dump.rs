@@ -133,7 +133,7 @@ pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool) -> R
     Ok(())
 }
 
-/// `ways introspect list --json`: enumerate candidate sessions in scope as
+/// `ways session list --json`: enumerate candidate sessions in scope as
 /// structured data, so an agent can pick one before dumping it (ADR-154 §4).
 /// Newest first. `scope` is null when `--all` was passed.
 pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {

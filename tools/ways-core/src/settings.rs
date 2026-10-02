@@ -63,8 +63,8 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["targets"],
         per_entry: true, entry: None,
-        repair: Some("`ways config target add|enable|disable|remove <dir>`"),
-        doc: "Where agent-ways is active. Changed by `ways config target`, which reconciles.",
+        repair: Some("`ways target add|enable|disable|remove <dir>`"),
+        doc: "Where agent-ways is active. Changed by `ways target`, which reconciles.",
     },
     SectionSpec {
         name: "install.secret_path_deny",
@@ -157,7 +157,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         scope: Scope::Project,
         doc: "One way on or off in this project.",
-        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways disable <id>` and `ways enable <id>` write the same key.",
+        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` and `ways settings unset ways.project.<id>` write the same key.",
         ..BASE
     },
     KeySpec {
@@ -231,7 +231,7 @@ const KEYS: &[KeySpec] = &[
         scope: Scope::User,
         check: Some(check_targets),
         doc: "The Claude Code config directories agent-ways is active in.",
-        long: "Changed by actions, since each change reconciles: `ways config target add|enable|disable|remove <dir>` (ADR-184). Absent means the default ~/.claude, enabled.",
+        long: "Changed by actions, since each change reconciles: `ways target add|enable|disable|remove <dir>` (ADR-184). Absent means the default ~/.claude, enabled.",
         ..BASE
     },
     agent_theme::settings::ACTIVE,

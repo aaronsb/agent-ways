@@ -79,7 +79,7 @@ pub(super) fn build_frames(
         // A `session_start` after the session's origin is a compaction boundary: the
         // real markers were cleared there, so reset the accumulated window state and
         // restart epoch numbering. The latest window then reflects only what fired
-        // since the last compaction — the same grain `ways list` shows.
+        // since the last compaction — the same grain `ways session ways` shows.
         let boundary = !frames.is_empty()
             && cluster.iter().any(|ev| ev.event == "session_start");
         if boundary {

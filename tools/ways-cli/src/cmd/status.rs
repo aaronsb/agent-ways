@@ -323,7 +323,7 @@ fn install_line() -> String {
     let (targets, explicit) = install_targets();
     let enabled: Vec<&crate::config::Target> = targets.iter().filter(|t| t.enabled).collect();
     if enabled.is_empty() {
-        return "installed, inactive (no enabled target; `ways config target add <dir>` activates one)".to_string();
+        return "installed, inactive (no enabled target; `ways target add <dir>` activates one)".to_string();
     }
     let names: Vec<String> = enabled
         .iter()

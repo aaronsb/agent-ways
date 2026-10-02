@@ -162,7 +162,7 @@ The matching channels, in practice:
 
 The system does two separable jobs, and they age differently as models improve:
 
-**Scheduling** — re-disclosing guidance because its influence fades over token distance — compensates for a measurable deficiency of current models (the forgetting curve applied to in-context instructions). Deficiencies get fixed. As effective attention improves, expect the tuned half-lives to lengthen and re-fires to get rarer; `ways tune` exists precisely to recalibrate this per model generation. The mechanism degrades gracefully — its cost trends toward zero as it becomes less necessary.
+**Scheduling** — re-disclosing guidance because its influence fades over token distance — compensates for a measurable deficiency of current models (the forgetting curve applied to in-context instructions). Deficiencies get fixed. As effective attention improves, expect the tuned half-lives to lengthen and re-fires to get rarer; `ways tune locale` exists precisely to recalibrate this per model generation. The mechanism degrades gracefully — its cost trends toward zero as it becomes less necessary.
 
 **Routing** — delivering local norms just-in-time, matched to the action at hand — answers a structural problem, not a deficiency. No future model ships knowing this team's conventions; that information must either be front-loaded (paying context cost every session for guidance mostly irrelevant to the task) or retrieved at the moment of relevance. Better models don't change that trade. The ablation evidence confirms it: the approval-seeking behavior appears in every model tier, because its cause is missing information, not weak attention.
 

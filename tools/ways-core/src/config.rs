@@ -143,7 +143,7 @@ pub struct Config {
     /// `way_nearmiss` telemetry event when at least one model's score landed
     /// within this much *below* its effective threshold (`thr - margin <=
     /// score < thr`). Purely a logging knob — it never changes firing. The
-    /// tuning passes (`ways tune --cadence/--precision`) consume the stream.
+    /// tuning passes (`ways tune locale --cadence/--precision`) consume the stream.
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
@@ -749,7 +749,7 @@ mod tests {
         assert!(body.contains("language: es\r\n# note\r\n"), "{body:?}");
         assert!(body.contains("targets:\r\n  - path: /c\r\n"), "{body:?}");
         assert!(!body.contains("\n\n") || body.contains("\r\n\r\n"), "no bare LF: {body:?}");
-        // The comments-only template `ways config init` writes is accepted.
+        // A file holding only comments is accepted.
         std::fs::write(&path, "# only comments\n# targets:\n#   - path: ~/.claude\n").unwrap();
         Config::write_targets_to(&path, &[]).unwrap();
         let body = std::fs::read_to_string(&path).unwrap();

@@ -1,8 +1,0 @@
-# overlay
-language: en
-
-ways:
-  # keep me
-  meta/introspection: false
-
-parent_boost_floor: 0.40

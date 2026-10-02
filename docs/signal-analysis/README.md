@@ -68,7 +68,7 @@ for the right prompt and stay quiet for the wrong one.
 - **Signal and noise overlap significantly**: no cutoff can cleanly separate them,
   and a `g(s)` fit over that overlap earns a low AUC (the fit is rejected below the
   `AUC_FLOOR` of 0.70, leaving the lane uncalibrated). The fix is stub-level — use
-  `ways tune` to find the confusers and re-author them.
+  `ways tune locale` to find the confusers and re-author them.
 - **Noise tail riding high on one way**: a specific confuser stub is scoring into
   signal territory. Tighten that stub; don't reach for a global knob to paper over
   one bad pair.
@@ -104,7 +104,7 @@ the multi path instead.
 
 The markers sat in the gap between signal_min and noise_p95 for both models. Multi
 showed ~1% p99 leakage (top 1% of noise exceeded 0.55); most of those are
-genuinely-ambiguous stubs that `ways tune` flags as discrimination problems — a
+genuinely-ambiguous stubs that `ways tune locale` flags as discrimination problems — a
 stub fix, not a threshold fix.
 
 ## See also

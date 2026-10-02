@@ -55,7 +55,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
             Err(NoSession::AllOrphaned) => {
                 println!(
                     "Session markers found, but no matching transcript. List candidates with \
-                     `ways introspect list`, then pass --session <id> to inspect one directly."
+                     `ways session list`, then pass --session <id> to inspect one directly."
                 );
                 return Ok(());
             }

@@ -404,14 +404,14 @@ impl Drop for Proc {
     }
 }
 
-/// `ways config target plan <dir>`, read-only, from this binary.
+/// `ways target plan <dir>`, read-only, from this binary.
 fn run_plan(dir: &Path) -> String {
     let Ok(exe) = std::env::current_exe() else { return "could not locate the ways binary".into() };
-    match Command::new(exe).args(["config", "target", "plan"]).arg(dir).env("NO_COLOR", "1").output() {
+    match Command::new(exe).args(["target", "plan"]).arg(dir).env("NO_COLOR", "1").output() {
         // A blocked plan exits non-zero and still prints everything.
         Ok(o) if !o.stdout.is_empty() => String::from_utf8_lossy(&o.stdout).into_owned(),
         Ok(o) => String::from_utf8_lossy(&o.stderr).into_owned(),
-        Err(e) => format!("could not run `ways config target plan`: {e}"),
+        Err(e) => format!("could not run `ways target plan`: {e}"),
     }
 }
 
