@@ -29,7 +29,11 @@ agent-identity = { path = "../agent-identity" }
 agent-theme = { path = "../agent-theme" }
 sensor-trait = { path = "../sensor-trait" }
 ways-core = { path = "../ways-core" }
+claude-sessions = { path = "../claude-sessions" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
 ways-agent-core = { path = "../ways-agent-core" }
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+# Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }

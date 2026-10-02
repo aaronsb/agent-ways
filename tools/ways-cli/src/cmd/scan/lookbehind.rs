@@ -28,7 +28,7 @@ const TAIL_BYTES: u64 = 64 * 1024;
 
 /// The assistant's prose since the last human turn, for `session_id`, or `None`.
 pub(crate) fn intent(session_id: &str) -> Option<String> {
-    let path = crate::cmd::context::find_transcript_by_session(session_id)?;
+    let path = ways_core::paths::claude_dir().find_transcript(None, session_id)?;
     let tail = read_tail(&path, TAIL_BYTES)?;
     assistant_prose_since_last_human(&tail)
 }

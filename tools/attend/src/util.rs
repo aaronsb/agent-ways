@@ -31,22 +31,15 @@ pub(crate) fn keepwarm_dir() -> std::path::PathBuf {
 /// encoded-cwd subdir exists here; message-tray lifetime is bound to it
 /// (ADR-136) rather than to a wall-clock age.
 pub(crate) fn projects_base() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(home).join(".claude").join("projects")
+    claude_sessions::ClaudeDir::user().projects_dir()
 }
 
-/// Encode a project path the same way Claude Code does: '/', '_', '.' →
-/// '-' (and, on Windows, '\' and ':'). Kept in lockstep with
-/// sensor-peers' `encode_cwd` so tray creation and the project-liveness
-/// lookup that reaps trays can never disagree on a path's encoded name
-/// (ADR-136 Decision 3).
+/// The name of a project's signal tray, `claude_sessions::attend_key`: the
+/// project slug, so the project-liveness lookup that reaps trays reads the
+/// project directory from it (ADR-136 Decision 3), and a hash of the full
+/// path, so two projects with one slug never share a tray.
 pub(crate) fn encode_project(path: &str) -> String {
-    path.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' | '\\' | ':' => '-',
-            _ => c,
-        })
-        .collect()
+    claude_sessions::attend_key(path)
 }
 
 /// Delegate to the canonical identity derivation (issue #378). No

@@ -32,7 +32,7 @@ use std::time::Duration;
 /// Simple line-oriented format — no serde dependency.
 ///
 /// Format:
-///   seen_signal: <dir>:<filename>
+///   seen_signal: <signal filename>
 ///   disclosed_thresholds: 40,50,65,...
 ///   context_pct: 31.2
 ///   reply_hint_shown: true
@@ -101,7 +101,8 @@ impl StateSnapshot {
             if let Some((key, value)) = line.split_once(": ") {
                 match key {
                     "seen_signal" => {
-                        state.seen_signals.insert(value.replace("\\n", "\n"));
+                        // transition read: removed by #701 (ADR-506)
+                        state.seen_signals.insert(normalize_seen_key(&value.replace("\\n", "\n")));
                     }
                     "disclosed_thresholds" => {
                         state.disclosed_thresholds = value.split(',')
@@ -129,20 +130,44 @@ impl StateSnapshot {
     }
 }
 
-/// A seen-set key is `<scan-dir>:<signal-filename>` (the peers sensor's
-/// collision-proof form). The filename part never contains `:` (signal
-/// ids are `[A-Za-z0-9_-]` + `.signal`), so the LAST colon splits the
-/// key back into its path. Returns `None` for keys that don't parse —
-/// those are kept forever rather than mis-pruned.
-fn key_to_path(key: &str) -> Option<PathBuf> {
-    let (dir, file) = key.rsplit_once(':')?;
-    Some(Path::new(dir).join(file))
+/// A seen-set key is the signal's filename (`<id>.signal`). Signal ids are
+/// unique across trays and rooms, so a signal moved from one tray to
+/// another keeps its key and is not delivered twice.
+pub fn seen_key(filename: &str) -> String {
+    filename.to_string()
+}
+
+// transition read: removed by #701 (ADR-506)
+/// A key written before keys were filenames, `<scan-dir>:<filename>`, read
+/// as its filename. Signal filenames never contain `:`, so the part after
+/// the last colon is the filename; a key with no colon is returned as is.
+pub fn normalize_seen_key(key: &str) -> String {
+    match key.rsplit_once(':') {
+        Some((_, file)) => file.to_string(),
+        None => key.to_string(),
+    }
+}
+
+/// The filenames of every signal under `signals_base`, one level of trays
+/// and rooms down. `None` when the base cannot be read, so nothing is
+/// pruned on a read error.
+fn existing_signal_names(signals_base: &Path) -> Option<HashSet<String>> {
+    let mut names = HashSet::new();
+    for dir in fs::read_dir(signals_base).ok()?.flatten() {
+        if let Ok(files) = fs::read_dir(dir.path()) {
+            names.extend(files.flatten().filter_map(|f| f.file_name().into_string().ok()));
+        }
+    }
+    Some(names)
 }
 
 /// State store manages checkpoint/restore for a session.
 pub struct StateStore {
     state_dir: PathBuf,
     session_id: Option<String>,
+    /// The trays and rooms whose signals the seen-set marks; a mark whose
+    /// signal is under none of them is pruned on write.
+    signals_base: PathBuf,
 }
 
 /// How long a writer spins for the advisory lock before proceeding
@@ -162,9 +187,17 @@ impl StateStore {
         )
     }
 
-    /// Test seam: a store rooted at an explicit directory.
+    /// Test seam: a store rooted at an explicit directory. Signals are
+    /// looked for in `signals/` beside it, as under `~/.cache/attend`.
     pub fn new_in(state_dir: PathBuf, session_id: Option<String>) -> Self {
-        Self { state_dir, session_id }
+        let signals_base = state_dir.parent().unwrap_or(&state_dir).join("signals");
+        Self { state_dir, session_id, signals_base }
+    }
+
+    /// The same store with its signals under `signals_base`.
+    pub fn with_signals_base(mut self, signals_base: PathBuf) -> Self {
+        self.signals_base = signals_base;
+        self
     }
 
     fn state_path(&self) -> Option<PathBuf> {
@@ -279,10 +312,11 @@ impl StateStore {
         // signal can never be re-delivered, so its mark is dead weight.
         // Pruning here (the single write path) keeps the file bounded by
         // the live ledger instead of growing for the session's lifetime.
+        let existing = existing_signal_names(&self.signals_base);
         merged.seen_signals = disk
             .seen_signals
             .union(&mem.seen_signals)
-            .filter(|k| key_to_path(k).map(|p| p.exists()).unwrap_or(true))
+            .filter(|k| existing.as_ref().is_none_or(|names| names.contains(k.as_str())))
             .cloned()
             .collect();
 
@@ -403,10 +437,10 @@ mod tests {
             git_head: Some("abc1234".into()),
             ..Default::default()
         };
-        snap.seen_signals.insert("/tmp/sig:abc-123.signal".into());
+        snap.seen_signals.insert("abc-123.signal".into());
 
         let text = snap.serialize();
-        assert!(text.contains("seen_signal: /tmp/sig:abc-123.signal"));
+        assert!(text.contains("seen_signal: abc-123.signal"));
         assert!(text.contains("disclosed_thresholds: 40,50"));
         assert!(text.contains("context_pct: 31.2"));
         assert!(text.contains("reply_hint_shown: true"));
@@ -432,10 +466,10 @@ mod tests {
         // Both signal files exist, so pruning keeps them.
         fs::write(sig_dir.join("drained.signal"), "x").unwrap();
         fs::write(sig_dir.join("sensor.signal"), "x").unwrap();
-        let drained_key = format!("{}:drained.signal", sig_dir.display());
-        let sensor_key = format!("{}:sensor.signal", sig_dir.display());
+        let drained_key = "drained.signal".to_string();
+        let sensor_key = "sensor.signal".to_string();
 
-        let store = StateStore::new_in(dir.clone(), Some("s1".into()));
+        let store = StateStore::new_in(dir.clone(), Some("s1".into())).with_signals_base(dir.clone());
         // Drain marks a message the sensor has never seen.
         store.mark_seen([drained_key.clone()]);
         // Sensor checkpoints a snapshot that lacks the drain's mark.
@@ -457,9 +491,9 @@ mod tests {
         let sig_dir = dir.join("signals");
         fs::create_dir_all(&sig_dir).unwrap();
         fs::write(sig_dir.join("a.signal"), "x").unwrap();
-        let key = format!("{}:a.signal", sig_dir.display());
+        let key = "a.signal".to_string();
 
-        let store = StateStore::new_in(dir.clone(), Some("s2".into()));
+        let store = StateStore::new_in(dir.clone(), Some("s2".into())).with_signals_base(dir.clone());
         let mem = StateSnapshot {
             disclosed_thresholds: vec![40],
             reply_hint_shown: true,
@@ -483,10 +517,10 @@ mod tests {
         let sig_dir = dir.join("signals");
         fs::create_dir_all(&sig_dir).unwrap();
         fs::write(sig_dir.join("live.signal"), "x").unwrap();
-        let live_key = format!("{}:live.signal", sig_dir.display());
-        let dead_key = format!("{}:gone.signal", sig_dir.display());
+        let live_key = "live.signal".to_string();
+        let dead_key = "gone.signal".to_string();
 
-        let store = StateStore::new_in(dir.clone(), Some("s3".into()));
+        let store = StateStore::new_in(dir.clone(), Some("s3".into())).with_signals_base(dir.clone());
         store.mark_seen([live_key.clone(), dead_key.clone()]);
         // dead_key's file never existed → pruned on the next write.
         store.mark_seen([live_key.clone()]);
@@ -496,6 +530,14 @@ mod tests {
         assert!(!after.seen_signals.contains(&dead_key),
             "mark for a deleted signal should be pruned");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A state file written with `<dir>:<filename>` keys reads as filenames.
+    #[test]
+    fn old_dir_keyed_marks_read_as_filenames() {
+        let back = StateSnapshot::deserialize("seen_signal: /home/u/.cache/attend/signals/-p:abc-1.signal\n");
+        assert!(back.seen_signals.contains("abc-1.signal"));
+        assert_eq!(normalize_seen_key("abc-1.signal"), "abc-1.signal");
     }
 
     /// "No session, no persistence": a store with no id never writes.
@@ -515,9 +557,9 @@ mod tests {
         let sig_dir = dir.join("signals");
         fs::create_dir_all(&sig_dir).unwrap();
         fs::write(sig_dir.join("m.signal"), "x").unwrap();
-        let key = format!("{}:m.signal", sig_dir.display());
+        let key = "m.signal".to_string();
 
-        let store = StateStore::new_in(dir.clone(), Some("peer-1".into()));
+        let store = StateStore::new_in(dir.clone(), Some("peer-1".into())).with_signals_base(dir.clone());
         store.mark_seen([key.clone()]);
 
         let seen = seen_keys_for_in(&dir, "peer-1").unwrap();

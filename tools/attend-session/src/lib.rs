@@ -29,6 +29,7 @@
 //! session (registry, groups) can branch on `resolved`.
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -150,19 +151,10 @@ pub fn find_own_session(own_pid: u32) -> Option<(String, u32)> {
 
 /// Test-seam counterpart to [`find_own_session`].
 pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
-    let mut pid_to_session: HashMap<u32, String> = HashMap::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                if let (Some(pid), Some(sid)) = (
-                    extract_json_u64(&content, "pid"),
-                    extract_json_string(&content, "sessionId"),
-                ) {
-                    pid_to_session.insert(pid as u32, sid);
-                }
-            }
-        }
-    }
+    let pid_to_session: HashMap<u32, String> = claude_sessions::read_session_records(dir)
+        .into_iter()
+        .map(|r| (r.pid, r.session_id))
+        .collect();
     if pid_to_session.is_empty() {
         return None;
     }
@@ -190,17 +182,11 @@ pub fn origin_path(session_id: &str) -> Option<String> {
 
 /// Test-seam counterpart to [`origin_path`].
 pub fn origin_path_in(dir: &Path, session_id: &str) -> Option<String> {
-    let entries = fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let Ok(content) = fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        if extract_json_string(&content, "sessionId").as_deref() == Some(session_id) {
-            return extract_json_string(&content, "cwd")
-                .map(|c| normalize_origin(&c));
-        }
-    }
-    None
+    claude_sessions::read_session_records(dir)
+        .into_iter()
+        .find(|r| r.session_id == session_id)
+        .and_then(|r| r.cwd)
+        .map(|c| normalize_origin(&c))
 }
 
 /// A session's ROOT path — the identity anchor (ADR-171, issue #394).
@@ -219,10 +205,7 @@ pub fn normalize_origin(cwd: &str) -> String {
 }
 
 fn sessions_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".claude").join("sessions")
+    claude_sessions::ClaudeDir::user().sessions_dir()
 }
 
 /// Return the parent PID of `pid`, or `None` if it cannot be
@@ -258,30 +241,6 @@ fn get_parent_pid(pid: u32) -> Option<u32> {
     } else {
         None
     }
-}
-
-/// Minimal JSON field extractor — the session file schema is flat and
-/// stable, so a parser dependency would be pure ceremony. Unlike the
-/// historical copies this canonicalizes, it tolerates whitespace after
-/// the colon (`"key": "value"`): as the now-single point of failure
-/// for identity, it must not silently break if Claude Code ever
-/// pretty-prints the record.
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\":", key);
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = json[start..].trim_start().strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
-fn extract_json_u64(json: &str, key: &str) -> Option<u64> {
-    let pattern = format!("\"{}\":", key);
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = json[start..].trim_start();
-    let end = rest
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(rest.len());
-    rest[..end].parse().ok()
 }
 
 #[cfg(test)]
@@ -373,11 +332,16 @@ mod tests {
     }
 
     #[test]
-    fn extractors_tolerate_whitespace_after_colon() {
-        let json = r#"{ "sessionId": "sess-x", "pid": 42, "cwd": "/p" }"#;
-        assert_eq!(extract_json_string(json, "sessionId").as_deref(), Some("sess-x"));
-        assert_eq!(extract_json_string(json, "cwd").as_deref(), Some("/p"));
-        assert_eq!(extract_json_u64(json, "pid"), Some(42));
+    fn pretty_printed_record_resolves() {
+        // Records are read with serde_json (claude-sessions), so whitespace
+        // and key order do not matter.
+        let dir = tempdir_like();
+        let pid = std::process::id();
+        let body = format!("{{\n  \"cwd\": \"/p\",\n  \"pid\": {pid},\n  \"sessionId\": \"sess-x\"\n}}");
+        std::fs::write(dir.join("x.json"), body).unwrap();
+        let id = identity_in(&dir, pid);
+        assert_eq!(id.session_id, "sess-x");
+        assert_eq!(id.origin_path, "/p");
     }
 
     #[test]
@@ -417,13 +381,6 @@ mod tests {
         write_session(&dir, "sess-b", 2222, "/proj/b");
         assert_eq!(origin_path_in(&dir, "sess-b").as_deref(), Some("/proj/b"));
         assert_eq!(origin_path_in(&dir, "sess-zz"), None);
-    }
-
-    #[test]
-    fn extract_json_u64_parses_pid() {
-        assert_eq!(extract_json_u64(r#"{"pid":12345,"x":"y"}"#, "pid"), Some(12345));
-        assert_eq!(extract_json_u64(r#"{"pid": 99}"#, "pid"), Some(99));
-        assert_eq!(extract_json_u64(r#"{"nope":1}"#, "pid"), None);
     }
 }
 

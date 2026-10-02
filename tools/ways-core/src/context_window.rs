@@ -35,11 +35,9 @@ pub const ENV_OVERRIDE: &str = "CLAUDE_CONTEXT_WINDOW";
 /// an absence rather than an unrecognized id — a transcript whose newest
 /// assistant turn is an interrupt still has a real model further back, and
 /// resolving it to the default would hand that session a 5x-wrong window.
-const SENTINELS: &[&str] = &["<synthetic>", "-", "unknown", ""];
-
-/// True when `model` is a placeholder rather than a real model id.
+/// The list is `claude_sessions::usage::PLACEHOLDER_MODELS`.
 pub fn is_sentinel(model: &str) -> bool {
-    SENTINELS.contains(&model.trim())
+    claude_sessions::usage::is_placeholder_model(model)
 }
 
 /// Known model context windows, keyed by model id (ADR-166).

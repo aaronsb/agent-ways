@@ -3,8 +3,7 @@
 use crate::config;
 
 pub(crate) fn cmd_tune(apply: bool) {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let projects_root = std::path::PathBuf::from(&home).join(".claude").join("projects");
+    let projects_root = claude_sessions::ClaudeDir::user().projects_dir();
 
     // Gather the 10 most-recently-modified project directories.
     let mut proj_dirs: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();

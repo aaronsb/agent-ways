@@ -51,16 +51,17 @@ pub fn broadcast_dir() -> PathBuf {
 }
 
 /// Encode a cwd path into the signal directory name the peer sensor
-/// scans. Must stay byte-identical to `attend::util::encode_project`
-/// (same `/`, `_`, `.` → `-` transform). See the mirror note on
-/// `write_broadcast` — same contract, different layer.
+/// scans: `claude_sessions::attend_key`, the one name `attend` and the
+/// sensor use too.
 pub fn encode_cwd(path: &str) -> String {
-    path.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' => '-',
-            _ => c,
-        })
-        .collect()
+    claude_sessions::attend_key(path)
+}
+
+/// The names of this cwd's own tray the watcher reads,
+/// `claude_sessions::attend_tray_names`: the key, then the old names.
+// transition read: removed by #701 (ADR-506)
+pub fn own_tray_names(path: &str) -> Vec<String> {
+    claude_sessions::attend_tray_names(path)
 }
 
 /// Directory that delivers signals to the claude session rooted at
@@ -490,14 +491,13 @@ mod tests {
     }
 
     #[test]
-    fn encode_cwd_matches_attend_convention() {
-        // Same transform as attend::util::encode_project — `/`, `_`,
-        // `.` collapse to `-`. This is the path the peer sensor
-        // scans when looking for messages directed at a specific
-        // cwd, so drift here breaks direct routing silently.
-        assert_eq!(encode_cwd("/home/aaron/.claude"), "-home-aaron--claude");
-        assert_eq!(encode_cwd("/tmp/foo_bar"), "-tmp-foo-bar");
+    fn encode_cwd_is_the_attend_key() {
+        // The name attend::util::encode_project and the peer sensor use
+        // for a cwd's tray; drift here breaks direct routing silently.
+        assert_eq!(encode_cwd("/srv/my proj"), "-srv-my-proj-bte5w6");
         assert_eq!(encode_cwd(""), "");
+        assert_eq!(own_tray_names("/srv/my proj"), vec!["-srv-my-proj-bte5w6".to_string(), "-srv-my proj".to_string()]);
+        assert!(own_tray_names("").is_empty());
     }
 
     #[test]
@@ -513,7 +513,7 @@ mod tests {
         );
         assert_eq!(
             d.file_name().and_then(|s| s.to_str()),
-            Some("-home-aaron-proj")
+            Some("-home-aaron-proj-wjpr18")
         );
     }
 

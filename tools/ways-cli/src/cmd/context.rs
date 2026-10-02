@@ -99,7 +99,7 @@ pub fn pct_used_from_transcript(transcript: &str) -> Option<u64> {
 }
 
 fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Result<ContextInfo> {
-    let projects_root = home_dir().join(".claude/projects");
+    let projects_root = projects_root();
     let env_session_id = std::env::var("CLAUDE_CODE_SESSION_ID").ok();
     let transcript = resolve_transcript(
         project_dir,
@@ -170,7 +170,7 @@ fn resolve_transcript(
     projects_root: &Path,
 ) -> Result<PathBuf> {
     if let Some(sid) = session_id {
-        return find_transcript_by_session_in(projects_root, sid)
+        return claude_sessions::find_transcript_in(projects_root, None, sid)
             .ok_or_else(|| anyhow::anyhow!("No transcript found for session: {sid}"));
     }
 
@@ -179,7 +179,7 @@ fn resolve_transcript(
     // missing, so behaviour outside a live session is unchanged.
     if project_dir.is_none() {
         if let Some(sid) = env_session_id.filter(|s| !s.is_empty()) {
-            if let Some(transcript) = find_transcript_by_session_in(projects_root, sid) {
+            if let Some(transcript) = claude_sessions::find_transcript_in(projects_root, None, sid) {
                 return Ok(transcript);
             }
         }
@@ -191,9 +191,8 @@ fn resolve_transcript(
         .or_else(detect_project_dir)
         .unwrap_or_else(|| ".".to_string());
 
-    let conv_dir = projects_root.join(ways_core::paths::project_slug(&project));
-
-    find_newest_transcript(&conv_dir)
+    claude_sessions::find_project_dir_in(projects_root, &project)
+        .and_then(|dir| claude_sessions::newest_transcript(&dir))
         .ok_or_else(|| anyhow::anyhow!("No active transcript found for project: {project}"))
 }
 
@@ -279,25 +278,7 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
 /// running, and treating the sentinel as the model would resolve a live 1M session
 /// to the 200K default. Nine transcripts in local history end on one.
 fn detect_model(content: &str) -> String {
-    // Scan from the end for the most recent assistant message with a model field
-    for line in content.lines().rev() {
-        if !line.contains("\"assistant\"") {
-            continue;
-        }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                if let Some(model) = val
-                    .get("message")
-                    .and_then(|m| m.get("model"))
-                    .and_then(|m| m.as_str())
-                    .filter(|m| !context_window::is_sentinel(m))
-                {
-                    return model.to_string();
-                }
-            }
-        }
-    }
-    UNKNOWN_MODEL.to_string()
+    claude_sessions::usage::last_model(content).unwrap_or_else(|| UNKNOWN_MODEL.to_string())
 }
 
 /// Sentinel `detect_model` returns when the transcript holds no assistant turn
@@ -314,33 +295,9 @@ fn resolve_window(content: &str) -> context_window::ContextWindow {
 }
 
 fn read_token_usage(content: &str) -> (u64, String) {
-    // Find the highest token count from assistant messages with usage data
-    // cache_read reflects actual context size sent to API
-    let mut max_tokens: u64 = 0;
-
-    for line in content.lines().rev() {
-        if !line.contains("cache_read_input_tokens") {
-            continue;
-        }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                if let Some(usage) = val.get("message").and_then(|m| m.get("usage")) {
-                    let cache_read = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
-                    let cache_create = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-                    let input = usage["input_tokens"].as_u64().unwrap_or(0);
-                    let total = cache_read + cache_create + input;
-                    if total > max_tokens {
-                        max_tokens = total;
-                        // Most recent is most accurate — don't keep scanning
-                        return (max_tokens, "api".to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    if max_tokens > 0 {
-        return (max_tokens, "api".to_string());
+    // The newest turn's API usage: cache reads reflect the context sent.
+    if let Some(tokens) = claude_sessions::usage::last_context_tokens(content) {
+        return (tokens, "api".to_string());
     }
 
     // Fallback: estimate from transcript bytes
@@ -454,61 +411,10 @@ pub fn iso_to_epoch(s: &str) -> Option<u64> {
 
 /// The root every session transcript lives under, one directory per project.
 pub(crate) fn projects_root() -> PathBuf {
-    home_dir().join(".claude/projects")
+    ways_core::paths::transcripts_root()
 }
 
-/// Find a transcript by session id, searching every project dir under
-/// `~/.claude/projects/`. Session ids are globally unique, so we don't
-/// need to know which project the session is rooted in.
-pub(crate) fn find_transcript_by_session(session_id: &str) -> Option<PathBuf> {
-    find_transcript_by_session_in(&projects_root(), session_id)
-}
-
-/// Search `projects_root/*/<session_id>.jsonl`. Split out from
-/// `find_transcript_by_session` so the lookup is testable against a temp
-/// projects root instead of the real `~/.claude/projects`.
-pub(crate) fn find_transcript_by_session_in(
-    projects_root: &Path,
-    session_id: &str,
-) -> Option<PathBuf> {
-    let filename = format!("{session_id}.jsonl");
-    // `flatten` rather than `?` on each entry: one unreadable directory must not
-    // abort the scan. This gates `session_is_live`, so a single I/O error while
-    // iterating ~/.claude/projects would otherwise make every session look dead.
-    for entry in std::fs::read_dir(projects_root).ok()?.flatten() {
-        let candidate = entry.path().join(&filename);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn find_newest_transcript(dir: &Path) -> Option<PathBuf> {
-    if !dir.is_dir() {
-        return None;
-    }
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(dir).ok()? {
-        let entry = entry.ok()?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        if path.to_str().is_some_and(|s| s.contains(".tmp")) {
-            continue;
-        }
-        if let Ok(meta) = entry.metadata() {
-            let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-            if newest.as_ref().is_none_or(|(t, _)| mtime > *t) {
-                newest = Some((mtime, path));
-            }
-        }
-    }
-    newest.map(|(_, p)| p)
-}
-
-use crate::util::{detect_project_dir, home_dir};
+use crate::util::detect_project_dir;
 use agent_theme::{paint, Role, Style};
 
 #[cfg(test)]
@@ -585,11 +491,17 @@ mod tests {
     }
 
     #[test]
-    fn find_transcript_by_session_in_returns_none_when_missing() {
-        // Pins the not-found half of the id lookup the fall-through depends on.
-        let root = temp_projects_root(line!(), &[("-someproj", "present-sid")]);
-        assert!(find_transcript_by_session_in(&root, "absent-sid").is_none());
-        assert!(find_transcript_by_session_in(&root, "present-sid").is_some());
+    fn explicit_long_project_finds_its_truncated_dir() {
+        // Claude Code cuts a slug over 200 characters and appends a hash; the
+        // project branch looked for the uncut slug and found nothing.
+        let project = format!("/srv/{}", "deep_dir/".repeat(30));
+        let project = project.trim_end_matches('/');
+        let name = claude_sessions::project_slug(project);
+        // The hash Claude Code 2.1.287 computes for this path, under node.
+        assert!(name.ends_with("-deep-d-8gbmig"), "{name}");
+        let root = temp_projects_root(line!(), &[(name.as_str(), "sid-long")]);
+        let got = resolve_transcript(Some(project), None, None, &root).unwrap();
+        assert_eq!(got, root.join(&name).join("sid-long.jsonl"));
         std::fs::remove_dir_all(&root).ok();
     }
 

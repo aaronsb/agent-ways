@@ -214,13 +214,11 @@ link_path_binaries() {
       ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
     fi
   done
-  # Script tools ship from tools/ rather than bin/ (nothing to compile), but are
-  # linked the same way so they're callable from any working directory.
-  for b in claude-projects; do
-    if [[ -e "$APP_DIR/tools/$b" ]]; then
-      ln -sf "$APP_DIR/tools/$b" "$XDG_BIN/$b"
-    fi
-  done
+  # claude-projects was a script linked from tools/; `ways projects` replaced
+  # it (ADR-504). Remove the link an earlier install made, and only that link.
+  if [[ -L "$XDG_BIN/claude-projects" && "$(readlink "$XDG_BIN/claude-projects")" == "$APP_DIR/tools/claude-projects" ]]; then
+    rm -f "$XDG_BIN/claude-projects"
+  fi
   return 0
 }
 

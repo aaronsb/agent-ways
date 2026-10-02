@@ -27,6 +27,7 @@ attend-heartbeat = { path = "../attend-heartbeat" }
 attend-identity-view = { path = "../attend-identity-view" }
 attend-instances = { path = "../attend-instances" }
 attend-session = { path = "../attend-session" }
+claude-sessions = { path = "../claude-sessions" }
 attend-state = { path = "../attend-state" }
 sensor-trait = { path = "../sensor-trait" }
 # CLI parsing — matches ADR-111's choice for `ways-cli`. Doc comments on

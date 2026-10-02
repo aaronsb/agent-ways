@@ -336,12 +336,18 @@ enum Commands {
     /// hooks from hardcoding a path that drifts from `paths::events_log()`.
     EventsLogPath,
     /// Print the directory name Claude Code gives a project under its projects
-    /// dir (`ways_core::paths::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
+    /// dir (`claude_sessions::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
     /// else the working directory. Lets shell macros read per-project state
     /// without re-deriving the rule.
     ProjectSlug {
         /// Project path
         path: Option<String>,
+    },
+    /// Claude Code's projects: list, search, show, stats, cleanup, hygiene and
+    /// relocate (ADR-504). With no subcommand, lists them.
+    Projects {
+        #[command(subcommand)]
+        command: Option<cmd::projects::ProjectsCommand>,
     },
     /// The ways agent: API keys, the judge's engine and mode (ADR-196, ADR-502).
     /// Runs `ways-agent`; `ways agent --help` lists its commands.
@@ -1004,12 +1010,13 @@ fn run() -> Result<()> {
             println!("{}", paths::events_log().display());
             Ok(())
         }
+        Commands::Projects { command } => cmd::projects::run(command),
         Commands::ProjectSlug { path } => {
             let project = path
                 .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|p| !p.is_empty()))
                 .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
                 .unwrap_or_default();
-            println!("{}", ways_core::paths::project_slug(&project));
+            println!("{}", claude_sessions::project_slug(&project));
             Ok(())
         }
         Commands::ResponseTopicsPath { session } => {

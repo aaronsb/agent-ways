@@ -176,7 +176,7 @@ pub fn run(
         }
     }
 
-    let projects_dir = home_dir().join(".claude/projects");
+    let projects_dir = ways_core::paths::transcripts_root();
     if projects_dir.is_dir() {
         vlog(&format!("enumerating projects: {}", projects_dir.display()));
         for entry in std::fs::read_dir(&projects_dir)? {
@@ -190,7 +190,7 @@ pub fn run(
             // probing is_dir() across every candidate split of the encoded name,
             // so an unreachable mount stalls here, under this project's name.
             vlog(&format!("  resolving {encoded}"));
-            let project_path = match resolve_project_path(&projects_dir, &encoded) {
+            let project_path = match claude_sessions::resolve_project_path(&projects_dir, &encoded) {
                 Some(p) => p,
                 None => {
                     vlog("    unresolved — skipped");
@@ -950,82 +950,6 @@ fn auto_embed(
         Some(why) => Embedded::Degraded(why),
         None => Embedded::Complete,
     })
-}
-
-/// Resolve real project path from Claude Code's encoded directory name.
-/// The encoding (/ → -) is lossy, so we try sessions-index.json first,
-/// then fall back to greedy filesystem resolution.
-fn resolve_project_path(projects_dir: &Path, encoded: &str) -> Option<String> {
-    // Try sessions-index.json first
-    let idx = projects_dir.join(encoded).join("sessions-index.json");
-    if idx.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&idx) {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(path) = parsed["entries"][0]["projectPath"].as_str() {
-                    if !path.is_empty() {
-                        return Some(path.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: greedy filesystem resolution
-    resolve_encoded_path(encoded)
-}
-
-/// Greedily resolve an encoded path against the filesystem.
-/// Splits on -, accumulates segments, tests filesystem at each step
-/// to distinguish / from - in the original path.
-/// e.g., "-home-aaron-Projects-app-github-manager" → "/home/aaron/Projects/app/github-manager"
-fn resolve_encoded_path(encoded: &str) -> Option<String> {
-    let stripped = encoded.strip_prefix('-').unwrap_or(encoded);
-    let segments: Vec<&str> = stripped.split('-').collect();
-
-    let mut current = String::new();
-    let mut pending = String::new();
-
-    for seg in &segments {
-        if pending.is_empty() {
-            let try_path = format!("{current}/{seg}");
-            if Path::new(&try_path).is_dir() {
-                current = try_path;
-            } else {
-                pending = seg.to_string();
-            }
-        } else {
-            // Try hyphenated: current/pending-seg
-            let try_hyphen = format!("{current}/{pending}-{seg}");
-            // Try split: current/pending/seg
-            let try_split = format!("{current}/{pending}/{seg}");
-
-            if Path::new(&try_hyphen).is_dir() {
-                current = try_hyphen;
-                pending.clear();
-            } else if Path::new(&try_split).is_dir() {
-                current = try_split;
-                pending.clear();
-            } else {
-                pending = format!("{pending}-{seg}");
-            }
-        }
-    }
-
-    // Flush pending
-    if !pending.is_empty() {
-        let try_path = format!("{current}/{pending}");
-        if Path::new(&try_path).is_dir() {
-            current = try_path;
-        } else {
-            return None;
-        }
-    }
-
-    if Path::new(&current).is_dir() {
-        Some(current)
-    } else {
-        None
-    }
 }
 
 /// Walk up from a project path to find .claude/ways/ directory.

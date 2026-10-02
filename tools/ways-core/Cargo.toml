@@ -19,3 +19,4 @@ walkdir = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 anyhow = "1"
 sensor-trait = { path = "../sensor-trait" }
+claude-sessions = { path = "../claude-sessions" }

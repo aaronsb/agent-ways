@@ -253,7 +253,7 @@ fn session_is_live_in(
     session_id: &str,
 ) -> bool {
     sessions_root.join(session_id).is_dir()
-        && crate::cmd::context::find_transcript_by_session_in(projects_root, session_id).is_some()
+        && claude_sessions::find_transcript_in(projects_root, None, session_id).is_some()
 }
 
 /// Why auto-detection found nothing, so the caller can say which of the two

@@ -11,3 +11,6 @@ path = "src/lib.rs"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dependencies]
+claude-sessions = { path = "../claude-sessions" }
