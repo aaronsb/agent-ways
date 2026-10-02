@@ -33,6 +33,9 @@ fn context(home: &Path, project: &Path, extra: &[(&str, &str)]) -> Vec<u8> {
         .arg(project)
         .current_dir(project)
         .env("HOME", home)
+        // home_dir() prefers USERPROFILE on Windows, so set both or the
+        // binary looks for transcripts under the runner's real profile.
+        .env("USERPROFILE", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("XDG_DATA_HOME", home.join(".local/share"))
         .env("XDG_STATE_HOME", home.join(".local/state"))
