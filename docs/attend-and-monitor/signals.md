@@ -125,13 +125,30 @@ flowchart LR
 
 **Phase 1 — creation.** The sender (an agent via `attend send`, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--channel <name>` → `@<name>/`, `--to <path>` → the encoded path, and no flag → `_broadcast/`. The threading flag composes with any routing flag.
 
-**Phase 2 — scanning.** Every peer sensor poll (default 30 seconds), `sensor-peers` walks its scan directories: its own project scope, `_broadcast`, and every `@group` the session has joined. A file whose path is not in the session's seen-set is read, parsed, and added to the seen-set. On a session's first scan with no restored checkpoint, every existing file is added to the seen-set without being shown, so a fresh start does not replay the backlog. A session that restarts restores its seen-set from its checkpoint and surfaces only the files that arrived while it was down.
+**Phase 2 — scanning.** Every peer sensor poll (default 30 seconds), `sensor-peers` walks its scan directories: its own project scope, `_broadcast`, and every `@group` the session has joined. A file whose path is not in the session's seen-set is read, parsed, and added to the seen-set. On a session's first scan with no restored checkpoint, the sensor applies the cold-start rule below, so a fresh start does not replay the backlog and does not consume addressed mail unseen. A session that restarts restores its seen-set from its checkpoint and surfaces only the files that arrived while it was down.
 
 **Phase 3 — presentation.** Unseen messages from one poll are emitted as Monitor notification lines. If a single poll finds more than 8, they are coalesced into one digest line that gives the count, and `attend inbox` holds the detail. The message lane skips the salience gate and the action-potential refractory, and it uses a permissive governor with a flat cooldown instead of the event lane's governor, so a message is never dropped for arriving at a busy moment. The agent sees the notification; the human (if running `attend chat`) sees the message in the TUI.
 
-A second conduit delivers the same messages at the turn boundary. A Stop hook runs `attend inbox --drain`, which reads the same scan directories and the same persisted seen-set, so a message surfaced by one conduit is not repeated by the other (ADR-172). On a cold start with no seen-set on disk, the drain marks the backlog seen without delivering it, except for messages younger than 120 seconds, which it delivers (`tools/attend/src/cmd/inbox.rs:352, 434-443`).
+A second conduit delivers the same messages at the turn boundary. A Stop hook runs `attend inbox --drain`, which reads the same scan directories and the same persisted seen-set, so a message surfaced by one conduit is not repeated by the other (ADR-172).
 
-The drain delivers only to a session enrolled in attend: one that ran `attend run` (`/attend`), which gives it a slot in its project's instance registry, or one that joined a channel (#720). Enrollment covers every scan directory: `#open`, the project scope and the joined channels. Starting attend joins `#open`; there is no separate join for it. For a session that is not enrolled the drain is a silent no-op: it delivers nothing, including a message sent to its project with `--to`, and writes nothing, not even the heartbeat, so the session does not look alive to peers or to `/purge`. Its messages stay on disk and reach it once it enrolls.
+**Enrollment.** The drain delivers only to a session enrolled in attend (#720). A session enrolls by running `attend run` (`/attend`), by `attend join`, or by a scene that joins a channel. Each writes a record in attend's cache, `enrolled/<session-id>`, naming how the session enrolled. Enrollment covers every scan directory: `#open`, the project scope and the joined channels. Starting attend includes `#open`, and there is no separate join for it.
+
+Enrollment is durable. A stale heartbeat does not undo it, and neither does `cleanup_stale` pruning a channel membership after a long turn. Only an explicit opt-out ends it:
+
+- Leaving the last channel, or activating a scene that leaves none, withdraws the join. A session that also ran `attend run` stays enrolled.
+- `attend scene private` withdraws the join and, once no `attend run` holds the session, the run as well.
+
+For a session that is not enrolled the drain is a silent no-op. It delivers nothing, including a message sent to its project with `--to`, and writes nothing, not even the heartbeat, so the session does not look alive to peers or to `/purge`. Its messages stay on disk.
+
+**Cold start.** The first scan after enrollment has no seen-set. The drain and the peers sensor apply one rule, `attend_state::cold_start`:
+
+- A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
+- An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
+- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N earlier messages not shown; attend inbox`. The drain sends that line alone when there is nothing else to deliver.
+
+**Session id changes.** Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick and moves the session's state to the new id: the enrollment record, the seen-set, the registry slot with its instance name, and channel memberships. It then restarts itself under the new id.
+
+**Instance registry.** The registry slot that gives a session its instance name (`-alpha`, `-beta`) is not enrollment, and it is sticky. A slot outlives `attend run`, and is removed only when another session registers in the same project after the slot has been idle for 7 days. A session resumed after that gap gets a new name; one that never stopped keeps its name.
 
 **Phase 4 — retention.** Reading a signal marks it seen in that session's own seen-set; it does not delete the file. The file stays on disk for other peers and for `attend inbox`. Nothing removes a signal because of its age.
 

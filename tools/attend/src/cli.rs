@@ -55,9 +55,10 @@ pub(crate) enum Commands {
 
         /// Atomically deliver pending messages and record their
         /// consumption (ADR-172). The Stop-hook fast path: a silent no-op
-        /// under an unresolved identity or for a session that never ran
-        /// attend and joined no channel (#720), and on a cold start (no
-        /// seen-set) baselines the backlog without delivering.
+        /// under an unresolved identity or for a session not enrolled by
+        /// attend run or a channel join (#720). On a cold start (no
+        /// seen-set) it delivers addressed mail and fresh messages and
+        /// counts the older backlog it does not show.
         #[arg(long)]
         drain: bool,
 
