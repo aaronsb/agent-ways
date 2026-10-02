@@ -160,6 +160,8 @@ usually unset, so every command spells out its default; run them as written.
 
 Your mental model for developing on and updating agent-ways changes with the layout — the install, your dev checkout, and a sandbox are now three different places. See [development.md](development.md) for the post-1.0 workflow.
 
+The `claude-projects` script is gone. `ways projects` takes its subcommands and flags (`list`, `search`, `show`, `stats`, `cleanup`, `hygiene`, `relocate`), and the installer removes the old `claude-projects` link from `~/.local/bin`. Use `ways projects relocate OLD NEW` to preview moving a project's session history, and add `--execute` to apply it.
+
 ## See also
 
 - [ADR-142](architecture/platform/ADR-142-agent-ways-1-0-xdg-application-distribution.md) — the XDG application distribution

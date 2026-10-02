@@ -343,6 +343,12 @@ enum Commands {
         /// Project path
         path: Option<String>,
     },
+    /// Claude Code's projects: list, search, show, stats, cleanup, hygiene and
+    /// relocate (ADR-504). With no subcommand, lists them.
+    Projects {
+        #[command(subcommand)]
+        command: Option<cmd::projects::ProjectsCommand>,
+    },
     /// The ways agent: API keys, the judge's engine and mode (ADR-196, ADR-502).
     /// Runs `ways-agent`; `ways agent --help` lists its commands.
     #[command(disable_help_flag = true)]
@@ -1004,6 +1010,7 @@ fn run() -> Result<()> {
             println!("{}", paths::events_log().display());
             Ok(())
         }
+        Commands::Projects { command } => cmd::projects::run(command),
         Commands::ProjectSlug { path } => {
             let project = path
                 .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|p| !p.is_empty()))
