@@ -29,17 +29,20 @@ pub use slug::{project_slug, slug_matches, MAX_SLUG_LEN};
 
 use std::path::{Path, PathBuf};
 
-/// The user's home directory: `USERPROFILE` first on Windows, else `HOME`,
-/// else `/tmp`.
-pub fn home_dir() -> PathBuf {
+/// The user's home directory as the environment names it: `USERPROFILE`
+/// first on Windows, else `HOME`. `None` when neither is set (an empty value
+/// is unset), for a caller that must not invent one.
+pub fn env_home_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     if let Some(p) = std::env::var_os("USERPROFILE").filter(|p| !p.is_empty()) {
-        return PathBuf::from(p);
+        return Some(PathBuf::from(p));
     }
-    std::env::var_os("HOME")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
+    std::env::var_os("HOME").filter(|p| !p.is_empty()).map(PathBuf::from)
+}
+
+/// The user's home directory: [`env_home_dir`], else `/tmp`.
+pub fn home_dir() -> PathBuf {
+    env_home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 /// `~/.claude.json`, Claude Code's per-user state file, which sits beside the

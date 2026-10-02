@@ -93,6 +93,12 @@ pub fn grant_satisfies(grant: &Permission, requirement: &Permission) -> bool {
 /// For Bash commands: `*` contains anything, `git:*` contains `git:status`.
 /// For paths: glob-style containment — `/home/**` contains `/home/user/file`.
 fn scope_contains(grant_scope: &str, req_scope: &str) -> bool {
+    scope_contains_under(grant_scope, req_scope, claude_sessions::env_home_dir().as_deref())
+}
+
+/// [`scope_contains`] with the home directory given. A `~/` grant matches
+/// nothing when there is no home: it is never expanded against a fallback.
+fn scope_contains_under(grant_scope: &str, req_scope: &str, home: Option<&Path>) -> bool {
     // Wildcard scope covers everything
     if grant_scope == "*" {
         return true;
@@ -110,15 +116,17 @@ fn scope_contains(grant_scope: &str, req_scope: &str) -> bool {
         // grant "git:*" covers requirement "git:status"
         return req_scope.starts_with(&format!("{prefix}:"));
     }
+    // Tilde expansion: "~/.claude/**" matches "/home/user/.claude/foo". It
+    // runs before the glob test, so a `~/…/**` grant is expanded first.
+    if grant_scope.starts_with("~/") {
+        let Some(home) = home else { return false };
+        let expanded = format!("{}{}", home.display(), &grant_scope[1..]);
+        return scope_contains_under(&expanded, req_scope, Some(home));
+    }
     // Path glob: grant "/home/**" matches requirement "/home/user/file"
     if grant_scope.contains("**") {
         let prefix = grant_scope.trim_end_matches("**");
         return req_scope.starts_with(prefix);
-    }
-    // Tilde expansion: "~/.claude/**" matches "/home/user/.claude/foo"
-    if grant_scope.starts_with("~/") {
-        let expanded = format!("{}{}", claude_sessions::home_dir().display(), &grant_scope[1..]);
-        return scope_contains(&expanded, req_scope);
     }
     false
 }
@@ -253,6 +261,24 @@ pub fn display_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With no home directory a `~/` grant expands to nothing and matches
+    /// nothing. It used to expand against claude_sessions' /tmp fallback.
+    #[test]
+    fn tilde_grant_without_home_matches_nothing() {
+        assert!(!scope_contains_under("~/.claude/settings.json", "/tmp/.claude/settings.json", None));
+        let home = std::path::Path::new("/home/u");
+        assert!(scope_contains_under("~/.claude/settings.json", "/home/u/.claude/settings.json", Some(home)));
+    }
+
+    /// A `~/…/**` grant is expanded before the glob test. The glob branch ran
+    /// first and compared the literal `~/` prefix, so such a grant never matched.
+    #[test]
+    fn tilde_glob_grant_is_expanded() {
+        let home = std::path::Path::new("/home/u");
+        assert!(scope_contains_under("~/.claude/**", "/home/u/.claude/x", Some(home)));
+        assert!(!scope_contains_under("~/.claude/**", "/home/v/.claude/x", Some(home)));
+    }
 
     #[test]
     fn test_parse_wildcard() {
