@@ -280,7 +280,8 @@ fn the_project_flow_queues_init_and_the_checkbox_adds_enable() {
         assert!(t.contains(want), "{want}:\n{t}");
     }
     press(&mut app, &[KeyCode::Right]);
-    assert!(text(&mut app).contains("$ ways init --project "));
+    // A long path is cut in the middle of the line, so only its head is sure to show.
+    assert!(text(&mut app).contains("$ ways init --pro"));
     click_text(&mut app, "also set ways.enabled");
     assert!(text(&mut app).contains("[x] also set ways.enabled"));
     press(&mut app, &[KeyCode::Enter]);
