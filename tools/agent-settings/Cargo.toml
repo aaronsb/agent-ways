@@ -8,3 +8,7 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "agent_settings"
 path = "src/lib.rs"
+
+[dependencies]
+serde_yaml = "0.9"
+serde_json = { version = "1", features = ["preserve_order"] }

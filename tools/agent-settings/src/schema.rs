@@ -1,0 +1,416 @@
+//! Schema types (ADR-503 §1). A component declares its settings as a static
+//! [`Schema`]: the sections of each file kind it owns and every key in them.
+//! Parsing, validation, lint, emit and help all read these declarations.
+
+use serde_yaml::Value;
+
+/// Where a key may be set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The user's file only.
+    User,
+    /// A project's file only.
+    Project,
+    /// Either; `set` writes the user file unless a project is named.
+    Both,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::User => "user",
+            Scope::Project => "project",
+            Scope::Both => "user, project",
+        }
+    }
+}
+
+/// The scope a loaded layer stands at. A target layer takes the same keys as
+/// the user layer except those only the user file may hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerScope {
+    User,
+    Target,
+    Project,
+}
+
+impl LayerScope {
+    /// Whether a key of `scope` may be read from a layer at this scope.
+    pub fn admits(self, scope: Scope) -> bool {
+        matches!(
+            (self, scope),
+            (_, Scope::Both) | (LayerScope::User, Scope::User) | (LayerScope::Project, Scope::Project)
+        )
+    }
+}
+
+/// The type of a key's value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kind {
+    Bool,
+    Int { min: i64, max: i64 },
+    Float { min: f64, max: f64 },
+    Choice(&'static [&'static str]),
+    Text,
+    Path,
+    /// A sequence of strings.
+    List,
+    /// `true`/`false`, or a mapping whose `enabled` is a bool (ADR-131 long form).
+    Toggle,
+    /// Shown, never set by `set`; changed by an action command.
+    ReadOnly,
+    /// Present or absent; the value never passes through the schema (ADR-503 §12).
+    Secret,
+}
+
+impl Kind {
+    pub fn describe(&self) -> String {
+        match self {
+            Kind::Bool => "bool".into(),
+            Kind::Int { min, max } if *max == i64::MAX => format!("int, at least {min}"),
+            Kind::Int { min, max } => format!("int, {min}..{max}"),
+            Kind::Float { min, max } => format!("float, {min}..{max}"),
+            Kind::Choice(c) => format!("one of {}", c.join(", ")),
+            Kind::Text => "text".into(),
+            Kind::Path => "path".into(),
+            Kind::List => "list of text".into(),
+            Kind::Toggle => "bool (on or off)".into(),
+            Kind::ReadOnly => "read-only".into(),
+            Kind::Secret => "secret (present or absent)".into(),
+        }
+    }
+
+    /// Check a stored value against the type. The message names what is wrong.
+    pub fn check(&self, v: &Value) -> Result<(), String> {
+        match self {
+            Kind::Bool => v.as_bool().map(|_| ()).ok_or_else(|| format!("expected a bool, found {}", show(v))),
+            Kind::Int { min, max } => {
+                let n = v.as_i64().ok_or_else(|| format!("expected an integer, found {}", show(v)))?;
+                if n < *min || n > *max {
+                    return Err(format!("{n} is outside {}", Kind::Int { min: *min, max: *max }.describe()));
+                }
+                Ok(())
+            }
+            Kind::Float { min, max } => {
+                let n = match v {
+                    Value::Number(n) => n.as_f64(),
+                    _ => None,
+                }
+                .ok_or_else(|| format!("expected a number, found {}", show(v)))?;
+                if !(n >= *min && n <= *max) {
+                    return Err(format!("{n} is outside {min}..{max}"));
+                }
+                Ok(())
+            }
+            Kind::Choice(c) => match v.as_str() {
+                Some(s) if c.contains(&s) => Ok(()),
+                _ => Err(format!("expected one of {}, found {}", c.join(", "), show(v))),
+            },
+            Kind::Text | Kind::Path => v.as_str().map(|_| ()).ok_or_else(|| format!("expected text, found {}", show(v))),
+            Kind::List => match v {
+                Value::Sequence(s) if s.iter().all(|i| i.is_string()) => Ok(()),
+                _ => Err(format!("expected a list of text, found {}", show(v))),
+            },
+            Kind::Toggle => match v {
+                Value::Bool(_) => Ok(()),
+                Value::Mapping(m) => match m.get("enabled") {
+                    None | Some(Value::Bool(_)) => Ok(()),
+                    Some(o) => Err(format!("enabled: expected a bool, found {}", show(o))),
+                },
+                _ => Err(format!("expected a bool, found {}", show(v))),
+            },
+            Kind::ReadOnly => Ok(()),
+            Kind::Secret => Err("a secret is never stored in a settings file".into()),
+        }
+    }
+
+    /// Parse a command-line value into a typed value. Errors name the type.
+    pub fn parse_cli(&self, s: &str) -> Result<Value, String> {
+        let v = match self {
+            Kind::Bool | Kind::Toggle => match s {
+                "true" | "on" | "yes" => Value::Bool(true),
+                "false" | "off" | "no" => Value::Bool(false),
+                _ => return Err(format!("expected true or false, found '{s}'")),
+            },
+            Kind::Int { .. } => {
+                Value::Number(s.trim().parse::<i64>().map_err(|_| format!("expected an integer, found '{s}'"))?.into())
+            }
+            Kind::Float { .. } => {
+                let f = s.trim().parse::<f64>().map_err(|_| format!("expected a number, found '{s}'"))?;
+                Value::Number(f.into())
+            }
+            Kind::Choice(_) | Kind::Text | Kind::Path => Value::String(s.to_string()),
+            Kind::List => {
+                let t = s.trim();
+                if t.starts_with('[') {
+                    serde_yaml::from_str(t).map_err(|e| format!("expected a list such as [a, b]: {e}"))?
+                } else if t.is_empty() {
+                    Value::Sequence(Vec::new())
+                } else {
+                    Value::Sequence(t.split(',').map(|p| Value::String(p.trim().to_string())).collect())
+                }
+            }
+            Kind::ReadOnly => return Err("read-only; it is changed by its action command".into()),
+            Kind::Secret => return Err("a secret is entered on stdin to its own command, never as an argument".into()),
+        };
+        self.check(&v)?;
+        Ok(v)
+    }
+}
+
+/// A value as a short string for messages.
+pub fn show(v: &Value) -> String {
+    match v {
+        Value::Null => "null".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => format!("'{s}'"),
+        Value::Sequence(_) => "a list".into(),
+        Value::Mapping(_) => "a mapping".into(),
+        Value::Tagged(_) => "a tagged value".into(),
+    }
+}
+
+/// A key's default.
+#[derive(Clone, Copy)]
+pub enum DefaultValue {
+    /// No default: the key is absent unless a file sets it.
+    None,
+    /// A YAML literal.
+    Yaml(&'static str),
+    /// Computed from the wildcard segments the key was bound with.
+    Fn(fn(&[String]) -> Option<Value>),
+}
+
+impl std::fmt::Debug for DefaultValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DefaultValue::None => f.write_str("None"),
+            DefaultValue::Yaml(s) => write!(f, "Yaml({s})"),
+            DefaultValue::Fn(_) => f.write_str("Fn"),
+        }
+    }
+}
+
+/// One key. `name` and `path` may hold `*` segments, bound in pairs: the
+/// n-th `*` of the name is the n-th `*` of the path.
+#[derive(Debug, Clone, Copy)]
+pub struct KeySpec {
+    /// Dotted name: `matching.semantic_fire_probability`, `gate.profiles.*.threshold`.
+    pub name: &'static str,
+    /// The section that owns the key; its fallback unit.
+    pub section: &'static str,
+    /// The file kind the key lives in.
+    pub file: &'static str,
+    /// Key path inside the file.
+    pub path: &'static [&'static str],
+    pub kind: Kind,
+    pub default: DefaultValue,
+    /// Wildcard bindings that exist with no file setting them, for list and emit.
+    pub instances: &'static [&'static str],
+    pub scope: Scope,
+    /// One line.
+    pub doc: &'static str,
+    /// The long text `help` prints and the TUI's detail pane shows.
+    pub long: &'static str,
+    /// A check beyond the type, such as an id grammar.
+    pub check: Option<fn(&Value) -> Result<(), String>>,
+    /// A value computed outside the files, such as whether a key file exists.
+    pub computed: Option<fn(&[String]) -> Value>,
+}
+
+impl KeySpec {
+    /// Whether the name holds a `*`.
+    pub fn is_pattern(&self) -> bool {
+        self.name.contains('*')
+    }
+
+    /// Check a stored value: the type, then the key's own check.
+    pub fn check_value(&self, v: &Value) -> Result<(), String> {
+        self.kind.check(v)?;
+        if let Some(c) = self.check {
+            c(v)?;
+        }
+        Ok(())
+    }
+
+    /// Parse a command-line value: the type, then the key's own check.
+    pub fn parse_cli(&self, s: &str) -> Result<Value, String> {
+        let v = self.kind.parse_cli(s)?;
+        if let Some(c) = self.check {
+            c(&v)?;
+        }
+        Ok(v)
+    }
+
+    pub fn default_for(&self, bound: &[String]) -> Option<Value> {
+        match self.default {
+            DefaultValue::None => None,
+            DefaultValue::Yaml(s) => serde_yaml::from_str(s).ok(),
+            DefaultValue::Fn(f) => f(bound),
+        }
+    }
+
+    /// Bind the wildcards to produce the concrete dotted name and file path.
+    pub fn bind(&self, bound: &[String]) -> (String, Vec<String>) {
+        let mut it = bound.iter();
+        let name: Vec<String> = self
+            .name
+            .split('.')
+            .map(|s| if s == "*" { it.next().cloned().unwrap_or_default() } else { s.to_string() })
+            .collect();
+        let mut it = bound.iter();
+        let path = self
+            .path
+            .iter()
+            .map(|s| if *s == "*" { it.next().cloned().unwrap_or_default() } else { s.to_string() })
+            .collect();
+        (name.join("."), path)
+    }
+
+    /// Match a concrete dotted name, returning the wildcard bindings. A
+    /// binding takes as many dot-separated parts as it needs for the rest
+    /// of the pattern to match, so way ids such as `a/b` and model names
+    /// with dots bind whole.
+    pub fn match_name(&self, name: &str) -> Option<Vec<String>> {
+        let pat: Vec<&str> = self.name.split('.').collect();
+        let parts: Vec<&str> = name.split('.').collect();
+        let mut out = Vec::new();
+        if match_parts(&pat, &parts, &mut out) {
+            Some(out)
+        } else {
+            None
+        }
+    }
+
+    /// Match a concrete file path, returning the wildcard bindings.
+    pub fn match_path(&self, path: &[String]) -> Option<Vec<String>> {
+        if path.len() != self.path.len() {
+            return None;
+        }
+        let mut out = Vec::new();
+        for (p, s) in self.path.iter().zip(path) {
+            if *p == "*" {
+                out.push(s.clone());
+            } else if p != s {
+                return None;
+            }
+        }
+        Some(out)
+    }
+}
+
+fn match_parts(pat: &[&str], parts: &[&str], out: &mut Vec<String>) -> bool {
+    match (pat.first(), parts.first()) {
+        (None, None) => true,
+        (None, _) | (_, None) => false,
+        (Some(&"*"), _) => {
+            // Shortest binding that lets the rest match; the rest of a
+            // pattern holds fixed segments, so this is unambiguous.
+            let rest = pat.len() - 1;
+            if parts.len() < rest + 1 {
+                return false;
+            }
+            for take in 1..=parts.len() - rest {
+                let mut trial = out.clone();
+                trial.push(parts[..take].join("."));
+                if match_parts(&pat[1..], &parts[take..], &mut trial) {
+                    *out = trial;
+                    return true;
+                }
+            }
+            false
+        }
+        (Some(p), Some(q)) => p == q && match_parts(&pat[1..], &parts[1..], out),
+    }
+}
+
+/// A section: the fallback unit. It owns some top-level keys of one file kind.
+#[derive(Debug, Clone, Copy)]
+pub struct SectionSpec {
+    pub name: &'static str,
+    pub file: &'static str,
+    /// Top-level keys of the file this section owns.
+    pub top: &'static [&'static str],
+    pub doc: &'static str,
+}
+
+/// A file kind a schema owns sections of.
+#[derive(Debug, Clone, Copy)]
+pub struct FileSpec {
+    pub id: &'static str,
+    /// Retired top-level keys and the message that names their replacement.
+    /// They are lint findings and never make a section fall back.
+    pub retired: &'static [(&'static str, &'static str)],
+}
+
+/// One component's schema.
+#[derive(Debug, Clone, Copy)]
+pub struct Schema {
+    pub component: &'static str,
+    pub files: &'static [FileSpec],
+    pub sections: &'static [SectionSpec],
+    pub keys: &'static [KeySpec],
+}
+
+impl Schema {
+    pub fn section(&self, name: &str) -> Option<&SectionSpec> {
+        self.sections.iter().find(|s| s.name == name)
+    }
+
+    pub fn file(&self, id: &str) -> Option<&FileSpec> {
+        self.files.iter().find(|f| f.id == id)
+    }
+
+    /// The section owning a top-level key of a file kind.
+    pub fn section_of_top(&self, file: &str, top: &str) -> Option<&SectionSpec> {
+        self.sections.iter().find(|s| s.file == file && s.top.contains(&top))
+    }
+
+    pub fn keys_of_section<'a>(&'a self, section: &'a str) -> impl Iterator<Item = &'a KeySpec> + 'a {
+        self.keys.iter().filter(move |k| k.section == section)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const K: KeySpec = KeySpec {
+        name: "ways.project.*",
+        section: "ways.project",
+        file: "config",
+        path: &["ways", "*"],
+        kind: Kind::Toggle,
+        default: DefaultValue::Yaml("true"),
+        instances: &[],
+        scope: Scope::Project,
+        doc: "",
+        long: "",
+        check: None,
+        computed: None,
+    };
+
+    #[test]
+    fn wildcards_bind_whole_ids() {
+        assert_eq!(K.match_name("ways.project.itops/incident"), Some(vec!["itops/incident".into()]));
+        assert_eq!(K.match_name("ways.project"), None);
+        let p = KeySpec { name: "gate.profiles.*.model", path: &["profiles", "*", "model"], ..K };
+        assert_eq!(p.match_name("gate.profiles.my.fast.model"), Some(vec!["my.fast".into()]));
+        assert_eq!(p.match_name("gate.profiles.a.threshold"), None);
+        assert_eq!(p.bind(&["a".into()]), ("gate.profiles.a.model".into(), vec!["profiles".into(), "a".into(), "model".into()]));
+    }
+
+    #[test]
+    fn kinds_check_and_parse() {
+        let f = Kind::Float { min: 0.0, max: 1.0 };
+        assert!(f.parse_cli("0.4").is_ok());
+        assert!(f.parse_cli("1.5").is_err());
+        assert!(f.check(&Value::Number(1.into())).is_ok());
+        assert!(Kind::Toggle.check(&serde_yaml::from_str("{enabled: false, later: 1}").unwrap()).is_ok());
+        assert!(Kind::Toggle.check(&serde_yaml::from_str("{enabled: 3}").unwrap()).is_err());
+        assert_eq!(Kind::List.parse_cli("a, b").unwrap(), serde_yaml::from_str::<Value>("[a, b]").unwrap());
+        assert!(Kind::Choice(&["x"]).parse_cli("y").is_err());
+        assert!(Kind::Secret.parse_cli("sk-123").is_err());
+    }
+}
