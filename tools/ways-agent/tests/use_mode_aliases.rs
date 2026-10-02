@@ -165,3 +165,33 @@ fn a_top_level_typo_is_reported_not_silent() {
     let (_, err, _) = f.run(&["config"]);
     assert!(err.contains("mdoe") && err.contains("unknown key"), "{err}");
 }
+
+#[test]
+fn use_refuses_when_the_whole_profiles_section_fell_back() {
+    // S2: `profiles:` that is not a mapping is a whole-section fallback.
+    let f = Fixture::new("whole");
+    let path = f.agent_yaml();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let src = "profiles: [a, b]   # odd\n";
+    std::fs::write(&path, src).unwrap();
+    let (_, err, code) = f.run(&["use", "anthropic", "--model", "m1"]);
+    assert_ne!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+}
+
+#[test]
+fn config_says_the_gate_is_off_when_agent_yaml_is_broken() {
+    // B2: with a key file present, a broken file or a mistyped mode used to
+    // report `mode enforce`; the gate fails closed and says why.
+    let f = Fixture::new("closed");
+    let keys = f.root.join("xdg/config/agent-ways/keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    std::fs::write(keys.join("anthropic"), "sk-ant-test-not-a-real-key-0000").unwrap();
+    let path = f.agent_yaml();
+    for text in ["mode: off\nengine: anthropic\nprofiles:\n  anthropic: [\n", "mode: of\n"] {
+        std::fs::write(&path, text).unwrap();
+        let (out, err, code) = f.run(&["config"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(out.contains("gate: off") && !out.contains("mode enforce"), "{text:?}: {out}{err}");
+    }
+}

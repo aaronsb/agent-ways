@@ -18,10 +18,10 @@ pub const GATE_SECTIONS: &[&str] = &["gate", "gate.mode", "gate.profiles"];
 /// operator switched off back on; profiles fall back one profile at a time,
 /// so a typo in one never drops another's tuning.
 const SECTIONS: &[SectionSpec] = &[
-    SectionSpec { name: "gate", file: FILE, top: &["engine"], per_entry: false, doc: "The engine profile the relevance gate uses." },
-    SectionSpec { name: "gate.mode", file: FILE, top: &["mode"], per_entry: false, doc: "What the gate does with a verdict: enforce, shadow or off." },
-    SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], per_entry: true, doc: "Changes to the shipped engine profiles, and profiles of your own. Each profile falls back alone." },
-    SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
+    SectionSpec { name: "gate", file: FILE, top: &["engine"], per_entry: false, repair: None, doc: "The engine profile the relevance gate uses." },
+    SectionSpec { name: "gate.mode", file: FILE, top: &["mode"], per_entry: false, repair: None, doc: "What the gate does with a verdict: enforce, shadow or off." },
+    SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], per_entry: true, repair: None, doc: "Changes to the shipped engine profiles, and profiles of your own. Each profile falls back alone." },
+    SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, repair: None, doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -37,6 +37,7 @@ const BASE: KeySpec = KeySpec {
     long: "",
     check: None,
     computed: None,
+    fail_closed: None,
 };
 
 const POSITIVE: Kind = Kind::Int { min: 1, max: i64::MAX };
@@ -54,6 +55,9 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "gate.mode",
         section: "gate.mode",
+        // Fails closed: a bad mode turns the gate off, which sends nothing
+        // anywhere (ADR-503 addendum).
+        fail_closed: Some(closed_mode),
         path: &["mode"],
         kind: Kind::Choice(&["enforce", "shadow", "off"]),
         default: DefaultValue::Yaml("enforce"),
@@ -146,6 +150,13 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
 ];
+
+fn closed_mode(v: &Value) -> Option<Value> {
+    match v.as_str() {
+        Some("enforce" | "shadow") => None,
+        _ => Some(Value::String("off".into())),
+    }
+}
 
 fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
     let p = profile::shipped().get(bound.first()?)?.clone();

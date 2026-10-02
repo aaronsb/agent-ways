@@ -435,7 +435,7 @@ fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
     // The profile being edited, or the engine, fell back: what was loaded is
     // not what the file says, so writing from it could lose hand edits.
     let profile_unit = format!("gate.profiles.{name}");
-    if let Some(f) = findings.iter().find(|f| f.fallback && matches!(f.unit.as_deref(), Some(u) if u == "gate" || u == profile_unit)) {
+    if let Some(f) = findings.iter().find(|f| f.fallback && matches!(f.unit.as_deref(), Some(u) if u == "gate" || u == "gate.profiles" || u == profile_unit)) {
         bail!("{f}; the engine was not changed. `ways settings lint` lists the findings");
     }
     for f in &findings {
@@ -508,6 +508,14 @@ fn set_mode(mode: Mode) -> Result<ExitCode> {
 }
 
 fn show_config() -> Result<ExitCode> {
+    let path = profile::user_layer_path();
+    let (_, findings) = UserLayer::load_with_findings(&path)?;
+    if let Some(f) = profile::fails_closed(&findings) {
+        println!("user layer: {}", path.display());
+        println!("gate: off ({f}; the gate fails closed until it is fixed)");
+        println!("`ways settings lint` lists the findings");
+        return Ok(ExitCode::SUCCESS);
+    }
     let (user, settings) = current_settings()?;
     println!("user layer: {}", profile::user_layer_path().display());
     let Some(s) = settings else {

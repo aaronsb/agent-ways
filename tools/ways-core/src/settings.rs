@@ -26,21 +26,21 @@ const SECTIONS: &[SectionSpec] = &[
         name: "ways",
         file: FILE,
         top: &["language", "default_scope"],
-        per_entry: false,
+        per_entry: false, repair: None,
         doc: "The language ways are written in and the default scope of a way.",
     },
     SectionSpec {
         name: "ways.switch",
         file: FILE,
         top: &["enabled"],
-        per_entry: false,
+        per_entry: false, repair: None,
         doc: "Whether ways run at all; false in a project's .claude/ways.yaml switches them off there.",
     },
     SectionSpec {
         name: "ways.domains",
         file: FILE,
         top: &["disabled_domains"],
-        per_entry: false,
+        per_entry: false, repair: None,
         doc: "Domains switched off everywhere.",
     },
     SectionSpec {
@@ -54,28 +54,29 @@ const SECTIONS: &[SectionSpec] = &[
             "near_miss_margin",
             "refire_presets",
         ],
-        per_entry: false,
+        per_entry: false, repair: None,
         doc: "When a way fires: the calibrated probabilities, the parent boost, and how often a way may fire again.",
     },
     SectionSpec {
         name: "install.targets",
         file: FILE,
         top: &["targets"],
-        per_entry: false,
+        per_entry: true,
+        repair: Some("`ways config target add|enable|disable|remove <dir>`"),
         doc: "Where agent-ways is active. Changed by `ways config target`, which reconciles.",
     },
     SectionSpec {
         name: "install.secret_path_deny",
         file: FILE,
         top: &["secret_path_deny"],
-        per_entry: false,
+        per_entry: false, repair: None,
         doc: "Whether the secret-path permissions.deny baseline is merged into settings.json.",
     },
     SectionSpec {
         name: "ways.project",
         file: FILE,
         top: &["ways"],
-        per_entry: true,
+        per_entry: true, repair: None,
         doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
     },
 ];
@@ -99,6 +100,7 @@ const BASE: KeySpec = KeySpec {
     long: "",
     check: None,
     computed: None,
+    fail_closed: None,
 };
 
 const PROB: Kind = Kind::Float { min: 0.0, max: 1.0 };
@@ -107,6 +109,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "ways.enabled",
         section: "ways.switch",
+        fail_closed: Some(closed_off),
         path: &["enabled"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
@@ -133,6 +136,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "ways.disabled_domains",
         section: "ways.domains",
+        fail_closed: Some(closed_domains),
         path: &["disabled_domains"],
         kind: Kind::List,
         default: DefaultValue::Yaml("[]"),
@@ -142,6 +146,7 @@ const KEYS: &[KeySpec] = &[
     },
     KeySpec {
         name: "ways.project.*",
+        fail_closed: Some(closed_toggle),
         section: "ways.project",
         path: &["ways", "*"],
         kind: Kind::Toggle,
@@ -216,6 +221,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "install.targets",
         section: "install.targets",
+        fail_closed: Some(closed_targets),
         path: &["targets"],
         kind: Kind::ReadOnly,
         scope: Scope::User,
@@ -227,6 +233,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "install.secret_path_deny",
         section: "install.secret_path_deny",
+        fail_closed: Some(closed_deny),
         path: &["secret_path_deny"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
@@ -245,6 +252,59 @@ fn refire_default(bound: &[String]) -> Option<Value> {
         _ => return None,
     };
     Some(Value::Number(f.into()))
+}
+
+// ── fail-closed readings (ADR-503 addendum) ─────────────────────
+//
+// A switch that turns something off keeps it off when its own value is bad
+// or its file does not parse. `None` is "no opinion": fall through.
+
+/// `enabled`: anything but `true` reads as off.
+fn closed_off(v: &Value) -> Option<Value> {
+    (v != &Value::Bool(true)).then_some(Value::Bool(false))
+}
+
+/// `disabled_domains`: whatever names can be read stay disabled, from a
+/// list or from text such as `ea,itops`.
+fn closed_domains(v: &Value) -> Option<Value> {
+    let names: Vec<Value> = match v {
+        Value::String(s) => s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(Value::from).collect(),
+        Value::Sequence(items) => items.iter().filter_map(|i| i.as_str()).map(Value::from).collect(),
+        _ => Vec::new(),
+    };
+    (!names.is_empty()).then_some(Value::Sequence(names))
+}
+
+/// A per-way toggle: anything but an explicit on reads as disabled.
+fn closed_toggle(v: &Value) -> Option<Value> {
+    let on = match v {
+        Value::Bool(b) => *b,
+        Value::Mapping(m) => m.get("enabled").is_none_or(|e| e == &Value::Bool(true)),
+        _ => false,
+    };
+    (!on).then_some(Value::Bool(false))
+}
+
+/// `secret_path_deny`: the closed side is the deny baseline merged, so
+/// only a valid `false` opts out.
+fn closed_deny(v: &Value) -> Option<Value> {
+    (v != &Value::Bool(false)).then_some(Value::Bool(true))
+}
+
+/// One `targets` item (as a one-item list): a valid item stays as written,
+/// so a broken file never drops a target into the implicit default; an
+/// invalid one with a readable path is kept disabled, so it is withdrawn,
+/// never projected into.
+fn closed_targets(v: &Value) -> Option<Value> {
+    let item = v.as_sequence()?.first()?;
+    if check_targets(v).is_ok() {
+        return Some(v.clone());
+    }
+    let path = item.get("path")?.as_str()?;
+    let mut m = serde_yaml::Mapping::new();
+    m.insert("path".into(), path.into());
+    m.insert("enabled".into(), Value::Bool(false));
+    Some(Value::Sequence(vec![Value::Mapping(m)]))
 }
 
 fn check_targets(v: &Value) -> Result<(), String> {

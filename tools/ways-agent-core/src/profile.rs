@@ -245,7 +245,19 @@ impl UserLayer {
         use agent_settings::load;
         let doc = match load::parse_text(text, path) {
             Ok(d) => d,
-            Err(f) => return Ok((UserLayer::default(), vec![*f])),
+            Err(f) => {
+                // Only the switches salvaged from the text apply; the gate
+                // itself treats a parse failure as off (`fails_closed`).
+                let salvaged = load::closed_from_salvage(
+                    &crate::settings::SCHEMA,
+                    crate::settings::FILE,
+                    agent_settings::LayerScope::User,
+                    text,
+                    Some(crate::settings::GATE_SECTIONS),
+                );
+                let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(salvaged)).unwrap_or_default();
+                return Ok((layer, vec![*f]));
+            }
         };
         let checked = load::check(
             &crate::settings::SCHEMA,
@@ -307,6 +319,27 @@ impl UserLayer {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
+}
+
+/// The finding that turns the relevance gate off, if any: agent.yaml does
+/// not parse, or its `mode` failed the schema. The gate fails closed on
+/// either, since off sends nothing anywhere (ADR-503 addendum).
+pub fn fails_closed(findings: &[agent_settings::Finding]) -> Option<&agent_settings::Finding> {
+    findings.iter().find(|f| f.is_parse_failure() || (f.fallback && f.unit.as_deref() == Some("gate.mode")))
+}
+
+/// The settings the gate runs with, from the layer at `path`, as [`resolve`]
+/// gives them. A finding that fails closed is returned as the error, so the
+/// caller turns the gate off and can log why.
+pub fn gate_settings(path: &Path, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
+    let (user, findings) = UserLayer::load_with_findings(path)?;
+    if let Some(f) = fails_closed(&findings) {
+        bail!("{f}; the gate is off until it is fixed");
+    }
+    for f in &findings {
+        eprintln!("{}", f.diagnostic("ways"));
+    }
+    resolve(&user, has_key)
 }
 
 /// The shipped profiles, by name.
@@ -476,8 +509,9 @@ mod tests {
         let f = &findings[0];
         assert_eq!((f.line, f.section.as_deref(), f.fallback), (Some(4), Some("gate.profiles"), true));
         assert!(f.to_string().contains("profiles.anthropic.treshold: unknown key"), "{f}");
+        // A bad mode fails closed to off (ADR-503 addendum).
         let (user, findings) = UserLayer::parse("mode: loud\nprofiles:\n  anthropic:\n    threshold: 0.5\n", None).unwrap();
-        assert_eq!(user.mode, None);
+        assert_eq!(user.mode, Some(Mode::Off));
         assert_eq!(user.profiles["anthropic"].threshold, Some(0.5));
         assert_eq!(findings[0].section.as_deref(), Some("gate.mode"));
         // A bad engine never drops `mode: off`, and a typo in one profile
@@ -563,5 +597,26 @@ mod tests {
         let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
         assert_eq!(names, vec![std::ffi::OsString::from("agent.yaml")]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn gate_with(text: &str) -> Result<Option<Settings>> {
+        let dir = std::env::temp_dir().join(format!("ways-gate-closed-{}-{}", std::process::id(), crate::keys::unique()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.yaml");
+        std::fs::write(&path, text).unwrap();
+        let r = gate_settings(&path, |_| true);
+        std::fs::remove_dir_all(&dir).ok();
+        r
+    }
+
+    #[test]
+    fn the_gate_fails_closed_on_a_broken_file_or_a_bad_mode() {
+        // With a key present, each of these used to resolve to enforce.
+        assert!(gate_with("mode: off\nengine: anthropic\nprofiles:\n  anthropic: [\n").is_err(), "parse failure is off");
+        assert!(gate_with("engine: anthropic\nprofiles: [\n").is_err(), "parse failure with no mode is off too");
+        assert!(gate_with("mode: of\n").is_err(), "a mistyped mode is off");
+        assert!(matches!(gate_with("mode: off\nengine: 5\n"), Ok(Some(s)) if s.mode == Mode::Off), "a bad engine keeps mode: off");
+        // The control: a sound file with a key runs the gate.
+        assert!(matches!(gate_with("mode: shadow\n"), Ok(Some(s)) if s.mode == Mode::Shadow));
     }
 }

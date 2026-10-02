@@ -532,20 +532,35 @@ fn checked_text(text: &str, path: Option<&Path>, scope: LayerScope, sections: &[
     let doc = match load::parse_text(text, path) {
         Ok(d) => d,
         Err(f) => {
-            eprintln!("{}", f.diagnostic("ways"));
-            return None;
+            report(&f.diagnostic("ways"));
+            // Fails closed: the switches the text turns off stay off
+            // (ADR-503 addendum); nothing else in the file applies.
+            let salvaged =
+                load::closed_from_salvage(&crate::settings::SCHEMA, crate::settings::FILE, scope, text, Some(sections));
+            return Some(serde_yaml::Value::Mapping(salvaged));
         }
     };
-    // Every finding goes to stderr, one line each: a section that fell back,
+    // Every finding goes to stderr, one line each: a unit that fell back,
     // and a top-level key no section owns, such as a typo or a key ADR-156
     // retired, which the check reports by name with its replacement.
     let checked = load::check(&crate::settings::SCHEMA, crate::settings::FILE, scope, &doc, Some(sections));
     if !checked.is_clean() {
         for f in checked.findings(None, path, text) {
-            eprintln!("{}", f.diagnostic("ways"));
+            report(&f.diagnostic("ways"));
         }
     }
     Some(serde_yaml::Value::Mapping(checked.accepted))
+}
+
+/// Print a diagnostic once per process: a hook that loads the config more
+/// than once reports each finding one time.
+fn report(line: &str) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if !seen.iter().any(|l| l == line) {
+        seen.push(line.to_string());
+        eprintln!("{line}");
+    }
 }
 
 fn targets_value(list: &[Target]) -> serde_yaml::Value {
@@ -640,7 +655,7 @@ mod tests {
     fn a_wrong_type_or_unknown_key_falls_back_only_its_section() {
         let mut cfg = Config::default();
         cfg.apply_yaml("disabled_domains: ea\nparent_boost_floor: 0.25\n");
-        assert!(cfg.disabled_domains.is_empty(), "a scalar is not a list: the ways section falls back");
+        assert_eq!(cfg.disabled_domains, vec!["ea".to_string()], "a bad domain list keeps the names it can read disabled");
         assert_eq!(cfg.parent_boost_floor, 0.25);
         let mut cfg = Config::default();
         cfg.apply_yaml("refire_presets:\n  normal: 0.2\n  bad: lots\nlanguage: ja\n");
@@ -897,7 +912,7 @@ mod tests {
     fn one_bad_toggle_never_re_enables_the_other_disabled_ways() {
         let mut cfg = Config::default();
         apply_project(&mut cfg, "ways:\n  itops/incident: false\n  meta/introspection: no\n  ea/x:\n    enabled: false\n");
-        assert_eq!(cfg.disabled_ways(), &["itops/incident".to_string(), "ea/x".to_string()]);
+        assert_eq!(cfg.disabled_ways(), &["itops/incident".to_string(), "meta/introspection".to_string(), "ea/x".to_string()], "a bad toggle reads as disabled");
     }
 
     #[test]
@@ -911,7 +926,7 @@ mod tests {
         .unwrap();
         let t = doc.get("targets").and_then(Config::read_targets_value).unwrap();
         assert_eq!((t.len(), t[0].enabled), (1, false));
-        assert!(doc.get("secret_path_deny").is_none());
+        assert_eq!(doc.get("secret_path_deny"), Some(&serde_yaml::Value::Bool(true)), "a bad value keeps the deny baseline");
     }
 
     #[test]
@@ -920,5 +935,41 @@ mod tests {
         cfg.apply_yaml("semantic_fire_probability: 0.35\nrefire_presets:\n  never: 5\n");
         assert_eq!(cfg.semantic_fire_probability, 0.35);
         assert_eq!(cfg.refire_presets.get("never").copied(), Some(5.0));
+    }
+
+    #[test]
+    fn an_unparseable_project_file_keeps_its_off_switches() {
+        // ADR-503 addendum: a file that does not parse still keeps what it
+        // switches off. Before, `enabled: false` was lost with the file.
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "enabled: false\nlanguage: [\nways:\n  itops/incident: false\n");
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.disabled_ways(), &["itops/incident".to_string()]);
+        assert_eq!(cfg.language, "auto", "only the switches are salvaged");
+    }
+
+    #[test]
+    fn a_bad_switch_value_fails_closed() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "enabled: nope\ndisabled_domains: ea,itops\nways:\n  a/b: maybe\n");
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.disabled_domains, vec!["ea".to_string(), "itops".to_string()]);
+        assert_eq!(cfg.disabled_ways(), &["a/b".to_string()]);
+        let mut cfg = Config { secret_path_deny: false, ..Default::default() };
+        cfg.apply_yaml("secret_path_deny: \"false\"\n");
+        assert!(cfg.secret_path_deny, "the deny baseline is the closed side");
+    }
+
+    #[test]
+    fn one_bad_target_keeps_the_others_and_is_kept_disabled() {
+        let doc = checked_text(
+            "targets:\n  - path: ~/.claude\n    enabled: false\n  - path: ~/.claude-work\n    enabled: maybe\n",
+            None,
+            LayerScope::User,
+            crate::settings::HOOK_SECTIONS,
+        )
+        .unwrap();
+        let t = doc.get("targets").and_then(Config::read_targets_value).unwrap();
+        assert_eq!(t.iter().map(|t| (t.path.as_str(), t.enabled)).collect::<Vec<_>>(), vec![("~/.claude", false), ("~/.claude-work", false)]);
     }
 }
