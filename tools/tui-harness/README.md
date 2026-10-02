@@ -20,7 +20,7 @@ tui-harness attach <name>                # look in from your terminal; detach wi
 tui-harness down   <name>                # kills it only if this root launched it
 tui-harness down   --all                 # every session of this root, its orphans and stale state
 tui-harness prune  [--untagged]          # kill this root's orphans; drop dead and stale state
-tui-harness ls                           # STATE: up, gone, foreign, orphan, stale, untagged
+tui-harness ls                           # STATE: up, gone, foreign, orphan, launching, stale, untagged
 tui-harness render --out PATH [--in FILE] [--cols N] [--rows M] [--font NAME] [--size PT]
 ```
 
@@ -51,9 +51,16 @@ one, is refused.
 
 In `ls`, `foreign` is a name this root has state for but another root's
 session runs under, `orphan` is this root's session with no state left,
-`stale` is state from an interrupted launch, and `untagged` is a `tui-*`
-session no root tagged. `prune` and `down --all` never kill another root's
-session or an untagged one; `prune --untagged` kills untagged ones on request.
+`launching` is a launch still under way, `stale` is state from an interrupted
+launch (its environment file may still be on disk), and `untagged` is a
+`tui-*` session no root tagged. `prune` and `down --all` never kill another
+root's session or an untagged one, and leave a launch in progress alone;
+`prune --untagged` kills untagged ones on request. A launch whose state is
+removed while it runs (by an explicit `down` of its name) fails.
+
+A command given as one word runs directly when it is a plain program name or
+path, so a missing program fails the launch; a one-word shell string
+(`'make test; read'`) runs through `$SHELL -c`, as tmux runs one.
 
 ## Defaults
 
@@ -161,7 +168,9 @@ fails rather than skips.
   working directory and the environment as NUL-separated records. The helper
   deletes the file before anything else, builds the environment from nothing
   (plus tmux's `TERM`, `TMUX`, `TMUX_PANE`), changes directory, and execs the
-  command. No shell reads the file, so names bash treats as readonly (`UID`,
+  command. A name or value holding NUL, or a name that is empty or holds `=`,
+  is refused at launch, since the file could not carry it exactly. No shell
+  reads the file, so names bash treats as readonly (`UID`,
   `SHELLOPTS`) and a `PATH` without `rm` are fine, and the working directory
   never passes through tmux's format expansion. `launch` returns once the
   command has started, or fails with the helper's error. tmux's

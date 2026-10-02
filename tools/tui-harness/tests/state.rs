@@ -55,7 +55,8 @@ fn an_interrupted_launch_is_listed_and_pruned() {
             .any(|l| l.starts_with(name) && l.contains(state))
     };
     assert!(found("kk-bare-unused", "stale"), "ls was:\n{ls_out}");
-    assert!(found("kk-meta-unused", "gone"), "ls was:\n{ls_out}");
+    // An environment file still on disk marks the launch as interrupted.
+    assert!(found("kk-meta-unused", "stale"), "ls was:\n{ls_out}");
 
     let prune = cli(&root, &["prune"]);
     let prune_out = String::from_utf8_lossy(&prune.stdout).into_owned();
@@ -63,5 +64,39 @@ fn an_interrupted_launch_is_listed_and_pruned() {
     assert!(!bare.exists(), "prune left {}: {prune_out}", bare.display());
     assert!(!meta.exists(), "prune left {}: {prune_out}", meta.display());
 
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn an_environment_that_cannot_round_trip_is_refused() {
+    use tui_harness::{Harness, LaunchOptions};
+    let root = std::env::temp_dir().join(format!("tui-harness-nul-{}", std::process::id()));
+    let h = Harness::new(&root);
+    let cmd = [
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "exit 0".to_string(),
+    ];
+    let cases: [(&str, &str); 4] = [
+        ("NULV", "before\0INJECTED=yes"),
+        ("NU\0LK", "v"),
+        ("", "v"),
+        ("A=B", "v"),
+    ];
+    for (k, v) in cases {
+        let opts = LaunchOptions {
+            env: vec![(k.to_string(), v.to_string())],
+            ..LaunchOptions::default()
+        };
+        let err = h
+            .launch("nul-check", &opts, &cmd)
+            .expect_err(&format!("{k:?}={v:?} was accepted"));
+        let msg = format!("{err:#}");
+        assert!(msg.contains("environment variable"), "{k:?}={v:?}: {msg}");
+        assert!(
+            !root.join("sessions/nul-check").exists(),
+            "state left for {k:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -181,17 +181,31 @@ fn bytes_os(b: &[u8]) -> OsString {
     OsString::from(String::from_utf8_lossy(b).into_owned())
 }
 
+/// Whether a one-word command is a plain program name or path, with no
+/// whitespace and nothing a shell would interpret. Such a word is executed
+/// directly, so a missing program fails with `ENOENT` rather than as a
+/// shell's exit 127; anything else runs through `$SHELL -c`.
+fn is_plain_word(word: &OsStr) -> bool {
+    let w = word.to_string_lossy();
+    !w.is_empty()
+        && !w
+            .chars()
+            .any(|c| c.is_whitespace() || "|&;<>()$`\\\"'*?[]#~=%{}!".contains(c))
+}
+
 /// Start a launched command: the body of `tui-harness __exec-env FILE --
 /// CMD...`, which tmux runs as the pane's process.
 ///
 /// It reads `file` (see [`write_exec_file`]) and deletes it before anything
 /// else, then builds the command's environment from nothing: the pane's
 /// `TERM`, `TMUX` and `TMUX_PANE`, `COLORTERM=truecolor`, then every pair in
-/// the file, which wins. Pairs the OS would refuse (an empty name, or one
-/// holding `=`) are skipped. It changes to the recorded directory and execs
-/// the command, searching the new `PATH`. A one-word command runs through
-/// `$SHELL -c` (else `/bin/sh -c`), as tmux runs one. No shell parses the
-/// file, so any name or value, readonly in bash or not, arrives intact.
+/// the file, which wins. Pairs the OS would refuse (an empty name) are
+/// skipped. It changes to the recorded directory and execs the command,
+/// searching the new `PATH`. A one-word command that is a plain program name
+/// or path is executed directly; any other one-word command is a shell
+/// string and runs through `$SHELL -c` (else `/bin/sh -c`), as tmux runs
+/// one. No shell parses the file, so any name or value, readonly in bash or
+/// not, arrives intact.
 ///
 /// It returns only on failure. The error is also appended to `exec.err`
 /// beside the file, where `launch` looks for it.
@@ -230,7 +244,7 @@ fn exec_env_inner(file: &Path, cmd: &[OsString]) -> std::io::Error {
     let Some((program, args)) = cmd.split_first() else {
         return std::io::Error::new(std::io::ErrorKind::InvalidInput, "no command");
     };
-    let mut command = if args.is_empty() {
+    let mut command = if args.is_empty() && !is_plain_word(program) {
         let shell = pairs
             .iter()
             .rev()
@@ -505,6 +519,7 @@ impl Harness {
         if cmd.is_empty() {
             bail!("missing command");
         }
+        validate_env(&opts.env)?;
         let mut opts = opts.clone();
         opts.cols = opts.cols.clamp(1, MAX_CELLS);
         opts.rows = opts.rows.clamp(1, MAX_CELLS);
@@ -614,6 +629,19 @@ impl Harness {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         loop {
+            // State removed under the launch (an explicit `down` of this
+            // name): it cannot succeed. tmux may still be about to create
+            // the session, so give it a moment to appear and kill it rather
+            // than leave it to come up after the launch has failed.
+            if !dir.join("env").exists() {
+                let settle = Instant::now() + Duration::from_secs(1);
+                while Instant::now() < settle && !has_session(&tmux_name) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                return Err(fail(format!(
+                    "the state of '{name}' was removed while it launched"
+                )));
+            }
             let tagged = session_owner(&tmux_name).flatten().as_deref() == Some(root_tag.as_str());
             let taken = !env_file.exists();
             if let Ok(msg) = std::fs::read_to_string(&err_path) {
@@ -646,6 +674,13 @@ impl Harness {
             if !msg.trim().is_empty() {
                 return Err(fail(msg.trim().to_string()));
             }
+        }
+        // Something removed this launch's state while it ran (a `down` of
+        // this name, say): the launch did not complete.
+        if !dir.join("env").exists() {
+            return Err(fail(format!(
+                "the state of '{name}' was removed while it launched"
+            )));
         }
         Ok(session)
     }
@@ -748,6 +783,11 @@ impl Harness {
         }
         for name in self.state_dirs() {
             let dir = self.sessions_dir().join(&name);
+            // A directory still holding `environ` is a launch in progress
+            // until the file outlives a launch's timeout.
+            if launch_in_progress(&dir) {
+                continue;
+            }
             let gone = match self.session(&name) {
                 Ok(s) => !s.alive(),
                 Err(_) => older_than(&dir, STALE_AFTER),
@@ -786,6 +826,9 @@ impl Harness {
     pub fn down_all(&self) -> Result<Vec<(String, DownOutcome)>> {
         let mut out = Vec::new();
         for s in self.list()? {
+            if launch_in_progress(&s.dir) {
+                continue;
+            }
             let name = s.name.clone();
             out.push((name, s.down()?));
         }
@@ -802,6 +845,13 @@ impl Harness {
         }
         Ok(out)
     }
+}
+
+/// Whether the state directory `dir` belongs to a launch still running: it
+/// holds an `environ` file younger than [`STALE_AFTER`].
+fn launch_in_progress(dir: &Path) -> bool {
+    let environ = dir.join(ENVIRON);
+    environ.exists() && !older_than(&environ, STALE_AFTER)
 }
 
 /// Whether everything in `path` (a file, or a directory and its entries)
@@ -857,6 +907,14 @@ impl Session {
     /// Whether a tmux session of this name is running (whoever owns it).
     pub fn alive(&self) -> bool {
         has_session(&self.tmux_name)
+    }
+
+    /// `None` when no environment file is left in the state directory;
+    /// otherwise whether it is stale (older than a launch's timeout, so left
+    /// by an interrupted launch) rather than a launch in progress.
+    pub fn environ_left(&self) -> Option<bool> {
+        let environ = self.dir.join(ENVIRON);
+        environ.exists().then(|| older_than(&environ, STALE_AFTER))
     }
 
     /// Who owns the running session of this name: `None` when none runs,
@@ -1102,6 +1160,21 @@ fn kill_session(tmux_name: &str) {
         .status();
 }
 
+/// Refuse an environment the exec file could not carry exactly: a NUL in a
+/// name or value would split its record, and an empty name or one holding
+/// `=` cannot be set.
+fn validate_env(env: &[(String, String)]) -> Result<()> {
+    for (k, v) in env {
+        if k.is_empty() || k.contains(['=', '\0']) {
+            bail!("environment variable name {k:?} is empty or holds '=' or NUL");
+        }
+        if v.contains('\0') {
+            bail!("environment variable {k} holds a NUL byte");
+        }
+    }
+    Ok(())
+}
+
 fn validate_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
         && name
@@ -1223,6 +1296,34 @@ mod tests {
         let helper = args.iter().position(|a| a == EXEC_ENV).unwrap();
         assert_eq!(args[helper + 2], "--");
         assert_eq!(args[helper + 3], "sleep");
+    }
+
+    #[test]
+    fn plain_words_run_directly_and_shell_strings_through_the_shell() {
+        for w in [
+            "nosuchprog_xyz",
+            "/no/such/path/prog",
+            "ways",
+            "./a.out",
+            "a-b_c.d+e",
+        ] {
+            assert!(is_plain_word(OsStr::new(w)), "{w}");
+        }
+        for w in ["echo hi", "a;b", "$HOME/x", "x*", "FOO=1", "a|b", "~/x", ""] {
+            assert!(!is_plain_word(OsStr::new(w)), "{w}");
+        }
+    }
+
+    #[test]
+    fn env_that_cannot_round_trip_is_refused() {
+        let ok = vec![("A".to_string(), "x=y\n'".to_string())];
+        assert!(validate_env(&ok).is_ok());
+        for (k, v) in [("", "v"), ("A=B", "v"), ("A\0B", "v"), ("A", "x\0B=1")] {
+            assert!(
+                validate_env(&[(k.to_string(), v.to_string())]).is_err(),
+                "{k:?}={v:?}"
+            );
+        }
     }
 
     #[test]

@@ -237,11 +237,15 @@ fn run(cli: Cli) -> Result<()> {
                 "NAME", "GEOMETRY", "STATE", "FONT"
             );
             for s in sessions {
-                let state = match s.owner() {
-                    None => "gone",
-                    Some(None) => "untagged",
-                    Some(Some(_)) if s.owned() => "up",
-                    Some(Some(_)) => "foreign",
+                let state = match (s.environ_left(), s.owner()) {
+                    (Some(true), _) => "stale",
+                    (Some(false), _) => "launching",
+                    (None, owner) => match owner {
+                        None => "gone",
+                        Some(None) => "untagged",
+                        Some(Some(_)) if s.owned() => "up",
+                        Some(Some(_)) => "foreign",
+                    },
                 };
                 let geometry = format!("{}x{}", s.cols, s.rows);
                 println!(

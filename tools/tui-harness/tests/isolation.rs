@@ -146,6 +146,27 @@ fn a_command_that_cannot_start_fails_the_launch() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("cannot start"), "{err:#}");
     assert!(!h.sessions_dir().join(&name).exists(), "state left behind");
+    // A missing program given as one word fails the same way, by name or
+    // by path; a real shell string still runs through the shell.
+    for word in ["nosuchprog_xyz", "/no/such/path/prog"] {
+        let n = scratch.name(&format!("word{}", word.len()));
+        let err = h
+            .launch(&n, &LaunchOptions::default(), &[word.to_string()])
+            .expect_err(&format!("{word} launched"));
+        assert!(
+            format!("{err:#}").contains("cannot start"),
+            "{word}: {err:#}"
+        );
+    }
+    let shell = scratch.name("shellstr");
+    let s = h
+        .launch(
+            &shell,
+            &LaunchOptions::default(),
+            &["echo shell-ok; read -r x".to_string()],
+        )
+        .unwrap();
+    s.wait_for("shell-ok", WAIT).unwrap();
     // A command that runs and exits at once is not a failure.
     let quick = scratch.name("quick");
     let cmd = [
@@ -306,4 +327,121 @@ fn prune_and_down_all_never_kill_untagged_sessions() {
     ok(&out);
     assert!(!alive(&format!("tui-{raw}")));
     assert!(!s.alive());
+}
+
+/// A PATH whose `setsid` waits before starting tmux, so a launch stays in
+/// progress (state written, no session yet) long enough to interfere with.
+fn slow_setsid_path(scratch: &Scratch) -> std::ffi::OsString {
+    let bin = scratch.path("slowbin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let real = which("setsid");
+    let real = if real.as_os_str().is_empty() {
+        // No setsid (macOS): the harness falls back to tmux directly, so
+        // slow tmux instead, for the launch's first call only.
+        which("tmux")
+    } else {
+        real
+    };
+    let name = if which("setsid").as_os_str().is_empty() {
+        "tmux"
+    } else {
+        "setsid"
+    };
+    let shim = bin.join(name);
+    std::fs::write(
+        &shim,
+        format!("#!/bin/sh\nsleep 2\nexec '{}' \"$@\"\n", real.display()),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(paths).unwrap()
+}
+
+/// Start a CLI launch that will sit in progress, and wait until its state
+/// is on disk.
+fn launch_in_progress(scratch: &mut Scratch, base: &str) -> (String, std::process::Child) {
+    let name = scratch.name(base);
+    let child = cli(&scratch.root)
+        .args(["launch", &name, "--cols", "60", "--rows", "4", "--"])
+        .args(marker_cmd("inprog-ok"))
+        .env("PATH", slow_setsid_path(scratch))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let environ = scratch.root.join("sessions").join(&name).join("environ");
+    let deadline = std::time::Instant::now() + WAIT;
+    while !environ.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "launch never wrote its state"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    (name, child)
+}
+
+fn assert_launch_survived(scratch: &Scratch, name: &str, child: std::process::Child) {
+    let out = child.wait_with_output().unwrap();
+    ok(&out);
+    let s = Harness::new(&scratch.root).session(name).unwrap();
+    s.wait_for("inprog-ok", WAIT).unwrap();
+}
+
+#[test]
+fn prune_spares_a_launch_in_progress() {
+    if !tmux_or_skip("prune_spares_a_launch_in_progress") {
+        return;
+    }
+    let mut scratch = Scratch::new("inprog-prune");
+    let (name, child) = launch_in_progress(&mut scratch, "inprog-prune");
+    let report = Harness::new(&scratch.root).prune(false).unwrap();
+    assert!(
+        report.removed.is_empty(),
+        "prune removed {:?}",
+        report.removed
+    );
+    assert_launch_survived(&scratch, &name, child);
+}
+
+#[test]
+fn down_all_spares_a_launch_in_progress() {
+    if !tmux_or_skip("down_all_spares_a_launch_in_progress") {
+        return;
+    }
+    let mut scratch = Scratch::new("inprog-down");
+    let (name, child) = launch_in_progress(&mut scratch, "inprog-down");
+    let downed = Harness::new(&scratch.root).down_all().unwrap();
+    assert!(downed.is_empty(), "down --all touched {downed:?}");
+    assert_launch_survived(&scratch, &name, child);
+}
+
+#[test]
+fn a_launch_whose_state_is_removed_midway_fails() {
+    if !tmux_or_skip("a_launch_whose_state_is_removed_midway_fails") {
+        return;
+    }
+    let mut scratch = Scratch::new("inprog-gone");
+    let (name, child) = launch_in_progress(&mut scratch, "inprog-gone");
+    // An explicit down of the name removes the state at once.
+    Harness::new(&scratch.root).down(&name).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success(), "the launch reported success");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("removed while it launched"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !alive(&format!("tui-{name}")),
+        "the session was left running"
+    );
 }
