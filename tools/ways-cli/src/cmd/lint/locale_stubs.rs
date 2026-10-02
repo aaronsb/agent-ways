@@ -8,7 +8,6 @@
 
 use anyhow::Result;
 use std::path::Path;
-use walkdir::WalkDir;
 
 use super::schema::{is_reserved_field, Schema};
 
@@ -22,22 +21,12 @@ pub(super) fn lint_locale_stubs(
     fix: bool,
 ) -> Result<usize> {
     let mut count = 0usize;
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file()
-            || !path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(".locales.jsonl"))
-        {
+    for path in crate::scanner::files(dir) {
+        if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".locales.jsonl")) {
             continue;
         }
         count += 1;
-        lint_one_stub_file(path, ways_dir, schema, errors, warnings, fixes, fix)?;
+        lint_one_stub_file(&path, ways_dir, schema, errors, warnings, fixes, fix)?;
     }
     Ok(count)
 }

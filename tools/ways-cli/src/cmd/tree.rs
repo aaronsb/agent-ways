@@ -166,23 +166,9 @@ fn jaccard_similarity(vocab_a: &str, vocab_b: &str) -> f64 {
 }
 
 fn find_way_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        // Check frontmatter
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if crate::frontmatter::opens_with_fence(&content) {
-                files.push(path.to_path_buf());
-            }
-        }
-    }
+    let mut files: Vec<PathBuf> = crate::scanner::md_files(dir, crate::scanner::MdKind::All)
+        .filter(|p| std::fs::read_to_string(p).is_ok_and(|c| crate::frontmatter::opens_with_fence(&c)))
+        .collect();
     files.sort();
     Ok(files)
 }

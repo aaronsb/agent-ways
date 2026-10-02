@@ -622,16 +622,8 @@ fn scan_ways_dir(
     // Track which (directory, lang) pairs have external .lang.md overrides
     let mut locale_overrides: std::collections::HashSet<(PathBuf, String)> = std::collections::HashSet::new();
 
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
+    for path in crate::scanner::files(dir) {
+        let path = path.as_path();
         let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         // Collect .locales.jsonl files
@@ -645,7 +637,7 @@ fn scan_ways_dir(
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
-        if fname.contains(".check.") {
+        if crate::scanner::is_check(path) {
             continue;
         }
         if crate::util::is_excluded_path(path, excluded) {
@@ -993,6 +985,15 @@ fn content_hash(dir: &Path) -> String {
 
 use crate::util::home_dir;
 
+/// True if a way or locale file (`.md`, `.jsonl`) under `root` is newer than
+/// the manifest.
+fn any_way_file_newer(root: &Path, manifest: &Path) -> bool {
+    crate::scanner::files(root).any(|path| {
+        let ext = path.extension().and_then(|e| e.to_str());
+        (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(&path, manifest)
+    })
+}
+
 /// Check if any way file is newer than the manifest.
 fn is_stale(manifest: &Path, global_dir: &Path, project_dir: &str) -> bool {
     // Check core + user ways (both unnamespaced roots feed the corpus).
@@ -1000,38 +1001,16 @@ fn is_stale(manifest: &Path, global_dir: &Path, project_dir: &str) -> bool {
         if !root.is_dir() {
             continue;
         }
-        for entry in WalkDir::new(&root)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if path.is_file() {
-                let ext = path.extension().and_then(|e| e.to_str());
-                if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
-                    return true;
-                }
-            }
+        if any_way_file_newer(&root, manifest) {
+            return true;
         }
     }
 
     // Check project ways
     if !project_dir.is_empty() {
         let project_ways = Path::new(project_dir).join(".claude/ways");
-        if project_ways.is_dir() {
-            for entry in WalkDir::new(&project_ways)
-                .follow_links(true)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                let path = entry.path();
-                if path.is_file() {
-                    let ext = path.extension().and_then(|e| e.to_str());
-                    if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
-                        return true;
-                    }
-                }
-            }
+        if project_ways.is_dir() && any_way_file_newer(&project_ways, manifest) {
+            return true;
         }
     }
 

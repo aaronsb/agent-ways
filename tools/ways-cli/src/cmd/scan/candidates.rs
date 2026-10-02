@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use crate::session;
 
@@ -126,20 +125,12 @@ pub(crate) fn way_ids(root: &Path) -> HashSet<String> {
     if !root.is_dir() {
         return ids;
     }
-    for entry in WalkDir::new(root).follow_links(true).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.contains(".check.") {
-            continue;
-        }
-        match std::fs::read_to_string(path) {
+    for path in crate::scanner::md_files(root, crate::scanner::MdKind::Ways) {
+        match std::fs::read_to_string(&path) {
             Ok(c) if crate::frontmatter::opens_with_fence(&c) => {}
             _ => continue,
         }
-        let id = way_id_from_path(path, root);
+        let id = way_id_from_path(&path, root);
         if !id.is_empty() {
             ids.insert(id);
         }
@@ -180,20 +171,12 @@ fn collect_from_dir(
 ) {
     let Walk { dir, corpus_prefix, kind, foreign_roots } = walk;
     let root_canon = canonical(dir);
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let is_check = name.contains(".check.");
-        if is_check != (kind == Kind::Checks) {
-            continue;
-        }
+    let md = match kind {
+        Kind::Ways => crate::scanner::MdKind::Ways,
+        Kind::Checks => crate::scanner::MdKind::Checks,
+    };
+    for path in crate::scanner::md_files(dir, md) {
+        let path = path.as_path();
 
         // Identity and shadowing first: a duplicate sighting or a shadowed id
         // is dropped before its body is read.

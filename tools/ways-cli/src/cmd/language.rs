@@ -7,7 +7,6 @@ use anyhow::Result;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use crate::agents;
 use crate::frontmatter;
@@ -150,14 +149,8 @@ fn scan_way_dirs(
     // Collect way directories (each dir with a .md file containing frontmatter)
     let mut way_dirs: BTreeMap<String, PathBuf> = BTreeMap::new();
 
-    for entry in WalkDir::new(dir).follow_links(true).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".check.")) {
-            continue;
-        }
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+        let path = path.as_path();
         if crate::util::is_excluded_path(path, excluded) {
             continue;
         }

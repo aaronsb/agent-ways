@@ -4,7 +4,6 @@
 use anyhow::Result;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 pub fn run(json_output: bool) -> Result<()> {
     let xdg_cache = crate::paths::corpus_dir();
@@ -292,21 +291,8 @@ fn count_ways(dir: &Path) -> (usize, usize) {
     let mut total = 0;
     let mut semantic = 0;
 
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.contains(".check.") {
-            continue;
-        }
-
-        let content = match std::fs::read_to_string(path) {
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+        let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };

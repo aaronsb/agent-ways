@@ -3,7 +3,6 @@
 use agent_fmt::permissions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use crate::util::home_dir;
 
@@ -58,19 +57,8 @@ fn collect_way_requirements(
     ways_dir: &Path,
     out: &mut Vec<(String, Vec<String>)>,
 ) -> Result<()> {
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        // Skip check files
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".check.")) {
-            continue;
-        }
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+        let path = path.as_path();
 
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,

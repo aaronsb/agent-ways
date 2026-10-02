@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use crate::frontmatter::opens_with_fence;
 use crate::util::home_dir;
@@ -182,22 +181,8 @@ fn scan_provenance(
     let mut with_prov = Vec::new();
     let mut without_prov = Vec::new();
 
-    for entry in WalkDir::new(root)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.contains(".check."))
-        {
-            continue;
-        }
+    for path in crate::scanner::md_files(root, crate::scanner::MdKind::Ways) {
+        let path = path.as_path();
 
         // Check frontmatter exists
         let content = match std::fs::read_to_string(path) {

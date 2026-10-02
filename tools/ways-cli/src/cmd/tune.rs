@@ -23,7 +23,6 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use walkdir::WalkDir;
 
 use crate::frontmatter;
 use crate::util::home_dir;
@@ -184,11 +183,8 @@ fn collect_locale_files(
     excluded: &[String],
 ) -> Result<Vec<(String, PathBuf)>> {
     let mut files: Vec<(String, PathBuf)> = Vec::new();
-    for entry in WalkDir::new(global_dir).follow_links(true).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
+    for path in crate::scanner::files(global_dir) {
+        let path = path.as_path();
         if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".locales.jsonl")) {
             continue;
         }

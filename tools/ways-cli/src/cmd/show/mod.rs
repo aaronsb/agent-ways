@@ -880,16 +880,8 @@ pub fn attend(signal: &str, session_id: &str) -> Result<String> {
     let mut matched_ids: Vec<String> = Vec::new();
 
     for dir in &dirs {
-        for entry in walkdir::WalkDir::new(dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if !path.is_file() { continue; }
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.ends_with(".md") || name.contains(".check.") { continue; }
-
-            if let Ok(content) = std::fs::read_to_string(path) {
+        for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
                 let signals = extract_attend_signals(&content);
                 if signals.iter().any(|s| s == signal) {
                     // Derive way ID from path relative to ways dir

@@ -502,22 +502,8 @@ fn frontmatter_block(content: &str) -> Option<String> {
 pub fn build_criteria_map(roots: &[PathBuf]) -> CriteriaMap {
     let mut map = CriteriaMap::new();
     for root in roots {
-        for entry in walkdir::WalkDir::new(root)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-                continue;
-            }
-            if path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.contains(".check."))
-            {
-                continue;
-            }
+        for path in crate::scanner::md_files(root, crate::scanner::MdKind::Ways) {
+            let path = path.as_path();
             let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
             };
