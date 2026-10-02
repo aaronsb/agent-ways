@@ -121,12 +121,28 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 /// Whether a recorded project path is in the project `scope`: the same path,
-/// or a path under it, trailing slashes aside. A worktree under a project,
+/// or a path under it, trailing separators aside. A worktree under a project,
 /// such as an agent's in `.claude/worktrees/`, is part of it; a sibling whose
-/// name only begins the same (`/a/foo-bar` for `/a/foo`) is not.
+/// name only begins the same (`/a/foo-bar` for `/a/foo`) is not. `/` and `\`
+/// both separate, since Windows records backslash paths. An empty scope is no
+/// project and holds nothing.
 pub fn in_project(project: &str, scope: &str) -> bool {
-    let (p, s) = (project.trim_end_matches('/'), scope.trim_end_matches('/'));
-    p == s || p.strip_prefix(s).is_some_and(|rest| rest.starts_with('/'))
+    const SEP: [char; 2] = ['/', '\\'];
+    if scope.is_empty() {
+        return false;
+    }
+    let (p, s) = (project.trim_end_matches(SEP), scope.trim_end_matches(SEP));
+    p == s || p.strip_prefix(s).is_some_and(|rest| rest.starts_with(SEP))
+}
+
+/// A `--project` path as events record it: a relative one, such as `.`,
+/// resolved against the working directory.
+pub fn project_arg(path: &str) -> String {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    std::fs::canonicalize(p).or_else(|_| std::path::absolute(p)).map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string())
 }
 
 /// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
@@ -349,5 +365,17 @@ mod tests {
         // canonicalize the same real dir to the same key.
         let dir = std::env::temp_dir();
         assert_eq!(encode_project_key(&dir), encode_project_key(&dir));
+    }
+
+    #[test]
+    fn in_project_takes_the_project_and_what_is_under_it_on_either_separator() {
+        assert!(in_project("/a/proj", "/a/proj/"));
+        assert!(in_project("/a/proj/.claude/worktrees/x", "/a/proj"));
+        assert!(!in_project("/a/proj-2", "/a/proj"));
+        assert!(in_project(r"C:\a\proj\.claude\worktrees\x", r"C:\a\proj"));
+        assert!(in_project(r"C:\a\proj", r"C:\a\proj\"));
+        assert!(!in_project(r"C:\a\proj-2", r"C:\a\proj"));
+        assert!(in_project("/a/proj", "/"), "the root holds every path");
+        assert!(!in_project("/a/proj", ""), "an empty scope holds nothing");
     }
 }

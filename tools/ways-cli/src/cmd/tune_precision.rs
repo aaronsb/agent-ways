@@ -150,6 +150,7 @@ pub fn run(
     // Load ALL fires (project filter only). The way filter is applied at the
     // report stage, never here: a session's activity class must be computed
     // from every way that fired in it, not just the way under inspection.
+    let project_filter = project_filter.as_deref().map(ways_core::util::project_arg);
     let fires = load_fires(&ways_core::firing::load_events_text(), project_filter.as_deref());
     if fires.is_empty() {
         println!("no way_fired events found in the selected window.");

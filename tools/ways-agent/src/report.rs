@@ -8,7 +8,8 @@ pub fn run(since: Option<&str>, session: Option<&str>, project: Option<&str>, by
     let since = since.map(parse_date).transpose()?;
     let all = load();
     let covers = covers_since(&all);
-    let calls = filter_project(filter(all, since.as_deref(), session), project);
+    let project = project.map(ways_core::util::project_arg);
+    let calls = filter_project(filter(all, since.as_deref(), session), project.as_deref());
     if json {
         println!("{}", serde_json::to_string_pretty(&report(&calls, covers))?);
     } else {

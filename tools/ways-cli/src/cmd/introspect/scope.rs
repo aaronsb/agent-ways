@@ -13,7 +13,7 @@ pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<
         return Ok(None);
     }
     if let Some(p) = project {
-        return Ok(Some(p.to_string()));
+        return Ok(Some(ways_core::util::project_arg(p)));
     }
     match crate::util::project_root() {
         Some(p) => Ok(Some(p)),

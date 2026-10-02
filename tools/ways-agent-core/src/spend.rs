@@ -271,12 +271,13 @@ not json
     }
 
     #[test]
-    fn a_project_matches_exactly_a_trailing_slash_aside() {
+    fn a_project_takes_the_paths_under_it() {
         let kept = |p: &str| filter_project(calls(), Some(p)).into_iter().map(|c| c.session).collect::<Vec<_>>();
         assert_eq!(kept("/p/a"), ["s1", "s1", "s3"]);
         assert_eq!(kept("/p/a/"), ["s1", "s1", "s3"]);
         assert_eq!(kept("/p").len(), 4, "a parent takes the projects under it");
-        assert!(kept("/p/a-other").is_empty() && kept("/p/").len() == 4);
+        assert!(kept("/p/a-other").is_empty(), "a sibling whose name begins the same is not under it");
+        assert_eq!(kept("/p/").len(), 4);
         assert_eq!(filter_project(calls(), None).len(), 4);
     }
 

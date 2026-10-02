@@ -87,7 +87,7 @@ ways tune stats --json
 
 **When:** After a session where guidance seemed off, to replay exactly what fired, when, and why. Also useful for onboarding: walk through a past session to see the system in action, or follow the current one as ways fire.
 
-**Run from:** The project directory, which scopes the sessions to that project and the paths under it, so an agent's worktree in `.claude/worktrees/` counts toward its project; `/a/foo-bar` is not part of `/a/foo`. The tune commands and `ways agent cost --project` match a project the same way. `--project <dir>` picks another project and `--all` takes every project; when the current project cannot be detected, the command fails rather than reading every project.
+**Run from:** The project directory, which scopes the sessions to that project and the paths under it, so an agent's worktree in `.claude/worktrees/` counts toward its project; `/a/foo-bar` is not part of `/a/foo`. The tune commands and `ways agent cost --project` match a project the same way, and a relative `--project`, such as `.`, is resolved against the working directory. With no `--session`, the default session is the newest at the project itself, else the newest under it. `--project <dir>` picks another project and `--all` takes every project; when the current project cannot be detected, the command fails rather than reading every project.
 
 **Bare:** `ways session` with no verb, on a terminal, opens the session screen as `replay` does; in a pipe it prints its help and exits 2, so a script names the verb.
 

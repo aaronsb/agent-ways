@@ -366,7 +366,11 @@ pub(crate) fn most_recent_active_session(content: &str) -> Option<String> {
 
 /// Latest session (by session_start timestamp) within an optional project scope.
 pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<String> {
+    // The newest session at the project itself wins; one in a worktree under
+    // it is the default only when the project has none, so a workflow's
+    // session never stands in for the operator's own.
     let mut best: Option<(String, String)> = None; // (ts, session)
+    let mut under: Option<(String, String)> = None;
     for line in content.lines() {
         if !line.contains("session_start") {
             continue;
@@ -382,17 +386,18 @@ pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<
             Some(s) if !s.is_empty() => s,
             _ => continue,
         };
-        if let Some(sc) = scope {
-            if !scope::project_matches(v["project"].as_str().unwrap_or(""), sc) {
-                continue;
-            }
-        }
+        let project = v["project"].as_str().unwrap_or("");
+        let slot = match scope {
+            Some(sc) if !scope::project_matches(project, sc) => continue,
+            Some(sc) if !ways_core::util::in_project(sc, project) => &mut under,
+            _ => &mut best,
+        };
         let ts = v["ts"].as_str().unwrap_or("").to_string();
-        if best.as_ref().map(|(b, _)| ts > *b).unwrap_or(true) {
-            best = Some((ts, sid.to_string()));
+        if slot.as_ref().map(|(b, _)| ts > *b).unwrap_or(true) {
+            *slot = Some((ts, sid.to_string()));
         }
     }
-    best.map(|(_, s)| s)
+    best.or(under).map(|(_, s)| s)
 }
 
 /// Map a near-miss timestamp to the epoch of the frame it falls within —

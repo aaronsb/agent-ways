@@ -13,7 +13,8 @@ pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, g
     } else {
         None
     };
-    let project_filter = project_filter.or(detected_project.as_deref());
+    let given = project_filter.map(ways_core::util::project_arg);
+    let project_filter = given.as_deref().or(detected_project.as_deref());
     if crate::paths::events_log_sources().is_empty() {
         if !json_output {
             println!("No events recorded yet. Stats will appear after ways start firing.");
