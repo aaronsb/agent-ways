@@ -402,11 +402,89 @@ fn fix_never_drops_the_targets_list() {
     let text = std::fs::read_to_string(f.user()).unwrap();
     assert!(text.contains("targets:\n  - path: /a\n    enabled: false\n  - path: /b\n"), "{text}");
     assert!(text.contains("secret_path_deny: true"), "{text}");
-    assert!(err.contains("fix leaves install.targets"), "{err}");
-    // A section holding only a key fix cannot rebuild is refused, untouched.
-    let (_, _, code) = f.run(&["settings", "fix", "install.targets"]);
-    assert_eq!(code, 3);
-    assert!(std::fs::read_to_string(f.user()).unwrap().contains("- path: /b"));
+    // A bad target entry is refused by fix, which names the command that
+    // owns the list; the list is untouched.
+    let src = "targets:\n  - path: /a\n    enabled: false\n  - path: /b\n    enabled: maybe\n";
+    f.write(&f.user(), src);
+    let (_, err, code) = f.run(&["settings", "fix", "install"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("`ways config target add|enable|disable|remove <dir>` repairs it"), "{err}");
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), src);
+    // The load diagnostic names that command too, not fix.
+    let (_, err, _) = f.run(&["settings", "get", "install.targets"]);
+    assert!(err.contains("ways config target") && !err.contains("settings fix install"), "{err}");
+}
+
+#[test]
+fn one_bad_target_entry_keeps_the_others_and_stays_withdrawn() {
+    // S1: a bad field in one entry no longer drops the list into the
+    // implicit ~/.claude, which the operator disabled here.
+    let f = Fx::new();
+    f.write(&f.user(), "targets:\n  - path: ~/.claude\n    enabled: false\n  - path: ~/.claude-work\n    enabled: maybe\n");
+    let (out, _, _) = f.run(&["settings", "get", "install.targets"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v, serde_json::json!([{"path": "~/.claude", "enabled": false}, {"path": "~/.claude-work", "enabled": false}]));
+}
+
+#[test]
+fn fix_gate_keeps_the_gate_off() {
+    // B1: `fix gate` touches the gate section alone and repairs engine.
+    let f = Fx::new();
+    let agent = f.root.join("xdg/config/agent-ways/agent.yaml");
+    f.write(&agent, "engine: 5\nmode: off   # gate switched off on purpose\n");
+    let (_, err, code) = f.run(&["settings", "fix", "gate"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(&agent).unwrap(), "mode: off   # gate switched off on purpose\n");
+    assert_eq!(f.run(&["settings", "lint"]).2, 0);
+}
+
+#[test]
+fn fix_ways_in_a_project_keeps_it_switched_off() {
+    // B1: in a project file fix removes the bad key, never writes canonical.
+    let f = Fx::new();
+    f.write(&f.overlay(), "language: 7\nenabled: false\ndisabled_domains: [ea, itops]\n");
+    let (_, err, code) = f.run(&["settings", "fix", "ways", "--project", f.root.join("proj").to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(f.overlay()).unwrap(), "enabled: false\ndisabled_domains: [ea, itops]\n");
+    assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n");
+}
+
+#[test]
+fn fix_repairs_a_per_entry_section_until_lint_is_clean() {
+    // S3: a section that is not a mapping, and an integer entry key.
+    let f = Fx::new();
+    let proj = f.root.join("proj");
+    let p = proj.to_str().unwrap();
+    f.write(&f.overlay(), "ways: 5\n");
+    assert_eq!(f.run(&["settings", "fix", "ways.project", "--project", p]).2, 0);
+    assert_eq!(f.run(&["settings", "lint", "--project", p]).2, 0);
+    f.write(&f.overlay(), "ways:\n  123: false\n  a/b: false\n");
+    assert_eq!(f.run(&["settings", "fix", "ways.project", "--project", p]).2, 0);
+    assert_eq!(std::fs::read_to_string(f.overlay()).unwrap(), "ways:\n  a/b: false\n");
+    assert_eq!(f.run(&["settings", "lint", "--project", p]).2, 0);
+}
+
+#[test]
+fn an_unparseable_project_file_keeps_ways_switched_off() {
+    // B2 on the ways side: before, the whole file was lost with `enabled: false`.
+    let f = Fx::new();
+    f.write(&f.overlay(), "enabled: false\nlanguage: [\nways:\n  itops/incident: false\n");
+    assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n");
+    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\n");
+}
+
+#[test]
+fn a_finding_reads_with_a_colon_and_prints_once_per_hook() {
+    let f = Fx::new();
+    f.write(&f.user(), "mdoe: 1\n");
+    let (_, err, _) = f.run(&["settings", "lint"]);
+    assert!(err.is_empty() || !err.contains("mdoe: 1"), "{err}");
+    let (out, _, _) = f.run(&["settings", "lint"]);
+    assert_eq!(out, "<ROOT>/xdg/config/agent-ways/config.yaml:1: mdoe: unknown key; it is ignored\n");
+    // L1: a hook command that loads the config twice prints the finding once.
+    let mut c = f.cmd(&["scan", "prompt", "--query=write a unit test", "--session=s1"]);
+    let err = String::from_utf8_lossy(&c.output().unwrap().stderr).to_string();
+    assert_eq!(err.matches("mdoe").count(), 1, "{err}");
 }
 
 #[test]
@@ -417,10 +495,14 @@ fn a_bad_value_never_switches_back_on_what_was_turned_off() {
     assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n");
     // One bad toggle keeps the other disabled ways disabled.
     f.write(&f.overlay(), "ways:\n  itops/incident: false\n  meta/introspection: no\n  ea/x: false\n");
-    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\nea/x\n");
-    // fix drops only the bad toggle.
+    // A bad toggle fails closed: it reads as disabled too.
+    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\nmeta/introspection\nea/x\n");
+    // fix writes the bad toggle's closed reading, so it stays off.
     assert_eq!(f.run(&["settings", "fix", "ways.project", "--project", f.root.join("proj").to_str().unwrap()]).2, 0);
-    assert_eq!(std::fs::read_to_string(f.overlay()).unwrap(), "ways:\n  itops/incident: false\n  ea/x: false\n");
+    assert_eq!(
+        std::fs::read_to_string(f.overlay()).unwrap(),
+        "ways:\n  itops/incident: false\n  meta/introspection: false\n  ea/x: false\n"
+    );
     // A bad secret_path_deny keeps the recorded targets.
     f.write(&f.user(), "secret_path_deny: \"false\"\ntargets:\n  - path: /srv/work/.claude\n");
     assert!(f.run(&["settings", "get", "install.targets"]).0.contains("/srv/work/.claude"));

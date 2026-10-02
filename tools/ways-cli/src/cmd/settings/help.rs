@@ -21,8 +21,9 @@ pub fn help(topic: Option<&str>) -> Out {
         println!("  help <key|section>   what a key or section does\n");
         println!("exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden by a higher layer, 5 write failed\n");
         println!("sections:");
+        let width = reg.sections().map(|(_, s)| s.name.len()).max().unwrap_or(0);
         for (_, s) in reg.sections() {
-            println!("  {:<16} {}", s.name, s.doc);
+            println!("  {:<width$}  {}", s.name, s.doc);
         }
         return Ok(());
     };
