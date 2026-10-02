@@ -22,8 +22,7 @@ agent-identity = { path = "../agent-identity" }
 agent-tui = { path = "../agent-tui" }
 agent-theme = { path = "../agent-theme", features = ["ratatui"] }
 # Reads the user's theme choice (`theme.active`, `theme.shape`), read only.
-agent-settings = { path = "../agent-settings" }
-serde_yaml = "0.9"
+attend-config = { path = "../attend-config" }
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
