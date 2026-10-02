@@ -8,15 +8,17 @@
 //! Object mode (`apply`) takes a settings object and answers with JSON.
 //!
 //! `property` holds get, set, unset and list; `object` apply; `maintain`
-//! emit, lint and fix; `help` the schema's text. This module holds what they
-//! share: the registry, the layers, and where a key is written.
+//! emit, lint and fix; `help` the schema's text; `tui` the settings screens
+//! on `agent-tui` (ADR-504 §8). This module holds what they share: the
+//! registry, the layers, where a key is written, and the one write path.
 
 mod help;
 mod maintain;
 mod object;
 mod property;
+pub mod tui;
 
-pub use help::help;
+pub use help::{help, help_text};
 pub use maintain::{emit, fix, lint};
 pub use object::apply;
 pub use property::{bare, get, list, set, unset};
@@ -149,6 +151,21 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
         },
         _ => Err(fail(exit::REJECTED, format!("{name} is not stored in a settings file; `ways settings help {name}`"))),
     }
+}
+
+/// Write `values`, each a key path and a typed value, into one settings file
+/// in one locked edit. `set` writes through here, and so does the settings
+/// screens' apply, so both leave the same bytes. Returns whether the file
+/// changed.
+pub(super) fn write_file(path: &Path, values: &[(Vec<String>, Value)]) -> Result<bool, Failure> {
+    agent_settings::writer::edit_file(path, header_for(path), |d| {
+        for (k, v) in values {
+            d.set(k, v)?;
+        }
+        Ok(())
+    })
+    .map(|((), changed)| changed)
+    .map_err(write_failed)
 }
 
 pub(super) fn header_for(path: &Path) -> Option<&'static str> {

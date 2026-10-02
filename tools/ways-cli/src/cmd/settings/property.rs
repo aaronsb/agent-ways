@@ -72,8 +72,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
         .parse_cli(value)
         .map_err(|m| fail(exit::REJECTED, format!("{key}: {m}; `ways settings help {key}`")))?;
     let (path, _) = target_file(&b, project)?;
-    let kp = b.path();
-    agent_settings::writer::edit_file(&path, header_for(&path), |d| d.set(&kp, &v)).map_err(write_failed)?;
+    write_file(&path, &[(b.path(), v)])?;
     if let Some(why) = overridden(&b, &path, project) {
         return Err(fail(exit::OVERRIDDEN, format!("{key} written to {}, but {why}", path.display())));
     }
@@ -99,9 +98,13 @@ pub fn unset(key: &str, project: Option<&Path>) -> Out {
     Ok(())
 }
 
-/// Bare `ways settings`: the TUI is a later increment (ADR-504), so a
-/// terminal and a pipe both get `list`.
+/// Bare `ways settings`: the settings screens on a terminal, `list` in a
+/// pipe (ADR-503 §9).
 pub fn bare() -> Out {
+    use std::io::IsTerminal;
+    if std::io::stdout().is_terminal() && std::io::stdin().is_terminal() {
+        return super::tui::open(&super::tui::Open::default());
+    }
     list(None, false, false, None, None)
 }
 

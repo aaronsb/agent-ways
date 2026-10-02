@@ -1,0 +1,144 @@
+agent-tui frame 100x30
+| 1 ways    2 matching    3 gate    4 install    5 theme                                   |
+|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
+|│▌  semantic_fire_probability   0.5                   ││matching.semantic_fire_probability         │|
+|│   keyword_floor_probability   0.15                  ││                                           │|
+|│   parent_threshold_multiplier 0.8                   ││Calibrated probability at which a way fires│|
+|│   parent_boost_floor          0.3                   ││on relatedness.                            │|
+|│   near_miss_margin            0.1                   ││                                           │|
+|│ ▸ refire_presets                                    ││A way fires when the calibrated probability│|
+|│                                                     ││of its best model lane reaches this value  │|
+|│                                                     ││(ADR-156). Lower fires more often.         │|
+|│                                                     ││                                           │|
+|│                                                     ││value    0.5                               │|
+|│                                                     ││type     number 0..=1 (Enter edits)        │|
+|│                                                     ││default  0.5                               │|
+|│                                                     ││from     default                           │|
+|│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
+|│                                                     ││[matching.semantic_fire_probability]       │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
+| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters all tabs          |
+styles
+  0   0-0   Blue - -
+  0   1-8   White Blue -
+  0   9-9   Blue - -
+  0  12-12  Cyan - -
+  0  13-24  Black Cyan BOLD
+  0  25-25  Cyan - -
+  0  28-28  Blue - -
+  0  29-36  White Blue -
+  0  37-37  Blue - -
+  0  40-40  Blue - -
+  0  41-51  White Blue -
+  0  52-52  Blue - -
+  0  55-55  Blue - -
+  0  56-64  White Blue -
+  0  65-65  Blue - -
+  1   0-0   - - DIM
+  1   1-24  Blue - BOLD|DIM
+  1  25-55  - - DIM
+  1  56-61  Blue - BOLD|DIM
+  1  62-99  - - DIM
+  2   0-0   - - DIM
+  2   1-1   Cyan - BOLD|REVERSED
+  2   2-53  - - BOLD|REVERSED
+  2  54-55  - - DIM
+  2  56-89  - - BOLD
+  2  99-99  - - DIM
+  3   0-0   - - DIM
+  3  54-55  - - DIM
+  3  99-99  - - DIM
+  4   0-0   - - DIM
+  4  54-55  - - DIM
+  4  99-99  - - DIM
+  5   0-0   - - DIM
+  5  54-55  - - DIM
+  5  99-99  - - DIM
+  6   0-0   - - DIM
+  6  32-34  Blue - -
+  6  54-55  - - DIM
+  6  99-99  - - DIM
+  7   0-0   - - DIM
+  7   2-17  - - BOLD
+  7  54-55  - - DIM
+  7  99-99  - - DIM
+  8   0-0   - - DIM
+  8  54-55  - - DIM
+  8  99-99  - - DIM
+  9   0-0   - - DIM
+  9  54-55  - - DIM
+  9  99-99  - - DIM
+ 10   0-0   - - DIM
+ 10  54-55  - - DIM
+ 10  99-99  - - DIM
+ 11   0-0   - - DIM
+ 11  54-64  - - DIM
+ 11  99-99  - - DIM
+ 12   0-0   - - DIM
+ 12  54-64  - - DIM
+ 12  99-99  - - DIM
+ 13   0-0   - - DIM
+ 13  54-64  - - DIM
+ 13  99-99  - - DIM
+ 14   0-0   - - DIM
+ 14  54-64  - - DIM
+ 14  99-99  - - DIM
+ 15   0-0   - - DIM
+ 15  54-64  - - DIM
+ 15  99-99  - - DIM
+ 16   0-0   - - DIM
+ 16  54-55  - - DIM
+ 16  99-99  - - DIM
+ 17   0-0   - - DIM
+ 17  54-55  - - DIM
+ 17  99-99  - - DIM
+ 18   0-0   - - DIM
+ 18  54-55  - - DIM
+ 18  99-99  - - DIM
+ 19   0-0   - - DIM
+ 19  54-55  - - DIM
+ 19  99-99  - - DIM
+ 20   0-0   - - DIM
+ 20  54-55  - - DIM
+ 20  99-99  - - DIM
+ 21   0-0   - - DIM
+ 21  54-55  - - DIM
+ 21  99-99  - - DIM
+ 22   0-0   - - DIM
+ 22  54-55  - - DIM
+ 22  99-99  - - DIM
+ 23   0-0   - - DIM
+ 23  54-55  - - DIM
+ 23  99-99  - - DIM
+ 24   0-0   - - DIM
+ 24  54-55  - - DIM
+ 24  99-99  - - DIM
+ 25   0-0   - - DIM
+ 25  54-55  - - DIM
+ 25  99-99  - - DIM
+ 26   0-0   - - DIM
+ 26  54-55  - - DIM
+ 26  99-99  - - DIM
+ 27   0-0   - - DIM
+ 27  54-55  - - DIM
+ 27  99-99  - - DIM
+ 28   0-99  - - DIM
+ 29   0-0   Cyan - -
+ 29   1-8   Black Cyan BOLD
+ 29   9-9   Cyan - -
+ 29  11-19  - - DIM|ITALIC
+ 29  20-22  - - DIM
+ 29  23-30  - - DIM|ITALIC
+ 29  31-33  - - DIM
+ 29  34-45  - - DIM|ITALIC
