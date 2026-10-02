@@ -33,6 +33,9 @@ claude-sessions = { path = "../claude-sessions" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
 ways-agent-core = { path = "../ways-agent-core" }
 agent-settings = { path = "../agent-settings" }
+# attend's settings schema, composed into `ways settings` (ADR-503 §1); the
+# schema crate, never the attend binary.
+attend-config = { path = "../attend-config" }
 # The settings screens (ADR-504 §8). Linked into `ways`, never called on a
 # hook path (§11).
 agent-tui = { path = "../agent-tui" }

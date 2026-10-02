@@ -15,28 +15,30 @@ Both files are optional. Attend ships with sensible defaults in code, so running
 
 The user-scope path respects `XDG_CONFIG_HOME` if set; otherwise it falls back to `$HOME/.config/`.
 
-## Bootstrapping
+## Reading and changing it
+
+The keys are described by one schema, `attend-config`, which `ways settings` composes with ways' own (ADR-503). Every key is named `attend.<section>.<key>`:
 
 ```bash
-attend config init      # write a default config to ~/.config/attend/config.yaml
-attend config show      # print the merged config attend is currently using
-attend config path      # print the file paths attend loads from
-attend config lint      # schema-driven validation of user + project config files
-attend config lint --fix   # remove unknown/deprecated keys in place
-attend config lint --check # non-zero exit on errors (CI mode)
+ways settings                                   # the settings screens: attend's tabs are `attend` and `sensors`
+ways settings list attend                       # every attend key in effect, as key=value
+ways settings get attend.engagement.decay_per_minute
+ways settings set attend.sensors.git.interval 60 --project .   # writes .claude/attend.yaml
+ways settings help attend.sensors.*.script      # what a key does, its type, range and default
+ways settings lint                              # findings in every settings file; exit 3 with any
+ways settings fix attend.engagement             # repair what that section's findings point at
+
+attend config init      # write the default config to ~/.config/attend/config.yaml, if none is there
+attend config show      # every attend key in effect, as key=value
+attend config path      # the file paths attend loads from
+attend config lint      # the findings in attend's two files; exit 3 with any
 ```
 
-`attend config lint` validates both the user-scope and project-scope
-config files against the same section schemas the loader knows about,
-reporting typos (`UNKNOWN: ...`), fields the schema accepts but are no
-longer load-bearing (`DEPRECATED: ...`), and unknown top-level sections.
-The runtime loader intentionally ignores unknown keys so a typo never
-crashes attend at startup — `config lint` is where those typos surface.
-`--fix` surgically removes the offending lines (no YAML round-trip, no
-reformatting of surviving keys). Fields whose name starts with `x-` are
-an intentional-foreign escape hatch and the linter leaves them alone.
+Every write goes through the one settings writer: it takes a lock beside the file, changes only the keys it sets, keeps every comment and the order of the rest, and renames a temporary file into place. `attend tune --apply` and `ways settings set` leave the same bytes.
 
-`attend config init` creates the user-scope file with fully commented defaults — useful as a starting point to understand what's available.
+A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults; each sensor falls back alone. A switch fails closed: a sensor or `cleanup` whose `enabled` holds anything but `true` in an entry with a finding reads as off. A file that does not parse sets nothing, and `cleanup` is off until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
+
+`attend config init` creates the user-scope file with fully commented defaults, and never overwrites one that exists.
 
 ## Complete schema
 
@@ -115,7 +117,7 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 - **`decay_per_minute`** (float, default 0.1): exponential decay rate for the relative-refractory multiplier. At load time attend converts this to `multiplier_half_life = ln(0.5) / ln(1 - decay_per_minute) × 60` seconds. At `0.1`, the half-life is ≈ 395 s (~6.6 min); at `0.0256` (typical tune output), ≈ 1611 s (~27 min).
 - **`peer_activity_window`** (seconds, default 900): sliding window used by `sensor-peers` for the per-peer engagement boost. This *is* still tick-windowed — sensor-peers implements its own count-in-window logic rather than going through the shared curve engine, because the per-peer boost is a different shape than per-sensor refractory.
 
-> **Legacy `burst_window`.** Pre-ADR-123 configs carried a `burst_window` key. It was soft-deprecated in ADR-123 phase 1 (parsed but ignored, flagged by `attend config lint`) and fully removed in phase 2 — attend now rejects the key at load time with a pointer to `attend config lint --fix`. If `attend run` fails on startup complaining about `burst_window`, run the lint fixer once and the key will be removed in place.
+> **`burst_window`.** Pre-ADR-123 configs carried a `burst_window` key. It is an unknown key now: the `engagement` section it sits in falls back to the layers beneath, and `ways settings fix attend.engagement` removes it.
 
 **Yaml field stability.** The yaml keys are deliberately preserved from pre-ADR-123 attend configs, so existing tuned configs keep loading without changes. Internally the keys are translated to the `Curve::ActionPotential` parameters attend actually runs on. The doc-level mapping is:
 
@@ -149,7 +151,7 @@ attend cleanup --all                  # nuke everything (ignore liveness)
 
 ### `sensors`
 
-Per-sensor configuration. Each built-in sensor can have its intervals, threshold, decay, and permissions overridden. User-authored sensors (script or crate) are declared in the same block with a `+` prefix.
+Per-sensor configuration. Each built-in sensor can have its intervals, threshold, decay, and permissions overridden. A sensor of your own is declared in the same block: any name with a `script`. A sensor's name is letters, digits, `-` and `_`.
 
 **Existing built-in override:**
 
@@ -164,14 +166,15 @@ sensors:
 
 ```yaml
 sensors:
-  -processes:            # the '-' prefix disables
+  processes:
+    enabled: false
 ```
 
 **Add a new script sensor:**
 
 ```yaml
 sensors:
-  +github-project:
+  github-project:
     script: $XDG_DATA_HOME/attend/sensors/github-project.sh
     interval: 300
     min_interval: 60
@@ -181,15 +184,15 @@ sensors:
       - Bash(gh:*)
 ```
 
-The `+` prefix declares a new sensor beyond the built-ins. Script paths are deliberately unconstrained — they can be:
+The `script` key makes it a sensor of your own. Script paths are deliberately unconstrained — they can be:
 
 - **User-global**, under `$XDG_DATA_HOME/attend/sensors/` (the convention this config documents by default). Survives across projects; lives in your own trusted script dir.
 - **Project-scoped**, at `.claude/sensors/name.sh` in a specific repo. Only loads when attend runs from that project.
 - **Absolute paths** to anywhere on disk — your personal tools repo, a team-shared scripts dir, `~/bin`, wherever you keep trusted executables.
 
-Attend only cares that the path resolves and that the script respects the subprocess contract. The `$HOME`, `~`, and `$XDG_*` prefixes are expanded by the config parser, so `$XDG_DATA_HOME/...` in config becomes an absolute path at load time. This keeps configs portable across machines.
+Attend only cares that the path resolves and that the script respects the subprocess contract. The `$HOME`, `~`, and `$XDG_*` prefixes are expanded when the config loads, so `$XDG_DATA_HOME/...` in config becomes an absolute path at load time. This keeps configs portable across machines.
 
-**The shipped example.** Attend ships one external sensor at `tools/attend/examples/xdg-downloads.sh` in the agent-ways repo as a reference implementation. The default user-scope config declares it as `+xdg-downloads:` with `enabled: false`. To actually run it you copy the script to a trusted location you control (the comment in the default config walks through `$XDG_DATA_HOME/attend/sensors/` as the XDG-convention choice), review it, and flip `enabled: true`. The "copy to a trusted path, review, then enable" workflow is intentional — external sensors run arbitrary shell under your user, and you should always audit a sensor's code before letting it run.
+**The shipped example.** Attend ships one external sensor at `tools/attend/examples/xdg-downloads.sh` in the agent-ways repo as a reference implementation. The default user-scope config declares it as `xdg-downloads:` with `enabled: false`. To actually run it you copy the script to a trusted location you control (the comment in the default config walks through `$XDG_DATA_HOME/attend/sensors/` as the XDG-convention choice), review it, and flip `enabled: true`. The "copy to a trusted path, review, then enable" workflow is intentional — external sensors run arbitrary shell under your user, and you should always audit a sensor's code before letting it run.
 
 ### Per-sensor keys
 
@@ -213,8 +216,8 @@ The overlay layers project-scope on top of user-scope. For each setting:
 
 - **Scalar values** (numbers, strings, bools): project-scope replaces user-scope entirely
 - **Sensor blocks**: merge on a per-key basis — a project can override just one sensor's interval without touching the others
-- **Sensor additions** (`+name:`): union — the project can add script sensors the user-scope doesn't know about
-- **Sensor disables** (`-name:`): marks the built-in disabled for this project only
+- **Sensors of your own** (a name with `script:`): union — the project can add script sensors the user-scope doesn't know about
+- **Sensor disables** (`enabled: false`): the sensor is off for this project only
 
 Example. User-scope:
 
@@ -231,8 +234,9 @@ Project-scope at `<repo>/.claude/attend.yaml`:
 sensors:
   git:
     interval: 60         # slow down git polling in this repo only
-  -processes:            # don't run the process sensor here
-  +build-watcher:
+  processes:
+    enabled: false       # don't run the process sensor here
+  build-watcher:
     script: .claude/sensors/build-watcher.sh
     interval: 20
 ```
@@ -256,30 +260,21 @@ Attend Permissions Audit
   git            Bash(git:*)        ✓ granted
   peers          Read               ✓ granted
   processes      Bash(ps:*)         ✓ granted
-  +build-watcher Bash(cargo:*)      ✗ MISSING
+  build-watcher  Bash(cargo:*)      ✗ MISSING
 ```
 
 Use this to confirm your config will actually work before launching attend — a sensor that requires a permission you haven't granted will silently emit nothing.
 
-## Parser notes
+## The schema
 
-Attend's YAML parser is deliberately minimal — it's a hand-written subset that handles the specific shape described above, with no `serde` dependency. It supports:
+The files are YAML, read by `serde_yaml` and checked against attend's schema in the `attend-config` crate. Flow and block lists read the same (`requires: [Bash(gh:*), Read]`, or one `- item` per line). Anchors, block scalars and any other YAML work; a key the schema does not name is a finding.
 
-- Two-level section headers (`governor:`, `engagement:`, `cleanup:`, `sensors:`)
-- Four-space indent for sensor properties
-- Inline arrays (`requires: [Bash(gh:*), Read]`, `watch: [cargo, mix]`)
-- Block-form lists on a new line (`requires:` followed by indented `- item` lines) for `requires:` and `watch:`
-- Comments (`#`) and blank lines (they don't terminate a block-form list)
-- `+name:` and `-name:` sensor prefixes
+Removed with the hand-written parser (ADR-506; the release notes say how to move a file by hand):
 
-It does **not** support:
-
-- Anchors and references (`&`, `*`)
-- Multi-document files (`---`)
-- Block scalars (`|`, `>`)
-- Nested dicts beyond the documented depth
-
-If you need something the parser doesn't handle, either restructure or file an issue. The parser will grow as needed, not speculatively.
+- the `+name:` and `-name:` sensor prefixes: write `name:` with a `script`, and `enabled: false`;
+- the `x-` escape hatch for keys of your own: any key the schema does not name is a finding;
+- `attend config lint --fix` and `--check`: `attend config lint` exits 3 with findings, and `ways settings fix <section>` repairs them;
+- the startup refusal of `burst_window`: it is an unknown key like any other.
 
 ## Related
 

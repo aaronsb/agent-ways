@@ -1,5 +1,6 @@
-//! The registry as the screens' tree: one tab per root of the dotted names
-//! (`ways`, `matching`, `gate`, `install`), each key a row with its value,
+//! The registry as the screens' tree: a tab per root of ways' dotted names
+//! (`ways`, `matching`, `gate`, `install`) and two for attend's (`attend`,
+//! and `sensors` for `attend.sensors`), each key a row with its value,
 //! the layer and file it resolves from, the file a change writes, and the
 //! lint findings of its file. Keys the TUI cannot set (read-only, secret)
 //! carry the action commands that change them.
@@ -15,8 +16,42 @@ use serde_yaml::Value;
 use super::super::{help_text, layer_label, plain, target_file};
 use super::Ways;
 
-/// The settings tabs, in order; the theme tab follows them.
-pub const TABS: [&str; 4] = ["ways", "matching", "gate", "install"];
+/// A settings tab: its name, the prefix of the keys it shows, and the
+/// prefixes under that one another tab shows instead.
+#[derive(Debug, Clone, Copy)]
+pub struct Tab {
+    pub name: &'static str,
+    pub prefix: &'static str,
+    pub skip: &'static [&'static str],
+}
+
+impl Tab {
+    const fn root(name: &'static str) -> Tab {
+        Tab { name, prefix: name, skip: &[] }
+    }
+
+    /// Whether a dotted name or section belongs on this tab.
+    pub fn holds(&self, name: &str) -> bool {
+        agent_settings::registry::under(name, self.prefix) && !self.skip.iter().any(|s| agent_settings::registry::under(name, s))
+    }
+}
+
+/// The settings tabs, in order; the theme tab follows them. attend's
+/// settings are two tabs beside ways' (ADR-504 §8): its governor, engagement
+/// and cleanup, and its sensors.
+pub const TABS: [Tab; 6] = [
+    Tab::root("ways"),
+    Tab::root("matching"),
+    Tab::root("gate"),
+    Tab::root("install"),
+    Tab { name: "attend", prefix: "attend", skip: &["attend.sensors"] },
+    Tab { name: "sensors", prefix: "attend.sensors", skip: &[] },
+];
+
+/// The tab named `name`.
+pub fn tab_named(name: &str) -> Option<&'static Tab> {
+    TABS.iter().find(|t| t.name == name)
+}
 
 /// `p` with the home directory as `~` and `/` between parts, as the
 /// screens show paths.
@@ -133,9 +168,10 @@ fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> S
 impl Ways {
     /// The keys of a tab: every concrete key under it, and a toggle for each
     /// way of the corpus on the ways tab.
-    fn keys_of(&self, tab: &str, layers: &[Layer]) -> Vec<Bound> {
-        let mut keys = self.reg.concrete(tab, layers);
-        if tab == "ways" {
+    fn keys_of(&self, tab: &Tab, layers: &[Layer]) -> Vec<Bound> {
+        let mut keys = self.reg.concrete(tab.prefix, layers);
+        keys.retain(|b| tab.holds(&b.name()));
+        if tab.name == "ways" {
             if let Some(b) = self.reg.lookup("ways.project.x") {
                 // The ways a file names and the ways of the corpus, as one
                 // sorted list: the order is the ids', whatever a file holds,
@@ -157,25 +193,32 @@ impl Ways {
         TABS.iter().map(|tab| self.tab(tab, layers)).collect()
     }
 
+    /// The doc of a group: its section's, or for one of attend's sensors, a
+    /// line on that sensor.
     fn section_doc(&self, name: &str) -> String {
+        if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
+            return attend_config::schema::sensor_doc(s);
+        }
         self.reg.section(name).map(|(_, s)| s.doc.to_string()).unwrap_or_default()
     }
 
-    fn tab(&self, tab: &str, layers: &[Layer]) -> Node {
+    fn tab(&self, tab: &Tab, layers: &[Layer]) -> Node {
         let home = &self.ctx.home;
         let broken = broken(layers);
-        let mut root = Node::group(tab, help_text(Some(tab)).unwrap_or_default(), vec![]).opened();
+        let mut root = Node::group(tab.name, help_text(Some(tab.name)).unwrap_or_default(), vec![]).opened();
         let docs = |name: &str| self.section_doc(name);
         let mut files: BTreeSet<&'static str> = BTreeSet::new();
+        // The parts of a name the tab itself stands for.
+        let depth = tab.prefix.split('.').count();
         for b in self.keys_of(tab, layers) {
             files.insert(b.spec.file);
             let segs = segments(&b);
-            let rest = &segs[1..];
+            let rest = &segs[depth.min(segs.len())..];
             if rest.is_empty() {
                 continue;
             }
             if b.spec.name == "install.targets" {
-                insert(&mut root, rest, self.targets(&b, layers), &docs, tab);
+                insert(&mut root, rest, self.targets(&b, layers), &docs, tab.prefix);
                 continue;
             }
             let r = resolve(b.spec, &b.bound, layers);
@@ -211,14 +254,14 @@ impl Ways {
             if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {
                 node = node.with_finding(tilde_text(&f.to_string(), home));
             }
-            insert(&mut root, rest, node, &docs, tab);
+            insert(&mut root, rest, node, &docs, tab.prefix);
         }
         let mut found = self.findings(tab, &files, layers);
         if !found.children.is_empty() {
             found.open = true;
             root.children.insert(0, found);
         }
-        match tab {
+        match tab.name {
             "ways" => {
                 root.actions = vec![Action::new("set up", "guided: pick a project, preview what `ways init` writes there").arg(Arg::Flow("setup".into()))];
             }
@@ -321,13 +364,13 @@ impl Ways {
     /// The findings of the files a tab's keys live in, as rows: those of the
     /// tab's own sections, and those of the whole file (a file that does not
     /// parse, a key no section owns). A section's finding carries `fix`.
-    fn findings(&self, tab: &str, files: &BTreeSet<&'static str>, layers: &[Layer]) -> Node {
+    fn findings(&self, tab: &Tab, files: &BTreeSet<&'static str>, layers: &[Layer]) -> Node {
         let home = &self.ctx.home;
         let mut rows = Vec::new();
         for l in layers.iter().filter(|l| l.present && files.contains(l.file)) {
             for f in &l.findings {
                 let mine = match &f.section {
-                    Some(s) => agent_settings::registry::under(s, tab),
+                    Some(s) => tab.holds(s),
                     None => true,
                 };
                 if !mine {

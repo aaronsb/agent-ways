@@ -29,10 +29,10 @@ pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Ou
 }
 
 pub(super) fn file_label(file: &str) -> &'static str {
-    if file == ways_agent_core::settings::FILE {
-        "agent.yaml"
-    } else {
-        "config.yaml (or a project's .claude/ways.yaml)"
+    match file {
+        f if f == ways_agent_core::settings::FILE => "agent.yaml",
+        f if f == attend_config::FILE => "attend/config.yaml (or a project's .claude/attend.yaml)",
+        _ => "config.yaml (or a project's .claude/ways.yaml)",
     }
 }
 
@@ -90,16 +90,13 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
     }
     let mut by_file: Vec<(PathBuf, Vec<(&'static agent_settings::Schema, &'static agent_settings::SectionSpec)>)> = Vec::new();
     for (schema, sec) in sections {
-        let path = if sec.file == ways_agent_core::settings::FILE {
-            ways_agent_core::profile::user_layer_path()
-        } else if sec.file == ways_core::settings::FILE {
-            match project {
-                Some(_) => ways_core::settings::project_file(&project_dir(project)),
-                None => ways_core::paths::user_config(),
-            }
-        } else {
-            continue;
+        // A section's file: the user's, or with --project the project's. The
+        // agent's sections live in the user file alone, --project or not.
+        let (scope, at) = match sec.file == ways_agent_core::settings::FILE {
+            true => (Scope::User, None),
+            false => (Scope::Both, project),
         };
+        let Some(Ok((path, _))) = file_of(sec.file, scope, at) else { continue };
         match by_file.iter_mut().find(|(p, _)| *p == path) {
             Some((_, list)) => list.push((schema, sec)),
             None => by_file.push((path, vec![(schema, sec)])),
@@ -107,8 +104,8 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
     }
     let mut left = Vec::new();
     for (path, list) in &by_file {
-        let user_file = path == &ways_core::paths::user_config() || path == &ways_agent_core::profile::user_layer_path();
-        let scope = if path.file_name().is_some_and(|n| n == "ways.yaml") { LayerScope::Project } else { LayerScope::User };
+        let user_file = is_user_file(path);
+        let scope = if user_file { LayerScope::User } else { LayerScope::Project };
         let names: Vec<&str> = list.iter().map(|(_, s)| s.name).collect();
         let file = list[0].1.file;
         let schema = list[0].0;

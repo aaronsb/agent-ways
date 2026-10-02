@@ -169,6 +169,56 @@ fn a_change_applied_in_the_screens_writes_the_bytes_set_writes() {
     assert!(tui.read(".config/agent-ways/config.yaml").unwrap().starts_with("# my settings, by hand\nsemantic_fire_probability: 0.5  # tuned\n"));
 }
 
+/// An attend user file with comments, which both writers must keep.
+const ATTEND: &str = "# my attend settings\nengagement:\n  decay_per_minute: 0.1  # tuned\n";
+
+#[test]
+fn an_attend_change_applied_in_the_screens_writes_the_bytes_set_writes() {
+    let (cli, tui) = (Fx::new(), Fx::new());
+    for fx in [&cli, &tui] {
+        fx.file(".config/attend/config.yaml", ATTEND);
+    }
+    for (key, value) in [
+        ("attend.governor.base_cooldown", "30"),
+        ("attend.engagement.decay_per_minute", "0.07"),
+        ("attend.sensors.processes.enabled", "false"),
+    ] {
+        let (_, err, code) = cli.run(&["settings", "set", key, value]);
+        assert_eq!(code, 0, "set {key}: {err}");
+    }
+    // The same three on attend's two tabs, each reviewed and applied.
+    let left = tui.drive(
+        "attend",
+        "/ text:base_cool enter down down enter e ctrl-u text:30 enter \
+         / text:decay_per enter down down enter e ctrl-u text:0.07 enter w a \
+         6 down down down right down enter w a",
+    );
+    assert_eq!(left, "nothing pending\n", "every change applied");
+    let rel = ".config/attend/config.yaml";
+    assert_eq!(tui.read(rel), cli.read(rel), "the screens wrote other bytes than `ways settings set`");
+    assert!(tui.read(rel).unwrap().starts_with("# my attend settings\nengagement:\n  decay_per_minute: 0.07  # tuned\n"));
+    // attend runs on what the screens wrote.
+    let (out, _, _) = tui.run(&["settings", "get", "attend.sensors.processes.enabled"]);
+    assert_eq!(out, "false\n");
+}
+
+#[test]
+fn a_finding_in_an_attend_file_marks_its_row_on_attend_s_tab() {
+    let fx = Fx::new();
+    fx.file(".config/attend/config.yaml", "engagement:\n  burst_window: 900\n");
+    fx.file("proj/.claude/attend.yaml", "sensors:\n  -processes:\n");
+    let f = glyphs(&fx.snap("attend", "down", "120x30", "16"));
+    assert!(f.contains("▾ findings") && f.contains("[attend.engagement] engagement.burst_window: unknown"), "{f}");
+    assert!(f.contains("ways settings fix attend.engagement"), "the finding row queues fix:\n{f}");
+    assert!(!f.contains("-processes"), "a sensor's finding is on the sensors tab:\n{f}");
+    let f = glyphs(&fx.snap("sensors", "down", "160x30", "16"));
+    assert!(f.contains("'-processes' is not a sensor name"), "{f}");
+    // fix, queued from the finding row, repairs the user file.
+    let left = fx.drive("attend", "down a enter y w a");
+    assert_eq!(left, "nothing pending\n");
+    assert_eq!(fx.read(".config/attend/config.yaml").as_deref(), Some(""));
+}
+
 #[test]
 fn the_theme_choice_is_a_settings_key_written_as_set_writes_it() {
     let (cli, tui) = (Fx::new(), Fx::new());
@@ -250,13 +300,13 @@ fn bare_settings_in_a_pipe_prints_list_and_a_tab_needs_a_terminal() {
     assert!(err.contains("need a terminal"), "{err}");
     let (_, err, code) = fx.run(&["settings", "nope", "--snap", "80x25"]);
     assert_eq!(code, 2);
-    assert!(err.contains("no tab nope; the tabs are ways, matching, gate, install, theme"), "{err}");
+    assert!(err.contains("no tab nope; the tabs are ways, matching, gate, install, attend, sensors, theme"), "{err}");
 }
 
 #[test]
 fn the_help_overlay_shows_the_text_settings_help_prints() {
     let fx = Fx::new();
-    for tab in ["ways", "matching", "gate", "install", "theme"] {
+    for tab in ["ways", "matching", "gate", "install", "attend", "sensors", "theme"] {
         let (help, _, code) = fx.run(&["settings", "help", tab]);
         assert_eq!(code, 0);
         let f = glyphs(&fx.snap(tab, "?", "160x60", "16"));
@@ -346,7 +396,7 @@ fn a_key_script_cannot_type_a_secret() {
 // ── golden frames ──────────────────────────────────────────────
 
 /// Each settings tab in browse, edit and review, at 100x30 in the 16-colour
-/// default; the theme tab's edit is its slot editor and its review is the
+/// default, attend's two tabs among them; the theme tab's edit is its slot editor and its review is the
 /// exit guard listing its unsaved edits. Then the minimum size, a chosen
 /// theme in truecolor, and a broken file.
 #[test]
@@ -371,6 +421,12 @@ fn golden_frames() {
         ("theme-edit", "theme", "down down e text:mine enter down down down down down down down down enter", "100x30"),
         ("theme-review", "theme", "down down e text:mine enter q", "100x30"),
         ("matching-80x25", "matching", "down", "80x25"),
+        ("attend-browse", "attend", "down down right", "100x30"),
+        ("attend-edit", "attend", "down down right down down down down e ctrl-u text:900", "100x30"),
+        ("attend-review", "attend", "right down e ctrl-u text:30 enter w", "100x30"),
+        ("sensors-browse", "sensors", "down down down right", "100x30"),
+        ("sensors-edit", "sensors", "down right down down e ctrl-u text:45", "100x30"),
+        ("sensors-review", "sensors", "down down down right down enter w", "100x30"),
     ];
     for (name, tab, keys, size) in shots {
         g.check_text(name, &fx.snap(tab, keys, size, "16"));

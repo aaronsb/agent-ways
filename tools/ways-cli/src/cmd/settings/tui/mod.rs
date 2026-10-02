@@ -154,8 +154,7 @@ impl Ways {
         let text = doc.text();
         let mut layers = live_layers(&self.ctx.project);
         for l in layers.iter_mut().filter(|l| l.path.as_deref() == Some(file)) {
-            let schema = if l.file == ways_agent_core::settings::FILE { &ways_agent_core::settings::SCHEMA } else { &ways_core::settings::SCHEMA };
-            *l = Layer::from_text(schema, &l.name.clone(), l.file, l.scope, Some(file), &text);
+            *l = Layer::from_text(super::schema_of(l.file), &l.name.clone(), l.file, l.scope, Some(file), &text);
         }
         for w in values {
             let Some(b) = self.reg.lookup(&w.store.key) else { continue };
@@ -491,7 +490,7 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone());
     let title = format!(" ways settings — {} ", tilde(&ways.ctx.project, &ways.ctx.home));
-    let mut names: Vec<&str> = TABS.to_vec();
+    let mut names: Vec<&str> = TABS.iter().map(|t| t.name).collect();
     names.push("theme");
     let at = match tab {
         None => 0,

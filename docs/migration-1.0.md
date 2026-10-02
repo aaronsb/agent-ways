@@ -156,6 +156,24 @@ usually unset, so every command spells out its default; run them as written.
 | `ways uninstall` and `claude-ways` | the old cache dir | `ways uninstall` no longer removes `${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways`; `rm -rf` it by hand |
 | `make update` | the retired target | After the stubs go (#717), a `make update` that stops with `No rule to make target 'install'` is an update from an old Makefile: run `ways update` |
 
+### attend's config files
+
+attend's `~/.config/attend/config.yaml` and a project's `.claude/attend.yaml` keep their paths, and are now read through the settings schema (ADR-503, #698) instead of a hand-written parser. The forms below were read before and are not now (ADR-506). Each is a finding that `attend config lint` and `ways settings lint` name by file and line. A section that holds one is ignored in that file, so its keys come from the layers beneath, and each sensor falls back on its own.
+
+| Old form | What happens now | Move it |
+|---|---|---|
+| `sensors:` `-name:` | a finding; the sensor runs | `name:` with `enabled: false` under it |
+| `sensors:` `+name:` | a finding; the sensor does not run | drop the `+`: any name with a `script` is a sensor of your own |
+| `engagement:` `burst_window:` | a finding; `engagement` falls back (attend no longer refuses to start) | delete it, or `ways settings fix attend.engagement` |
+| `signals:`, `cleanup:` `retention:` | a finding; `signals:` changes nothing else, `retention` makes `cleanup` fall back | delete them |
+| an `x-` key | a finding like any key the schema does not name | delete it, or keep the note as a comment |
+| a value of the wrong type or out of range, such as `base_cooldown: abc` or `max_per_window: 0` | a finding; the section falls back (before, a bad value was skipped and its neighbours kept) | set a value in range; `ways settings help <key>` gives it |
+| `attend config lint --fix`, `--check` | not accepted | `attend config lint` exits 3 with findings; `ways settings fix attend.<section>` repairs them |
+| `attend config show`'s table | prints `key=value` lines | parse those, or `ways settings list attend --json` |
+| `attend config init` over an existing file | leaves it as it is | move or delete the file first to get the defaults |
+
+`attend tune --apply` now changes only `absolute_refractory`, `decay_per_minute` and `peer_activity_window`, under the settings writer's lock, and keeps every comment; it no longer writes `burst_threshold: 3` and `step_multiplier: 1.25` over yours.
+
 ## After migrating
 
 Your mental model for developing on and updating agent-ways changes with the layout — the install, your dev checkout, and a sandbox are now three different places. See [development.md](development.md) for the post-1.0 workflow.

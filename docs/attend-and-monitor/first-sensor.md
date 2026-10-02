@@ -56,7 +56,7 @@ Then open `~/.config/attend/config.yaml` and add a block under the `sensors:` se
 
 ```yaml
 sensors:
-  +notes-watch:
+  notes-watch:
     script: $XDG_DATA_HOME/attend/sensors/notes-watch.sh
     enabled: true
     interval: 30
@@ -201,7 +201,7 @@ See `tools/attend/examples/xdg-downloads.sh` for a different take on the same pa
 Go back to the config block:
 
 ```yaml
-  +notes-watch:
+  notes-watch:
     script: $XDG_DATA_HOME/attend/sensors/notes-watch.sh
     enabled: true
     interval: 30
@@ -228,7 +228,7 @@ You already did the install. For completeness, here's the deploy checklist:
 3. **Config block is in `~/.config/attend/config.yaml`** (user scope) or `<project>/.claude/attend.yaml` (project scope — overlays on top of user-scope). See [`configuration.md`](configuration.md) for the overlay semantics.
 4. **`enabled: true`.** The shipped examples ship disabled so you read them before turning them on; your own sensor can start enabled.
 5. **Restart attend.** Stop the running Monitor task, start a new one. Config changes need a fresh process; binary changes get picked up automatically via self-reload.
-6. **Watch the startup banner.** The first notification after attend restarts lists the active sensors. If your sensor isn't in the list, the config didn't parse — check indentation and re-read [`configuration.md`](configuration.md) § "Parser notes".
+6. **Watch the startup banner.** The first notification after attend restarts lists the active sensors. If your sensor isn't in the list, run `attend config lint`: it names the file, line and key of each finding. See [`configuration.md`](configuration.md) § "The schema".
 
 ## What you just learned
 

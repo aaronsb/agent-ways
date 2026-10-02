@@ -320,7 +320,10 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
         fx.file(&format!("corpus/{id}/{name}.md"), &format!("---\ndescription: {name}\n---\n"));
     }
     let r = roots(&fx);
-    assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install"]);
+    assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install", "attend", "sensors"]);
+    // attend's tabs: its sections, and a group per sensor on the next one.
+    assert_eq!(r[4].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["governor", "engagement", "cleanup"]);
+    assert_eq!(r[5].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), attend_config::BUILTINS);
     let project = r[0].children.iter().find(|n| n.name == "project").expect("the per-way toggles");
     let one = &project.children.iter().find(|n| n.name == "a").unwrap().children[0];
     assert_eq!(one.name, "one");
