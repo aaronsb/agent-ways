@@ -267,10 +267,6 @@ pub(crate) fn capture_show_check(
     crate::cmd::show::check_within(id, session_id, trigger, score, budget).unwrap_or_default()
 }
 
-// ── Path helpers ───────────────────────────────────────────────
-
-pub(crate) use crate::util::home_dir;
-
 #[cfg(test)]
 mod tests {
     use super::{multilingual_enabled, parse_match_rows, sibling_corpus};

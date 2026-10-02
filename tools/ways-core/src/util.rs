@@ -60,22 +60,15 @@ pub fn encode_project_key(path: &Path) -> String {
         .collect()
 }
 
-/// Home directory from $HOME (or USERPROFILE on Windows), falling back to /tmp.
+/// Home directory, separator-normalised: [`claude_sessions::home_dir`]
+/// (USERPROFILE first on Windows, else $HOME, else /tmp; an empty value is
+/// unset), with its components rebuilt by [`normalize_path_sep`].
 ///
 /// On Windows, $HOME is often set by Git Bash to a Unix-style path like /c/Users/name,
 /// which Rust's PathBuf treats as root-relative (\c\Users\name) rather than C:\Users\name.
-/// USERPROFILE is always the correct Windows absolute path, so we prefer it on Windows.
+/// USERPROFILE is always the correct Windows absolute path, so it comes first there.
 pub fn home_dir() -> PathBuf {
-    let p = {
-        #[cfg(windows)]
-        if let Ok(profile) = std::env::var("USERPROFILE") {
-            return normalize_path_sep(&PathBuf::from(profile));
-        }
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp"))
-    };
-    normalize_path_sep(&p)
+    normalize_path_sep(&claude_sessions::home_dir())
 }
 
 /// `CLAUDE_PROJECT_DIR` when it is set and not empty. The one read of that

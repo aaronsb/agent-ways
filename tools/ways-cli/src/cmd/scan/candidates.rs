@@ -314,7 +314,7 @@ pub(crate) fn check_when(
     }
 
     if let Some(ref wp) = when_project {
-        let expanded = wp.replace("~", &super::scoring::home_dir().display().to_string());
+        let expanded = wp.replace("~", &crate::util::home_dir().display().to_string());
         let resolved = std::fs::canonicalize(&expanded)
             .unwrap_or_else(|_| PathBuf::from(&expanded));
         let current = std::fs::canonicalize(project_dir)

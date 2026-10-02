@@ -59,7 +59,7 @@ struct Plan {
 /// `~/.local/bin`, the Makefile `$XDG_BIN_HOME` when set.
 fn bin_dirs(home: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![home.join(".local/bin")];
-    if let Some(x) = std::env::var_os("XDG_BIN_HOME").map(PathBuf::from).filter(|p| p.is_absolute()) {
+    if let Some(x) = crate::paths::xdg_dir("XDG_BIN_HOME") {
         if !dirs.contains(&x) {
             dirs.push(x);
         }

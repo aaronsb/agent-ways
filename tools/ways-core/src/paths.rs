@@ -35,16 +35,19 @@ const APP: &str = "agent-ways";
 // private copy into this module.
 // ---------------------------------------------------------------------------
 
-/// Resolve an `$XDG_*` base, treating an empty or relative value as unset.
+/// An `$XDG_*` directory variable, treating an empty or relative value as
+/// unset. The one guard every `$XDG_*` read goes through.
 ///
 /// The spec says relative `$XDG_*` values must be ignored. This matters here
 /// because these roots now drive a destructive relocate — a stray empty env var
 /// must never resolve a root to the current directory.
+pub fn xdg_dir(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
+/// Resolve an `$XDG_*` base through [`xdg_dir`], else `fallback`.
 fn xdg_base(var: &str, fallback: impl Fn() -> PathBuf) -> PathBuf {
-    match std::env::var(var) {
-        Ok(v) if !v.is_empty() && Path::new(&v).is_absolute() => PathBuf::from(v),
-        _ => fallback(),
-    }
+    xdg_dir(var).unwrap_or_else(fallback)
 }
 
 /// XDG data base ($XDG_DATA_HOME or ~/.local/share).

@@ -20,6 +20,14 @@ pub use engagement::{
 
 // ── Session directory ──────────────────────────────────────────
 
+/// `$XDG_RUNTIME_DIR/claude-sessions`, or `None` when the variable is unset or
+/// empty: the `[[ -n "${XDG_RUNTIME_DIR:-}" ]]` test of `sessions-root.sh`.
+/// Not the absolute-path guard of `paths::xdg_dir`, which the shell twin does
+/// not apply (a Windows `C:\…` value would split the two).
+fn runtime_sessions_root(xdg: Option<String>) -> Option<String> {
+    xdg.filter(|x| !x.is_empty()).map(|x| format!("{x}/claude-sessions"))
+}
+
 /// Per-user sessions root.
 ///
 /// Resolution order — **must stay identical to `hooks/ways/sessions-root.sh`**.
@@ -33,8 +41,8 @@ pub use engagement::{
 ///   3. `/tmp/.claude-sessions-{uid}`                 (other Unix)
 pub fn sessions_root() -> String {
     // 1. XDG_RUNTIME_DIR (already per-user, no UID needed) — wins on any platform.
-    if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
-        return format!("{xdg}/claude-sessions");
+    if let Some(root) = runtime_sessions_root(std::env::var("XDG_RUNTIME_DIR").ok()) {
+        return root;
     }
 
     // 2. Windows: per-user LOCALAPPDATA base (matches sessions-root.sh).
@@ -717,6 +725,15 @@ fn read_u64_path(path: &Path) -> u64 {
 #[cfg(test)]
 mod token_position_tests {
     use super::*;
+
+    /// An empty XDG_RUNTIME_DIR is unset, as in sessions-root.sh. The binary
+    /// used to resolve it to `/claude-sessions` while the hooks used /tmp.
+    #[test]
+    fn empty_runtime_dir_is_unset_like_the_shell_twin() {
+        assert_eq!(runtime_sessions_root(None), None);
+        assert_eq!(runtime_sessions_root(Some(String::new())), None);
+        assert_eq!(runtime_sessions_root(Some("/run/user/1".into())).as_deref(), Some("/run/user/1/claude-sessions"));
+    }
 
     #[test]
     fn non_ascii_project_paths_find_their_transcript() {
