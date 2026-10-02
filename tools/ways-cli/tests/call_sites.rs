@@ -257,7 +257,7 @@ fn ways_help(args: &[&str]) -> (bool, String) {
 /// Groups that open a screen when run bare on a terminal (ADR-507 §7, note
 /// of 2026-10-02). Their usage line reads `[COMMAND]`, but in a script, as a
 /// call site is, they still need a verb: bare in a pipe they exit 2.
-const SCREEN_GROUPS: &[&str] = &["session"];
+const SCREEN_GROUPS: &[&str] = &["session", "target"];
 
 #[test]
 fn every_ways_call_site_names_a_command_the_cli_accepts() {

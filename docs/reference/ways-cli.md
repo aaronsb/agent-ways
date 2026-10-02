@@ -480,7 +480,7 @@ ways reconcile --quiet               # suppress the summary line
 
 **Run from:** Anywhere. Keys under `ways.project` write the project's `.claude/ways.yaml`; the project is `CLAUDE_PROJECT_DIR`, else the working directory, or `--project <dir>`.
 
-**Tells you:** `list` prints `key=value` lines in effect; `list --json` prints a fragment keyed by the file each key lives in, and `--effective` adds the defaults. `set` and `unset` print nothing on success. Alone on a terminal, `ways settings` opens the settings screens.
+**Tells you:** `list` prints `key=value` lines in effect; `list --json` prints a fragment keyed by the file each key lives in, and `--effective` adds the defaults. `set` and `unset` print nothing on success. Alone on a terminal, `ways settings` opens the settings screens; so do a bare `ways target`, on the install tab, and a bare `ways agent`, on the gate tab. In a pipe, `ways target` prints its help and exits 2, and `ways agent` prints `ways-agent`'s.
 
 ```
 ways settings list                                   # every key in effect

@@ -61,15 +61,18 @@ enum Commands {
         action: Option<SettingsCommand>,
     },
     /// Claude Code config directories agent-ways is active in (ADR-184)
-    #[command(arg_required_else_help = true)]
+    ///
+    /// Run bare on a terminal, it opens the settings screens on their install
+    /// tab; in a pipe, it prints this help.
     Target {
         #[command(subcommand)]
-        action: TargetCommand,
+        action: Option<TargetCommand>,
     },
     /// The ways agent: keys, models and the daemon (ADR-502)
     ///
     /// Runs `ways-agent`; `ways agent --help` lists its commands. The engine,
-    /// model and mode are settings: `ways settings list gate` (ADR-507).
+    /// model and mode are settings: `ways settings list gate` (ADR-507). Run
+    /// bare on a terminal, it opens the settings screens on their gate tab.
     #[command(disable_help_flag = true)]
     Agent {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -924,6 +927,33 @@ fn main() -> Result<()> {
     }
 }
 
+/// Whether stdin and stdout are both a terminal: a screen needs one to draw
+/// on and one to read keys from.
+fn on_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
+}
+
+/// A group run with no verb: its screen on a terminal; in a pipe its help on
+/// stderr and exit 2, as a group that needs a verb (ADR-507 §7, notes of
+/// 2026-10-02). The long help, unlike clap's short one for a missing verb,
+/// carries the line saying a bare run on a terminal opens the screen.
+fn bare_group(group: &str, screen: impl FnOnce() -> Result<()>) -> Result<()> {
+    use clap::CommandFactory;
+    if on_terminal() {
+        return screen();
+    }
+    let help = Cli::command().try_get_matches_from(["ways", group, "--help"]).expect_err("--help ends parsing");
+    eprint!("{}", help.render());
+    std::process::exit(2);
+}
+
+/// The settings screens on `tab`, as `ways settings <tab>` opens them.
+fn settings_screen(tab: &str) -> Result<()> {
+    let open = cmd::settings::tui::Open { tab: Some(tab.into()), ..Default::default() };
+    cmd::settings::exit_with(cmd::settings::tui::open(&open))
+}
+
 fn run() -> Result<()> {
     // A bare `ways` prints help, with the banner only on a terminal
     // (ADR-507 §7). `--help` and `help` are clap's and carry no banner. The
@@ -1061,7 +1091,8 @@ fn run() -> Result<()> {
                 Some(SettingsCommand::Fix { section, project }) => st::fix(&section, project.as_deref()),
             })
         }
-        Commands::Target { action } => match action {
+        Commands::Target { action: None } => bare_group("target", || settings_screen("install")),
+        Commands::Target { action: Some(action) } => match action {
             TargetCommand::List { json } => cmd::target::list(json),
             TargetCommand::Plan { dir, json } => cmd::target::plan(&dir, json),
             TargetCommand::Add { dir, force, dry_run, json } => cmd::target::add(&dir, force, dry_run, json),
@@ -1070,18 +1101,7 @@ fn run() -> Result<()> {
             TargetCommand::Remove { dir } => cmd::target::remove(&dir),
         },
         Commands::Session { action: None } => {
-            // A bare group opens its screen on a terminal and keeps its help
-            // and exit 2 in a pipe (ADR-507 §7, note of 2026-10-02). The long
-            // help, unlike the other groups' short one, carries the line that
-            // says a bare run on a terminal opens the screen.
-            use std::io::IsTerminal;
-            if std::io::stdout().is_terminal() && std::io::stdin().is_terminal() {
-                cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default())
-            } else {
-                let help = Cli::command().try_get_matches_from(["ways", "session", "--help"]).expect_err("--help ends parsing");
-                eprint!("{}", help.render());
-                std::process::exit(2);
-            }
+            bare_group("session", || cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default()))
         }
         Commands::Session { action: Some(action) } => match action {
             SessionCommand::Ways { session, sort, json, matched } => cmd::list::run(session.as_deref(), &sort, json, matched),
@@ -1142,6 +1162,9 @@ fn run() -> Result<()> {
             Ok(())
         }
         Commands::Hook { event } => cmd::hook::run(event),
+        // `ways-agent` prints its own help in a pipe, so only the terminal
+        // case is ways' to handle.
+        Commands::Agent { args } if args.is_empty() && on_terminal() => settings_screen("gate"),
         Commands::Agent { args } => cmd::agent::run(&args),
         Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
         Commands::JudgeSetup => cmd::judge::setup(),
