@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Fixture for the tui-harness integration test: print coloured text, wait
 # for one key, then report it and hold the pane open.
 printf '\033[1;31mRED\033[0m plain \033[44m    \033[0m\n'

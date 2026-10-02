@@ -27,7 +27,11 @@ fn drives_fixture_through_tmux() {
         ..LaunchOptions::default()
     };
     let session = harness
-        .launch(&name, &opts, &["sh".into(), fixture.display().to_string()])
+        .launch(
+            &name,
+            &opts,
+            &["bash".into(), fixture.display().to_string()],
+        )
         .expect("launch");
 
     let result = std::panic::catch_unwind(|| {
