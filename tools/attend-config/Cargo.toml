@@ -1,0 +1,10 @@
+[package]
+name = "attend-config"
+version = "0.1.0"
+edition = "2021"
+description = "Typed settings schema for attend, split from the attend binary"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "attend_config"
+path = "src/lib.rs"

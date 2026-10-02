@@ -1,0 +1,10 @@
+[package]
+name = "agent-settings"
+version = "0.1.0"
+edition = "2021"
+description = "Settings registry machinery for agent-ways: layered loading, lint, emit and writer"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "agent_settings"
+path = "src/lib.rs"
