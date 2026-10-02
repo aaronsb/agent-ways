@@ -242,4 +242,4 @@ Since #738, `ways session` is the first group the note above covers: bare on a t
 
 ## Note (2026-10-02): `target` and `agent` open the settings screens bare
 
-On a terminal, a bare `ways target` opens the settings screens on their install tab, and a bare `ways agent` on their gate tab, where the settings and actions those groups change already live (#748). In a pipe `target` prints its help and exits 2, and `agent` passes on to `ways-agent`, which prints its own. `target` joins `session` in the call-site check's list of groups a script must still give a verb.
+On a terminal, a bare `ways target` opens the settings screens on their install tab, and a bare `ways agent` on their gate tab, where the settings and actions those groups change already live (#748). In a pipe `target` prints its help and exits 2, and `agent` passes on to `ways-agent`, which prints its own. `target` joins `session` in the call-site check's list of groups a script must still give a verb. A bare `ways projects` opens the projects screen on a terminal and keeps item 7's `list` default in a pipe; `list`, `search` and `show` gained `--json`, the commands its borders name.

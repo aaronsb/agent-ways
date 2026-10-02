@@ -39,12 +39,18 @@ pub enum ProjectsCommand {
         /// Also search transcript content (slower)
         #[arg(long)]
         deep: bool,
+        /// Machine-readable JSON output: every match, best first
+        #[arg(long)]
+        json: bool,
     },
     /// Show one project in detail
     #[command(visible_alias = "info")]
     Show {
         /// Project path or name fragment
         project: String,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
     },
     /// Aggregate statistics
     Stats,
@@ -79,6 +85,9 @@ pub struct ListArgs {
     /// Show clickable file:// URLs
     #[arg(long)]
     urls: bool,
+    /// Machine-readable JSON output
+    #[arg(long)]
+    json: bool,
 }
 
 /// Where the commands read and write: Claude Code's config dir and
@@ -146,8 +155,8 @@ pub fn dispatch(
 ) -> Result<bool> {
     match command.unwrap_or(ProjectsCommand::List(ListArgs::default())) {
         ProjectsCommand::List(args) => list(env, &args, out)?,
-        ProjectsCommand::Search { query, deep } => search(env, &query, deep, out)?,
-        ProjectsCommand::Show { project } => show(env, &project, out)?,
+        ProjectsCommand::Search { query, deep, json } => search(env, &query, deep, json, out)?,
+        ProjectsCommand::Show { project, json } => show(env, &project, json, out)?,
         ProjectsCommand::Stats => stats(env, out)?,
         ProjectsCommand::Cleanup { dry_run } => cleanup(env, dry_run, out, confirm)?,
         ProjectsCommand::Hygiene { dry_run } => hygiene(env, dry_run, out, confirm)?,
@@ -182,6 +191,41 @@ struct Project {
 impl Project {
     fn is_empty(&self) -> bool {
         self.sessions == 0 && self.transcripts == 0
+    }
+
+    /// The project as `list --json` gives it; `show --json` adds its
+    /// sessions with `sessions` set.
+    fn json(&self, sessions: bool) -> Value {
+        let date = |e: Option<u64>| e.map(fmt_date);
+        let mut v = serde_json::json!({
+            "path": self.path,
+            "dir": self.dirname,
+            "sessions": self.sessions,
+            "transcripts": self.transcripts,
+            "transcript_bytes": self.transcript_bytes,
+            "memory_files": self.memory_files,
+            "first_active": date(self.first_active),
+            "last_active": date(self.last_active),
+            "last_branch": self.last_branch,
+            "last_summary": self.last_summary,
+            "recent_prompts": self.recent_prompts,
+        });
+        if sessions {
+            v["session_list"] = self
+                .entries
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "modified": str_field(e, "modified"),
+                        "messages": e.get("messageCount"),
+                        "branch": str_field(e, "gitBranch"),
+                        "sidechain": e.get("isSidechain").and_then(Value::as_bool).unwrap_or(false),
+                        "summary": str_field(e, "summary"),
+                    })
+                })
+                .collect();
+        }
+        v
     }
 }
 
@@ -386,6 +430,11 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
             }
         })
         .collect();
+    if args.json {
+        let all: Vec<Value> = projects.iter().map(|p| p.json(false)).collect();
+        writeln!(out, "{}", serde_json::to_string_pretty(&all)?)?;
+        return Ok(());
+    }
     if projects.is_empty() {
         writeln!(out, "No matching projects found.")?;
         return Ok(());
@@ -412,7 +461,7 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()> {
+fn search(env: &Env, query: &str, deep: bool, json: bool, out: &mut dyn Write) -> Result<()> {
     let q = query.to_lowercase();
     let mut matches: Vec<(u32, Project, Vec<String>)> = Vec::new();
 
@@ -430,6 +479,19 @@ fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()>
 
     // Stable: equal scores keep the most-recent-first order.
     matches.sort_by_key(|m| std::cmp::Reverse(m.0));
+    if json {
+        let all: Vec<Value> = matches
+            .iter()
+            .map(|(score, p, snippets)| {
+                let mut v = p.json(false);
+                v["score"] = (*score).into();
+                v["snippets"] = snippets.clone().into();
+                v
+            })
+            .collect();
+        writeln!(out, "{}", serde_json::to_string_pretty(&all)?)?;
+        return Ok(());
+    }
     if matches.is_empty() {
         let hint = if deep { "" } else { " (try --deep to search transcript content)" };
         writeln!(out, "No projects matching '{query}'{hint}")?;
@@ -523,17 +585,28 @@ fn deep_search(dir: &Path, q: &str) -> (u32, Option<String>) {
     (hits, snippet)
 }
 
-fn show(env: &Env, query: &str, out: &mut dyn Write) -> Result<()> {
+fn show(env: &Env, query: &str, json: bool, out: &mut dyn Write) -> Result<()> {
+    // The query's best match, most recently active first at each step: the
+    // project whose path or directory is the query, then the one it names
+    // (its last path component), then the first whose path contains it.
     let q = query.to_lowercase();
-    let Some(p) = scan_all(env)
-        .into_iter()
-        .find(|p| p.path.to_lowercase().contains(&q) || p.dirname.to_lowercase().contains(&q))
-    else {
+    let all = scan_all(env);
+    let name = |p: &Project| p.path.rsplit(['/', '\\']).next().unwrap_or("").to_lowercase();
+    let found = all
+        .iter()
+        .find(|p| p.path.to_lowercase() == q || p.dirname.to_lowercase() == q)
+        .or_else(|| all.iter().find(|p| name(p) == q))
+        .or_else(|| all.iter().find(|p| p.path.to_lowercase().contains(&q) || p.dirname.to_lowercase().contains(&q)));
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(&found.map(|p| p.json(true)))?)?;
+        return Ok(());
+    }
+    let Some(p) = found else {
         writeln!(out, "No project matching '{query}'")?;
         return Ok(());
     };
     out.write_all(b"\n")?;
-    show_project(env, &p, out)
+    show_project(env, p, out)
 }
 
 /// What `show` prints for one project, after its leading blank line.

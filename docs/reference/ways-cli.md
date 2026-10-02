@@ -546,13 +546,15 @@ ways author permissions --global
 
 **Run from:** Anywhere. It reads Claude Code's `~/.claude/projects`, never your project directories.
 
+**Bare:** on a terminal, `ways projects` opens the projects screen: the projects as `list` shows them, the selected one as `show` prints it, and `/` to filter as `search` matches. In a pipe it runs `list`.
+
 **Tells you:** Depends on subcommand. `cleanup` and `hygiene` list what they would remove, ask first, and move it to a `.trash-<stamp>` dir under `~/.claude/projects` rather than deleting it; `--dry-run` only lists. `relocate` prints a plan and changes nothing unless given `--execute`. It refuses while a session is running in the project, and a rerun after a failed step resumes from where it stopped.
 
 | Subcommand | What it shows or does |
 |------------|-----------------------|
-| `list` (default) | Projects, most recently active first; `--active`, `--memory`, `--stale` filter, `--urls` prints `file://` links |
-| `search <query>` | Projects whose path, session summaries or first prompts match; `--deep` also searches transcript text |
-| `show <fragment>` | One project: dates, branch, transcripts, memory, recent sessions |
+| `list` (default) | Projects, most recently active first; `--active`, `--memory`, `--stale` filter, `--urls` prints `file://` links, `--json` prints them as data |
+| `search <query>` | Projects whose path, session summaries or first prompts match; `--deep` also searches transcript text; `--json` prints every match, best first, with its score |
+| `show <fragment>` | One project: dates, branch, transcripts, memory, recent sessions. The fragment matches an exact path first, then a project's name (its last path component), then the first path containing it; `--json` prints the project with its indexed sessions, or `null` |
 | `stats` | Totals and the projects using the most disk and holding the most sessions |
 | `cleanup` | Moves project entries with no sessions and no transcripts to a `.trash-<stamp>` dir; skips entries modified in the last 5 minutes |
 | `hygiene` | Large transcripts, and empty session dirs, which it moves to a `.trash-<stamp>` dir |

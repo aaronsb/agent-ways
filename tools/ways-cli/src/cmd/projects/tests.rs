@@ -164,21 +164,21 @@ fn list_on_an_empty_projects_dir() {
 #[test]
 fn search_scores_paths_and_summaries() {
     let f = populated("search");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "parser".into(), deep: false });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "parser".into(), deep: false, json: false });
     assert!(out.contains("Search: parser  (1 matches)"), "{out}");
     assert!(out.contains("file:///srv/legacy") && out.contains("› Port the parser"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "app_one".into(), deep: false });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "app_one".into(), deep: false, json: false });
     assert!(out.contains("file:///srv/app_one") && out.contains("2t · today"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "hello".into(), deep: false });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "hello".into(), deep: false, json: false });
     assert!(out.contains("try --deep"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "HELLO from".into(), deep: true });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "HELLO from".into(), deep: true, json: false });
     assert!(out.contains("Deep search") && out.contains("file:///srv/app_one"), "{out}");
 }
 
 #[test]
 fn show_prints_index_sessions() {
     let f = populated("show");
-    let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into() });
+    let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into(), json: false });
     assert!(out.contains("Dir: -srv-legacy"), "{out}");
     assert!(out.contains("First session: 2026-07-01"), "{out}");
     assert!(out.contains("Last active:  2026-08-20 (1mo)"), "{out}");
@@ -186,9 +186,9 @@ fn show_prints_index_sessions() {
     assert!(out.contains("Sessions:     2"), "{out}");
     assert!(out.contains("Memory:       no"), "{out}");
     assert!(out.contains("2026-07-02    3 msgs  main                 ⑂"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Show { project: "app".into() });
+    let (_, out) = f.run(ProjectsCommand::Show { project: "app".into(), json: false });
     assert!(out.contains("Memory:       yes (1 files)"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Show { project: "nothing".into() });
+    let (_, out) = f.run(ProjectsCommand::Show { project: "nothing".into(), json: false });
     assert_eq!(out, "No project matching 'nothing'\n");
 }
 
@@ -598,8 +598,8 @@ fn screen_filters_as_search_matches_and_esc_clears() {
     assert!(press(&mut s, &[KeyCode::Backspace, KeyCode::Backspace]));
     // A session summary matches, as `search` matches it.
     let out = shows(&mut s);
-    assert!(out.contains(" ways projects search port the ") && out.contains("1/1"), "{out}");
-    assert!(out.contains(" ways projects show /srv/legacy "), "{out}");
+    assert!(out.contains(" ways projects search 'port the' --json ") && out.contains("1/1"), "{out}");
+    assert!(out.contains(" ways projects show /srv/legacy --json "), "{out}");
     // Enter keeps the filter; Esc then clears it, the selection kept.
     assert!(press(&mut s, &[KeyCode::Enter, KeyCode::Esc]));
     let out = shows(&mut s);
@@ -618,4 +618,47 @@ fn screen_q_and_esc_quit() {
     assert!(!press(&mut screen(&f), &[KeyCode::Esc]), "Esc with no filter ends the screen");
     let mut s = screen(&f);
     assert!(!s.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+}
+
+/// `list --json` gives each project as data, most recently active first.
+#[test]
+fn list_json_gives_the_projects_as_data() {
+    let f = populated("list-json");
+    let (_, out) = f.run(ProjectsCommand::List(ListArgs { json: true, ..ListArgs::default() }));
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let paths: Vec<&str> = v.as_array().unwrap().iter().map(|p| p["path"].as_str().unwrap()).collect();
+    assert_eq!(paths[..2], ["/srv/app_one", "/srv/legacy"], "{out}");
+    let app = &v[0];
+    assert_eq!((app["transcripts"].as_u64(), app["memory_files"].as_u64()), (Some(2), Some(1)), "{app}");
+}
+
+/// `show` takes the exact path first, then the project the query names,
+/// then the first path containing it; `--json` adds the indexed sessions.
+#[test]
+fn show_takes_an_exact_path_before_a_newer_one_containing_it() {
+    let f = populated("show-exact");
+    f.transcript("/srv/app", "a1", "/srv/app", NOW - 30 * 86_400);
+    let path = |q: &str| {
+        let (_, out) = f.run(ProjectsCommand::Show { project: q.into(), json: true });
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["path"].as_str().map(str::to_string)
+    };
+    assert_eq!(path("/srv/app").as_deref(), Some("/srv/app"), "exact, though /srv/app_one is newer");
+    assert_eq!(path("legacy").as_deref(), Some("/srv/legacy"), "by name");
+    assert_eq!(path("app_o").as_deref(), Some("/srv/app_one"), "by containment");
+    assert_eq!(path("nothing-here"), None);
+    let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into(), json: true });
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["session_list"][0]["summary"], "Port the parser");
+    assert_eq!(v["session_list"][1]["sidechain"], true);
+}
+
+/// `search --json` lists every match, best first, with its score and
+/// snippets.
+#[test]
+fn search_json_lists_the_matches_with_their_scores() {
+    let f = populated("search-json");
+    let (_, out) = f.run(ProjectsCommand::Search { query: "parser".into(), deep: false, json: true });
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v[0]["path"], "/srv/legacy", "{out}");
+    assert!(v[0]["score"].as_u64().unwrap() > 0 && !v[0]["snippets"].as_array().unwrap().is_empty(), "{out}");
 }

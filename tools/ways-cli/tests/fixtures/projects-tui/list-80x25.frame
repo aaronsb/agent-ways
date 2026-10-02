@@ -1,12 +1,12 @@
 agent-tui frame 80x25
 | projects                                                                       |
-|┌ ways projects list ──────────────────────────────────────────────────────────┐|
+|┌ ways projects list --json ───────────────────────────────────────────────────┐|
 |│ Project                                        Sessions   Size    Last Memory│|
 |│ /srv/app_one                                         2t   212B   today      ●│|
 |│▌/srv/legacy                                           2   104B     1mo      ·│|
 |│ -srv-gone                                             –      –       –      ·│|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-|┌ ways projects show /srv/legacy ──────────────────────────────────────────────┐|
+|┌ ways projects show /srv/legacy --json ───────────────────────────────────────┐|
 |│file:///srv/legacy                                                            │|
 |│  Dir: -srv-legacy                                                            │|
 |│                                                                              │|
@@ -27,8 +27,8 @@ agent-tui frame 80x25
 styles
   0   0-9   White Blue -
   1   0-0   - - DIM
-  1   1-20  Blue - BOLD|DIM
-  1  21-79  - - DIM
+  1   1-27  Blue - BOLD|DIM
+  1  28-79  - - DIM
   2   0-0   - - DIM
   2   1-78  - - BOLD
   2  79-79  - - DIM
@@ -42,8 +42,8 @@ styles
   5  79-79  - - DIM
   6   0-79  - - DIM
   7   0-0   - - DIM
-  7   1-32  Blue - BOLD|DIM
-  7  33-79  - - DIM
+  7   1-39  Blue - BOLD|DIM
+  7  40-79  - - DIM
   8   0-0   - - DIM
   8   1-18  Cyan - -
   8  79-79  - - DIM

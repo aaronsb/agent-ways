@@ -1,10 +1,10 @@
 agent-tui frame 80x25
 | projects   / parser                                                            |
-|┌ ways projects search parser ─────────────────────────────────────────────────┐|
+|┌ ways projects search parser --json ──────────────────────────────────────────┐|
 |│ Project                                        Sessions   Size    Last Memory│|
 |│▌/srv/legacy                                           2   104B     1mo      ·│|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-|┌ ways projects show /srv/legacy ──────────────────────────────────────────────┐|
+|┌ ways projects show /srv/legacy --json ───────────────────────────────────────┐|
 |│file:///srv/legacy                                                            │|
 |│  Dir: -srv-legacy                                                            │|
 |│                                                                              │|
@@ -29,8 +29,8 @@ styles
   0  10-13  Cyan - -
   0  20-20  - - REVERSED
   1   0-0   - - DIM
-  1   1-29  Blue - BOLD|DIM
-  1  30-79  - - DIM
+  1   1-36  Blue - BOLD|DIM
+  1  37-79  - - DIM
   2   0-0   - - DIM
   2   1-78  - - BOLD
   2  79-79  - - DIM
@@ -40,8 +40,8 @@ styles
   3  79-79  - - DIM
   4   0-79  - - DIM
   5   0-0   - - DIM
-  5   1-32  Blue - BOLD|DIM
-  5  33-79  - - DIM
+  5   1-39  Blue - BOLD|DIM
+  5  40-79  - - DIM
   6   0-0   - - DIM
   6   1-18  Cyan - -
   6  79-79  - - DIM

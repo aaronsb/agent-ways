@@ -81,7 +81,8 @@ enum Commands {
     /// Claude Code's projects and their session history (ADR-504)
     ///
     /// Claude Code's projects: list, search, show, stats, cleanup, hygiene and
-    /// relocate (ADR-504). With no subcommand, lists them.
+    /// relocate (ADR-504). With no subcommand, it opens the projects screen on
+    /// a terminal and lists them in a pipe.
     Projects {
         #[command(subcommand)]
         command: Option<cmd::projects::ProjectsCommand>,
@@ -1155,6 +1156,8 @@ fn run() -> Result<()> {
             println!("{}", paths::events_log().display());
             Ok(())
         }
+        // Bare on a terminal, the projects screen; in a pipe, `list`.
+        Commands::Projects { command: None } if on_terminal() => cmd::projects::screen::open(&cmd::introspect::Open::default()),
         Commands::Projects { command } => cmd::projects::run(command),
         Commands::ProjectSlug { path } => {
             let project = path.unwrap_or_else(util::project_dir);

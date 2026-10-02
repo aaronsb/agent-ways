@@ -19,8 +19,6 @@ use super::{ellipsize_left, list_cells, scan_all, shallow_match, show_project, E
 use crate::cmd::introspect::{self, pane, Open};
 
 /// Open the screen on the terminal, or headless as `open` asks.
-// Unused until main.rs opens it for a bare `ways projects` on a terminal.
-#[allow(dead_code)]
 pub(crate) fn open(open: &Open) -> Result<()> {
     let (palette, shape) = introspect::look(introspect::depth_of(open.depth.as_deref())?);
     introspect::show(Projects::new(&Env::user(), palette, shape), open)
@@ -103,8 +101,8 @@ impl Projects {
     /// The command that prints the table's data.
     fn list_command(&self) -> String {
         match self.filter.text() {
-            "" => " ways projects list ".to_string(),
-            q => format!(" ways projects search {q} "),
+            "" => " ways projects list --json ".to_string(),
+            q => format!(" ways projects search {} --json ", agent_tui::tree::quote(q)),
         }
     }
 }
@@ -171,9 +169,9 @@ impl Screen for Projects {
                 if let Some(first) = lines.first_mut() {
                     *first = first.clone().style(theme::accent());
                 }
-                (format!(" ways projects show {} ", e.project.path), lines)
+                (format!(" ways projects show {} --json ", agent_tui::tree::quote(&e.project.path)), lines)
             }
-            None => (" ways projects show ".to_string(), Vec::new()),
+            None => (" ways projects show --json ".to_string(), Vec::new()),
         };
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title)), detail);
 
