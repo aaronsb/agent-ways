@@ -158,9 +158,9 @@ pub fn valid_model_id(model: &str) -> bool {
 }
 
 /// A user's change to one profile. Every field is optional; a profile name the
-/// shipped set lacks must name its provider and model.
+/// shipped set lacks must name its provider and model. Unknown fields are
+/// caught by the settings schema, which falls the section back (ADR-503 §4).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProfilePatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<Provider>,
@@ -181,10 +181,6 @@ pub struct ProfilePatch {
 }
 
 impl ProfilePatch {
-    fn is_empty(&self) -> bool {
-        *self == ProfilePatch::default()
-    }
-
     fn apply(&self, base: &Profile) -> Profile {
         Profile {
             provider: self.provider.unwrap_or(base.provider),
@@ -201,7 +197,6 @@ impl ProfilePatch {
 
 /// The user layer: `$XDG_CONFIG_HOME/agent-ways/agent.yaml`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct UserLayer {
     /// The profile the agent uses. Unset: the first shipped profile with a key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -216,46 +211,90 @@ pub fn user_layer_path() -> PathBuf {
     ways_core::paths::config_root().join("agent.yaml")
 }
 
+/// The text a new `agent.yaml` starts with.
+const HEADER: &str = "# The ways agent's user layer (ADR-196 §5). Fields here override the\n\
+# shipped engine profiles and survive updates. `ways agent config`\n\
+# shows the resolved settings. `ways agent use`, `mode` and `ways settings`\n\
+# change only the keys they set; comments here stay.\n";
+
 impl UserLayer {
-    /// Reads the layer. A missing or empty file is an empty layer; a malformed
-    /// one is an error naming the file.
+    /// Reads the layer through the settings schema. A missing or empty file is
+    /// an empty layer. A section that fails the schema, or a file that does
+    /// not parse, loads as canonical with a diagnostic on stderr (ADR-503 §4);
+    /// only an unreadable file is an error.
     pub fn load(path: &Path) -> Result<UserLayer> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(UserLayer::default()),
-            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-        };
-        if text.trim().is_empty() {
-            return Ok(UserLayer::default());
+        let (layer, findings) = Self::load_with_findings(path)?;
+        for f in findings {
+            eprintln!("{}", f.diagnostic("ways"));
         }
-        serde_yaml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+        Ok(layer)
     }
 
-    /// Writes the layer through a temporary file and a rename, so a reader
-    /// never sees half a file. The temp name is unique to this process and
-    /// call, so concurrent writers never rename each other's file.
-    pub fn save(&self, path: &Path) -> Result<()> {
-        let mut layer = self.clone();
-        layer.profiles.retain(|_, p| !p.is_empty());
-        let body = format!(
-            "# The ways agent's user layer (ADR-196 §5). Fields here override the\n\
-             # shipped engine profiles and survive updates. `ways agent config`\n\
-             # shows the resolved settings. `ways agent use` and `mode` rewrite\n\
-             # this file, so comments added here do not survive them.\n{}",
-            serde_yaml::to_string(&layer)?
-        );
-        let dir = path.parent().context("user layer path has no parent")?;
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let tmp = dir.join(format!(".agent.yaml.{}.{}.tmp", std::process::id(), crate::keys::unique()));
-        let discard = |_: &std::io::Error| {
-            let _ = std::fs::remove_file(&tmp);
+    /// [`UserLayer::load`], returning the findings instead of printing them.
+    pub fn load_with_findings(path: &Path) -> Result<(UserLayer, Vec<agent_settings::Finding>)> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((UserLayer::default(), Vec::new())),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
         };
-        std::fs::write(&tmp, body)
-            .inspect_err(discard)
-            .with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, path)
-            .inspect_err(discard)
-            .with_context(|| format!("replacing {}", path.display()))
+        Self::parse(&text, Some(path))
+    }
+
+    /// Parse the layer's text, section by section.
+    pub fn parse(text: &str, path: Option<&Path>) -> Result<(UserLayer, Vec<agent_settings::Finding>)> {
+        use agent_settings::load;
+        let doc = match load::parse_text(text, path) {
+            Ok(d) => d,
+            Err(f) => return Ok((UserLayer::default(), vec![f])),
+        };
+        let checked = load::check(
+            &crate::settings::SCHEMA,
+            crate::settings::FILE,
+            agent_settings::LayerScope::User,
+            &doc,
+            Some(crate::settings::GATE_SECTIONS),
+        );
+        let findings = if checked.is_clean() { Vec::new() } else { checked.findings(None, path, text) };
+        let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(checked.accepted))
+            .with_context(|| format!("parsing {}", path.map(|p| p.display().to_string()).unwrap_or_default()))?;
+        Ok((layer, findings))
+    }
+
+    /// Writes the engine, the mode and every profile this layer holds, each
+    /// through the settings writer. See [`UserLayer::save_fields`].
+    pub fn save(&self, path: &Path) -> Result<()> {
+        let mut fields = vec!["engine".to_string(), "mode".to_string()];
+        fields.extend(self.profiles.keys().map(|n| format!("profiles.{n}")));
+        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        self.save_fields(path, &refs)
+    }
+
+    /// Writes only the named fields (`engine`, `mode`, `profiles.<name>`) of
+    /// this layer to `path`, under the settings writer's lock, by temp file
+    /// and rename (ADR-503 §6). Every other key and every comment in the
+    /// file stays. A field this layer leaves unset, or an empty profile
+    /// patch, is removed from the file.
+    pub fn save_fields(&self, path: &Path, fields: &[&str]) -> Result<()> {
+        let value = serde_yaml::to_value(self)?;
+        agent_settings::writer::edit_file(path, Some(HEADER), |doc| {
+            for f in fields {
+                let key: Vec<String> = match f.split_once('.') {
+                    Some((a, b)) => vec![a.to_string(), b.to_string()],
+                    None => vec![f.to_string()],
+                };
+                let desired = agent_settings::yaml_edit::value_at(&value, &key)
+                    .filter(|v| !v.as_mapping().is_some_and(|m| m.is_empty()));
+                match desired {
+                    Some(v) => doc.set(&key, v)?,
+                    None => {
+                        doc.unset(&key)?;
+                    }
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(())
     }
 }
 
@@ -407,12 +446,48 @@ mod tests {
     }
 
     #[test]
-    fn bad_values_and_unknown_fields_are_refused() {
+    fn bad_values_are_refused_by_resolve() {
         let user: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    threshold: 1.5\n").unwrap();
         assert!(profiles(&user).is_err());
-        assert!(serde_yaml::from_str::<UserLayer>("profiles:\n  anthropic:\n    treshold: 0.4\n").is_err());
         let user: UserLayer = serde_yaml::from_str("engine: nope\n").unwrap();
         assert!(resolve(&user, |_| true).is_err());
+    }
+
+    #[test]
+    fn an_unknown_field_falls_its_section_back_and_the_other_loads() {
+        // ADR-503 §4 replaces the deny_unknown_fields parse: one typo used to
+        // reject the whole file and turn the gate off.
+        let (user, findings) =
+            UserLayer::parse("mode: shadow\nprofiles:\n  anthropic:\n    treshold: 0.4\n", Some(Path::new("/a.yaml"))).unwrap();
+        assert_eq!(user.mode, Some(Mode::Shadow));
+        assert!(user.profiles.is_empty());
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        assert_eq!((f.line, f.section.as_deref(), f.fallback), (Some(4), Some("gate.profiles"), true));
+        assert!(f.to_string().contains("profiles.anthropic.treshold: unknown key"), "{f}");
+        let (user, findings) = UserLayer::parse("mode: loud\nprofiles:\n  anthropic:\n    threshold: 0.5\n", None).unwrap();
+        assert_eq!(user.mode, None);
+        assert_eq!(user.profiles["anthropic"].threshold, Some(0.5));
+        assert_eq!(findings[0].section.as_deref(), Some("gate"));
+        let (user, findings) = UserLayer::parse("mode: [\n", None).unwrap();
+        assert_eq!(user, UserLayer::default());
+        assert!(findings[0].message.contains("does not parse"));
+    }
+
+    #[test]
+    fn saving_keeps_comments_and_keys_it_does_not_set() {
+        let dir = std::env::temp_dir().join(format!("ways-agent-profile-keep-{}", std::process::id()));
+        let path = dir.join("agent.yaml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "# mine\nengine: anthropic  # chosen by hand\nprofiles:\n  anthropic:\n    threshold: 0.4  # tuned\n").unwrap();
+        let mut user = UserLayer::load(&path).unwrap();
+        user.mode = Some(Mode::Shadow);
+        user.save_fields(&path, &["mode"]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# mine\nengine: anthropic  # chosen by hand\nprofiles:\n  anthropic:\n    threshold: 0.4  # tuned\nmode: shadow\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

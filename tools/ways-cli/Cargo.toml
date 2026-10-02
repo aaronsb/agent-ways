@@ -32,6 +32,7 @@ ways-core = { path = "../ways-core" }
 claude-sessions = { path = "../claude-sessions" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
 ways-agent-core = { path = "../ways-agent-core" }
+agent-settings = { path = "../agent-settings" }
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]

@@ -1,8 +1,9 @@
 //! ADR-131: project-scope per-way toggles.
 //!
 //! `ways disable <name>` and `ways enable <name>` edit
-//! `{project}/.claude/ways.yaml`, round-tripping comments and unrelated
-//! keys by rewriting only the lines inside the `ways:` block.
+//! `{project}/.claude/ways.yaml` through the settings writer (ADR-503 §6):
+//! they set or unset the key `ways.project.<name>` that `ways settings`
+//! writes, under its lock, keeping comments and unrelated keys.
 //!
 //! Project scope only — there is no `--global` flag. Default state is
 //! enabled (absence of an entry).
@@ -19,9 +20,7 @@ pub fn disable(name: &str) -> Result<()> {
     warn_if_unknown(name);
 
     let path = project_overlay_path()?;
-    let content = read_or_empty(&path)?;
-    let updated = rewrite_block(&content, name, true);
-    write_overlay(&path, &updated)?;
+    write_toggle(&path, name, true)?;
     println!("disabled {name} (project: {})", path.display());
     Ok(())
 }
@@ -39,8 +38,7 @@ pub fn enable(name: &str) -> Result<()> {
         println!("{name} is already enabled");
         return Ok(());
     }
-    let updated = rewrite_block(&content, name, false);
-    write_overlay(&path, &updated)?;
+    write_toggle(&path, name, false)?;
     println!("enabled {name} (project: {})", path.display());
     Ok(())
 }
@@ -137,19 +135,21 @@ fn read_or_empty(path: &Path) -> Result<String> {
     }
 }
 
-fn write_overlay(path: &Path, content: &str) -> Result<()> {
-    // Pre-flight: if our rewrite produced something serde_yaml can't parse,
-    // refuse to write rather than corrupting the user's overlay. That would
-    // silently drop every project setting on next load.
-    serde_yaml::from_str::<serde_yaml::Value>(content)
-        .with_context(|| "ways disable/enable produced invalid YAML — refusing to overwrite")?;
+/// Disable `name` (`ways: {name: false}`) or remove its entry, through the
+/// settings writer: locked, verified, renamed into place.
+fn write_toggle(path: &Path, name: &str, disable: bool) -> Result<()> {
+    agent_settings::writer::edit_file(path, Some(HEADER), |doc| toggle(doc, name, disable))
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
+fn toggle(doc: &mut agent_settings::yaml_edit::Doc, name: &str, disable: bool) -> Result<(), agent_settings::yaml_edit::EditError> {
+    let key = ["ways".to_string(), name.to_string()];
+    if disable {
+        doc.set(&key, &serde_yaml::Value::Bool(false))
+    } else {
+        doc.unset(&key).map(|_| ())
     }
-    std::fs::write(path, content)
-        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// Returns true if `name` currently parses to disabled in the given content.
@@ -160,171 +160,19 @@ fn is_disabled(content: &str, name: &str) -> bool {
     cfg.disabled_ways().iter().any(|w| w == name)
 }
 
-/// Rewrite `content` so that `name` is either disabled (`disable=true`) or
-/// removed from the `ways:` block (`disable=false`). Preserves comments and
-/// every other key by editing only the lines that belong to the way's entry.
-///
-/// Honors whatever child indent the existing block already uses (2 or 4
-/// spaces are both legal YAML; the writer matches what's there rather than
-/// hardcoding 2). For a freshly-created block, the default is 2 spaces.
+/// The text `content` becomes when `name` is disabled or enabled: the
+/// writer's edit without the file. Kept for the tests below.
+#[cfg(test)]
 pub(crate) fn rewrite_block(content: &str, name: &str, disable: bool) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-
-    let ways_start = lines.iter().position(|l| matches_ways_key(l));
-    let (block_start, block_end, child_indent) = match ways_start {
-        Some(s) => {
-            let (end, indent) = find_block_end(&lines, s);
-            (s, end, indent)
-        }
-        None => {
-            if !disable {
-                return content.to_string();
-            }
-            let mut out = content.to_string();
-            if !out.is_empty() && !out.ends_with('\n') {
-                out.push('\n');
-            }
-            if out.is_empty() {
-                out.push_str(HEADER);
-            }
-            out.push_str("ways:\n");
-            out.push_str(&format!("  {name}: false\n"));
-            return out;
-        }
-    };
-
-    let entry_range = find_entry(&lines, block_start + 1, block_end, name, child_indent);
-
-    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 2);
-    out.extend(lines[..=block_start].iter().map(|s| s.to_string()));
-
-    for (i, line) in lines[block_start + 1..block_end].iter().enumerate() {
-        let abs = block_start + 1 + i;
-        match entry_range {
-            Some((s, e)) if abs >= s && abs < e => continue,
-            _ => out.push((*line).to_string()),
-        }
+    let start = if content.trim().is_empty() { HEADER } else { content };
+    let mut doc = agent_settings::yaml_edit::Doc::parse(start).expect("test input parses");
+    let before = doc.value().clone();
+    toggle(&mut doc, name, disable).expect("edit");
+    if doc.value() == &before {
+        return content.to_string();
     }
-
-    if disable {
-        let indent = " ".repeat(child_indent);
-        out.push(format!("{indent}{name}: false"));
-    }
-
-    for line in &lines[block_end..] {
-        out.push((*line).to_string());
-    }
-
-    if !disable && block_is_empty(&out, block_start) {
-        out.remove(block_start);
-    }
-
-    let mut s = out.join("\n");
-    if content.ends_with('\n') || !s.is_empty() {
-        s.push('\n');
-    }
-    s
-}
-
-fn matches_ways_key(line: &str) -> bool {
-    // Column-0 `ways:` with optional trailing comment / whitespace.
-    let trimmed = line.trim_end();
-    if let Some(rest) = trimmed.strip_prefix("ways:") {
-        return rest.is_empty() || rest.starts_with(' ') || rest.starts_with('#');
-    }
-    false
-}
-
-/// Returns (end_line_exclusive, child_indent_in_spaces).
-///
-/// `ways:` lives at column 0; the block ends at the next column-0 non-blank
-/// non-comment line. The child indent is the leading-whitespace width of the
-/// first existing entry — so a hand-edited 4-space overlay stays 4-space
-/// after we rewrite it. Falls back to 2 when the block is empty.
-fn find_block_end(lines: &[&str], start: usize) -> (usize, usize) {
-    let mut end = lines.len();
-    let mut child_indent: Option<usize> = None;
-
-    for (i, line) in lines.iter().enumerate().skip(start + 1) {
-        if line.trim().is_empty() || line.trim_start().starts_with('#') {
-            continue;
-        }
-        let first = line.chars().next().unwrap_or(' ');
-        if first != ' ' && first != '\t' {
-            end = i;
-            break;
-        }
-        if child_indent.is_none() {
-            let indent = line.len() - line.trim_start().len();
-            // Reject tab-indented blocks — YAML technically allows them but
-            // mixing is a footgun. We refuse to rewrite such a block and let
-            // the user fix indentation manually (writer falls back to 2).
-            if !line.starts_with('\t') {
-                child_indent = Some(indent);
-            }
-        }
-    }
-    (end, child_indent.unwrap_or(2))
-}
-
-/// Find the line range [start, end) covering `name`'s entry inside the block.
-/// Handles both shorthand (`name: false`) and long-form (`name:\n  enabled: false`).
-/// `child_indent` is the leading-whitespace width of entries at the top of the
-/// block (typically 2 or 4) — sub-key lines must be more deeply indented.
-fn find_entry(
-    lines: &[&str],
-    block_start: usize,
-    block_end: usize,
-    name: &str,
-    child_indent: usize,
-) -> Option<(usize, usize)> {
-    let prefix = " ".repeat(child_indent);
-    let needle = format!("{prefix}{name}:");
-
-    for (i, line) in lines[block_start..block_end].iter().enumerate() {
-        let abs = block_start + i;
-        if line.trim_start().is_empty() || line.trim_start().starts_with('#') {
-            continue;
-        }
-        if line.starts_with(&needle) {
-            let after = &line[needle.len()..];
-            // The next char after `name:` must be end-of-line or whitespace —
-            // otherwise we matched a prefix (e.g., `name-extra:`).
-            if !after.is_empty() && !after.starts_with(' ') && !after.starts_with('#') {
-                continue;
-            }
-            let mut end = abs + 1;
-            while end < block_end {
-                let l = lines[end];
-                if l.trim_start().is_empty() {
-                    end += 1;
-                    continue;
-                }
-                let this_indent = l.len() - l.trim_start().len();
-                if this_indent > child_indent {
-                    end += 1;
-                } else {
-                    break;
-                }
-            }
-            return Some((abs, end));
-        }
-    }
-    None
-}
-
-fn block_is_empty(lines: &[String], block_start: usize) -> bool {
-    for line in lines.iter().skip(block_start + 1) {
-        if line.is_empty() || line.trim().starts_with('#') {
-            continue;
-        }
-        let first = line.chars().next().unwrap_or(' ');
-        if first == ' ' || first == '\t' {
-            return false; // still has children
-        }
-        return true; // hit next sibling key
-    }
-    true
+    doc.verify().expect("round trip");
+    doc.text()
 }
 
 // ── Tests ───────────────────────────────────────────────────────

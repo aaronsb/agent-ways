@@ -2311,6 +2311,7 @@ version = "1.27.1"
 dependencies = [
  "agent-fmt",
  "agent-identity",
+ "agent-settings",
  "agent-theme",
  "anyhow",
  "clap",
@@ -2339,6 +2340,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "serde_yaml",
  "ureq",
  "ways-agent-core",
  "ways-core",
@@ -2348,6 +2350,7 @@ dependencies = [
 name = "ways-agent-core"
 version = "0.1.0"
 dependencies = [
+ "agent-settings",
  "anyhow",
  "libc",
  "serde",
@@ -2372,6 +2375,7 @@ dependencies = [
 name = "ways-core"
 version = "1.0.0"
 dependencies = [
+ "agent-settings",
  "anyhow",
  "claude-sessions",
  "pulldown-cmark",

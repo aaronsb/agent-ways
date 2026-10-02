@@ -459,7 +459,7 @@ fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
     if let Some(net::Check::ModelUnavailable(model)) = &result {
         bail!("{} does not offer model {model}; the engine was not changed", p.provider);
     }
-    user.save(&path)?;
+    user.save_fields(&path, &["engine", &format!("profiles.{name}")])?;
     println!("engine: {name} ({} {}), mode {}", p.provider, p.model, resolved.mode.as_str());
     if !p.provider.is_recommended(&p.model) {
         println!(
@@ -486,7 +486,7 @@ fn set_mode(mode: Mode) -> Result<ExitCode> {
     let path = profile::user_layer_path();
     let mut user = UserLayer::load(&path)?;
     user.mode = (mode != Mode::default()).then_some(mode);
-    user.save(&path)?;
+    user.save_fields(&path, &["mode"])?;
     let note = match mode {
         Mode::Enforce => "ways judged irrelevant are not injected",
         Mode::Shadow => "every candidate is judged and logged; the matcher still decides",
