@@ -144,6 +144,37 @@ mod tests {
         });
     }
 
+    /// #725 re-review, finding 8: `attend run`'s enroll and `attend
+    /// leave`'s withdraw race on one record; neither may lose the other's
+    /// write.
+    #[test]
+    fn concurrent_edits_lose_no_way() {
+        with_cache(|| {
+            for round in 0..1000 {
+                let sid = format!("race-{round}");
+                enroll(&sid, Source::Join).unwrap();
+                let go = std::sync::Arc::new(std::sync::Barrier::new(2));
+                let a = {
+                    let (sid, go) = (sid.clone(), go.clone());
+                    std::thread::spawn(move || {
+                        go.wait();
+                        enroll(&sid, Source::Run).unwrap()
+                    })
+                };
+                let b = {
+                    let (sid, go) = (sid.clone(), go.clone());
+                    std::thread::spawn(move || {
+                        go.wait();
+                        withdraw(&sid, Source::Join).unwrap()
+                    })
+                };
+                a.join().unwrap();
+                b.join().unwrap();
+                assert_eq!(sources(&sid), vec![Source::Run], "round {round}");
+            }
+        });
+    }
+
     #[test]
     fn carry_moves_every_way_to_the_new_id() {
         with_cache(|| {

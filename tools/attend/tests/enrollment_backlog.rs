@@ -47,11 +47,35 @@ fn attend_run_delivers_addressed_and_announces_the_rest() {
             out.contains(ADDRESSED) && out.contains(NOTE)
         });
         assert!(!run.output().contains(OLD_OPEN), "old #open backlog is not shown: {}", run.output());
-        // Let the sensor's checkpoint reach disk before stopping it.
+        // The sensor applied the rule, and its checkpoint says so.
         run.wait_for("the checkpoint", Duration::from_secs(10), |_| {
-            std::fs::read_to_string(f.state_file(&f.sid)).is_ok_and(|s| s.contains("other-1-addressed"))
+            std::fs::read_to_string(f.state_file(&f.sid))
+                .is_ok_and(|s| s.contains("other-1-addressed") && s.contains("baselined: true"))
         });
     }
     let drained = f.drain("plain");
     assert!(!drained.contains(ADDRESSED) && !drained.contains(OLD_OPEN), "{drained}");
+}
+
+/// #725 re-review, finding 2: under `/attend` the turn usually ends a few
+/// seconds after `attend run` starts, before the peers sensor's first
+/// message scan (its first poll only baselines peer presence, yet
+/// checkpoints). A drain in that window must still apply the rule: the
+/// 50 cap on addressed mail, old `#open` held back, and the note.
+#[test]
+fn a_drain_before_the_sensor_scans_applies_the_rule() {
+    let f = Fixture::with_peers_interval("backlog-window", 30);
+    let tray = f.project_tray();
+    for i in 0..55 {
+        f.put(&tray, &format!("other-1-to-{i:02}"), &format!("addressed {i:02}"), 10 * MINUTE + Duration::from_secs(i));
+    }
+    for i in 0..3 {
+        f.put("_broadcast", &format!("other-1-open-{i}"), &format!("old open {i}"), 60 * MINUTE);
+    }
+    let run = f.run();
+    run.wait_for("the sensor's first checkpoint", Duration::from_secs(10), |_| f.state_file(&f.sid).exists());
+    let hook = f.drain_hook_with("{}");
+    assert!(hook.contains("50 peer message(s)"), "the 50 cap: {hook}");
+    assert!(hook.contains("8 earlier messages not shown; attend inbox"), "the note: {hook}");
+    assert!(!hook.contains("old open"), "old #open is held back: {hook}");
 }

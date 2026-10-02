@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime};
 
-/// Attend config for tests: only the peers sensor, polling every second.
+/// Attend config for tests: only the peers sensor, polling every
+/// `{peers}` seconds.
 const QUIET_CONFIG: &str = "\
 sensors:
   context:
@@ -22,8 +23,8 @@ sensors:
   keepwarm:
     enabled: false
   peers:
-    interval: 1
-    min_interval: 1
+    interval: {peers}
+    min_interval: {peers}
 cleanup:
   enabled: false
 ";
@@ -36,12 +37,17 @@ pub struct Fixture {
 
 impl Fixture {
     pub fn new(tag: &str) -> Self {
+        Self::with_peers_interval(tag, 1)
+    }
+
+    /// A fixture whose peers sensor polls every `secs` seconds.
+    pub fn with_peers_interval(tag: &str, secs: u64) -> Self {
         let home = std::env::temp_dir().join(format!("attend-it-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join(".claude").join("sessions")).unwrap();
         let config = home.join("config").join("attend");
         std::fs::create_dir_all(&config).unwrap();
-        std::fs::write(config.join("config.yaml"), QUIET_CONFIG).unwrap();
+        std::fs::write(config.join("config.yaml"), QUIET_CONFIG.replace("{peers}", &secs.to_string())).unwrap();
         let origin = home.join("proj");
         std::fs::create_dir_all(&origin).unwrap();
         let f = Fixture { origin: origin.to_string_lossy().into_owned(), sid: format!("sess-{tag}"), home };
@@ -131,11 +137,35 @@ impl Fixture {
         age_file(&path, age);
     }
 
+    /// Drain in hook form with `payload` as the Stop hook's stdin.
+    pub fn drain_hook_with(&self, payload: &str) -> String {
+        use std::io::Write;
+        let mut child = self
+            .command()
+            .args(["inbox", "--drain", "--format", "hook"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("run attend");
+        child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
     /// Start `attend run`; its stdout (the Monitor lines) goes to a file.
     pub fn run(&self) -> Run {
+        self.run_with(&[])
+    }
+
+    /// [`Fixture::run`] with extra environment.
+    pub fn run_with(&self, env: &[(&str, &str)]) -> Run {
         let log = self.home.join(format!("run-{}.out", self.sid));
-        let child = self
-            .command()
+        let mut cmd = self.command();
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let child = cmd
             .arg("run")
             .stdout(Stdio::from(std::fs::File::create(&log).unwrap()))
             .stderr(Stdio::from(std::fs::File::create(self.home.join("run.err")).unwrap()))

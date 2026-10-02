@@ -51,3 +51,75 @@ fn attend_run_follows_a_session_id_change() {
     f.put("_broadcast", "other-1-after", "after the clear", Duration::ZERO);
     assert!(f.drain("plain").contains("after the clear"));
 }
+
+/// #725 re-review, finding 1: a message the sensor has scanned but the
+/// disclosure cooldown still holds must not be lost when the id changes.
+#[test]
+fn a_message_held_in_the_cooldown_survives_an_id_change() {
+    let f = Fixture::new("idcooldown");
+    let old = f.sid.clone();
+    let run = f.run();
+    f.put("_broadcast", "other-1-a", "first message", Duration::ZERO);
+    run.wait_for("the first message", Duration::from_secs(20), |r| r.output().contains("first message"));
+    // The message cooldown is 3 s from that disclosure.
+    f.put("_broadcast", "other-1-b", "held in the cooldown", Duration::ZERO);
+    run.wait_for("the sensor to scan the second", Duration::from_secs(5), |_| {
+        std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-b"))
+    });
+    f.set_session_id("sess-cooldown-new");
+    run.wait_for("the second message, on the Monitor or the drain", Duration::from_secs(20), |r| {
+        r.output().contains("held in the cooldown")
+            || (f.marker("sess-cooldown-new").exists() && f.drain("plain").contains("held in the cooldown"))
+    });
+}
+
+/// #725 re-review, finding 5: a session enrolled only by a join keeps its
+/// enrollment, seen-set and channels when `/clear` changes its id, with no
+/// `attend run` to move them.
+#[test]
+fn a_join_only_session_follows_an_id_change() {
+    let f = Fixture::new("idjoin");
+    f.ok(&["join", "side"]);
+    f.put("_broadcast", "other-1-before", "before the clear", Duration::ZERO);
+    assert!(f.drain("plain").contains("before the clear"));
+
+    f.set_session_id("sess-join-new");
+    f.put("_broadcast", "other-1-after", "open after", Duration::ZERO);
+    f.put(&f.project_tray(), "other-1-to", "addressed after", Duration::ZERO);
+    f.put("@side", "other-1-side", "channel after", Duration::ZERO);
+    let out = f.drain("plain");
+    for body in ["open after", "addressed after", "channel after"] {
+        assert!(out.contains(body), "missing {body}: {out}");
+    }
+    assert!(!out.contains("before the clear"), "nothing seen before is delivered again: {out}");
+    assert!(f.marker("sess-join-new").exists());
+    assert!(!f.marker("sess-idjoin").exists());
+    assert!(f.ok(&["channels", "--joined"]).contains("#side"));
+}
+
+/// #725 re-review, finding 9: the moves happen in the re-executed run, so
+/// a crash before the exec leaves everything on the old id. A run started
+/// with `ATTEND_SESSION_MOVED_FROM` performs them.
+#[test]
+fn a_run_started_after_a_move_performs_it() {
+    let f = Fixture::new("idmoved");
+    let old = "sess-before-move";
+    // The old id's state, as the previous process left it.
+    let marker_dir = f.cache().join("enrolled");
+    std::fs::create_dir_all(&marker_dir).unwrap();
+    std::fs::write(marker_dir.join(old), "run\n").unwrap();
+    f.put("_broadcast", "other-1-seen", "seen by the old id", Duration::ZERO);
+    let state_dir = f.cache().join("state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    std::fs::write(
+        state_dir.join(format!("{old}.state")),
+        "seen_signal: other-1-seen.signal\nbaselined: true\nreply_hint_shown: true\n",
+    )
+    .unwrap();
+
+    let run = f.run_with(&[("ATTEND_SESSION_MOVED_FROM", old)]);
+    run.wait_for("the move", Duration::from_secs(20), |_| !f.marker(old).exists());
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap_or_default();
+    assert!(state.contains("other-1-seen"), "seen-set moved: {state}");
+    assert!(!f.state_file(old).exists());
+}

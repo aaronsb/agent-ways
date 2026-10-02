@@ -920,6 +920,15 @@ mod drain_tests {
         assert!(!from_is_id_prefix("claude:", "-1-0"));
     }
 
+    /// A cold start with nothing to deliver sends the note alone, not a
+    /// "0 peer message(s) delivered" header.
+    #[test]
+    fn note_only_reason_is_the_note() {
+        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 earlier messages not shown; attend inbox"));
+        assert!(reason.starts_with("[attend] 3 earlier messages not shown; attend inbox"), "{reason}");
+        assert!(!reason.contains("0 peer message"), "{reason}");
+    }
+
     #[test]
     fn drain_reason_caps_render_and_counts_remainder() {
         let msgs: Vec<FakeMsg> = (0..14).map(msg).collect();

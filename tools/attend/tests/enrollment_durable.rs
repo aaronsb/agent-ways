@@ -62,3 +62,33 @@ fn leaving_every_channel_keeps_a_session_that_ran_attend() {
     f.ok(&["leave", "a"]);
     assert!(f.marker(&f.sid).exists(), "attend run enrolled it; leave does not undo that");
 }
+
+/// #725 re-review, finding 3: `scene private` under a live `attend run`
+/// is recorded, and takes effect once the run is gone.
+#[test]
+fn scene_private_under_a_live_run_sticks() {
+    let f = Fixture::new("privaterun");
+    f.ok(&["join", "a"]);
+    {
+        let run = f.run();
+        run.wait_for("enrollment by attend run", Duration::from_secs(20), |_| {
+            std::fs::read_to_string(f.marker(&f.sid)).is_ok_and(|m| m.contains("run"))
+        });
+        f.ok(&["scene", "private"]);
+    }
+    f.put("_broadcast", "other-1-x", "after opting out", Duration::ZERO);
+    assert_eq!(f.drain("plain"), "", "the opt-out holds once the run is gone");
+    assert!(!f.marker(&f.sid).exists());
+}
+
+/// A fresh `attend run` or `attend join` after `scene private` enrolls the
+/// session again.
+#[test]
+fn enrolling_again_after_private_clears_the_opt_out() {
+    let f = Fixture::new("privateagain");
+    f.ok(&["join", "a"]);
+    f.ok(&["scene", "private"]);
+    f.ok(&["join", "b"]);
+    f.put("_broadcast", "other-1-y", "after rejoining", Duration::ZERO);
+    assert!(f.drain("plain").contains("after rejoining"));
+}

@@ -341,7 +341,6 @@ mod tests {
         });
     }
 
-    #[cfg(unix)]
     #[test]
     fn run_is_live_follows_the_lock_and_creates_nothing() {
         with_home(|_| {
