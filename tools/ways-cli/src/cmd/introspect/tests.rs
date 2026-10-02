@@ -275,6 +275,30 @@ fn anchor_keeps_the_same_way_or_the_nearest_earlier_one() {
     assert_eq!(reselect_by_anchor(f, "gone/way", 0), 0, "nothing earlier: the first row");
 }
 
+/// A session id that is not ASCII is shortened by characters, not bytes.
+#[test]
+fn a_non_ascii_session_id_is_cut_by_characters() {
+    match Replay::load("", "aéééééééééééé", None, false) {
+        Err(e) => assert_eq!(e, "no events for session aééééééééééé"),
+        Ok(_) => panic!("no events, no replay"),
+    }
+}
+
+/// Live, new events on the log read the frames again; the why-fired
+/// reader keeps its place and its index rather than going back to the top.
+#[test]
+fn a_live_refresh_keeps_the_why_reader_where_it_was() {
+    let mut s = Introspect::showing(replay(true), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Left, KeyCode::Down, KeyCode::Down, KeyCode::Tab]);
+    press(&mut s, &[KeyCode::Char('j'); 5]);
+    let before = frame(&render(&mut s, 80, 25));
+    assert!(before.contains("why it fired 6–"), "{before}");
+    s.replay.as_mut().unwrap().take_frames(replay(true).frames);
+    let after = text(&render(&mut s, 80, 25));
+    assert!(after.contains("why it fired 6–"), "the reader went back to the top: {after}");
+    assert!(after.contains("• e3 softwaredev/code/t"), "the why index is still there: {after}");
+}
+
 #[test]
 fn the_why_reader_scrolls_within_its_document() {
     let mut s = Introspect::showing(replay(false), terminal(), Shape::PLAIN);

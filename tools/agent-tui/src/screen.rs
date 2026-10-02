@@ -16,7 +16,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::{Frame, Terminal};
 
-use crate::app::term::{restore, Signals, TermGuard};
+use crate::app::term::{kill_job_group, restore, Signals, TermGuard};
 use crate::theme::{self, Palette};
 
 /// What an application supplies for one screen session.
@@ -62,6 +62,59 @@ const HANGUP: i32 = libc::SIGHUP;
 #[cfg(not(unix))]
 const HANGUP: i32 = 1;
 
+/// A panic hook, as `std::panic::set_hook` takes one.
+#[doc(hidden)]
+pub type Hook = Box<dyn Fn(&std::panic::PanicHookInfo) + Send + Sync>;
+
+/// The panic hook a screen session runs under: end the command in flight
+/// and restore the terminal, then run `prev`, the hook that was in place.
+#[doc(hidden)]
+pub fn panic_hook(prev: Hook) -> Hook {
+    Box::new(move |info| {
+        // A panic that aborts runs no drop: end the command in flight here,
+        // as `crate::run`'s hook does.
+        kill_job_group();
+        restore();
+        prev(info);
+    })
+}
+
+/// When a screen's tick is due.
+struct Ticker {
+    last: Instant,
+}
+
+impl Ticker {
+    fn new(now: Instant) -> Ticker {
+        Ticker { last: now }
+    }
+
+    /// How long to wait for input before the tick is due, at most `POLL`.
+    fn wait(&self, every: Option<Duration>, now: Instant) -> Duration {
+        match every {
+            Some(every) => every.saturating_sub(now.duration_since(self.last)).min(POLL),
+            None => POLL,
+        }
+    }
+
+    /// Whether a tick is due at `now`, taking it when it is. While no tick
+    /// is asked for, the clock follows `now`, so the first tick after
+    /// ticking starts comes a whole period later.
+    fn due(&mut self, every: Option<Duration>, now: Instant) -> bool {
+        match every {
+            Some(every) if now.duration_since(self.last) >= every => {
+                self.last = now;
+                true
+            }
+            Some(_) => false,
+            None => {
+                self.last = now;
+                false
+            }
+        }
+    }
+}
+
 /// Run `s` on the terminal until a key ends it or a signal comes. Returns
 /// the signal, if one ended it; the terminal is restored by then, and the
 /// caller exits with 128 plus it.
@@ -71,21 +124,15 @@ pub fn run(s: &mut dyn Screen) -> io::Result<Option<i32>> {
     let mut guard = TermGuard::new();
     // ratatui::init's own hook restores less; this one replaces it.
     let _ratatui_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        restore();
-        hook(info);
-    }));
+    std::panic::set_hook(panic_hook(hook));
     let term = &mut guard.term;
-    let mut last_tick = Instant::now();
+    let mut ticker = Ticker::new(Instant::now());
     loop {
         if let Some(sig) = signals.caught() {
             signals.take_up();
             return Ok(Some(sig));
         }
-        let wait = match s.tick_every() {
-            Some(every) => every.saturating_sub(last_tick.elapsed()).min(POLL),
-            None => POLL,
-        };
+        let wait = ticker.wait(s.tick_every(), Instant::now());
         // A terminal that can no longer be drawn on or read from has hung
         // up: end as on SIGHUP.
         let event = match term.draw(|f| draw(s, f)).and_then(|_| event::poll(wait)) {
@@ -98,11 +145,8 @@ pub fn run(s: &mut dyn Screen) -> io::Result<Option<i32>> {
             Ok(Some(Event::Key(k))) if k.kind == KeyEventKind::Press && !s.key(k) => return Ok(None),
             _ => {}
         }
-        if let Some(every) = s.tick_every() {
-            if last_tick.elapsed() >= every {
-                s.tick();
-                last_tick = Instant::now();
-            }
+        if ticker.due(s.tick_every(), Instant::now()) {
+            s.tick();
         }
     }
 }
@@ -127,6 +171,24 @@ mod tests {
             self.0 += 1;
             k.code != KeyCode::Char('q')
         }
+    }
+
+    /// A screen that starts ticking, as a replay does when play starts,
+    /// waits a whole period for its first tick, however long it sat idle.
+    #[test]
+    fn the_first_tick_waits_a_whole_period_after_ticking_starts() {
+        let t0 = Instant::now();
+        let mut t = Ticker::new(t0);
+        let every = Duration::from_millis(1000);
+        for s in 1..=5 {
+            assert!(!t.due(None, t0 + Duration::from_secs(s)), "idle: no tick asked for");
+        }
+        let start = t0 + Duration::from_secs(5);
+        assert!(!t.due(Some(every), start), "the first frame advanced as play started");
+        assert_eq!(t.wait(Some(every), start), POLL);
+        assert!(!t.due(Some(every), start + Duration::from_millis(999)));
+        assert!(t.due(Some(every), start + every));
+        assert!(!t.due(Some(every), start + every + Duration::from_millis(1)), "taken once");
     }
 
     #[test]

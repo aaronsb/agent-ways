@@ -123,12 +123,14 @@ impl Renderer {
             p.push(("│ ".into(), theme::muted()));
         }
         for it in &mut self.items {
-            match it.marker.take().filter(|_| first) {
+            match if first { it.marker.take() } else { None } {
                 Some(m) => p.extend(m),
                 None => p.push((" ".repeat(it.width), Style::new())),
             }
         }
-        p
+        // Deep nesting gives up its outer indent before the text loses
+        // more than half the width; the marker, at the right, stays.
+        clip_left(p, self.width / 2)
     }
 
     /// Emit the line being built, wrapped, under its prefix. An item whose
@@ -160,7 +162,8 @@ impl Renderer {
                 let mut parts = t.split('\n').peekable();
                 while let Some(seg) = parts.next() {
                     if !seg.is_empty() {
-                        self.cur.push((seg.to_string(), style));
+                        let col = runs_width(&self.cur);
+                        self.cur.push((expand_tabs(seg, col), style));
                     }
                     if parts.peek().is_some() {
                         if self.cur.is_empty() {
@@ -180,9 +183,17 @@ impl Renderer {
                 let s = self.style().patch(code_style());
                 self.push(&t, s);
             }
-            Event::Html(t) | Event::InlineHtml(t) => {
+            // An HTML block arrives a line at each event.
+            Event::Html(t) => {
                 let s = self.style().patch(theme::muted());
                 self.push(t.trim_end_matches('\n'), s);
+                if self.table.is_none() {
+                    self.flush();
+                }
+            }
+            Event::InlineHtml(t) => {
+                let s = self.style().patch(theme::muted());
+                self.push(&t, s);
             }
             Event::SoftBreak => self.push(" ", Style::new()),
             Event::HardBreak => {
@@ -356,6 +367,50 @@ impl Renderer {
         }
         self.out
     }
+}
+
+/// `runs` with columns dropped from the left until at most `max` are left.
+fn clip_left(runs: Vec<Run>, max: usize) -> Vec<Run> {
+    let mut over = runs_width(&runs).saturating_sub(max);
+    if over == 0 {
+        return runs;
+    }
+    let mut out = Vec::new();
+    for (text, style) in runs {
+        if over == 0 {
+            out.push((text, style));
+            continue;
+        }
+        let mut kept = String::new();
+        for c in text.chars() {
+            let cw = c.width().unwrap_or(0);
+            if over > 0 {
+                over = over.saturating_sub(cw.max(1));
+            } else {
+                kept.push(c);
+            }
+        }
+        if !kept.is_empty() {
+            out.push((kept, style));
+        }
+    }
+    out
+}
+
+/// `seg`, starting at column `col`, with each tab taken to the next stop of 8.
+fn expand_tabs(seg: &str, mut col: usize) -> String {
+    let mut out = String::with_capacity(seg.len());
+    for c in seg.chars() {
+        if c == '\t' {
+            let n = 8 - col % 8;
+            out.push_str(&" ".repeat(n));
+            col += n;
+        } else {
+            out.push(c);
+            col += c.width().unwrap_or(0);
+        }
+    }
+    out
 }
 
 fn runs_width(runs: &[Run]) -> usize {
@@ -644,6 +699,37 @@ mod tests {
         assert_eq!(lines, ["  vocabulary: alpha", "beta gamma"], "the indent that opens the line is kept");
         assert_eq!(out[0].spans[0].style, theme::muted());
         assert_eq!(wrap_line(&Line::raw(""), 5).len(), 1, "a blank line stays one line");
+    }
+
+    /// A tab in code goes to the next stop of 8, as a terminal puts it;
+    /// drawn as is it took no column and vanished.
+    #[test]
+    fn tabs_in_code_reach_the_next_stop_of_eight() {
+        let out = md("```\nall:\n\tmake build\na\tb\n```", 40);
+        let lines: Vec<String> = out.iter().map(text).collect();
+        assert_eq!(lines[..3], ["all:", "        make build", "a       b"]);
+        assert!(lines.iter().all(|l| !l.contains('\t')));
+    }
+
+    /// An HTML block keeps its lines.
+    #[test]
+    fn an_html_block_keeps_its_lines() {
+        let out = md("<div>html block\nline two</div>\n\nafter", 40);
+        let lines: Vec<String> = out.iter().map(text).collect();
+        assert_eq!(lines[..2], ["<div>html block", "line two</div>"]);
+        assert!(lines.contains(&"after".to_string()));
+    }
+
+    /// Lists nested deeper than the width allows still fit it, and keep
+    /// their text.
+    #[test]
+    fn deep_nesting_stays_within_the_width() {
+        let src: String = (0..12).map(|d| format!("{}- level {d} words here\n", "  ".repeat(d))).collect();
+        let out = md(&src, 20);
+        let lines: Vec<String> = out.iter().map(text).collect();
+        assert!(out.iter().all(|l| l.width() <= 20), "{lines:#?}");
+        let all = lines.join(" ");
+        assert!(all.contains("level") && all.contains("11"), "{lines:#?}");
     }
 
     #[test]

@@ -122,6 +122,30 @@ fn a_session_opens_directly_and_live_follows_the_newest() {
     assert!(why.contains("why it fired") && why.contains("Trigger"), "{why}");
 }
 
+/// A session id that is not ASCII, on the command line or in the log, is
+/// shortened by characters: cut by bytes it panicked, and the release
+/// build aborts.
+#[test]
+fn non_ascii_session_ids_do_not_panic() {
+    let fx = Fx::new();
+    let odd = "aéééééééééééé";
+    let log = fx.home().join(".local/state/agent-ways/events.jsonl");
+    let proj = fx.home().join("my_proj").display().to_string();
+    let mut text = std::fs::read_to_string(&log).unwrap();
+    text += &format!("{{\"ts\":\"2026-07-03T10:00:00Z\",\"event\":\"session_start\",\"session\":\"{odd}\",\"project\":\"{proj}\"}}\n");
+    std::fs::write(&log, text).unwrap();
+
+    let (out, err, code) = fx.run(&["introspect", "list"]);
+    assert_eq!(code, 0, "list: {err}");
+    assert!(out.contains("aééééééééééé"), "{out}");
+    let (out, err, code) = fx.run(&["introspect", "fires", "--session", odd]);
+    assert_eq!(code, 0, "fires: {err}");
+    assert!(out.contains("session aééééééééééé"), "{out}");
+    let (out, err, code) = fx.run(&["introspect", "replay", "--session", "zéééééééééééé", "--snap", "40x10"]);
+    assert_eq!(code, 0, "replay: {err}");
+    assert!(out.contains("no events for session zééééééééééé"), "{out}");
+}
+
 #[test]
 fn without_a_terminal_the_screens_say_so_and_json_needs_none() {
     let fx = Fx::new();

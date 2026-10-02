@@ -116,8 +116,8 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
     println!("{}", paint(Role::Muted, "─".repeat(102)));
 
     for s in sessions.iter().rev().take(50) {
-        let short_id = &s.id[..s.id.len().min(12)];
-        let date = &s.ts[..s.ts.len().min(16)];
+        let short_id = super::short_id(&s.id);
+        let date: String = s.ts.chars().take(16).collect();
         let project_short = s.project.split('/').next_back().unwrap_or(&s.project);
         let duration = agent_fmt::when::duration(s.duration_secs);
         let transcript = if s.transcript { paint(Role::Ok, "yes") } else { paint(Role::Muted, "gone") };

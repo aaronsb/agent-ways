@@ -36,6 +36,13 @@ use crate::session;
 pub(crate) use model::Frame;
 use screen::{Introspect, Picker, Replay};
 
+/// A session id shortened for a table or a message: its first 12
+/// characters. Cut by characters, since an id from the command line or the
+/// log need not be ASCII.
+pub(crate) fn short_id(id: &str) -> String {
+    id.chars().take(12).collect()
+}
+
 /// How the screens are opened: on the terminal, or headless with keys fed
 /// to the real key handler and a frame printed in the test kit's format.
 #[derive(Debug, Default, Clone)]
@@ -357,7 +364,7 @@ pub fn fires(
     if rows.is_empty() {
         println!(
             "No semantic fires for session {} (keyword/state fires carry no score/surface).",
-            &session_id[..session_id.len().min(12)]
+            short_id(&session_id)
         );
         return Ok(());
     }
@@ -372,7 +379,7 @@ pub fn fires(
         "{} semantic fire{} · session {} · lowest score first{}",
         total,
         if total == 1 { "" } else { "s" },
-        &session_id[..session_id.len().min(12)],
+        short_id(&session_id),
         max_score.map(|c| format!(" · ≤ {c:.2}")).unwrap_or_default(),
     );
     for (score, way, surface, redisclosed) in rows.into_iter().take(shown) {

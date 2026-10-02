@@ -49,9 +49,9 @@ impl Playback {
     }
 
     /// The speed whose frame time is the first at or below `ms`; the
-    /// slowest when none is.
+    /// fastest when `ms` is faster than every speed.
     pub fn with_speed_ms(mut self, ms: u64) -> Playback {
-        self.speed = SPEEDS.iter().position(|(s, _)| *s <= ms).unwrap_or(0);
+        self.speed = SPEEDS.iter().position(|(s, _)| *s <= ms).unwrap_or(SPEEDS.len() - 1);
         self
     }
 
@@ -298,7 +298,8 @@ mod tests {
             p.slower();
         }
         assert_eq!(p.speed_label(), "2.0s");
-        assert_eq!(Playback::replay(1).with_speed_ms(5).speed_label(), "2.0s", "below every speed is the slowest");
+        assert_eq!(Playback::replay(1).with_speed_ms(50).speed_label(), "0.1s", "faster than every speed is the fastest");
+        assert_eq!(Playback::replay(1).with_speed_ms(5000).speed_label(), "2.0s", "slower than every speed is the slowest");
     }
 
     fn glyphs(l: &Line) -> String {

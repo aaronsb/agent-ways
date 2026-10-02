@@ -100,7 +100,7 @@ impl Replay {
             .or_else(|| super::frames::find_session_project(content, session_id))
             .unwrap_or_else(|| "unknown".to_string());
         let events = super::frames::load_session_events(content, session_id);
-        let short = &session_id[..session_id.len().min(12)];
+        let short = super::short_id(session_id);
         if events.is_empty() {
             return Err(format!("no events for session {short}"));
         }
@@ -153,7 +153,15 @@ impl Replay {
         self.view = View::Why;
         self.play.pause();
         self.scroll = 0;
-        if self.why.is_none() && self.from_log {
+        if self.why.is_none() {
+            self.load_why();
+        }
+    }
+
+    /// Read the why index from the event log. It leaves the view, the
+    /// playback and the reader's place alone.
+    fn load_why(&mut self) {
+        if self.from_log {
             let model = SessionIntrospection::from_session(&self.session_id, &self.project, self.window_k);
             self.why = Some(why::build_why_index(&model));
         }
@@ -240,14 +248,23 @@ impl Replay {
         if frames.is_empty() {
             return;
         }
+        self.take_frames(frames);
+    }
+
+    /// The frames read again: the newest shown while following, the
+    /// selection kept on its way, and the why index read afresh.
+    pub(crate) fn take_frames(&mut self, frames: Vec<Frame>) {
         let anchor = self.anchor();
         self.frames = frames;
         self.play.resize(self.frames.len());
         self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(self.frame(), &id, epoch));
-        if self.why.is_some() {
-            self.why = None;
+        // The why index is read again in place: the reader keeps its scroll.
+        // Out of the view it is dropped and read when the view opens.
+        if self.why.is_some() && self.from_log {
             if self.view == View::Why {
-                self.open_why();
+                self.load_why();
+            } else {
+                self.why = None;
             }
         }
     }

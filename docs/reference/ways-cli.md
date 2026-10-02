@@ -101,6 +101,7 @@ ways stats --json
 ```
 ways introspect replay                                 # picker of this project's sessions
 ways introspect replay --session <id>                  # one session
+ways introspect replay --project <dir>                  # sessions from another project
 ways introspect replay --all                           # sessions across every project
 ways introspect replay --speed 500                     # faster playback (ms per frame)
 ways introspect replay --json                          # most recent session as JSON
