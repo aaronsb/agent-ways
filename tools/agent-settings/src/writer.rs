@@ -54,7 +54,7 @@ pub fn lock_path(target: &Path) -> PathBuf {
 /// it and tries again, so two holders never overlap.
 pub struct Lock {
     path: PathBuf,
-    _file: File,
+    file: Option<File>,
 }
 
 impl Lock {
@@ -67,7 +67,7 @@ impl Lock {
             let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
             file.lock()?;
             if same_file(&file, &path) {
-                return Ok(Lock { path, _file: file });
+                return Ok(Lock { path, file: Some(file) });
             }
         }
     }
@@ -89,9 +89,22 @@ fn same_file(_file: &File, _path: &Path) -> bool {
 
 impl Drop for Lock {
     fn drop(&mut self) {
-        // Removed while held; the OS lock goes with the handle right after.
+        // Unix: removed while held, so a waiter that then gets the lock on the
+        // unlinked file sees the path moved on and tries again; the OS lock
+        // goes with the handle right after.
         #[cfg(unix)]
-        let _ = std::fs::remove_file(&self.path);
+        {
+            let _ = std::fs::remove_file(&self.path);
+            drop(self.file.take());
+        }
+        // Windows: an open file cannot be deleted, so the handle (and the
+        // lock) goes first. The removal fails, harmlessly, while a waiter
+        // holds the file open; otherwise no lock file is left behind.
+        #[cfg(not(unix))]
+        {
+            drop(self.file.take());
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 

@@ -21,9 +21,21 @@ struct Fx {
 
 impl Fx {
     /// A fixture root of exactly 19 characters, like `/tmp/tmp.XXXXXXXXXX`.
+    /// It must be absolute on the platform: the binary ignores a relative
+    /// `XDG_*` value by design (`paths::xdg_base`), and `/tmp/...` is not
+    /// absolute on Windows. There it sits on the temp directory's drive,
+    /// `C:\w00-000000001234`.
     fn new() -> Fx {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        #[cfg(not(windows))]
         let root = PathBuf::from(format!("/tmp/w{n:02}-{:010}", std::process::id()));
+        #[cfg(windows)]
+        let root = {
+            let tmp = std::env::temp_dir();
+            let drive = tmp.components().next().expect("temp dir has a drive").as_os_str().to_string_lossy().to_string();
+            PathBuf::from(format!("{drive}\\w{n:02}-{:012}", std::process::id()))
+        };
+        assert!(root.is_absolute(), "{}", root.display());
         assert_eq!(root.as_os_str().len(), 19);
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
@@ -45,11 +57,21 @@ impl Fx {
         // parent commit's, to see which tests fail before the change.
         let bin = std::env::var_os("SETTINGS_CLI_BIN").map(PathBuf::from).unwrap_or_else(|| env!("CARGO_BIN_EXE_ways").into());
         let mut c = Command::new(bin);
-        c.args(args)
-            .current_dir(self.root.join("proj"))
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .env("HOME", self.root.join("home"))
+        c.args(args).current_dir(self.root.join("proj")).env_clear();
+        #[cfg(not(windows))]
+        c.env("PATH", "/usr/bin:/bin");
+        // Windows: the process needs its system variables, and home_dir()
+        // reads USERPROFILE before HOME, so both name the fixture home.
+        #[cfg(windows)]
+        {
+            for var in ["PATH", "SystemRoot", "SystemDrive", "TEMP", "TMP", "windir"] {
+                if let Some(v) = std::env::var_os(var) {
+                    c.env(var, v);
+                }
+            }
+            c.env("USERPROFILE", self.root.join("home"));
+        }
+        c.env("HOME", self.root.join("home"))
             .env("XDG_CONFIG_HOME", self.root.join("xdg/config"))
             .env("XDG_STATE_HOME", self.root.join("xdg/state"))
             .env("XDG_CACHE_HOME", self.root.join("xdg/cache"))
@@ -73,9 +95,34 @@ impl Fx {
             child.stdin.take().unwrap().write_all(i.as_bytes()).unwrap();
         }
         let out = child.wait_with_output().unwrap();
+        (self.norm(&out.stdout), self.norm(&out.stderr), out.status.code().unwrap_or(-1))
+    }
+
+    /// Output with the fixture root as `<ROOT>`. On Windows the path that
+    /// follows the root is written with `/`, so goldens and assertions read
+    /// the same on every platform; nothing but those paths is changed.
+    fn norm(&self, b: &[u8]) -> String {
+        let text = String::from_utf8_lossy(b).to_string();
         let root = self.root.to_string_lossy().to_string();
-        let norm = |b: &[u8]| String::from_utf8_lossy(b).replace(&root, "<ROOT>");
-        (norm(&out.stdout), norm(&out.stderr), out.status.code().unwrap_or(-1))
+        #[cfg(not(windows))]
+        return text.replace(&root, "<ROOT>");
+        #[cfg(windows)]
+        {
+            // JSON escapes each backslash, so the root appears in three forms.
+            let mut t = text.replace(&root.replace('\\', "\\\\"), "<ROOT>");
+            t = t.replace(&root, "<ROOT>").replace(&root.replace('\\', "/"), "<ROOT>");
+            let mut out = String::with_capacity(t.len());
+            let mut rest = t.as_str();
+            while let Some(i) = rest.find("<ROOT>") {
+                out.push_str(&rest[..i + "<ROOT>".len()]);
+                rest = &rest[i + "<ROOT>".len()..];
+                let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '"' | ')' | ',' | '\'')).unwrap_or(rest.len());
+                out.push_str(&rest[..end].replace("\\\\", "/").replace('\\', "/"));
+                rest = &rest[end..];
+            }
+            out.push_str(rest);
+            out
+        }
     }
 
     fn write(&self, path: &Path, text: &str) {
@@ -92,13 +139,14 @@ impl Drop for Fx {
 
 fn golden(name: &str) -> (String, String, i32) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/settings-aliases");
-    let read = |ext: &str| std::fs::read_to_string(dir.join(format!("{name}.{ext}"))).unwrap();
+    // A Windows checkout may give the golden files CRLF; the output is LF.
+    let read = |ext: &str| std::fs::read_to_string(dir.join(format!("{name}.{ext}"))).unwrap().replace("\r\n", "\n");
     (read("out"), read("err"), read("code").trim().parse().unwrap())
 }
 
 fn golden_file(name: &str) -> String {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/settings-aliases");
-    std::fs::read_to_string(dir.join(format!("{name}.file"))).unwrap()
+    std::fs::read_to_string(dir.join(format!("{name}.file"))).unwrap().replace("\r\n", "\n")
 }
 
 fn parsed(text: &str) -> serde_yaml::Value {
