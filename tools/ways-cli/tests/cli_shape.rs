@@ -52,7 +52,8 @@ fn a_group_with_no_verb_prints_its_help_and_exits_2() {
         let out = ways(&[group]);
         assert_eq!(out.status.code(), Some(2), "{group}");
         let text = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
-        assert!(text.contains(&format!("Usage: ways {group} <COMMAND>")), "{group}: {text}");
+        // The binary is `ways.exe` on Windows.
+        assert!(text.contains(&format!(" {group} <COMMAND>")), "{group}: {text}");
     }
 }
 
