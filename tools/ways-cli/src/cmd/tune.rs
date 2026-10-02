@@ -21,7 +21,6 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use crate::frontmatter;
@@ -231,44 +230,25 @@ fn measure_way(
             entry.vocabulary.as_deref().unwrap_or("")
         );
 
-        let output = Command::new(embed_bin)
-            .args([
-                "match",
-                "--corpus", multi_corpus.to_str().unwrap(),
-                "--model", multi_model.to_str().unwrap(),
-                "--query", &query,
-                "--threshold", "0.0",
-            ])
-            .output()
-            .with_context(|| format!("way-embed match for {way_id}/{lang}", lang = entry.lang))?;
-
-        if !output.status.success() {
+        let Some(rows) = crate::cmd::scan::scoring::way_embed_match(embed_bin, multi_corpus, multi_model, &query)
+            .with_context(|| format!("way-embed match for {way_id}/{lang}", lang = entry.lang))?
+        else {
             continue;
-        }
+        };
 
         // Collect same-way peer scores (excluding self-row at ~1.0) and
         // best non-self score (the top confuser — another way's alias that
         // competes with this stub in embedding space).
         let mut peer_scores: Vec<f64> = Vec::new();
         let mut top_confuser: Option<Confuser> = None;
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let mut parts = line.split('\t');
-            let id = match parts.next() {
-                Some(s) => s,
-                None => continue,
-            };
-            let score: f64 = match parts.next().and_then(|s| s.parse().ok()) {
-                Some(s) => s,
-                None => continue,
-            };
-
+        for (id, score) in rows {
             if id == way_id {
                 if score > 0.999 {
                     continue; // self-match
                 }
                 peer_scores.push(score);
             } else if top_confuser.as_ref().is_none_or(|c| score > c.score) {
-                top_confuser = Some(Confuser { way_id: id.to_string(), score });
+                top_confuser = Some(Confuser { way_id: id, score });
             }
         }
 

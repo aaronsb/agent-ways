@@ -124,7 +124,7 @@ pub(crate) fn batch_embed_score_with(
     if en.is_none() && multi.is_none() && corpus.is_none() {
         let combined = xdg.join("ways-corpus.jsonl");
         if combined.is_file() && en_model.is_file() {
-            let fallback = run_embed_match(&embed_bin, &combined, &en_model, query);
+            let fallback = way_embed_match(&embed_bin, &combined, &en_model, query).ok().flatten();
             return EmbedScores { en: fallback, multi: None, calibration };
         }
     }
@@ -184,45 +184,50 @@ fn run_if_ready(
         eprintln!("  Run: make setup");
         return None;
     }
-    run_embed_match(bin, corpus, model, query)
+    way_embed_match(bin, corpus, model, query).ok().flatten()
 }
 
-/// Run way-embed match against a single corpus/model pair.
+/// `way-embed match` for one query against one corpus/model pair: every
+/// `(way_id, cosine)` row way-embed prints, in its order. The one runner for
+/// the single-query mode (the matcher and `ways tune`).
 ///
 /// Passes `--threshold 0.0` so way-embed returns every score. Per-way
 /// thresholds and parent-boost (ADR-125) are applied in Rust at match time.
-fn run_embed_match(
+/// `Err` when the binary cannot be run; `Ok(None)` when it exits non-zero.
+/// A row that does not parse as `id<TAB>score` is skipped.
+pub(crate) fn way_embed_match(
     bin: &std::path::Path,
     corpus: &std::path::Path,
     model: &std::path::Path,
     query: &str,
-) -> Option<Vec<(String, f64)>> {
+) -> std::io::Result<Option<Vec<(String, f64)>>> {
     let output = std::process::Command::new(bin)
-        .args([
-            "match",
-            "--corpus", corpus.to_str()?,
-            "--model", model.to_str()?,
-            "--query", query,
-            "--threshold", "0.0",
-        ])
-        .output()
-        .ok()?;
+        .arg("match")
+        .arg("--corpus")
+        .arg(corpus)
+        .arg("--model")
+        .arg(model)
+        .args(["--query", query, "--threshold", "0.0"])
+        .output()?;
 
     if !output.status.success() {
-        return None;
+        return Ok(None);
     }
 
-    Some(
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let mut parts = line.split('\t');
-                let id = parts.next()?.to_string();
-                let score: f64 = parts.next()?.parse().ok()?;
-                Some((id, score))
-            })
-            .collect(),
-    )
+    Ok(Some(parse_match_rows(&String::from_utf8_lossy(&output.stdout))))
+}
+
+/// `id<TAB>score` rows from `way-embed match`, skipping any that do not parse.
+fn parse_match_rows(stdout: &str) -> Vec<(String, f64)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let id = parts.next()?.to_string();
+            let score: f64 = parts.next()?.parse().ok()?;
+            Some((id, score))
+        })
+        .collect()
 }
 
 fn has_entries(path: &std::path::Path) -> bool {
@@ -273,7 +278,13 @@ pub(crate) use crate::util::home_dir;
 
 #[cfg(test)]
 mod tests {
-    use super::{multilingual_enabled, sibling_corpus};
+    use super::{multilingual_enabled, parse_match_rows, sibling_corpus};
+
+    #[test]
+    fn match_rows_parse_and_skip_junk() {
+        let rows = parse_match_rows("a/b\t0.5\nnoise\nc\tnan-ish\nd\t0.25\textra\n");
+        assert_eq!(rows, vec![("a/b".to_string(), 0.5), ("d".to_string(), 0.25)]);
+    }
     use std::path::Path;
 
     #[test]

@@ -9,7 +9,7 @@ mod late_interaction;
 mod lookbehind;
 mod order;
 mod reduce;
-mod scoring;
+pub(crate) mod scoring;
 mod state;
 pub(crate) use scoring::{batch_embed_score, batch_embed_score_with, sibling_corpus};
 
