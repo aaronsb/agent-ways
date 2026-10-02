@@ -331,8 +331,7 @@ struct Fireable {
 /// Resolves a way for firing: the disable switches, its file, its scope and
 /// its refire curve. `None` when it is disabled, missing or out of scope.
 fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
     let domain = id.split('/').next().unwrap_or(id).to_string();
@@ -446,8 +445,7 @@ fn render_way(
 /// subagent's scope, and the subagent starts with fresh context whatever the
 /// parent session has already been shown. Empty when disabled or missing.
 pub fn subagent_way(id: &str, session_id: &str) -> Result<String> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     let domain = id.split('/').next().unwrap_or(id);
     if session::domain_disabled(domain) || session::way_disabled(id) {
         return Ok(String::new());
@@ -685,8 +683,7 @@ pub fn check_within(
     match_score: f64,
     mut budget: Option<&mut ContextBudget>,
 ) -> Result<String> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
     let domain = id.split('/').next().unwrap_or(id);
@@ -866,8 +863,7 @@ pub fn attend(signal: &str, session_id: &str) -> Result<String> {
     let ways_dir = crate::paths::projected_ways_root();
 
     // Also check project-local ways
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     let project_ways = std::path::PathBuf::from(&project_dir).join(".claude/ways");
 
     let dirs: Vec<&std::path::Path> = if project_ways.is_dir() {

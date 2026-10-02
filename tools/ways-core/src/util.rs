@@ -78,6 +78,36 @@ pub fn home_dir() -> PathBuf {
     normalize_path_sep(&p)
 }
 
+/// `CLAUDE_PROJECT_DIR` when it is set and not empty. The one read of that
+/// variable: an empty value (a hook that exported an empty cwd) counts as
+/// unset everywhere.
+pub fn env_project_dir() -> Option<String> {
+    std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|s| !s.is_empty())
+}
+
+/// The directory a command acts on: `CLAUDE_PROJECT_DIR` when set, else
+/// `$PWD`, else the current directory, else `.`.
+pub fn project_dir() -> String {
+    project_dir_from(
+        env_project_dir(),
+        std::env::var("PWD").ok(),
+        std::env::current_dir().ok(),
+    )
+}
+
+fn project_dir_from(env: Option<String>, pwd: Option<String>, cwd: Option<PathBuf>) -> String {
+    env.or_else(|| pwd.filter(|s| !s.is_empty()))
+        .or_else(|| cwd.map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| ".".to_string())
+}
+
+/// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
+/// project enclosing the current directory ([`detect_project_dir`]). `None`
+/// outside any project.
+pub fn project_root() -> Option<String> {
+    env_project_dir().or_else(detect_project_dir)
+}
+
 /// Detect the project root by walking up from cwd looking for .claude/settings.json or CLAUDE.md.
 pub fn detect_project_dir() -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
@@ -165,6 +195,17 @@ pub fn is_excluded_path(path: &Path, excluded_segments: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An empty `CLAUDE_PROJECT_DIR` is unset. Most readers used to take it as
+    /// the project, so a hook that exported an empty cwd scoped to "".
+    #[test]
+    fn project_dir_treats_an_empty_env_as_unset() {
+        let pwd = Some("/work/p".to_string());
+        assert_eq!(project_dir_from(None, pwd.clone(), None), "/work/p");
+        assert_eq!(project_dir_from(Some("/env/p".into()), pwd.clone(), None), "/env/p");
+        assert_eq!(project_dir_from(None, Some(String::new()), Some(PathBuf::from("/cwd"))), "/cwd");
+        assert_eq!(project_dir_from(None, None, None), ".");
+    }
 
     #[test]
     fn valid_locale_codes() {

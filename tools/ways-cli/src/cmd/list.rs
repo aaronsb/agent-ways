@@ -81,8 +81,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     // Fallback refire threshold for ways with missing/unparsable curves —
     // matches the pre-ADR-123 visual baseline of 25% of the context window.
     let fallback_refire_k = context_window_k * 25 / 100;
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
 
     // Collect metrics from JSONL (has trigger, depth, parent)
     let metrics = load_metrics(&session_id);
@@ -283,9 +282,7 @@ fn detect_session() -> Result<String, NoSession> {
 /// `paths::events_log()`, so the project-scoped branch escapes them. Closing
 /// that is what stands between this and a temp-dir test of the full precedence.
 fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<String, NoSession> {
-    let project = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .or_else(detect_project_dir);
+    let project = crate::util::project_root();
 
     if let Some(ref proj) = project {
         if let Some(sid) = latest_session_for_project(proj) {
@@ -346,7 +343,6 @@ fn latest_session_for_project(project: &str) -> Option<String> {
     latest
 }
 
-use crate::util::detect_project_dir;
 
 fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64) {
     let entries: Vec<serde_json::Value> = ways

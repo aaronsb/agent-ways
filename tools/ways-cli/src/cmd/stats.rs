@@ -9,9 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, global: bool) -> Result<()> {
     // Default to project scope: CLAUDE_PROJECT_DIR > detect from cwd > global
     let detected_project = if !global && project_filter.is_none() {
-        std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(detect_project_dir)
+        crate::util::project_root()
     } else {
         None
     };
@@ -468,7 +466,6 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
     }
 }
 
-use crate::util::detect_project_dir;
 
 #[cfg(test)]
 mod tests {

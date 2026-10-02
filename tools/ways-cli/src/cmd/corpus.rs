@@ -69,7 +69,7 @@ pub fn run(
         let manifest = out_dir.join("embed-manifest.json");
         let corpus = out_dir.join("ways-corpus.jsonl");
         if manifest.is_file() && corpus.is_file() {
-            let project_dir = std::env::var("CLAUDE_PROJECT_DIR").unwrap_or_default();
+            let project_dir = crate::util::env_project_dir().unwrap_or_default();
             vlog("staleness check (walks core + user + project ways)");
             let bin = crate::paths::way_embed_in(&engine_dir);
             let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
@@ -151,28 +151,26 @@ pub fn run(
     // The namespace key is derived from the REAL project root via
     // encode_project_key, so it matches exactly what `ways scan --project`
     // computes for the same directory (the fix for Bug B).
-    if let Ok(cpd) = std::env::var("CLAUDE_PROJECT_DIR") {
-        if !cpd.is_empty() {
-            vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
-            let proj_root = PathBuf::from(&cpd);
-            let ways_path = proj_root.join(".claude/ways");
-            if ways_path.is_dir() {
-                let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
-                seen_ways_dirs.insert(canon);
-                let key = crate::util::encode_project_key(&proj_root);
-                let real = std::fs::canonicalize(&proj_root)
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or(cpd);
-                project_total += embed_one_project(
-                    &ways_path,
-                    &key,
-                    &real,
-                    &excluded,
-                    &mut w,
-                    &mut manifest_projects,
-                    &log,
-                )?;
-            }
+    if let Some(cpd) = crate::util::env_project_dir() {
+        vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
+        let proj_root = PathBuf::from(&cpd);
+        let ways_path = proj_root.join(".claude/ways");
+        if ways_path.is_dir() {
+            let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
+            seen_ways_dirs.insert(canon);
+            let key = crate::util::encode_project_key(&proj_root);
+            let real = std::fs::canonicalize(&proj_root)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or(cpd);
+            project_total += embed_one_project(
+                &ways_path,
+                &key,
+                &real,
+                &excluded,
+                &mut w,
+                &mut manifest_projects,
+                &log,
+            )?;
         }
     }
 

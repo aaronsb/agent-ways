@@ -314,8 +314,7 @@ use crate::util::home_dir;
 /// The install state (ADR-184 item 1): installed and inactive, or active with
 /// the targets and their converged state.
 fn install_targets() -> (Vec<crate::config::Target>, bool) {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     let cfg = crate::config::Config::load(&project_dir);
     (cfg.targets(), cfg.targets_explicit())
 }
@@ -370,11 +369,7 @@ fn mcp_binary_line() -> String {
 
 /// Findings in the live settings files: ways' and the agent's.
 fn settings_findings() -> Vec<String> {
-    let project = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("PWD").ok())
-        .unwrap_or_else(|| ".".into());
+    let project = crate::util::project_dir();
     let mut layers = ways_core::settings::layers(std::path::Path::new(&project));
     layers.extend(ways_agent_core::settings::layers());
     layers.iter().filter(|l| l.present).flat_map(|l| l.findings.iter().map(|f| f.to_string())).collect()

@@ -11,7 +11,7 @@ use crate::session;
 
 use super::candidates::collect_candidates;
 use super::emit_hook_context;
-use super::scoring::{capture_show_way, default_project};
+use super::scoring::capture_show_way;
 
 pub fn state(
     session_id: &str,
@@ -34,7 +34,7 @@ pub fn state(
 
     let project_dir = project
         .map(|s| s.to_string())
-        .unwrap_or_else(default_project);
+        .unwrap_or_else(crate::util::project_dir);
 
     let scope = session::detect_scope(session_id);
     let candidates = collect_candidates(&project_dir);

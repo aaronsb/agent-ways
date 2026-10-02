@@ -83,10 +83,7 @@ Numeric form pins the cadence to today's model. Preset form tracks the project's
 pub fn run(project: Option<&str>) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            std::env::var("CLAUDE_PROJECT_DIR")
-                .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()))
-        });
+        .unwrap_or_else(crate::util::project_dir);
 
     let claude_dir = PathBuf::from(&project_dir).join(".claude");
     let ways_dir = claude_dir.join("ways");

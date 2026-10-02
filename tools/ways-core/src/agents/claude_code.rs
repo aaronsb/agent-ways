@@ -30,7 +30,7 @@ fn read_user_settings_language() -> Option<String> {
 
 /// Read language from $CLAUDE_PROJECT_DIR/.claude/settings.json
 fn read_project_settings_language() -> Option<String> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR").ok()?;
+    let project_dir = crate::util::env_project_dir()?;
     let path = std::path::PathBuf::from(project_dir).join(".claude/settings.json");
     read_language_from_json(&path)
 }

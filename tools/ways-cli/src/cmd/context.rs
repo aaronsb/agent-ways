@@ -187,8 +187,7 @@ fn resolve_transcript(
 
     let project = project_dir
         .map(|s| s.to_string())
-        .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
-        .or_else(detect_project_dir)
+        .or_else(crate::util::project_root)
         .unwrap_or_else(|| ".".to_string());
 
     claude_sessions::find_project_dir_in(projects_root, &project)
@@ -379,7 +378,6 @@ pub(crate) fn projects_root() -> PathBuf {
     ways_core::paths::transcripts_root()
 }
 
-use crate::util::detect_project_dir;
 use agent_theme::{paint, Role, Style};
 
 #[cfg(test)]

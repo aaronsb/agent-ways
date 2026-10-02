@@ -14,9 +14,7 @@ pub fn audit(global: bool) -> Result<()> {
     // Determine scan dirs (same logic as lint)
     let mut scan_dirs = vec![ways_dir.clone()];
     if !global {
-        let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(crate::util::detect_project_dir);
+        let project_dir = crate::util::project_root();
         if let Some(ref pd) = project_dir {
             let project_ways = PathBuf::from(pd).join(".claude/ways");
             if project_ways.is_dir() {

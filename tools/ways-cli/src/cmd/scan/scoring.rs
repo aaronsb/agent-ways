@@ -269,11 +269,6 @@ pub(crate) fn capture_show_check(
 
 // ── Path helpers ───────────────────────────────────────────────
 
-pub(crate) fn default_project() -> String {
-    std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()))
-}
-
 pub(crate) use crate::util::home_dir;
 
 #[cfg(test)]

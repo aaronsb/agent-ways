@@ -208,8 +208,7 @@ pub fn epoch_distance(way_id: &str, session_id: &str) -> u64 {
 /// Read this session's token position from its transcript: the hook's own
 /// `transcript_path` when it names this session, else the session-id lookup.
 pub fn get_token_position(session_id: &str) -> u64 {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     token_position_in(
         &ways_core::paths::claude_dir(),
         crate::cmd::show::firing_transcript(),

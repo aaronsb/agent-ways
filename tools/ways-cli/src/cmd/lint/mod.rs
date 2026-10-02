@@ -41,7 +41,6 @@ mod size;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-use crate::util::detect_project_dir;
 
 pub fn run(
     path: Option<String>,
@@ -79,9 +78,7 @@ pub fn run(
     let (scan_dir, is_targeted, project_label) = if let Some(ref p) = path {
         (PathBuf::from(p), true, None)
     } else if !global {
-        let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(detect_project_dir);
+        let project_dir = crate::util::project_root();
         match project_dir {
             Some(pd) if PathBuf::from(&pd).join(".claude/ways").is_dir() => {
                 let pw = PathBuf::from(&pd).join(".claude/ways");

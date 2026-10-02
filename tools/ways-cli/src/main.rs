@@ -1117,10 +1117,7 @@ fn run() -> Result<()> {
         }
         Commands::Projects { command } => cmd::projects::run(command),
         Commands::ProjectSlug { path } => {
-            let project = path
-                .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|p| !p.is_empty()))
-                .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
-                .unwrap_or_default();
+            let project = path.unwrap_or_else(util::project_dir);
             println!("{}", claude_sessions::project_slug(&project));
             Ok(())
         }

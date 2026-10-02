@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use crate::session;
 
 use candidates::{check_when, collect_candidates, collect_checks};
-use scoring::{capture_show_check, capture_show_way, default_project, EmbedScores};
+use scoring::{capture_show_check, capture_show_way, EmbedScores};
 use crate::cmd::show::ContextBudget;
 use order::{order_hits, Hit};
 
@@ -98,8 +98,7 @@ impl WayCandidate {
 pub fn enabled_for(project: Option<&str>) -> bool {
     let dir = match project {
         Some(p) => p.to_string(),
-        None => std::env::var("CLAUDE_PROJECT_DIR")
-            .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string())),
+        None => crate::util::project_dir(),
     };
     crate::config::Config::load(&dir).enabled
 }
@@ -251,7 +250,7 @@ fn scan_prompt_surface(
 ) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
-        .unwrap_or_else(default_project);
+        .unwrap_or_else(crate::util::project_dir);
 
     if bump_epoch {
         session::bump_epoch(session_id);
@@ -469,7 +468,7 @@ pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DI
 /// (engine unavailable, or the surface is too sparse to chunk) — the caller then
 /// falls back to the single-vector view, mirroring production's fail-safe.
 pub fn diagnose(query: &str, project: Option<&str>, top_n: usize) -> Option<(String, Vec<DiagRow>)> {
-    let project_dir = project.map(|s| s.to_string()).unwrap_or_else(default_project);
+    let project_dir = project.map(|s| s.to_string()).unwrap_or_else(crate::util::project_dir);
     let candidates = collect_candidates(&project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
     let rows = late_interaction::run_diagnostic(&reduced, &body_map(&candidates), top_n)?;
@@ -486,7 +485,7 @@ pub fn task(
 ) -> Result<()> {
     let project_dir = project
         .map(|s| s.to_string())
-        .unwrap_or_else(default_project);
+        .unwrap_or_else(crate::util::project_dir);
 
     let is_teammate = team.is_some();
     let candidates = collect_candidates(&project_dir);
@@ -605,7 +604,7 @@ pub fn command(
     crate::cmd::show::set_firing_transcript(transcript);
     let project_dir = project
         .map(|s| s.to_string())
-        .unwrap_or_else(default_project);
+        .unwrap_or_else(crate::util::project_dir);
 
     session::bump_epoch(session_id);
     let scope = session::detect_scope(session_id);
@@ -772,7 +771,7 @@ pub fn file(
     crate::cmd::show::set_firing_transcript(transcript);
     let project_dir = project
         .map(|s| s.to_string())
-        .unwrap_or_else(default_project);
+        .unwrap_or_else(crate::util::project_dir);
 
     session::bump_epoch(session_id);
     let scope = session::detect_scope(session_id);
