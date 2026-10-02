@@ -285,6 +285,32 @@ fn a_non_ascii_session_id_is_cut_by_characters() {
     }
 }
 
+/// Live and following, the cursor rides the newest way as frames arrive.
+/// Moving it up is reviewing: it stays put through a refresh, and End
+/// resumes the follow on the newest way.
+#[test]
+fn a_live_cursor_follows_the_newest_way_until_the_reader_looks_back() {
+    let first = |n: usize| replay(true).frames.into_iter().take(n).collect::<Vec<_>>();
+    let sel = |s: &mut Introspect| {
+        let t = text(&render(s, 120, 40));
+        t.lines().find(|l| l.contains('▌')).unwrap_or("").to_string()
+    };
+    // Frame 2 lists commits, adr, testing: testing is the newest row.
+    let mut live = replay(true);
+    live.take_frames(first(2));
+    let mut s = Introspect::showing(live, terminal(), Shape::PLAIN);
+    s.replay.as_mut().unwrap().take_frames(first(3));
+    assert!(sel(&mut s).contains("softwaredev/code/testing"), "follows the newest: {}", sel(&mut s));
+    press(&mut s, &[KeyCode::Up]);
+    s.replay.as_mut().unwrap().take_frames(first(3));
+    assert!(sel(&mut s).contains("softwaredev/docs/adr"), "looking back holds the cursor: {}", sel(&mut s));
+    assert!(text(&render(&mut s, 120, 40)).contains("LIVE paused"));
+    press(&mut s, &[KeyCode::End]);
+    assert!(text(&render(&mut s, 120, 40)).contains("● LIVE"));
+    s.replay.as_mut().unwrap().take_frames(first(3));
+    assert!(sel(&mut s).contains("softwaredev/code/testing"), "End resumes the follow: {}", sel(&mut s));
+}
+
 /// Live, new events on the log read the frames again; the why-fired
 /// reader keeps its place and its index rather than going back to the top.
 #[test]

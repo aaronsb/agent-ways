@@ -70,7 +70,7 @@ pub(crate) struct Replay {
 
 impl Replay {
     pub(crate) fn new(session_id: String, project: String, window_k: u64, frames: Vec<Frame>, play: Playback) -> Replay {
-        Replay {
+        let mut r = Replay {
             session_id,
             project,
             window_k,
@@ -87,7 +87,9 @@ impl Replay {
             now: agent_fmt::when::now_secs(),
             table: TableState::default(),
             list: ListState::default(),
-        }
+        };
+        r.follow_newest();
+        r
     }
 
     /// Read a session's frames from the event log `content`. `project`
@@ -137,7 +139,8 @@ impl Replay {
     }
 
     /// Move along the timeline with `go`, keeping the selection on the
-    /// same way, or the nearest that fired at or before it.
+    /// same way, or the nearest that fired at or before it. Resuming a live
+    /// follow puts the cursor back on the newest way.
     fn travel(&mut self, go: impl FnOnce(&mut Playback)) {
         let anchor = self.anchor();
         go(&mut self.play);
@@ -145,7 +148,27 @@ impl Replay {
             Some((id, epoch)) => reselect_by_anchor(self.frame(), &id, epoch),
             None => 0,
         };
+        self.follow_newest();
         self.scroll = 0;
+    }
+
+    /// While a live timeline follows, the cursor rides the newest way, so
+    /// each way injected as the session runs scrolls into view. Reviewing
+    /// history (a step back, the cursor moved up, the why-fired reader)
+    /// leaves the cursor where it is.
+    fn follow_newest(&mut self) {
+        if self.view == View::Timeline && self.play.is_live() && self.play.following() {
+            self.sel = self.ways_len().saturating_sub(1);
+        }
+    }
+
+    /// Moving the cursor up a live timeline is reviewing it: the follow
+    /// stops on the frame shown, and space or End resumes it.
+    fn stop_following(&mut self) {
+        if self.play.is_live() && self.play.following() {
+            let at = self.play.pos();
+            self.play.go(at);
+        }
     }
 
     fn open_why(&mut self) {
@@ -174,10 +197,12 @@ impl Replay {
             (View::Why, KeyCode::Esc | KeyCode::Tab) => {
                 self.view = View::Timeline;
                 self.scroll = 0;
+                self.follow_newest();
             }
             (View::Timeline, KeyCode::Tab) => self.open_why(),
             (View::Timeline, KeyCode::Enter) if n > 0 => self.open_why(),
             (View::Timeline, KeyCode::Up | KeyCode::Char('k')) | (View::Why, KeyCode::Up) => {
+                self.stop_following();
                 self.sel = self.sel.saturating_sub(1);
                 self.scroll = 0;
             }
@@ -185,7 +210,10 @@ impl Replay {
                 self.sel = (self.sel + 1).min(n.saturating_sub(1));
                 self.scroll = 0;
             }
-            (View::Timeline, KeyCode::PageUp) => self.sel = self.sel.saturating_sub(10),
+            (View::Timeline, KeyCode::PageUp) => {
+                self.stop_following();
+                self.sel = self.sel.saturating_sub(10);
+            }
             (View::Timeline, KeyCode::PageDown) => self.sel = (self.sel + 10).min(n.saturating_sub(1)),
             (View::Why, KeyCode::Char('j')) => self.scroll = self.scroll.saturating_add(1),
             (View::Why, KeyCode::Char('k')) => self.scroll = self.scroll.saturating_sub(1),
@@ -257,6 +285,7 @@ impl Replay {
         self.frames = frames;
         self.play.resize(self.frames.len());
         self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(self.frame(), &id, epoch));
+        self.follow_newest();
         // The why index is read again in place: the reader keeps its scroll.
         // Out of the view it is dropped and read when the view opens.
         if self.why.is_some() && self.from_log {
