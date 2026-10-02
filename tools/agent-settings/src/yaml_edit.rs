@@ -401,7 +401,7 @@ fn is_seq_item(t: &str) -> bool {
 
 /// Split `key: rest` (the line with its indent removed) into the raw key and
 /// the text after the colon. `None` when the line is not a mapping key.
-fn split_key(t: &str) -> Option<(String, String)> {
+pub(crate) fn split_key(t: &str) -> Option<(String, String)> {
     if t.starts_with(['#', ' ', '?']) || is_seq_item(t) {
         return None;
     }
@@ -440,7 +440,7 @@ fn split_key(t: &str) -> Option<(String, String)> {
 
 /// Split the text after a key's colon into its value and its trailing
 /// comment (with the whitespace before it).
-fn split_comment(rest: &str) -> (String, String) {
+pub(crate) fn split_comment(rest: &str) -> (String, String) {
     let start = rest.len() - rest.trim_start().len();
     let body = &rest[start..];
     let mut scan_from = 0;
@@ -469,7 +469,7 @@ fn split_comment(rest: &str) -> (String, String) {
     }
 }
 
-fn unquote(raw: &str) -> String {
+pub(crate) fn unquote(raw: &str) -> String {
     if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
         serde_yaml::from_str::<String>(raw).unwrap_or_else(|_| raw[1..raw.len() - 1].to_string())
     } else if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {

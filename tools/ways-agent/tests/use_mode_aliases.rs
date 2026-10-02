@@ -195,3 +195,15 @@ fn config_says_the_gate_is_off_when_agent_yaml_is_broken() {
         assert!(out.contains("gate: off") && !out.contains("mode enforce"), "{text:?}: {out}{err}");
     }
 }
+
+#[test]
+fn config_never_panics_on_a_broken_agent_yaml() {
+    // N1: this text made `ways-agent config` panic.
+    let f = Fixture::new("n1");
+    let path = f.agent_yaml();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "  engine: anthropic\n#ña\nmode: off\n").unwrap();
+    let (out, err, code) = f.run(&["config"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("gate: off"), "{out}{err}");
+}

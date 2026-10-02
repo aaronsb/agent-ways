@@ -267,11 +267,22 @@ fn closed_off(v: &Value) -> Option<Value> {
 /// `disabled_domains`: whatever names can be read stay disabled, from a
 /// list or from text such as `ea,itops`.
 fn closed_domains(v: &Value) -> Option<Value> {
-    let names: Vec<Value> = match v {
-        Value::String(s) => s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(Value::from).collect(),
-        Value::Sequence(items) => items.iter().filter_map(|i| i.as_str()).map(Value::from).collect(),
-        _ => Vec::new(),
+    // Text salvaged from a broken list keeps its brackets and quotes.
+    let clean = |s: &str| s.trim().trim_matches(|c| matches!(c, '[' | ']' | '"' | '\'')).trim().to_string();
+    let mut names: Vec<Value> = Vec::new();
+    let mut add = |s: &str| {
+        for part in s.split(',') {
+            let n = clean(part);
+            if !n.is_empty() && !names.contains(&Value::String(n.clone())) {
+                names.push(Value::String(n));
+            }
+        }
     };
+    match v {
+        Value::String(s) => add(s),
+        Value::Sequence(items) => items.iter().filter_map(|i| i.as_str()).for_each(&mut add),
+        _ => {}
+    }
     (!names.is_empty()).then_some(Value::Sequence(names))
 }
 
@@ -300,11 +311,28 @@ fn closed_targets(v: &Value) -> Option<Value> {
     if check_targets(v).is_ok() {
         return Some(v.clone());
     }
-    let path = item.get("path")?.as_str()?;
+    let path = match item {
+        Value::Mapping(_) => item.get("path")?.as_str()?.to_string(),
+        // An item salvaged from text that does not parse, kept as its text.
+        Value::String(raw) => path_in(raw)?,
+        _ => return None,
+    };
+    let path = path.as_str();
     let mut m = serde_yaml::Mapping::new();
     m.insert("path".into(), path.into());
     m.insert("enabled".into(), Value::Bool(false));
     Some(Value::Sequence(vec![Value::Mapping(m)]))
+}
+
+/// The `path:` named in the raw text of a broken target entry.
+fn path_in(raw: &str) -> Option<String> {
+    let at = raw.find("path:")? + "path:".len();
+    let rest = raw[at..].trim_start();
+    let value = match rest.chars().next()? {
+        q @ ('"' | '\'') => rest[1..].split(q).next()?,
+        _ => rest.split([',', '}', '\n']).next()?.trim(),
+    };
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn check_targets(v: &Value) -> Result<(), String> {

@@ -138,7 +138,9 @@ impl Checked {
                     key: (!f.path.is_empty()).then(|| f.path.join(".")),
                     message,
                     fallback: f.unit.as_ref().is_some_and(|u| self.failed.contains(u)),
-                    repair: f.repair.map(str::to_string),
+                    // A key in a file that may not hold it is removed by fix,
+                    // whatever command owns it elsewhere.
+                    repair: f.repair.filter(|_| !f.message.ends_with(" file only")).map(str::to_string),
                 }
             })
             .collect()
@@ -174,7 +176,8 @@ pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Box<Finding>
             unit: None,
             key: None,
             message: format!(
-                "{message}; its sections resolve from the layers beneath, and any switch it turns off stays off"
+                "{message}; its sections resolve from the layers beneath, except that a switch whose key can be \
+                 found stays off unless its value reads cleanly as on"
             ),
             fallback: true,
             repair: None,
@@ -337,83 +340,234 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
 }
 
 // ── salvage ────────────────────────────────────────────────────
+//
+// A heuristic over text that does not parse, used only to keep the switches
+// it turns off. It never fails and never panics: lines are measured in ASCII
+// spaces, so a cut is always a character boundary. A value that cannot be
+// read is kept as its raw text, which every fail-closed reading treats as
+// closed: where the text cannot be read, closed wins.
 
-/// What can be read from text that does not parse as a whole: each
-/// top-level entry parsed on its own, and an entry that does not parse
-/// salvaged entry by entry beneath it. Best effort; used only to keep a
-/// switch that the file turns off.
-pub fn salvage(text: &str) -> Mapping {
+/// What salvage reads from broken text. Duplicate keys are kept, in order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Salvaged {
+    /// A value that parsed, or an unreadable one as its raw text (or null).
+    Value(Value),
+    Map(Vec<(String, Salvaged)>),
+    Seq(Vec<Salvaged>),
+}
+
+impl Salvaged {
+    /// As a plain value, for a fail-closed reading. A duplicate key keeps
+    /// its first occurrence here; [`closed_from_salvage`] merges them.
+    pub fn to_value(&self) -> Value {
+        match self {
+            Salvaged::Value(v) => v.clone(),
+            Salvaged::Map(pairs) => {
+                let mut m = Mapping::new();
+                for (k, v) in pairs {
+                    if !m.contains_key(k.as_str()) {
+                        m.insert(Value::String(k.clone()), v.to_value());
+                    }
+                }
+                Value::Mapping(m)
+            }
+            Salvaged::Seq(items) => Value::Sequence(items.iter().map(Salvaged::to_value).collect()),
+        }
+    }
+}
+
+fn spaces(l: &str) -> usize {
+    l.len() - l.trim_start_matches(' ').len()
+}
+
+fn is_content(l: &str) -> bool {
+    !l.trim().is_empty() && !l.trim_start().starts_with('#')
+}
+
+/// `l` without up to `n` leading spaces; never cuts into text.
+fn dedent(l: &str, n: usize) -> &str {
+    &l[spaces(l).min(n)..]
+}
+
+/// The top-level entries of text that does not parse as a whole.
+pub fn salvage(text: &str) -> Vec<(String, Salvaged)> {
     if let Ok(Value::Mapping(m)) = yaml_edit::parse(text) {
-        return m;
+        return m.into_iter().filter_map(|(k, v)| Some((k.as_str()?.to_string(), Salvaged::Value(v)))).collect();
     }
     let lines: Vec<&str> = text.lines().collect();
-    let indent = |l: &str| l.len() - l.trim_start_matches(' ').len();
-    let content = |l: &str| !l.trim().is_empty() && !l.trim_start().starts_with('#');
-    let base = lines.iter().find(|l| content(l)).map(|l| indent(l)).unwrap_or(0);
-    let starts: Vec<usize> = (0..lines.len())
-        .filter(|&i| content(lines[i]) && indent(lines[i]) == base && !lines[i].trim_start().starts_with('-'))
-        .collect();
-    let mut out = Mapping::new();
+    salvage_map(&lines)
+}
+
+/// Entries at the least indent of `lines`. Lines indented less than the
+/// first entry, or before it, belong to no entry and are skipped.
+fn salvage_map(lines: &[&str]) -> Vec<(String, Salvaged)> {
+    let Some(base) = lines.iter().filter(|l| is_content(l)).map(|l| spaces(l)).min() else { return Vec::new() };
+    let starts: Vec<usize> = (0..lines.len()).filter(|&i| is_content(lines[i]) && spaces(lines[i]) == base).collect();
+    let mut out = Vec::new();
     for (n, &s) in starts.iter().enumerate() {
         let e = starts.get(n + 1).copied().unwrap_or(lines.len());
-        let block: Vec<&str> = lines[s..e].iter().map(|l| if l.len() >= base { &l[base..] } else { l.trim_start() }).collect();
-        let block_text = block.join("\n");
-        if let Ok(Value::Mapping(m)) = serde_yaml::from_str::<Value>(&block_text) {
-            out.extend(m);
+        let head = dedent(lines[s], base).trim_end();
+        if head.starts_with('{') {
+            out.extend(salvage_flow(head));
             continue;
         }
-        // The entry itself is broken: salvage what is under its key.
-        let head = block[0].trim_end();
-        if let Some(key) = head.strip_suffix(':').filter(|k| !k.contains(": ")) {
-            let inner = salvage(&block[1..].join("\n"));
-            if !inner.is_empty() {
-                out.insert(Value::String(key.trim().to_string()), Value::Mapping(inner));
+        let Some((raw_key, rest)) = yaml_edit::split_key(head) else { continue };
+        let key = yaml_edit::unquote(&raw_key);
+        let block: Vec<&str> = lines[s..e].iter().map(|l| dedent(l, base)).collect();
+        if let Ok(Value::Mapping(m)) = serde_yaml::from_str::<Value>(&block.join("\n")) {
+            if let Some((_, v)) = m.into_iter().next() {
+                out.push((key, Salvaged::Value(v)));
+                continue;
             }
         }
+        let (rest, _) = yaml_edit::split_comment(&rest);
+        let children = &lines[s + 1..e];
+        let v = if !rest.is_empty() {
+            match serde_yaml::from_str::<Value>(&rest) {
+                Ok(v) if !children.iter().any(|l| is_content(l)) => Salvaged::Value(v),
+                _ => Salvaged::Value(Value::String(rest)),
+            }
+        } else if children.iter().any(|l| is_content(l)) {
+            salvage_children(children)
+        } else {
+            Salvaged::Value(Value::Null)
+        };
+        out.push((key, v));
     }
     out
 }
 
+/// The block under a key: a list, item by item, or a mapping.
+fn salvage_children(lines: &[&str]) -> Salvaged {
+    let Some(base) = lines.iter().filter(|l| is_content(l)).map(|l| spaces(l)).min() else {
+        return Salvaged::Value(Value::Null);
+    };
+    let first = lines.iter().find(|l| is_content(l) && spaces(l) == base).map(|l| dedent(l, base)).unwrap_or("");
+    if !(first == "-" || first.starts_with("- ")) {
+        return Salvaged::Map(salvage_map(lines));
+    }
+    let starts: Vec<usize> = (0..lines.len())
+        .filter(|&i| is_content(lines[i]) && spaces(lines[i]) == base && dedent(lines[i], base).starts_with('-'))
+        .collect();
+    let mut items = Vec::new();
+    for (n, &s) in starts.iter().enumerate() {
+        let e = starts.get(n + 1).copied().unwrap_or(lines.len());
+        let block: Vec<&str> = lines[s..e].iter().map(|l| dedent(l, base)).collect();
+        match serde_yaml::from_str::<Value>(&block.join("\n")) {
+            Ok(Value::Sequence(mut v)) if v.len() == 1 => items.push(Salvaged::Value(v.remove(0))),
+            _ => {
+                let raw = block[0].trim_start_matches('-').trim();
+                items.push(Salvaged::Value(Value::String(raw.to_string())));
+            }
+        }
+    }
+    Salvaged::Seq(items)
+}
+
+/// `{a: 1, b: [}` on one line: split at the top-level commas.
+fn salvage_flow(line: &str) -> Vec<(String, Salvaged)> {
+    let body = line.trim_start_matches('{');
+    let body = body.strip_suffix('}').unwrap_or(body);
+    let mut parts = Vec::new();
+    let (mut depth, mut start) = (0i32, 0usize);
+    for (i, c) in body.char_indices() {
+        match c {
+            '[' | '{' => depth += 1,
+            ']' | '}' => depth -= 1,
+            ',' if depth <= 0 => {
+                parts.push(&body[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&body[start..]);
+    parts
+        .into_iter()
+        .filter_map(|p| {
+            let (raw_key, rest) = yaml_edit::split_key(p.trim())?;
+            let rest = rest.trim().to_string();
+            let v = serde_yaml::from_str::<Value>(&rest).unwrap_or(Value::String(rest));
+            Some((yaml_edit::unquote(&raw_key), Salvaged::Value(v)))
+        })
+        .collect()
+}
+
+/// Merge a closed reading into `out` at `key`: the first closed reading
+/// stays, and lists are joined, so a later open duplicate never reopens it.
+fn merge_closed(out: &mut Mapping, key: &str, c: Value) {
+    match (out.get_mut(key), c) {
+        (Some(Value::Sequence(have)), Value::Sequence(more)) => {
+            for v in more {
+                if !have.contains(&v) {
+                    have.push(v);
+                }
+            }
+        }
+        (Some(_), _) => {}
+        (None, c) => {
+            out.insert(Value::String(key.to_string()), c);
+        }
+    }
+}
+
 /// The fail-closed readings of every switch salvaged from text that does
-/// not parse: what such a file still contributes to its layer.
+/// not parse: what such a file still contributes to its layer. A switch
+/// whose key can be found stays off unless its value reads cleanly as on.
+/// A per-entry list that is named but unreadable contributes an empty list,
+/// so it never falls to an implicit default.
 pub fn closed_from_salvage(schema: &Schema, file: &str, scope: LayerScope, text: &str, only: Option<&[&str]>) -> Mapping {
     let keys = file_keys(schema, file);
     let mut out = Mapping::new();
-    for (k, v) in salvage(text) {
-        let Some(top) = k.as_str() else { continue };
-        let Some(sec) = schema.section_of_top(file, top) else { continue };
+    for (top, v) in salvage(text) {
+        let Some(sec) = schema.section_of_top(file, &top) else { continue };
         if only.is_some_and(|o| !o.contains(&sec.name)) {
             continue;
         }
-        let path = vec![top.to_string()];
-        match (sec.per_entry, &v) {
-            (true, Value::Mapping(m)) => {
-                let mut kept = Mapping::new();
-                for (ek, ev) in m {
-                    let Some(e) = ek.as_str() else { continue };
-                    if let Some(c) = closed(&keys, scope, &[top.to_string(), e.to_string()], ev) {
-                        kept.insert(ek.clone(), c);
-                    }
-                }
-                if !kept.is_empty() {
-                    out.insert(k.clone(), Value::Mapping(kept));
+        let path = vec![top.clone()];
+        if !sec.per_entry {
+            if let Some(c) = closed(&keys, scope, &path, &v.to_value()) {
+                merge_closed(&mut out, &top, c);
+            }
+            continue;
+        }
+        // Per-entry: each entry or item on its own.
+        let as_entries = match &v {
+            Salvaged::Map(pairs) => Some(pairs.iter().map(|(k, s)| (k.clone(), s.to_value())).collect::<Vec<_>>()),
+            Salvaged::Value(Value::Mapping(m)) => {
+                Some(m.iter().filter_map(|(k, s)| Some((k.as_str()?.to_string(), s.clone()))).collect())
+            }
+            _ => None,
+        };
+        let as_items = match &v {
+            Salvaged::Seq(items) => Some(items.iter().map(Salvaged::to_value).collect::<Vec<_>>()),
+            Salvaged::Value(Value::Sequence(items)) => Some(items.clone()),
+            _ => None,
+        };
+        if let Some(entries) = as_entries {
+            let mut kept = match out.get(top.as_str()) {
+                Some(Value::Mapping(m)) => m.clone(),
+                _ => Mapping::new(),
+            };
+            for (e, ev) in entries {
+                if let Some(c) = closed(&keys, scope, &[top.clone(), e.clone()], &ev) {
+                    merge_closed(&mut kept, &e, c);
                 }
             }
-            (true, Value::Sequence(items)) => {
-                let mut kept = Vec::new();
-                for item in items {
-                    if let Some(Value::Sequence(c)) = closed(&keys, scope, &path, &Value::Sequence(vec![item.clone()])) {
-                        kept.extend(c);
-                    }
-                }
-                if !kept.is_empty() {
-                    out.insert(k.clone(), Value::Sequence(kept));
+            if !kept.is_empty() {
+                out.insert(Value::String(top.clone()), Value::Mapping(kept));
+            }
+        } else {
+            let mut kept = Vec::new();
+            for item in as_items.unwrap_or_default() {
+                if let Some(Value::Sequence(c)) = closed(&keys, scope, &path, &Value::Sequence(vec![item])) {
+                    kept.extend(c);
                 }
             }
-            _ => {
-                if let Some(c) = closed(&keys, scope, &path, &v) {
-                    out.insert(k.clone(), c);
-                }
+            // A list that is named stays a list, so it never falls to an
+            // implicit default, even when nothing in it can be read.
+            if keys.iter().any(|k| k.match_path(&path).is_some() && scope.admits(k.scope)) {
+                merge_closed(&mut out, &top, Value::Sequence(kept));
             }
         }
     }
@@ -468,7 +622,8 @@ pub struct Layer {
 impl Layer {
     /// Read and check a file. A missing file is an empty, clean layer.
     pub fn read(schema: &Schema, name: &str, file: &'static str, scope: LayerScope, path: &Path) -> Layer {
-        let text = std::fs::read_to_string(path).ok();
+        // Read lossily: a stray byte must not hide the switches in the file.
+        let text = std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
         let present = text.is_some();
         let mut layer = Layer::from_text(schema, name, file, scope, Some(path), text.as_deref().unwrap_or(""));
         layer.present = present;
@@ -701,11 +856,52 @@ mod tests {
     #[test]
     fn salvage_reads_the_entries_that_parse() {
         let m = salvage("enabled: false\nlanguage: [\nways:\n  a/b: false\n  c/d: [\n  e/f: false\n");
-        assert_eq!(m.get("enabled"), Some(&Value::Bool(false)));
-        assert!(m.get("language").is_none());
-        let ways = m.get("ways").and_then(|w| w.as_mapping()).unwrap();
-        assert_eq!(ways.get("a/b"), Some(&Value::Bool(false)));
-        assert_eq!(ways.get("e/f"), Some(&Value::Bool(false)));
-        assert!(ways.get("c/d").is_none());
+        assert_eq!(m[0], ("enabled".into(), Salvaged::Value(Value::Bool(false))));
+        assert_eq!(m[1], ("language".into(), Salvaged::Value(Value::String("[".into()))));
+        let Salvaged::Map(ways) = &m[2].1 else { panic!("{m:?}") };
+        assert_eq!(ways[0], ("a/b".into(), Salvaged::Value(Value::Bool(false))));
+        assert_eq!(ways[1], ("c/d".into(), Salvaged::Value(Value::String("[".into()))));
+        assert_eq!(ways[2], ("e/f".into(), Salvaged::Value(Value::Bool(false))));
+    }
+
+    #[test]
+    fn salvage_never_cuts_into_text_or_keys() {
+        // N1: the first line indented, a multibyte comment at column 0.
+        let m = salvage("  language: en\n#ña\nenabled: false\n");
+        assert!(m.contains(&("enabled".into(), Salvaged::Value(Value::Bool(false)))), "{m:?}");
+        let m = salvage("  language: en\nenabled: false\n");
+        assert!(m.contains(&("enabled".into(), Salvaged::Value(Value::Bool(false)))), "{m:?}");
+    }
+
+    #[test]
+    fn salvage_and_checks_never_panic_on_generated_text() {
+        // A deterministic fuzz over pieces that break YAML: indents, quotes,
+        // brackets, list marks, multibyte text, tabs, duplicate keys.
+        const PIECES: &[&str] = &[
+            "enabled", "ways", "targets", "mode", ":", ": ", " ", "  ", "   ", "\t", "\n", "\n", "\n", "- ", "-", "\"",
+            "'", "[", "]", "{", "}", ",", "#", "ñ", "é", "日本", "\u{1F600}", "false", "true", "a/b", "path", "~/.claude",
+            "|", ">", "&a", "*a", "!!str", "---", "...", "\r\n", "\u{feff}", "0", "-1", "1.5e3", "null", "?",
+        ];
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..20_000 {
+            let len = (next() % 40) as usize;
+            let text: String = (0..len).map(|_| PIECES[(next() % PIECES.len() as u64) as usize]).collect();
+            let _ = salvage(&text);
+            let _ = closed_from_salvage(&SCHEMA, "cfg", LayerScope::Project, &text, None);
+            let l = Layer::from_text(&SCHEMA, "f", "cfg", LayerScope::Project, Some(Path::new("/f.yaml")), &text);
+            for f in &l.findings {
+                let _ = f.diagnostic("t");
+            }
+            if let Ok(mut d) = crate::yaml_edit::Doc::parse(&text) {
+                let _ = d.line_of(&["ways".into(), "a/b".into()]);
+                let _ = d.set(&["ways".into(), "a/b".into()], &Value::Bool(false));
+            }
+        }
     }
 }

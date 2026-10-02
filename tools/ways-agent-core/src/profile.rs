@@ -527,8 +527,9 @@ mod tests {
         // A top-level typo is reported, not silent.
         let (_, findings) = UserLayer::parse("mdoe: off\n", None).unwrap();
         assert_eq!(findings[0].key.as_deref(), Some("mdoe"));
+        // An unreadable mode reads closed: off.
         let (user, findings) = UserLayer::parse("mode: [\n", None).unwrap();
-        assert_eq!(user, UserLayer::default());
+        assert_eq!(user, UserLayer { mode: Some(Mode::Off), ..Default::default() });
         assert!(findings[0].message.contains("does not parse"));
     }
 
