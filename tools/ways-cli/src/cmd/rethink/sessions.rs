@@ -95,9 +95,10 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
             s.way_fires = *fires;
         }
         if let Some(last) = last_ts.get(&s.id) {
-            let start = parse_utc_iso(&s.ts).unwrap_or(0);
-            let end = parse_utc_iso(last).unwrap_or(0);
-            s.duration_secs = end.saturating_sub(start);
+            // A stamp that is not UTC gives no duration rather than one from 1970.
+            if let (Some(start), Some(end)) = (parse_utc_iso(&s.ts), parse_utc_iso(last)) {
+                s.duration_secs = end.saturating_sub(start);
+            }
         }
     }
 
@@ -263,6 +264,17 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A start stamp that is not UTC gives no duration, not one measured from 1970.
+    #[test]
+    fn a_non_utc_start_gives_no_duration() {
+        let content = concat!(
+            r#"{"event":"session_start","session":"s1","ts":"2026-01-01T00:00:00+02:00","project":"/p"}"#, "\n",
+            r#"{"event":"way_fired","session":"s1","ts":"2026-01-01T00:01:00Z","way":"a/b"}"#, "\n",
+        );
+        let sessions = gather_sessions(content, Some("/p"));
+        assert_eq!(sessions[0].duration_secs, 0);
+    }
 
     #[test]
     fn gather_sessions_dedups_compaction_restarts() {

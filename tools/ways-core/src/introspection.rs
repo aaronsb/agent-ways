@@ -234,8 +234,9 @@ impl SessionIntrospection {
         let mut cluster: Vec<&FireRow> = Vec::new();
         let mut last_secs: u64 = 0;
 
-        for f in &fires {
-            let secs = parse_utc_iso(&f.ts).unwrap_or(0);
+        // A row whose stamp is not UTC is skipped: read as 0 it would open a
+        // turn of its own and split the one it sits in.
+        for (secs, f) in fires.iter().filter_map(|f| Some((parse_utc_iso(&f.ts)?, f))) {
             if !cluster.is_empty() && secs > last_secs + 3 {
                 epoch += 1;
                 turns.push(build_turn(&cluster, epoch, criteria));
@@ -334,10 +335,10 @@ fn nearest_prompt_turn<'a>(
     turn_ts: &str,
     prompt_turns: &'a [crate::transcript::PromptTurn],
 ) -> Option<&'a crate::transcript::PromptTurn> {
-    let turn_secs = parse_utc_iso(turn_ts).unwrap_or(0);
+    let turn_secs = parse_utc_iso(turn_ts)?;
     let in_tolerance: Vec<(&crate::transcript::PromptTurn, u64)> = prompt_turns
         .iter()
-        .map(|pt| (pt, parse_utc_iso(&pt.ts).unwrap_or(0).abs_diff(turn_secs)))
+        .filter_map(|pt| Some((pt, parse_utc_iso(&pt.ts)?.abs_diff(turn_secs))))
         .filter(|(_, diff)| *diff <= JOIN_TOLERANCE_SECS)
         .collect();
 
@@ -561,6 +562,20 @@ pub fn project_criteria_map(project: &str) -> CriteriaMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fire whose timestamp is not UTC is skipped, not read as 1970: the
+    /// zero split the turn it sat in.
+    #[test]
+    fn a_non_utc_fire_is_skipped_not_epoch_zero() {
+        let fire = |ts: &str, way: &str| json!({"ts": ts, "event": "way_fired", "session": "s", "way": way});
+        let events = vec![
+            fire("2026-01-01T00:00:00Z", "d/a"),
+            fire("2026-01-01T00:00:01+00:00", "d/x"),
+            fire("2026-01-01T00:00:02Z", "d/b"),
+        ];
+        let intro = SessionIntrospection::build(&events, "s", "/nonexistent-project", 200, &CriteriaMap::new());
+        assert_eq!(intro.turns.len(), 1, "one turn: a and b are 2s apart");
+    }
     use serde_json::json;
 
     fn crit(pattern: &str) -> MatchCriteria {
