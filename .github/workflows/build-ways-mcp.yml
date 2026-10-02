@@ -6,7 +6,7 @@ on:
     tags: ['ways-mcp-v*']
     paths:
       - 'tools/ways-mcp/**'
-      - 'tools/attend-session/**'
+      - 'tools/attend-presence/**'
       - 'tools/claude-sessions/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
@@ -15,7 +15,7 @@ on:
   pull_request:
     paths:
       - 'tools/ways-mcp/**'
-      - 'tools/attend-session/**'
+      - 'tools/attend-presence/**'
       - 'tools/claude-sessions/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
@@ -31,10 +31,10 @@ jobs:
     with:
       component: ways-mcp
       test-os: '["ubuntu-latest", "macos-latest"]'
-      # attend-session's ancestry walk is how the server finds its session;
-      # its ps invocation has to work on BSD ps as well as GNU.
+      # attend-presence's ancestry walk is how the server finds its session;
+      # its ps fallback (no /proc) has to work on BSD ps as well as GNU.
       test: |
-        cargo test --manifest-path tools/Cargo.toml -p ways-mcp -p attend-session
+        cargo test --manifest-path tools/Cargo.toml -p ways-mcp -p attend-presence
       release-notes: |-
         Pre-built ways-mcp binaries for 4 platforms.
 
