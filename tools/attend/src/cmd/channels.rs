@@ -11,6 +11,7 @@ pub(crate) fn cmd_join(name: &str, pin: bool) {
     let r = get_groups();
     match r.join(name, pin) {
         Ok(()) => {
+            crate::util::enroll_by_join();
             let suffix = if pin { " (pinned)" } else { "" };
             println!("[attend] joined #{name}{suffix}");
         }
@@ -29,6 +30,7 @@ pub(crate) fn cmd_leave(name: &str) {
         return;
     }
     r.leave(name).ok();
+    crate::util::settle_join_enrollment(&r);
     println!("[attend] left #{name}");
 }
 

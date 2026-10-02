@@ -9,6 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+mod common;
+
 const ORIGIN: &str = "/tmp/drain-enrollment-project";
 
 fn session(tag: &str) -> String {
@@ -117,30 +119,25 @@ fn a_session_in_a_channel_drains_every_tray_as_before() {
 
 #[test]
 fn a_session_that_ran_attend_drains_every_tray_as_before() {
-    let home = fixture("registered");
-    // `attend run` registers the session in its project's instance
-    // registry; the registry file is that record.
-    let instances = cache(&home).join("instances");
-    std::fs::create_dir_all(&instances).unwrap();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    std::fs::write(
-        instances.join(format!("{}.yaml", claude_sessions::attend_key(ORIGIN))),
-        format!(
-            "{}:\n  instance: alpha\n  registered_at: {now}\n  last_seen: {now}\n",
-            session("registered")
-        ),
-    )
-    .unwrap();
+    // `attend run` enrolls the session; once it has stopped, the drain is
+    // the conduit and delivers everything the session receives.
+    let f = common::Fixture::new("drain-ran");
+    {
+        let run = f.run();
+        run.wait_for("enrollment by attend run", std::time::Duration::from_secs(20), |_| {
+            f.marker(&f.sid).exists()
+        });
+    }
+    let tray = f.project_tray();
+    f.put("_broadcast", "other-1-open-msg", "open-msg", std::time::Duration::ZERO);
+    f.put(&tray, "other-1-project-msg", "project-msg", std::time::Duration::ZERO);
+    f.put("@side", "other-1-channel-msg", "channel-msg", std::time::Duration::ZERO);
 
-    let plain = drain(&home, "plain");
+    let plain = f.drain("plain");
     // Not in `@side`, so the channel tray is not read.
     for body in ["open-msg", "project-msg"] {
         assert!(plain.contains(body), "missing {body}: {plain}");
     }
     assert!(!plain.contains("channel-msg"), "{plain}");
-    assert!(heartbeat(&home, "registered").exists());
-    std::fs::remove_dir_all(&home).ok();
+    assert!(f.heartbeat(&f.sid).exists());
 }

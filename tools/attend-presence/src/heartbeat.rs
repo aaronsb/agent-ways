@@ -194,6 +194,36 @@ pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLo
     }
 }
 
+/// Whether an `attend run` holds the session lock for `session_id`.
+/// Unlike [`try_acquire_session_lock`] this never creates the heartbeat
+/// file, so asking does not make the session look alive.
+pub fn run_is_live(session_id: &str) -> bool {
+    #[cfg(unix)]
+    let path = heartbeat_path(session_id);
+    #[cfg(windows)]
+    let path = lock_path(session_id);
+    let Ok(file) = fs::OpenOptions::new().write(true).open(&path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if ret == 0 {
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+            return false;
+        }
+        io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK)
+    }
+    #[cfg(windows)]
+    {
+        drop(file);
+        matches!(
+            fs::OpenOptions::new().write(true).share_mode(0).open(&path),
+            Err(e) if e.raw_os_error() == Some(32)
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +338,19 @@ mod tests {
                 .expect("b holds — different session must not contend");
             drop(a);
             drop(b);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_is_live_follows_the_lock_and_creates_nothing() {
+        with_home(|_| {
+            assert!(!run_is_live("sess-live"));
+            assert!(!heartbeat_path("sess-live").exists(), "asking must not create a heartbeat");
+            let lock = try_acquire_session_lock("sess-live").unwrap().unwrap();
+            assert!(run_is_live("sess-live"));
+            drop(lock);
+            assert!(!run_is_live("sess-live"));
         });
     }
 

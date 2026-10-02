@@ -52,15 +52,23 @@ pub(crate) fn own_origin_cwd() -> String {
     attend_presence::session::identity().origin_path
 }
 
-/// Whether the session enrolled in attend (#720): it ran `attend run`,
-/// which gives it a slot in its project's instance registry, or it joined
-/// a channel. Enrollment is what the Stop-hook drain delivers to; it covers
-/// `#open` and the project tray as well as the joined channels.
-pub(crate) fn enrolled(ident: &attend_presence::session::SessionIdentity, groups: &groups::Groups) -> bool {
-    attend_instances::Registry::new()
-        .lookup(&ident.origin_path, &ident.session_id)
-        .is_some()
-        || !groups.my_groups().is_empty()
+/// Record that this session enrolled by joining a channel (#720). Only a
+/// resolved session enrolls: the drain never runs for any other.
+pub(crate) fn enroll_by_join() {
+    let ident = attend_presence::session::identity();
+    if ident.resolved() {
+        attend_presence::enrollment::enroll(&ident.session_id, attend_presence::enrollment::Source::Join).ok();
+    }
+}
+
+/// After this session's channels changed: a session in no channel any more
+/// withdraws its join enrollment. One that also ran `attend run` stays
+/// enrolled through that.
+pub(crate) fn settle_join_enrollment(groups: &groups::Groups) {
+    let ident = attend_presence::session::identity();
+    if ident.resolved() && groups.my_groups().is_empty() {
+        attend_presence::enrollment::withdraw(&ident.session_id, attend_presence::enrollment::Source::Join).ok();
+    }
 }
 
 pub(crate) fn count_signals(dir: &std::path::Path) -> usize {

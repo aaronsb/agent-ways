@@ -398,15 +398,14 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         return;
     }
     let session_id = ident.session_id.clone();
-    let base = signals_base();
-    let r = crate::groups::Groups::new(&base, &session_id);
-
     // Enrollment gate (#720): a session that never ran attend and joined
     // no channel has chosen not to take part, so the drain delivers it
     // nothing and writes nothing, not even the heartbeat below.
-    if !crate::util::enrolled(&ident, &r) {
+    if !attend_presence::enrollment::is_enrolled(&session_id) {
         return;
     }
+    let base = signals_base();
+    let r = crate::groups::Groups::new(&base, &session_id);
 
     // Liveness: a drain-only session (no Monitor running) must still
     // look alive to /purge's consumer consult, or the Decision 5

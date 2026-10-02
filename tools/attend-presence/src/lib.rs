@@ -6,6 +6,7 @@
 //! - [`heartbeat`]: the per-session liveness file (ADR-129) and the
 //!   duplicate-attend lock.
 //! - [`alive`]: the one predicate for "is this member live".
+//! - [`enrollment`]: whether a session enrolled in attend (#720).
 //! - [`cache`]: attend's cache root, under `XDG_CACHE_HOME`.
 //! - [`process`]: a pid's parent and command line.
 //!
@@ -13,6 +14,7 @@
 //! ADR-505), which every consumer depended on together.
 
 pub mod cache;
+pub mod enrollment;
 pub mod heartbeat;
 pub mod process;
 pub mod session;

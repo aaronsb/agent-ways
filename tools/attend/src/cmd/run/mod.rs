@@ -114,6 +114,11 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // The roster enumerates addressable coordinating units; a
     // `pid-<pid>` fallback runner is not one, and registering it
     // would allocate a Greek slot to a persona nobody can address.
+    // Enrollment (#720): a resolved session that starts attend is enrolled
+    // until it opts out, whatever its liveness does later.
+    if ident.resolved() {
+        attend_presence::enrollment::enroll(&session_id, attend_presence::enrollment::Source::Run).ok();
+    }
     let my_instance = if ident.resolved() {
         match instance_registry.register(&focus.working_dir, &session_id) {
             Ok(s) => {
