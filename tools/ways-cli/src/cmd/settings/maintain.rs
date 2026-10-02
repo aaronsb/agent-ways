@@ -29,10 +29,10 @@ pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Ou
 }
 
 pub(super) fn file_label(file: &str) -> &'static str {
-    if file == ways_agent_core::settings::FILE {
-        "agent.yaml"
-    } else {
-        "config.yaml (or a project's .claude/ways.yaml)"
+    match file {
+        f if f == ways_agent_core::settings::FILE => "agent.yaml",
+        f if f == attend_config::FILE => "attend/config.yaml (or a project's .claude/attend.yaml)",
+        _ => "config.yaml (or a project's .claude/ways.yaml)",
     }
 }
 
@@ -78,6 +78,10 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Sche
 /// - an unknown key, a non-text key, or a value of the wrong shape is
 ///   removed.
 ///
+/// An entry's name the section refuses is not repaired: it closes its
+/// section, and only a hand edit can say what it meant. fix writes nothing
+/// to that file and exits 5.
+///
 /// A top-level key no section owns is not removed: it may be a typo to
 /// correct by hand. `fix ""` reports it and exits 3.
 ///
@@ -90,16 +94,13 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
     }
     let mut by_file: Vec<(PathBuf, Vec<(&'static agent_settings::Schema, &'static agent_settings::SectionSpec)>)> = Vec::new();
     for (schema, sec) in sections {
-        let path = if sec.file == ways_agent_core::settings::FILE {
-            ways_agent_core::profile::user_layer_path()
-        } else if sec.file == ways_core::settings::FILE {
-            match project {
-                Some(_) => ways_core::settings::project_file(&project_dir(project)),
-                None => ways_core::paths::user_config(),
-            }
-        } else {
-            continue;
+        // A section's file: the user's, or with --project the project's. The
+        // agent's sections live in the user file alone, --project or not.
+        let (scope, at) = match sec.file == ways_agent_core::settings::FILE {
+            true => (Scope::User, None),
+            false => (Scope::Both, project),
         };
+        let Some(Ok((path, _))) = file_of(sec.file, scope, at) else { continue };
         match by_file.iter_mut().find(|(p, _)| *p == path) {
             Some((_, list)) => list.push((schema, sec)),
             None => by_file.push((path, vec![(schema, sec)])),
@@ -107,14 +108,20 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
     }
     let mut left = Vec::new();
     for (path, list) in &by_file {
-        let user_file = path == &ways_core::paths::user_config() || path == &ways_agent_core::profile::user_layer_path();
-        let scope = if path.file_name().is_some_and(|n| n == "ways.yaml") { LayerScope::Project } else { LayerScope::User };
+        let user_file = is_user_file(path);
+        let scope = if user_file { LayerScope::User } else { LayerScope::Project };
         let names: Vec<&str> = list.iter().map(|(_, s)| s.name).collect();
         let file = list[0].1.file;
         let schema = list[0].0;
-        agent_settings::writer::edit_file(path, None, |d| {
+        let refused = agent_settings::writer::edit_file(path, None, |d| {
             let raw = d.value().clone();
             let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
+            // A name the section refuses closes it, and may be an off-switch
+            // the schema cannot read: only a hand edit can say what it meant.
+            if checked.has_refused_name() {
+                let text = d.text();
+                return Ok(checked.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>());
+            }
             for (sec, key) in checked.failing() {
                 if sec.is_none() {
                     continue; // a top-level key no section owns; not this fix
@@ -147,9 +154,17 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
                     }
                 }
             }
-            Ok(())
+            Ok(Vec::new())
         })
-        .map_err(write_failed)?;
+        .map_err(write_failed)?
+        .0;
+        if let Some(f) = refused.first() {
+            let hint = f.message.split_once("; ").map_or("rename it, or delete it", |(_, h)| h);
+            return Err(fail(
+                exit::WRITE_FAILED,
+                format!("{f}; fix cannot repair an entry's name, so nothing was written. Edit the file by hand: {hint}. Until then the section fails closed in that file"),
+            ));
+        }
         // Check again: what fix could not repair is reported, with its command.
         let text = std::fs::read_to_string(path).unwrap_or_default();
         if let Ok(doc) = agent_settings::load::parse_text(&text, Some(path)) {

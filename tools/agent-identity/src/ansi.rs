@@ -1,7 +1,7 @@
 //! ANSI rendering of an identity for terminals that don't use a component
 //! framework.
 //!
-//! Consumers that render to iocraft/ratatui/etc. should map the
+//! Consumers that render to ratatui or another toolkit should map the
 //! `PaletteEntry` onto their own types instead — `ansi::wrap` is for
 //! `println!`-style callers (attend's `peers` table, banners, status
 //! output, etc.). The escape sequences themselves are agent-theme's

@@ -1,22 +1,22 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│   enabled                     true                  ││ways.language                              │|
-|│▌  language                    auto                  ││                                           │|
-|│   default_scope               agent                 ││Output language: en, auto, or a language   │|
-|│   disabled_domains            []                    ││code.                                      │|
-|│ ▸ project                                           ││                                           │|
-|│                                                     ││en and auto keep the English corpus. A     │|
-|│                                                     ││specific code, set by the ways-localize    │|
-|│                                                     ││skill, switches the build, matcher and     │|
-|│                                                     ││tuner to that language (ADR-139).          │|
-|│                                                     ││                                           │|
-|│                                                     ││value    auto                              │|
-|│                                                     ││type     text (Enter edits)                │|
-|│                                                     ││default  auto                              │|
+|│ ▸ governor                                          ││attend.cleanup.interval                    │|
+|│ ▸ engagement                                        ││                                           │|
+|│ ▾ cleanup                                           ││Seconds between sweeps.                    │|
+|│     enabled                   true                  ││                                           │|
+|│▌    interval                  600                   ││value    600                               │|
+|│                                                     ││type     integer 1..=604800 (Enter edits)  │|
+|│                                                     ││default  600                               │|
 |│                                                     ││from     default                           │|
-|│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
-|│                                                     ││[ways.language]                            │|
+|│                                                     ││writes   ~/.config/attend/config.yaml      │|
+|│                                                     ││[attend.cleanup.interval]                  │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -28,13 +28,13 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| edit  auto▏  Enter set · Esc cancel  ? keys · Tab 1-9 tabs · / filters all tabs                    |
+| edit  900▏  Enter set · Esc cancel  ? keys · Tab 1-9 tabs · / filters all tabs                     |
 styles
-  0   0-7   Black Cyan BOLD
+  0   0-7   White Blue -
   0  10-21  White Blue -
   0  24-31  White Blue -
   0  34-44  White Blue -
-  0  47-56  White Blue -
+  0  47-56  Black Cyan BOLD
   0  59-69  White Blue -
   0  72-80  White Blue -
   1   0-0   - - DIM
@@ -43,53 +43,55 @@ styles
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
+  2   2-11  - - BOLD
   2  54-55  - - DIM
-  2  56-68  - - BOLD
+  2  56-78  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
-  3   1-1   Cyan - BOLD|REVERSED
-  3   2-53  - - BOLD|REVERSED
+  3   2-13  - - BOLD
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
+  4   2-10  - - BOLD
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6   2-10  - - BOLD
-  6  54-55  - - DIM
+  6   1-1   Cyan - BOLD|REVERSED
+  6   2-53  - - BOLD|REVERSED
+  6  54-64  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7  54-55  - - DIM
+  7  54-64  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8  54-55  - - DIM
+  8  54-64  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  54-55  - - DIM
+  9  54-64  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10  54-55  - - DIM
+ 10  54-64  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-64  - - DIM
+ 12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-64  - - DIM
+ 13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-64  - - DIM
+ 14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-64  - - DIM
+ 15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  54-64  - - DIM
+ 16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-55  - - DIM
@@ -126,4 +128,4 @@ styles
  27  99-99  - - DIM
  28   0-99  - - DIM
  29   0-5   Black Cyan BOLD
- 29  13-35  - - DIM|ITALIC
+ 29  12-34  - - DIM|ITALIC

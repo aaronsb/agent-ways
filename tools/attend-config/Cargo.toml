@@ -8,3 +8,10 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "attend_config"
 path = "src/lib.rs"
+
+[dependencies]
+agent-settings = { path = "../agent-settings" }
+# The `theme` section's declarations, read only here (attend keeps no theme key).
+agent-theme = { path = "../agent-theme", features = ["settings"] }
+claude-sessions = { path = "../claude-sessions" }
+serde_yaml = "0.9"

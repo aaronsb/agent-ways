@@ -54,9 +54,11 @@ dependencies = [
 name = "agent-theme"
 version = "0.1.0"
 dependencies = [
+ "agent-settings",
  "agent-theme",
  "ratatui-core",
  "serde",
+ "serde_yaml",
  "toml",
 ]
 
@@ -289,8 +291,10 @@ version = "0.15.1"
 dependencies = [
  "agent-fmt",
  "agent-identity",
+ "agent-settings",
  "agent-theme",
  "attend-chat",
+ "attend-config",
  "attend-groups",
  "attend-instances",
  "attend-presence",
@@ -302,6 +306,7 @@ dependencies = [
  "sensor-peers",
  "sensor-processes",
  "sensor-trait",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -325,6 +330,12 @@ dependencies = [
 [[package]]
 name = "attend-config"
 version = "0.1.0"
+dependencies = [
+ "agent-settings",
+ "agent-theme",
+ "claude-sessions",
+ "serde_yaml",
+]
 
 [[package]]
 name = "attend-groups"
@@ -2608,6 +2619,7 @@ dependencies = [
  "agent-theme",
  "agent-tui",
  "anyhow",
+ "attend-config",
  "clap",
  "claude-sessions",
  "glob",
@@ -2675,6 +2687,7 @@ version = "1.0.0"
 dependencies = [
  "agent-fmt",
  "agent-settings",
+ "agent-theme",
  "anyhow",
  "claude-sessions",
  "pulldown-cmark",

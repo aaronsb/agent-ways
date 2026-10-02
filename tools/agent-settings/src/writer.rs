@@ -311,16 +311,37 @@ pub fn edit_file_within<T>(
     Ok((out, true))
 }
 
-/// Create `path` with `body` only when no file is there (`config init`).
-/// Returns false when one already exists.
+/// Create `path` with `body` only when nothing is there (`config init`).
+/// Returns false when something already is. Never overwrites, by
+/// construction rather than by a check: the body is written to a temporary
+/// file, synced, and hard-linked to `path`, which the OS refuses when any
+/// entry, even a dangling or looping link, holds the name. A writer that
+/// takes no lock (an editor) creating the file at the same moment wins, and
+/// is kept.
 pub fn create_new(path: &Path, body: &str) -> Result<bool, WriteError> {
     let path = &resolve(path);
     let _lock = Lock::acquire(path).map_err(|e| WriteError::Lock(path.to_path_buf(), e))?;
-    if path.exists() {
-        return Ok(false);
-    }
-    write_atomic(path, body).map_err(|e| WriteError::Write(path.to_path_buf(), e))?;
-    Ok(true)
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let err = |e| WriteError::Write(path.to_path_buf(), e);
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.{}.new", std::process::id(), TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
+    let result = (|| {
+        let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        io::Write::write_all(&mut f, body.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        match std::fs::hard_link(&tmp, path) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(e),
+        }
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    result.map_err(err)
 }
 
 #[cfg(test)]
@@ -472,6 +493,23 @@ mod tests {
         assert!(create_new(&path, "# a\n").unwrap());
         assert!(!create_new(&path, "# b\n").unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# a\n");
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("config.yaml")], "no temporary or lock file left");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Something at the name that `exists()` does not see, here a link to
+    /// itself, is never replaced: the create is refused by the OS, not
+    /// decided by a check before it.
+    #[cfg(unix)]
+    #[test]
+    fn create_new_never_replaces_an_entry_a_check_would_miss() {
+        let dir = tmp("init-loop");
+        let path = dir.join("config.yaml");
+        std::os::unix::fs::symlink("config.yaml", &path).unwrap();
+        assert!(!path.exists(), "a looping link does not exist to a check");
+        assert!(!create_new(&path, "# a\n").unwrap());
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink(), "the entry is kept");
         std::fs::remove_dir_all(&dir).ok();
     }
 

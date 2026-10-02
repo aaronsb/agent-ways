@@ -157,14 +157,10 @@ pub(crate) fn cmd_tune(apply: bool) {
     //
     // peer_activity_window: same as burst_window.
 
-    let burst_threshold = 3.0_f64;
-    let step_multiplier = 1.25_f64;
-    let peak_multiplier = 1.0 + (1.0 * step_multiplier); // peak at exactly burst_threshold
-
-    let burst_window_s = (u2u_p90 * burst_threshold).clamp(300.0, 3600.0) as u64;
-    let abs_refractory_s = a2u_median.clamp(15.0, 300.0) as u64;
-    let burst_window_min = burst_window_s as f64 / 60.0;
-    let decay_per_minute = (peak_multiplier - 1.0) / (2.0 * burst_window_min);
+    // burst_threshold and step_multiplier are the operator's: tune derives
+    // the other three from them and writes only those three.
+    let current = config::Config::from_layers(&[config::user_layer()]);
+    let d = derive(&current.engagement, a2u_median, u2u_p90);
 
     println!();
     println!("=== attend tune — session survey ===");
@@ -179,98 +175,62 @@ pub(crate) fn cmd_tune(apply: bool) {
     println!();
     println!("=== derived engagement config ===");
     println!("engagement:");
-    println!("  burst_threshold: {}", burst_threshold as usize);
-    println!("  step_multiplier: {}", step_multiplier);
-    println!("  absolute_refractory: {}     # median think time", abs_refractory_s);
-    println!(
-        "  decay_per_minute: {:.4}     # peak decays over ~2× burst-window equivalent",
-        decay_per_minute
-    );
-    println!(
-        "  peer_activity_window: {}    # sized from u2u p90 × burst_threshold",
-        burst_window_s
-    );
+    println!("  burst_threshold: {}     # yours, unchanged", current.engagement.burst_threshold);
+    println!("  step_multiplier: {}     # yours, unchanged", current.engagement.step_multiplier);
+    println!("  absolute_refractory: {}     # median think time", d.absolute_refractory);
+    println!("  decay_per_minute: {:.4}     # peak decays over ~2× burst-window equivalent", d.decay_per_minute);
+    println!("  peer_activity_window: {}    # sized from u2u p90 × burst_threshold", d.peer_activity_window);
     println!();
 
-    if apply {
-        match apply_engagement_tune(burst_window_s, abs_refractory_s, decay_per_minute) {
-            Ok(path) => println!("[tune] wrote updated engagement section to {}", path.display()),
-            Err(e) => eprintln!("[tune] error writing config: {}", e),
-        }
-    } else {
+    if !apply {
         println!("(pass --apply to write these values to your attend config)");
+        return;
+    }
+    let path = config::user_path();
+    // Through the settings writer: locked, atomic, and only these three keys
+    // change, so comments and every other value stay (ADR-503 §6). The two
+    // inputs are read again under the lock, so a concurrent edit to them is
+    // never derived from stale.
+    let written = config::update(&path, |held| {
+        let d = derive(&held.engagement, a2u_median, u2u_p90);
+        vec![
+            ("attend.engagement.absolute_refractory".into(), serde_yaml::Value::from(d.absolute_refractory)),
+            ("attend.engagement.decay_per_minute".into(), serde_yaml::Value::from(d.decay_per_minute)),
+            ("attend.engagement.peer_activity_window".into(), serde_yaml::Value::from(d.peer_activity_window)),
+        ]
+    });
+    match written {
+        Ok(true) => println!("[tune] wrote the engagement values to {}", path.display()),
+        Ok(false) => println!("[tune] {} already holds these values", path.display()),
+        Err(e) => {
+            eprintln!("[tune] {e}");
+            std::process::exit(agent_settings::exit::WRITE_FAILED);
+        }
     }
 }
 
-fn apply_engagement_tune(
-    peer_activity_window_s: u64,
-    abs_refractory_s: u64,
+/// The three engagement values tune derives.
+struct Derived {
+    absolute_refractory: u64,
     decay_per_minute: f64,
-) -> std::io::Result<std::path::PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", home));
-    let path = std::path::PathBuf::from(config_dir)
-        .join("attend")
-        .join("config.yaml");
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let existing =
-        std::fs::read_to_string(&path).unwrap_or_else(|_| config::Config::default_yaml());
-
-    let new_section = format!(
-        "engagement:\n  burst_threshold: 3\n  step_multiplier: 1.25\n  absolute_refractory: {}\n  decay_per_minute: {:.4}\n  peer_activity_window: {}\n",
-        abs_refractory_s, decay_per_minute, peer_activity_window_s,
-    );
-
-    let updated = replace_engagement_section(&existing, &new_section);
-    std::fs::write(&path, updated)?;
-    Ok(path)
+    peer_activity_window: u64,
 }
 
-/// Replace (or insert) the `engagement:` section in a YAML config string.
-fn replace_engagement_section(existing: &str, new_section: &str) -> String {
-    let mut result = String::new();
-    let mut skipping = false;
-    let mut found = false;
-
-    for line in existing.lines() {
-        let is_top_level =
-            !line.is_empty() && !line.starts_with(' ') && !line.starts_with('\t');
-
-        if is_top_level && line.starts_with("engagement:") {
-            skipping = true;
-            found = true;
-            result.push_str(new_section);
-            continue;
-        }
-
-        if skipping {
-            // Stay in skip mode until we hit another top-level, non-comment line.
-            if is_top_level && !line.starts_with('#') {
-                skipping = false;
-                // fall through to emit this line
-            } else {
-                continue;
-            }
-        }
-
-        result.push_str(line);
-        result.push('\n');
+/// Derive the three values from the operator's burst_threshold and
+/// step_multiplier and the session survey. decay_per_minute is clamped to
+/// its range, so a large step_multiplier writes the fastest decay instead
+/// of a value the schema refuses.
+fn derive(e: &config::EngagementConfig, a2u_median: f64, u2u_p90: f64) -> Derived {
+    let peak_multiplier = 1.0 + e.step_multiplier; // peak at exactly burst_threshold
+    let burst_window_s = (u2u_p90 * e.burst_threshold as f64).clamp(300.0, 3600.0) as u64;
+    let burst_window_min = burst_window_s as f64 / 60.0;
+    // Four decimals, as the derived block prints it.
+    let decay = ((peak_multiplier - 1.0) / (2.0 * burst_window_min) * 1e4).round() / 1e4;
+    Derived {
+        absolute_refractory: a2u_median.clamp(15.0, 300.0) as u64,
+        decay_per_minute: decay.clamp(0.0, 1.0),
+        peer_activity_window: burst_window_s,
     }
-
-    if !found {
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
-        result.push('\n');
-        result.push_str(new_section);
-    }
-
-    result
 }
 
 /// Extract a "key":"value" string from a single JSON line (naive, fast).

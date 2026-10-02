@@ -20,7 +20,7 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
     let Some(topic) = topic else {
         let _ = writeln!(out, "ways settings: the settings of ways and its agent, read and written through their files.\n");
         let _ = writeln!(out, "  (no verb)            the settings screens on a terminal; `list` in a pipe");
-        let _ = writeln!(out, "  <tab>                the screens, opened on ways, matching, gate, install or theme");
+        let _ = writeln!(out, "  <tab>                the screens, opened on ways, matching, gate, install, attend, sensors or theme");
         let _ = writeln!(out, "  get <key>            the value in effect (--json: with its layer, default and file)");
         let _ = writeln!(out, "  set <key> <value>    write it (--project <dir> for a project's ways.yaml)");
         let _ = writeln!(out, "  unset <key>          remove it, so the layer below applies");
@@ -59,6 +59,8 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
         }
         return Ok(out);
     }
+    // A tab whose keys sit under a longer prefix: `sensors` is attend's.
+    let topic = super::tui::build::tab_named(topic).map_or(topic, |t| t.prefix);
     // A section, with the sections under it: `gate` covers `gate.mode`.
     let sections: Vec<_> =
         reg.sections().filter(|(_, s)| s.name == topic || agent_settings::registry::under(s.name, topic)).collect();

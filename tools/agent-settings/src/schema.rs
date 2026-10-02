@@ -174,6 +174,9 @@ pub fn show(v: &Value) -> String {
 /// A check a key runs beyond its type, returning the message on failure.
 pub type Check = fn(&Value) -> Result<(), String>;
 
+/// A check of an entry's name in a per-entry section.
+pub type EntryCheck = fn(&str) -> Result<(), String>;
+
 /// A key's default.
 #[derive(Clone, Copy)]
 pub enum DefaultValue {
@@ -349,6 +352,9 @@ pub struct SectionSpec {
     /// collection of switches, where losing all of them would turn back on
     /// everything the operator turned off.
     pub per_entry: bool,
+    /// The grammar of an entry's name in a per-entry section: a name it
+    /// refuses makes that entry fall back, as a bad value in it would.
+    pub entry: Option<EntryCheck>,
     /// The command that repairs this section, when `ways settings fix` cannot
     /// (an action command owns it). The diagnostic names it.
     pub repair: Option<&'static str>,

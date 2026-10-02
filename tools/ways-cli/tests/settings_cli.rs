@@ -408,9 +408,8 @@ fn hook_commands_load_only_their_sections() {
     f.write(&f.user(), "language: en\n");
     f.write(&f.overlay(), "ways: {}\n");
     f.write(&f.root.join("xdg/config/agent-ways/agent.yaml"), "mode: shadow\n");
-    // Guard for #698: attend's settings move into ways then, and hooks must
-    // still not read them. Today ways has no attend loader, so this cannot
-    // fail yet.
+    // attend's schema is in ways' registry (#698), and hooks must still not
+    // read attend's files: a broken one would print its finding here.
     f.write(&f.root.join("xdg/config/attend/config.yaml"), "engagement: [\n");
     let ways_line =
         "settings-trace: load-sections ways:config [ways,ways.switch,ways.domains,matching,install.targets,install.secret_path_deny,ways.project]";

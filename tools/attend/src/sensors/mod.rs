@@ -45,7 +45,7 @@ use std::time::Duration;
 /// 2. Add it as an optional dep + feature in attend/Cargo.toml
 /// 3. Add a #[cfg(feature)] block below with register_builtin!
 ///
-/// Config controls runtime: `-sensorname` in attend.yaml disables it.
+/// Config controls runtime: `<name>: {enabled: false}` in attend.yaml disables it.
 /// Feature flags control compilation: `--no-default-features` excludes it.
 #[allow(unused_variables)]
 pub fn register_sensors(

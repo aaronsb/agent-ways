@@ -83,7 +83,7 @@ An external sensor is declared in attend config:
 
 ```yaml
 sensors:
-  +github-project:
+  github-project:
     script: $XDG_DATA_HOME/attend/sensors/github-project.sh
     interval: 120        # base interval in seconds
     min_interval: 30     # fastest interval
@@ -163,7 +163,7 @@ A common workflow: you're coding, Claude is helping, and you have a GitHub Proje
 
 ```yaml
 sensors:
-  +github-project:
+  github-project:
     script: .claude/sensors/github-project.sh
     interval: 300           # poll every 5 minutes by default
     min_interval: 60        # speed up to 1 min when activity is detected

@@ -14,8 +14,6 @@
 
 mod cli;
 mod cmd;
-mod config;
-mod config_lint;
 mod emit;
 mod groups;
 mod scenes;
@@ -27,6 +25,9 @@ mod util;
 /// purge consult all speak its wire format. The alias keeps every
 /// existing `state::` call site unchanged.
 use attend_state as state;
+
+/// attend's settings, typed and loaded through their schema (ADR-503 §13).
+use attend_config as config;
 
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, KeepwarmCmd, PermissionsCmd};
@@ -125,9 +126,9 @@ fn print_banner() {
 
 fn exec_chat(passthrough: Vec<String>) -> ! {
     // `attend chat` is a thin shim that execs the standalone `attend-chat`
-    // binary. Keeping the iocraft dependency (and its async runtime) out of
-    // the attend crate means `attend status`, `attend send`, and the sensor
-    // loop stay cheap to cold-start from hooks. See ADR-120.
+    // binary. Keeping the chat's terminal UI out of the attend crate means
+    // `attend status`, `attend send`, and the sensor loop stay cheap to
+    // cold-start from hooks. See ADR-120 and ADR-504 §1.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -157,24 +158,23 @@ fn exec_chat(passthrough: Vec<String>) -> ! {
 fn dispatch_config(sub: ConfigCmd) {
     match sub {
         ConfigCmd::Init => {
-            let path = config::Config::init_user_config();
-            println!("wrote default config to {}", path.display());
+            let path = config::user_path();
+            match config::init(&path) {
+                Ok(true) => println!("wrote default config to {}", path.display()),
+                Ok(false) => println!("{} exists; left as it is", path.display()),
+                Err(e) => {
+                    eprintln!("attend config init: {e}; nothing written");
+                    std::process::exit(5);
+                }
+            }
         }
-        ConfigCmd::Show => {
-            let focus = Focus::default_focus();
-            let cfg = config::Config::load(&focus.working_dir);
-            cmd::config_cmd::display_config(&cfg);
-        }
+        ConfigCmd::Show => cmd::config_cmd::show(&Focus::default_focus().working_dir),
         ConfigCmd::Path => {
-            let home = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-                format!("{}/.config", std::env::var("HOME").unwrap_or_default())
-            });
-            println!("user:    {}/attend/config.yaml", home);
-            let cwd = util::own_origin_cwd();
-            println!("project: {}/.claude/attend.yaml", cwd);
+            println!("user:    {}", config::user_path().display());
+            println!("project: {}", config::project_path(std::path::Path::new(&util::own_origin_cwd())).display());
         }
-        ConfigCmd::Lint { fix, check } => {
-            let code = config_lint::run(fix, check);
+        ConfigCmd::Lint => {
+            let code = cmd::config_cmd::lint(&util::own_origin_cwd());
             if code != 0 {
                 std::process::exit(code);
             }

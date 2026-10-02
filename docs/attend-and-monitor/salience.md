@@ -117,15 +117,7 @@ The key design points:
 
 ### Configuration
 
-Operators tune the gate through attend's `signals:` block:
-
-```yaml
-signals:
-  half_life_seconds: 1800   # exponential decay half-life (30 min default)
-  presentation_floor: 0.3   # suppress below this salience
-```
-
-Defaults are conservative first-value picks, subject to `attend tune` once survey coverage exists. `attend config lint` recognizes both keys; unknown sub-keys surface as warnings and can be removed with `--fix`.
+The `signals:` block that tuned this gate was retired with liveness reaping (#141); the message lane no longer runs a salience gate (ADR-136). attend's schema names `signals:` as a retired key: `attend config lint` and `ways settings lint` report it, and nothing reads it.
 
 ### Why the session-length distribution still matters
 
@@ -187,7 +179,7 @@ Preserved here for posterity. The arguments didn't change when the engine unifie
 
 - **Not the canonical architecture.** That's [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md), with [ADR-121](../architecture/attend/ADR-121-salience-decay-for-signal-presentation-turn-based-exponential.md) as the original outward-gate decision. <!-- adr-cite-ignore -->
 - **Not the engine documentation.** That's `sensor_trait::curve::Curve` in source, with unit tests as the executable spec.
-- **Not a parameter-tuning guide for attend.** Attend's outward-gate parameters don't exist in production yet — `attend config lint` will surface them alongside engagement parameters when sensor-peers consumes them.
+- **Not a parameter-tuning guide for attend.** Attend's outward-gate parameters don't exist in production; `ways settings help attend` lists the keys that do.
 
 ## Related
 

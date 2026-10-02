@@ -15,12 +15,18 @@ path = "src/lib.rs"
 # on; what ADR-504 §11 holds is that no hook command's code path calls into
 # it or reads a theme.
 ratatui = ["dep:ratatui-core"]
+# The `theme` settings section's declarations (ADR-503, ADR-504 §5): one
+# source for ways' schema and for attend's read-only view of the choice.
+# Declarations only; this crate still reads no settings file.
+settings = ["dep:agent-settings", "dep:serde_yaml"]
 
 [dependencies]
 serde = "1"
 toml = "0.8"
 ratatui-core = { version = "0.1", optional = true }
+agent-settings = { path = "../agent-settings", optional = true }
+serde_yaml = { version = "0.9", optional = true }
 
 [dev-dependencies]
 # Test the ratatui output too, under `cargo test` and clippy --all-targets.
-agent-theme = { path = ".", features = ["ratatui"] }
+agent-theme = { path = ".", features = ["ratatui", "settings"] }

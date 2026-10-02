@@ -379,7 +379,7 @@ Survey session history and derive engagement config
 
 ###### **Options:**
 
-* `--apply` — Write derived values to the user config
+* `--apply` — Write the derived absolute_refractory, decay_per_minute and peer_activity_window to the user config, changing nothing else
 
 
 
@@ -424,16 +424,16 @@ Manage configuration (default: show)
 
 ###### **Subcommands:**
 
-* `init` — Write a default config file to the user scope
-* `show` — Display the current effective configuration (default)
+* `init` — Write the default config file to the user scope, if none is there
+* `show` — Print each setting in effect as key=value (default)
 * `path` — Print the user/project config file paths
-* `lint` — Validate the config file
+* `lint` — Check the config files against the schema; exit 3 with findings
 
 
 
 ## `attend config init`
 
-Write a default config file to the user scope
+Write the default config file to the user scope, if none is there
 
 **Usage:** `attend config init`
 
@@ -441,7 +441,7 @@ Write a default config file to the user scope
 
 ## `attend config show`
 
-Display the current effective configuration (default)
+Print each setting in effect as key=value (default)
 
 **Usage:** `attend config show`
 
@@ -457,14 +457,9 @@ Print the user/project config file paths
 
 ## `attend config lint`
 
-Validate the config file
+Check the config files against the schema; exit 3 with findings
 
-**Usage:** `attend config lint [OPTIONS]`
-
-###### **Options:**
-
-* `--fix` — Auto-fix what can be fixed
-* `--check` — Exit non-zero on errors (for CI)
+**Usage:** `attend config lint`
 
 
 

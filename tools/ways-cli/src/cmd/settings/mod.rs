@@ -1,5 +1,5 @@
-//! `ways settings` (ADR-503 §9): the ways and agent schemas composed into one
-//! tree, read and written through the files.
+//! `ways settings` (ADR-503 §9): the ways, agent and attend schemas composed
+//! into one tree, read and written through the files.
 //!
 //! Property mode (`get`, `set`, `unset`, `list`) is terse and reports through
 //! exit codes: 0 done, 2 usage or unknown key, 3 rejected by the schema,
@@ -54,7 +54,44 @@ pub fn exit_with(r: Out) -> ! {
 }
 
 pub fn registry() -> Registry {
-    Registry::new(vec![&ways_core::settings::SCHEMA, &ways_agent_core::settings::SCHEMA])
+    Registry::new(vec![&ways_core::settings::SCHEMA, &ways_agent_core::settings::SCHEMA, &attend_config::SCHEMA])
+}
+
+/// The schema that owns a file kind.
+pub(super) fn schema_of(file: &str) -> &'static agent_settings::Schema {
+    match file {
+        f if f == ways_agent_core::settings::FILE => &ways_agent_core::settings::SCHEMA,
+        f if f == attend_config::FILE => &attend_config::SCHEMA,
+        _ => &ways_core::settings::SCHEMA,
+    }
+}
+
+/// The file a key of `kind` and `scope` is written to, with the layer scope
+/// it is written at: the user's unless a project is given and the key may
+/// be set there. `None` for a kind no file holds (the key store).
+pub(super) fn file_of(kind: &str, scope: Scope, project: Option<&Path>) -> Option<Result<(PathBuf, LayerScope), Scope>> {
+    let known = [ways_agent_core::settings::FILE, ways_core::settings::FILE, attend_config::FILE];
+    if !known.contains(&kind) {
+        return None;
+    }
+    if project.is_some() && scope == Scope::User {
+        return Some(Err(Scope::User));
+    }
+    let to_project = matches!((scope, project), (Scope::Project, _) | (Scope::Both, Some(_)));
+    let dir = || project_dir(project);
+    Some(Ok(match kind {
+        f if f == ways_agent_core::settings::FILE => (ways_agent_core::profile::user_layer_path(), LayerScope::User),
+        f if f == ways_core::settings::FILE && to_project => (ways_core::settings::project_file(&dir()), LayerScope::Project),
+        f if f == ways_core::settings::FILE => (ways_core::paths::user_config(), LayerScope::User),
+        f if f == attend_config::FILE && to_project => (attend_config::project_path(&dir()), LayerScope::Project),
+        f if f == attend_config::FILE => (attend_config::user_path(), LayerScope::User),
+        _ => return None,
+    }))
+}
+
+/// Whether `path` is a user file, which `fix` repairs to canonical values.
+pub(super) fn is_user_file(path: &Path) -> bool {
+    path == ways_core::paths::user_config() || path == ways_agent_core::profile::user_layer_path() || path == attend_config::user_path()
 }
 
 pub(super) fn project_dir(opt: Option<&Path>) -> PathBuf {
@@ -69,18 +106,25 @@ pub(super) fn live_layers(project: &Path) -> Vec<Layer> {
     agent_settings::load::trace("tree");
     let mut out = ways_core::settings::layers(project);
     out.extend(ways_agent_core::settings::layers());
+    out.extend(attend_config::layers(project));
     out
 }
 
 /// One file read on its own (`--file`): `agent.yaml` is the agent kind, a
-/// `ways.yaml` a project overlay, anything else a user-scope config.
+/// `ways.yaml` a project overlay, an `attend.yaml` attend's project overlay
+/// and a `config.yaml` in a directory named `attend` its user file; anything
+/// else is a user-scope ways config.
 pub(super) fn file_layers(path: &Path) -> Result<Vec<Layer>, Failure> {
     if !path.is_file() {
         return Err(fail(exit::USAGE, format!("{} is not a file", path.display())));
     }
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let in_attend = path.parent().and_then(Path::file_name).is_some_and(|d| d == "attend");
     let layer = if name == "agent.yaml" {
         Layer::read(&ways_agent_core::settings::SCHEMA, "file", ways_agent_core::settings::FILE, LayerScope::User, path)
+    } else if name == "attend.yaml" || (in_attend && name == "config.yaml") {
+        let scope = if name == "attend.yaml" { LayerScope::Project } else { LayerScope::User };
+        Layer::read(&attend_config::SCHEMA, "file", attend_config::FILE, scope, path)
     } else {
         let scope = if name == "ways.yaml" { LayerScope::Project } else { LayerScope::User };
         Layer::read(&ways_core::settings::SCHEMA, "file", ways_core::settings::FILE, scope, path)
@@ -135,21 +179,12 @@ pub(super) fn describe(r: &Resolved, layers: &[Layer]) -> serde_json::Value {
 /// The file a key is written to, and the layer scope it is written at.
 pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf, LayerScope), Failure> {
     let name = b.name();
-    match b.spec.file {
-        f if f == ways_agent_core::settings::FILE => {
-            if project.is_some() {
-                return Err(fail(exit::USAGE, format!("{name} is set in the user file only; drop --project")));
-            }
-            Ok((ways_agent_core::profile::user_layer_path(), LayerScope::User))
-        }
-        f if f == ways_core::settings::FILE => match (b.spec.scope, project) {
-            (Scope::User, Some(_)) => Err(fail(exit::USAGE, format!("{name} is set in the user file only; drop --project"))),
-            (Scope::User, None) | (Scope::Both, None) => Ok((ways_core::paths::user_config(), LayerScope::User)),
-            (Scope::Project, p) | (Scope::Both, p @ Some(_)) => {
-                Ok((ways_core::settings::project_file(&project_dir(p)), LayerScope::Project))
-            }
-        },
-        _ => Err(fail(exit::REJECTED, format!("{name} is not stored in a settings file; `ways settings help {name}`"))),
+    // The agent's keys live in the user file alone, whatever their scope says.
+    let scope = if b.spec.file == ways_agent_core::settings::FILE { Scope::User } else { b.spec.scope };
+    match file_of(b.spec.file, scope, project) {
+        Some(Ok(t)) => Ok(t),
+        Some(Err(_)) => Err(fail(exit::USAGE, format!("{name} is set in the user file only; drop --project"))),
+        None => Err(fail(exit::REJECTED, format!("{name} is not stored in a settings file; `ways settings help {name}`"))),
     }
 }
 
@@ -185,7 +220,10 @@ pub(super) fn write_file_checked(
 }
 
 pub(super) fn header_for(path: &Path) -> Option<&'static str> {
-    (path.file_name().is_some_and(|n| n == "ways.yaml")).then_some("# Project-scope ways overlay — see ADR-115, ADR-131\n")
+    if path.file_name().is_some_and(|n| n == "ways.yaml") {
+        return Some("# Project-scope ways overlay — see ADR-115, ADR-131\n");
+    }
+    (path == attend_config::user_path() || path.file_name().is_some_and(|n| n == "attend.yaml")).then_some(attend_config::HEADER)
 }
 
 pub(super) fn write_failed(e: agent_settings::writer::WriteError) -> Failure {

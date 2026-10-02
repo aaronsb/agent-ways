@@ -35,6 +35,10 @@ pub struct Finding {
     pub fallback: bool,
     /// The command that repairs the section when `fix` cannot.
     pub repair: Option<String>,
+    /// An entry's name the section refuses: the section failed closed in
+    /// this file, every switch it holds reads off, and only a hand edit of
+    /// the name repairs it (`fix` refuses).
+    pub closed: bool,
 }
 
 impl std::fmt::Display for Finding {
@@ -71,14 +75,20 @@ impl Finding {
             None => format!("`ways settings fix {s}` repairs it"),
         };
         match (&self.section, &self.unit, self.fallback) {
+            (Some(s), _, true) if self.closed => format!(
+                "[{tool}] settings: {self}; a name that names nothing closes section {s} in this file: every \
+                 switch it holds reads off, and nothing else in it is read, until the name is edited by hand \
+                 (`ways settings fix` cannot repair a name)"
+            ),
             (Some(s), Some(u), true) if u != s => format!(
                 "[{tool}] settings: {self}; entry {u} is ignored, so it resolves from the layers beneath \
-                 (a switch stays off). `ways settings lint` lists the findings, {}",
+                 (a switch whose own value is bad reads off). `ways settings lint` lists the findings, {}",
                 fix(s)
             ),
             (Some(s), _, true) => format!(
                 "[{tool}] settings: {self}; section {s} is ignored in this file, so its keys resolve from the \
-                 layers beneath, ending at canonical (a switch stays off). `ways settings lint` lists the findings, {}",
+                 layers beneath, ending at canonical (a switch whose own value is bad reads off). \
+                 `ways settings lint` lists the findings, {}",
                 fix(s)
             ),
             _ => format!("[{tool}] settings: {self}"),
@@ -95,6 +105,8 @@ struct Failure {
     unit: Option<String>,
     path: Vec<String>,
     message: String,
+    /// A refused entry name, which closes its section.
+    closed: bool,
 }
 
 /// The outcome of checking one parsed file.
@@ -119,6 +131,12 @@ impl Checked {
         self.failures.iter().map(|f| (f.section, f.path.clone())).collect()
     }
 
+    /// Whether an entry's name was refused, closing its section: a finding
+    /// only a hand edit repairs.
+    pub fn has_refused_name(&self) -> bool {
+        self.failures.iter().any(|f| f.closed)
+    }
+
     /// The findings, with line numbers looked up in `text`.
     pub fn findings(&self, schema_name: Option<&str>, file: Option<&Path>, text: &str) -> Vec<Finding> {
         let doc = Doc::parse(text).ok();
@@ -140,8 +158,13 @@ impl Checked {
                     message,
                     fallback: f.unit.as_ref().is_some_and(|u| self.failed.contains(u)),
                     // A key in a file that may not hold it is removed by fix,
-                    // whatever command owns it elsewhere.
-                    repair: f.repair.filter(|_| !f.message.ends_with(" file only")).map(str::to_string),
+                    // whatever command owns it elsewhere. A refused name is
+                    // repaired by hand only.
+                    repair: match f.closed {
+                        true => Some("editing the name by hand".to_string()),
+                        false => f.repair.filter(|_| !f.message.ends_with(" file only")).map(str::to_string),
+                    },
+                    closed: f.closed,
                 }
             })
             .collect()
@@ -157,6 +180,7 @@ impl Checked {
             unit: Some(unit.clone()),
             path,
             message,
+            closed: false,
         }));
     }
 }
@@ -185,6 +209,7 @@ pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Box<Finding>
             ),
             fallback: true,
             repair: None,
+            closed: false,
         })
     })
 }
@@ -195,12 +220,26 @@ fn file_keys<'a>(schema: &'a Schema, file: &str) -> Vec<&'a KeySpec> {
 }
 
 /// The fail-closed reading of the raw value at `path`, if its key has one.
+/// A mapping no key names is a unit with keys inside it: it keeps the closed
+/// reading of each switch in it, so a bad value beside a switch never
+/// switches it back on.
 fn closed(keys: &[&KeySpec], scope: LayerScope, path: &[String], raw: &Value) -> Option<Value> {
-    let k = keys.iter().find(|k| k.match_path(path).is_some())?;
-    if !scope.admits(k.scope) {
-        return None;
+    if let Some(k) = keys.iter().find(|k| k.match_path(path).is_some()) {
+        if !scope.admits(k.scope) {
+            return None;
+        }
+        return (k.fail_closed?)(raw);
     }
-    (k.fail_closed?)(raw)
+    let mut out = Mapping::new();
+    for (ck, cv) in raw.as_mapping()? {
+        let Some(s) = ck.as_str() else { continue };
+        let mut at = path.to_vec();
+        at.push(s.to_string());
+        if let Some(c) = closed(keys, scope, &at, cv) {
+            out.insert(ck.clone(), c);
+        }
+    }
+    (!out.is_empty()).then_some(Value::Mapping(out))
 }
 
 /// Check a parsed file of kind `file` at `scope` against `schema`. With
@@ -221,6 +260,7 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                 unit: None,
                 path: vec![crate::schema::show(k)],
                 message: "a top-level key is not text; it is ignored".to_string(),
+                closed: false,
             });
             continue;
         };
@@ -229,7 +269,7 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                 Some((_, m)) => (*m).to_string(),
                 None => "unknown key; it is ignored".to_string(),
             };
-            out.failures.push(Failure { section: None, repair: None, unit: None, path: vec![top.to_string()], message });
+            out.failures.push(Failure { section: None, repair: None, unit: None, path: vec![top.to_string()], message, closed: false });
             continue;
         };
         if only.is_some_and(|o| !o.contains(&sec.name)) {
@@ -239,6 +279,9 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
         match (sec.per_entry, v) {
             (true, Value::Mapping(m)) => {
                 let kept = accepted.as_mapping_mut().expect("a mapping");
+                // Names the section accepted, and the units with a name it refused.
+                let mut names: Vec<String> = Vec::new();
+                let mut refused: Vec<String> = Vec::new();
                 for (ek, ev) in m {
                     let mut errs = Vec::new();
                     let entry = match ek.as_str() {
@@ -250,12 +293,23 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                         }
                     };
                     let path = vec![top.to_string(), entry.clone()];
+                    // A name the section refuses drops its entry whole: it
+                    // names nothing, so no switch in it is kept either.
+                    let named = match (errs.is_empty(), sec.entry) {
+                        (true, Some(c)) => c(&entry).map_err(|m| errs.push((path.clone(), m))).is_ok(),
+                        (named, _) => named,
+                    };
+                    match named {
+                        true => names.push(entry.clone()),
+                        false if ek.is_string() => refused.push(format!("{}.{entry}", sec.name)),
+                        false => {}
+                    }
                     if errs.is_empty() {
                         check_tree(&keys, scope, &mut path.clone(), ev, &mut errs);
                     }
                     if !errs.is_empty() {
                         out.fail(sec, format!("{}.{entry}", sec.name), errs);
-                        match (ek.is_string(), closed(&keys, scope, &path, ev)) {
+                        match (named, closed(&keys, scope, &path, ev)) {
                             (true, Some(c)) => {
                                 kept.insert(ek.clone(), c);
                             }
@@ -264,6 +318,21 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                             }
                         }
                     }
+                }
+                // A refused name fails the section closed in this file (the
+                // operator's decision in #733, under the ADR-503 addendum's
+                // whole-file rule): it may be an off-switch the schema cannot
+                // read, so every switch the section holds reads off, for each
+                // name it declares and each name this file gives, and nothing
+                // the file says in it is read.
+                if !refused.is_empty() {
+                    for f in out.failures.iter_mut().filter(|f| f.unit.as_ref().is_some_and(|u| refused.contains(u))) {
+                        f.closed = true;
+                    }
+                    if !out.failed.iter().any(|u| u == sec.name) {
+                        out.failed.push(sec.name.to_string());
+                    }
+                    closed_tops.push((k.clone(), Value::Mapping(closed_entries(&keys, scope, sec, &names))));
                 }
             }
             (true, Value::Sequence(items)) => {
@@ -343,6 +412,47 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
     }
 }
 
+/// Set `v` at `path` under `root`, making the mappings between.
+fn set_in(root: &mut Mapping, path: &[String], v: Value) {
+    let (last, parents) = path.split_last().expect("a key has a path");
+    let mut cur = root;
+    for seg in parents {
+        if !cur.get(seg.as_str()).is_some_and(Value::is_mapping) {
+            cur.insert(Value::String(seg.clone()), Value::Mapping(Mapping::new()));
+        }
+        cur = cur.get_mut(seg.as_str()).and_then(Value::as_mapping_mut).expect("a mapping");
+    }
+    cur.insert(Value::String(last.clone()), v);
+}
+
+/// The bindings a key's closed reading is written for when nothing in the
+/// file can be read: none for a fixed name, each declared instance for a
+/// pattern with one wildcard. A pattern with no instances names nothing.
+fn closed_bindings(k: &KeySpec) -> Vec<Vec<String>> {
+    match k.name.matches('*').count() {
+        0 => vec![vec![]],
+        1 => k.instances.iter().map(|i| vec![i.to_string()]).collect(),
+        _ => vec![],
+    }
+}
+
+/// A per-entry section closed whole: for each entry name, its declared
+/// instances and `names`, every fail-closed switch in the entry at its
+/// reading of no value. The value under the section's top-level key.
+fn closed_entries(keys: &[&KeySpec], scope: LayerScope, sec: &SectionSpec, names: &[String]) -> Mapping {
+    let mut out = Mapping::new();
+    for k in keys.iter().filter(|k| k.section == sec.name && scope.admits(k.scope) && k.path.len() >= 2 && k.path[1] == "*") {
+        let Some(c) = k.fail_closed.and_then(|f| f(&Value::Null)) else { continue };
+        let mut all: Vec<String> = k.instances.iter().map(|s| s.to_string()).collect();
+        all.extend(names.iter().filter(|n| !k.instances.contains(&n.as_str())).cloned());
+        for n in all {
+            let path = k.bind(&[n]).1;
+            set_in(&mut out, &path[1..], c.clone());
+        }
+    }
+    out
+}
+
 // ── a file that does not parse ─────────────────────────────────
 
 /// What a file that does not parse contributes to its layer: nothing it
@@ -350,25 +460,20 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
 /// the operator's decision in #713, recorded in the ADR-503 addendum). Each
 /// switch takes its fail-closed reading of no value: `enabled` off, the
 /// gate's `mode` off, `secret_path_deny` on, an empty `targets` list where
-/// the scope holds one. Only keys with a fixed name count; a per-way toggle
-/// cannot be named in a file that cannot be read, and `enabled: false`
-/// already switches every way in that scope off.
+/// the scope holds one. A switch with a pattern name is closed for each
+/// instance its key declares (attend's built-in sensors); a name only a file
+/// could give (a per-way toggle, a sensor of your own) cannot be read from a
+/// file that does not parse, and `enabled: false` already switches every way
+/// in that scope off.
 pub fn closed_file(schema: &Schema, file: &str, scope: LayerScope, only: Option<&[&str]>) -> Mapping {
     let mut out = Mapping::new();
     for k in file_keys(schema, file) {
-        if k.is_pattern() || !scope.admits(k.scope) || only.is_some_and(|o| !o.contains(&k.section)) {
+        if !scope.admits(k.scope) || only.is_some_and(|o| !o.contains(&k.section)) {
             continue;
         }
-        let Some(f) = k.fail_closed else { continue };
-        if let Some(c) = f(&Value::Null) {
-            let mut cur = &mut out;
-            for seg in &k.path[..k.path.len() - 1] {
-                if !cur.contains_key(*seg) {
-                    cur.insert(Value::String(seg.to_string()), Value::Mapping(Mapping::new()));
-                }
-                cur = cur.get_mut(*seg).and_then(Value::as_mapping_mut).expect("a mapping");
-            }
-            cur.insert(Value::String(k.path[k.path.len() - 1].to_string()), c);
+        let Some(c) = k.fail_closed.and_then(|f| f(&Value::Null)) else { continue };
+        for b in closed_bindings(k) {
+            set_in(&mut out, &k.bind(&b).1, c.clone());
         }
     }
     out
@@ -521,9 +626,9 @@ mod tests {
     use crate::schema::*;
 
     const SECTIONS: &[SectionSpec] = &[
-        SectionSpec { per_entry: false, repair: None, name: "general", file: "cfg", top: &["language"], doc: "" },
-        SectionSpec { per_entry: false, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
-        SectionSpec { per_entry: true, repair: None, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
+        SectionSpec { per_entry: false, entry: None, repair: None, name: "general", file: "cfg", top: &["language"], doc: "" },
+        SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
+        SectionSpec { per_entry: true, entry: None, repair: None, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
     ];
     const BASE: KeySpec = KeySpec {
         name: "general.language",
@@ -680,6 +785,84 @@ mod tests {
             for f in &l.findings {
                 let _ = f.diagnostic("t");
             }
+        }
+    }
+
+    /// A per-entry section of units with a switch inside each, and a section
+    /// whose switch sits under its top-level key: the shape of attend's
+    /// `sensors:` and `cleanup:`.
+    mod nested {
+        use super::*;
+
+        fn closed_off(v: &Value) -> Option<Value> {
+            (v != &Value::Bool(true)).then_some(Value::Bool(false))
+        }
+
+        fn plain_name(n: &str) -> Result<(), String> {
+            match n.chars().next() {
+                Some(c) if c.is_ascii_alphanumeric() => Ok(()),
+                _ => Err(format!("'{n}' is not a sensor name")),
+            }
+        }
+
+        const SECTIONS: &[SectionSpec] = &[
+            SectionSpec { per_entry: true, entry: Some(plain_name), repair: None, name: "sensors", file: "cfg", top: &["sensors"], doc: "" },
+            SectionSpec { per_entry: false, entry: None, repair: None, name: "cleanup", file: "cfg", top: &["cleanup"], doc: "" },
+        ];
+        const KEYS: &[KeySpec] = &[
+            KeySpec { name: "sensors.*.enabled", section: "sensors", path: &["sensors", "*", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), instances: &["a", "b"], ..BASE },
+            KeySpec { name: "sensors.*.interval", section: "sensors", path: &["sensors", "*", "interval"], kind: Kind::Int { min: 1, max: 60 }, ..BASE },
+            KeySpec { name: "cleanup.enabled", section: "cleanup", path: &["cleanup", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), ..BASE },
+            KeySpec { name: "cleanup.interval", section: "cleanup", path: &["cleanup", "interval"], kind: Kind::Int { min: 1, max: 60 }, ..BASE },
+        ];
+        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[] }], sections: SECTIONS, keys: KEYS };
+
+        fn read(text: &str) -> Layer {
+            Layer::from_text(&S, "p", "cfg", LayerScope::Project, Some(Path::new("/p.yaml")), text)
+        }
+
+        fn get(l: &Layer, p: &str) -> Option<Value> {
+            l.get(&p.split('.').map(str::to_string).collect::<Vec<_>>()).cloned()
+        }
+
+        fn yaml(s: &str) -> Option<Value> {
+            Some(serde_yaml::from_str(s).unwrap())
+        }
+
+        #[test]
+        fn a_failed_unit_keeps_the_closed_reading_of_a_switch_inside_it() {
+            let l = read("sensors:\n  git: {enabled: maybe, interval: 5}\n  ps: {enabled: false, interval: 99}\n  ok: {interval: 3}\ncleanup:\n  enabled: 2\n  interval: 5\n");
+            assert_eq!(get(&l, "sensors.git"), yaml("{enabled: false}"), "a bad switch reads off; its neighbour falls through");
+            assert_eq!(get(&l, "sensors.ps"), yaml("{enabled: false}"), "a good off stays off beside a bad value");
+            assert_eq!(get(&l, "sensors.ok.interval"), yaml("3"));
+            assert_eq!(get(&l, "cleanup"), yaml("{enabled: false}"), "a section's nested switch fails closed too");
+            // A switch that reads on has no closed reading: its unit falls through.
+            let l = read("sensors:\n  git: {enabled: true, interval: 99}\n");
+            assert_eq!(get(&l, "sensors.git"), None);
+        }
+
+        #[test]
+        fn a_name_the_section_refuses_closes_the_section_in_that_file() {
+            // `-ps` may be an off-switch the schema cannot read: the section
+            // fails closed. Each declared instance and each name the file
+            // gives reads off; nothing the file says in the section is read.
+            let l = read("sensors:\n  -ps:\n  +mine: {enabled: true}\n  git: {interval: 4, enabled: true}\n");
+            assert_eq!(get(&l, "sensors"), yaml("{a: {enabled: false}, b: {enabled: false}, git: {enabled: false}}"));
+            let f: Vec<_> = l.findings.iter().map(|f| (f.unit.clone().unwrap_or_default(), f.line, f.message.clone(), f.closed)).collect();
+            assert_eq!(f[0], ("sensors.-ps".into(), Some(2), "'-ps' is not a sensor name".into(), true), "{f:?}");
+            assert_eq!((f[1].0.as_str(), f[1].3), ("sensors.+mine", true));
+            let d = l.findings[0].diagnostic("t");
+            assert!(d.contains("closes section sensors in this file") && d.contains("edited by hand"), "{d}");
+            assert!(!d.contains("a switch stays off") && !d.contains("resolves from the layers beneath"), "{d}");
+            // A refused name is repaired by hand only: the TUI offers no fix.
+            assert!(l.findings[0].repair.is_some());
+        }
+
+        #[test]
+        fn a_file_that_does_not_parse_closes_each_declared_instance() {
+            let l = read("sensors:\n  a:\n    enabled: true\nx: [\n");
+            assert_eq!(get(&l, "sensors"), yaml("{a: {enabled: false}, b: {enabled: false}}"));
+            assert_eq!(get(&l, "cleanup"), yaml("{enabled: false}"));
         }
     }
 
