@@ -138,12 +138,13 @@ pub fn signal_filename(sender_id: &str) -> String {
     format!("{}-{}-{}.signal", sanitize_id_component(sender_id), nanos, seq)
 }
 
-/// FNV-1a 64-bit. Deterministic across runs and targets — this is the
-/// property we need, and why we don't use `std::hash::DefaultHasher`.
-/// Crate-internal (`pub(crate)`) so the groups module shares the exact
-/// same hash; any divergence would make group / user / cwd seats
-/// silently non-comparable.
-pub(crate) fn fnv1a_64(bytes: &[u8]) -> u64 {
+/// FNV-1a 64-bit: the workspace's stable content hash. Deterministic across
+/// runs, targets and Rust releases — the property every persisted hash needs,
+/// and why none uses `std::hash::DefaultHasher`, whose algorithm may change
+/// between releases. Identity seeds, group seats, the corpus manifest's
+/// content hashes and the agent's key stamp all use this one, so a value
+/// written by one build is read the same by the next.
+pub fn fnv1a_64(bytes: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash = OFFSET;

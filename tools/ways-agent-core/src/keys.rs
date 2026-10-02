@@ -265,11 +265,9 @@ fn stamp(source: &Source) -> Option<(u64, u64)> {
         Source::File(path) => path,
         Source::Env(var) => {
             // A hash, not the value: enough to notice the variable changed.
-            use std::hash::{Hash, Hasher};
             let value = std::env::var(var).ok()?;
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            value.trim().hash(&mut h);
-            return Some((value.trim().len() as u64, h.finish()));
+            let value = value.trim();
+            return Some((value.len() as u64, agent_identity::identity::fnv1a_64(value.as_bytes())));
         }
     };
     let meta = std::fs::metadata(path).ok()?;

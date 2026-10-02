@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use walkdir::WalkDir;
 
 use crate::frontmatter;
 
@@ -935,29 +934,31 @@ fn find_ways_dir(project_path: &str) -> Option<PathBuf> {
     None
 }
 
-/// Content hash of a directory (sorted file list + sizes).
+/// Content hash of a directory: FNV-1a over the sorted file list and sizes,
+/// stable across Rust releases so a manifest written by one build matches the
+/// next build's hash of the same tree.
 fn content_hash(dir: &Path) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    let mut entries: Vec<(String, u64)> = Vec::new();
-
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if entry.path().is_file() {
-            let rel = entry.path().strip_prefix(dir).unwrap_or(entry.path());
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            entries.push((rel.display().to_string(), size));
-        }
-    }
+    let mut entries: Vec<(String, u64)> = crate::scanner::files(dir)
+        .map(|path| {
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let rel = path.strip_prefix(dir).unwrap_or(&path).display().to_string();
+            (rel, size)
+        })
+        .collect();
     entries.sort();
-    entries.hash(&mut hasher);
+    format!("{:016x}", agent_identity::identity::fnv1a_64(&content_hash_input(&entries)))
+}
 
-    format!("{:016x}", hasher.finish())
+/// The bytes [`content_hash`] hashes: each path, a NUL, its size as 8
+/// little-endian bytes. The NUL keeps `a` + size from colliding with `a1`.
+fn content_hash_input(entries: &[(String, u64)]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (rel, size) in entries {
+        bytes.extend_from_slice(rel.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&size.to_le_bytes());
+    }
+    bytes
 }
 
 use crate::util::home_dir;
@@ -1183,6 +1184,21 @@ fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hash is a fixed function of the tree, not of the Rust release: a
+    /// known input pins its value. DefaultHasher made no such promise.
+    #[test]
+    fn content_hash_is_pinned_fnv1a() {
+        let input = content_hash_input(&[("a/a.md".to_string(), 3)]);
+        assert_eq!(input, b"a/a.md\0\x03\0\0\0\0\0\0\0".to_vec());
+        let dir = std::env::temp_dir().join(format!("ways-content-hash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/a.md"), "abc").unwrap();
+        let want = format!("{:016x}", agent_identity::identity::fnv1a_64(&input));
+        assert_eq!(content_hash(&dir), want);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use std::cell::RefCell;
 
     fn scratch(name: &str) -> PathBuf {

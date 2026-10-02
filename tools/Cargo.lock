@@ -2469,6 +2469,7 @@ name = "ways-agent-core"
 version = "0.1.0"
 dependencies = [
  "agent-fmt",
+ "agent-identity",
  "agent-settings",
  "anyhow",
  "libc",
