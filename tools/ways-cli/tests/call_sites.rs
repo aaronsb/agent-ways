@@ -254,6 +254,11 @@ fn ways_help(args: &[&str]) -> (bool, String) {
     (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Groups that open a screen when run bare on a terminal (ADR-507 §7, note
+/// of 2026-10-02). Their usage line reads `[COMMAND]`, but in a script, as a
+/// call site is, they still need a verb: bare in a pipe they exit 2.
+const SCREEN_GROUPS: &[&str] = &["session"];
+
 #[test]
 fn every_ways_call_site_names_a_command_the_cli_accepts() {
     let root = repo_root();
@@ -265,7 +270,8 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
     }
 
     // Per command: None when the CLI rejects it, else whether it needs a verb
-    // (its usage line reads `<COMMAND>`, as `session` does; `settings` runs bare).
+    // (its usage line reads `<COMMAND>`, as `tune` does, or it opens a screen
+    // when bare; `settings` runs bare in a pipe too).
     let mut groups: BTreeMap<String, Option<bool>> = BTreeMap::new();
     let mut bad = Vec::new();
     for ((a, b), places) in &sites {
@@ -280,7 +286,7 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
                 return Some(false);
             }
             let (ok, out) = ways_help(&[a]);
-            ok.then(|| out.lines().any(|l| l.starts_with("Usage:") && l.contains("<COMMAND>")))
+            ok.then(|| SCREEN_GROUPS.contains(&a.as_str()) || out.lines().any(|l| l.starts_with("Usage:") && l.contains("<COMMAND>")))
         });
         let ok = match (*group, b) {
             (None, _) => false,

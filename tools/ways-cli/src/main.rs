@@ -84,10 +84,11 @@ enum Commands {
         command: Option<cmd::projects::ProjectsCommand>,
     },
     /// This session and past ones: fired ways, replay, reset
-    #[command(arg_required_else_help = true)]
+    ///
+    /// Run bare on a terminal, the session screen; in a pipe, this help.
     Session {
         #[command(subcommand)]
-        action: SessionCommand,
+        action: Option<SessionCommand>,
     },
     /// Context-window usage for a session
     ///
@@ -1067,7 +1068,19 @@ fn run() -> Result<()> {
             TargetCommand::Disable { dir } => cmd::target::disable(&dir),
             TargetCommand::Remove { dir } => cmd::target::remove(&dir),
         },
-        Commands::Session { action } => match action {
+        Commands::Session { action: None } => {
+            // A bare group opens its screen on a terminal and keeps its help
+            // and exit 2 in a pipe (ADR-507 §7, note of 2026-10-02).
+            use std::io::IsTerminal;
+            if std::io::stdout().is_terminal() && std::io::stdin().is_terminal() {
+                cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default())
+            } else {
+                let help = Cli::command().try_get_matches_from(["ways", "session", "--help"]).expect_err("--help ends parsing");
+                eprint!("{}", help.render());
+                std::process::exit(2);
+            }
+        }
+        Commands::Session { action: Some(action) } => match action {
             SessionCommand::Ways { session, sort, json, matched } => cmd::list::run(session.as_deref(), &sort, json, matched),
             SessionCommand::Replay { session, project, all, speed, json, matched, keys, snap, depth } => {
                 let open = cmd::introspect::Open { keys, snap, depth };
