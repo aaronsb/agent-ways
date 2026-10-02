@@ -136,16 +136,17 @@ impl Ways {
     fn keys_of(&self, tab: &str, layers: &[Layer]) -> Vec<Bound> {
         let mut keys = self.reg.concrete(tab, layers);
         if tab == "ways" {
-            let have: BTreeSet<String> = keys.iter().map(Bound::name).collect();
             if let Some(b) = self.reg.lookup("ways.project.x") {
-                let mut ids: Vec<String> = crate::cmd::scan::candidates::way_ids(&self.ctx.corpus).into_iter().collect();
-                ids.sort();
-                for id in ids {
-                    let w = Bound { bound: vec![id], ..b.clone() };
-                    if !have.contains(&w.name()) {
-                        keys.push(w);
-                    }
-                }
+                // The ways a file names and the ways of the corpus, as one
+                // sorted list: the order is the ids', whatever a file holds,
+                // so setting a toggle never moves a row.
+                let project = |k: &Bound| k.spec.name == b.spec.name;
+                let mut ids: BTreeSet<String> = keys.iter().filter(|k| project(k)).filter_map(|k| k.bound.first().cloned()).collect();
+                ids.extend(crate::cmd::scan::candidates::way_ids(&self.ctx.corpus));
+                let at = keys.iter().position(project).unwrap_or(keys.len());
+                keys.retain(|k| !project(k));
+                let ways: Vec<Bound> = ids.into_iter().map(|id| Bound { bound: vec![id], ..b.clone() }).collect();
+                keys.splice(at.min(keys.len())..at.min(keys.len()), ways);
             }
         }
         keys

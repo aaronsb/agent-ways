@@ -41,3 +41,7 @@ pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 [target.'cfg(windows)'.dependencies]
 # Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess).
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# A pty for the test that signals the settings screens mid-apply.
+libc = "0.2"

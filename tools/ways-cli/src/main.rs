@@ -361,8 +361,8 @@ enum Commands {
         /// The project whose .claude/ways.yaml the screens read and write
         #[arg(long)]
         project: Option<PathBuf>,
-        /// Feed these keys to the screens, headless (the TUI test kit's key script)
-        #[arg(long, hide = true, num_args = 1.., allow_hyphen_values = true)]
+        /// Test only: feed this key script to the screens, headless; repeatable. It cannot type into a masked entry
+        #[arg(long, hide = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
         keys: Vec<String>,
         /// Print the frame at WIDTHxHEIGHT, headless, in the test kit's frame format
         #[arg(long, hide = true)]

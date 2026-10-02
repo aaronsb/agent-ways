@@ -323,3 +323,78 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
     assert!(r[3].children.iter().any(|n| n.name == "targets" && !n.actions.is_empty()));
     assert!(r.iter().all(|t| t.children.iter().all(|n| n.name != "theme")), "the theme keys belong to the theme tab");
 }
+
+// ── the adapter's write, under the real paths ──────────────────
+//
+// `Ways::write` finds its files through the environment, which tests in one
+// process must not change. Each check runs as a child of this test binary
+// with HOME and every XDG directory in a fixture of its own.
+
+fn in_fixture(test: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("ways-tui-adapter-{test}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("home/.config/agent-ways")).unwrap();
+    std::fs::create_dir_all(root.join("home/proj")).unwrap();
+    let name = format!("{}::{test}", module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest));
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([name.as_str(), "--exact", "--ignored", "--test-threads=1"])
+        .env("HOME", root.join("home"))
+        .env("XDG_CONFIG_HOME", root.join("home/.config"))
+        .env("XDG_DATA_HOME", root.join("home/.local/share"))
+        .env("XDG_STATE_HOME", root.join("home/.local/state"))
+        .env("XDG_CACHE_HOME", root.join("home/.cache"))
+        .env("CLAUDE_PROJECT_DIR", root.join("home/proj"))
+        .env("WAYS_TUI_ADAPTER_CHILD", "1")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && text.contains("1 passed"), "{test} in its fixture:\n{text}{}", String::from_utf8_lossy(&out.stderr));
+    root
+}
+
+/// The adapter over the fixture the parent set up; `None` outside it.
+fn child() -> Option<(Ways, PathBuf)> {
+    std::env::var_os("WAYS_TUI_ADAPTER_CHILD")?;
+    Some((Ways::new(Ctx::from_env(None)), ways_core::paths::user_config()))
+}
+
+fn store(key: &str, file: &Path) -> agent_tui::tree::Store {
+    agent_tui::tree::Setting::new(agent_tui::tree::Kind::Text, "", "user").store("user", file.to_path_buf(), key).store.unwrap()
+}
+
+#[test]
+#[ignore = "run by a_value_write_to_a_broken_file_is_refused"]
+fn child_refuses_a_broken_file() {
+    let Some((mut ways, user)) = child() else { return };
+    let broken = "near_miss_margin: 0.2\nmatching: [unclosed\n";
+    std::fs::write(&user, broken).unwrap();
+    let st = store("matching.near_miss_margin", &user);
+    let e = ways.write(&user, &[Write { store: &st, value: "0.1", loaded: "0.05" }]).expect_err("a broken file takes no write");
+    assert!(e.contains("does not parse, so it fails closed and takes no write"), "{e}");
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), broken, "the file is untouched");
+}
+
+#[test]
+fn a_value_write_to_a_broken_file_is_refused() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_refuses_a_broken_file"));
+}
+
+#[test]
+#[ignore = "run by a_write_never_overwrites_an_outside_change"]
+fn child_refuses_a_changed_value() {
+    let Some((mut ways, user)) = child() else { return };
+    // The tree read 0.05 (the default); another writer has since set 0.3.
+    std::fs::write(&user, "# by hand\nnear_miss_margin: 0.3\n").unwrap();
+    let st = store("matching.near_miss_margin", &user);
+    let e = ways.write(&user, &[Write { store: &st, value: "0.1", loaded: "0.05" }]).expect_err("an outside change is not overwritten");
+    assert!(e.contains("matching.near_miss_margin is 0.3 on disk, not the 0.05 it was read as"), "{e}");
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), "# by hand\nnear_miss_margin: 0.3\n");
+    // Read as it now is, the write goes through.
+    ways.write(&user, &[Write { store: &st, value: "0.1", loaded: "0.3" }]).expect("the value read is the one on disk");
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), "# by hand\nnear_miss_margin: 0.1\n");
+}
+
+#[test]
+fn a_write_never_overwrites_an_outside_change() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_refuses_a_changed_value"));
+}

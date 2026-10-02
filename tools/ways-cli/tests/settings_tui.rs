@@ -78,7 +78,16 @@ impl Fx {
 
     /// Run `ways` and return stdout, stderr and the exit code.
     fn run(&self, args: &[&str]) -> (String, String, i32) {
-        let o = self.cmd(args).output().unwrap();
+        self.run_with(args, &[])
+    }
+
+    /// [`Fx::run`] with extra environment.
+    fn run_with(&self, args: &[&str], env: &[(&str, &Path)]) -> (String, String, i32) {
+        let mut c = self.cmd(args);
+        for (k, v) in env {
+            c.env(k, v);
+        }
+        let o = c.output().unwrap();
         (String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned(), o.status.code().unwrap_or(-1))
     }
 
@@ -252,6 +261,82 @@ fn the_help_overlay_shows_the_text_settings_help_prints() {
             assert!(f.contains(line.trim_end()), "{tab}: `{line}` is not in the overlay:\n{f}");
         }
     }
+}
+
+// ── rows keep their place; commands report what they printed ──
+
+/// The tree pane of a frame: the left half of each row, values included.
+fn tree_pane(frame: &str) -> Vec<String> {
+    glyphs(frame).lines().skip(2).map(|l| l.chars().take(56).collect()).collect()
+}
+
+#[test]
+fn setting_a_way_toggle_keeps_every_row_in_place() {
+    let fx = Fx::new();
+    // Open project, itops and softwaredev; the cursor on softwaredev.
+    let keys = "end right down right down down right";
+    let before = fx.snap("ways", keys, "100x30", "16");
+    let (_, err, code) = fx.run(&["settings", "set", "ways.project.softwaredev/code/testing", "false"]);
+    assert_eq!(code, 0, "{err}");
+    let after = fx.snap("ways", keys, "100x30", "16");
+    assert_eq!(tree_pane(&after), tree_pane(&before), "a toggle a file names takes the same place as one it does not");
+    assert!(tree_pane(&after).iter().any(|l| l.contains('▌') && l.contains("softwaredev")), "{}", glyphs(&after));
+}
+
+#[test]
+fn after_an_apply_the_cursor_is_on_the_same_key() {
+    let fx = Fx::new();
+    // Toggle softwaredev/code/testing, apply; the reload puts the toggle in
+    // the project file, and the cursor stays on it.
+    let f = glyphs(&fx.snap("ways", "end right down right down down right down right down enter w a", "100x30", "16"));
+    let cursor = tree_pane(&f).into_iter().find(|l| l.contains('▌')).unwrap_or_default();
+    assert!(cursor.contains("testing") && cursor.contains("false"), "the cursor moved off its key:
+{f}");
+    let pane = tree_pane(&f).join("
+");
+    assert!(pane.find("itops").unwrap() < pane.find("softwaredev").unwrap(), "{pane}");
+    assert_eq!(fx.read("proj/.claude/ways.yaml").as_deref().map(|t| t.contains("softwaredev/code/testing: false")), Some(true));
+}
+
+#[test]
+fn a_failed_command_reports_its_stdout_when_stderr_is_empty() {
+    let fx = Fx::new();
+    // A stand-in for the binary that prints its refusal on stdout and fails,
+    // as `ways agent key add` does when a check is not confirmed.
+    let runner = fx.path("runner.sh");
+    std::fs::write(&runner, "#!/bin/sh
+echo 'check: the key was not confirmed'
+exit 1
+").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::PermissionsExt::set_mode(&mut std::fs::metadata(&runner).unwrap().permissions(), 0o755);
+    #[cfg(unix)]
+    std::fs::set_permissions(&runner, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    // install: the targets row's menu, plan, a directory, review, apply.
+    let (out, err, code) = fx.run_with(
+        &["settings", "install", "--depth", "16", "--snap", "240x30", "--keys", "a down down enter text:/tmp/x enter w a"],
+        &[("WAYS_SETTINGS_RUNNER", &runner)],
+    );
+    assert_eq!(code, 0, "{err}");
+    let f = glyphs(&out);
+    assert!(f.contains("exit 1: check: the key was not confirmed"), "{f}");
+    assert!(f.contains("The command may have done part of its work and the tree is read again"), "{f}");
+}
+
+#[test]
+fn keys_may_come_before_the_other_flags() {
+    let fx = Fx::new();
+    let (out, err, code) = fx.run(&["settings", "matching", "--keys", "down", "--snap", "80x12", "--depth", "16"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.starts_with("agent-tui frame 80x12"), "{out}");
+}
+
+#[test]
+fn a_key_script_cannot_type_a_secret() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "gate", "--keys", "/ text:keys.anthropic enter end enter enter text:sk-123", "--snap", "80x12"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--keys cannot type into a masked entry"), "{err}");
 }
 
 // ── golden frames ──────────────────────────────────────────────

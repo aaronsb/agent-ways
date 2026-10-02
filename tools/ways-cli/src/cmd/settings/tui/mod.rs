@@ -15,7 +15,8 @@ mod tests;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::{IsTerminal, Write as _};
+use std::cell::RefCell;
+use std::io::{IsTerminal, Read, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
@@ -26,10 +27,11 @@ use agent_theme::ColorDepth;
 use agent_tui::flow::Flow;
 use agent_tui::theme::Shape;
 use agent_tui::tree::{Node, Queued, Store};
+use agent_tui::adapter::{Ended, Job};
 use agent_tui::{Adapter, App, Themes, Write};
 use serde_yaml::Value;
 
-use super::{fail, live_layers, lookup, project_dir, registry, target_file, write_file, Failure, Out};
+use super::{fail, live_layers, lookup, project_dir, registry, target_file, write_file, write_file_checked, Failure, Out};
 use build::{display, tilde, TABS};
 
 /// Where the screens look: the project, the home directory paths are shown
@@ -69,15 +71,23 @@ impl Ctx {
 pub struct Ways {
     pub ctx: Ctx,
     reg: Registry,
+    /// The files the tree was read from, for the change watch: found when
+    /// the tree is built, so the watch reads metadata only.
+    watched: RefCell<Vec<PathBuf>>,
 }
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
-        Ways { ctx, reg: registry() }
+        Ways { ctx, reg: registry(), watched: RefCell::default() }
     }
 
     pub fn layers(&self) -> Vec<Layer> {
-        live_layers(&self.ctx.project)
+        let layers = live_layers(&self.ctx.project);
+        let mut paths: Vec<PathBuf> = layers.iter().filter_map(|l| l.path.clone()).collect();
+        paths.push(ways_agent_core::profile::user_layer_path());
+        paths.push(ways_core::paths::config_root().join("keys"));
+        *self.watched.borrow_mut() = paths;
+        layers
     }
 
     pub fn roots(&self) -> Vec<Node> {
@@ -88,14 +98,6 @@ impl Ways {
     fn value(&self, key: &str, layers: &[Layer]) -> Option<Value> {
         let b = self.reg.lookup(key)?;
         resolve(b.spec, &b.bound, layers).value
-    }
-
-    /// The files the tree reads, for the change watch.
-    fn watched(&self) -> Vec<PathBuf> {
-        let mut out: Vec<PathBuf> = self.layers().into_iter().filter_map(|l| l.path).collect();
-        out.push(ways_agent_core::profile::user_layer_path());
-        out.push(ways_core::paths::config_root().join("keys"));
-        out
     }
 
     /// The flow environment: discovery roots, the recorded targets, and the
@@ -131,14 +133,49 @@ impl Ways {
 
     /// A file that does not parse fails closed and takes no write from the
     /// screens; the writer would refuse it too, and this says why first.
+    /// The file is read as it is now, not as the tree last saw it.
     fn refuse_broken(&self, path: &Path) -> Result<(), String> {
-        if build::broken(&self.layers()).iter().any(|(f, _)| f == path) {
+        let Ok(bytes) = std::fs::read(path) else { return Ok(()) };
+        if agent_settings::load::parse_text(&String::from_utf8_lossy(&bytes), Some(path)).is_err() {
             return Err(format!(
                 "{} does not parse, so it fails closed and takes no write; fix its syntax by hand",
                 tilde(path, &self.ctx.home)
             ));
         }
         Ok(())
+    }
+
+    /// Check, under the writer's lock, that each key still resolves to the
+    /// value the tree read before it was edited, with `file` as `doc` now
+    /// holds it. A difference is an outside change, which a write would
+    /// overwrite unseen; it is refused, naming the key and both values.
+    fn unchanged(&self, file: &Path, doc: &agent_settings::yaml_edit::Doc, values: &[Write]) -> Result<(), String> {
+        let text = doc.text();
+        let mut layers = live_layers(&self.ctx.project);
+        for l in layers.iter_mut().filter(|l| l.path.as_deref() == Some(file)) {
+            let schema = if l.file == ways_agent_core::settings::FILE { &ways_agent_core::settings::SCHEMA } else { &ways_core::settings::SCHEMA };
+            *l = Layer::from_text(schema, &l.name.clone(), l.file, l.scope, Some(file), &text);
+        }
+        for w in values {
+            let Some(b) = self.reg.lookup(&w.store.key) else { continue };
+            let now = display(resolve(b.spec, &b.bound, &layers).value.as_ref(), b.spec.kind);
+            if now != w.loaded {
+                return Err(format!(
+                    "{} is {now} on disk, not the {} it was read as: it changed since. Review shows it now; apply again to write {}",
+                    w.store.key, w.loaded, w.value
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The binary queued commands run with: this one, or for tests the
+    /// stand-in `WAYS_SETTINGS_RUNNER` names.
+    fn runner() -> Result<PathBuf, String> {
+        match std::env::var_os("WAYS_SETTINGS_RUNNER").filter(|v| !v.is_empty()) {
+            Some(p) => Ok(PathBuf::from(p)),
+            None => std::env::current_exe().map_err(|e| format!("locating ways: {e}")),
+        }
     }
 
     /// A message with paths under home as `~`.
@@ -158,8 +195,10 @@ impl Adapter for Ways {
     }
 
     /// One locked edit of `file`, each value parsed by the schema exactly as
-    /// `ways settings set` parses its argument.
+    /// `ways settings set` parses its argument. A file that does not parse,
+    /// or a key that changed on disk since it was read, takes no write.
     fn write(&mut self, file: &Path, values: &[Write]) -> Result<(), String> {
+        self.refuse_broken(file)?;
         let mut edits = Vec::new();
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
@@ -171,53 +210,91 @@ impl Adapter for Ways {
             }
             edits.push((b.path(), v));
         }
-        self.refuse_broken(file)?;
-        write_file(file, &edits).map(|_| ()).map_err(|f| self.short(&f.message))
+        match write_file_checked(file, &edits, |doc| self.unchanged(file, doc, values)) {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(conflict)) => Err(self.short(&conflict)),
+            Err(f) => Err(self.short(&f.message)),
+        }
     }
 
-    /// The queued command line, run as the CLI runs it: this binary with
-    /// the line's arguments, a secret on stdin.
+    /// The queued command, run to its end; [`Adapter::start`] is what the
+    /// screens use.
     fn run(&mut self, q: &Queued) -> Result<(), String> {
-        let line = q.command.strip_suffix(" < <stdin>").unwrap_or(&q.command);
-        let argv = split(line)?;
-        let Some(("ways", args)) = argv.split_first().map(|(a, rest)| (a.as_str(), rest)) else {
-            return Err(format!("not a ways command: {}", q.command));
+        let mut job = self.start(q);
+        loop {
+            if let Some(r) = job.poll() {
+                return r;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// The queued command line, started as the CLI runs it: this binary
+    /// with the line's arguments, a secret on stdin. It runs in the
+    /// background; the screens poll it.
+    fn start(&mut self, q: &Queued) -> Box<dyn Job> {
+        let ended = |r: Result<(), String>| -> Box<dyn Job> { Box::new(Ended(Some(r))) };
+        let line = q.command.strip_suffix(" < <stdin>").unwrap_or(&q.command).to_string();
+        let argv = match split(&line) {
+            Ok(a) => a,
+            Err(e) => return ended(Err(e)),
         };
-        let exe = std::env::current_exe().map_err(|e| format!("locating ways: {e}"))?;
-        let mut child = Command::new(exe)
+        let Some(("ways", args)) = argv.split_first().map(|(a, rest)| (a.as_str(), rest)) else {
+            return ended(Err(format!("not a ways command: {}", q.command)));
+        };
+        let exe = match Ways::runner() {
+            Ok(e) => e,
+            Err(e) => return ended(Err(e)),
+        };
+        let mut child = match Command::new(exe)
             .args(args)
             .env("NO_COLOR", "1")
             .stdin(if q.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("{line}: {e}"))?;
+        {
+            Ok(c) => c,
+            Err(e) => return ended(Err(format!("{line}: {e}"))),
+        };
         if let (Some(secret), Some(mut pipe)) = (&q.stdin, child.stdin.take()) {
-            pipe.write_all(secret.reveal().as_bytes()).map_err(|e| format!("{line}: {e}"))?;
+            if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
+                // Never leave the child behind unwaited.
+                let _ = child.kill();
+                let _ = child.wait();
+                return ended(Err(format!("{line}: writing its stdin: {e}")));
+            }
         }
-        let out = child.wait_with_output().map_err(|e| format!("{line}: {e}"))?;
-        if out.status.success() {
-            return Ok(());
-        }
-        let err = String::from_utf8_lossy(&out.stderr);
-        let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
-        Err(self.short(&format!("exit {}: {last}", out.status.code().unwrap_or(-1))))
+        let read = |p: Option<Box<dyn Read + Send>>| p.map(|mut r| std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = r.read_to_end(&mut b);
+            b
+        }));
+        let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+        let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+        let home = self.ctx.home.display().to_string();
+        Box::new(Proc { child, out, err, home })
     }
 
     fn reload(&mut self) -> Option<Vec<Node>> {
         Some(self.roots())
     }
 
+    /// The size and time of each file the tree was read from, and the names
+    /// in the keys directory: metadata only, nothing parsed.
     fn stamp(&self) -> Option<u64> {
         let mut h = DefaultHasher::new();
-        for p in self.watched() {
+        if self.watched.borrow().is_empty() {
+            let _ = self.layers();
+        }
+        for p in self.watched.borrow().iter() {
             p.hash(&mut h);
-            if let Ok(m) = std::fs::metadata(&p) {
+            if let Ok(m) = std::fs::metadata(p) {
                 m.len().hash(&mut h);
                 m.modified().ok().hash(&mut h);
             }
             if p.is_dir() {
-                let mut names: Vec<String> = std::fs::read_dir(&p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+                let mut names: Vec<String> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
                 names.sort();
                 names.hash(&mut h);
             }
@@ -235,6 +312,67 @@ impl Adapter for Ways {
 
     fn choose_theme(&mut self, name: &str) -> Result<(), String> {
         self.set_one("theme.active", name)
+    }
+
+    fn choose_shape(&mut self, name: &str) -> Result<(), String> {
+        self.set_one("theme.shape", name)
+    }
+}
+
+/// A queued command running in the background, its output read on threads
+/// so a full pipe never stalls it.
+struct Proc {
+    child: std::process::Child,
+    out: Option<std::thread::JoinHandle<Vec<u8>>>,
+    err: Option<std::thread::JoinHandle<Vec<u8>>>,
+    /// Shown as `~` in the messages.
+    home: String,
+}
+
+impl Proc {
+    /// The last line a failed command printed: on stderr, else on stdout,
+    /// since some commands (`ways agent key add`) report a refusal there.
+    fn reason(&mut self) -> String {
+        let take = |h: Option<std::thread::JoinHandle<Vec<u8>>>| h.and_then(|h| h.join().ok()).unwrap_or_default();
+        let (out, err) = (take(self.out.take()), take(self.err.take()));
+        let last = |b: &[u8]| String::from_utf8_lossy(b).lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());
+        let line = last(&err).or_else(|| last(&out)).unwrap_or_else(|| "it printed nothing".into());
+        if self.home.len() > 1 { line.replace(&self.home, "~") } else { line }
+    }
+}
+
+impl Job for Proc {
+    fn poll(&mut self) -> Option<Result<(), String>> {
+        match self.child.try_wait() {
+            Ok(None) => None,
+            Ok(Some(status)) if status.success() => {
+                let _ = self.reason();
+                Some(Ok(()))
+            }
+            Ok(Some(status)) => {
+                let why = self.reason();
+                Some(Err(match status.code() {
+                    Some(c) => format!("exit {c}: {why}"),
+                    None => format!("ended by a signal: {why}"),
+                }))
+            }
+            Err(e) => Some(Err(format!("waiting on the command: {e}"))),
+        }
+    }
+
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for Proc {
+    fn drop(&mut self) {
+        // A command still running when the screens close is ended, never
+        // left behind.
+        if matches!(self.child.try_wait(), Ok(None)) {
+            self.stop();
+        }
     }
 }
 
@@ -348,10 +486,20 @@ pub fn open(o: &Open) -> Out {
         if left != "nothing pending\n" {
             print!("{left}");
         }
+        // The terminal is restored by now; a signal ends the process as it
+        // would have, with 128 plus the signal.
+        if let Some(sig) = session.signal {
+            std::process::exit(128 + sig);
+        }
         return Ok(());
     }
     let keys = agent_tui::testkit::parse_keys(o.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| fail(exit::USAGE, format!("--keys: {e}")))?;
     for k in keys {
+        // A secret never comes from an argument: it would sit in argv and
+        // the process list. A key script stops at a masked entry.
+        if app.masked() && matches!(k.code, agent_tui::ratatui::crossterm::event::KeyCode::Char(_)) {
+            return Err(fail(exit::USAGE, "--keys cannot type into a masked entry: a secret is never an argument"));
+        }
         if !app.key(k) {
             break;
         }

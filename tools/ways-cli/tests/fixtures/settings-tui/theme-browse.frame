@@ -7,8 +7,9 @@ agent-tui frame 100x30
 |│   catppuccin-mocha dark                             ││source    bundled (read-only)              │|
 |│   dracula          dark                             ││active    no (Enter)                       │|
 |│   gruvbox-dark     dark                             ││saves to  ~/.config/agent-ways/themes      │|
-|│   tokyonight-night dark                             ││                                           │|
-|│   paper            light                            ││slots                                      │|
+|│   tokyonight-night dark                             ││shape     plain (a: shape cycles it)       │|
+|│   paper            light                            ││                                           │|
+|│                                                     ││slots                                      │|
 |│                                                     ││   bg     #2e3440    info   #81a1c1        │|
 |│                                                     ││   fg     #d8dee9    ok     #a3be8c        │|
 |│                                                     ││   dim    #4c566a    warn   #d08770        │|
@@ -17,7 +18,6 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││contrast  ok                               │|
 |│                                                     ││distinct  ok, err/warn ΔE 0.084            │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -122,7 +122,7 @@ styles
   8  42-42  - Yellow -
   8  43-43  - DarkGray -
   8  44-44  - Gray -
-  8  54-55  - - DIM
+  8  54-65  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  21-27  - - DIM
@@ -135,25 +135,21 @@ styles
   9  42-43  - Red -
   9  44-44  - DarkGray -
   9  54-55  - - DIM
-  9  56-60  - - BOLD
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  54-55  - - DIM
- 10  56-57  - Black -
- 10  58-65  - - DIM
- 10  74-75  - DarkGray -
- 10  76-83  - - DIM
+ 10  56-60  - - BOLD
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  54-55  - - DIM
- 11  56-57  - Gray -
+ 11  56-57  - Black -
  11  58-65  - - DIM
  11  74-75  - DarkGray -
  11  76-83  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  54-55  - - DIM
- 12  56-57  - DarkGray -
+ 12  56-57  - Gray -
  12  58-65  - - DIM
  12  74-75  - DarkGray -
  12  76-83  - - DIM
@@ -169,22 +165,26 @@ styles
  14  54-55  - - DIM
  14  56-57  - DarkGray -
  14  58-65  - - DIM
- 14  74-75  - Gray -
+ 14  74-75  - DarkGray -
  14  76-83  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM
+ 15  56-57  - DarkGray -
+ 15  58-65  - - DIM
+ 15  74-75  - Gray -
+ 15  76-83  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  54-65  - - DIM
- 16  66-67  Green - -
+ 16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-65  - - DIM
- 17  66-86  Green - -
+ 17  66-67  Green - -
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18  54-55  - - DIM
+ 18  54-65  - - DIM
+ 18  66-86  Green - -
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM
