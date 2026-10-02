@@ -10,8 +10,10 @@ name = "agent_theme"
 path = "src/lib.rs"
 
 [features]
-# The ratatui output. Off by default: the engine's core, and every binary on
-# a hook path, carries no ratatui dependency (ADR-504 §4, §11).
+# The ratatui output. Off by default, so the engine's core carries no ratatui
+# dependency (ADR-504 §4). A binary that links the screens (`ways`) turns it
+# on; what ADR-504 §11 holds is that no hook command's code path calls into
+# it or reads a theme.
 ratatui = ["dep:ratatui-core"]
 
 [dependencies]

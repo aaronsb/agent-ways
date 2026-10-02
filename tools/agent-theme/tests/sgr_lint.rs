@@ -1,6 +1,5 @@
 //! The raw-colour lint (ADR-504 §6): a raw SGR escape literal in a Rust
-//! source under `tools/` outside `agent-theme` and `tools/spikes` is a
-//! finding. Colour goes through agent-theme's painter, which honours the
+//! source under `tools/` outside `agent-theme` is a finding. Colour goes through agent-theme's painter, which honours the
 //! theme, the terminal's depth and `NO_COLOR`; a literal does none of that.
 //!
 //! The second test plants a literal in a fixture tree and requires the scan
@@ -21,15 +20,16 @@ use std::path::{Path, PathBuf};
 /// lowercased.
 const NEEDLES: [&str; 5] = ["\\x1b[", "\\033[", "\\u{1b}[", "\\u{001b}[", "\\u{00001b}["];
 
-/// Directories the scan does not enter: the engine itself, the spikes,
-/// build output and hidden directories.
+/// Directories the scan does not enter: the engine itself, build output
+/// and hidden directories. A spike under `tools/spikes` is scanned like any
+/// other source.
 fn skipped(dir: &Path, root: &Path) -> bool {
     let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if name == "target" || name.starts_with('.') {
         return true;
     }
     let rel = dir.strip_prefix(root).unwrap_or(dir);
-    rel == Path::new("agent-theme") || rel == Path::new("spikes")
+    rel == Path::new("agent-theme")
 }
 
 fn walk(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
@@ -109,8 +109,10 @@ fn a_planted_literal_is_reported() {
 
     let (found, files) = scan(&root);
     let _ = std::fs::remove_dir_all(&root);
-    assert_eq!(files.len(), 3, "the excluded trees and the .txt file are not read: {files:#?}");
-    assert_eq!(found.len(), 2, "{found:#?}");
-    assert!(found[0].starts_with(&format!("other{}src{}main.rs:1:", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR)), "{found:#?}");
-    assert!(found[1].starts_with(&format!("some-crate{}src{}lib.rs:2:", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR)), "{found:#?}");
+    assert_eq!(files.len(), 4, "the excluded trees and the .txt file are not read: {files:#?}");
+    assert_eq!(found.len(), 3, "{found:#?}");
+    let sep = std::path::MAIN_SEPARATOR;
+    assert!(found[0].starts_with(&format!("other{sep}src{sep}main.rs:1:")), "{found:#?}");
+    assert!(found[1].starts_with(&format!("some-crate{sep}src{sep}lib.rs:2:")), "{found:#?}");
+    assert!(found[2].starts_with(&format!("spikes{sep}demo{sep}src{sep}main.rs:1:")), "a spike is not exempt: {found:#?}");
 }
