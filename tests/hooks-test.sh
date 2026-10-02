@@ -106,6 +106,28 @@ check "inject-subagent ignores the parent's refire state" "$expected" "$(inject 
 check "inject-subagent logs each injection" "8" \
     "$(jq -r 'select(.event=="way_fired" and .scope=="subagent") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
 
+# inject-subagent.sh's work on the assembled context must stay linear in its
+# size (#705). In a UTF-8 locale `${ctx// /}` took 150 ms on 13 KB of ways
+# and grows with the square of the size: about 9 s on this 100 KB way.
+utf8=$(locale -a 2>/dev/null | grep -iE '^(C|en_US)\.utf-?8$' | head -1)
+if [[ -n "$utf8" ]]; then
+    mkdir -p "$HOME/.claude/hooks/ways/coredom/big"
+    { printf -- '---\ndescription: big way\nscope: subagent\nrefire: 0.15\n---\n'
+      for _ in $(seq 1 2000); do printf 'Le café est prêt, and the way body runs on.\n'; done
+    } > "$HOME/.claude/hooks/ways/coredom/big/big.md"
+    mkdir -p "$SESSIONS/sess-big/subagent-stash"
+    echo '{"ways":["coredom/big"],"channels":["prompt"]}' > "$SESSIONS/sess-big/subagent-stash/001.json"
+    start=$(date +%s%N)
+    big=$(echo "{\"session_id\":\"sess-big\",\"cwd\":\"$WORK/project\"}" \
+        | LC_ALL="$utf8" bash "$HOOKS/inject-subagent.sh" | jq -r '.hookSpecificOutput.additionalContext' | wc -l)
+    ms=$(( ($(date +%s%N) - start) / 1000000 ))
+    check "inject-subagent injects a 100 KB way" "2000" "$(echo $big)"
+    check "inject-subagent handles a 100 KB way in under 2 s (took ${ms} ms)" "yes" \
+        "$([[ $ms -lt 2000 ]] && echo yes || echo no)"
+else
+    echo "  SKIP: no UTF-8 locale for the inject-subagent size check"
+fi
+
 # The code-quality macro runs on every fire of its way, SubagentStart
 # included. Its process count must not grow with the repo (#705): one spawn
 # of `file` and of `wc` per tracked file cost 3.5 s on a 1,600-file repo.

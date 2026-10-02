@@ -92,8 +92,10 @@ done <<< "$WAYS"
 # Output JSON for SubagentStart (additionalContext format)
 if [[ -n "$CONTEXT" ]]; then
   TRIMMED="${CONTEXT%$'\n\n'}"
-  # Guard against whitespace-only content from malformed ways
-  if [[ -n "${TRIMMED// /}" ]]; then
+  # Guard against whitespace-only content from malformed ways. A regex test
+  # stops at the first visible character; `${TRIMMED// /}` rewrote the whole
+  # string, superlinear in a UTF-8 locale: 150 ms on 13 KB of ways (#705).
+  if [[ $TRIMMED =~ [^[:space:]] ]]; then
     jq -n --arg ctx "$TRIMMED" '{
       hookSpecificOutput: {
         hookEventName: "SubagentStart",
