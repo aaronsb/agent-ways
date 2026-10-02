@@ -1,0 +1,17 @@
+# Paper — original to agent-ways: a warm off-white page with ink-dark text;
+# slots hand-picked against the 4.5:1 contrast floor.
+THEME_NAME="paper"
+THEME_LABEL="Paper"
+THEME_KIND="light"
+THEME_BACKGROUND="fill"
+
+THEME_BG="#f6f1e7"
+THEME_FG="#2b2a26"
+THEME_DIM="#7a7468"
+THEME_SUBTLE="#e4dccb"
+THEME_ACCENT="#0b6fa4"
+THEME_INFO="#2a5db0"
+THEME_OK="#3b7d23"
+THEME_WARN="#9a5b00"
+THEME_ERR="#b3261e"
+THEME_ALT="#7a3e9d"

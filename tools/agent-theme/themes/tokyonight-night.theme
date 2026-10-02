@@ -1,0 +1,24 @@
+# Tokyo Night — blue-violet base, saturated accents.
+#
+# bat/delta (both syntect) ship no Tokyo Night, so THEME_BAT falls back to
+# base16, which draws from the terminal's own 16 colors instead of a built-in
+# palette. Syntax highlighting under this theme follows Konsole's scheme rather
+# than the hexes below.
+THEME_NAME="tokyonight-night"
+THEME_LABEL="Tokyo Night"
+THEME_KIND="dark"
+
+THEME_BG="#1a1b26"
+THEME_FG="#c0caf5"
+THEME_DIM="#565f89"
+THEME_SUBTLE="#292e42"
+THEME_ACCENT="#bb9af7"
+THEME_INFO="#7aa2f7"
+THEME_OK="#9ece6a"
+THEME_WARN="#ff9e64"
+THEME_ERR="#f7768e"
+THEME_ALT="#7dcfff"
+
+THEME_VIVID="tokyonight-night"
+THEME_BAT="base16"
+THEME_DELTA="base16"

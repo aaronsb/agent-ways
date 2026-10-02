@@ -1,0 +1,17 @@
+# agent-ways — the default theme: status colours drawn from the agent-identity
+# palette (sky, azure, mint, gold, coral, orchid) on a neutral dark ground.
+THEME_NAME="agent-ways"
+THEME_LABEL="agent-ways"
+THEME_KIND="dark"
+THEME_BACKGROUND="terminal"
+
+THEME_BG="#1c1c1e"
+THEME_FG="#d0d0d0"
+THEME_DIM="#6b6b6b"
+THEME_SUBTLE="#3a3a3c"
+THEME_ACCENT="#5ac8fa"
+THEME_INFO="#7aa2f7"
+THEME_OK="#7dd87d"
+THEME_WARN="#f4d03f"
+THEME_ERR="#ff6b6b"
+THEME_ALT="#c67eff"

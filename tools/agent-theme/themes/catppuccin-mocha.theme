@@ -1,0 +1,19 @@
+# Catppuccin Mocha — dark, low-contrast pastels.
+THEME_NAME="catppuccin-mocha"
+THEME_LABEL="Catppuccin Mocha"
+THEME_KIND="dark"
+
+THEME_BG="#1e1e2e"
+THEME_FG="#cdd6f4"
+THEME_DIM="#6c7086"
+THEME_SUBTLE="#313244"
+THEME_ACCENT="#cba6f7"
+THEME_INFO="#89b4fa"
+THEME_OK="#a6e3a1"
+THEME_WARN="#fab387"
+THEME_ERR="#f38ba8"
+THEME_ALT="#94e2d5"
+
+THEME_VIVID="catppuccin-mocha"
+THEME_BAT="Catppuccin Mocha"
+THEME_DELTA="Catppuccin Mocha"
