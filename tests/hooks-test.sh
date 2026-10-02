@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Hook scripts under hooks/ways, run against a temp HOME, XDG dirs and
-# sessions root: clear-markers.sh clears only its own session's state, the
-# memory macro finds MEMORY.md under Claude Code's project slug, and
-# inject-subagent.sh injects stashed ways from every ways root. The hooks
-# call the ways binary at $HOME/.claude/bin/ways; the test links the build
-# named by $WAYS_TEST_BIN (default tools/target/debug/ways) there.
+# sessions root. Each script is an adapter over `ways hook <event>`: the
+# SessionStart clear and `ways reset` clear only a plain session id, the Stop
+# hook records the last response, the post-tool scan runs postchecks,
+# inject-subagent.sh injects stashed ways from every ways root, and a macro
+# gets its session, scope and sessions root. The hooks call the ways binary
+# at $HOME/.claude/bin/ways; the test links the build named by
+# $WAYS_TEST_BIN (default tools/target/debug/ways) there.
 
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
