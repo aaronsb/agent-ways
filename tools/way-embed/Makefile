@@ -104,11 +104,10 @@ setup-binary:
 		$(MAKE) $(BIN); \
 	fi
 
-# Force re-download (or rebuild) of the platform binary. Removes the
-# cached install so download-prebuilt.sh's "already installed" early-
-# return does not skip a refresh after an upstream update.
+# Refresh the platform binary: download-prebuilt.sh replaces a cached
+# install older than the latest release and keeps the working one when the
+# download is refused, so nothing is removed first.
 rebuild-binary:
-	@rm -f "$(MODEL_DIR)/way-embed"
 	@$(MAKE) setup-binary
 
 # Run basic smoke test

@@ -136,7 +136,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    can never move backward. A failed refresh reverts and CONTINUES (we still
     //    reproject the pulled source) rather than aborting mid-update. Skipped when
     //    the cargo suite's source didn't move; a stale ways is refreshed in step 4.
-    let mut ways_refreshed = if cargo_changed {
+    let ways_refreshed = if cargo_changed {
         eprintln!("==> refresh ways (pre-built first, downgrade-guarded)");
         match refresh_ways(&app, has_toolchain) {
             Ok(()) => true,
@@ -184,7 +184,6 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         eprintln!("==> {} is {}, source is {}: refreshing it", s.name, s.installed, s.source);
         if let Err(e) = refresh_stale(&app, s, has_toolchain) {
             eprintln!("  ⚠ {e}");
-            ways_refreshed &= s.name != "ways";
         }
     }
 
@@ -599,21 +598,25 @@ fn refresh_component(app: &Path, name: &str, make_args: &[&str], make_dir: &Path
 /// rename-revert protection of `refresh_component`.
 fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
     let name = stale.name.as_str();
-    let _ = Command::new("bash")
+    let fetched = Command::new("bash")
         .args(["tools/scripts/download-prebuilt.sh", name])
         .current_dir(app)
         .stdout(std::process::Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|s| s.success());
     let Some(now) = stale_suite_binaries(app).into_iter().find(|s| s.name == name) else {
         return Ok(());
     };
+    // The download script says why it failed on stderr; a success that left the
+    // binary behind means the latest release trails the source.
+    let why = if fetched { format!("no {name} {} release yet", now.source) } else { "the release download failed".to_string() };
     if !has_toolchain {
         bail!(
-            "{name} is {}, source is {}: no release of {} yet and no toolchain to build it; the next update checks again",
-            now.installed, now.source, now.source
+            "{name} is {}, source is {}: {why}, and no toolchain to build it; the next update checks again",
+            now.installed, now.source
         );
     }
-    eprintln!("     no {name} {} release yet; building from source", now.source);
+    eprintln!("     {why}; building {name} from source");
     refresh_component(app, name, &[&format!("{name}-rebuild")], app)
 }
 
@@ -1020,6 +1023,61 @@ mod tests {
         assert!(bin.exists(), "original binary must be restored");
         assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD-BINARY", "and be the same file");
         assert!(!app.join("bin").join(format!("{}.pre-update", exe("ways"))).exists(), "backup consumed by the revert");
+        let _ = std::fs::remove_dir_all(&app);
+    }
+
+    #[cfg(unix)]
+    fn stale_app(release_version: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let app = tmp();
+        let exec = |p: &Path, body: &str| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        std::fs::create_dir_all(app.join("tools/ways-agent")).unwrap();
+        std::fs::write(app.join("tools/suite-bins"), "ways-agent\n").unwrap();
+        std::fs::write(app.join("tools/ways-agent/Cargo.toml"), "[package]\nname = \"ways-agent\"\nversion = \"0.5.1\"\n").unwrap();
+        exec(&app.join("bin/ways-agent"), "#!/bin/sh\necho 'ways-agent 0.4.0'\n");
+        // The fake download logs its call and installs the latest release.
+        exec(
+            &app.join("tools/scripts/download-prebuilt.sh"),
+            &format!("#!/bin/sh\necho download >> calls\nprintf '#!/bin/sh\\necho \"ways-agent {release_version}\"\\n' > bin/ways-agent\n"),
+        );
+        std::fs::write(
+            app.join("Makefile"),
+            "ways-agent-rebuild:\n\techo rebuild >> calls\n\tprintf '#!/bin/sh\\necho \"ways-agent 0.5.1\"\\n' > bin/ways-agent\n\tchmod +x bin/ways-agent\n",
+        )
+        .unwrap();
+        app
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_binary_takes_the_latest_release_in_place_and_builds_only_when_still_behind() {
+        let stale = |app: &Path| stale_suite_binaries(app).pop().expect("ways-agent is stale");
+        let calls = |app: &Path| std::fs::read_to_string(app.join("calls")).unwrap_or_default();
+
+        // The release caught up with the source: one download, no build.
+        let app = stale_app("0.5.1");
+        refresh_stale(&app, &stale(&app), true).unwrap();
+        assert_eq!(calls(&app), "download\n");
+        assert!(stale_suite_binaries(&app).is_empty());
+        assert!(!app.join("bin/ways-agent.pre-update").exists(), "the binary was never moved aside for the download");
+        let _ = std::fs::remove_dir_all(&app);
+
+        // The release lags the source: the download leaves it behind, so it is built.
+        let app = stale_app("0.5.0");
+        refresh_stale(&app, &stale(&app), true).unwrap();
+        assert_eq!(calls(&app), "download\nrebuild\n");
+        assert!(stale_suite_binaries(&app).is_empty());
+        let _ = std::fs::remove_dir_all(&app);
+
+        // No toolchain: it stays at the latest release and says why.
+        let app = stale_app("0.5.0");
+        let err = refresh_stale(&app, &stale(&app), false).unwrap_err().to_string();
+        assert!(err.contains("no ways-agent 0.5.1 release yet"), "got: {err}");
+        assert_eq!(calls(&app), "download\n");
         let _ = std::fs::remove_dir_all(&app);
     }
 

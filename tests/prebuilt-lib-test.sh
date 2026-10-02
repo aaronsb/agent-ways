@@ -186,6 +186,11 @@ JSON
   FAKE_GH_FAIL=api prebuilt_install ways latest "$FAKE/out-noapi" "$REPO" "make ways" >/dev/null 2>"$FAKE/err"
   check "an unreachable API fails the install" "1" "$?"
 
+  ge() { if version_at_least "$1" "$2"; then echo yes; else echo no; fi; }
+  check "version_at_least orders numeric cores" "yes:no:yes" "$(ge 0.10.0 0.9.0):$(ge 0.9.0 0.10.0):$(ge 1.2.0 1.2.0)"
+  check "a pre-release is behind its release" "no:yes" "$(ge 1.2.0-rc1 1.2.0):$(ge 1.2.0 1.2.0-rc1)"
+  check "an unparseable version is behind any other" "no:yes" "$(ge unknown 1.0.0):$(ge unknown unknown)"
+
   check "curl is never called" "no" "$(yn grep -q '^curl' "$FAKE/calls")"
   exit "$fails"
 )

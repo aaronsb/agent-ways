@@ -91,6 +91,22 @@ binary_version() {
   "$1" --version 2>/dev/null | awk 'NR == 1 { print $2 }'
 }
 
+# Whether version A is at or ahead of B: numeric X.Y.Z cores compared in
+# order, and at an equal core a pre-release (1.2.0-rc1) is behind the release.
+# A version that does not parse is at least B only when it equals B. The same
+# order as `version_older` in tools/ways-cli/src/cmd/update.rs.
+version_at_least() {
+  local a="$1" b="$2" ac bc
+  [[ "$a" == "$b" ]] && return 0
+  ac="${a%%-*}" bc="${b%%-*}"
+  [[ "$ac" =~ ^[0-9]+(\.[0-9]+)*$ && "$bc" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
+  if [[ "$ac" == "$bc" ]]; then
+    [[ "$a" != *-* ]]  # equal cores: A is behind only when it is a pre-release
+    return
+  fi
+  [[ "$(printf '%s\n%s\n' "$ac" "$bc" | sort -V | tail -1)" == "$ac" ]]
+}
+
 # Install the pre-built binary of COMPONENT from a GitHub Release.
 #
 #   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT [CHECK]
@@ -166,8 +182,7 @@ prebuilt_install() (
     fi
     # At or ahead of the latest release: a newer binary is never replaced by
     # an older release.
-    latest="${tag#"${comp}-v"}"
-    [[ -n "$installed" && "$(printf '%s\n%s\n' "$latest" "$installed" | sort -V | tail -1)" == "$installed" ]] && keep_installed
+    [[ -n "$installed" ]] && version_at_least "$installed" "${tag#"${comp}-v"}" && keep_installed
   fi
   [[ -n "$installed" ]] && echo "Replacing ${comp} ${installed} with ${tag}" >&2
 
