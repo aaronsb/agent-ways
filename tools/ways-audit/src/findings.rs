@@ -10,6 +10,7 @@ use std::io::Write;
 
 use ways_core::finding::{assemble as assemble_findings, Finding};
 use ways_core::{firing, paths, util};
+use agent_theme::{paint, Role, Style};
 
 /// Assemble finding rows from the claim manifest + firing events, print them, and
 /// optionally append them to the ledger. `way` filters to a single way id.
@@ -38,14 +39,20 @@ pub fn assemble(manifest: &Value, way: Option<&str>, write: bool, json_out: bool
     let outcome = findings.iter().filter(|f| f.criterion.is_some()).count();
     println!();
     println!(
-        "  \x1b[2m{} finding(s): {} outcome-tier (assessable), {} process-tier. \
-         Determination is unset — a classifier labels it (ADR-201).\x1b[0m",
-        findings.len(),
-        outcome,
-        findings.len() - outcome,
+        "  {}",
+        paint(
+            Role::Muted,
+            format!(
+                "{} finding(s): {} outcome-tier (assessable), {} process-tier. \
+                 Determination is unset — a classifier labels it (ADR-201).",
+                findings.len(),
+                outcome,
+                findings.len() - outcome,
+            )
+        ),
     );
     if write {
-        println!("  \x1b[2mAppended to {}\x1b[0m", paths::findings_ledger().display());
+        println!("  {}", paint(Role::Muted, format!("Appended to {}", paths::findings_ledger().display())));
     }
     Ok(())
 }
@@ -67,32 +74,38 @@ pub fn list(json_out: bool) -> Result<()> {
 
     if findings.is_empty() {
         println!();
-        println!("  \x1b[2mNo findings assembled yet. Run `ways-audit assemble --write`.\x1b[0m");
+        println!("  {}", paint(Role::Muted, "No findings assembled yet. Run `ways-audit assemble --write`."));
         return Ok(());
     }
     render_table(&findings, "Finding Ledger");
     let labeled = findings.iter().filter(|f| f.determination.is_some()).count();
     println!();
     println!(
-        "  \x1b[2m{} finding(s), {} labeled by a classifier, {} awaiting classification.\x1b[0m",
-        findings.len(),
-        labeled,
-        findings.len() - labeled,
+        "  {}",
+        paint(
+            Role::Muted,
+            format!(
+                "{} finding(s), {} labeled by a classifier, {} awaiting classification.",
+                findings.len(),
+                labeled,
+                findings.len() - labeled,
+            )
+        ),
     );
     Ok(())
 }
 
 fn render_table(findings: &[Finding], title: &str) {
     println!();
-    println!("\x1b[1m{title}\x1b[0m");
+    println!("{}", paint(Style::new().bold(), title));
     println!();
     println!(
-        "  \x1b[1m{:<26} {:<26} {:<8} {:>5}  DETERMINATION\x1b[0m",
-        "WAY", "CONTROL", "TIER", "FIRES"
+        "  {}",
+        paint(Style::new().bold(), format!("{:<26} {:<26} {:<8} {:>5}  DETERMINATION", "WAY", "CONTROL", "TIER", "FIRES"))
     );
     println!(
-        "  \x1b[2m{:<26} {:<26} {:<8} {:>5}  -------------\x1b[0m",
-        "---", "-------", "----", "-----"
+        "  {}",
+        paint(Role::Muted, format!("{:<26} {:<26} {:<8} {:>5}  -------------", "---", "-------", "----", "-----"))
     );
     for f in findings {
         let control = if f.control.len() > 26 { &f.control[..26] } else { &f.control };
@@ -101,8 +114,8 @@ fn render_table(findings: &[Finding], title: &str) {
             ways_core::finding::Tier::Outcome => "outcome",
         };
         let det = match &f.determination {
-            Some(d) => d.as_str(),
-            None => "\x1b[2m(unset)\x1b[0m",
+            Some(d) => d.as_str().to_string(),
+            None => paint(Role::Muted, "(unset)"),
         };
         println!(
             "  {:<26} {:<26} {:<8} {:>5}  {}",

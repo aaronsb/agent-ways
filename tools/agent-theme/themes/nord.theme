@@ -1,0 +1,19 @@
+# Nord — cool desaturated arctic blues.
+THEME_NAME="nord"
+THEME_LABEL="Nord"
+THEME_KIND="dark"
+
+THEME_BG="#2e3440"
+THEME_FG="#d8dee9"
+THEME_DIM="#4c566a"
+THEME_SUBTLE="#3b4252"
+THEME_ACCENT="#b48ead"
+THEME_INFO="#81a1c1"
+THEME_OK="#a3be8c"
+THEME_WARN="#d08770"
+THEME_ERR="#bf616a"
+THEME_ALT="#88c0d0"
+
+THEME_VIVID="nord"
+THEME_BAT="Nord"
+THEME_DELTA="Nord"

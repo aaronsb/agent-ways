@@ -4,6 +4,10 @@ use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
 use ways_core::firing::load_events;
+use agent_theme::{paint, Role, Style};
+
+const BOLD: Style = Style::new().bold();
+const WARN: Style = Style::new().role(Role::Warn).bold();
 
 pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
     let way_data = &manifest["ways"][way_id];
@@ -30,22 +34,24 @@ pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
 
     println!();
     println!(
-        "\x1b[1mClaim Trace: \x1b[0;36m{way_id}\x1b[0m"
+        "{}{}",
+        paint(BOLD, "Claim Trace: "),
+        paint(Role::Accent, way_id)
     );
     println!();
     if let Some(path) = way_data["path"].as_str() {
-        println!("  File: \x1b[2m{path}\x1b[0m");
+        println!("  File: {}", paint(Role::Muted, path));
     }
     println!();
 
     let prov = &way_data["provenance"];
     if prov.is_null() {
-        println!("  \x1b[1;33m(no claim)\x1b[0m");
+        println!("  {}", paint(WARN, "(no claim)"));
         return Ok(());
     }
 
     // Policies
-    println!("\x1b[1mPolicy sources:\x1b[0m");
+    println!("{}", paint(BOLD, "Policy sources:"));
     if let Some(policies) = prov["policy"].as_array() {
         for p in policies {
             let ptype = p["type"].as_str().unwrap_or("unknown");
@@ -56,7 +62,7 @@ pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
     println!();
 
     // Controls
-    println!("\x1b[1mControls:\x1b[0m");
+    println!("{}", paint(BOLD, "Controls:"));
     if let Some(controls) = prov["controls"].as_array() {
         for c in controls {
             if let Some(obj) = c.as_object() {
@@ -78,14 +84,14 @@ pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
 
     // Verified
     match prov["verified"].as_str() {
-        Some(v) => println!("  Verified: \x1b[0;32m{v}\x1b[0m"),
-        None => println!("  Verified: \x1b[1;33mnot set\x1b[0m"),
+        Some(v) => println!("  Verified: {}", paint(Role::Ok, v)),
+        None => println!("  Verified: {}", paint(WARN, "not set")),
     }
     println!();
 
     // Rationale
     if let Some(rationale) = prov["rationale"].as_str() {
-        println!("\x1b[1mRationale:\x1b[0m");
+        println!("{}", paint(BOLD, "Rationale:"));
         println!("  {rationale}");
     }
 

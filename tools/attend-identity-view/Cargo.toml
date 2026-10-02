@@ -11,4 +11,5 @@ path = "src/lib.rs"
 
 [dependencies]
 agent-identity = { path = "../agent-identity" }
+agent-theme = { path = "../agent-theme" }
 attend-instances = { path = "../attend-instances" }

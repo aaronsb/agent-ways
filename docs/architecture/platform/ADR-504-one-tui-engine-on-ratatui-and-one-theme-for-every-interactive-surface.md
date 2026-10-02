@@ -101,6 +101,9 @@ considered:
     said: "agent ways can vend it's own themes, but let's use the same structure as the dotfiles themes do. if the dotfiles themes are insufficient in properties or configs, we can deviate from dotfiles"
     via: chat, session 02e97f86, 2026-10-01, answering the ADR probes
     covers: [own themes]
+  - operator: aaronsb
+    said: "the default theme should be something that works on a conventional 16 color terminal, then any other theme can be chosen (with the 16 color theme as a fallback if the terminal isn't 256 or true color)"
+    via: "operator, relayed by the coordinator with the review of PR #711, session 6881527e, 2026-10-01"
 observable:
   - 'see: switching the active theme changes the colours of the settings screens, introspect, attend-chat and ways list output'
   - 'see: NO_COLOR=1 removes colour from every ways and attend surface'
@@ -256,3 +259,9 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) built the 
 - **Keep `claude-projects` in Python, or wrap it.** Declined by the operator in favour of Rust. It keeps a second implementation of the locator and a Python dependency.
 - **A Rust `claude-projects` binary.** It keeps the old name but adds a release artifact, a download script and an install link for what a `ways` subcommand group serves.
 - **A Clippy lint, a per-crate test or a grep script for SGR literals.** Clippy has no such lint and a custom one needs a driver; a test per crate has to be added to each; a shell script is new non-Rust tooling. One workspace-scanning test covers every crate, including new ones.
+
+## Note (2026-10-01): the default theme and the 16-colour fallback
+
+The operator, on the review of PR #711: "the default theme should be something that works on a conventional 16 color terminal, then any other theme can be chosen (with the 16 color theme as a fallback if the terminal isn't 256 or true color)".
+
+The default theme is the 16-colour terminal palette: the status roles are the terminal's own ANSI colours, muted text is dim and selection is reverse video. Any other theme can be chosen. A chosen theme is used only where the detected depth is 256 or truecolor; on a 16-colour terminal the whole default theme is used in its place, not the chosen theme reduced to 16 colours. Without colour, behaviour is as §4 and §6 state. `agent_theme::Painter::select` holds the rule.

@@ -5,6 +5,10 @@ use serde_json::{json, Value};
 
 use crate::helpers::{cutoff_date, find_stale_ways};
 use ways_core::firing::{count_fires, load_events};
+use agent_theme::{paint, Role, Style};
+
+const BOLD: Style = Style::new().bold();
+const WARN: Style = Style::new().role(Role::Warn).bold();
 
 pub fn gaps(manifest: &Value, json_out: bool) -> Result<()> {
     let without = &manifest["coverage"]["without_provenance"];
@@ -19,7 +23,9 @@ pub fn gaps(manifest: &Value, json_out: bool) -> Result<()> {
 
     println!();
     println!(
-        "\x1b[1mWays Without a Claim\x1b[0m \x1b[1;33m({count} of {total})\x1b[0m"
+        "{} {}",
+        paint(BOLD, "Ways Without a Claim"),
+        paint(WARN, format!("({count} of {total})"))
     );
     println!();
     if let Some(arr) = without.as_array() {
@@ -53,12 +59,14 @@ pub fn stale(manifest: &Value, days: u32, json_out: bool) -> Result<()> {
     let cutoff = cutoff_date(days);
     println!();
     println!(
-        "\x1b[1mStale Claims\x1b[0m \x1b[2m(verified > {days} days ago, cutoff: {cutoff})\x1b[0m"
+        "{} {}",
+        paint(BOLD, "Stale Claims"),
+        paint(Role::Muted, format!("(verified > {days} days ago, cutoff: {cutoff})"))
     );
     println!();
 
     if stale_ways.is_empty() {
-        println!("  \x1b[0;32mAll claim dates are current.\x1b[0m");
+        println!("  {}", paint(Role::Ok, "All claim dates are current."));
     } else {
         for way in &stale_ways {
             let verified = manifest["ways"][way.as_str()]["provenance"]["verified"]
@@ -100,19 +108,20 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     let total_ways = manifest["ways_scanned"].as_u64().unwrap_or(0);
 
     println!();
-    println!("\x1b[1mActive Claims Report\x1b[0m");
+    println!("{}", paint(BOLD, "Active Claims Report"));
     println!();
     println!(
-        "  Ways with claims: \x1b[0;32m{total_governed}\x1b[0m of {total_ways}"
+        "  Ways with claims: {} of {total_ways}",
+        paint(Role::Ok, total_governed)
     );
     println!();
     println!(
-        "  \x1b[1m{:<28} {:>5}  Status\x1b[0m",
-        "Way", "Fires"
+        "  {}",
+        paint(BOLD, format!("{:<28} {:>5}  Status", "Way", "Fires"))
     );
     println!(
-        "  \x1b[2m{:<28} {:>5}  ------\x1b[0m",
-        "---", "-----"
+        "  {}",
+        paint(Role::Muted, format!("{:<28} {:>5}  ------", "---", "-----"))
     );
 
     for v in with_prov {
@@ -122,9 +131,9 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         };
         let fires = fire_counts.get(way).copied().unwrap_or(0);
         let status = if fires > 0 {
-            "\x1b[0;32mactive\x1b[0m"
+            paint(Role::Ok, "active")
         } else {
-            "\x1b[2mdormant\x1b[0m"
+            paint(Role::Muted, "dormant")
         };
         println!("  {:<28} {:>5}  {}", way, fires, status);
     }
@@ -132,7 +141,9 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     // Ways without a claim, ranked by fire count.
     println!();
     println!(
-        "\x1b[1mWays without a claim\x1b[0m \x1b[2m(top by fire count):\x1b[0m"
+        "{} {}",
+        paint(BOLD, "Ways without a claim"),
+        paint(Role::Muted, "(top by fire count):")
     );
     if let Some(without) = manifest["coverage"]["without_provenance"].as_array() {
         let mut ungov_fires: Vec<(&str, u64)> = without
@@ -154,8 +165,8 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         } else {
             for (way, fires) in ungov_fires.iter().take(5) {
                 println!(
-                    "  {:<28} {:>5} fires \x1b[1;33m(no claim)\x1b[0m",
-                    way, fires
+                    "  {:<28} {:>5} fires {}",
+                    way, fires, paint(WARN, "(no claim)")
                 );
             }
         }

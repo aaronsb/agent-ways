@@ -11,7 +11,8 @@
 //! groups by name (`#deploy`), not by glyph.
 
 use crate::identity::fnv1a_64;
-use crate::palette::{resolve, PaletteEntry, Resolved, Style, TermCaps};
+use crate::palette::{resolve, PaletteEntry, Resolved, Style};
+use agent_theme::ColorDepth;
 
 /// Curated glyph pool — ~20 distinctive Unicode symbols chosen for
 /// broad font coverage. Avoiding anything that commonly degrades to
@@ -49,7 +50,7 @@ impl Group {
     /// Same hash as `Identity::for_user`, but namespaced so a group
     /// named "aaron" doesn't land on the same palette entry as a
     /// human user named "aaron".
-    pub fn for_name(name: &str, caps: TermCaps) -> Self {
+    pub fn for_name(name: &str, caps: ColorDepth) -> Self {
         let key = format!("group:{name}");
         let seed = fnv1a_64(key.as_bytes());
         let glyph = GLYPHS[(seed as usize) % GLYPHS.len()];
@@ -74,8 +75,8 @@ mod tests {
 
     #[test]
     fn same_name_same_group() {
-        let a = Group::for_name("deploy", TermCaps::Rich);
-        let b = Group::for_name("deploy", TermCaps::Rich);
+        let a = Group::for_name("deploy", ColorDepth::TrueColor);
+        let b = Group::for_name("deploy", ColorDepth::TrueColor);
         assert_eq!(a.glyph, b.glyph);
         assert_eq!(a.palette, b.palette);
         assert_eq!(a.style, b.style);
@@ -84,8 +85,8 @@ mod tests {
 
     #[test]
     fn different_names_differ() {
-        let a = Group::for_name("deploy", TermCaps::Rich);
-        let b = Group::for_name("infra", TermCaps::Rich);
+        let a = Group::for_name("deploy", ColorDepth::TrueColor);
+        let b = Group::for_name("infra", ColorDepth::TrueColor);
         assert_ne!(a.seed, b.seed);
     }
 
@@ -95,8 +96,8 @@ mod tests {
         // resolve to different palette seats — the `group:` prefix
         // in the hash input is what guarantees this.
         use crate::identity::Identity;
-        let g = Group::for_name("aaron", TermCaps::Rich);
-        let u = Identity::for_user("aaron", "ignored", TermCaps::Rich);
+        let g = Group::for_name("aaron", ColorDepth::TrueColor);
+        let u = Identity::for_user("aaron", "ignored", ColorDepth::TrueColor);
         assert_ne!(g.seed, u.seed);
     }
 
@@ -121,14 +122,14 @@ mod tests {
     fn case_sensitive_group_names() {
         // Group names follow the dir name on disk; filesystems are
         // case-sensitive on Linux, so we treat the names that way.
-        let a = Group::for_name("Deploy", TermCaps::Rich);
-        let b = Group::for_name("deploy", TermCaps::Rich);
+        let a = Group::for_name("Deploy", ColorDepth::TrueColor);
+        let b = Group::for_name("deploy", ColorDepth::TrueColor);
         assert_ne!(a.seed, b.seed);
     }
 
     #[test]
     fn mono_produces_mono_entry() {
-        let g = Group::for_name("deploy", TermCaps::Mono);
+        let g = Group::for_name("deploy", ColorDepth::NoColor);
         assert_eq!(g.palette.name, "mono");
     }
 }

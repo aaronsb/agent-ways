@@ -13,7 +13,8 @@
 //! now, and where" — heartbeat-fresh sessions only, rooted at their
 //! origin path (ADR-171).
 
-use agent_identity::{Identity, TermCaps};
+use agent_identity::Identity;
+use agent_theme::ColorDepth;
 use attend_instances::SnapshotCache;
 
 use crate::sessions::{discover as discover_sessions, DiscoveredSession};
@@ -34,7 +35,7 @@ pub struct Peer {
 }
 
 /// Build the live roster from session records + heartbeats.
-pub fn roster(caps: TermCaps, instances: &SnapshotCache) -> Vec<Peer> {
+pub fn roster(caps: ColorDepth, instances: &SnapshotCache) -> Vec<Peer> {
     roster_with(
         &discover_sessions(),
         |sid| attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE),
@@ -49,7 +50,7 @@ pub fn roster(caps: TermCaps, instances: &SnapshotCache) -> Vec<Peer> {
 pub fn roster_with<F: Fn(&str) -> bool>(
     seeds: &[DiscoveredSession],
     is_live: F,
-    caps: TermCaps,
+    caps: ColorDepth,
     instances: &SnapshotCache,
 ) -> Vec<Peer> {
     let mut seen = std::collections::HashSet::new();
@@ -118,7 +119,7 @@ mod tests {
     #[test]
     fn roster_filters_to_live_sessions() {
         let seeds = vec![seed("live-1", "/home/x"), seed("dead-1", "/home/y")];
-        let r = roster_with(&seeds, |sid| sid == "live-1", TermCaps::Rich, &empty_cache());
+        let r = roster_with(&seeds, |sid| sid == "live-1", ColorDepth::TrueColor, &empty_cache());
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].session_id, "live-1");
     }
@@ -133,7 +134,7 @@ mod tests {
             seed("sess-a", "/home/proj/.claude/worktrees/hop"),
             seed("sess-b", "/home/other"),
         ];
-        let r = roster_with(&seeds, |_| true, TermCaps::Rich, &empty_cache());
+        let r = roster_with(&seeds, |_| true, ColorDepth::TrueColor, &empty_cache());
         assert_eq!(r.len(), 2, "one row per session id, got {r:?}");
     }
 
@@ -143,11 +144,11 @@ mod tests {
         // keeps its origin-root persona (ADR-171): same root, same
         // nickname as before the hop.
         let seeds = vec![seed("sess-a", "/home/me/proj/.claude/worktrees/feat")];
-        let r = roster_with(&seeds, |_| true, TermCaps::Rich, &empty_cache());
+        let r = roster_with(&seeds, |_| true, ColorDepth::TrueColor, &empty_cache());
         assert_eq!(r[0].root, "/home/me/proj");
         assert_eq!(
             r[0].display,
-            Identity::for_cwd("/home/me/proj", TermCaps::Rich).nickname
+            Identity::for_cwd("/home/me/proj", ColorDepth::TrueColor).nickname
         );
     }
 

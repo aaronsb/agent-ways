@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
+use agent_theme::{paint, Role, Style};
 
 pub fn control(manifest: &Value, pattern: &str, json_out: bool) -> Result<()> {
     let by_control = match manifest["coverage"]["by_control"].as_object() {
@@ -34,7 +35,9 @@ pub fn control(manifest: &Value, pattern: &str, json_out: bool) -> Result<()> {
     }
 
     println!(
-        "\x1b[1mControls matching\x1b[0m '\x1b[0;36m{pattern}\x1b[0m':"
+        "{} '{}':",
+        paint(Style::new().bold(), "Controls matching"),
+        paint(Role::Accent, pattern)
     );
     println!();
     for (cid, ways) in &matches {
@@ -80,7 +83,9 @@ pub fn policy(manifest: &Value, pattern: &str, json_out: bool) -> Result<()> {
     }
 
     println!(
-        "\x1b[1mPolicies matching\x1b[0m '\x1b[0;36m{pattern}\x1b[0m':"
+        "{} '{}':",
+        paint(Style::new().bold(), "Policies matching"),
+        paint(Role::Accent, pattern)
     );
     println!();
     for (uri, ways) in &matches {

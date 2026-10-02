@@ -233,12 +233,12 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
     let bar_width = 60;
     let filled = (ctx.pct_used as usize * bar_width / 100).min(bar_width);
 
-    let bar_color = if ctx.pct_used < 50 {
-        "\x1b[0;32m" // green
+    let bar_style = if ctx.pct_used < 50 {
+        Style::new().role(Role::Ok)
     } else if ctx.pct_used < 75 {
-        "\x1b[1;33m" // yellow
+        Style::new().role(Role::Warn).bold()
     } else {
-        "\x1b[0;31m" // red
+        Style::new().role(Role::Err)
     };
 
     // Token-usage bar. The old "25% re-disclosure marker" was dropped
@@ -254,14 +254,16 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
         }
     }
 
-    println!("  {bar_color}{bar}\x1b[0m {}%", ctx.pct_used);
+    println!("  {} {}%", paint(bar_style, &bar), ctx.pct_used);
     println!();
     println!(
-        "  \x1b[1m{used_k}K\x1b[0m / {total_k}K tokens used  \x1b[2m({remaining_k}K remaining)\x1b[0m"
+        "  {} / {total_k}K tokens used  {}",
+        paint(Style::new().bold(), format!("{used_k}K")),
+        paint(Role::Muted, format!("({remaining_k}K remaining)"))
     );
     println!(
-        "  \x1b[2mModel: {}  Method: {}\x1b[0m",
-        ctx.model, ctx.method
+        "  {}",
+        paint(Role::Muted, format!("Model: {}  Method: {}", ctx.model, ctx.method))
     );
     println!();
 
@@ -507,6 +509,7 @@ fn find_newest_transcript(dir: &Path) -> Option<PathBuf> {
 }
 
 use crate::util::{detect_project_dir, home_dir};
+use agent_theme::{paint, Role, Style};
 
 #[cfg(test)]
 mod tests {

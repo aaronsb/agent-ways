@@ -31,5 +31,5 @@ pub use groups::{Group, GLYPHS};
 pub use identity::{cwd_basename, sanitize_id_component, signal_filename, Identity};
 pub use signal::{is_valid_signal_id, parse_signal, ParsedSignal};
 pub use palette::{
-    resolve, PaletteEntry, Resolved, Style, TermCaps, BASIC_PALETTE, RICH_PALETTE,
+    categorical, is_rich, resolve, PaletteEntry, Resolved, Style, BASIC_PALETTE, CATEGORICAL, RICH_PALETTE,
 };

@@ -16,7 +16,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use agent_identity::{Group, TermCaps};
+use agent_identity::Group;
+use agent_theme::ColorDepth;
 use attend_groups::GroupEntry;
 
 use crate::signal::signals_base;
@@ -47,13 +48,13 @@ pub const BASE_CHANNEL_NAME: &str = "open";
 /// paired with its membership entry from `_groups.yaml` (or an empty
 /// membership if the yaml doesn't mention it — a group dir can exist
 /// before `_groups.yaml` catches up).
-pub fn scan(caps: TermCaps) -> Vec<KnownGroup> {
+pub fn scan(caps: ColorDepth) -> Vec<KnownGroup> {
     scan_in(&signals_base(), caps)
 }
 
 /// Scan under an arbitrary base. Exists so tests can drive the scan
 /// against a scratch directory without touching `$HOME`.
-pub fn scan_in(base: &Path, caps: TermCaps) -> Vec<KnownGroup> {
+pub fn scan_in(base: &Path, caps: ColorDepth) -> Vec<KnownGroup> {
     let memberships = attend_groups::load_groups(base);
     let Ok(entries) = fs::read_dir(base) else {
         return Vec::new();
@@ -95,12 +96,12 @@ pub fn scan_in(base: &Path, caps: TermCaps) -> Vec<KnownGroup> {
 /// Groups after `#open` preserve the order [`scan`] returns them
 /// in — alphabetical today. Richer ordering (pinned, recent) is
 /// deferred per ADR-124 §3.
-pub fn channels(caps: TermCaps) -> Vec<KnownGroup> {
+pub fn channels(caps: ColorDepth) -> Vec<KnownGroup> {
     channels_in(&signals_base(), caps)
 }
 
 /// Test-seam counterpart to [`channels`] — same shape, arbitrary base.
-pub fn channels_in(base: &Path, caps: TermCaps) -> Vec<KnownGroup> {
+pub fn channels_in(base: &Path, caps: ColorDepth) -> Vec<KnownGroup> {
     let mut out = Vec::with_capacity(8);
     out.push(KnownGroup {
         group: Group::for_name(BASE_CHANNEL_NAME, caps),
@@ -245,7 +246,7 @@ mod tests {
         // No groups on disk → the channel bar still shows `#open`.
         // This is the ADR-124 §1 invariant: base never hides.
         let base = tempdir_like();
-        let ch = channels_in(&base, TermCaps::Rich);
+        let ch = channels_in(&base, ColorDepth::TrueColor);
         assert_eq!(ch.len(), 1);
         assert!(ch[0].is_base);
         assert_eq!(ch[0].group.name, BASE_CHANNEL_NAME);
@@ -257,7 +258,7 @@ mod tests {
         let base = tempdir_like();
         fs::create_dir_all(base.join("@deploy")).unwrap();
         fs::create_dir_all(base.join("@infra")).unwrap();
-        let ch = channels_in(&base, TermCaps::Rich);
+        let ch = channels_in(&base, ColorDepth::TrueColor);
         let names: Vec<_> = ch.iter().map(|c| c.group.name.as_str()).collect();
         assert_eq!(names, vec!["open", "deploy", "infra"]);
         assert!(ch[0].is_base);
@@ -273,7 +274,7 @@ mod tests {
         let base = tempdir_like();
         fs::create_dir_all(base.join("@open")).unwrap();
         fs::create_dir_all(base.join("@deploy")).unwrap();
-        let ch = channels_in(&base, TermCaps::Rich);
+        let ch = channels_in(&base, ColorDepth::TrueColor);
         let names: Vec<_> = ch.iter().map(|c| c.group.name.as_str()).collect();
         // Exactly one `open` — the synthetic base — and `deploy`
         // follows. The on-disk `@open/` is filtered out.
@@ -362,7 +363,7 @@ mod tests {
         fs::create_dir_all(base.join("@infra")).unwrap();
         fs::create_dir_all(base.join("_broadcast")).unwrap(); // ignored
         fs::create_dir_all(base.join("-home-x")).unwrap(); // cwd dir, ignored
-        let groups = scan_in(&base, TermCaps::Rich);
+        let groups = scan_in(&base, ColorDepth::TrueColor);
         let names: Vec<_> = groups.iter().map(|g| g.group.name.as_str()).collect();
         assert_eq!(names, vec!["deploy", "infra"]);
     }
@@ -375,7 +376,7 @@ mod tests {
             &base,
             "deploy:\n  pinned: true\n  members:\n    - sess-a\n    - sess-b\n",
         );
-        let groups = scan_in(&base, TermCaps::Rich);
+        let groups = scan_in(&base, ColorDepth::TrueColor);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].group.name, "deploy");
         assert!(groups[0].membership.pinned);
@@ -385,7 +386,7 @@ mod tests {
     #[test]
     fn scan_empty_if_no_base() {
         let base = tempdir_like().join("nope"); // never created
-        let groups = scan_in(&base, TermCaps::Rich);
+        let groups = scan_in(&base, ColorDepth::TrueColor);
         assert!(groups.is_empty());
     }
 
@@ -394,7 +395,7 @@ mod tests {
         let base = tempdir_like();
         fs::create_dir_all(base.join("@orphan")).unwrap();
         // no _groups.yaml at all
-        let groups = scan_in(&base, TermCaps::Rich);
+        let groups = scan_in(&base, ColorDepth::TrueColor);
         assert_eq!(groups.len(), 1);
         assert!(groups[0].membership.members.is_empty());
         assert!(!groups[0].membership.pinned);
@@ -409,7 +410,7 @@ mod tests {
             &base,
             "deploy:\n  pinned: false\n  members:\n    - sess-a\ninfra:\n  pinned: false\n  members:\n    - sess-b\n",
         );
-        let groups = scan_in(&base, TermCaps::Rich);
+        let groups = scan_in(&base, ColorDepth::TrueColor);
         let mine = groups_for_session("sess-a", &groups);
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].group.name, "deploy");
@@ -425,7 +426,7 @@ mod tests {
             &base,
             "deploy:\n  pinned: false\n  members:\n    - sess-a\n    - aaron\n",
         );
-        let groups = scan_in(&base, TermCaps::Rich);
+        let groups = scan_in(&base, ColorDepth::TrueColor);
         let mine = groups_for_session("aaron", &groups);
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].group.name, "deploy");

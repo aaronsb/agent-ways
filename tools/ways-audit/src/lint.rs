@@ -2,6 +2,10 @@
 
 use anyhow::Result;
 use serde_json::{json, Value};
+use agent_theme::{paint, Role, Style};
+
+const BOLD: Style = Style::new().bold();
+const WARN: Style = Style::new().role(Role::Warn).bold();
 
 pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     let ways = match manifest["ways"].as_object() {
@@ -124,31 +128,33 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     }
 
     println!();
-    println!("\x1b[1mClaim Lint Report\x1b[0m");
+    println!("{}", paint(BOLD, "Claim Lint Report"));
     println!();
 
     for (way, msg) in &errors {
         println!(
-            "  \x1b[0;31m{:<6}\x1b[0m [{:<28}] {}",
-            "ERROR", way, msg
+            "  {} [{:<28}] {}",
+            paint(Role::Err, format!("{:<6}", "ERROR")), way, msg
         );
     }
     for (way, msg) in &warnings {
         println!(
-            "  \x1b[1;33m{:<6}\x1b[0m [{:<28}] {}",
-            "WARN", way, msg
+            "  {} [{:<28}] {}",
+            paint(WARN, format!("{:<6}", "WARN")), way, msg
         );
     }
 
     if error_count == 0 && warning_count == 0 {
-        println!("  \x1b[0;32mAll claim checks passed.\x1b[0m");
+        println!("  {}", paint(Role::Ok, "All claim checks passed."));
     } else {
         println!();
         println!(
-            "  Results: \x1b[0;31m{error_count} error(s)\x1b[0m, \x1b[1;33m{warning_count} warning(s)\x1b[0m"
+            "  Results: {}, {}",
+            paint(Role::Err, format!("{error_count} error(s)")),
+            paint(WARN, format!("{warning_count} warning(s)"))
         );
         if error_count > 0 {
-            println!("  \x1b[0;31mLint FAILED — errors must be resolved.\x1b[0m");
+            println!("  {}", paint(Role::Err, "Lint FAILED — errors must be resolved."));
             std::process::exit(1);
         }
     }

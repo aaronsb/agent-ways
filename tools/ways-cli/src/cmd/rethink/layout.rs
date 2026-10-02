@@ -11,6 +11,7 @@ use crate::cmd::render;
 
 #[cfg(feature = "tui")]
 use super::model::{Player, View, SPEEDS};
+use agent_theme::{pair, paint, Role, Style};
 
 // ── Frame renderer ────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ fn compose_screen(
     }
     if overflow {
         let below = rows.len().saturating_sub(view_h + scroll);
-        lines.push(format!("  \x1b[2m⋮ {scroll} above · {below} below · ↑↓\x1b[0m"));
+        lines.push(format!("  {}", paint(Role::Muted, format!("⋮ {scroll} above · {below} below · ↑↓"))));
         filled += 1;
     }
     // Pad the list area so the extras/nav stay anchored at the bottom.
@@ -114,7 +115,7 @@ pub(super) fn render_frame(player: &mut Player) -> String {
     let top = header_lines(player, th.lines().map(str::to_string).collect());
 
     if frame.ways.is_empty() {
-        let rows = vec!["  \x1b[2mNo ways triggered yet.\x1b[0m".to_string()];
+        let rows = vec![format!("  {}", paint(Role::Muted, "No ways triggered yet."))];
         return compose_screen(top, rows, 0, Vec::new(), nav, drawable);
     }
 
@@ -132,18 +133,18 @@ pub(super) fn render_frame(player: &mut Player) -> String {
         way_start_line.push(rows.len());
         // The selection highlight takes visual precedence over new/redisclosed color.
         let (prefix, suffix) = if i == selected {
-            ("\x1b[7m", "\x1b[0m")
+            pair(Role::Selection)
         } else if w.is_new {
-            ("\x1b[1;32m", "\x1b[0m")
+            pair(Style::new().role(Role::Ok).bold())
         } else if w.is_redisclosed {
-            ("\x1b[1;36m", "\x1b[0m")
+            pair(Style::new().role(Role::Accent).bold())
         } else {
-            ("", "")
+            (String::new(), "")
         };
         let mut block = String::new();
         render::write_way_row_with(
             &mut block, w, current_epoch, current_tokens_k,
-            &bar_positions, &unique_pos, i, prefix, suffix, &layout,
+            &bar_positions, &unique_pos, i, &prefix, suffix, &layout,
         );
         rows.extend(block.lines().map(str::to_string));
     }
@@ -162,7 +163,7 @@ pub(super) fn render_frame(player: &mut Player) -> String {
     }
     if !frame.new_events.is_empty() {
         extras.push(String::new());
-        extras.push(format!("  \x1b[1;32m+ {}\x1b[0m", frame.new_events.join(", ")));
+        extras.push(format!("  {}", paint(Style::new().role(Role::Ok).bold(), format!("+ {}", frame.new_events.join(", ")))));
     }
 
     compose_screen(top, rows, sel_line, extras, nav, drawable)
@@ -175,7 +176,7 @@ pub(super) fn render_frame(player: &mut Player) -> String {
 #[cfg(feature = "tui")]
 pub(super) fn render_status_bar(out: &mut String, player: &Player) {
     let width = (player.term_width as usize).max(1);
-    let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(width));
+    let _ = writeln!(out, "{}", paint(Role::Muted, "─".repeat(width)));
 
     let active = if player.view == View::WhyFired { 1 } else { 0 };
 
@@ -183,31 +184,37 @@ pub(super) fn render_status_bar(out: &mut String, player: &Player) {
     let mut segs: Vec<String> = vec![compositor::tab_bar(&["Timeline", "Why fired"], active)];
     match player.view {
         View::Timeline => {
-            segs.push("\x1b[7m ▲▼ \x1b[0m select".into());
-            segs.push("\x1b[7m ⏎ \x1b[0m why".into());
-            segs.push("\x1b[7m ◀▶ \x1b[0m frame".into());
+            segs.push(key("▲▼", "select"));
+            segs.push(key("⏎", "why"));
+            segs.push(key("◀▶", "frame"));
             if player.live {
                 segs.push(if player.following {
-                    "\x1b[7m space \x1b[0m \x1b[1;32m● following\x1b[0m".into()
+                    key("space", &paint(Style::new().role(Role::Ok).bold(), "● following"))
                 } else {
-                    "\x1b[7m space \x1b[0m \x1b[1;33m● paused\x1b[0m".into()
+                    key("space", &paint(Style::new().role(Role::Warn).bold(), "● paused"))
                 });
             } else {
-                segs.push("\x1b[7m space \x1b[0m play".into());
-                segs.push(format!("\x1b[7m +- \x1b[0m \x1b[2m{}\x1b[0m", SPEEDS[player.speed_idx].1));
+                segs.push(key("space", "play"));
+                segs.push(key("+-", &paint(Role::Muted, SPEEDS[player.speed_idx].1)));
             }
         }
         View::WhyFired => {
-            segs.push("\x1b[7m ▲▼ \x1b[0m way".into());
-            segs.push("\x1b[7m j/k \x1b[0m read".into());
-            segs.push("\x1b[7m ◀▶ \x1b[0m frame".into());
+            segs.push(key("▲▼", "way"));
+            segs.push(key("j/k", "read"));
+            segs.push(key("◀▶", "frame"));
         }
     }
-    segs.push("\x1b[7m tab \x1b[0m view".into());
-    segs.push("\x1b[7m esc \x1b[0m quit".into());
-    segs.push(format!("\x1b[1m{}/{}\x1b[0m", player.current + 1, player.frames.len()));
+    segs.push(key("tab", "view"));
+    segs.push(key("esc", "quit"));
+    segs.push(paint(Style::new().bold(), format!("{}/{}", player.current + 1, player.frames.len())));
 
     out.push_str(&justify(&segs, width));
+}
+
+/// A key hint: the key as a reverse-video cap, then its label.
+#[cfg(feature = "tui")]
+fn key(cap: &str, label: &str) -> String {
+    format!("{} {label}", paint(Style::new().reverse(), format!(" {cap} ")))
 }
 
 /// Lay `segments` out across `width` with even gaps between them (space-between):
@@ -245,11 +252,11 @@ pub(super) fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<Stri
     let live = if player.live {
         if player.following {
             let ago = seconds_ago(&frame.timestamp)
-                .map(|s| format!(" \x1b[2m· {}\x1b[0m", ago_label(s)))
+                .map(|s| format!(" {}", paint(Role::Muted, format!("· {}", ago_label(s)))))
                 .unwrap_or_default();
-            format!("  \x1b[1;32m● LIVE\x1b[0m{ago}")
+            format!("  {}{ago}", paint(Style::new().role(Role::Ok).bold(), "● LIVE"))
         } else {
-            "  \x1b[1;33m● LIVE paused\x1b[0m".to_string()
+            format!("  {}", paint(Style::new().role(Role::Warn).bold(), "● LIVE paused"))
         }
     } else {
         String::new()
@@ -257,19 +264,27 @@ pub(super) fn header_lines(player: &Player, col_header: Vec<String>) -> Vec<Stri
     let mut h = vec![
         // Full session id (there's ample room), with the session's project path.
         format!(
-            "\x1b[1mSession\x1b[0m {}  \x1b[2m{}\x1b[0m",
-            player.session_id, player.project_name
+            "{} {}  {}",
+            paint(Style::new().bold(), "Session"),
+            player.session_id,
+            paint(Role::Muted, &player.project_name)
         ),
         // The current frame's wall-clock time anchors "when" you are as you scrub
         // windows/frames — otherwise every window looks alike.
         format!(
-            "  \x1b[2mepoch {} · {}K ctx · {} ways · window {}/{} · {}\x1b[0m{live}",
-            frame.epoch,
-            player.context_window_k,
-            frame.ways.len(),
-            frame.window,
-            player.windows,
-            friendly_ts(&frame.timestamp),
+            "  {}{live}",
+            paint(
+                Role::Muted,
+                format!(
+                    "epoch {} · {}K ctx · {} ways · window {}/{} · {}",
+                    frame.epoch,
+                    player.context_window_k,
+                    frame.ways.len(),
+                    frame.window,
+                    player.windows,
+                    friendly_ts(&frame.timestamp),
+                )
+            ),
         ),
     ];
     h.extend(col_header);

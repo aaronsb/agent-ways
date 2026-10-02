@@ -15,7 +15,8 @@
 //! prompts that render it. It is the presentation accessor, kept apart
 //! from `--machine` so the key contract stays free of ordinals.
 
-use agent_identity::{Identity, TermCaps};
+use agent_identity::Identity;
+use agent_theme::ColorDepth;
 
 pub(crate) fn cmd_whoami(machine: bool, display: bool) {
     let ident = attend_session::identity();
@@ -60,7 +61,7 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
 /// The rendered display name: the origin path's nickname, plus the
 /// instance suffix when several sessions share that origin.
 fn display_name(ident: &attend_session::SessionIdentity) -> String {
-    let nickname = Identity::for_cwd(&ident.origin_path, TermCaps::detect()).nickname;
+    let nickname = Identity::for_cwd(&ident.origin_path, ColorDepth::detect()).nickname;
     let instance = attend_instances::Registry::new()
         .lookup(&ident.origin_path, &ident.session_id);
     join_display(nickname, instance.as_deref())

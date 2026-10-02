@@ -1,0 +1,19 @@
+# Gruvbox Dark — warm earth tones, amber and olive on brown-black.
+THEME_NAME="gruvbox-dark"
+THEME_LABEL="Gruvbox Dark"
+THEME_KIND="dark"
+
+THEME_BG="#282828"
+THEME_FG="#ebdbb2"
+THEME_DIM="#928374"
+THEME_SUBTLE="#3c3836"
+THEME_ACCENT="#d3869b"
+THEME_INFO="#83a598"
+THEME_OK="#b8bb26"
+THEME_WARN="#fe8019"
+THEME_ERR="#fb4934"
+THEME_ALT="#8ec07c"
+
+THEME_VIVID="gruvbox-dark"
+THEME_BAT="gruvbox-dark"
+THEME_DELTA="gruvbox-dark"

@@ -126,8 +126,12 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "\x1b[1mSession\x1b[0m {short_id}...  \x1b[2mepoch {current_epoch} · {context_window_k}K ctx · {} ways fired\x1b[0m",
-        ways.len()
+        "{} {short_id}...  {}",
+        agent_theme::paint(agent_theme::Style::new().bold(), "Session"),
+        agent_theme::paint(
+            agent_theme::Role::Muted,
+            format!("epoch {current_epoch} · {context_window_k}K ctx · {} ways fired", ways.len())
+        )
     );
     let _ = writeln!(out);
 

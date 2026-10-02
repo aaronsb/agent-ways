@@ -22,18 +22,28 @@
 //! chat render). Build it fresh per pass and never share across passes
 //! — the registry can change between them.
 
-use agent_identity::{ansi, Identity, TermCaps};
+use agent_identity::{ansi, Identity};
+use agent_theme::Role;
+/// Re-exported for the same reason: a caller passes the painter that
+/// draws the label, and `Painter::plain()` for machine-carried text.
+pub use agent_theme::Painter;
 /// Re-exported so a renderer's crate needs only this dependency to
 /// build the per-pass cache every function here takes.
 pub use attend_instances::SnapshotCache;
 
-/// Render a sender label from the wire `from`/`cwd` pair.
+/// Render a sender label from the wire `from`/`cwd` pair, drawn by
+/// `painter`.
 ///
 /// Claudes get `Nickname-instance (cwd_basename)` with the nickname in
 /// their identity color. Humans get `user (cwd_basename)` styled the
 /// same way — keyed on username, not cwd, so the same human shows up
 /// consistently across projects. Unknown prefixes fall through
 /// showing the raw `from` value, colored off its own hash.
+///
+/// A terminal caller passes `agent_theme::painter()`, which is plain when
+/// stdout is not a terminal. Machine-carried text (the Monitor event line,
+/// the ADR-172 drain injection) passes `Painter::plain()`, so it is
+/// escape-free whatever the environment says (#388).
 ///
 /// Scope derivation deliberately differs from `attend-chat::chip::chip_for`:
 /// that renderer falls back to the `project` field when `cwd` is
@@ -43,48 +53,24 @@ pub use attend_instances::SnapshotCache;
 /// keep the code simple and ignore `project`. Production signals
 /// populate `cwd` either way — the divergence only manifests on
 /// hand-crafted signals, which shouldn't be a hot path.
-pub fn render_sender_label(from: &str, cwd: &str, caps: TermCaps, instances: &SnapshotCache) -> String {
+pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: &SnapshotCache) -> String {
+    let depth = painter.depth();
     if let Some(sid) = from.strip_prefix("claude:") {
-        let id = Identity::for_cwd(cwd, caps);
+        let id = Identity::for_cwd(cwd, depth);
         // Instance suffix (ADR-129). Always rendered when present so
         // pattern matching on the display name is consistent — solo
         // and multi-session cwds both look the same.
         let primary = with_instance(id.nickname, cwd, sid, instances);
-        compose(&primary, &id.cwd_basename, &id, caps)
+        compose(&primary, &id.cwd_basename, &id, painter)
     } else if let Some(rest) = from.strip_prefix("external:") {
         let username = rest.split('@').next().unwrap_or(rest);
         let scope = agent_identity::cwd_basename(cwd);
-        let id = Identity::for_user(username, &scope, caps);
-        compose(username, &id.cwd_basename, &id, caps)
+        let id = Identity::for_user(username, &scope, depth);
+        compose(username, &id.cwd_basename, &id, painter)
     } else {
         let scope = agent_identity::cwd_basename(cwd);
-        let id = Identity::for_user(from, &scope, caps);
-        compose(from, &id.cwd_basename, &id, caps)
-    }
-}
-
-/// Escape-free sender label for machine-carried text — the Monitor
-/// event line, the ADR-172 drain injection, and piped (non-TTY)
-/// output. Same derivation as [`render_sender_label`], zero ANSI:
-/// `TermCaps::Mono` is NOT enough for these paths because Mono still
-/// emits style bits (dim/reset) by design — that leak is issue #388.
-pub fn render_sender_label_plain(from: &str, cwd: &str, instances: &SnapshotCache) -> String {
-    // Caps only steer styling, which this path discards; Mono keeps
-    // the identity derivation on its cheapest branch.
-    let caps = TermCaps::Mono;
-    if let Some(sid) = from.strip_prefix("claude:") {
-        let id = Identity::for_cwd(cwd, caps);
-        let primary = with_instance(id.nickname, cwd, sid, instances);
-        format!("{primary} ({})", id.cwd_basename)
-    } else if let Some(rest) = from.strip_prefix("external:") {
-        let username = rest.split('@').next().unwrap_or(rest);
-        let scope = agent_identity::cwd_basename(cwd);
-        let id = Identity::for_user(username, &scope, caps);
-        format!("{username} ({})", id.cwd_basename)
-    } else {
-        let scope = agent_identity::cwd_basename(cwd);
-        let id = Identity::for_user(from, &scope, caps);
-        format!("{from} ({})", id.cwd_basename)
+        let id = Identity::for_user(from, &scope, depth);
+        compose(from, &id.cwd_basename, &id, painter)
     }
 }
 
@@ -105,14 +91,15 @@ pub fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &Sn
     }
 }
 
-fn compose(primary: &str, secondary: &str, id: &Identity, caps: TermCaps) -> String {
-    let coloured = ansi::wrap(primary, &id.palette, id.style, caps);
-    format!("{coloured} \x1b[2m({})\x1b[0m", secondary)
+fn compose(primary: &str, secondary: &str, id: &Identity, painter: &Painter) -> String {
+    let coloured = ansi::wrap(primary, &id.palette, id.style, painter);
+    format!("{coloured} {}", painter.paint(Role::Muted, format!("({secondary})")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_theme::ColorDepth;
     use attend_instances::Registry;
 
     /// A cache over an empty registry: no instance suffixes, no
@@ -128,8 +115,8 @@ mod tests {
 
     #[test]
     fn claude_label_uses_nickname() {
-        let label = render_sender_label("claude:abc", "/home/me/repo", TermCaps::Rich, &empty_cache());
-        let expected = Identity::for_cwd("/home/me/repo", TermCaps::Rich);
+        let label = render_sender_label("claude:abc", "/home/me/repo", &Painter::terminal(ColorDepth::TrueColor), &empty_cache());
+        let expected = Identity::for_cwd("/home/me/repo", ColorDepth::TrueColor);
         assert!(
             label.contains(expected.nickname),
             "label {label:?} should carry nickname {:?}",
@@ -140,22 +127,22 @@ mod tests {
 
     #[test]
     fn external_label_keeps_username() {
-        let label = render_sender_label("external:aaron@kitty", "/home/aaron/Projects", TermCaps::Rich, &empty_cache());
+        let label = render_sender_label("external:aaron@kitty", "/home/aaron/Projects", &Painter::terminal(ColorDepth::TrueColor), &empty_cache());
         assert!(label.contains("aaron"));
         assert!(label.contains("(Projects)"));
     }
 
     #[test]
     fn unknown_sender_renders_without_panic() {
-        let label = render_sender_label("weird-prefix:xyz", "/tmp", TermCaps::Rich, &empty_cache());
+        let label = render_sender_label("weird-prefix:xyz", "/tmp", &Painter::terminal(ColorDepth::TrueColor), &empty_cache());
         assert!(label.contains("weird-prefix:xyz"));
     }
 
     #[test]
     fn mono_caps_produces_label_without_color() {
-        let label = render_sender_label("claude:abc", "/home/me/repo", TermCaps::Mono, &empty_cache());
+        let label = render_sender_label("claude:abc", "/home/me/repo", &Painter::terminal(ColorDepth::NoColor), &empty_cache());
         // Mono path: no truecolor SGR, but style + reset still present.
-        assert!(!label.contains("\x1b[38;2;"), "mono leaked color: {label:?}");
+        assert!(!label.contains("38;2;"), "mono leaked color: {label:?}");
     }
 
     #[test]
@@ -173,9 +160,9 @@ mod tests {
     #[test]
     fn plain_label_is_escape_free_and_matches_styled_text() {
         let cache = empty_cache();
-        let plain = render_sender_label_plain("claude:abc", "/home/me/repo", &cache);
+        let plain = render_sender_label("claude:abc", "/home/me/repo", &Painter::plain(), &cache);
         assert!(!plain.contains('\x1b'), "plain leaked ANSI: {plain:?}");
-        let expected = Identity::for_cwd("/home/me/repo", TermCaps::Mono);
+        let expected = Identity::for_cwd("/home/me/repo", ColorDepth::NoColor);
         assert_eq!(plain, format!("{} (repo)", expected.nickname));
     }
 }

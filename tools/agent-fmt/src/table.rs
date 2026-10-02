@@ -183,11 +183,11 @@ impl Table {
             let w = widths.get(i).copied().unwrap_or(10);
             header.push_str(&pad_cell(h, w, self.aligns.get(i).copied().unwrap_or(Align::Left)));
         }
-        println!("{pad}\x1b[1m{header}\x1b[0m");
+        println!("{pad}{}", agent_theme::paint(agent_theme::Style::new().bold(), header));
 
         // Separator
         let total_width: usize = widths.iter().sum::<usize>() + ncols.saturating_sub(1);
-        println!("{pad}\x1b[2m{}\x1b[0m", "─".repeat(total_width));
+        println!("{pad}{}", agent_theme::paint(agent_theme::Role::Muted, "─".repeat(total_width)));
 
         // Rows
         for row in &self.rows {
@@ -268,8 +268,11 @@ pub fn truncate_visible(s: &str, max: usize) -> String {
         }
     }
     result.push('…');
-    // Close any open ANSI sequence
-    result.push_str("\x1b[0m");
+    // Close any open ANSI sequence. Text with none gets no reset, so plain
+    // output stays free of escapes.
+    if result.contains('\x1b') {
+        result.push_str(agent_theme::RESET);
+    }
     result
 }
 
@@ -283,5 +286,25 @@ fn pad_cell(s: &str, width: usize, align: Align) -> String {
     match align {
         Align::Left => format!("{s}{}", " ".repeat(padding)),
         Align::Right => format!("{}{s}", " ".repeat(padding)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_visible;
+    use agent_theme::{ColorDepth, Painter, Role, RESET};
+
+    #[test]
+    fn plain_text_truncates_without_escapes() {
+        let t = truncate_visible("softwaredev/freshness", 6);
+        assert_eq!(t, "softw…");
+        assert!(!t.contains('\x1b'));
+    }
+
+    #[test]
+    fn styled_text_truncated_mid_style_is_sealed() {
+        let red = Painter::terminal(ColorDepth::TrueColor).paint(Role::Err, "abcdef");
+        let t = truncate_visible(&red, 4);
+        assert!(t.ends_with(&format!("…{RESET}")), "{t:?}");
     }
 }

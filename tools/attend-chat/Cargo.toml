@@ -20,6 +20,7 @@ async-channel = "2"
 smol = "2"
 agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
+agent-theme = { path = "../agent-theme" }
 attend-groups = { path = "../attend-groups" }
 attend-heartbeat = { path = "../attend-heartbeat" }
 attend-identity-view = { path = "../attend-identity-view" }

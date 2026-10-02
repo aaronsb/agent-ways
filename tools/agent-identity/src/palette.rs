@@ -1,10 +1,14 @@
-//! Color palette + terminal capability detection + style axes.
+//! Color palette + style axes.
 //!
-//! We don't depend on a terminal crate here — capability detection is
-//! a couple of env-var probes, and we emit colors as palette indices
-//! that the consumer maps onto its own rendering layer (iocraft `Color`,
-//! crossterm `Color`, raw ANSI, etc.). That keeps this crate free of a
-//! rendering opinion.
+//! Terminal colour depth is agent-theme's to detect (ADR-504 §6); this
+//! module picks a palette for a given depth. Entries carry both an RGB
+//! triple and an ANSI index, and `PaletteEntry::color` hands agent-theme
+//! the form the depth calls for, so this crate keeps no rendering opinion
+//! of its own.
+//!
+//! These identity colours are agent-ways' one categorical palette: agent
+//! and group chips, and any output that tells unordered things apart by
+//! colour (`ways list` pins), draw from it. They are not theme roles.
 //!
 //! Philosophy: use **color** as the primary identity signal, and
 //! reserve **style bits** (bold / italic / underline) as secondary
@@ -13,56 +17,7 @@
 //! italicize, some invert, some ignore), so we use it sparingly and
 //! always paired with color so a broken italic doesn't break identity.
 
-/// What the terminal can render.
-///
-/// We probe env vars only — a PTY round-trip would be more accurate
-/// but adds latency and complexity we don't need for picking from
-/// three palette sizes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TermCaps {
-    /// Truecolor or 256-color: full 20-entry palette available.
-    Rich,
-    /// 16-color ANSI with bright variants.
-    Basic,
-    /// Monochrome or unknown. We still emit style bits.
-    Mono,
-}
-
-impl TermCaps {
-    /// Detect capability from the current process environment.
-    pub fn detect() -> Self {
-        Self::detect_from(|k| std::env::var(k).ok())
-    }
-
-    /// Detection driven by an injectable env getter. Tests use this to
-    /// exercise every branch without mutating the global process env.
-    pub fn detect_from<F: Fn(&str) -> Option<String>>(get: F) -> Self {
-        if let Some(v) = get("NO_COLOR") {
-            if !v.is_empty() {
-                return TermCaps::Mono;
-            }
-        }
-        if let Some(v) = get("COLORTERM") {
-            let v = v.to_ascii_lowercase();
-            if v.contains("truecolor") || v.contains("24bit") {
-                return TermCaps::Rich;
-            }
-        }
-        if let Some(term) = get("TERM") {
-            let term = term.to_ascii_lowercase();
-            if term.contains("256color") || term.contains("direct") {
-                return TermCaps::Rich;
-            }
-            if term == "dumb" {
-                return TermCaps::Mono;
-            }
-            if !term.is_empty() {
-                return TermCaps::Basic;
-            }
-        }
-        TermCaps::Mono
-    }
-}
+use agent_theme::{Color, ColorDepth};
 
 /// One palette entry: an RGB triple *and* the nearest ANSI bright code.
 ///
@@ -76,6 +31,25 @@ pub struct PaletteEntry {
     pub ansi16: u8,
     /// Short human name for debugging and tests.
     pub name: &'static str,
+}
+
+impl PaletteEntry {
+    /// The entry as agent-theme draws it at `depth`: RGB where the rich
+    /// palette applies (agent-theme reduces it to an index at 256 colours),
+    /// the ANSI code at 16, nothing without colour.
+    pub fn color(&self, depth: ColorDepth) -> Option<Color> {
+        match depth {
+            ColorDepth::TrueColor | ColorDepth::Ansi256 => Some(Color::rgb(self.rgb.0, self.rgb.1, self.rgb.2)),
+            ColorDepth::Ansi16 => Some(Color::Ansi(self.ansi16)),
+            ColorDepth::NoColor => None,
+        }
+    }
+}
+
+/// Whether `depth` draws from the 20-entry rich palette (truecolor and
+/// 256) rather than the 12-entry basic one.
+pub fn is_rich(depth: ColorDepth) -> bool {
+    matches!(depth, ColorDepth::TrueColor | ColorDepth::Ansi256)
 }
 
 /// 20 distinct colors tuned for readability on both light and dark
@@ -142,16 +116,28 @@ pub struct Resolved {
     pub style: Style,
 }
 
+/// The rich palette in categorical order: for things told apart by colour
+/// alone, the `i`th thing takes `categorical(i)`. Neighbours differ in hue,
+/// and in their ANSI code too, so adjacent categories stay apart on a
+/// 16-colour terminal: sky, mint, coral, iris, gold, rose (six distinct
+/// codes), then teal, lime, amber, azure.
+pub const CATEGORICAL: [usize; 10] = [6, 4, 0, 8, 2, 10, 5, 3, 1, 7];
+
+/// The `i`th categorical colour, cycling after ten.
+pub fn categorical(i: usize) -> PaletteEntry {
+    RICH_PALETTE[CATEGORICAL[i % CATEGORICAL.len()]]
+}
+
 /// Pick a palette entry + style deterministically from a seed and the
-/// detected capability.
+/// terminal's colour depth.
 ///
-/// Contract: identical `(seed, caps)` → identical `Resolved`. Different
-/// caps levels may produce different entries — we tune per-palette.
-pub fn resolve(seed: u64, caps: TermCaps) -> Resolved {
-    let palette: &[PaletteEntry] = match caps {
-        TermCaps::Rich => RICH_PALETTE,
-        TermCaps::Basic => BASIC_PALETTE,
-        TermCaps::Mono => {
+/// Contract: identical `(seed, depth)` → identical `Resolved`. Truecolor
+/// and 256 share the rich palette; 16 colours take the basic one.
+pub fn resolve(seed: u64, depth: ColorDepth) -> Resolved {
+    let palette: &[PaletteEntry] = match depth {
+        ColorDepth::TrueColor | ColorDepth::Ansi256 => RICH_PALETTE,
+        ColorDepth::Ansi16 => BASIC_PALETTE,
+        ColorDepth::NoColor => {
             // No color — identity carries entirely on style. Return a
             // neutral entry and vary style bits across the full range.
             let neutral = PaletteEntry {
@@ -191,52 +177,10 @@ fn style_from_seed(seed: u64, mono: bool) -> Style {
 mod tests {
     use super::*;
 
-    fn env<'a>(map: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
-        move |k| map.iter().find(|(kk, _)| *kk == k).map(|(_, v)| v.to_string())
-    }
-
-    #[test]
-    fn truecolor_is_rich() {
-        let e = env(&[("COLORTERM", "truecolor"), ("TERM", "xterm")]);
-        assert_eq!(TermCaps::detect_from(e), TermCaps::Rich);
-    }
-
-    #[test]
-    fn term_256color_is_rich() {
-        let e = env(&[("TERM", "xterm-256color")]);
-        assert_eq!(TermCaps::detect_from(e), TermCaps::Rich);
-    }
-
-    #[test]
-    fn bare_xterm_is_basic() {
-        let e = env(&[("TERM", "xterm")]);
-        assert_eq!(TermCaps::detect_from(e), TermCaps::Basic);
-    }
-
-    #[test]
-    fn dumb_is_mono() {
-        let e = env(&[("TERM", "dumb")]);
-        assert_eq!(TermCaps::detect_from(e), TermCaps::Mono);
-    }
-
-    #[test]
-    fn no_color_wins() {
-        // NO_COLOR overrides any rich signal — the spec at no-color.org
-        // says any non-empty value disables color.
-        let e = env(&[("NO_COLOR", "1"), ("COLORTERM", "truecolor")]);
-        assert_eq!(TermCaps::detect_from(e), TermCaps::Mono);
-    }
-
-    #[test]
-    fn no_env_is_mono() {
-        let e = env(&[]);
-        assert_eq!(TermCaps::detect_from(e), TermCaps::Mono);
-    }
-
     #[test]
     fn resolve_is_stable() {
-        let a = resolve(12345, TermCaps::Rich);
-        let b = resolve(12345, TermCaps::Rich);
+        let a = resolve(12345, ColorDepth::TrueColor);
+        let b = resolve(12345, ColorDepth::TrueColor);
         assert_eq!(a.entry, b.entry);
         assert_eq!(a.style, b.style);
     }
@@ -248,7 +192,7 @@ mod tests {
         // check that we don't collapse onto one color.
         use std::collections::HashSet;
         let colors: HashSet<&str> = (0u64..200)
-            .map(|s| resolve(s, TermCaps::Rich).entry.name)
+            .map(|s| resolve(s, ColorDepth::TrueColor).entry.name)
             .collect();
         assert!(
             colors.len() >= 12,
@@ -264,11 +208,40 @@ mod tests {
         let mut saw_bold = false;
         let mut saw_plain = false;
         for s in 0u64..32 {
-            let r = resolve(s, TermCaps::Mono);
+            let r = resolve(s, ColorDepth::NoColor);
             assert_eq!(r.entry.name, "mono");
             if r.style.bold { saw_bold = true; } else { saw_plain = true; }
         }
         assert!(saw_bold && saw_plain, "mono style not varying across seeds");
+    }
+
+    #[test]
+    fn depth_picks_the_palette_and_the_form() {
+        assert_eq!(resolve(7, ColorDepth::TrueColor).entry, resolve(7, ColorDepth::Ansi256).entry);
+        assert!(BASIC_PALETTE.contains(&resolve(7, ColorDepth::Ansi16).entry));
+        let e = RICH_PALETTE[0];
+        assert_eq!(e.color(ColorDepth::TrueColor), Some(Color::rgb(0xff, 0x6b, 0x6b)));
+        assert_eq!(e.color(ColorDepth::Ansi16), Some(Color::Ansi(9)));
+        assert_eq!(e.color(ColorDepth::NoColor), None);
+    }
+
+    #[test]
+    fn categorical_neighbours_differ_on_a_16_colour_terminal() {
+        let codes: Vec<u8> = (0..CATEGORICAL.len()).map(|i| categorical(i).ansi16).collect();
+        for i in 0..codes.len() {
+            let next = codes[(i + 1) % codes.len()];
+            assert_ne!(codes[i], next, "clusters {i} and {} share ANSI {next}", (i + 1) % codes.len());
+        }
+        let first6: std::collections::HashSet<_> = codes[..6].iter().collect();
+        assert_eq!(first6.len(), 6, "the first six clusters each get their own code: {codes:?}");
+    }
+
+    #[test]
+    fn categorical_order_is_ten_distinct_rich_entries() {
+        let names: std::collections::HashSet<_> = (0..10).map(|i| categorical(i).name).collect();
+        assert_eq!(names.len(), 10);
+        assert_eq!(categorical(10), categorical(0));
+        assert_eq!(categorical(0).name, "sky");
     }
 
     #[test]

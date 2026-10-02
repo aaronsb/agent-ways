@@ -1,0 +1,19 @@
+# Dracula — high-saturation accents on deep violet-grey.
+THEME_NAME="dracula"
+THEME_LABEL="Dracula"
+THEME_KIND="dark"
+
+THEME_BG="#282a36"
+THEME_FG="#f8f8f2"
+THEME_DIM="#6272a4"
+THEME_SUBTLE="#44475a"
+THEME_ACCENT="#bd93f9"
+THEME_INFO="#8be9fd"
+THEME_OK="#50fa7b"
+THEME_WARN="#ffb86c"
+THEME_ERR="#ff5555"
+THEME_ALT="#ff79c6"
+
+THEME_VIVID="dracula"
+THEME_BAT="Dracula"
+THEME_DELTA="Dracula"

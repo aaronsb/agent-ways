@@ -11,7 +11,7 @@
 //! the ordered channel-name list, so cycling, dissolve-advance, and
 //! scope resolution are testable without an iocraft `App`.
 
-use agent_identity::TermCaps;
+use agent_theme::ColorDepth;
 use iocraft::prelude::*;
 
 use crate::chip::color_for;
@@ -141,7 +141,7 @@ pub fn tab_strip_row(
     foreground: &Tab,
     current_partial: Option<&str>,
 ) -> Vec<AnyElement<'static>> {
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
     let mut chips: Vec<AnyElement<'static>> = Vec::with_capacity(known.len() + 1);
 

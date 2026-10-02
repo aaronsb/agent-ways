@@ -52,7 +52,7 @@ pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<St
             println!();
 
             if !global.is_empty() {
-                println!("\x1b[1mGlobal ways\x1b[0m");
+                println!("{}", agent_theme::paint(agent_theme::Style::new().bold(), "Global ways"));
                 println!();
                 let mut t = Table::new(&["Sibling", "Cosine"]);
                 t.max_width(0, 50);
@@ -67,7 +67,7 @@ pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<St
                 if !global.is_empty() {
                     println!();
                 }
-                println!("\x1b[1mProject-local ways\x1b[0m");
+                println!("{}", agent_theme::paint(agent_theme::Style::new().bold(), "Project-local ways"));
                 println!();
                 let mut t = Table::new(&["Sibling", "Cosine"]);
                 t.max_width(0, 50);

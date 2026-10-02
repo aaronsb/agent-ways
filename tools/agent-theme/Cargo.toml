@@ -8,3 +8,17 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "agent_theme"
 path = "src/lib.rs"
+
+[features]
+# The ratatui output. Off by default: the engine's core, and every binary on
+# a hook path, carries no ratatui dependency (ADR-504 §4, §11).
+ratatui = ["dep:ratatui-core"]
+
+[dependencies]
+serde = "1"
+toml = "0.8"
+ratatui-core = { version = "0.1", optional = true }
+
+[dev-dependencies]
+# Test the ratatui output too, under `cargo test` and clippy --all-targets.
+agent-theme = { path = ".", features = ["ratatui"] }

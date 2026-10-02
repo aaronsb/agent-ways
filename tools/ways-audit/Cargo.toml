@@ -15,3 +15,4 @@ anyhow = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
 ways-core = { path = "../ways-core" }
+agent-theme = { path = "../agent-theme" }

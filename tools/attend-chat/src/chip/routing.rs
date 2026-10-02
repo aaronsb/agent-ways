@@ -102,7 +102,8 @@ fn levenshtein(a: &str, b: &str) -> usize {
 mod tests {
     use super::super::registry::{known_identities_with_liveness, KnownIdentity};
     use super::*;
-    use agent_identity::{Identity, TermCaps};
+    use agent_identity::Identity;
+    use agent_theme::ColorDepth;
     use attend_instances::SnapshotCache;
 
     fn empty_cache() -> SnapshotCache {
@@ -125,7 +126,7 @@ mod tests {
     fn known(nick: &str, cwd: &str) -> KnownIdentity {
         // Bypass the file-touching identity derivation — tests for
         // resolve_nickname only care about the nickname/cwd shape.
-        let id = Identity::for_cwd(cwd, TermCaps::Rich);
+        let id = Identity::for_cwd(cwd, ColorDepth::TrueColor);
         KnownIdentity {
             nickname: nick.to_string(),
             cwd: cwd.to_string(),
@@ -141,7 +142,7 @@ mod tests {
             sig("claude:a", "/home/repo"),
             sig("external:aaron@kitty", "/home/aaron/Projects"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         let claude_nick = &reg.iter().find(|k| k.is_claude).unwrap().nickname;
         // Case-insensitive match hits the claude cwd.
         let lowered = claude_nick.to_ascii_lowercase();

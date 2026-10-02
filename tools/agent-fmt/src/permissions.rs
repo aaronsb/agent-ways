@@ -201,15 +201,10 @@ pub fn display_audit(
     has_tpm: bool,
 ) {
     use crate::{Align, Table};
-
-    const RESET: &str = "\x1b[0m";
-    const BOLD: &str = "\x1b[1m";
-    const GREEN: &str = "\x1b[32m";
-    const RED: &str = "\x1b[31m";
-    const YELLOW: &str = "\x1b[33m";
+    use agent_theme::{paint, Role, Style};
 
     println!();
-    println!("  {BOLD}{title}{RESET} (ADR-116)");
+    println!("  {} (ADR-116)", paint(Style::new().bold(), title));
     println!();
 
     if results.is_empty() {
@@ -228,13 +223,13 @@ pub fn display_audit(
 
     for r in results {
         let status = if r.granted {
-            format!("{GREEN}granted{RESET}")
+            paint(Role::Ok, "granted")
         } else {
             missing_count += 1;
             if !missing_perms.contains(&r.requirement) {
                 missing_perms.push(r.requirement.clone());
             }
-            format!("{RED}MISSING{RESET}")
+            paint(Role::Err, "MISSING")
         };
         table.add(vec![&r.source, &r.requirement, &status]);
     }
@@ -243,17 +238,17 @@ pub fn display_audit(
     println!();
 
     if missing_count > 0 {
-        println!("  {YELLOW}{missing_count} missing permission(s).{RESET} Add to settings.json:");
+        println!("  {} Add to settings.json:", paint(Role::Warn, format!("{missing_count} missing permission(s).")));
         for p in &missing_perms {
             println!("    \"{p}\"");
         }
     } else {
-        println!("  {GREEN}All permissions granted.{RESET}");
+        println!("  {}", paint(Role::Ok, "All permissions granted."));
     }
 
     if has_tpm {
         println!();
-        println!("  {YELLOW}Deprecation:{RESET} ~/.claude/trusted-project-macros found.");
+        println!("  {} ~/.claude/trusted-project-macros found.", paint(Role::Warn, "Deprecation:"));
         println!("  This file is deprecated — use requires: fields in way frontmatter instead.");
         println!("  See ADR-116 for migration guidance.");
     }
