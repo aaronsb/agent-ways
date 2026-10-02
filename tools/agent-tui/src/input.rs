@@ -1,19 +1,25 @@
-//! A text entry of one or more lines: the buffer, a cursor counted in
-//! characters, the editing keys, and its rows at a width with the cursor
-//! drawn as a reverse-video cell. Enter is the application's; Shift-Enter
-//! and Alt-Enter insert a newline (Shift-Enter reaches only terminals that
-//! speak the kitty keyboard protocol, Alt-Enter every terminal).
+//! A text entry of one or more lines: the buffer, a cursor, the editing
+//! keys, and its rows at a width with the cursor drawn as a reverse-video
+//! cell. Enter is the application's; Shift-Enter and Alt-Enter insert a
+//! newline (Shift-Enter reaches only terminals that speak the kitty keyboard
+//! protocol, Alt-Enter every terminal).
+//!
+//! The cursor is counted in characters, so callers can splice the text by
+//! character, but it only ever rests between grapheme clusters: moving and
+//! deleting go a whole cluster at a time, so a combining mark or a joined
+//! emoji is never split.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
+use unicode_segmentation::UnicodeSegmentation;
 
-use crate::wrap::char_width;
+use crate::wrap::{line_of, wrap_cells, Cell};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Input {
     text: String,
-    /// In characters, from 0 to the character count.
+    /// In characters, on a cluster boundary, from 0 to the character count.
     cursor: usize,
 }
 
@@ -31,6 +37,7 @@ impl Input {
         &self.text
     }
 
+    /// The cursor, in characters.
     pub fn cursor(&self) -> usize {
         self.cursor
     }
@@ -39,14 +46,27 @@ impl Input {
         self.text.is_empty()
     }
 
-    fn len(&self) -> usize {
-        self.text.chars().count()
+    /// The cluster boundaries, in characters: 0, each cluster's end.
+    fn bounds(&self) -> Vec<usize> {
+        let mut out = vec![0];
+        let mut n = 0;
+        for g in self.text.graphemes(true) {
+            n += g.chars().count();
+            out.push(n);
+        }
+        out
     }
 
-    /// Replace the text and put the cursor at `cursor`, kept inside it.
+    /// The first boundary at or after `n`.
+    fn snap(&self, n: usize) -> usize {
+        self.bounds().into_iter().find(|b| *b >= n).unwrap_or_else(|| self.text.chars().count())
+    }
+
+    /// Replace the text and put the cursor at `cursor` characters, kept
+    /// inside it and on a cluster boundary.
     pub fn set(&mut self, text: impl Into<String>, cursor: usize) {
         self.text = text.into();
-        self.cursor = cursor.min(self.len());
+        self.cursor = self.snap(cursor);
     }
 
     pub fn clear(&mut self) {
@@ -56,37 +76,42 @@ impl Input {
     pub fn insert(&mut self, c: char) {
         let at = byte_at(&self.text, self.cursor);
         self.text.insert(at, c);
-        self.cursor += 1;
+        // A combining mark joins the cluster before it; the cursor stays
+        // after whatever cluster the character ended up in.
+        self.cursor = self.snap(self.cursor + 1);
     }
 
     pub fn newline(&mut self) {
         self.insert('\n');
     }
 
-    /// Drop the character left of the cursor.
-    pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let at = byte_at(&self.text, self.cursor - 1);
-        self.text.remove(at);
-        self.cursor -= 1;
+    /// Remove the characters from `a` to `b`.
+    fn cut(&mut self, a: usize, b: usize) {
+        let (x, y) = (byte_at(&self.text, a), byte_at(&self.text, b));
+        self.text.replace_range(x..y, "");
     }
 
-    /// Drop the character under the cursor.
+    /// Drop the cluster left of the cursor.
+    pub fn backspace(&mut self) {
+        if let Some(prev) = self.bounds().into_iter().rev().find(|b| *b < self.cursor) {
+            self.cut(prev, self.cursor);
+            self.cursor = prev;
+        }
+    }
+
+    /// Drop the cluster under the cursor.
     pub fn delete(&mut self) {
-        if self.cursor < self.len() {
-            let at = byte_at(&self.text, self.cursor);
-            self.text.remove(at);
+        if let Some(next) = self.bounds().into_iter().find(|b| *b > self.cursor) {
+            self.cut(self.cursor, next);
         }
     }
 
     pub fn left(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
+        self.cursor = self.bounds().into_iter().rev().find(|b| *b < self.cursor).unwrap_or(0);
     }
 
     pub fn right(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.len());
+        self.cursor = self.bounds().into_iter().find(|b| *b > self.cursor).unwrap_or(self.cursor);
     }
 
     /// The start of the cursor's line.
@@ -120,51 +145,32 @@ impl Input {
         true
     }
 
-    /// The text broken into rows of `width` columns at any character, an
-    /// explicit newline starting a row, with the cursor's cell in reverse
-    /// video (a space past the end of a line). `style` is the text's.
+    /// The text word-wrapped to rows of `width` columns, an explicit newline
+    /// starting a row, with the cursor's cluster in reverse video (a space
+    /// past the end of a line). `style` is the text's.
     pub fn rows(&self, width: u16, style: Style) -> Vec<Line<'static>> {
-        let width = (width as usize).max(1);
         let cursor_style = style.add_modifier(Modifier::REVERSED);
-        let mut rows: Vec<Vec<Span<'static>>> = vec![Vec::new()];
-        let mut used = 0;
-        let push = |rows: &mut Vec<Vec<Span<'static>>>, used: &mut usize, text: String, st: Style, w: usize| {
-            if *used + w > width && *used > 0 {
-                rows.push(Vec::new());
-                *used = 0;
-            }
-            rows.last_mut().expect("one row at least").push(Span::styled(text, st));
-            *used += w;
-        };
-        for (i, c) in self.text.chars().enumerate() {
-            let here = i == self.cursor;
-            if c == '\n' {
+        let mut logical: Vec<Vec<Cell>> = vec![Vec::new()];
+        let mut at = 0;
+        let cursor_cell = || Cell { text: " ".into(), style: cursor_style, sticky: true };
+        for g in self.text.graphemes(true) {
+            let here = at == self.cursor;
+            at += g.chars().count();
+            if g == "\n" || g == "\r\n" {
                 if here {
-                    push(&mut rows, &mut used, " ".into(), cursor_style, 1);
+                    logical.last_mut().expect("one row at least").push(cursor_cell());
                 }
-                rows.push(Vec::new());
-                used = 0;
+                logical.push(Vec::new());
                 continue;
             }
-            push(&mut rows, &mut used, c.to_string(), if here { cursor_style } else { style }, char_width(c));
+            let st = if here { cursor_style } else { style };
+            logical.last_mut().expect("one row at least").push(Cell { text: g.to_string(), style: st, sticky: here });
         }
-        if self.cursor >= self.len() {
-            push(&mut rows, &mut used, " ".into(), cursor_style, 1);
+        if self.cursor >= at {
+            logical.last_mut().expect("one row at least").push(cursor_cell());
         }
-        rows.into_iter().map(merge).collect()
+        logical.iter().flat_map(|cells| wrap_cells(cells, width as usize)).map(|r| line_of(&r, Style::new())).collect()
     }
-}
-
-/// Neighbouring spans of one style as one.
-fn merge(spans: Vec<Span<'static>>) -> Line<'static> {
-    let mut out: Vec<Span<'static>> = Vec::new();
-    for s in spans {
-        match out.last_mut() {
-            Some(last) if last.style == s.style => last.content.to_mut().push_str(&s.content),
-            _ => out.push(s),
-        }
-    }
-    Line::from(out)
 }
 
 #[cfg(test)]
@@ -179,6 +185,10 @@ mod tests {
 
     fn state(i: &Input) -> (&str, usize) {
         (i.text(), i.cursor())
+    }
+
+    fn texts(rows: &[Line]) -> Vec<String> {
+        rows.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
     }
 
     #[test]
@@ -203,6 +213,36 @@ mod tests {
         i.set("ab", 2);
         i.delete();
         assert_eq!(state(&i), ("ab", 2), "delete at the end does nothing");
+    }
+
+    #[test]
+    fn moves_and_deletes_go_by_grapheme_cluster() {
+        // A decomposed é: the cursor never rests on the combining mark,
+        // and backspace takes the letter and its mark together.
+        let mut i = at("cafe\u{301}", 5);
+        i.left();
+        assert_eq!(i.cursor(), 3, "one step back crosses e and its accent");
+        i.right();
+        assert_eq!(i.cursor(), 5);
+        i.backspace();
+        assert_eq!(state(&i), ("caf", 3));
+        // A ZWJ family is one cluster.
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        let mut i = at(&format!("a{family}b"), 0);
+        i.right();
+        i.right();
+        assert_eq!(i.cursor(), 1 + family.chars().count());
+        i.left();
+        i.delete();
+        assert_eq!(state(&i), ("ab", 1));
+        // A cursor set inside a cluster snaps to its end.
+        assert_eq!(at("cafe\u{301}", 4).cursor(), 5);
+        // A combining mark typed after a letter joins it; the cursor follows.
+        let mut i = at("e", 1);
+        i.insert('\u{301}');
+        assert_eq!(i.cursor(), 2);
+        i.left();
+        assert_eq!(i.cursor(), 0);
     }
 
     #[test]
@@ -242,15 +282,24 @@ mod tests {
     }
 
     #[test]
-    fn rows_break_at_the_width_and_mark_the_cursor() {
+    fn rows_word_wrap_and_mark_the_cursor() {
         let rows = at("abcdef", 6).rows(4, Style::new());
-        let text: Vec<String> = rows.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect();
-        assert_eq!(text, ["abcd", "ef "]);
+        assert_eq!(texts(&rows), ["abcd", "ef "]);
         let last = rows[1].spans.last().expect("the cursor");
         assert!(last.style.add_modifier.contains(Modifier::REVERSED));
         let rows = at("ab\ncd", 1).rows(10, Style::new());
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].spans[1].content, "b");
         assert!(rows[0].spans[1].style.add_modifier.contains(Modifier::REVERSED));
+        // Words move whole, as the feed wraps them.
+        assert_eq!(texts(&at("hello there world", 0).rows(12, Style::new())), ["hello there", "world"]);
+        // The cursor on the space at a break stays visible.
+        let rows = at("hello world", 5).rows(8, Style::new());
+        assert_eq!(texts(&rows), ["hello ", "world"]);
+        assert!(rows[0].spans[1].style.add_modifier.contains(Modifier::REVERSED));
+        assert_eq!(texts(&at("hello world", 6).rows(8, Style::new())), ["hello", "world"], "a cursor on a letter splits nothing");
+        // A cluster under the cursor is drawn whole.
+        let rows = at("cafe\u{301}!", 3).rows(10, Style::new());
+        assert!(rows[0].spans.iter().any(|s| s.content == "e\u{301}" && s.style.add_modifier.contains(Modifier::REVERSED)));
     }
 }

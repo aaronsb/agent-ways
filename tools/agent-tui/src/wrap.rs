@@ -1,11 +1,13 @@
 //! Wrapping styled text to a width in terminal columns: words move whole
 //! to the next row, a word longer than a row is broken, and an explicit
-//! newline starts a row. Widths are display widths, so a wide character
-//! takes two columns.
+//! newline starts a row. The unit is the grapheme cluster, so a combining
+//! mark or a joined emoji is never split, and widths are display widths, so
+//! a wide character takes two columns.
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// The columns `c` takes; a control character takes none.
 pub fn char_width(c: char) -> usize {
@@ -14,7 +16,7 @@ pub fn char_width(c: char) -> usize {
 
 /// The columns `s` takes.
 pub fn str_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+    s.width()
 }
 
 /// `s` cut to `max` columns, the last kept column a `…` when anything was cut.
@@ -24,12 +26,12 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
     let mut out = String::new();
     let mut used = 0;
-    for c in s.chars() {
-        let w = char_width(c);
+    for g in s.graphemes(true) {
+        let w = str_width(g);
         if used + w + 1 > max {
             break;
         }
-        out.push(c);
+        out.push_str(g);
         used += w;
     }
     if max > 0 {
@@ -38,25 +40,38 @@ pub fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-/// One styled character of a line being wrapped.
-type Cell = (char, Style);
+/// One grapheme cluster of a line being wrapped, with its style. A
+/// `sticky` cell is never a break: a space marked sticky (the input's
+/// cursor) stays on its row like a letter.
+#[derive(Debug, Clone)]
+pub(crate) struct Cell {
+    pub text: String,
+    pub style: Style,
+    pub sticky: bool,
+}
 
-/// Rows of cells back into a line, joining runs of one style into a span.
-fn line_of(cells: &[Cell], base: Style) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut run = String::new();
-    let mut style = None;
-    for (c, s) in cells {
-        if style != Some(*s) {
-            if let Some(st) = style {
-                spans.push(Span::styled(std::mem::take(&mut run), st));
-            }
-            style = Some(*s);
-        }
-        run.push(*c);
+impl Cell {
+    fn width(&self) -> usize {
+        str_width(&self.text)
     }
-    if let Some(st) = style {
-        spans.push(Span::styled(run, st));
+
+    fn is_break(&self) -> bool {
+        !self.sticky && self.text == " "
+    }
+
+    fn is_lone(&self) -> bool {
+        self.sticky && self.text == " "
+    }
+}
+
+/// A row of cells back into a line, joining runs of one style into a span.
+pub(crate) fn line_of(cells: &[Cell], base: Style) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for c in cells {
+        match spans.last_mut() {
+            Some(last) if last.style == c.style => last.content.to_mut().push_str(&c.text),
+            _ => spans.push(Span::styled(c.text.clone(), c.style)),
+        }
     }
     Line::from(spans).style(base)
 }
@@ -64,46 +79,48 @@ fn line_of(cells: &[Cell], base: Style) -> Line<'static> {
 /// Wrap one line to `width` columns. A newline inside a span starts a new
 /// row. An empty line stays one empty row.
 pub fn wrap_line(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
-    let width = width.max(1);
-    let base = line.style;
-    // Logical rows: split on newlines first.
     let mut logical: Vec<Vec<Cell>> = vec![Vec::new()];
     for span in &line.spans {
-        for c in span.content.chars() {
-            if c == '\n' {
+        for g in span.content.graphemes(true) {
+            if g == "\n" || g == "\r\n" {
                 logical.push(Vec::new());
             } else {
-                logical.last_mut().expect("one row at least").push((c, span.style));
+                logical.last_mut().expect("one row at least").push(Cell { text: g.to_string(), style: span.style, sticky: false });
             }
         }
     }
-    let mut out = Vec::new();
-    for cells in logical {
-        out.extend(wrap_cells(&cells, width).iter().map(|r| line_of(r, base)));
-    }
-    out
+    logical.iter().flat_map(|cells| wrap_cells(cells, width)).map(|r| line_of(&r, line.style)).collect()
 }
 
 /// Wrap a run of cells with no newline in it.
-fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
+pub(crate) fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
+    let width = width.max(1);
     let mut rows: Vec<Vec<Cell>> = Vec::new();
     let mut row: Vec<Cell> = Vec::new();
     let mut used = 0;
     let mut i = 0;
     while i < cells.len() {
-        // The next word and the spaces before it.
+        // The next word and the breaks before it.
         let start = i;
-        while i < cells.len() && cells[i].0 == ' ' {
+        while i < cells.len() && cells[i].is_break() {
             i += 1;
         }
         let spaces = &cells[start..i];
         let wstart = i;
-        while i < cells.len() && cells[i].0 != ' ' {
+        while i < cells.len() && !cells[i].is_break() {
+            // A sticky space is a word of its own: it stays where it is
+            // without gluing the words either side together.
+            if cells[i].is_lone() {
+                if i == wstart {
+                    i += 1;
+                }
+                break;
+            }
             i += 1;
         }
         let word = &cells[wstart..i];
-        let sw: usize = spaces.iter().map(|c| char_width(c.0)).sum();
-        let ww: usize = word.iter().map(|c| char_width(c.0)).sum();
+        let sw: usize = spaces.iter().map(Cell::width).sum();
+        let ww: usize = word.iter().map(Cell::width).sum();
         if used + sw + ww <= width {
             row.extend_from_slice(spaces);
             row.extend_from_slice(word);
@@ -117,23 +134,23 @@ fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
             used = 0;
         } else {
             for c in spaces {
-                let w = char_width(c.0);
+                let w = c.width();
                 if used + w > width {
                     rows.push(std::mem::take(&mut row));
                     used = 0;
                 }
-                row.push(*c);
+                row.push(c.clone());
                 used += w;
             }
         }
-        // A word longer than a row is broken across rows.
+        // A word longer than a row is broken across rows, between clusters.
         for c in word {
-            let w = char_width(c.0);
+            let w = c.width();
             if used + w > width && used > 0 {
                 rows.push(std::mem::take(&mut row));
                 used = 0;
             }
-            row.push(*c);
+            row.push(c.clone());
             used += w;
         }
     }
@@ -182,5 +199,17 @@ mod tests {
         assert_eq!(texts(&wrap_line(&Line::from("日本語"), 4)), ["日本", "語"]);
         assert_eq!(truncate("abcdef", 4), "abc…");
         assert_eq!(truncate("abc", 4), "abc");
+    }
+
+    #[test]
+    fn a_cluster_is_never_split() {
+        // `e` and a combining acute are one cluster; so is a ZWJ family.
+        let decomposed = "cafe\u{301}cafe\u{301}";
+        let rows = texts(&wrap_line(&Line::from(decomposed), 4));
+        assert_eq!(rows, ["cafe\u{301}", "cafe\u{301}"]);
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        let rows = texts(&wrap_line(&Line::from(format!("ab{family}")), 3));
+        assert!(rows.iter().any(|r| r.contains(family)), "{rows:?}");
+        assert_eq!(truncate(&format!("abc{family}xyz"), 5).matches('\u{200d}').count() % 2, 0);
     }
 }

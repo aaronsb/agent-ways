@@ -21,6 +21,8 @@ signal-hook = "0.3"
 pulldown-cmark = { version = "0.13", default-features = false }
 # Display widths for wrapping text and the input's rows.
 unicode-width = "0.2"
+# Grapheme clusters: the input steps and deletes by them, and wrapping never splits one.
+unicode-segmentation = "1"
 
 [target.'cfg(unix)'.dependencies]
 # killpg, for the process group of a command in flight, and tcgetattr, to

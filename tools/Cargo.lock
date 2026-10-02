@@ -71,6 +71,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "signal-hook",
+ "unicode-segmentation",
  "unicode-width",
 ]
 
