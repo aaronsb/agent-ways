@@ -417,11 +417,18 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         // `/clear` gives the process a new id. An enrollment recorded for
         // this same Claude Code process under its previous id moves here,
         // with its seen-set and channels, as `attend run` would move it.
-        let previous = ident
-            .claude_key()
+        // The process key costs a `ps` off Linux, so it is computed only
+        // when some enrollment was ever recorded under a process key.
+        let previous = attend_presence::enrollment::any_indexed()
+            .then(|| ident.claude_key())
+            .flatten()
             .and_then(|key| attend_presence::enrollment::previous_id(&key, &session_id));
         let Some(old) = previous else { return };
         crate::util::move_session(&old, &session_id, &ident.origin_path);
+        // The record moved with any pending opt-out; apply it now.
+        if !attend_presence::enrollment::is_enrolled(&session_id) {
+            return;
+        }
     }
     let base = signals_base();
     let r = crate::groups::Groups::new(&base, &session_id);

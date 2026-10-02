@@ -45,13 +45,10 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     }
     emit::log(&format!("focus: {} ({})", focus.description, focus.working_dir));
 
-    // A run re-executed after `/clear` moves the old id's state to this
-    // one before anything below reads it.
-    let moved_from = if ident.resolved() {
-        rekey::complete_move(&ident.session_id, &ident.origin_path)
-    } else {
-        None
-    };
+    // After `/clear`, the old id's state moves to this one before anything
+    // below reads it, and before `enroll(Run)` repoints the Claude-process
+    // index at the new id.
+    let moved_from = if ident.resolved() { rekey::complete_move(&ident) } else { None };
 
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
@@ -270,7 +267,6 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // exists; what matters is that it can never *disagree* with the
     // id the registry and groups saw (PR #380 review, finding 1).
     let heartbeat_id = session_id.clone();
-    let mut failed_handover: Option<String> = None;
 
     loop {
         // `/clear` gives this session a new id under us. Checked every
@@ -278,12 +274,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         // id finds it enrolled before the next turn ends.
         if ident.resolved() {
             if let Some(new_id) = rekey::changed_id(&heartbeat_id) {
-                if failed_handover.as_deref() != Some(new_id.as_str()) {
-                    rekey::hand_over(&heartbeat_id, &new_id, &mut slots, &state_store);
-                    // Still here: the exec failed. Carry on under the old
-                    // id rather than retrying every tick.
-                    failed_handover = Some(new_id);
-                }
+                rekey::hand_over(&heartbeat_id, &new_id, &mut slots, &state_store);
             }
         }
 

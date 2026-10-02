@@ -48,11 +48,11 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
         },
     ]);
     t.add(vec!["display", rendered.as_str()]);
-    // Two processes with different XDG_CACHE_HOME share no mesh; the root
-    // in use is how an operator sees that.
-    let cache = attend_presence::cache::dir().to_string_lossy().into_owned();
-    t.add(vec!["cache", cache.as_str()]);
     t.print();
+    // Two processes with different XDG_CACHE_HOME share no mesh; the root
+    // in use is how an operator sees that. Printed whole, outside the
+    // table, which would cut a long path to its width.
+    println!("cache: {}", attend_presence::cache::dir().display());
 
     if !ident.resolved() {
         eprintln!(

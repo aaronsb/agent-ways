@@ -13,4 +13,6 @@ path = "src/lib.rs"
 libc = "0.2"
 
 [dependencies]
+# The atomic writer and the edit lock the settings crates share.
+agent-settings = { path = "../agent-settings" }
 claude-sessions = { path = "../claude-sessions" }

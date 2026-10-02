@@ -15,7 +15,8 @@
 //!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it.
 //!
 //! The session is enrolled while the record holds a way. Every edit is a
-//! read-modify-write under `enrolled/.lock`.
+//! read-modify-write under one lock (`agent_settings::writer::Lock`), and
+//! every file is written atomically (`write_atomic`).
 
 use std::fs;
 use std::io;
@@ -102,14 +103,9 @@ fn write(session_id: &str, record: &Record) -> io::Result<()> {
             _ => Ok(()),
         };
     }
-    fs::create_dir_all(dir())?;
-    let tmp = p.with_extension(format!("tmp.{}", std::process::id()));
-    fs::write(&tmp, record.render())?;
-    fs::rename(&tmp, &p)?;
+    agent_settings::writer::write_atomic(&p, record.render())?;
     if let Some(key) = &record.claude {
-        let index = index_path(key);
-        fs::create_dir_all(index.parent().unwrap_or(&dir()))?;
-        fs::write(index, session_id)?;
+        agent_settings::writer::write_atomic(&index_path(key), session_id)?;
     }
     Ok(())
 }
@@ -117,9 +113,7 @@ fn write(session_id: &str, record: &Record) -> io::Result<()> {
 /// Run `edit` on `session_id`'s record under the enrollment lock and write
 /// the result.
 fn edit(session_id: &str, edit: impl FnOnce(&mut Record)) -> io::Result<()> {
-    fs::create_dir_all(dir())?;
-    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir().join(".lock"))?;
-    lock.lock()?;
+    let _lock = agent_settings::writer::Lock::acquire(&dir().join(".edit"))?;
     let mut record = read(session_id).unwrap_or_default();
     edit(&mut record);
     write(session_id, &record)
@@ -206,6 +200,12 @@ pub fn carry(old: &str, new: &str) -> io::Result<()> {
         }
     })?;
     edit(old, |r| *r = Record::default())
+}
+
+/// Whether any enrollment was ever recorded under a Claude Code process
+/// key. A cheap test before computing this process's key.
+pub fn any_indexed() -> bool {
+    dir().join("by-claude").is_dir()
 }
 
 /// The enrolled session recorded for the Claude Code process `claude_key`,

@@ -460,6 +460,7 @@ pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
 pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSnapshot {
     let mut snapshot = state::StateSnapshot::default();
     for slot in slots {
+        let peers = slot.name() == "peers";
         for (key, value) in slot.export_state() {
             match key.as_str() {
                 "seen_signal" => {
@@ -476,7 +477,9 @@ pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSna
                 "context_pct" => {
                     snapshot.context_pct = value.parse().ok();
                 }
-                "baselined" => {
+                // The message lane's cold-start mark: only the peers sensor
+                // applies the rule.
+                "baselined" if peers => {
                     snapshot.baselined |= value == "true";
                 }
                 _ => {}

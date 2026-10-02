@@ -332,6 +332,7 @@ dependencies = [
 name = "attend-presence"
 version = "0.1.0"
 dependencies = [
+ "agent-settings",
  "claude-sessions",
  "libc",
 ]
