@@ -14,8 +14,11 @@
 #           hooks receive, so the team cannot be found by matching ids. The
 #           `attach` verb finds it by age and cwd instead, records the list id
 #           in the bridge state, and carries the previous list's open tasks
-#           into the new store. The team directory is removed when the
-#           process exits; the task directory stays.
+#           into the new store. The record carries the claude pid and start
+#           time; /clear gives the same process a new session id, and attach
+#           adopts the list a session with the same process recorded. The
+#           team directory is removed when the process exits; the task
+#           directory stays.
 #   file    <id>.json, id sanitized to [A-Za-z0-9_-]
 #   create  proper-lockfile on <dir>/.lock: mkdir <dir>/.lock.lock, 30 retries
 #           at 5–100 ms, stale after 10 s, mtime refreshed while held
@@ -31,7 +34,7 @@
 # file's lock.
 #
 # Usage:
-#   gh-tasks [--session ID] attach [startup|resume]   # resolve the live list, carry the previous one forward
+#   gh-tasks [--session ID] attach [startup|resume|compact|clear]   # resolve the live list, carry the previous one forward
 #   gh-tasks [--session ID] [--force] pull
 #   gh-tasks [--session ID] whisper [--full]
 #   gh-tasks [--session ID] link <issue> <task-id>
@@ -434,7 +437,6 @@ claimed_teams() {
   done
 }
 
-# Start time in ms of the nearest ancestor named claude, or nothing.
 # Seconds since `pid` started. GNU ps has `etimes`; BSD ps only `etime`,
 # formatted [[dd-]hh:]mm:ss.
 elapsed_seconds() {
@@ -452,22 +454,65 @@ elapsed_seconds() {
   printf '%s' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$sec ))
 }
 
-process_start_ms() {
-  local pid=$$ comm age i
+# Pid of the nearest ancestor named claude, or nothing.
+claude_pid() {
+  local pid=$$ comm i
   for ((i = 0; i < 12; i++)); do
     comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
     [[ -n "$comm" ]] || return 0
     comm="${comm##*/}"   # macOS prints the full path
-    if [[ "$comm" == claude* ]]; then
-      age="$(elapsed_seconds "$pid")"
-      [[ "$age" =~ ^[0-9]+$ ]] || return 0
-      printf '%s' $(( ($(now) - age) * 1000 ))
-      return 0
-    fi
+    [[ "$comm" == claude* ]] && { printf '%s' "$pid"; return 0; }
     pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
     [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 0
   done
   return 0
+}
+
+# Start time in ms of the claude process, or nothing.
+process_start_ms() {
+  local pid age
+  pid="$(claude_pid)"; [[ -n "$pid" ]] || return 0
+  age="$(elapsed_seconds "$pid")"
+  [[ "$age" =~ ^[0-9]+$ ]] || return 0
+  printf '%s' $(( ($(now) - age) * 1000 ))
+}
+
+# The claude process as pid plus its start time, stable across calls and
+# across the session ids one process goes through: /clear starts a new
+# session id in the same process, with the same team and task list.
+# GH_TASKS_PROCESS overrides it for tests.
+process_key() {
+  if [[ -n "${GH_TASKS_PROCESS:-}" ]]; then printf '%s' "$GH_TASKS_PROCESS"; return 0; fi
+  local pid start
+  pid="$(claude_pid)"; [[ -n "$pid" ]] || return 0
+  start="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ')"
+  [[ -n "$start" ]] && printf '%s %s' "$pid" "$start"
+  return 0
+}
+
+# The list recorded by another session of this same process, or nothing.
+sibling_list_id() {
+  local key f d id
+  key="$(process_key)"; [[ -n "$key" ]] || return 0
+  for f in "$SESSIONS_ROOT"/*/gh-tasks/process; do
+    [[ -f "$f" ]] || continue
+    d="$(dirname "$f")"
+    [[ "$d" == "$(state_dir)" ]] && continue
+    [[ "$(head -n1 "$f" 2>/dev/null)" == "$key" && -f "$d/list_id" ]] || continue
+    id="$(head -n1 "$d/list_id" 2>/dev/null || true)"
+    [[ -n "$id" ]] && { sanitize_id "$id"; return 0; }
+  done
+  return 0
+}
+
+# Record the resolved list id and the process that owns it.
+record_list() {
+  local state; state="$(state_dir)"; mkdir -p "$state"
+  printf '%s\n' "$1" >"$state/list_id.tmp" && mv -f "$state/list_id.tmp" "$state/list_id"
+  local key; key="$(process_key)"
+  if [[ -n "$key" ]]; then
+    printf '%s\n' "$key" >"$state/process.tmp" && mv -f "$state/process.tmp" "$state/process"
+  fi
 }
 
 fresh_team() {
@@ -529,17 +574,26 @@ carry_tasks() {
   return 0
 }
 
-# attach [startup|resume|compact|clear]: the SessionStart source. Only a new
-# process has a new team, so compact and clear are no-ops.
+# attach [startup|resume|compact|clear]: the SessionStart source. A new
+# process (startup, resume) has a new team. Compact and clear keep the
+# process and its list but clear changes the session id, so the new session
+# adopts the list a sibling session of the same process recorded.
 cmd_attach() {
   require_session
-  local source="${ARGS[0]:-startup}" state prev new origin=""
+  local source="${ARGS[0]:-startup}" prev new origin=""
+  prev="$(recorded_list_id)"
   case "$source" in
     startup|resume) ;;
-    *) return 0 ;;
+    *)
+      [[ -z "$prev" && -z "${CLAUDE_CODE_TASK_LIST_ID:-}" ]] || return 0
+      new="$(sibling_list_id)"
+      if [[ -n "$new" ]]; then
+        record_list "$new"
+        log "attach ($source): list $new, from this process's previous session"
+      fi
+      return 0
+      ;;
   esac
-  state="$(state_dir)"; mkdir -p "$state"
-  prev="$(recorded_list_id)"
   if [[ -n "${CLAUDE_CODE_TASK_LIST_ID:-}" ]]; then
     # An explicit list is the operator's choice, shared or named; nothing
     # private is carried into it.
@@ -563,7 +617,7 @@ cmd_attach() {
   # lead-session match keeps working for a process that named its team from
   # this session id.
   if [[ "$origin" == env || "$origin" == team ]]; then
-    printf '%s\n' "$new" >"$state/list_id.tmp" && mv -f "$state/list_id.tmp" "$state/list_id"
+    record_list "$new"
   fi
   log "attach ($source): list $new$([[ -n "$prev" && "$prev" != "$new" ]] && echo " (was $prev)")"
 }

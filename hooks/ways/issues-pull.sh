@@ -4,9 +4,9 @@
 # what changed (ADR-180).
 #
 # Usage in settings.json: issues-pull.sh <session-start|prompt|post-gh>
-#   session-start  on startup and resume, attach to the live task list
-#                  (carrying the previous one forward); forced pull; the full
-#                  open list
+#   session-start  attach to the live task list (a new process carries the
+#                  previous one forward; a cleared session adopts its
+#                  process's list); forced pull; the full open list
 #   prompt         pull if the snapshot is older than GH_TASKS_TTL, then deltas
 #   post-gh        forced pull after an in-session `gh issue` command, then deltas
 #
@@ -37,10 +37,7 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 case "$MODE" in
   session-start)
-    # A new process has a new team; compact and clear keep the old one.
-    case "$SOURCE" in
-      startup|resume) "$GH_TASKS" --session "$SESSION_ID" attach "$SOURCE" 2>/dev/null ;;
-    esac
+    "$GH_TASKS" --session "$SESSION_ID" attach "${SOURCE:-startup}" 2>/dev/null
     "$GH_TASKS" --session "$SESSION_ID" --force pull 2>/dev/null
     OUT=$("$GH_TASKS" --session "$SESSION_ID" whisper --full 2>/dev/null)
     ;;

@@ -24,6 +24,7 @@ export CLAUDE_CONFIG_DIR="$TMP/config"
 export XDG_RUNTIME_DIR="$TMP/runtime"
 export CLAUDE_CODE_SESSION_ID="abcdef12-0000-0000-0000-000000000000"
 export GH_TASKS_TTL=0
+export GH_TASKS_PROCESS="4242 Thu Oct  1 13:54:00 2026"
 unset CLAUDE_CODE_TASK_LIST_ID
 mkdir -p "$CLAUDE_CONFIG_DIR" "$XDG_RUNTIME_DIR"
 
@@ -286,6 +287,17 @@ WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
   "$GH_TASKS" attach clear 2>/dev/null
   assert_eq "clear does not re-attach" "$(cat "$st/list_id")" "session-newproc"
   rm -rf "$CLAUDE_CONFIG_DIR/teams/session-neighbor"
+  # /clear gives the same process a new session id with no record.
+  ( export CLAUDE_CODE_SESSION_ID="11111111-eeee-bbbb-cccc-dddddddddddd"
+    "$GH_TASKS" attach clear 2>/dev/null
+    assert_eq "a cleared session adopts its process's list" "$("$GH_TASKS" dir)" "$new"
+    export CLAUDE_CODE_SESSION_ID="11111111-ffff-bbbb-cccc-dddddddddddd"
+    "$GH_TASKS" attach clear 2>/dev/null
+    assert_eq "a second clear adopts it from the first" "$("$GH_TASKS" dir)" "$new"
+    export CLAUDE_CODE_SESSION_ID="11111111-9999-bbbb-cccc-dddddddddddd"
+    GH_TASKS_PROCESS="5151 Thu Oct  1 14:00:00 2026" "$GH_TASKS" attach clear 2>/dev/null
+    assert_eq "another process's list is not adopted" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/$CLAUDE_CODE_SESSION_ID"
+  )
 ) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
 
 ( cd "$WORK"
