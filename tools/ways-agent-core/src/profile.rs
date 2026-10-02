@@ -232,8 +232,10 @@ impl UserLayer {
 
     /// [`UserLayer::load`], returning the findings instead of printing them.
     pub fn load_with_findings(path: &Path) -> Result<(UserLayer, Vec<agent_settings::Finding>)> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
+        // Read lossily, as the other settings loaders do: a stray byte in a
+        // comment must not make the file unreadable.
+        let text = match std::fs::read(path) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((UserLayer::default(), Vec::new())),
             Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
         };

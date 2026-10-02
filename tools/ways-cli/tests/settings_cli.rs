@@ -723,6 +723,23 @@ fn an_unparseable_agent_yaml_turns_the_gate_off() {
 }
 
 #[test]
+fn an_agent_yaml_with_a_latin1_comment_reads_the_same_everywhere() {
+    // U1: the gate read agent.yaml strictly as UTF-8, the other loaders
+    // lossily, so a Latin-1 comment made the hook's gate fail while
+    // `settings get` read the file.
+    let f = Fx::new();
+    let keys = f.root.join("xdg/config/agent-ways/keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    std::fs::write(keys.join("anthropic"), "sk-ant-test-not-a-real-key-0000").unwrap();
+    let agent = f.root.join("xdg/config/agent-ways/agent.yaml");
+    std::fs::write(&agent, b"mode: shadow\n# caf\xe9\n").unwrap();
+    assert_eq!(f.run(&["settings", "get", "gate.mode"]), ("shadow\n".to_string(), String::new(), 0));
+    let (_, err, code) = f.run(&["scan", "prompt", "--query=write a unit test", "--session=s1"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!err.contains("agent.yaml"), "the hook's gate reads the file too: {err}");
+}
+
+#[test]
 fn fix_refuses_an_unparseable_file_and_says_to_fix_it_by_hand() {
     let f = Fx::new();
     let text = "language: es\nx: [\n";
