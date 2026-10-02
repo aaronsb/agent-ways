@@ -6,7 +6,8 @@
 
 use attend_identity_view::render_sender_label;
 use attend_instances::SnapshotCache;
-use crate::util::{get_groups, own_session_id, own_tray_names, signals_base};
+use crate::util::{get_groups, own_session_id, signals_base};
+use claude_sessions::attend_tray_names;
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
@@ -14,7 +15,8 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let r = get_groups();
-    let mut scan_dirs: Vec<_> = own_tray_names(&cwd).iter().map(|n| base.join(n)).collect();
+    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
+    let mut scan_dirs: Vec<_> = attend_tray_names(&cwd).iter().map(|n| base.join(n)).collect();
     scan_dirs.push(base.join("_broadcast"));
     for name in r.joined_group_names() {
         scan_dirs.push(r.group_dir(&name));
@@ -68,7 +70,8 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     let own_session_id = own_session_id().unwrap_or_default();
 
     // Scan same dirs as the peer sensor: own project + broadcast + focus group
-    let own_trays = own_tray_names(&cwd);
+    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
+    let own_trays = attend_tray_names(&cwd);
     let r = get_groups();
     let mut scan_dirs: Vec<_> = own_trays.iter().map(|n| base.join(n)).collect();
     scan_dirs.push(base.join("_broadcast"));
@@ -335,8 +338,8 @@ fn scan_pending(
                 Some(f) if f.ends_with(".signal") => f.to_string(),
                 _ => continue,
             };
-            // Same collision-proof key the peers sensor uses.
-            let key = format!("{}:{}", dir.display(), filename);
+            // The key the peers sensor uses: the signal's filename.
+            let key = attend_state::seen_key(&filename);
             if seen.contains(&key) {
                 continue;
             }
@@ -448,7 +451,8 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let r = get_groups();
-    let mut scan_dirs: Vec<_> = own_tray_names(&cwd)
+    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
+    let mut scan_dirs: Vec<_> = attend_tray_names(&cwd)
         .iter()
         .map(|n| (base.join(n), "project".to_string()))
         .collect();
@@ -762,10 +766,27 @@ mod drain_tests {
     fn write_signal(dir: &std::path::Path, name: &str, from: &str, msg: &str) -> String {
         let file = format!("{name}.signal");
         std::fs::write(dir.join(&file), format!("{from}|proj|/src/cwd|{msg}\n")).unwrap();
-        format!("{}:{}", dir.display(), file)
+        attend_state::seen_key(&file)
     }
 
     const HOUR: std::time::Duration = std::time::Duration::from_secs(3600);
+
+    #[test]
+    fn a_signal_moved_between_trays_stays_seen() {
+        // Read in the old tray, then moved into the key tray by cleanup:
+        // keyed by directory it would be delivered again.
+        let root = scan_fixture("moved");
+        let (old, new) = (root.join("-srv-my proj"), root.join("-srv-my-proj-bte5w6"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        let key = write_signal(&old, "m1", "claude:other-session", "once");
+        let seen: std::collections::HashSet<String> = [key].into_iter().collect();
+        std::fs::rename(old.join("m1.signal"), new.join("m1.signal")).unwrap();
+        let dirs = vec![(new.clone(), "project".to_string())];
+        let (delivered, _) = scan_pending(&dirs, &seen, "my-session", false, HOUR);
+        assert!(delivered.is_empty());
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn scan_delivers_unseen_and_filters_seen() {
@@ -866,7 +887,7 @@ mod drain_tests {
         let mut state = vec![("reply_hint_shown".to_string(), "true".to_string())];
         if let Ok(entries) = std::fs::read_dir(&broadcast) {
             for name in entries.flatten().filter_map(|e| e.file_name().into_string().ok()) {
-                state.push(("seen_signal".to_string(), format!("{}:{name}", broadcast.display())));
+                state.push(("seen_signal".to_string(), attend_state::seen_key(&name)));
             }
         }
         sensor.import_state(&state);

@@ -3,6 +3,7 @@
 //! One copy of: the config directory (`~/.claude` or one given), its projects
 //! and their transcripts, the project-path encoder ([`project_slug`]) and the
 //! path a project directory was named from, transcript lookup by session id,
+//! the name attend gives a project's tray ([`attend_key`]),
 //! the session records under `sessions/`, and the usage and model a
 //! transcript reports. Depends on the standard library and `serde_json` only,
 //! so `attend` and the sensors use it without `ways-core`.
@@ -10,17 +11,19 @@
 //! This crate only reads. `ways projects cleanup` and `relocate` are the only
 //! writers into the projects directory.
 
+mod attend;
 mod locate;
 mod records;
 mod slug;
 pub mod usage;
 
+pub use attend::{attend_key, attend_key_slug, attend_tray_names, legacy_attend_names};
 pub use locate::{
-    find_project_dir_in, find_transcript_in, newest_transcript, project_dirs_in,
-    resolve_project_path, transcripts_in,
+    dir_belongs_to, find_project_dir_in, find_transcript_in, newest_transcript, prefix_candidates_in,
+    project_dirs_in, resolve_project_path, transcripts_in,
 };
 pub use records::{parse_session_record, read_session_records, SessionRecord};
-pub use slug::{legacy_attend_name, project_slug, slug_matches, MAX_SLUG_LEN};
+pub use slug::{project_slug, slug_matches, MAX_SLUG_LEN};
 
 use std::path::{Path, PathBuf};
 

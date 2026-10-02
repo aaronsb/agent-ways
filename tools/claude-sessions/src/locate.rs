@@ -11,23 +11,52 @@ use crate::slug::{project_slug, slug_matches, MAX_SLUG_LEN};
 /// The directory holding `project`'s sessions under `projects`, if one exists.
 ///
 /// Tries the exact slug first. For a path whose slug Claude Code truncates,
-/// it then takes any directory named by the 200-character prefix and a hash,
-/// as Claude Code does.
+/// it then looks at every directory named by the 200-character prefix and a
+/// hash, as Claude Code does, and takes one only when it is verified to
+/// belong to `project` ([`dir_belongs_to`]). Two paths that share their
+/// first 200 slug characters share that prefix, so an unverified or
+/// ambiguous match is `None`, never a guess.
 pub fn find_project_dir_in(projects: &Path, project: &str) -> Option<PathBuf> {
-    let slug = project_slug(project);
-    let direct = projects.join(&slug);
+    let direct = projects.join(project_slug(project));
     if direct.is_dir() {
         return Some(direct);
     }
+    let mut verified = prefix_candidates_in(projects, project)
+        .into_iter()
+        .filter(|d| dir_belongs_to(d, project));
+    let first = verified.next()?;
+    verified.next().is_none().then_some(first)
+}
+
+/// Every directory under `projects` named by `project`'s 200-character slug
+/// prefix and some hash, sorted. Empty when the slug is not truncated.
+pub fn prefix_candidates_in(projects: &Path, project: &str) -> Vec<PathBuf> {
+    let slug = project_slug(project);
     if slug.len() <= MAX_SLUG_LEN {
-        return None;
+        return Vec::new();
     }
     let prefix = &slug[..=MAX_SLUG_LEN];
-    std::fs::read_dir(projects)
-        .ok()?
-        .flatten()
-        .find(|e| e.file_name().to_str().is_some_and(|n| n.starts_with(prefix)) && e.path().is_dir())
-        .map(|e| e.path())
+    let mut out: Vec<PathBuf> = std::fs::read_dir(projects)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_name().to_str().is_some_and(|n| n.starts_with(prefix)))
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out
+}
+
+/// True when a project directory records `project` itself: its
+/// `sessions-index.json` `originalPath`, or the first `cwd` of one of its
+/// transcripts, equals the path.
+pub fn dir_belongs_to(dir: &Path, project: &str) -> bool {
+    let original = read_json(&dir.join("sessions-index.json"))
+        .and_then(|i| i.get("originalPath").and_then(|v| v.as_str()).map(str::to_string));
+    original.as_deref() == Some(project)
+        || transcripts_in(dir).iter().any(|t| first_cwd(t).as_deref() == Some(project))
 }
 
 /// A session's transcript, `<projects>/<project dir>/<session_id>.jsonl`.
@@ -248,13 +277,54 @@ mod tests {
         let slug = project_slug(&project);
         // Named with a different hash, as another runtime may have written it.
         let other = format!("{}-otherhash", &slug[..MAX_SLUG_LEN]);
-        t.file(&format!("projects/{other}/s3.jsonl"), "{}\n");
+        t.file(&format!("projects/{other}/s3.jsonl"), &format!("{{\"cwd\":\"{project}\"}}\n"));
         let projects = t.path("projects");
         assert_eq!(find_project_dir_in(&projects, &project), Some(projects.join(&other)));
         assert_eq!(
             find_transcript_in(&projects, Some(&project), "s3"),
             Some(projects.join(&other).join("s3.jsonl"))
         );
+    }
+
+    #[test]
+    fn prefix_lookup_refuses_an_unverified_or_ambiguous_match() {
+        // `<base>/projA` and `<base>/projB` share their first 200 slug
+        // characters; neither may be returned for the other.
+        let t = TempTree::new("sibling");
+        let base = format!("/{}", "a".repeat(220));
+        let (a, b) = (format!("{base}/projA"), format!("{base}/projB"));
+        let name_b = project_slug(&b);
+        t.file(&format!("projects/{name_b}/s.jsonl"), &format!("{{\"cwd\":\"{b}\"}}\n"));
+        let projects = t.path("projects");
+        assert_eq!(find_project_dir_in(&projects, &a), None);
+        assert_eq!(prefix_candidates_in(&projects, &a), vec![projects.join(&name_b)]);
+        assert_eq!(find_transcript_in(&projects, Some(&a), "missing"), None);
+
+        // Two directories that both claim `a` (another runtime's hash): ambiguous.
+        let slug_a = project_slug(&a);
+        for hash in ["h1", "h2"] {
+            t.file(
+                &format!("projects/{}-{hash}/s.jsonl", &slug_a[..MAX_SLUG_LEN]),
+                &format!("{{\"cwd\":\"{a}\"}}\n"),
+            );
+        }
+        assert_eq!(find_project_dir_in(&projects, &a), None);
+    }
+
+    #[test]
+    fn finds_transcripts_of_non_ascii_paths() {
+        let t = TempTree::new("nonascii");
+        let projects = t.path("projects");
+        for (project, sid) in [("/srv/项目 x", "cjk"), ("/srv/🦀/crab", "crab")] {
+            let name = project_slug(project);
+            t.file(&format!("projects/{name}/{sid}.jsonl"), "{}\n");
+            assert_eq!(
+                find_transcript_in(&projects, Some(project), sid),
+                Some(projects.join(&name).join(format!("{sid}.jsonl")))
+            );
+        }
+        assert_eq!(project_slug("/srv/项目 x"), "-srv----x");
+        assert_eq!(project_slug("/srv/🦀/crab"), "-srv----crab");
     }
 
     #[test]

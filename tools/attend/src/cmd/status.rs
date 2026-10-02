@@ -1,6 +1,6 @@
 //! `attend status` — show running instances, signal counts, and focus.
 
-use crate::util::{count_signals, get_groups, own_tray_names, signals_base};
+use crate::util::{count_signals, get_groups, signals_base};
 
 pub(crate) fn cmd_status() {
     // Check if attend run is already active
@@ -35,7 +35,8 @@ pub(crate) fn cmd_status() {
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let broadcast_dir = base.join("_broadcast");
-    let own_count: usize = own_tray_names(&cwd).iter().map(|n| count_signals(&base.join(n))).sum();
+    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
+    let own_count: usize = claude_sessions::attend_tray_names(&cwd).iter().map(|n| count_signals(&base.join(n))).sum();
     let broadcast_count = count_signals(&broadcast_dir);
 
     let r = get_groups();

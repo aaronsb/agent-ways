@@ -6,6 +6,16 @@ use serde_json::Value;
 /// errors). It names no model.
 pub const SYNTHETIC_MODEL: &str = "<synthetic>";
 
+/// Model strings that name no model: Claude Code's [`SYNTHETIC_MODEL`], and
+/// the `-` and `unknown` placeholders agent-ways prints when it has none.
+/// The one list; `ways_core::context_window` uses it.
+pub const PLACEHOLDER_MODELS: &[&str] = &[SYNTHETIC_MODEL, "-", "unknown", ""];
+
+/// True when `model` is a placeholder rather than a real model id.
+pub fn is_placeholder_model(model: &str) -> bool {
+    PLACEHOLDER_MODELS.contains(&model.trim())
+}
+
 /// Context tokens of one `message.usage` object: input plus cache reads plus
 /// cache writes. Output tokens are not context until the next turn reads them.
 pub fn usage_total(usage: &Value) -> u64 {
@@ -31,8 +41,8 @@ pub fn last_context_tokens(content: &str) -> Option<u64> {
         .find(|&total| total > 0)
 }
 
-/// The model of the newest assistant turn that names a real one: turns with
-/// [`SYNTHETIC_MODEL`] or an empty model are skipped. `None` before the first
+/// The model of the newest assistant turn that names a real one: turns whose
+/// model is in [`PLACEHOLDER_MODELS`] are skipped. `None` before the first
 /// assistant turn is written.
 pub fn last_model(content: &str) -> Option<String> {
     content
@@ -41,7 +51,7 @@ pub fn last_model(content: &str) -> Option<String> {
         .filter(|l| l.contains("\"model\""))
         .filter_map(assistant)
         .filter_map(|v| v.get("message")?.get("model")?.as_str().map(str::to_string))
-        .find(|m| !m.trim().is_empty() && m.trim() != SYNTHETIC_MODEL)
+        .find(|m| !is_placeholder_model(m))
 }
 
 #[cfg(test)]

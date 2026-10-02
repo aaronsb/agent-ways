@@ -51,23 +51,17 @@ pub fn broadcast_dir() -> PathBuf {
 }
 
 /// Encode a cwd path into the signal directory name the peer sensor
-/// scans: Claude Code's project slug, the rule `attend::util::encode_project`
-/// and the sensor share through `claude_sessions::project_slug`.
+/// scans: `claude_sessions::attend_key`, the one name `attend` and the
+/// sensor use too.
 pub fn encode_cwd(path: &str) -> String {
-    claude_sessions::project_slug(path)
+    claude_sessions::attend_key(path)
 }
 
-/// The names of this cwd's own tray the watcher reads: [`encode_cwd`],
-/// then the name attend used before adopting Claude Code's slug, when that
-/// differs. The old name is read for one release (ADR-504).
+/// The names of this cwd's own tray the watcher reads,
+/// `claude_sessions::attend_tray_names`: the key, then the old names.
+// transition read: removed by #701 (ADR-506)
 pub fn own_tray_names(path: &str) -> Vec<String> {
-    let current = encode_cwd(path);
-    let legacy = claude_sessions::legacy_attend_name(path);
-    if legacy == current || path.is_empty() {
-        vec![current]
-    } else {
-        vec![current, legacy]
-    }
+    claude_sessions::attend_tray_names(path)
 }
 
 /// Directory that delivers signals to the claude session rooted at
@@ -497,17 +491,13 @@ mod tests {
     }
 
     #[test]
-    fn encode_cwd_is_claude_codes_project_slug() {
-        // Same transform as attend::util::encode_project — `/`, `_`,
-        // `.` collapse to `-`. This is the path the peer sensor
-        // scans when looking for messages directed at a specific
-        // cwd, so drift here breaks direct routing silently.
-        assert_eq!(encode_cwd("/home/aaron/.claude"), "-home-aaron--claude");
-        assert_eq!(encode_cwd("/tmp/foo_bar"), "-tmp-foo-bar");
+    fn encode_cwd_is_the_attend_key() {
+        // The name attend::util::encode_project and the peer sensor use
+        // for a cwd's tray; drift here breaks direct routing silently.
+        assert_eq!(encode_cwd("/srv/my proj"), "-srv-my-proj-bte5w6");
         assert_eq!(encode_cwd(""), "");
-        assert_eq!(encode_cwd("/tmp/a b"), "-tmp-a-b");
-        assert_eq!(own_tray_names("/tmp/a b"), vec!["-tmp-a-b".to_string(), "-tmp-a b".to_string()]);
-        assert_eq!(own_tray_names("/tmp/foo_bar"), vec!["-tmp-foo-bar".to_string()]);
+        assert_eq!(own_tray_names("/srv/my proj"), vec!["-srv-my-proj-bte5w6".to_string(), "-srv-my proj".to_string()]);
+        assert!(own_tray_names("").is_empty());
     }
 
     #[test]
@@ -523,7 +513,7 @@ mod tests {
         );
         assert_eq!(
             d.file_name().and_then(|s| s.to_str()),
-            Some("-home-aaron-proj")
+            Some("-home-aaron-proj-wjpr18")
         );
     }
 

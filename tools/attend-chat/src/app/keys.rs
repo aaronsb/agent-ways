@@ -585,9 +585,9 @@ fn purge_channel_in(
             // Seen-set consult (ADR-172 Decision 5): every live
             // consumer of this channel must have consumed the message
             // before purge may delete it. The key mirrors the sensor's
-            // and the drain's collision-proof `<dir>:<filename>` form.
+            // and the drain's: the signal filename.
             let consumed_by_all = e.file_name().to_str().is_some_and(|f| {
-                let key = format!("{}:{}", dir.display(), f);
+                let key = attend_state::seen_key(f);
                 consumers.iter().all(|seen| seen.contains(&key))
             });
             if old_enough && consumed_by_all && std::fs::remove_file(&path).is_ok() {
@@ -640,6 +640,7 @@ fn sender_watches(dest: &std::path::Path) -> bool {
     let own_cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
+    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
     let own_trays = own_tray_names(&own_cwd);
     // `accept_path` classifies by the first path component (the inbox dir
     // name); hand it a probe file inside `dest` so it judges that dir.
@@ -1150,7 +1151,7 @@ mod tests {
         std::fs::write(bdir.join("unread.signal"), "f|p|/x|msg\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
 
-        let key = format!("{}:unread.signal", bdir.display());
+        let key = attend_state::seen_key("unread.signal");
         let empty: std::collections::HashSet<String> = Default::default();
         let seen: std::collections::HashSet<String> = [key].into_iter().collect();
 

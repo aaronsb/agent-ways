@@ -14,6 +14,9 @@
 //!     sender cwd in the wire format. A live recipient that has not yet
 //!     read a shared signal is safe: a project leaves `~/.claude/projects`
 //!     only when the user deletes it, long after delivery latency.
+//!
+//! A tray is named by `claude_sessions::attend_key`: the project slug, `-`,
+//! and a hash of the path. The slug part is what liveness checks.
 
 use std::path::Path;
 
@@ -28,9 +31,104 @@ pub(crate) struct CleanupStats {
     pub(crate) dirs_removed: u64,
 }
 
-/// Is the project owning `encoded_name` still tracked by Claude Code?
-fn project_live(projects: &Path, encoded_name: &str) -> bool {
-    projects.join(encoded_name).is_dir()
+/// Is the project owning the tray `tray` still tracked by Claude Code? The
+/// tray's slug part names the project directory, exactly or, for a slug
+/// Claude Code truncated, by its 200-character prefix.
+fn tray_live(projects: &Path, tray: &str) -> bool {
+    if let Some(slug) = claude_sessions::attend_key_slug(tray) {
+        if projects.join(slug).is_dir() {
+            return true;
+        }
+        if slug.len() > claude_sessions::MAX_SLUG_LEN {
+            let prefix = &slug[..=claude_sessions::MAX_SLUG_LEN];
+            let any = std::fs::read_dir(projects).into_iter().flatten().flatten().any(|e| {
+                e.file_name().to_str().is_some_and(|n| n.starts_with(prefix)) && e.path().is_dir()
+            });
+            if any {
+                return true;
+            }
+        }
+    }
+    // transition read: removed by #701 (ADR-506)
+    // A tray named under attend's old rule for a path of letters, digits,
+    // `/`, `_` and `.` has the project directory's own name.
+    projects.join(tray).is_dir()
+}
+
+/// Move pending signals out of trays named under attend's old rule into
+/// the project's [`claude_sessions::attend_key`] tray, then remove the
+/// emptied old trays. Runs before any sweep, at `attend run` start and in
+/// every cleanup, so mail in an old tray is neither stranded nor reaped.
+///
+/// The project of an old tray is found among `known_paths` (this session's
+/// origin and the session records' cwds) and the paths the project
+/// directories record; an old tray matches a path when it is one of that
+/// path's [`claude_sessions::legacy_attend_names`]. Signal filenames are
+/// unique ids, so a move never overwrites; one already present is left in
+/// place. Returns the number of signals moved.
+// transition read: removed by #701 (ADR-506)
+pub(crate) fn migrate_legacy_trays(base: &Path, projects: &Path, known_paths: &[String], dry_run: bool) -> u64 {
+    let Ok(entries) = std::fs::read_dir(base) else { return 0 };
+    let trays: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| !n.starts_with('_') && !n.starts_with('@'))
+        .collect();
+    let mut moved = 0;
+    for tray in &trays {
+        // Every old-rule name encodes to the project directory's name.
+        let dir_name = claude_sessions::project_slug(tray);
+        let resolved = projects
+            .join(&dir_name)
+            .is_dir()
+            .then(|| claude_sessions::resolve_project_path(projects, &dir_name))
+            .flatten();
+        let Some(path) = known_paths
+            .iter()
+            .map(String::as_str)
+            .chain(resolved.as_deref())
+            .find(|p| claude_sessions::legacy_attend_names(p).iter().any(|n| n == tray))
+        else {
+            continue;
+        };
+        let target = base.join(claude_sessions::attend_key(path));
+        let old = base.join(tray);
+        let Ok(files) = std::fs::read_dir(&old) else { continue };
+        for f in files.flatten() {
+            let name = f.file_name();
+            if !name.to_string_lossy().ends_with(".signal") || target.join(&name).exists() {
+                continue;
+            }
+            if dry_run {
+                println!("would move {} to {}", f.path().display(), target.display());
+                continue;
+            }
+            if std::fs::create_dir_all(&target).is_ok() && std::fs::rename(f.path(), target.join(&name)).is_ok() {
+                moved += 1;
+            }
+        }
+        if !dry_run {
+            let _ = std::fs::remove_dir(&old);
+        }
+    }
+    moved
+}
+
+/// The paths cleanup and `attend run` can name trays for without reading
+/// the project directories: this session's origin and every session
+/// record's cwd.
+pub(crate) fn known_project_paths() -> Vec<String> {
+    let mut paths = vec![crate::util::own_origin_cwd()];
+    paths.extend(
+        claude_sessions::ClaudeDir::user()
+            .session_records()
+            .into_iter()
+            .filter_map(|r| r.cwd.map(|c| attend_session::normalize_origin(&c))),
+    );
+    paths.retain(|p| !p.is_empty());
+    paths.dedup();
+    paths
 }
 
 /// Sender cwd from a signal's wire line `from|project|cwd|...`. Returns
@@ -52,11 +150,25 @@ fn sender_cwd(content: &str) -> Option<&str> {
 ///
 /// On `dry_run`, prints a line per candidate instead of deleting.
 pub(crate) fn run_cleanup(base: &Path, dry_run: bool, nuke_all: bool) -> CleanupStats {
+    run_cleanup_in(base, &projects_base(), &known_project_paths(), dry_run, nuke_all)
+}
+
+/// [`run_cleanup`] against explicit roots, for tests.
+pub(crate) fn run_cleanup_in(
+    base: &Path,
+    projects: &Path,
+    known_paths: &[String],
+    dry_run: bool,
+    nuke_all: bool,
+) -> CleanupStats {
     let mut stats = CleanupStats::default();
     if !base.is_dir() {
         return stats;
     }
-    let projects = projects_base();
+    // Before any sweep: an old-named tray of a live project is otherwise
+    // judged dead by its name and reaped with its unread mail.
+    // transition read: removed by #701 (ADR-506)
+    migrate_legacy_trays(base, projects, known_paths, dry_run);
 
     let entries = match std::fs::read_dir(base) {
         Ok(e) => e,
@@ -76,7 +188,11 @@ pub(crate) fn run_cleanup(base: &Path, dry_run: bool, nuke_all: bool) -> Cleanup
         // Shared rooms (`_broadcast`, `@group`) are decided per-signal by
         // sender; everything else is a project tray decided by its owner.
         let shared = dir_name.starts_with('_') || dir_name.starts_with('@');
-        let tray_dead = !shared && !project_live(&projects, &dir_name);
+        // transition read: removed by #701 (ADR-506)
+        // A tray in no attend-key form that the migration could not place
+        // is kept while it holds signals: its project cannot be judged.
+        let unplaced = claude_sessions::attend_key_slug(&dir_name).is_none();
+        let tray_dead = !shared && !unplaced && !tray_live(projects, &dir_name);
 
         let files = match std::fs::read_dir(&subpath) {
             Ok(e) => e,
@@ -101,7 +217,7 @@ pub(crate) fn run_cleanup(base: &Path, dry_run: bool, nuke_all: bool) -> Cleanup
                 std::fs::read_to_string(&path)
                     .ok()
                     .and_then(|c| sender_cwd(&c).map(str::to_string))
-                    .map(|cwd| claude_sessions::find_project_dir_in(&projects, &cwd).is_none())
+                    .map(|cwd| claude_sessions::find_project_dir_in(projects, &cwd).is_none())
                     .unwrap_or(false)
             } else {
                 tray_dead
@@ -168,5 +284,67 @@ pub(crate) fn cmd_cleanup(dry_run: bool, nuke_all: bool) {
             "cleaned up {} signal file(s), freed {} bytes (examined {}); removed {} empty project dir(s)",
             stats.removed, stats.bytes, stats.examined, stats.dirs_removed,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("attend-cleanup-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (base, projects) = (root.join("signals"), root.join("projects"));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&projects).unwrap();
+        (root, base, projects)
+    }
+
+    fn signal(dir: &Path, name: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(name), "claude:x|p|/src|hi\n").unwrap();
+    }
+
+    #[test]
+    fn a_live_projects_old_named_tray_is_moved_not_reaped() {
+        // `/srv/my proj` is live (Claude Code's dir `-srv-my-proj`), and its
+        // tray was named under attend's old rule, which kept the space. The
+        // sweep judged it dead by name and deleted its unread mail.
+        let (root, base, projects) = fixture("move");
+        let project = "/srv/my proj";
+        std::fs::create_dir_all(projects.join("-srv-my-proj")).unwrap();
+        signal(&base.join("-srv-my proj"), "m1.signal");
+
+        let stats = run_cleanup_in(&base, &projects, &[project.to_string()], false, false);
+        assert_eq!(stats.removed, 0);
+        let key = claude_sessions::attend_key(project);
+        assert!(base.join(&key).join("m1.signal").exists(), "the signal moved into the key tray");
+        assert!(!base.join("-srv-my proj").exists(), "the emptied old tray is removed");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn an_unplaced_old_tray_keeps_its_signals() {
+        // The project is not known to this machine: the tray cannot be
+        // judged, so its mail stays.
+        let (root, base, projects) = fixture("unplaced");
+        signal(&base.join("-gone-a b"), "m2.signal");
+        run_cleanup_in(&base, &projects, &[], false, false);
+        assert!(base.join("-gone-a b").join("m2.signal").exists());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_dead_projects_key_tray_is_reaped_and_a_live_one_kept() {
+        let (root, base, projects) = fixture("keys");
+        std::fs::create_dir_all(projects.join("-srv-live")).unwrap();
+        let live = base.join(claude_sessions::attend_key("/srv/live"));
+        let dead = base.join(claude_sessions::attend_key("/srv/dead"));
+        signal(&live, "a.signal");
+        signal(&dead, "b.signal");
+        run_cleanup_in(&base, &projects, &[], false, false);
+        assert!(live.join("a.signal").exists());
+        assert!(!dead.exists());
+        std::fs::remove_dir_all(&root).ok();
     }
 }

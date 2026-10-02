@@ -37,14 +37,14 @@ pub fn project_slug(path: &str) -> String {
 
 /// Claude Code's path hash: `h = (h << 5) - h + unit`, wrapping at 32 bits,
 /// over UTF-16 code units.
-fn path_hash(path: &str) -> i32 {
+pub(crate) fn path_hash(path: &str) -> i32 {
     path.encode_utf16().fold(0i32, |h, unit| {
         h.wrapping_shl(5).wrapping_sub(h).wrapping_add(i32::from(unit))
     })
 }
 
 /// Lowercase base 36, as JavaScript's `Number.prototype.toString(36)`.
-fn base36(mut n: u32) -> String {
+pub(crate) fn base36(mut n: u32) -> String {
     const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
     if n == 0 {
         return "0".to_string();
@@ -67,21 +67,6 @@ pub fn slug_matches(name: &str, path: &str) -> bool {
         return true;
     }
     slug.len() > MAX_SLUG_LEN && name.starts_with(&slug[..=MAX_SLUG_LEN])
-}
-
-/// The name attend gave a project's signal directory and registry file before
-/// it adopted [`project_slug`]: `/`, `_`, `.`, `\` and `:` became `-` and
-/// every other character was kept, with no length limit.
-///
-/// Attend reads directories named this way for one release after the switch
-/// (ADR-504), then this function is removed.
-pub fn legacy_attend_name(path: &str) -> String {
-    path.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' | '\\' | ':' => '-',
-            _ => c,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -163,11 +148,5 @@ mod tests {
         assert_eq!(base36(36), "10");
         // Math.abs(-2147483648).toString(36)
         assert_eq!(base36(i32::MIN.unsigned_abs()), "zik0zk");
-    }
-
-    #[test]
-    fn legacy_attend_name_keeps_spaces_and_symbols() {
-        assert_eq!(legacy_attend_name("/home/a/.claude"), "-home-a--claude");
-        assert_eq!(legacy_attend_name("/x/a b+c"), "-x-a b+c");
     }
 }

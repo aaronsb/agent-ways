@@ -1689,6 +1689,7 @@ version = "0.6.0"
 dependencies = [
  "attend-identity-view",
  "attend-session",
+ "attend-state",
  "claude-sessions",
  "sensor-trait",
  "serde_json",

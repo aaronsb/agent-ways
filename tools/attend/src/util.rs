@@ -34,26 +34,12 @@ pub(crate) fn projects_base() -> std::path::PathBuf {
     claude_sessions::ClaudeDir::user().projects_dir()
 }
 
-/// The name of a project's signal tray: Claude Code's project slug
-/// (`claude_sessions::project_slug`), so tray creation and the
-/// project-liveness lookup that reaps trays can never disagree on a path's
-/// encoded name (ADR-136 Decision 3).
+/// The name of a project's signal tray, `claude_sessions::attend_key`: the
+/// project slug, so the project-liveness lookup that reaps trays reads the
+/// project directory from it (ADR-136 Decision 3), and a hash of the full
+/// path, so two projects with one slug never share a tray.
 pub(crate) fn encode_project(path: &str) -> String {
-    claude_sessions::project_slug(path)
-}
-
-/// The names of a project's own tray to read: [`encode_project`], then the
-/// name attend gave it before adopting Claude Code's slug, when that
-/// differs. The old name is read for one release (ADR-504); sends go to
-/// the new one only.
-pub(crate) fn own_tray_names(path: &str) -> Vec<String> {
-    let current = encode_project(path);
-    let legacy = claude_sessions::legacy_attend_name(path);
-    if legacy == current {
-        vec![current]
-    } else {
-        vec![current, legacy]
-    }
+    claude_sessions::attend_key(path)
 }
 
 /// Delegate to the canonical identity derivation (issue #378). No

@@ -250,7 +250,8 @@ impl PeerSensor {
         // Directories to scan: own project + broadcast + joined channels.
         // The own tray is named by Claude Code's project slug; for one release
         // the tray named under attend's old rule is read too (ADR-504).
-        let own_trays = own_tray_names(&focus.working_dir);
+        // transition read: removed by #701 (ADR-506) — the old tray names after the key.
+        let own_trays = claude_sessions::attend_tray_names(&focus.working_dir);
         let mut scan_dirs: Vec<PathBuf> = own_trays.iter().map(|n| base.join(n)).collect();
         scan_dirs.push(base.join("_broadcast"));
 
@@ -284,8 +285,9 @@ impl PeerSensor {
                     _ => continue,
                 };
 
-                // Skip already-seen (use full path to avoid collisions across dirs)
-                let key = format!("{}:{}", dir.display(), filename);
+                // Skip already-seen. The key is the filename, a unique
+                // signal id, so a signal moved between trays stays seen.
+                let key = attend_state::seen_key(&filename);
                 if self.seen_signals.contains(&key) {
                     continue;
                 }
@@ -474,13 +476,14 @@ impl PeerSensor {
                 .unwrap_or("?")
                 .to_string();
 
-            // Read transcript for context % and model
-            let (context_percent, model) = self
-                .read_transcript_summary(&sf.cwd, &sf.session_id)
+            // One lookup per peer per poll: a peer with no transcript yet
+            // would otherwise cost a scan of every project twice.
+            let transcript = self.claude.find_transcript(Some(&sf.cwd), &sf.session_id);
+            let (context_percent, model) = transcript
+                .as_deref()
+                .and_then(transcript_summary)
                 .unwrap_or((0.0, "-".to_string()));
-
-            // Determine status from transcript mtime
-            let status = self.infer_status(&sf.cwd, &sf.session_id);
+            let status = infer_status(transcript.as_deref());
 
             peers.insert(sf.session_id, PeerSummary {
                 pid: sf.pid,
@@ -495,67 +498,104 @@ impl PeerSensor {
         peers
     }
 
+    #[cfg(test)]
     fn read_transcript_summary(&self, cwd: &str, session_id: &str) -> Option<(f64, String)> {
-        let path = self.claude.find_transcript(Some(cwd), session_id)?;
-
-        // Only the last 8 KB: recent usage is all this needs, and a long
-        // transcript runs to megabytes.
-        let content = fs::read(&path).ok()?;
-        let tail = &content[content.len().saturating_sub(8192)..];
-        let tail = String::from_utf8_lossy(tail);
-
-        // Sentinel turns (`<synthetic>`) are skipped by `last_model`, so a
-        // peer whose newest turn is synthetic keeps its real model (ADR-166).
-        let model = claude_sessions::usage::last_model(&tail)
-            .filter(|m| !ways_core::context_window::is_sentinel(m))
-            .unwrap_or_else(|| "-".to_string());
-        let context_tokens = claude_sessions::usage::last_context_tokens(&tail).unwrap_or(0);
-        // The window comes from the one resolver (ADR-166) — this sensor used to
-        // carry its own substring rules, which disagreed with the gauge's about
-        // sonnet-4.
-        //
-        // `resolve_for_foreign_session`, not `resolve`: this window belongs to the
-        // *peer's* session, and `CLAUDE_CONTEXT_WINDOW` states the window of the
-        // process that set it. Applying the operator's override to a peer would
-        // compute that peer's fill against the observer's window — an operator who
-        // set it to 1M would see a haiku peer at 190K/200K (about to compact)
-        // rendered as 19% full, and miss the one peer that actually needs room.
-        //
-        // `-` is the no-model placeholder, not a model id: with no model there is
-        // no meaningful percentage, so the peer's fill is suppressed rather than
-        // defaulted to a number that would look authoritative.
-        let context_window: u64 = if model == "-" {
-            0
-        } else {
-            ways_core::context_window::resolve_for_foreign_session(Some(&model)).tokens
-        };
-        let context_percent = if context_window > 0 {
-            (context_tokens as f64 / context_window as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        Some((context_percent, model))
+        transcript_summary(&self.claude.find_transcript(Some(cwd), session_id)?)
     }
 
+    #[cfg(test)]
     fn infer_status(&self, cwd: &str, session_id: &str) -> PeerStatus {
-        let mtime = self
-            .claude
-            .find_transcript(Some(cwd), session_id)
-            .and_then(|path| fs::metadata(path).ok())
-            .and_then(|m| m.modified().ok());
+        infer_status(self.claude.find_transcript(Some(cwd), session_id).as_deref())
+    }
+}
 
-        match mtime {
-            Some(t) => {
-                let age = t.elapsed().unwrap_or_default();
-                if age.as_secs() < 30 {
-                    PeerStatus::Working
-                } else {
-                    PeerStatus::Waiting
-                }
+/// The last complete lines of `path` that hold an assistant turn with
+/// usage: a 64 KB tail, doubled until it holds one or reaches the start of
+/// the file. A long final assistant line (tool output, long answers run
+/// past 49 KB) is read whole rather than cut, which `serde_json` cannot
+/// parse.
+fn usage_tail(path: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut size: u64 = 64 * 1024;
+    loop {
+        let start = len.saturating_sub(size);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).ok()?;
+        // Drop the partial first line unless the read began at the start.
+        let body = if start == 0 {
+            &buf[..]
+        } else {
+            match buf.iter().position(|&b| b == b'\n') {
+                Some(i) => &buf[i + 1..],
+                None => &[][..],
             }
-            None => PeerStatus::Unknown,
+        };
+        let text = String::from_utf8_lossy(body).into_owned();
+        if start == 0 || claude_sessions::usage::last_context_tokens(&text).is_some() {
+            return Some(text);
         }
+        size = size.saturating_mul(2);
+    }
+}
+
+/// A peer's context fill (percent of its window) and model, from the tail
+/// of its transcript.
+fn transcript_summary(path: &std::path::Path) -> Option<(f64, String)> {
+    let tail = usage_tail(path)?;
+
+    // Placeholder turns (`<synthetic>`, `-`, `unknown`) are skipped by
+    // `last_model`, so a peer whose newest turn is synthetic keeps its real
+    // model (ADR-166).
+    let model = claude_sessions::usage::last_model(&tail).unwrap_or_else(|| "-".to_string());
+    let context_tokens = claude_sessions::usage::last_context_tokens(&tail).unwrap_or(0);
+    // The window comes from the one resolver (ADR-166) — this sensor used to
+    // carry its own substring rules, which disagreed with the gauge's about
+    // sonnet-4.
+    //
+    // `resolve_for_foreign_session`, not `resolve`: this window belongs to the
+    // *peer's* session, and `CLAUDE_CONTEXT_WINDOW` states the window of the
+    // process that set it. Applying the operator's override to a peer would
+    // compute that peer's fill against the observer's window — an operator who
+    // set it to 1M would see a haiku peer at 190K/200K (about to compact)
+    // rendered as 19% full, and miss the one peer that actually needs room.
+    //
+    // `-` is the no-model placeholder, not a model id: with no model there is
+    // no meaningful percentage, so the peer's fill is suppressed rather than
+    // defaulted to a number that would look authoritative.
+    let context_window: u64 = if model == "-" {
+        0
+    } else {
+        ways_core::context_window::resolve_for_foreign_session(Some(&model)).tokens
+    };
+    let context_percent = if context_window > 0 {
+        (context_tokens as f64 / context_window as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    Some((context_percent, model))
+}
+
+/// Working when the transcript changed in the last 30 s, else waiting;
+/// unknown without one.
+fn infer_status(transcript: Option<&std::path::Path>) -> PeerStatus {
+    let mtime = transcript
+        .and_then(|path| fs::metadata(path).ok())
+        .and_then(|m| m.modified().ok());
+
+    match mtime {
+        Some(t) => {
+            let age = t.elapsed().unwrap_or_default();
+            if age.as_secs() < 30 {
+                PeerStatus::Working
+            } else {
+                PeerStatus::Waiting
+            }
+        }
+        None => PeerStatus::Unknown,
     }
 }
 
@@ -689,7 +729,8 @@ impl Sensor for PeerSensor {
         }
         for (key, value) in state {
             match key.as_str() {
-                "seen_signal" => { self.seen_signals.insert(value.clone()); }
+                // transition read: removed by #701 (ADR-506)
+                "seen_signal" => { self.seen_signals.insert(attend_state::normalize_seen_key(value)); }
                 "reply_hint_shown" => { self.reply_hint_shown = value == "true"; }
                 // Legacy "signal_salience" rows (from before the message
                 // lane stopped using the per-signal gate) are ignored.
@@ -779,19 +820,6 @@ fn pid_is_claude(pid: u32) -> bool {
 /// sensor's own-session filter.
 fn is_own_session(session_pid: u32, own_pid: u32) -> bool {
     attend_session::pid_has_ancestor(own_pid, session_pid)
-}
-
-/// The names of this project's own signal tray: Claude Code's project slug,
-/// then the name attend gave it before, when that differs. The old name is
-/// read for one release (ADR-504).
-fn own_tray_names(cwd: &str) -> Vec<String> {
-    let current = claude_sessions::project_slug(cwd);
-    let legacy = claude_sessions::legacy_attend_name(cwd);
-    if legacy == current {
-        vec![current]
-    } else {
-        vec![current, legacy]
-    }
 }
 
 /// Find the Claude session ID for the current process.
@@ -1073,12 +1101,23 @@ mod tests {
     }
 
     #[test]
-    fn own_tray_names_include_the_legacy_name_once() {
-        assert_eq!(own_tray_names("/a/b_c"), vec!["-a-b-c".to_string()]);
-        assert_eq!(
-            own_tray_names("/a/b c"),
-            vec!["-a-b-c".to_string(), "-a-b c".to_string()]
-        );
+    fn transcript_summary_reads_a_final_line_longer_than_the_tail() {
+        // A final assistant turn of 100 KB: an 8 KB tail cut it and lost the
+        // usage; the tail now grows until it holds the whole line.
+        let root = temp_claude("longline");
+        let path = root.join("t.jsonl");
+        let long = "x".repeat(100 * 1024);
+        fs::write(
+            &path,
+            format!(
+                "{{\"type\":\"user\"}}\n{{\"type\":\"assistant\",\"message\":{{\"model\":\"claude-opus-4-8\",\"content\":\"{long}\",\"usage\":{{\"input_tokens\":1000,\"cache_read_input_tokens\":99000,\"cache_creation_input_tokens\":0}}}}}}\n"
+            ),
+        )
+        .unwrap();
+        let (pct, model) = transcript_summary(&path).unwrap();
+        assert_eq!(model, "claude-opus-4-8");
+        assert!(pct > 0.0);
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
