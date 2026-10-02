@@ -123,3 +123,54 @@ fn a_run_started_after_a_move_performs_it() {
     assert!(state.contains("other-1-seen"), "seen-set moved: {state}");
     assert!(!f.state_file(old).exists());
 }
+
+/// #725 third review, finding 1: a run killed before it could hand over,
+/// then started fresh under the new id (no ATTEND_SESSION_MOVED_FROM),
+/// adopts the old id's state through the Claude process key.
+#[test]
+fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
+    let f = Fixture::new("idrestart");
+    let old = f.sid.clone();
+    let registry = f.cache().join("instances").join(format!("{}.yaml", f.project_tray()));
+    f.ok(&["join", "side"]);
+    {
+        let run = f.run();
+        f.put("_broadcast", "other-1-early", "EARLY-OPEN", Duration::ZERO);
+        run.wait_for("the early message", Duration::from_secs(20), |r| r.output().contains("EARLY-OPEN"));
+        run.wait_for("its checkpoint", Duration::from_secs(10), |_| {
+            std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-early"))
+        });
+    } // killed with SIGKILL: no hand-over
+
+    f.set_session_id("sess-restart-new");
+    let run = f.run();
+    run.wait_for("the adoption", Duration::from_secs(20), |_| {
+        f.marker("sess-restart-new").exists() && !f.marker(&old).exists()
+    });
+    let reg = std::fs::read_to_string(&registry).unwrap();
+    assert!(reg.contains("sess-restart-new") && !reg.contains(&old), "{reg}");
+    assert!(reg.contains("instance: alpha"), "the slot name carries over: {reg}");
+    assert!(f.ok(&["channels", "--joined"]).contains("#side"));
+    f.put("@side", "other-1-side", "SIDE-AFTER", Duration::ZERO);
+    run.wait_for("the channel message", Duration::from_secs(20), |r| r.output().contains("SIDE-AFTER"));
+    assert!(!run.output().contains("EARLY-OPEN"), "nothing seen is shown again: {}", run.output());
+}
+
+/// #725 third review, finding 2: when the hand-over exec fails, the run
+/// says so on the Monitor and exits, instead of staying on the old id.
+#[test]
+fn a_failed_hand_over_exits_with_a_restart_line() {
+    let f = Fixture::new("idexecfail");
+    let bin = f.home.join("attend-copy");
+    std::fs::copy(env!("CARGO_BIN_EXE_attend"), &bin).unwrap();
+    let mut run = f.run_from(&bin, &[]);
+    run.wait_for("registration", Duration::from_secs(20), |_| f.marker(&f.sid).exists());
+    std::fs::remove_file(&bin).unwrap();
+    f.set_session_id("sess-execfail-new");
+    let start = std::time::Instant::now();
+    while !run.exited() && start.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(run.exited(), "the run must stop: {}", run.output());
+    assert!(run.output().contains("restart attend"), "{}", run.output());
+}

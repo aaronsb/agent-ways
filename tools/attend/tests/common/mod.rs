@@ -101,7 +101,11 @@ impl Fixture {
     }
 
     fn command(&self) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_attend"));
+        self.command_from(Path::new(env!("CARGO_BIN_EXE_attend")))
+    }
+
+    fn command_from(&self, bin: &Path) -> Command {
+        let mut c = Command::new(bin);
         c.env("HOME", &self.home)
             .env("XDG_CACHE_HOME", self.home.join(".cache"))
             .env("XDG_CONFIG_HOME", self.home.join("config"))
@@ -160,8 +164,13 @@ impl Fixture {
 
     /// [`Fixture::run`] with extra environment.
     pub fn run_with(&self, env: &[(&str, &str)]) -> Run {
+        self.run_from(Path::new(env!("CARGO_BIN_EXE_attend")), env)
+    }
+
+    /// `attend run` from the binary at `bin`.
+    pub fn run_from(&self, bin: &Path, env: &[(&str, &str)]) -> Run {
         let log = self.home.join(format!("run-{}.out", self.sid));
-        let mut cmd = self.command();
+        let mut cmd = self.command_from(bin);
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -192,6 +201,11 @@ pub struct Run {
 }
 
 impl Run {
+    /// Whether the process has exited.
+    pub fn exited(&mut self) -> bool {
+        self.child.try_wait().ok().flatten().is_some()
+    }
+
     pub fn output(&self) -> String {
         std::fs::read_to_string(&self.log).unwrap_or_default()
     }

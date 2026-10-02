@@ -25,6 +25,9 @@ expect() {
   local want=$1 label=$2 name=$3 body=$4 d got
   d=$(scratch)
   [[ -n $body ]] && printf '%s\n' "$body" > "$d/.github/workflows/$name"
+  # A red case sits beside a valid workflow, so it is red for the stale
+  # form and not because nothing was checked.
+  [[ $want == red && -n $body ]] && printf '%s\n' "$good" > "$d/.github/workflows/valid.yml"
   if bash "$d/tests/workflow-crates-test.sh" >/dev/null 2>&1; then got=green; else got=red; fi
   rm -rf "$d"
   if [[ $got == "$want" ]]; then
@@ -77,6 +80,30 @@ expect green "a cmake component is not a crate" cmake.yml 'jobs:
       kind: cmake
       test: |
         cargo test --manifest-path tools/Cargo.toml -p attend-presence'
+
+expect red "a quoted component" quoted.yml 'jobs:
+  build:
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      component: "attend-session"'
+expect red "a cmake job does not exempt its neighbour" mixed.yml 'jobs:
+  embed:
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      component: way-embed
+      kind: cmake
+  attend:
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      component: attend-session'
+expect red "a tools/<dir> path with no slash" noslash.yml 'on:
+  pull_request:
+    paths:
+      - '"'"'tools/attend-session*'"'"''
+expect green "mkdir -p after cargo is not a package" mkdir.yml 'jobs:
+  t:
+    steps:
+      - run: cargo build --release -p attend-presence && mkdir -p dist'
 
 echo "Results: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

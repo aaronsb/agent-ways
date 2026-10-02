@@ -23,7 +23,8 @@ fn whoami_and_status_print_the_cache_root() {
     let home = std::env::temp_dir().join(format!("attend-cache-root-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
-    let cache = home.join("elsewhere-cache");
+    // Long, as a TMPDIR or a deep home makes it: the row must not be cut.
+    let cache = home.join(format!("elsewhere-cache-{}", "deep".repeat(30)));
     let root = cache.join("attend").to_string_lossy().into_owned();
 
     let whoami = stdout_of(&["whoami"], &cache, &home);
