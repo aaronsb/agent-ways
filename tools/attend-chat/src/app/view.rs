@@ -193,10 +193,15 @@ fn draw_compose(chat: &Chat, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>
     let inner = block.inner(area);
     f.render_widget(block, area);
     // Keep the cursor's row in view once the buffer outgrows the box.
+    // The rows the box really has, after layout, less the flag's row and
+    // an attachment row: a short terminal gives fewer than INPUT_ROWS.
+    let flag_h = 1;
+    let text_h = inner.height.saturating_sub(flag_h);
+    let room = (text_h as usize).saturating_sub(usize::from(!files.is_empty())).clamp(1, INPUT_ROWS);
     let cursor_row = rows.iter().position(|l| l.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::REVERSED))).unwrap_or(0);
-    let start = cursor_row.saturating_sub(INPUT_ROWS - 1);
+    let start = cursor_row.saturating_sub(room - 1);
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for (i, row) in rows.into_iter().enumerate().skip(start).take(INPUT_ROWS) {
+    for (i, row) in rows.into_iter().enumerate().skip(start).take(room) {
         let prompt = if i == 0 { "> " } else { "  " };
         let mut spans = vec![Span::styled(prompt, theme::accent())];
         spans.extend(row.spans);
@@ -205,8 +210,6 @@ fn draw_compose(chat: &Chat, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>
     if !files.is_empty() {
         lines.push(attachment_line(chat, files));
     }
-    let flag_h = 1;
-    let text_h = inner.height.saturating_sub(flag_h);
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
     let scope = tabs::send_scope(fg);
     if let Some(label) = super::destination_label(chat.input.text(), &scope) {

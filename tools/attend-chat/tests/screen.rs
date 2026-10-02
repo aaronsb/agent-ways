@@ -430,3 +430,24 @@ fn the_compose_box_wraps_by_word() {
     assert!(compose.len() >= 2, "{text}");
     assert!(compose.iter().all(|l| !l.contains("wor ") && !l.contains(" ord")), "no word is split: {compose:?}");
 }
+
+#[test]
+fn the_feed_shows_dates_once_the_day_changes() {
+    // 23:59 UTC, then 00:01 the next day, with the screen idle between.
+    let late = UNIX_EPOCH + Duration::from_secs(NOW + 10 * 3600 - 60);
+    let mut c = chat_at(ColorDepth::Ansi16, None).pinned(late, 0);
+    c.tick();
+    assert!(testkit::text(&testkit::render_screen(&mut c, 80, 25)).contains("13:59"));
+    let mut c = c.pinned(late + Duration::from_secs(120), 0);
+    c.tick();
+    let text = testkit::text(&testkit::render_screen(&mut c, 80, 25));
+    assert!(text.contains("10-02 13:59"), "yesterday's times show their date: {text}");
+}
+
+#[test]
+fn a_short_terminal_keeps_the_compose_cursor_in_view() {
+    let mut c = chat();
+    typed(&mut c, "one two three four five six seven eight nine ten eleven twelve");
+    let text = testkit::text(&testkit::render_screen(&mut c, 30, 10));
+    assert!(text.contains("twelve"), "the row with the cursor is shown: {text}");
+}

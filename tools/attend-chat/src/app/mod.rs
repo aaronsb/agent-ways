@@ -116,6 +116,9 @@ pub struct Chat {
     dry_run: bool,
     /// Frames drawn afresh, for tests of the skip.
     draws: usize,
+    /// The time the last tick saw, to notice the local day changing: the
+    /// feed's times are relative to the day (`HH:MM` today, a date before).
+    day_seen: Option<SystemTime>,
 }
 
 impl Chat {
@@ -145,6 +148,7 @@ impl Chat {
             drawn_fresh: false,
             dry_run: false,
             draws: 0,
+            day_seen: None,
         }
     }
 
@@ -417,6 +421,7 @@ impl Screen for Chat {
 
     fn tick(&mut self) {
         self.drain();
+        self.new_day();
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             // Human presence (ADR-170): while the chat is open, keep
             // `heartbeat/<username>` fresh so this human counts as a live
@@ -431,6 +436,32 @@ impl Screen for Chat {
 }
 
 impl Chat {
+    /// The time frames show times against.
+    fn now(&self) -> SystemTime {
+        match self.clock {
+            Clock::Live => SystemTime::now(),
+            Clock::Pinned { now, .. } => now,
+        }
+    }
+
+    /// At the local day's change, rebuild the feed: a time shown as
+    /// `HH:MM` yesterday shows its date now, and attachment chips are
+    /// checked against the files again.
+    fn new_day(&mut self) {
+        let now = self.now();
+        if let Some(prev) = self.day_seen {
+            let label = match self.clock {
+                Clock::Live => agent_fmt::compact_time(prev, now),
+                Clock::Pinned { offset, .. } => agent_fmt::compact_time_with_offset(prev, now, offset),
+            };
+            // `HH:MM` only on the same local day; a date has a `-`.
+            if label.contains('-') {
+                self.invalidate();
+            }
+        }
+        self.day_seen = Some(now);
+    }
+
     /// Read the peers and channels again, and rebuild the feed only when
     /// what it shows of them changed: an idle refresh of an unchanged
     /// world costs a read, not a re-layout of every message.
