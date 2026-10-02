@@ -52,7 +52,9 @@ impl Fixture {
     fn transcript(&self, project: &str, sid: &str, cwd: &str, mtime: u64) -> PathBuf {
         let name = claude_sessions::project_slug(project);
         let body = format!(
-            "{{\"type\":\"mode\",\"mode\":\"default\"}}\n{{\"type\":\"user\",\"cwd\":\"{cwd}\",\"message\":\"hello from {cwd}\"}}\n"
+            "{{\"type\":\"mode\",\"mode\":\"default\"}}\n{{\"type\":\"user\",\"cwd\":{},\"message\":{}}}\n",
+            js(cwd),
+            js(&format!("hello from {cwd}"))
         );
         let p = self.write(&format!(".claude/projects/{name}/{sid}.jsonl"), &body);
         set_mtime(&p, mtime);
@@ -79,6 +81,11 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.base);
     }
+}
+
+/// `s` as a JSON string literal: Windows paths hold backslashes.
+fn js(s: &str) -> String {
+    serde_json::to_string(s).unwrap()
 }
 
 fn set_mtime(p: &Path, secs: u64) {
@@ -306,10 +313,10 @@ fn relocate_to_a_long_new_path_beside_a_sibling_with_history() {
     // NEW has no history yet; a sibling sharing its 200-character prefix
     // is not ambiguity, and the move goes to NEW's own slug.
     let f = populated("reloc-long-new");
-    let base = f.base.join(format!("work/{}", "w".repeat(220))).to_string_lossy().into_owned();
-    let (wt1, wt2) = (format!("{base}/wt1"), format!("{base}/wt2"));
+    let base = f.base.join("work").join("w".repeat(220));
+    let (wt1, wt2) = (base.join("wt1").to_string_lossy().into_owned(), base.join("wt2").to_string_lossy().into_owned());
     let name1 = claude_sessions::project_slug(&wt1);
-    f.write(&format!(".claude/projects/{name1}/s.jsonl"), &format!("{{\"cwd\":\"{wt1}\"}}\n"));
+    f.write(&format!(".claude/projects/{name1}/s.jsonl"), &format!("{{\"cwd\":{}}}\n", js(&wt1)));
     let mut args = relocate_args("/srv/app_one", &wt2);
     args.execute = true;
     let (ok, out) = f.run(ProjectsCommand::Relocate(args));
@@ -336,7 +343,7 @@ fn relocate_previews_by_default() {
 #[test]
 fn relocate_execute_moves_history_and_config() {
     let f = populated("reloc-exec");
-    let target = f.base.join("work/app-two");
+    let target = f.base.join("work").join("app-two");
     let target_s = target.to_string_lossy().into_owned();
     std::fs::write(
         &f.env.claude_json,
@@ -357,7 +364,7 @@ fn relocate_execute_moves_history_and_config() {
     assert!(target.is_dir(), "the working directory is created");
     assert!(!f.projects().join("-srv-app-one").exists(), "{out}");
     let s1 = std::fs::read_to_string(new_dir.join("s1.jsonl")).unwrap();
-    assert!(s1.contains(&format!("\"cwd\":\"{target_s}\"")), "{s1}");
+    assert!(s1.contains(&format!("\"cwd\":{}", js(&target_s))), "{s1}");
     // Message text is left as the record of what happened.
     assert!(s1.contains("hello from /srv/app_one"), "{s1}");
     assert!(new_dir.join("memory/MEMORY.md").exists());
@@ -366,7 +373,7 @@ fn relocate_execute_moves_history_and_config() {
     let keys: Vec<&String> = cfg["projects"].as_object().unwrap().keys().collect();
     assert_eq!(keys, vec!["/x", &target_s, "/z"], "the renamed key keeps its place");
     let hist = std::fs::read_to_string(f.env.claude.history_file()).unwrap();
-    assert!(hist.contains(&format!("\"project\":\"{target_s}\"")) && hist.contains("\"/other\""));
+    assert!(hist.contains(&format!("\"project\":{}", js(&target_s))) && hist.contains("\"/other\""));
     assert!(out.contains("Done. Resume with:"), "{out}");
     assert!(out.contains("To reverse: ways projects relocate"), "{out}");
     let backups = std::fs::read_dir(f.home())
@@ -381,7 +388,7 @@ fn relocate_execute_moves_history_and_config() {
 fn relocate_refuses_a_live_session_and_an_existing_target() {
     let f = populated("reloc-refuse");
     f.transcript("/srv/app_one", "live", "/srv/app_one", super::epoch_now());
-    let target = f.base.join("work/t");
+    let target = f.base.join("work").join("t");
     let mut args = relocate_args("/srv/app_one", &target.to_string_lossy());
     args.execute = true;
     let (ok, out) = f.run(ProjectsCommand::Relocate(args));
@@ -399,13 +406,13 @@ fn relocate_refuses_a_live_session_and_an_existing_target() {
 fn relocate_merge_unions_the_index() {
     let f = populated("reloc-merge");
     // Executed relocations only ever target paths inside the fixture.
-    let new = f.base.join("work/new").to_string_lossy().into_owned();
+    let new = f.base.join("work").join("new").to_string_lossy().into_owned();
     std::fs::create_dir_all(&new).unwrap();
     let new_name = claude_sessions::project_slug(&new);
     f.transcript(&new, "N1", &new, NOW - 86_400);
     f.write(
         &format!(".claude/projects/{new_name}/sessions-index.json"),
-        &format!(r#"{{"entries":[{{"sessionId":"N1","projectPath":"{new}"}},{{"sessionId":"L1","summary":"stale copy"}}]}}"#),
+        &format!(r#"{{"entries":[{{"sessionId":"N1","projectPath":{}}},{{"sessionId":"L1","summary":"stale copy"}}]}}"#, js(&new)),
     );
     let mut args = relocate_args("/srv/legacy", &new);
     args.execute = true;
@@ -434,7 +441,7 @@ fn relocate_refuses_a_running_session_in_the_project() {
         ".claude/sessions/1.json",
         &format!(r#"{{"pid":{},"sessionId":"s1","cwd":"/srv/app_one"}}"#, std::process::id()),
     );
-    let target = f.base.join("work/t");
+    let target = f.base.join("work").join("t");
     let mut args = relocate_args("/srv/app_one", &target.to_string_lossy());
     let (ok, out) = f.run(ProjectsCommand::Relocate(relocate_args("/srv/app_one", &target.to_string_lossy())));
     assert!(ok && out.contains("running Claude Code session(s) have their working directory"), "{out}");
@@ -450,7 +457,7 @@ fn relocate_refuses_a_running_session_in_the_project() {
 fn relocate_resumes_after_a_failed_step() {
     use std::os::unix::fs::PermissionsExt;
     let f = populated("reloc-resume");
-    let target = f.base.join("work/resumed").to_string_lossy().into_owned();
+    let target = f.base.join("work").join("resumed").to_string_lossy().into_owned();
     f.write(".claude/history.jsonl", "{\"display\":\"hi\",\"project\":\"/srv/app_one\"}\n");
     let claude = f.home().join(".claude");
     // The history backup cannot be written: that step fails after the move.
@@ -467,7 +474,7 @@ fn relocate_resumes_after_a_failed_step() {
     let (ok, out) = f.run(ProjectsCommand::Relocate(args));
     assert!(ok && out.contains("resuming the remaining steps"), "{out}");
     let hist = std::fs::read_to_string(f.env.claude.history_file()).unwrap();
-    assert!(hist.contains(&format!("\"project\":\"{target}\"")), "{hist}");
+    assert!(hist.contains(&format!("\"project\":{}", js(&target))), "{hist}");
 }
 
 #[test]
@@ -478,8 +485,8 @@ fn relocate_refuses_an_unverified_long_prefix_match() {
     let base = format!("/{}", "a".repeat(220));
     let (a, b) = (format!("{base}/projA"), format!("{base}/projB"));
     let name_b = claude_sessions::project_slug(&b);
-    f.write(&format!(".claude/projects/{name_b}/s.jsonl"), &format!("{{\"cwd\":\"{b}\"}}\n"));
-    let target = f.base.join("work/x").to_string_lossy().into_owned();
+    f.write(&format!(".claude/projects/{name_b}/s.jsonl"), &format!("{{\"cwd\":{}}}\n", js(&b)));
+    let target = f.base.join("work").join("x").to_string_lossy().into_owned();
     let mut args = relocate_args(&a, &target);
     args.execute = true;
     let (ok, out) = f.run(ProjectsCommand::Relocate(args));

@@ -2323,6 +2323,7 @@ dependencies = [
  "walkdir",
  "ways-agent-core",
  "ways-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

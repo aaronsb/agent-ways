@@ -27,12 +27,12 @@ pub(super) fn remap(value: Option<&Value>, old: &str, new: &str) -> Option<Strin
     if v == old {
         Some(new.to_string())
     } else {
-        v.strip_prefix(old).filter(|r| r.starts_with('/')).map(|r| format!("{new}{r}"))
+        v.strip_prefix(old).filter(|r| r.starts_with(['/', '\\'])).map(|r| format!("{new}{r}"))
     }
 }
 
 pub(super) fn path_matches(value: &Value, old: &str) -> bool {
-    value.as_str().is_some_and(|v| v == old || v.strip_prefix(old).is_some_and(|r| r.starts_with('/')))
+    value.as_str().is_some_and(|v| v == old || v.strip_prefix(old).is_some_and(|r| r.starts_with(['/', '\\'])))
 }
 
 /// Does `field` hold a path at or under `old` anywhere below the top level?

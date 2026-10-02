@@ -52,32 +52,50 @@ const LIVE_SESSION_WINDOW: u64 = 120;
 
 // ── Paths ───────────────────────────────────────────────────────
 
-/// Absolute, `~`-expanded, lexically normalized, no trailing slash.
+/// Absolute, `~`-expanded, lexically normalized, no trailing separator.
+///
+/// A path starting with `/` is normalized on `/` as text, on every platform,
+/// because that is how Claude Code records it. Any other absolute path (a
+/// Windows `C:\x`) is normalized by its components. A relative path is
+/// joined to the working directory first.
 fn norm_path(p: &str, home: &str) -> String {
     let expanded = if p == "~" {
         home.to_string()
-    } else if let Some(rest) = p.strip_prefix("~/") {
-        format!("{home}/{rest}")
+    } else if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+        Path::new(home).join(rest).to_string_lossy().into_owned()
     } else {
         p.to_string()
     };
-    let abs = if expanded.starts_with('/') {
+    let abs = if expanded.starts_with('/') || Path::new(&expanded).is_absolute() {
         expanded
     } else {
-        let cwd = std::env::current_dir().map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
-        format!("{cwd}/{expanded}")
+        std::env::current_dir().unwrap_or_default().join(&expanded).to_string_lossy().into_owned()
     };
-    let mut parts: Vec<&str> = Vec::new();
-    for seg in abs.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
+    if abs.starts_with('/') {
+        let mut parts: Vec<&str> = Vec::new();
+        for seg in abs.split('/') {
+            match seg {
+                "" | "." => {}
+                ".." => {
+                    parts.pop();
+                }
+                s => parts.push(s),
             }
-            s => parts.push(s),
+        }
+        return format!("/{}", parts.join("/"));
+    }
+    let mut out = PathBuf::new();
+    for c in Path::new(&abs).components() {
+        match c {
+            std::path::Component::CurDir => {}
+            // `pop` never removes the root or a Windows prefix.
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
         }
     }
-    format!("/{}", parts.join("/"))
+    out.to_string_lossy().into_owned()
 }
 
 /// Confirm this relocation landed, and account for anything left behind in
@@ -224,15 +242,38 @@ fn merge_into(old_dir: &Path, new_dir: &Path, out: &mut dyn Write) -> Result<(),
 }
 
 /// Is the process `pid` running?
+#[cfg(target_os = "linux")]
 fn pid_alive(pid: u32) -> bool {
-    if cfg!(target_os = "linux") {
-        Path::new(&format!("/proc/{pid}")).exists()
-    } else {
-        std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Is the process `pid` running?
+#[cfg(all(unix, not(target_os = "linux")))]
+fn pid_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Is the process `pid` running? A handle with query rights opens for a
+/// live or recently exited process; the exit code tells them apart.
+#[cfg(windows)]
+fn pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: the handle is checked before use and closed exactly once;
+    // `code` outlives the call that writes it.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        ok && code == STILL_ACTIVE as u32
     }
 }
 
@@ -355,7 +396,11 @@ fn plan(env: &Env, args: &RelocateArgs, out: &mut dyn Write) -> Result<Option<Pl
     let running: Vec<&claude_sessions::SessionRecord> = records.iter().filter(|r| pid_alive(r.pid)).collect();
     let live_sessions = running
         .iter()
-        .filter(|r| r.cwd.as_deref().is_some_and(|c| c == old || c.starts_with(&format!("{old}/"))))
+        .filter(|r| {
+            r.cwd.as_deref().is_some_and(|c| {
+                c == old || c.strip_prefix(old.as_str()).is_some_and(|rest| rest.starts_with(['/', '\\']))
+            })
+        })
         .count();
     if live_sessions > 0 {
         warnings.push(format!(
@@ -638,6 +683,13 @@ mod tests {
         assert_eq!(norm_path("~", "/home/u"), "/home/u");
         assert_eq!(norm_path("/", "/home/u"), "/");
         assert_eq!(norm_path("/x//y/", "/home/u"), "/x/y");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn norm_path_keeps_a_drive_path() {
+        assert_eq!(norm_path(r"C:\a\.\b\..\c\", r"C:\Users\u"), r"C:\a\c");
+        assert_eq!(norm_path(r"~\x", r"C:\Users\u"), r"C:\Users\u\x");
     }
 
     #[test]
