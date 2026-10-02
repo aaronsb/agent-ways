@@ -845,3 +845,16 @@ fn a_short_trigger_keeps_semantic_apart_from_pattern() {
     assert_eq!(short_trigger("bash"), "bash");
     assert_eq!(short_trigger("keyword"), "keyword");
 }
+
+/// The default session is the newest at the project itself; a worktree's
+/// session under it is the default only when the project has none.
+#[test]
+fn the_default_session_prefers_the_project_over_its_worktrees() {
+    let start = |ts: &str, session: &str, project: &str| serde_json::json!({"event": "session_start", "ts": ts, "session": session, "project": project}).to_string();
+    let worktree = format!("{PROJECT}/.claude/worktrees/agent-1");
+    let log = [start("2026-07-03T10:00:00Z", "own", PROJECT), start("2026-07-03T11:00:00Z", "flow", &worktree), start("2026-07-03T12:00:00Z", "other", "/elsewhere")].join("\n");
+    assert_eq!(super::dump::most_recent_session(&log, Some(PROJECT)).as_deref(), Some("own"));
+    let only = start("2026-07-03T11:00:00Z", "flow", &worktree);
+    assert_eq!(super::dump::most_recent_session(&only, Some(PROJECT)).as_deref(), Some("flow"));
+    assert_eq!(super::dump::most_recent_session(&log, None).as_deref(), Some("other"), "unscoped: the newest anywhere");
+}

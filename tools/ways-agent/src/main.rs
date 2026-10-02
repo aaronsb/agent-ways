@@ -60,7 +60,7 @@ enum Command {
         /// Only this session id.
         #[arg(long)]
         session: Option<String>,
-        /// Only calls in this project path (exact, a trailing slash aside).
+        /// Only calls in this project path or under it.
         #[arg(long)]
         project: Option<String>,
         /// Group rows by session, project, day or month.

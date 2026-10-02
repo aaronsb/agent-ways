@@ -106,6 +106,8 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
 /// mirrors `replay`: defaults to the current project, `--project` for a specific
 /// one, and fails loud rather than silently globalizing when detection fails.
 pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result<()> {
+    let project = project.map(ways_core::util::project_arg);
+    let project = project.as_deref();
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         println!("No events recorded yet.");
