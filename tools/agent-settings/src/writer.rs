@@ -49,9 +49,20 @@ pub fn lock_path(target: &Path) -> PathBuf {
 /// An exclusive lock on a settings file, held for one read-modify-write.
 ///
 /// The lock is an OS file lock on a file beside the target, so a holder that
-/// dies releases it. The holder removes the file before releasing it; a waiter
-/// that then gets the lock on the removed file sees the path no longer names
-/// it and tries again, so two holders never overlap.
+/// dies releases it. The lock file is removed on release, and two holders
+/// never overlap:
+///
+/// - **Unix:** the holder unlinks the file while it still holds the lock. A
+///   waiter that then gets the lock on the unlinked file sees the path no
+///   longer names it (`same_file`) and tries again.
+/// - **Windows:** every handle on the lock file is opened without delete
+///   sharing, so the file cannot be deleted while anyone has it open. The
+///   holder closes its handle, then deletes the file; the delete fails while
+///   a waiter holds the file open, and the waiter locks the same file. A
+///   file can be deleted only when nobody has it open, and a later opener
+///   then creates a new one. So the path never moves under a holder, and
+///   `same_file` need not compare files. An open that meets another
+///   process's delete in progress gets a sharing violation and retries.
 pub struct Lock {
     path: PathBuf,
     file: Option<File>,
@@ -64,13 +75,41 @@ impl Lock {
             std::fs::create_dir_all(parent)?;
         }
         loop {
-            let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
+            let file = open_lock_file(&path)?;
             file.lock()?;
             if same_file(&file, &path) {
                 return Ok(Lock { path, file: Some(file) });
             }
         }
     }
+}
+
+/// Open (creating) the lock file. On Windows the handle shares read and
+/// write but not delete, which is what makes deleting on release safe.
+fn open_lock_file(path: &Path) -> io::Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_SHARE_WRITE: u32 = 0x2;
+        opts.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+        // ERROR_ACCESS_DENIED (5) or ERROR_SHARING_VIOLATION (32): another
+        // process is deleting the file at this moment. It is brief.
+        let mut tries = 0;
+        loop {
+            match opts.open(path) {
+                Err(e) if matches!(e.raw_os_error(), Some(5 | 32)) && tries < 1000 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                r => return r,
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    opts.open(path)
 }
 
 #[cfg(unix)]
@@ -82,6 +121,7 @@ fn same_file(file: &File, path: &Path) -> bool {
     }
 }
 
+/// Off Unix the path cannot move under a holder (see [`Lock`]).
 #[cfg(not(unix))]
 fn same_file(_file: &File, _path: &Path) -> bool {
     true
@@ -89,22 +129,22 @@ fn same_file(_file: &File, _path: &Path) -> bool {
 
 impl Drop for Lock {
     fn drop(&mut self) {
-        // Unix: removed while held, so a waiter that then gets the lock on the
-        // unlinked file sees the path moved on and tries again; the OS lock
-        // goes with the handle right after.
         #[cfg(unix)]
         {
+            // Unlinked while held; the OS lock goes with the handle after.
             let _ = std::fs::remove_file(&self.path);
             drop(self.file.take());
         }
-        // Windows: an open file cannot be deleted, so the handle (and the
-        // lock) goes first. The removal fails, harmlessly, while a waiter
-        // holds the file open; otherwise no lock file is left behind.
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
+            // The handle (and the lock) first; the delete then fails while a
+            // waiter holds the file open, since no handle shares delete.
             drop(self.file.take());
             let _ = std::fs::remove_file(&self.path);
         }
+        // Elsewhere the lock file is left in place.
+        #[cfg(not(any(unix, windows)))]
+        drop(self.file.take());
     }
 }
 
