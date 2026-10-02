@@ -6,6 +6,7 @@ on:
     tags: ['ways-agent-v*']
     paths:
       - 'tools/ways-agent/**'
+      - 'tools/agent-settings/**'
       - 'tools/claude-sessions/**'
       - 'tools/sensor-trait/**'
       - 'tools/ways-agent-core/**'
@@ -17,6 +18,7 @@ on:
   pull_request:
     paths:
       - 'tools/ways-agent/**'
+      - 'tools/agent-settings/**'
       - 'tools/claude-sessions/**'
       - 'tools/sensor-trait/**'
       - 'tools/ways-agent-core/**'
