@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# A fake `gh` for tests/prebuilt-lib-test.sh and tests/download-prebuilt-test.sh.
+# State lives under $FAKE: releases-page-N.json (the paginated releases API),
+# assets/<tag> (asset names), files/<tag>/<name> (downloadable files), and
+# calls (one line per invocation).
+# FAKE_GH_FAIL=api|view|checksums fails that call; FAKE_GH_DELAY=<seconds>
+# sleeps after each download, to widen the window between parallel calls.
+echo "gh $*" >> "$FAKE/calls"
+case "$1 $2" in
+  "api --paginate")
+    [[ "${FAKE_GH_FAIL:-}" == api ]] && { echo "HTTP 502" >&2; exit 1; }
+    jq_expr="${5:?}"
+    for page in "$FAKE"/releases-page-*.json; do jq -r "$jq_expr" "$page"; done ;;
+  "release view")
+    [[ "${FAKE_GH_FAIL:-}" == view ]] && exit 1
+    cat "$FAKE/assets/$3" ;;
+  "release download")
+    tag="$3"; shift 3; pattern="" dir=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in --pattern) pattern="$2"; shift 2 ;; --dir) dir="$2"; shift 2 ;; *) shift ;; esac
+    done
+    [[ "${FAKE_GH_FAIL:-}" == checksums && "$pattern" == checksums.txt ]] && exit 1
+    [[ -f "$FAKE/files/$tag/$pattern" ]] || exit 1
+    cp "$FAKE/files/$tag/$pattern" "$dir/$pattern"
+    sleep "${FAKE_GH_DELAY:-0}" ;;
+  *) echo "fake gh: unhandled: $*" >&2; exit 1 ;;
+esac

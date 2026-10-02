@@ -1,0 +1,194 @@
+name: Build a component
+
+# The jobs every build-<component>.yml runs, called with workflow_call: build
+# the component for each platform, run its tests, gather the binaries with a
+# checksums.txt, and on a <component>-v* tag publish the GitHub Release.
+# The callers own their triggers, so each component builds on its own paths
+# and releases on its own tags.
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: Binary name, used for assets (<component>-<platform>) and tags (<component>-v*)
+        type: string
+        required: true
+      kind:
+        description: cargo (a package of tools/Cargo.toml named <component>) or cmake (tools/way-embed)
+        type: string
+        default: cargo
+      matrix:
+        description: Build matrix include list as JSON; each entry has os and platform, a cargo entry a target, a cmake entry optional cmake_extra and cross
+        type: string
+        default: >-
+          [
+            {"target": "x86_64-unknown-linux-gnu", "platform": "linux-x86_64", "os": "ubuntu-latest"},
+            {"target": "aarch64-unknown-linux-gnu", "platform": "linux-aarch64", "os": "ubuntu-latest"},
+            {"target": "x86_64-apple-darwin", "platform": "darwin-x86_64", "os": "macos-latest"},
+            {"target": "aarch64-apple-darwin", "platform": "darwin-arm64", "os": "macos-latest"}
+          ]
+      test:
+        description: Shell script for the test job; empty skips the job
+        type: string
+        default: ''
+      test-os:
+        description: Runners for the test job, as a JSON list
+        type: string
+        default: '["ubuntu-latest"]'
+      release-notes:
+        description: Body of the GitHub Release
+        type: string
+        required: true
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      BIN: dist/${{ inputs.component }}-${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: ${{ inputs.kind == 'cmake' && 'recursive' || 'false' }}
+
+      - name: Install Rust toolchain
+        if: inputs.kind == 'cargo'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild (Linux cross-compile)
+        if: inputs.kind == 'cargo' && runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          pip3 install --retries 10 --timeout 60 ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build (native)
+        if: inputs.kind == 'cargo' && !(runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu')
+        run: cargo build --release --manifest-path tools/Cargo.toml -p ${{ inputs.component }} --target ${{ matrix.target }}
+
+      - name: Build (zigbuild cross-compile)
+        if: inputs.kind == 'cargo' && runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p ${{ inputs.component }} --target ${{ matrix.target }}
+
+      - name: Package binary
+        if: inputs.kind == 'cargo'
+        run: |
+          mkdir -p dist
+          cp tools/target/${{ matrix.target }}/release/${{ inputs.component }} "$BIN"
+
+      - name: Install dependencies
+        if: inputs.kind == 'cmake'
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y cmake g++
+          fi
+          # macOS runners have cmake and clang pre-installed
+
+      - name: Build way-embed
+        if: inputs.kind == 'cmake'
+        working-directory: tools/way-embed
+        run: |
+          mkdir -p build ../../dist
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra }} ..
+          cmake --build . --target way-embed -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+          cd ..
+          cp build/way-embed "../../$BIN"
+
+      # A native build runs here. A cross-compiled one (marked cross, a Linux
+      # aarch64 zigbuild, or an x86_64 Mac build on an Apple Silicon runner)
+      # can only be checked with `file`.
+      - name: Smoke test
+        if: "!(matrix.cross || (matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') || (matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64'))"
+        run: '"$BIN" --version'
+
+      # The x86 runner has AVX-512, so the smoke test passes even when the
+      # binary would die on an AVX2-only CPU. Check the instructions instead.
+      - name: No AVX-512 in the portable x86 build
+        if: inputs.kind == 'cmake' && matrix.platform == 'linux-x86_64'
+        run: |
+          n=$(objdump -d --no-show-raw-insn "$BIN" | grep -c zmm || true)
+          echo "zmm instructions: $n"
+          test "$n" -eq 0
+
+      - name: Verify binary (cross-compiled — can't execute on this runner)
+        if: matrix.cross || (matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') || (matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')
+        run: |
+          file "$BIN"
+          ls -lh "$BIN"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ inputs.component }}-${{ matrix.platform }}
+          path: ${{ env.BIN }}
+
+  test:
+    if: inputs.test != ''
+    strategy:
+      matrix:
+        os: ${{ fromJSON(inputs.test-os) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run tests
+        run: ${{ inputs.test }}
+
+  # Runs when the test job is skipped too (a component without tests).
+  collect:
+    needs: [build, test]
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: Generate checksums
+        env:
+          COMPONENT: ${{ inputs.component }}
+        run: |
+          cd binaries
+          sha256sum "$COMPONENT"-* > checksums.txt
+          cat checksums.txt
+          ls -lh
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ inputs.component }}-all-platforms
+          path: binaries/
+
+  release:
+    needs: collect
+    if: ${{ !cancelled() && !failure() && startsWith(github.ref, format('refs/tags/{0}-v', inputs.component)) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: ${{ inputs.component }}-all-platforms
+          path: binaries
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ inputs.component }}
+          NOTES: ${{ inputs.release-notes }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$COMPONENT ${TAG#"$COMPONENT"-}" \
+            --notes "$NOTES" \
+            binaries/*

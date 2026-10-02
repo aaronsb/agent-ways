@@ -6,7 +6,7 @@
 #   ways update | ways reconcile | ways uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: setup link relink install update sync-to-home update-binaries clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild ways-agent ways-agent-rebuild attend attend-rebuild attend-chat attend-chat-rebuild way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -19,15 +19,19 @@ else
     EXE :=
 endif
 
+# The suite binaries `link` puts on PATH, `relink` installs when missing, and
+# the get-or-build and -rebuild pattern rules below serve. The list is shared
+# with scripts/install.sh (tools/suite-bins) and read relative to this Makefile,
+# so `make -f <this> -C <app> link` reads it and links the app's bin/. The
+# build recipes use paths relative to the working directory and run from the
+# checkout.
+SUITE_LIST := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))tools/suite-bins
+SUITE_BINS := $(shell awk '/^[a-z]/ { print $$1 }' "$(SUITE_LIST)")
+ifeq ($(strip $(SUITE_BINS)),)
+    $(error no suite binaries read from $(SUITE_LIST))
+endif
 WAYS_BIN = bin/ways
-WAYS_AUDIT_BIN = bin/ways-audit
-WAYS_MCP_BIN = bin/ways-mcp
-WAYS_AGENT_BIN = bin/ways-agent
-ATTEND_BIN = bin/attend
-ATTEND_CHAT_BIN = bin/attend-chat
 WAY_EMBED_BIN = bin/way-embed
-# The suite binaries `link` puts on PATH and `relink` installs when missing.
-SUITE_BINS = ways ways-audit ways-mcp ways-agent attend attend-chat
 XDG_BIN = $(or $(XDG_BIN_HOME),$(HOME)/.local/bin)
 CLAUDE_BIN = $(HOME)/.claude/bin
 
@@ -122,8 +126,8 @@ setup: ways ways-audit attend attend-chat
 
 # Idempotent linking of the suite binaries onto PATH. Only links what exists in
 # bin/, so it is safe to run before every binary is built and safe to re-run.
-# The suite binaries (ways, ways-audit, ways-mcp, ways-agent, attend, attend-chat) link into
-# $(XDG_BIN); way-embed lives in $(CLAUDE_BIN).
+# The suite binaries (tools/suite-bins) link into $(XDG_BIN); way-embed lives
+# in $(CLAUDE_BIN).
 link:
 	@mkdir -p "$(XDG_BIN)"
 	@for b in $(SUITE_BINS); do \
@@ -170,153 +174,51 @@ sync-to-home:
 	@exit 1
 
 # Force-rebuild every binary `ways update` is responsible for refreshing.
-update-binaries: ways-rebuild ways-audit-rebuild ways-mcp-rebuild ways-agent-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
+update-binaries: $(SUITE_BINS:%=%-rebuild) way-embed-rebuild
 
 # --- Build ---
 
-# Get the ways binary: try existing → download → build from source.
-ways:
-	@if [ -x $(WAYS_BIN) ] && $(WAYS_BIN) --version >/dev/null 2>&1; then \
-		echo "ways already installed: $$($(WAYS_BIN) --version)"; \
-	elif bash tools/ways-cli/download-ways.sh; then \
-		echo "Pre-built binary installed."; \
+# The attend pair prints the state-reset advisory after a fresh install.
+ATTEND_STATE_HINT = $(if $(filter attend attend-chat,$*),$(MAKE) -s --no-print-directory _attend_state_hint;)
+
+# Declared here, after SUITE_BINS is read: .PHONY expands its list when read.
+.PHONY: $(SUITE_BINS) $(SUITE_BINS:%=%-rebuild)
+
+# Get a suite binary: keep a working bin/<name>, else download the pre-built
+# release, else build from source with cargo.
+$(SUITE_BINS): %:
+	@if [ -x bin/$* ] && bin/$* --version >/dev/null 2>&1; then \
+		echo "$* already installed: $$(bin/$* --version)"; \
+	elif bash tools/scripts/download-prebuilt.sh $*; then \
+		echo "Pre-built $* binary installed."; \
+		$(ATTEND_STATE_HINT) \
 	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Pre-built unavailable (see above) — building from source..."; \
+		echo "Pre-built unavailable (see above) — building $* from source..."; \
 		bash scripts/check-rust.sh || exit 1; \
-		cargo build --release --manifest-path tools/Cargo.toml -p ways; \
+		cargo build --release --manifest-path tools/Cargo.toml -p $* || exit 1; \
 		mkdir -p bin; \
-		$(LINK) "$(CURDIR)/tools/target/release/ways$(EXE)" $(WAYS_BIN); \
-		echo "Built: $(WAYS_BIN) ($$(ls -lh $(WAYS_BIN) | awk '{print $$5}'))"; \
+		$(LINK) "$(CURDIR)/tools/target/release/$*$(EXE)" bin/$*; \
+		echo "Built: bin/$* ($$(ls -lh bin/$* | awk '{print $$5}'))"; \
+		$(ATTEND_STATE_HINT) \
 	else \
 		echo "error: No pre-built binary and cargo not found."; \
 		echo "Install Rust: https://rustup.rs/"; \
 		exit 1; \
 	fi
 
-# Force rebuild from source (ignores existing binary and download).
-ways-rebuild:
+# Force a source build of a suite binary (ignores the existing binary and the
+# download).
+$(SUITE_BINS:%=%-rebuild): %-rebuild:
 	@if ! command -v cargo >/dev/null 2>&1; then \
 		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
 		exit 1; \
 	fi
 	@bash scripts/check-rust.sh
-	cargo build --release --manifest-path tools/Cargo.toml -p ways
+	cargo build --release --manifest-path tools/Cargo.toml -p $*
 	@mkdir -p bin
-	@$(LINK) "$(CURDIR)/tools/target/release/ways$(EXE)" $(WAYS_BIN)
-	@echo "Built: $(WAYS_BIN) ($$(ls -lh $(WAYS_BIN) | awk '{print $$5}'))"
-
-# Get the ways-audit compliance binary: try existing → download → build. A
-# first-class member of the suite (installed and updated like the others); it is
-# *deliberately-invoked* in the sense that you run `ways-audit` when you want it,
-# not that it's optional to install.
-ways-audit:
-	@if [ -x $(WAYS_AUDIT_BIN) ] && $(WAYS_AUDIT_BIN) --version >/dev/null 2>&1; then \
-		echo "ways-audit already installed: $$($(WAYS_AUDIT_BIN) --version)"; \
-	elif bash tools/ways-audit/download-ways-audit.sh; then \
-		echo "Pre-built ways-audit binary installed."; \
-	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Pre-built unavailable (see above) — building ways-audit from source..."; \
-		bash scripts/check-rust.sh || exit 1; \
-		cargo build --release --manifest-path tools/Cargo.toml -p ways-audit; \
-		mkdir -p bin; \
-		$(LINK) "$(CURDIR)/tools/target/release/ways-audit$(EXE)" $(WAYS_AUDIT_BIN); \
-		echo "Built: $(WAYS_AUDIT_BIN) ($$(ls -lh $(WAYS_AUDIT_BIN) | awk '{print $$5}'))"; \
-	else \
-		echo "error: No pre-built binary and cargo not found."; \
-		echo "Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-
-# Force rebuild ways-audit from source (ignores existing binary and download).
-ways-audit-rebuild:
-	@if ! command -v cargo >/dev/null 2>&1; then \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-	@bash scripts/check-rust.sh
-	cargo build --release --manifest-path tools/Cargo.toml -p ways-audit
-	@mkdir -p bin
-	@$(LINK) "$(CURDIR)/tools/target/release/ways-audit$(EXE)" $(WAYS_AUDIT_BIN)
-	@echo "Built: $(WAYS_AUDIT_BIN) ($$(ls -lh $(WAYS_AUDIT_BIN) | awk '{print $$5}'))"
-
-ways-mcp:
-	@if [ -x $(WAYS_MCP_BIN) ] && $(WAYS_MCP_BIN) --version >/dev/null 2>&1; then \
-		echo "ways-mcp already installed: $$($(WAYS_MCP_BIN) --version)"; \
-	elif bash tools/ways-mcp/download-ways-mcp.sh; then \
-		echo "Pre-built ways-mcp binary installed."; \
-	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Pre-built unavailable (see above) — building ways-mcp from source..."; \
-		bash scripts/check-rust.sh || exit 1; \
-		cargo build --release --manifest-path tools/Cargo.toml -p ways-mcp; \
-		mkdir -p bin; \
-		$(LINK) "$(CURDIR)/tools/target/release/ways-mcp$(EXE)" $(WAYS_MCP_BIN); \
-		echo "Built: $(WAYS_MCP_BIN) ($$(ls -lh $(WAYS_MCP_BIN) | awk '{print $$5}'))"; \
-	else \
-		echo "error: No pre-built binary and cargo not found."; \
-		echo "Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-
-# Force rebuild ways-mcp from source (ignores existing binary and download).
-ways-mcp-rebuild:
-	@if ! command -v cargo >/dev/null 2>&1; then \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-	@bash scripts/check-rust.sh
-	cargo build --release --manifest-path tools/Cargo.toml -p ways-mcp
-	@mkdir -p bin
-	@$(LINK) "$(CURDIR)/tools/target/release/ways-mcp$(EXE)" $(WAYS_MCP_BIN)
-	@echo "Built: $(WAYS_MCP_BIN) ($$(ls -lh $(WAYS_MCP_BIN) | awk '{print $$5}'))"
-
-ways-agent:
-	@if [ -x $(WAYS_AGENT_BIN) ] && $(WAYS_AGENT_BIN) --version >/dev/null 2>&1; then \
-		echo "ways-agent already installed: $$($(WAYS_AGENT_BIN) --version)"; \
-	elif bash tools/ways-agent/download-ways-agent.sh; then \
-		echo "Pre-built ways-agent binary installed."; \
-	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Pre-built unavailable (see above) — building ways-agent from source..."; \
-		bash scripts/check-rust.sh || exit 1; \
-		cargo build --release --manifest-path tools/Cargo.toml -p ways-agent; \
-		mkdir -p bin; \
-		$(LINK) "$(CURDIR)/tools/target/release/ways-agent$(EXE)" $(WAYS_AGENT_BIN); \
-		echo "Built: $(WAYS_AGENT_BIN) ($$(ls -lh $(WAYS_AGENT_BIN) | awk '{print $$5}'))"; \
-	else \
-		echo "error: No pre-built binary and cargo not found."; \
-		echo "Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-
-# Force rebuild ways-agent from source (ignores existing binary and download).
-ways-agent-rebuild:
-	@if ! command -v cargo >/dev/null 2>&1; then \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-	@bash scripts/check-rust.sh
-	cargo build --release --manifest-path tools/Cargo.toml -p ways-agent
-	@mkdir -p bin
-	@$(LINK) "$(CURDIR)/tools/target/release/ways-agent$(EXE)" $(WAYS_AGENT_BIN)
-	@echo "Built: $(WAYS_AGENT_BIN) ($$(ls -lh $(WAYS_AGENT_BIN) | awk '{print $$5}'))"
-
-# Build attend binary from workspace.
-attend:
-	@if [ -x $(ATTEND_BIN) ] && $(ATTEND_BIN) --version >/dev/null 2>&1; then \
-		echo "attend already built."; \
-	elif bash tools/attend/download-attend.sh; then \
-		echo "Pre-built attend binary installed."; \
-		$(MAKE) -s --no-print-directory _attend_state_hint; \
-	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Pre-built unavailable (see above) — building attend from source..."; \
-		cargo build --release --manifest-path tools/Cargo.toml -p attend; \
-		mkdir -p bin; \
-		$(LINK) "$(CURDIR)/tools/target/release/attend$(EXE)" $(ATTEND_BIN); \
-		echo "Built: $(ATTEND_BIN) ($$(ls -lh $(ATTEND_BIN) | awk '{print $$5}'))"; \
-		$(MAKE) -s --no-print-directory _attend_state_hint; \
-	else \
-		echo "error: No pre-built binary and cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
+	@$(LINK) "$(CURDIR)/tools/target/release/$*$(EXE)" bin/$*
+	@echo "Built: bin/$* ($$(ls -lh bin/$* | awk '{print $$5}'))"
+	$(if $(filter attend attend-chat,$*),@$(MAKE) -s --no-print-directory _attend_state_hint)
 
 # Generate the attend CLI markdown reference from the same clap-derive
 # `Cli` definition that drives runtime --help (ADR-111 extension). Output
@@ -326,49 +228,6 @@ docs: attend
 	@cargo build --release --manifest-path tools/Cargo.toml -p attend --bin gen-docs --quiet
 	@./tools/target/release/gen-docs > docs/cli/attend.md
 	@echo "Wrote docs/cli/attend.md ($$(wc -l < docs/cli/attend.md) lines)"
-
-# Force rebuild attend from source.
-attend-rebuild:
-	@if ! command -v cargo >/dev/null 2>&1; then \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-	cargo build --release --manifest-path tools/Cargo.toml -p attend
-	@mkdir -p bin
-	@$(LINK) "$(CURDIR)/tools/target/release/attend$(EXE)" $(ATTEND_BIN)
-	@echo "Built: $(ATTEND_BIN) ($$(ls -lh $(ATTEND_BIN) | awk '{print $$5}'))"
-	@$(MAKE) -s --no-print-directory _attend_state_hint
-
-# Build attend-chat binary from workspace.
-attend-chat:
-	@if [ -x $(ATTEND_CHAT_BIN) ] && $(ATTEND_CHAT_BIN) --version >/dev/null 2>&1; then \
-		echo "attend-chat already built."; \
-	elif bash tools/attend-chat/download-attend-chat.sh; then \
-		echo "Pre-built attend-chat binary installed."; \
-		$(MAKE) -s --no-print-directory _attend_state_hint; \
-	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Pre-built unavailable (see above) — building attend-chat from source..."; \
-		cargo build --release --manifest-path tools/Cargo.toml -p attend-chat; \
-		mkdir -p bin; \
-		$(LINK) "$(CURDIR)/tools/target/release/attend-chat$(EXE)" $(ATTEND_CHAT_BIN); \
-		echo "Built: $(ATTEND_CHAT_BIN) ($$(ls -lh $(ATTEND_CHAT_BIN) | awk '{print $$5}'))"; \
-		$(MAKE) -s --no-print-directory _attend_state_hint; \
-	else \
-		echo "error: No pre-built binary and cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-
-# Force rebuild attend-chat from source.
-attend-chat-rebuild:
-	@if ! command -v cargo >/dev/null 2>&1; then \
-		echo "error: cargo not found. Install Rust: https://rustup.rs/"; \
-		exit 1; \
-	fi
-	cargo build --release --manifest-path tools/Cargo.toml -p attend-chat
-	@mkdir -p bin
-	@$(LINK) "$(CURDIR)/tools/target/release/attend-chat$(EXE)" $(ATTEND_CHAT_BIN)
-	@echo "Built: $(ATTEND_CHAT_BIN) ($$(ls -lh $(ATTEND_CHAT_BIN) | awk '{print $$5}'))"
-	@$(MAKE) -s --no-print-directory _attend_state_hint
 
 # Internal: post-build advisory printed after every attend / attend-
 # chat (re)build. Suggests `make purge-attend-state` for operators
@@ -384,7 +243,7 @@ _attend_state_hint:
 
 # Force re-fetch (or rebuild) of the way-embed binary. Delegates to the
 # way-embed sub-Makefile's rebuild-binary target, which clears the
-# cached install before download-binary.sh would short-circuit.
+# cached install before download-prebuilt.sh would short-circuit.
 way-embed-rebuild:
 	$(MAKE) -C tools/way-embed rebuild-binary
 
@@ -429,6 +288,9 @@ test-hooks:
 	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
 	@bash tests/make-link-test.sh
+	@bash tests/make-targets-test.sh
+	@bash tests/prebuilt-lib-test.sh
+	@bash tests/download-prebuilt-test.sh
 	@bash tests/gh-tasks-test.sh
 
 test-unit:
