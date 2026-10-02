@@ -9,7 +9,9 @@
 //! matcher's order: judge latency grows with each candidate, and past the cap
 //! the rest pass unjudged, except a way whose ancestor the judge blocked, which
 //! is blocked with it and logged as a `block` with `reason: ancestor`, the
-//! ancestor's id and its verdict's fields. Every verdict, cap and fallback is logged to
+//! ancestor's id and its verdict's fields. A `pattern_strict` child of a
+//! blocked parent is logged the same way, as kept out by the judge, since the
+//! parent's block is what kept it out. Every verdict, cap and fallback is logged to
 //! `events.jsonl`, and any failure fails open: the matcher's decision stands.
 //! Each provider call is logged once more as `judge_call`, with its tokens
 //! and cost, so spend is counted per call, not per way (#741).
@@ -149,6 +151,24 @@ fn settings(
             None
         }
     }
+}
+
+/// A judge block of `id` (p_yes 0.05), for tests of the scan's call site.
+#[cfg(test)]
+pub(super) fn test_blocked(id: &str, log: &LogContext<'_>) -> Blocked {
+    use ways_agent_core::profile::Provider;
+    use ways_agent_core::protocol::Verdict;
+    let j = Judged {
+        engine: "anthropic".into(),
+        provider: Provider::Anthropic,
+        model: "claude-haiku-4-5".into(),
+        mode: Mode::Enforce,
+        threshold: 0.3,
+        verdicts: vec![Verdict { id: id.to_string(), p_yes: 0.05 }],
+        latency_ms: 800,
+        call: None,
+    };
+    decide(&j, log, "5")
 }
 
 /// The gate with the agent call injected, so tests can stand in an engine.
