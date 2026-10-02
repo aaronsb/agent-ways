@@ -43,8 +43,16 @@ impl App {
         if user {
             v.extend([ThemeAct::Rename, ThemeAct::Delete]);
         }
-        v.push(ThemeAct::Edit);
+        v.extend([ThemeAct::Edit, ThemeAct::Shape]);
         v
+    }
+
+    /// Make the next lozenge shape the one in use; the adapter keeps it.
+    fn next_shape(&mut self) -> Result<String, String> {
+        let next = self.shape.next();
+        self.adapter.choose_shape(next.name())?;
+        self.shape = next;
+        Ok(format!("shape {} (Nerd Font glyphs unless plain)", next.name()))
     }
 
     /// Make `name` the active theme: the adapter keeps the choice first.
@@ -88,6 +96,10 @@ impl App {
             ThemeAct::Rename => self.mode = Mode::ThemeName { op: NameOp::Rename(name), buf: String::new() },
             ThemeAct::Delete => self.mode = Mode::ThemeDelete { name },
             ThemeAct::Edit if src == Source::Bundled => self.mode = Mode::ThemeName { op: NameOp::EditCopy(name), buf: String::new() },
+            ThemeAct::Shape => {
+                let r = self.next_shape();
+                self.report(r);
+            }
             ThemeAct::Edit => {
                 let t = t.clone();
                 self.themes.editor = Some(Editor::new(t, true));

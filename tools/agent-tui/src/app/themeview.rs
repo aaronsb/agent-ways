@@ -91,6 +91,7 @@ impl App {
             ThemeAct::Delete => "asks first".into(),
             ThemeAct::Edit if src == Source::Bundled => "bundled: edits a copy".into(),
             ThemeAct::Edit => String::new(),
+            ThemeAct::Shape => format!("{} now; the next is {}", self.shape.name(), self.shape.next().name()),
         }
     }
 
@@ -183,6 +184,7 @@ impl App {
         lines.extend(fields("active", if active { "yes" } else { "no (Enter)" }, if active { theme::ok() } else { Style::new() }, room, dim));
         let dir = self.themes.dir.as_ref().map_or("none: nothing saves".to_string(), |d| self.themes.show(d));
         lines.extend(field("saves to", &dir));
+        lines.extend(field("shape", &format!("{} (a: shape cycles it)", self.shape.name())));
         lines.push(Line::raw(""));
         lines.push(Line::styled("slots", Style::new().add_modifier(Modifier::BOLD)));
         let inner = area.width.saturating_sub(2) as usize;

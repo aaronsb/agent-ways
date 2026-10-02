@@ -818,7 +818,11 @@ fn a_failing_write_step_keeps_it_and_everything_after_with_the_failed_row_marked
     assert!(t.contains("✗   gamma") && t.contains("·     1. $ ways agent key check") && t.contains("·     2. $ ways agent key remove"), "{t}");
     assert!(!t.contains("alpha") && !t.contains("beta"), "applied rows are cleared:\n{t}");
     assert!(detail.contains("planted failure at step 2"), "the cursor sits on the failed row:\n{detail}");
-    assert!(bottom(&mut app, 100, 24).contains("stopped at step 2 of 4; 3 still pending in ways"));
+    assert!(
+        app.msg.contains("wrote /c/a.yaml; stopped at step 2 of 4: planted failure at step 2; 3 still pending in ways"),
+        "the message names what was written before the stop: {}",
+        app.msg
+    );
     assert_eq!((app.pending_in(0), app.queue.len()), (3, 2));
     assert!(app.roots[0].children[2].setting.as_ref().unwrap().changed() && !app.roots[0].children[0].setting.as_ref().unwrap().changed());
     keys(&mut app, &[KeyCode::Esc]);

@@ -350,6 +350,8 @@ pub enum ThemeAct {
     Rename,
     Delete,
     Edit,
+    /// The lozenge shape, a setting of its own, cycled.
+    Shape,
 }
 
 impl ThemeAct {
@@ -360,6 +362,7 @@ impl ThemeAct {
             ThemeAct::Rename => "rename",
             ThemeAct::Delete => "delete",
             ThemeAct::Edit => "edit",
+            ThemeAct::Shape => "shape",
         }
     }
 }

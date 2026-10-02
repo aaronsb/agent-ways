@@ -15,3 +15,5 @@ path = "src/lib.rs"
 [dependencies]
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
 agent-theme = { path = "../agent-theme", features = ["ratatui"] }
+# The termination signals the run loop restores the terminal on.
+signal-hook = "0.3"

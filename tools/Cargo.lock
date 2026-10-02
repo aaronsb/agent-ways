@@ -66,6 +66,7 @@ version = "0.1.0"
 dependencies = [
  "agent-theme",
  "ratatui",
+ "signal-hook",
 ]
 
 [[package]]
@@ -2607,6 +2608,7 @@ dependencies = [
  "claude-sessions",
  "crossterm",
  "glob",
+ "libc",
  "pulldown-cmark",
  "regex",
  "rust-stemmers",

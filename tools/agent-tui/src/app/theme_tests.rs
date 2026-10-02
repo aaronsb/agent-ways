@@ -30,6 +30,21 @@ impl Adapter for Choice {
     fn choose_theme(&mut self, name: &str) -> Result<(), String> {
         std::fs::write(self.0.join("choice"), format!("{name}\n")).map_err(|e| e.to_string())
     }
+    fn choose_shape(&mut self, name: &str) -> Result<(), String> {
+        std::fs::write(self.0.join("shape"), name).map_err(|e| e.to_string())
+    }
+}
+
+#[test]
+fn the_theme_tab_shows_the_shape_and_its_menu_cycles_it() {
+    let d = dir("shape");
+    let mut app = app_in(&d, ColorDepth::TrueColor).shape(super::theme::Shape::PLAIN);
+    keys(&mut app, &[KeyCode::Char('3')]);
+    assert!(text(&draw(&mut app, 100, 30)).contains("shape     plain (a: shape cycles it)"));
+    act(&mut app, "shape");
+    assert_eq!(std::fs::read_to_string(d.join("shape")).unwrap(), "flame", "the adapter keeps the next shape");
+    assert_eq!(app.shape, super::theme::Shape::named("flame"));
+    assert!(app.msg.contains("shape flame"), "{}", app.msg);
 }
 
 /// The choice the adapter holds, if any.
@@ -180,7 +195,7 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     let d = dir("files");
     let mut app = app_in(&d, ColorDepth::TrueColor);
     keys(&mut app, &[KeyCode::Char('3')]);
-    assert_eq!(app.theme_acts().len(), 3, "a bundled theme offers new, copy and edit");
+    assert_eq!(app.theme_acts().len(), 4, "a bundled theme offers new, copy, edit and shape");
     act(&mut app, "new");
     type_str(&mut app, "mine");
     keys(&mut app, &[KeyCode::Enter]);
@@ -208,7 +223,7 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     // Rename the active theme: the file moves and the active choice follows.
     keys(&mut app, &[KeyCode::Enter]);
     assert_eq!(app.themes.active, "nord-2");
-    assert_eq!(app.theme_acts().len(), 5, "a user theme adds rename and delete");
+    assert_eq!(app.theme_acts().len(), 6, "a user theme adds rename and delete");
     act(&mut app, "rename");
     type_str(&mut app, "arctic");
     keys(&mut app, &[KeyCode::Enter]);

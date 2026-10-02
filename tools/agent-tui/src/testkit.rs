@@ -101,14 +101,18 @@ pub fn parse_keys<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Result<Vec<K
 }
 
 /// Tick a running apply until it has ended and review has closed it out.
+/// A command in flight is waited on in real time, up to a minute.
 pub fn finish_apply(app: &mut App) {
-    for _ in 0..400 {
-        if !app.applying() {
-            return;
+    let start = std::time::Instant::now();
+    while app.applying() {
+        if start.elapsed() > std::time::Duration::from_secs(60) {
+            panic!("the apply never ended");
         }
         app.tick();
+        if app.applying() {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
-    panic!("the apply never ended");
 }
 
 fn color(c: Color) -> String {

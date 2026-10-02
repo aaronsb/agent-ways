@@ -303,30 +303,40 @@ pub fn is_under(key: &str, root: &str) -> bool {
     key == root || key.strip_prefix(root).is_some_and(|r| r.starts_with('.'))
 }
 
-/// Typed secret text. Debug redacts, there is no Display, and the bytes are
-/// overwritten when it drops. Capacity is fixed up front so growth never
+/// Typed secret text. Debug redacts, there is no Display, and every byte it
+/// ever held is overwritten: a Backspace zeroes the bytes it removes, and a
+/// drop zeroes the whole buffer. Capacity is fixed up front so growth never
 /// leaves a copy behind.
-pub struct SecretBuf(String);
+pub struct SecretBuf(Vec<u8>);
 
 const SECRET_CAP: usize = 512;
 
 impl Default for SecretBuf {
     fn default() -> Self {
-        SecretBuf(String::with_capacity(SECRET_CAP))
+        SecretBuf(Vec::with_capacity(SECRET_CAP))
     }
 }
 
 impl SecretBuf {
     pub fn push(&mut self, c: char) {
-        if self.0.len() + c.len_utf8() <= SECRET_CAP {
-            self.0.push(c);
+        let mut b = [0u8; 4];
+        let e = c.encode_utf8(&mut b).as_bytes();
+        if self.0.len() + e.len() <= SECRET_CAP {
+            self.0.extend_from_slice(e);
         }
+        b.fill(0);
+        std::hint::black_box(&b);
     }
+    /// Remove the last character and zero its bytes.
     pub fn pop(&mut self) {
-        self.0.pop();
+        let n = self.reveal().chars().next_back().map_or(0, char::len_utf8);
+        let len = self.0.len() - n;
+        self.0[len..].fill(0);
+        std::hint::black_box(&self.0);
+        self.0.truncate(len);
     }
     pub fn len(&self) -> usize {
-        self.0.chars().count()
+        self.reveal().chars().count()
     }
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -334,7 +344,28 @@ impl SecretBuf {
     /// The typed text, for the stdin of the command it was typed for and
     /// nothing else.
     pub fn reveal(&self) -> &str {
-        &self.0
+        // Only whole characters are ever pushed.
+        std::str::from_utf8(&self.0).unwrap_or_default()
+    }
+    /// The `n` bytes past the end, which held removed characters.
+    #[cfg(test)]
+    fn residue(&self, n: usize) -> Vec<u8> {
+        let spare = &self.0.spare_capacity_mut_ref()[..n];
+        // SAFETY: test-only; these bytes were written before `pop` truncated.
+        spare.iter().map(|b| unsafe { b.assume_init() }).collect()
+    }
+}
+
+#[cfg(test)]
+trait SpareRef {
+    fn spare_capacity_mut_ref(&self) -> &[std::mem::MaybeUninit<u8>];
+}
+
+#[cfg(test)]
+impl SpareRef for Vec<u8> {
+    fn spare_capacity_mut_ref(&self) -> &[std::mem::MaybeUninit<u8>] {
+        // SAFETY: test-only view of the spare capacity of a Vec<u8>.
+        unsafe { std::slice::from_raw_parts(self.as_ptr().add(self.len()) as *const std::mem::MaybeUninit<u8>, self.capacity() - self.len()) }
     }
 }
 
@@ -346,9 +377,11 @@ impl std::fmt::Debug for SecretBuf {
 
 impl Drop for SecretBuf {
     fn drop(&mut self) {
-        let mut b = std::mem::take(&mut self.0).into_bytes();
-        b.fill(0);
-        std::hint::black_box(&b);
+        // Zero what it holds and the spare capacity Backspace left behind.
+        let cap = self.0.capacity();
+        self.0.resize(cap, 0);
+        self.0.fill(0);
+        std::hint::black_box(&self.0);
     }
 }
 
@@ -386,6 +419,29 @@ pub fn find<'a>(roots: &'a [Node], key: &str) -> Option<&'a Node> {
         n.children.iter().find_map(|c| within(c, rest))
     }
     roots.iter().find_map(|n| within(n, key))
+}
+
+/// The index path of the node a dotted key names: [`find`]'s match, as a
+/// path from the roots.
+pub fn path_of(roots: &[Node], key: &str) -> Option<Vec<usize>> {
+    fn within(n: &Node, key: &str, path: &mut Vec<usize>) -> bool {
+        if key == n.name {
+            return true;
+        }
+        let Some(rest) = key.strip_prefix(n.name.as_str()).and_then(|r| r.strip_prefix('.')) else { return false };
+        for (i, c) in n.children.iter().enumerate() {
+            path.push(i);
+            if within(c, rest, path) {
+                return true;
+            }
+            path.pop();
+        }
+        false
+    }
+    roots.iter().enumerate().find_map(|(i, n)| {
+        let mut path = vec![i];
+        within(n, key, &mut path).then_some(path)
+    })
 }
 
 /// The dotted key of the node at `path`.
@@ -548,6 +604,17 @@ mod tests {
         assert_eq!(q.undo_last().unwrap().command, "ways x add 'b c'");
         assert_eq!(q.len(), 1);
         assert_eq!(q.items()[0].command, "ways x add a");
+    }
+
+    #[test]
+    fn backspace_zeroes_the_bytes_it_removes() {
+        let mut b = SecretBuf::default();
+        "ab€".chars().for_each(|c| b.push(c));
+        b.pop();
+        assert_eq!(b.reveal(), "ab");
+        assert_eq!(b.residue(3), [0, 0, 0], "the removed character's bytes are wiped");
+        b.pop();
+        assert_eq!((b.reveal(), b.residue(1)), ("a", vec![0]));
     }
 
     #[test]

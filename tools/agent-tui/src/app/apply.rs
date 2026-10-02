@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use crate::adapter::{Adapter, Write};
+use crate::adapter::{Adapter, Job, Write};
 use crate::tree::{self, Node, Queue};
 
 /// One pending value change: where it would be written, and what changes.
@@ -181,7 +181,16 @@ pub struct Step {
     pub state: St,
     /// Why the step failed, once it has.
     pub error: Option<String>,
+    /// The file a write step writes, as the screens show it.
+    pub shown: Option<String>,
     work: Work,
+}
+
+impl Step {
+    /// Whether the step runs a command rather than writing a file.
+    pub fn is_command(&self) -> bool {
+        matches!(self.work, Work::Run)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -205,6 +214,8 @@ pub struct Run {
     /// The review's rows as the run began, so a finished write keeps its row
     /// on screen with its ✓ until the run ends.
     pub rows: Vec<RRow>,
+    /// The command in flight, while a run step waits on it.
+    job: Option<Box<dyn Job>>,
 }
 
 impl Run {
@@ -224,10 +235,11 @@ impl Run {
             text: format!("write {shown} ({} key{})", paths.len(), if paths.len() == 1 { "" } else { "s" }),
             state: St::Pending,
             error: None,
+            shown: Some(shown),
             work: Work::Write(file, paths),
         });
-        let runs = commands.into_iter().map(|c| Step { text: format!("run {c}"), state: St::Pending, error: None, work: Work::Run });
-        Run { tab, steps: writes.chain(runs).collect(), outcome: Outcome::Running, applied: 0, rows: review_rows(roots, queue, tab) }
+        let runs = commands.into_iter().map(|c| Step { text: format!("run {c}"), state: St::Pending, error: None, shown: None, work: Work::Run });
+        Run { tab, steps: writes.chain(runs).collect(), outcome: Outcome::Running, applied: 0, rows: review_rows(roots, queue, tab), job: None }
     }
 
     pub fn finished(&self) -> bool {
@@ -258,6 +270,36 @@ impl Run {
         Some(Failure { tab: self.tab, paths, text: self.steps[i].text.clone(), error: self.error(i) })
     }
 
+    /// Whether a command is in flight.
+    pub fn waiting(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// Stop the run where it is: end the command in flight and mark its
+    /// step failed with `why`. Steps before it stay done.
+    pub fn stop(&mut self, why: &str) {
+        if self.finished() {
+            return;
+        }
+        if let Some(mut job) = self.job.take() {
+            job.stop();
+            let _ = job.poll();
+        }
+        let i = self.steps.iter().position(|s| s.state == St::Running).or_else(|| self.steps.iter().position(|s| s.state == St::Pending));
+        if let Some(i) = i {
+            self.steps[i].state = St::Failed;
+            self.steps[i].error = Some(why.to_string());
+            self.outcome = Outcome::Stopped(i);
+        } else {
+            self.outcome = Outcome::Done;
+        }
+    }
+
+    /// The files the run has written, as the screens show them.
+    pub fn written(&self) -> Vec<String> {
+        self.steps.iter().filter(|s| s.state == St::Done).filter_map(|s| s.shown.clone()).collect()
+    }
+
     /// Advance one state: start the next step, or do the running one's work.
     /// A write the adapter makes moves its settings' loaded values to their
     /// values; a command it runs leaves the queue. A step that fails changes
@@ -273,7 +315,7 @@ impl Run {
                         .iter()
                         .filter_map(|p| {
                             let s = tree::get(roots, p).setting.as_ref()?;
-                            Some(Write { store: s.store.as_ref()?, value: &s.value })
+                            Some(Write { store: s.store.as_ref()?, value: &s.value, loaded: &s.loaded })
                         })
                         .collect();
                     let r = if values.len() == paths.len() { adapter.write(file, &values) } else { Err(format!("{}: a setting here has no store", file.display())) };
@@ -286,10 +328,20 @@ impl Run {
                     })
                 }
                 Work::Run => match queue.first_under(&roots[self.tab].name) {
-                    Some(q) => adapter.run(&queue.items()[q]).map(|()| {
-                        queue.remove(q);
-                        1
-                    }),
+                    Some(q) => {
+                        let job = self.job.get_or_insert_with(|| adapter.start(&queue.items()[q]));
+                        match job.poll() {
+                            // Still running: the step stays as it is.
+                            None => return,
+                            Some(r) => {
+                                self.job = None;
+                                r.map(|()| {
+                                    queue.remove(q);
+                                    1
+                                })
+                            }
+                        }
+                    }
                     None => Err("the queued command is gone".into()),
                 },
             };

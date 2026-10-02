@@ -153,9 +153,134 @@ fn a_reload_keeps_pending_values_and_open_groups_and_names_a_moved_one() {
     fresh[0].children[0].setting.as_mut().unwrap().loaded = "0.6".into();
     fresh[0].children[0].setting.as_mut().unwrap().value = "0.6".into();
     *p.fresh.borrow_mut() = Some(fresh);
-    app.reload();
+    let r = app.reload();
     assert_eq!((s(&app, 0).loaded.as_str(), s(&app, 0).value.as_str()), ("0.6", "0.4"));
-    assert!(app.message().contains("matching.tau changed on disk under a pending edit"), "{}", app.message());
+    assert_eq!(r.moved, ["matching.tau"]);
+    assert!(r.message().contains("matching.tau changed on disk under a pending edit; the edit is kept"), "{}", r.message());
+}
+
+#[test]
+fn a_reload_that_cannot_keep_an_edit_says_it_was_dropped_and_why() {
+    let (mut app, p) = probe();
+    // Edits to tau and floor; then tau's file breaks, so tau comes back
+    // locked, and floor is gone from the settings.
+    press(&mut app, &[KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.4");
+    press(&mut app, &[KeyCode::Enter, KeyCode::Down, KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.3");
+    press(&mut app, &[KeyCode::Enter]);
+    assert_eq!(app.pending(), 2);
+    let mut fresh = tree();
+    let s = fresh[0].children[0].setting.take().unwrap().lock("a.yaml does not parse");
+    fresh[0].children[0].setting = Some(s);
+    fresh[0].children.remove(1);
+    *p.fresh.borrow_mut() = Some(fresh);
+    p.stamp.set(1);
+    app.watch();
+    assert_eq!(app.pending(), 0, "neither edit could be kept");
+    assert_eq!(
+        app.message(),
+        "2 pending edits dropped: matching.tau: a.yaml does not parse; matching.floor: it is gone from the settings",
+        "the message says what was dropped, not that review shows both"
+    );
+}
+
+#[test]
+fn a_reload_finds_the_cursor_closed_groups_and_failure_by_key() {
+    // The fresh tree orders the tab's rows the other way round.
+    let (mut app, p) = probe();
+    press(&mut app, &[KeyCode::Down]);
+    assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "matching.floor");
+    let mut fresh = tree();
+    fresh[0].children.reverse();
+    *p.fresh.borrow_mut() = Some(fresh);
+    app.reload();
+    assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "matching.floor", "the cursor stays on its key");
+}
+
+#[test]
+fn the_masked_entry_shows_dots_while_a_secret_is_typed() {
+    const SECRET: &str = "§¤ß¥¶";
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    assert!(app.masked());
+    for (i, c) in SECRET.chars().enumerate() {
+        press(&mut app, &[KeyCode::Char(c)]);
+        let f = text(&render(&mut app, 100, 20));
+        assert!(f.contains("secret") && f.contains("••••••••"), "after {} characters:\n{f}", i + 1);
+        assert!(!f.chars().any(|x| SECRET.contains(x)), "a typed character reached the frame:\n{f}");
+    }
+}
+
+/// A job that runs until stopped.
+struct Forever {
+    stopped: Rc<Cell<bool>>,
+}
+
+impl crate::adapter::Job for Forever {
+    fn poll(&mut self) -> Option<Result<(), String>> {
+        self.stopped.get().then(|| Err("killed".into()))
+    }
+    fn stop(&mut self) {
+        self.stopped.set(true);
+    }
+}
+
+#[derive(Default, Clone)]
+struct Slow {
+    stopped: Rc<Cell<bool>>,
+    reloads: Rc<Cell<usize>>,
+}
+
+impl Adapter for Slow {
+    fn write(&mut self, _: &Path, _: &[Write]) -> Result<(), String> {
+        Ok(())
+    }
+    fn run(&mut self, _: &Queued) -> Result<(), String> {
+        unreachable!("started, never run to the end")
+    }
+    fn start(&mut self, _: &Queued) -> Box<dyn crate::adapter::Job> {
+        Box::new(Forever { stopped: self.stopped.clone() })
+    }
+    fn reload(&mut self) -> Option<Vec<Node>> {
+        self.reloads.set(self.reloads.get() + 1);
+        None
+    }
+}
+
+#[test]
+fn a_command_in_flight_keeps_the_screen_live_and_a_second_ctrl_c_stops_it() {
+    let slow = Slow::default();
+    let mut app = App::new("t", tree()).adapter(slow.clone());
+    app.queue.push(Queued::new("matching", "check", "ways agent key check", false));
+    press(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+    for _ in 0..10 {
+        app.tick();
+    }
+    assert!(app.applying(), "the command is still running");
+    let _ = render(&mut app, 100, 20);
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(app.key(ctrl_c));
+    assert!(app.applying() && app.message().contains("^C again stops it"));
+    assert!(app.key(ctrl_c));
+    assert!(!app.applying() && slow.stopped.get(), "the second ^C ends the command");
+    assert!(app.message().contains("stopped at step 1 of 1: stopped by ^C"), "{}", app.message());
+    assert_eq!(slow.reloads.get(), 1, "a failed command is followed by a read of the files");
+    assert_eq!(app.queued().len(), 1, "the command stays queued");
+}
+
+#[test]
+fn a_signal_stops_a_command_in_flight() {
+    let slow = Slow::default();
+    let mut app = App::new("t", tree()).adapter(slow.clone());
+    app.queue.push(Queued::new("matching", "check", "ways agent key check", false));
+    press(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+    app.tick();
+    app.tick();
+    app.stop_run("stopped by a signal");
+    assert!(slow.stopped.get() && !app.applying());
 }
 
 #[test]

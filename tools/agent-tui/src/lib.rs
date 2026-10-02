@@ -24,27 +24,27 @@ use std::io;
 pub use adapter::{Adapter, Unwired, Write};
 pub use app::flow;
 pub use app::theme;
+pub use app::term::{restore, Signals, TermGuard};
 pub use app::{App, Session, Themes};
 /// The ratatui this crate draws with, so an application names its types
 /// (key events, buffers) without a second dependency to keep in step.
 pub use ratatui;
 
-use ratatui::crossterm::event::DisableMouseCapture;
-use ratatui::crossterm::execute;
 
 /// Run `app` on the terminal until it quits, restoring the terminal on every
-/// exit path, a panic included.
+/// exit path: a return, an error, a panic and a termination signal. A
+/// signal ends the session with [`Session::signal`] set; the caller exits
+/// with 128 plus it.
 pub fn run(app: App) -> io::Result<Session> {
+    let signals = Signals::install()?;
+    let mut guard = TermGuard::new();
     // ratatui::init's panic hook restores raw mode and the screen but not
-    // mouse capture; this hook runs first and turns capture off.
-    let mut term = ratatui::init();
+    // mouse capture or the cursor; this one does it all, before a panic
+    // that aborts skips the guard's drop.
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
+        restore();
         hook(info);
     }));
-    let result = app.run(&mut term);
-    let _ = execute!(io::stdout(), DisableMouseCapture);
-    ratatui::restore();
-    result
+    app.run(&mut guard.term, &signals)
 }

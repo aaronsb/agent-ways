@@ -337,6 +337,17 @@ impl Shape {
         }
     }
 
+    /// The name [`Shape::named`] takes for this shape.
+    pub fn name(&self) -> &'static str {
+        Shape::NAMES.iter().copied().find(|n| Shape::named(n) == *self).unwrap_or("round")
+    }
+
+    /// The shape after this one in [`Shape::NAMES`], wrapping round.
+    pub fn next(&self) -> Shape {
+        let i = Shape::NAMES.iter().position(|n| *n == self.name()).unwrap_or(0);
+        Shape::named(Shape::NAMES[(i + 1) % Shape::NAMES.len()])
+    }
+
     /// Segments as one lozenge: the cap in the first background, each join
     /// carrying one background into the next, the last closing onto the
     /// terminal ground. Without colour the glyphs go and each segment is
