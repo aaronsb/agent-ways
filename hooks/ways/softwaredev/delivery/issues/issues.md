@@ -20,10 +20,11 @@ Issues carrying the `tasklist` label are mirrored into this session's task list 
 | subject | `[gh#<n>] <issue title>` |
 | description | the issue body inside a provenance fence |
 | metadata | `github_issue`, `github_url`, `body_sha`, `observed_state`, labels, assignees |
+| owner | `team-lead`, the head agent, unless the session set another |
 
 ## Ownership
 
-GitHub owns subject, description, and open or closed. The session owns `in_progress` and a `completed` request. Mark a mirrored task `in_progress` with TaskUpdate when you start it. Mark it `completed` when the work lands, then close the issue with `gh issue close`, since pushing status back is not wired yet. A reopen on GitHub returns the task to `pending` on the next pull.
+GitHub owns subject, description, and open or closed. The session owns `in_progress` and a `completed` request. A mirrored task is owned by `team-lead` so an idle teammate does not claim it; hand one to a teammate by setting its owner. Mark a mirrored task `in_progress` with TaskUpdate when you start it. Mark it `completed` when the work lands, then close the issue with `gh issue close`, since pushing status back is not wired yet. A reopen on GitHub returns the task to `pending` on the next pull.
 
 Removing the label stops the mirror for that issue: the task stays in the store as it was, the whisper says `unlabeled #n` once, and later closes never reach it. A stale `pending` on an unlabeled issue is expected, and `gh-tasks list` shows the URL to check.
 
@@ -39,7 +40,7 @@ The description of a mirrored task was written by whoever filed the issue and ca
 
 ## On a resume
 
-A resumed session gets a fresh task list, keyed by an id the hooks never see. The `SessionStart` hook runs `gh-tasks attach` first, which finds the live list by the team the process just created and carries the previous list's open tasks into it, ids kept and owners dropped. The whisper says `task list carried forward from <old list>: N task(s)`; read that line and go on, the tasks are there. The carry needs the previous session's bridge state. When that is missing, the first resume after an install or after the runtime directory was cleared, the whisper says `no previous task list recorded`, and the old list stays on disk under its old name. Say so to the user. `/compact` and `/clear` keep the process and its list.
+A resumed session gets a fresh task list, keyed by an id the hooks never see. The `SessionStart` hook runs `gh-tasks attach` first, which finds the live list by the team the process just created and carries the previous list's open tasks into it, ids kept. Mirrored tasks and tasks the head agent owned stay with `team-lead`; a teammate's claim is dropped. The whisper says `task list carried forward from <old list>: N task(s)`; read that line and go on, the tasks are there. The carry needs the previous session's bridge state. When that is missing, the first resume after an install or after the runtime directory was cleared, the whisper says `no previous task list recorded`, and the old list stays on disk under its old name. Say so to the user. `/compact` and `/clear` keep the process and its list. `/clear` starts a new session id, and `attach` gives it the list the process's earlier session recorded.
 
 ## When the layout is unrecognized
 

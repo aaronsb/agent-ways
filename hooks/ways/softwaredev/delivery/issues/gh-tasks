@@ -14,8 +14,11 @@
 #           hooks receive, so the team cannot be found by matching ids. The
 #           `attach` verb finds it by age and cwd instead, records the list id
 #           in the bridge state, and carries the previous list's open tasks
-#           into the new store. The team directory is removed when the
-#           process exits; the task directory stays.
+#           into the new store. The record carries the claude pid and start
+#           time; /clear gives the same process a new session id, and attach
+#           adopts the list a session with the same process recorded. The
+#           team directory is removed when the process exits; the task
+#           directory stays.
 #   file    <id>.json, id sanitized to [A-Za-z0-9_-]
 #   create  proper-lockfile on <dir>/.lock: mkdir <dir>/.lock.lock, 30 retries
 #           at 5–100 ms, stale after 10 s, mtime refreshed while held
@@ -25,13 +28,17 @@
 #   schema  id, subject, description, status ∈ {pending,in_progress,completed},
 #           blocks[], blockedBy[]; optional activeForm, owner, metadata{}
 #
-# Pulled tasks take id gh-<issue number>. This executable never writes
+# Pulled tasks take id gh-<issue number> and owner "team-lead", the name
+# Claude Code gives the head agent. An idle in-process teammate claims the
+# first pending, unblocked task with no owner (polled every 500 ms, 2.1.287);
+# an owner is the one field that keeps a task out of that pool while it stays
+# pending and editable by the head agent. This executable never writes
 # .highwatermark and never touches a file whose metadata.github_issue does not
 # match its id. Every read-merge-write of a task file happens under that
 # file's lock.
 #
 # Usage:
-#   gh-tasks [--session ID] attach [startup|resume]   # resolve the live list, carry the previous one forward
+#   gh-tasks [--session ID] attach [startup|resume|compact|clear]   # resolve the live list, carry the previous one forward
 #   gh-tasks [--session ID] [--force] pull
 #   gh-tasks [--session ID] whisper [--full]
 #   gh-tasks [--session ID] link <issue> <task-id>
@@ -264,6 +271,7 @@ fetch_issues() {
 # metadata.format stamps the fence format; a bump forces the description
 # through once so no task keeps a fence an older version could not secure.
 FORMAT=2
+LEAD_OWNER="team-lead"
 MERGE='
   (if $e == null or ($e.metadata.body_sha // "") != $r.body_sha
       or (($e.metadata.format // 0) != $r.metadata.format) then true else false end) as $body_changed |
@@ -279,7 +287,7 @@ MERGE='
     metadata: (($e.metadata // {}) + $r.metadata)
   }
   + (if ($e.activeForm? // null) != null then {activeForm: $e.activeForm} else {} end)
-  + (if ($e.owner? // null) != null then {owner: $e.owner} else {} end)'
+  + {owner: (if ((($e.owner? // "") | tostring) == "") then $lead else $e.owner end)}'
 
 cmd_pull() {
   require_session
@@ -387,7 +395,7 @@ cmd_pull() {
         lock_release "$target"; continue
       fi
     fi
-    merged="$(jq -n --argjson r "$(cat "$f")" --argjson e "$existing" "$MERGE")"
+    merged="$(jq -n --argjson r "$(cat "$f")" --argjson e "$existing" --arg lead "$LEAD_OWNER" "$MERGE")"
     if ! jq -e "$TASK_SHAPE" <<<"$merged" >/dev/null 2>&1; then
       note "merged task $(basename "$target" .json) failed shape check; skipped"
       lock_release "$target"; complete=0; continue
@@ -412,7 +420,7 @@ cmd_pull() {
 }
 
 # ── attach ───────────────────────────────────────────────────────
-# Run on SessionStart for startup and resume. Finds the team this process
+# Run on every SessionStart. On startup and resume it finds the team this process
 # created at startup: a teams/session-*/config.json whose leader cwd is this
 # cwd, that no other session's state has claimed, and that was created after
 # this process started (the hook's parent chain reaches the claude process;
@@ -434,7 +442,6 @@ claimed_teams() {
   done
 }
 
-# Start time in ms of the nearest ancestor named claude, or nothing.
 # Seconds since `pid` started. GNU ps has `etimes`; BSD ps only `etime`,
 # formatted [[dd-]hh:]mm:ss.
 elapsed_seconds() {
@@ -452,22 +459,99 @@ elapsed_seconds() {
   printf '%s' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$sec ))
 }
 
-process_start_ms() {
-  local pid=$$ comm age i
+# Name and parent pid of `pid`, tab-separated. /proc where it exists (read
+# with builtins, no fork), ps elsewhere.
+proc_comm_ppid() {
+  local stat comm rest
+  if [[ -r "/proc/$1/stat" ]]; then
+    read -r stat <"/proc/$1/stat" 2>/dev/null || return 0
+    comm="${stat#*(}"; comm="${comm%)*}"; rest="${stat##*) }"
+    read -r _ rest _ <<<"$rest"
+    printf '%s\t%s\n' "$comm" "$rest"
+    return 0
+  fi
+  comm="$(ps -o comm= -p "$1" 2>/dev/null | tr -d ' ')"
+  [[ -n "$comm" ]] || return 0
+  printf '%s\t%s\n' "${comm##*/}" "$(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ')"   # macOS prints the full path
+}
+
+# Pid of the nearest ancestor named claude, or nothing.
+claude_pid() {
+  local pid=$$ comm ppid i
   for ((i = 0; i < 12; i++)); do
-    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
+    IFS=$'\t' read -r comm ppid < <(proc_comm_ppid "$pid") || return 0
     [[ -n "$comm" ]] || return 0
-    comm="${comm##*/}"   # macOS prints the full path
-    if [[ "$comm" == claude* ]]; then
-      age="$(elapsed_seconds "$pid")"
-      [[ "$age" =~ ^[0-9]+$ ]] || return 0
-      printf '%s' $(( ($(now) - age) * 1000 ))
-      return 0
-    fi
-    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ "$comm" == claude* ]] && { printf '%s' "$pid"; return 0; }
+    pid="$ppid"
     [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 0
   done
   return 0
+}
+
+# Start time in ms of the claude process, or nothing.
+process_start_ms() {
+  local pid age
+  pid="$(claude_pid)"; [[ -n "$pid" ]] || return 0
+  age="$(elapsed_seconds "$pid")"
+  [[ "$age" =~ ^[0-9]+$ ]] || return 0
+  printf '%s' $(( ($(now) - age) * 1000 ))
+}
+
+# The claude process as pid plus its start time, stable across calls and
+# across the session ids one process goes through: /clear starts a new
+# session id in the same process, with the same team and task list.
+# GH_TASKS_PROCESS overrides it for tests.
+process_key() {
+  if [[ -n "${GH_TASKS_PROCESS:-}" ]]; then printf '%s' "$GH_TASKS_PROCESS"; return 0; fi
+  local pid stat start f
+  pid="$(claude_pid)"; [[ -n "$pid" ]] || return 0
+  if [[ -r "/proc/$pid/stat" ]]; then
+    # Field 22, starttime in clock ticks since boot.
+    read -r stat <"/proc/$pid/stat" 2>/dev/null || return 0
+    read -r -a f <<<"${stat##*) }"
+    start="${f[19]:-}"
+  else
+    start="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ')"
+  fi
+  [[ -n "$start" ]] && printf '%s %s' "$pid" "$start"
+  return 0
+}
+
+# The list of the newest other session of this same process, or nothing. A
+# sibling that recorded a list id gives it; one that recorded only its process
+# resolved its list by its own session id, so the lead-session match runs
+# again under that id.
+sibling_list_id() {
+  local key f d best="" best_m=-1 m sib
+  key="$(process_key)"; [[ -n "$key" ]] || return 0
+  for f in "$SESSIONS_ROOT"/*/gh-tasks/process; do
+    [[ -f "$f" ]] || continue
+    d="$(dirname "$f")"
+    [[ "$d" == "$(state_dir)" ]] && continue
+    [[ "$(head -n1 "$f" 2>/dev/null)" == "$key" ]] || continue
+    m="$(mtime "$f")"
+    if (( m > best_m )); then best="$d"; best_m="$m"; fi
+  done
+  [[ -n "$best" ]] || return 0
+  if [[ -s "$best/list_id" ]]; then
+    sanitize_id "$(head -n1 "$best/list_id")"
+  else
+    sib="$(basename "$(dirname "$best")")"
+    ( SESSION="$sib"; team_list_id )
+  fi
+  return 0
+}
+
+# Record the process that owns this session; the list id too when given.
+record_list() {
+  local state key; state="$(state_dir)"; mkdir -p "$state"
+  if [[ -n "${1:-}" ]]; then
+    printf '%s\n' "$1" >"$state/list_id.tmp" && mv -f "$state/list_id.tmp" "$state/list_id"
+  fi
+  key="$(process_key)"
+  if [[ -n "$key" ]]; then
+    printf '%s\n' "$key" >"$state/process.tmp" && mv -f "$state/process.tmp" "$state/process"
+  fi
 }
 
 fresh_team() {
@@ -497,8 +581,9 @@ fresh_team() {
 }
 
 # Copy the open tasks of $1 into $2 when $2 holds no numeric task yet. Ids
-# are kept; edges to tasks that did not come along are dropped; owner is
-# dropped, since the agent it named did not survive the restart.
+# are kept; edges to tasks that did not come along are dropped. A teammate an
+# owner named did not survive the restart, so a mirrored task or one the head
+# agent owned goes back to the head agent and any other task loses its owner.
 carry_tasks() {
   local from="$1" to="$2" f id n=0 ids
   [[ -d "$from" ]] || return 0
@@ -515,7 +600,7 @@ carry_tasks() {
     id="$(basename "$f" .json)"
     [[ -e "$to/$id.json" ]] && continue
     jq -e '.status != "completed"' "$f" >/dev/null 2>&1 || continue
-    jq 'del(.owner)' "$f" >"$to/$id.json.gh-tasks.tmp" && mv -f "$to/$id.json.gh-tasks.tmp" "$to/$id.json"
+    jq --arg lead "$LEAD_OWNER" 'if .metadata.github_issue? or .owner == $lead then .owner = $lead else del(.owner) end' "$f" >"$to/$id.json.gh-tasks.tmp" && mv -f "$to/$id.json.gh-tasks.tmp" "$to/$id.json"
     n=$((n + 1))
   done
   ids="$(for f in "$to"/*.json; do [[ -e "$f" ]] && basename "$f" .json; done | jq -R . | jq -s .)"
@@ -529,17 +614,26 @@ carry_tasks() {
   return 0
 }
 
-# attach [startup|resume|compact|clear]: the SessionStart source. Only a new
-# process has a new team, so compact and clear are no-ops.
+# attach [startup|resume|compact|clear]: the SessionStart source. A new
+# process (startup, resume) has a new team. Compact and clear keep the
+# process and its list but clear changes the session id, so the new session
+# adopts the list a sibling session of the same process recorded.
 cmd_attach() {
   require_session
-  local source="${ARGS[0]:-startup}" state prev new origin=""
+  local source="${ARGS[0]:-startup}" prev new origin=""
+  prev="$(recorded_list_id)"
   case "$source" in
     startup|resume) ;;
-    *) return 0 ;;
+    *)
+      [[ -z "$prev" && -z "${CLAUDE_CODE_TASK_LIST_ID:-}" ]] || return 0
+      new="$(sibling_list_id)"
+      if [[ -n "$new" ]]; then
+        record_list "$new"
+        log "attach ($source): list $new, from this process's previous session"
+      fi
+      return 0
+      ;;
   esac
-  state="$(state_dir)"; mkdir -p "$state"
-  prev="$(recorded_list_id)"
   if [[ -n "${CLAUDE_CODE_TASK_LIST_ID:-}" ]]; then
     # An explicit list is the operator's choice, shared or named; nothing
     # private is carried into it.
@@ -561,9 +655,12 @@ cmd_attach() {
   fi
   # Only a resolved id is recorded. The fallback stays unrecorded so the
   # lead-session match keeps working for a process that named its team from
-  # this session id.
+  # this session id; the process is recorded on every path so a later clear
+  # finds this session.
   if [[ "$origin" == env || "$origin" == team ]]; then
-    printf '%s\n' "$new" >"$state/list_id.tmp" && mv -f "$state/list_id.tmp" "$state/list_id"
+    record_list "$new"
+  else
+    record_list ""
   fi
   log "attach ($source): list $new$([[ -n "$prev" && "$prev" != "$new" ]] && echo " (was $prev)")"
 }
@@ -658,6 +755,7 @@ cmd_status() {
   echo "list id:    $(list_id)$([[ -n "$(recorded_list_id)" ]] && echo ' (recorded by attach)')"
   echo "store:      $dir $([[ -d "$dir" ]] && echo '(exists)' || echo '(absent)')"
   echo "state:      $state"
+  echo "process:    $(process_key)"
   echo "label:      $LABEL"
   echo "ttl:        ${TTL}s$([[ -e "$state/retry" ]] && echo ' (retry pending)')"
   if [[ -f "$snap" ]]; then
