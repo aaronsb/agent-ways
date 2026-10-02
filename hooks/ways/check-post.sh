@@ -92,7 +92,9 @@ done
 # Suppress output if nothing fired or content is whitespace-only.
 [[ -z "$CONTEXT" ]] && exit 0
 TRIMMED="${CONTEXT%$'\n\n'}"
-[[ -z "${TRIMMED// /}" ]] && exit 0
+# A regex test stops at the first visible character; `${TRIMMED// /}`
+# rewrote the whole string, quadratic in a UTF-8 locale (#710).
+[[ $TRIMMED =~ [^[:space:]] ]] || exit 0
 
 jq -n --arg ctx "$TRIMMED" --arg evt "PostToolUse" '{
   hookSpecificOutput: {

@@ -106,26 +106,42 @@ check "inject-subagent ignores the parent's refire state" "$expected" "$(inject 
 check "inject-subagent logs each injection" "8" \
     "$(jq -r 'select(.event=="way_fired" and .scope=="subagent") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
 
-# inject-subagent.sh's work on the assembled context must stay linear in its
-# size (#705). In a UTF-8 locale `${ctx// /}` took 150 ms on 13 KB of ways
-# and grows with the square of the size: about 9 s on this 100 KB way.
+# Hooks that test their assembled context must stay linear in its size
+# (#705, #710). In a UTF-8 locale `${ctx// /}` took 150 ms on 13 KB of ways
+# and grows with the square of the size: about 10 s on this 100 KB way.
+# Timed with bash's `time` keyword, which needs no GNU `date +%N`.
+TIMEFORMAT=%R
+under() { awk -v s="$1" -v l="$2" 'BEGIN { print (s + 0 < l) ? "yes" : "no" }'; }
+big_way() {  # dir scope
+    mkdir -p "$1"
+    { printf -- '---\ndescription: big way\nscope: %s\nrefire: 0.15\n---\n' "$2"
+      for _ in $(seq 1 2000); do printf 'Le café est prêt, and the way body runs on.\n'; done
+    } > "$1/$(basename "$1").md"
+}
 utf8=$(locale -a 2>/dev/null | grep -iE '^(C|en_US)\.utf-?8$' | head -1)
 if [[ -n "$utf8" ]]; then
-    mkdir -p "$HOME/.claude/hooks/ways/coredom/big"
-    { printf -- '---\ndescription: big way\nscope: subagent\nrefire: 0.15\n---\n'
-      for _ in $(seq 1 2000); do printf 'Le café est prêt, and the way body runs on.\n'; done
-    } > "$HOME/.claude/hooks/ways/coredom/big/big.md"
+    big_way "$HOME/.claude/hooks/ways/coredom/big" subagent
     mkdir -p "$SESSIONS/sess-big/subagent-stash"
     echo '{"ways":["coredom/big"],"channels":["prompt"]}' > "$SESSIONS/sess-big/subagent-stash/001.json"
-    start=$(date +%s%N)
-    big=$(echo "{\"session_id\":\"sess-big\",\"cwd\":\"$WORK/project\"}" \
-        | LC_ALL="$utf8" bash "$HOOKS/inject-subagent.sh" | jq -r '.hookSpecificOutput.additionalContext' | wc -l)
-    ms=$(( ($(date +%s%N) - start) / 1000000 ))
-    check "inject-subagent injects a 100 KB way" "2000" "$(echo $big)"
-    check "inject-subagent handles a 100 KB way in under 2 s (took ${ms} ms)" "yes" \
-        "$([[ $ms -lt 2000 ]] && echo yes || echo no)"
+    payload="{\"session_id\":\"sess-big\",\"cwd\":\"$WORK/project\"}"
+    secs=$( { time ( echo "$payload" | LC_ALL="$utf8" bash "$HOOKS/inject-subagent.sh" > "$WORK/big.json" 2>/dev/null ); } 2>&1 )
+    check "inject-subagent injects a 100 KB way" "2000" \
+        "$(jq -r '.hookSpecificOutput.additionalContext' "$WORK/big.json" | wc -l | tr -d ' ')"
+    check "inject-subagent handles a 100 KB way in under 2 s (took ${secs} s)" "yes" "$(under "$secs" 2)"
+
+    # check-post.sh (PostToolUse) fires a way whose postcheck exits 0; the
+    # 10,000-character cap still admits an oversized first body.
+    big_way "$HOME/.claude/hooks/ways/coredom/bigpost" agent
+    printf '#!/bin/sh\nexit 0\n' > "$HOME/.claude/hooks/ways/coredom/bigpost/postcheck.sh"
+    chmod +x "$HOME/.claude/hooks/ways/coredom/bigpost/postcheck.sh"
+    payload="{\"session_id\":\"sess-post\",\"cwd\":\"$WORK/project\",\"tool_name\":\"Edit\"}"
+    secs=$( { time ( echo "$payload" | LC_ALL="$utf8" bash "$HOOKS/check-post.sh" > "$WORK/post.json" 2>/dev/null ); } 2>&1 )
+    check "check-post injects a 100 KB way" "2000" \
+        "$(jq -r '.hookSpecificOutput.additionalContext' "$WORK/post.json" | wc -l | tr -d ' ')"
+    check "check-post handles a 100 KB way in under 2 s (took ${secs} s)" "yes" "$(under "$secs" 2)"
+    rm -rf "$HOME/.claude/hooks/ways/coredom/bigpost"
 else
-    echo "  SKIP: no UTF-8 locale for the inject-subagent size check"
+    echo "  SKIP: no UTF-8 locale for the context size checks"
 fi
 
 # The code-quality macro runs on every fire of its way, SubagentStart
@@ -141,6 +157,7 @@ done
 for i in $(seq 1 300); do printf 'a\nb\nc\n' > "$REPO/short$i.rs"; done
 seq 1 600 > "$REPO/long.rs"
 seq 1 900 > "$REPO/has space.rs"
+seq 1 700 > "$REPO/café.rs"                                    # non-ASCII name
 seq 1 900 > "$REPO/notes.md"                                   # excluded by scan_exclude
 { printf '\211PNG\r\n\032\n\0\0\0\rIHDR'; seq 1 600; } > "$REPO/blob.png"  # binary
 { seq 1 500; printf 'tail'; } > "$REPO/edge.rs"                # 500 lines to wc
@@ -149,6 +166,31 @@ out=$(cd "$REPO" && PATH="$SHIMS:$PATH" bash "$HOOKS/softwaredev/code/quality/ma
 check "quality macro spawns file once" "1" "$(grep -c '^file$' "$SPAWNS")"
 check "quality macro spawns wc once" "1" "$(grep -c '^wc$' "$SPAWNS")"
 check "quality macro lists only long text files" \
-    $'  900  has space.rs\n  600  long.rs' "$(grep -E '^ +[0-9]+  ' <<< "$out")"
+    $'  900  has space.rs\n  700  café.rs\n  600  long.rs' "$(grep -E '^ +[0-9]+  ' <<< "$out")"
+
+# A file `wc` cannot read gets no line from it. The macro then says nothing
+# rather than pair the remaining counts with the wrong files. The shim
+# simulates that by dropping wc's first line.
+mkdir -p "$WORK/shims-short"
+printf '#!/bin/sh\n%s "$@" | sed 1d\n' "$(command -v wc)" > "$WORK/shims-short/wc"
+chmod +x "$WORK/shims-short/wc"
+out=$(cd "$REPO" && PATH="$WORK/shims-short:$PATH" bash "$HOOKS/softwaredev/code/quality/macro.sh")
+check "quality macro is silent when wc skips a file" "" "$out"
+
+# With submodule.recurse set (a common global setting) the scan stays out
+# of submodules: their files are not this repo's and bypass scan_exclude.
+SUBSRC="$WORK/sub-src" SUPER="$WORK/super-repo"
+mkdir -p "$SUBSRC" "$SUPER"
+seq 1 900 > "$SUBSRC/inner.rs"
+seq 1 600 > "$SUPER/long.rs"
+gitq() { git -c user.name=t -c user.email=t@t -c protocol.file.allow=always -c init.defaultBranch=main "$@"; }
+gitq -C "$SUBSRC" init -q && gitq -C "$SUBSRC" add -A && gitq -C "$SUBSRC" commit -qm sub
+gitq -C "$SUPER" init -q && gitq -C "$SUPER" submodule -q add "$SUBSRC" sub 2>/dev/null
+gitq -C "$SUPER" add -A
+check "submodule fixture has a gitlink" "sub" "$(git -C "$SUPER" ls-files -s | awk '$1 == "160000" { print $4 }')"
+out=$(cd "$SUPER" && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=submodule.recurse GIT_CONFIG_VALUE_0=true \
+    bash "$HOOKS/softwaredev/code/quality/macro.sh")
+check "quality macro skips submodule files under submodule.recurse" \
+    '  600  long.rs' "$(grep -E '^ +[0-9]+  ' <<< "$out")"
 
 exit $fail
