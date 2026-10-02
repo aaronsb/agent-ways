@@ -1,7 +1,8 @@
 //! Shared rendering for ways list display.
 //!
-//! Used by both `list` (live session) and `rethink` (replay).
-//! All rendering writes to a String buffer; callers handle output.
+//! `list` prints the table as ANSI text into a String buffer. The replay
+//! screens draw the same columns on agent-tui and take the cell values and
+//! their styles from here ([`next_cell`], [`traffic`], [`pin_color`]).
 
 use std::fmt::Write;
 use agent_theme::{pair, paint, painter, Role, Style};
@@ -144,7 +145,16 @@ pub fn compute_bar_positions<W: WayRow>(
     ways: &[W],
     context_window_k: u64,
 ) -> Vec<Option<usize>> {
-    let bw = Layout::detect().bar_width;
+    compute_bar_positions_in(ways, context_window_k, Layout::detect().bar_width)
+}
+
+/// [`compute_bar_positions`] for a bar `bw` cells wide.
+pub fn compute_bar_positions_in<W: WayRow>(
+    ways: &[W],
+    context_window_k: u64,
+    bw: usize,
+) -> Vec<Option<usize>> {
+    let bw = bw.max(1);
     ways.iter()
         .map(|w| {
             if context_window_k == 0 {
@@ -181,10 +191,15 @@ pub fn cluster_of(bar_pos: usize, unique_positions: &[usize]) -> usize {
 pub fn pin_str(cluster_idx: usize) -> String {
     let symbol = PIN_SYMBOLS[cluster_idx % PIN_SYMBOLS.len()];
     let p = painter();
-    match agent_identity::categorical(cluster_idx).color(p.depth()) {
+    match pin_color(cluster_idx, p.depth()) {
         Some(c) => p.paint(c, symbol),
         None => symbol.to_string(),
     }
+}
+
+/// A cluster's pin colour at `depth`: agent-identity's categorical palette.
+pub fn pin_color(cluster_idx: usize, depth: agent_theme::ColorDepth) -> Option<agent_theme::Color> {
+    agent_identity::categorical(cluster_idx).color(depth)
 }
 
 /// Render table header against a content-sized layout (`Layout::for_rows`).
@@ -226,10 +241,7 @@ pub fn write_way_row_with<W: WayRow>(
     let display_id = format!("{prefix}{}", w.id());
     let trigger_display = format_trigger(w.trigger());
 
-    let (dist_on, dist_off) = pair(traffic(
-        distance == 0 || (current_epoch > 0 && distance < current_epoch / 3),
-        current_epoch > 0 && distance < current_epoch * 2 / 3,
-    ));
+    let (dist_on, dist_off) = pair(distance_style(distance, current_epoch));
 
     let pin = if let Some(bar_pos) = bar_positions.get(index).copied().flatten() {
         pin_str(cluster_of(bar_pos, unique_pos))
@@ -486,7 +498,7 @@ pub fn write_token_timeline<W: WayRow>(
 const WARN: Style = Style::new().role(Role::Warn).bold();
 
 /// The traffic-light style: ok when `good`, warn when `fair`, else err.
-fn traffic(good: bool, fair: bool) -> Style {
+pub fn traffic(good: bool, fair: bool) -> Style {
     if good {
         Style::new().role(Role::Ok)
     } else if fair {
@@ -496,25 +508,46 @@ fn traffic(good: bool, fair: bool) -> Style {
     }
 }
 
+/// The Dist column's light: how long ago, in epochs, a way fired against
+/// how far the session has come.
+pub fn distance_style(distance: u64, current_epoch: u64) -> Style {
+    traffic(
+        distance == 0 || (current_epoch > 0 && distance < current_epoch / 3),
+        current_epoch > 0 && distance < current_epoch * 2 / 3,
+    )
+}
+
 /// Predict when a way will next re-disclose against its own curve.
 pub fn predict_next<W: WayRow>(
     w: &W,
     current_epoch: u64,
     current_tokens_k: u64,
 ) -> String {
+    let (text, style) = next_cell(w, current_epoch, current_tokens_k);
+    paint(style, text)
+}
+
+/// The Re-disclosure cell's text and style: when a way will next
+/// re-disclose against its own curve.
+pub fn next_cell<W: WayRow>(
+    w: &W,
+    current_epoch: u64,
+    current_tokens_k: u64,
+) -> (String, Style) {
     let threshold_k = w.refire_threshold_k();
     let token_pos_k = w.token_pos() / 1000;
     let token_distance_k = current_tokens_k.saturating_sub(token_pos_k);
     let token_pct = (token_distance_k * 100).checked_div(threshold_k).unwrap_or(0);
+    let muted = Style::new().role(Role::Muted);
 
     if token_pct >= 100 {
-        return paint(Role::Ok, "● now");
+        return ("● now".into(), Style::new().role(Role::Ok));
     }
     if token_pct >= 75 {
-        return paint(WARN, format!("◐ {token_pct}%"));
+        return (format!("◐ {token_pct}%"), WARN);
     }
     if token_pct >= 50 {
-        return paint(Role::Muted, format!("◔ {token_pct}%"));
+        return (format!("◔ {token_pct}%"), muted);
     }
 
     let epoch_distance = current_epoch.saturating_sub(w.epoch_fired());
@@ -525,13 +558,13 @@ pub fn predict_next<W: WayRow>(
         let next_epoch = w.epoch_fired() + needed_distance;
         if epoch_distance < needed_distance {
             if needed_distance > 500 {
-                return paint(Role::Muted, format!("check ~{} (suppressed)", fmt_epoch(next_epoch)));
+                return (format!("check ~{} (suppressed)", fmt_epoch(next_epoch)), muted);
             }
-            return paint(Role::Muted, format!("check at epoch ~{next_epoch}"));
+            return (format!("check at epoch ~{next_epoch}"), muted);
         }
     }
 
-    paint(Role::Muted, "─")
+    ("─".into(), muted)
 }
 
 pub fn format_trigger(trigger: &str) -> String {
@@ -558,8 +591,7 @@ pub fn fmt_epoch(n: u64) -> String {
     }
 }
 
-// ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `agent_fmt`
-// — the canonical home — so `render`, `rethink`, and the compositor share one copy.
+// ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `agent_fmt`.
 
 #[cfg(test)]
 mod tests {

@@ -13,10 +13,9 @@ use super::model::{ActiveWay, Frame, WayEvent};
 
 /// Reconstruct the full replay frame timeline for a session. Loads the token
 /// timeline, pre-resolves per-way refire thresholds, and clusters events into
-/// epoch frames. Shared by the interactive replay (`run`) and the JSON dump
-/// (`rethink_dump::run_json`).
+/// epoch frames. Shared by the replay screens and `introspect replay --json`.
 ///
-/// Refire thresholds reflect each way's *current* curve — rethink is a replay,
+/// Refire thresholds reflect each way's *current* curve — this is a replay,
 /// so a curve edited since the recorded session shows today's value. That's the
 /// best we can do without snapshotting frontmatter into events.jsonl.
 pub(crate) fn reconstruct_frames(
@@ -40,7 +39,7 @@ pub(crate) fn reconstruct_frames(
     build_frames(events, &token_timeline, &refire_cache, fallback_refire_k)
 }
 
-fn build_frames(
+pub(super) fn build_frames(
     events: &[WayEvent],
     token_timeline: &[(String, u64)],
     refire_cache: &HashMap<String, u64>,
@@ -179,7 +178,7 @@ fn build_frames(
         }
 
         let mut ways: Vec<ActiveWay> = active_ways.values().cloned().collect();
-        ways.sort_by_key(|w| w.epoch_fired);
+        ways.sort_by(|a, b| (a.epoch_fired, &a.id).cmp(&(b.epoch_fired, &b.id)));
 
         frames.push(Frame {
             epoch,
@@ -289,7 +288,7 @@ pub(crate) fn find_session_project(content: &str, session_id: &str) -> Option<St
     None
 }
 
-#[cfg(all(test, feature = "tui"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -369,6 +368,30 @@ mod tests {
         let frames = build_frames(&events, &[], &HashMap::new(), 50);
         assert_eq!(frames.len(), 1, "a and b share one epoch");
         assert!(frames.iter().all(|f| f.ways.iter().all(|w| w.id != "d/x")), "the non-UTC row is skipped");
+    }
+
+    /// Ways that fired in one epoch keep one order, by id, in every frame:
+    /// the active set is a hash map, so an order by epoch alone moved rows
+    /// about from run to run and frame to frame.
+    #[test]
+    fn ways_of_one_epoch_are_in_id_order() {
+        let ids: Vec<String> = (0..24).map(|i| format!("d/w{i:02}")).collect();
+        let events: Vec<WayEvent> = ids
+            .iter()
+            .rev()
+            .map(|id| WayEvent {
+                ts: "2026-01-01T00:00:00Z".into(),
+                event: "way_fired".into(),
+                way: id.clone(),
+                trigger: "keyword".into(),
+                check: String::new(),
+                p_yes: String::new(),
+                verdict: String::new(),
+            })
+            .collect();
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        let got: Vec<&str> = frames[0].ways.iter().map(|w| w.id.as_str()).collect();
+        assert_eq!(got, ids.iter().map(String::as_str).collect::<Vec<_>>());
     }
 
     #[test]

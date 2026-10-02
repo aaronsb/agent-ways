@@ -1,0 +1,189 @@
+agent-tui frame 120x40
+| introspect    timeline    why fired                                                                                    |
+|Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
+|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55                                                             |
+|━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
+|┌ ways · epoch ────────────────────────┐┌ why it fired ────────────────────────────────────────────────────────────────┐|
+|│ • e1 softwaredev/delivery/commits    ││softwaredev/code/testing                                                      │|
+|│ · e2 softwaredev/docs/adr            ││/ways/softwaredev/code/testing/testing.md                                     │|
+|│▌• e3 softwaredev/code/testing        ││                                                                              │|
+|│                                      ││Trigger  embed:en  (score 0.71)                                               │|
+|│                                      ││Criteria                                                                      │|
+|│                                      ││  vocabulary: test tdd unit golden fixture assert                             │|
+|│                                      ││                                                                              │|
+|│                                      ││Matched                                                                       │|
+|│                                      ││  semantic fire — matched by embedding; no recoverable term                   │|
+|│                                      ││                                                                              │|
+|│                                      ││── way ─────────────                                                          │|
+|│                                      ││Testing                                                                       │|
+|│                                      ││                                                                              │|
+|│                                      ││Write the test first, watch it fail, then make it pass. Run make test before a│|
+|│                                      ││commit.                                                                       │|
+|│                                      ││                                                                              │|
+|│                                      ││• one behaviour per test                                                      │|
+|│                                      ││• name it for what it shows                                                   │|
+|│                                      ││                                                                              │|
+|│                                      ││Kind   │ Where                                                                │|
+|│                                      ││───────┼────────────────                                                      │|
+|│                                      ││unit   │ beside the code                                                      │|
+|│                                      ││golden │ tests/fixtures                                                       │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|│                                      ││                                                                              │|
+|└──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────┘|
+| why   ↑↓ way  j/k read  ←→ frame  esc timeline  q quit                                                                 |
+styles
+  0   0-11  White Blue -
+  0  14-23  White DarkGray DIM
+  0  26-36  Black Cyan BOLD
+  1   0-7   - - BOLD
+  1  44-59  - - DIM
+  2   0-58  - - DIM
+  3   0-75  Cyan - -
+  3  76-76  Cyan - BOLD
+  3  77-115 - - DIM
+  3 116-119 - - BOLD
+  4   0-0   - - DIM
+  4   1-14  Blue - BOLD|DIM
+  4  15-40  - - DIM
+  4  41-54  Blue - BOLD|DIM
+  4  55-119 - - DIM
+  5   0-0   - - DIM
+  5   4-6   - - DIM
+  5  39-40  - - DIM
+  5  41-64  - - BOLD
+  5 119-119 - - DIM
+  6   0-0   - - DIM
+  6   4-6   - - DIM
+  6  39-81  - - DIM
+  6 119-119 - - DIM
+  7   0-0   - - DIM
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-3   - - BOLD|REVERSED
+  7   4-6   - - BOLD|DIM|REVERSED
+  7   7-38  - - BOLD|REVERSED
+  7  39-40  - - DIM
+  7 119-119 - - DIM
+  8   0-0   - - DIM
+  8  39-40  - - DIM
+  8  41-49  - - BOLD
+  8  58-71  - - DIM
+  8 119-119 - - DIM
+  9   0-0   - - DIM
+  9  39-40  - - DIM
+  9  41-48  - - BOLD
+  9 119-119 - - DIM
+ 10   0-0   - - DIM
+ 10  39-54  - - DIM
+ 10 119-119 - - DIM
+ 11   0-0   - - DIM
+ 11  39-40  - - DIM
+ 11 119-119 - - DIM
+ 12   0-0   - - DIM
+ 12  39-40  - - DIM
+ 12  41-47  - - BOLD
+ 12 119-119 - - DIM
+ 13   0-0   - - DIM
+ 13  39-99  - - DIM
+ 13 119-119 - - DIM
+ 14   0-0   - - DIM
+ 14  39-40  - - DIM
+ 14 119-119 - - DIM
+ 15   0-0   - - DIM
+ 15  39-60  - - DIM
+ 15 119-119 - - DIM
+ 16   0-0   - - DIM
+ 16  39-40  - - DIM
+ 16  41-47  Cyan - BOLD
+ 16 119-119 - - DIM
+ 17   0-0   - - DIM
+ 17  39-40  - - DIM
+ 17 119-119 - - DIM
+ 18   0-0   - - DIM
+ 18  39-40  - - DIM
+ 18  56-60  - - BOLD
+ 18 101-109 Yellow - -
+ 18 119-119 - - DIM
+ 19   0-0   - - DIM
+ 19  39-40  - - DIM
+ 19 119-119 - - DIM
+ 20   0-0   - - DIM
+ 20  39-40  - - DIM
+ 20 119-119 - - DIM
+ 21   0-0   - - DIM
+ 21  39-40  - - DIM
+ 21  41-42  Cyan - -
+ 21 119-119 - - DIM
+ 22   0-0   - - DIM
+ 22  39-40  - - DIM
+ 22  41-42  Cyan - -
+ 22 119-119 - - DIM
+ 23   0-0   - - DIM
+ 23  39-40  - - DIM
+ 23 119-119 - - DIM
+ 24   0-0   - - DIM
+ 24  39-40  - - DIM
+ 24  41-44  - - BOLD
+ 24  47-49  - - DIM
+ 24  50-54  - - BOLD
+ 24 119-119 - - DIM
+ 25   0-0   - - DIM
+ 25  39-64  - - DIM
+ 25 119-119 - - DIM
+ 26   0-0   - - DIM
+ 26  39-40  - - DIM
+ 26  47-49  - - DIM
+ 26 119-119 - - DIM
+ 27   0-0   - - DIM
+ 27  39-40  - - DIM
+ 27  47-49  - - DIM
+ 27 119-119 - - DIM
+ 28   0-0   - - DIM
+ 28  39-40  - - DIM
+ 28 119-119 - - DIM
+ 29   0-0   - - DIM
+ 29  39-40  - - DIM
+ 29 119-119 - - DIM
+ 30   0-0   - - DIM
+ 30  39-40  - - DIM
+ 30 119-119 - - DIM
+ 31   0-0   - - DIM
+ 31  39-40  - - DIM
+ 31 119-119 - - DIM
+ 32   0-0   - - DIM
+ 32  39-40  - - DIM
+ 32 119-119 - - DIM
+ 33   0-0   - - DIM
+ 33  39-40  - - DIM
+ 33 119-119 - - DIM
+ 34   0-0   - - DIM
+ 34  39-40  - - DIM
+ 34 119-119 - - DIM
+ 35   0-0   - - DIM
+ 35  39-40  - - DIM
+ 35 119-119 - - DIM
+ 36   0-0   - - DIM
+ 36  39-40  - - DIM
+ 36 119-119 - - DIM
+ 37   0-0   - - DIM
+ 37  39-40  - - DIM
+ 37 119-119 - - DIM
+ 38   0-119 - - DIM
+ 39   0-4   Black Cyan BOLD
+ 39   7-8   Cyan - BOLD
+ 39   9-12  - - DIM|ITALIC
+ 39  15-17  Cyan - BOLD
+ 39  18-22  - - DIM|ITALIC
+ 39  25-26  Cyan - BOLD
+ 39  27-32  - - DIM|ITALIC
+ 39  35-37  Cyan - BOLD
+ 39  38-46  - - DIM|ITALIC
+ 39  49-49  Cyan - BOLD
+ 39  50-54  - - DIM|ITALIC

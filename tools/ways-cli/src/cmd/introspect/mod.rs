@@ -1,27 +1,162 @@
-//! `ways introspect` — the user/agent-facing surface over the ways-core
-//! `SessionIntrospection` model (ADR-154). Modes: `replay` (interactive),
-//! `list`, `dump` (agent-facing JSON). `live` and the why-fired drill-down
-//! follow in later increments.
+//! `ways introspect` — the user/agent-facing surface over a session's way
+//! firings (ADR-154). Modes: `replay` and `live`, timeline screens on
+//! agent-tui (ADR-504 §1, §9), with `replay --json` as the replay's CLI form;
+//! `list`, the session table or `--json`; `dump`, the `SessionIntrospection`
+//! model as JSON; `fires`, the semantic fires by score.
 //!
-//! `replay`/`list` currently delegate to the proven `rethink` pipeline
-//! (`build_frames` → TUI); re-pointing them at the `SessionIntrospection` model
-//! is deferred until the drill-down needs it, since it requires reconciling that
-//! model's fire-centric clustering with `build_frames`' full-event-stream
-//! clustering (ADR-154 §1 — not a drop-in swap). `dump` already reads the model.
+//! - [`model`] — the replay data types (`WayEvent`, `ActiveWay`, `Frame`).
+//! - [`scope`] — project-scope resolution and matching.
+//! - [`frames`] — frame reconstruction and event/token loading.
+//! - [`sessions`] — session enumeration, the `list` table, transcript discovery.
+//! - [`dump`] — `replay --json` and `list --json`.
+//! - [`why`] — the why-fired index and detail.
+//! - [`table`] — the ways table and context lines on agent-tui.
+//! - [`screen`] — the picker, timeline and why-fired screens.
 
-use anyhow::Result;
+mod dump;
+mod frames;
+mod model;
+mod scope;
+mod screen;
+mod sessions;
+mod table;
+mod why;
 
-use crate::cmd::{rethink, rethink_dump};
+#[cfg(test)]
+mod tests;
+
+use std::io::IsTerminal;
+
+use anyhow::{bail, Result};
+
+use agent_theme::ColorDepth;
+use agent_tui::theme::{Palette, Shape};
+
 use crate::session;
+pub(crate) use model::Frame;
+use screen::{Introspect, Picker, Replay};
 
-/// `ways introspect replay` — interactive replay of a session's way firings.
-pub fn replay(
-    session: Option<&str>,
-    project: Option<&str>,
-    all: bool,
-    speed: Option<u64>,
-) -> Result<()> {
-    rethink::run(session, project, speed, false, all)
+/// How the screens are opened: on the terminal, or headless with keys fed
+/// to the real key handler and a frame printed in the test kit's format.
+#[derive(Debug, Default, Clone)]
+pub struct Open {
+    /// Key tokens (`agent_tui::testkit::parse_keys`).
+    pub keys: Vec<String>,
+    /// `WxH`: print the frame at that size.
+    pub snap: Option<String>,
+    /// truecolor, 256, 16 or none; the terminal's by default.
+    pub depth: Option<String>,
+}
+
+impl Open {
+    fn headless(&self) -> bool {
+        !self.keys.is_empty() || self.snap.is_some()
+    }
+}
+
+fn depth_of(s: Option<&str>) -> Result<ColorDepth> {
+    Ok(match s {
+        None => ColorDepth::detect(),
+        Some("truecolor") => ColorDepth::TrueColor,
+        Some("256") => ColorDepth::Ansi256,
+        Some("16") => ColorDepth::Ansi16,
+        Some("none") => ColorDepth::NoColor,
+        Some(o) => bail!("--depth {o}: one of truecolor, 256, 16, none"),
+    })
+}
+
+/// The palette and lozenge shape the settings choose (`theme.active`,
+/// `theme.shape`, ADR-504 note of 2026-10-01), at `depth`.
+fn look(depth: ColorDepth) -> (Palette, Shape) {
+    let project = std::path::PathBuf::from(crate::util::project_dir());
+    let layers = ways_core::settings::layers(&project);
+    let value = |path: &[&str]| -> Option<String> {
+        let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        layers.iter().rev().find_map(|l| l.get(&path).and_then(|v| v.as_str().map(str::to_string)))
+    };
+    let shape = value(&["theme", "shape"]).map_or(Shape::PLAIN, |s| Shape::named(&s));
+    let painter = match agent_theme::user_dir() {
+        Some(dir) => agent_theme::Painter::named_in(value(&["theme", "active"]).as_deref(), &dir, depth).0,
+        None => agent_theme::Painter::terminal(depth),
+    };
+    (Palette { painter }, shape)
+}
+
+/// Show the screens: on the terminal until they close, or headless.
+fn show(mut screen: Introspect, open: &Open) -> Result<()> {
+    if !open.headless() {
+        if let Some(sig) = agent_tui::screen::run(&mut screen)? {
+            // The terminal is restored; end as the signal would have.
+            std::process::exit(128 + sig);
+        }
+        return Ok(());
+    }
+    let keys = agent_tui::testkit::parse_keys(open.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| anyhow::anyhow!("--keys: {e}"))?;
+    for k in keys {
+        if !agent_tui::screen::Screen::key(&mut screen, k) {
+            break;
+        }
+    }
+    if let Some(size) = &open.snap {
+        let (w, h) = size
+            .split_once('x')
+            .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
+            .filter(|(w, h)| *w > 0 && *h > 0)
+            .ok_or_else(|| anyhow::anyhow!("--snap {size}: WIDTHxHEIGHT, such as 100x30"))?;
+        print!("{}", agent_tui::testkit::frame(&agent_tui::screen::render(&mut screen, w, h)));
+    }
+    Ok(())
+}
+
+fn need_terminal(open: &Open, mode: &str) -> Result<()> {
+    if !open.headless() && !(std::io::stdout().is_terminal() && std::io::stdin().is_terminal()) {
+        bail!("`ways introspect {mode}` needs a terminal; `ways introspect replay --json` prints a session's timeline");
+    }
+    Ok(())
+}
+
+/// `ways introspect replay` — a session's way firings frame by frame. With
+/// no `--session`, the picker lists the sessions in scope. `--json` prints
+/// the timeline instead.
+pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Option<u64>, json: bool, open: &Open) -> Result<()> {
+    if json {
+        return dump::replay_json(session, project, all);
+    }
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
+        println!("No events recorded yet.");
+        return Ok(());
+    }
+    let scope = scope::resolve_project_scope(project, all)?;
+    need_terminal(open, "replay")?;
+    let (palette, shape) = look(depth_of(open.depth.as_deref())?);
+    let with_speed = move |mut r: Replay| {
+        if let Some(ms) = speed {
+            r.play = r.play.clone().with_speed_ms(ms);
+        }
+        r
+    };
+    let screen = match session {
+        Some(id) => match Replay::load(&content, id, None, false) {
+            Ok(r) => Introspect::showing(with_speed(r), palette, shape),
+            Err(e) => {
+                println!("{e}");
+                return Ok(());
+            }
+        },
+        None => {
+            let mut found = sessions::gather_sessions(&content, scope.as_deref());
+            if found.is_empty() {
+                println!("No sessions found.");
+                return Ok(());
+            }
+            sessions::find_transcripts(&mut found, &ways_core::paths::claude_dir());
+            let shown = scope.clone().unwrap_or_else(|| "every project".into());
+            let opener: screen::Opener = Box::new(move |id| Replay::load(&content, id, None, false).map(with_speed));
+            Introspect::picking(Picker::new(found, shown), opener, palette, shape)
+        }
+    };
+    show(screen, open)
 }
 
 /// `ways introspect live` — monitor the current session's way firings, following
@@ -29,7 +164,7 @@ pub fn replay(
 /// scope (the one actively writing events); `--session` overrides it. Scoping
 /// mirrors `replay`: defaults to the current project, `--project` for a specific
 /// one, and fails loud rather than silently globalizing when detection fails.
-pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
+pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         println!("No events recorded yet.");
@@ -46,14 +181,14 @@ pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
     //   happening now," which is an activity signal, not a project one.
     let session_id = match (session, project) {
         (Some(s), _) => s.to_string(),
-        (None, Some(p)) => match rethink_dump::most_recent_session(&content, Some(p)) {
+        (None, Some(p)) => match dump::most_recent_session(&content, Some(p)) {
             Some(s) => s,
             None => {
                 println!("No sessions found for project {p}.");
                 return Ok(());
             }
         },
-        (None, None) => match rethink_dump::most_recent_active_session(&content) {
+        (None, None) => match dump::most_recent_active_session(&content) {
             Some(s) => s,
             None => {
                 println!("No sessions found to monitor.");
@@ -66,26 +201,38 @@ pub fn live(session: Option<&str>, project: Option<&str>) -> Result<()> {
     // the monitor — CLAUDE_PROJECT_DIR, or the current directory — NOT the session's
     // recorded project, which the boundary hook may have mislabeled. For a live view,
     // "the project" is where you're working now.
-    let launch_project = Some(project.map_or_else(crate::util::project_dir, str::to_string));
-
-    rethink::run_live(&session_id, launch_project.as_deref(), None)
+    let launch_project = project.map_or_else(crate::util::project_dir, str::to_string);
+    need_terminal(open, "live")?;
+    let (palette, shape) = look(depth_of(open.depth.as_deref())?);
+    match Replay::load(&content, &session_id, Some(&launch_project), true) {
+        Ok(r) => show(Introspect::showing(r, palette, shape), open),
+        Err(_) => {
+            println!("No events for the current session yet.");
+            Ok(())
+        }
+    }
 }
 
 /// `ways introspect list` — enumerate candidate sessions in scope, as a table or
 /// (`--json`) machine-listable data for an agent to pick from before dumping.
 pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
     if json {
-        rethink_dump::run_list_json(project, all)
-    } else {
-        rethink::run(None, project, None, true, all)
+        return dump::run_list_json(project, all);
     }
+    let content = ways_core::firing::load_events_text();
+    if content.trim().is_empty() {
+        println!("No events recorded yet.");
+        return Ok(());
+    }
+    let scope = scope::resolve_project_scope(project, all)?;
+    sessions::list_sessions(&content, scope.as_deref())
 }
 
 /// `ways introspect dump` — emit a session's reconstructed introspection (turns,
 /// fired ways, criteria, keyed transcript join, matched spans) as JSON, so an
 /// agent can investigate *which ways fired, on which turn, and why* without a TUI.
 ///
-/// Scoping mirrors `rethink`: default the current project, `--project` for a
+/// Scoping mirrors `replay`: default the current project, `--project` for a
 /// specific one, `--all` across every project (which only affects session
 /// picking). With no `--session`, the most recent session in scope is dumped.
 pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
@@ -96,7 +243,7 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
     }
 
     // Fail-loud scope resolution, as JSON (agent-facing).
-    let scope = match rethink::resolve_project_scope(project, all) {
+    let scope = match scope::resolve_project_scope(project, all) {
         Ok(s) => s,
         Err(e) => {
             println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);
@@ -106,7 +253,7 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
 
     let session_id = match session {
         Some(s) => s.to_string(),
-        None => match rethink_dump::most_recent_session(&content, scope.as_deref()) {
+        None => match dump::most_recent_session(&content, scope.as_deref()) {
             Some(s) => s,
             None => {
                 println!("{{\"error\":\"no sessions found in scope\"}}");
@@ -122,7 +269,7 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
     // session id if the slug misses, so a wrong path here still resolves the join.
     let project_path = scope
         .clone()
-        .or_else(|| rethink::find_session_project(&content, &session_id))
+        .or_else(|| frames::find_session_project(&content, &session_id))
         .unwrap_or_default();
     let window_k = session::detect_context_window_for(&project_path, &session_id) / 1000;
 
@@ -155,10 +302,10 @@ pub fn fires(
         return Ok(());
     }
 
-    let scope = rethink::resolve_project_scope(project, all)?;
+    let scope = scope::resolve_project_scope(project, all)?;
     let session_id = match session {
         Some(s) => s.to_string(),
-        None => match rethink_dump::most_recent_session(&content, scope.as_deref()) {
+        None => match dump::most_recent_session(&content, scope.as_deref()) {
             Some(s) => s,
             None => {
                 println!("No sessions found in scope.");

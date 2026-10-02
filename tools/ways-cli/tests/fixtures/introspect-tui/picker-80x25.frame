@@ -1,0 +1,90 @@
+agent-tui frame 80x25
+| introspect    sessions                                                         |
+|┌ sessions in /home/dev/proj (3) ──────────────────────────────────────────────┐|
+|│ Session      Date             Project        Events  Ways Duration Transcript│|
+|│ 8f3a2c1d-5e6 2026-07-03 16:52 proj               10     9      18s yes       │|
+|│▌1b2c3d4e-000 2026-07-01 09:10 proj                4     3      12s yes       │|
+|│ 9e8d7c6b-000 2026-06-28 22:05 other_proj          2     1      10s gone      │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|└──────────────────────────────────────────────────────────────────────────────┘|
+| pick   ↑↓ select  ⏎ replay  q quit                                          2/3|
+styles
+  0   0-11  White Blue -
+  0  14-23  Black Cyan BOLD
+  1   0-0   - - DIM
+  1   1-32  Blue - BOLD|DIM
+  1  33-79  - - DIM
+  2   0-0   - - DIM
+  2   1-78  - - BOLD
+  2  79-79  - - DIM
+  3   0-0   - - DIM
+  3  69-71  Green - -
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-68  - - BOLD|REVERSED
+  4  69-71  Green - BOLD|REVERSED
+  4  72-78  - - BOLD|REVERSED
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5  69-72  - - DIM
+  5  79-79  - - DIM
+  6   0-0   - - DIM
+  6  79-79  - - DIM
+  7   0-0   - - DIM
+  7  79-79  - - DIM
+  8   0-0   - - DIM
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  79-79  - - DIM
+ 23   0-79  - - DIM
+ 24   0-5   Black Cyan BOLD
+ 24   8-9   Cyan - BOLD
+ 24  10-16  - - DIM|ITALIC
+ 24  19-19  Cyan - BOLD
+ 24  20-26  - - DIM|ITALIC
+ 24  29-29  Cyan - BOLD
+ 24  30-34  - - DIM|ITALIC
+ 24  77-79  - - DIM
