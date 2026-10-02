@@ -17,9 +17,6 @@
 //! grain those callers already use; East-Asian double-width and combining marks are
 //! not accounted for (that would need a new dependency the lean binary declines).
 
-#[cfg(feature = "tui")]
-use std::fmt::Write;
-
 // ── ANSI-visible-width primitives ─────────────────────────────
 
 /// Visible length of `s` in `char`s, ignoring ANSI escape sequences (`\x1b[…X`,
@@ -72,7 +69,7 @@ pub fn truncate_visible(s: &str, max: usize) -> String {
         visible += 1;
     }
     if truncated && result.contains('\x1b') {
-        result.push_str("\x1b[0m");
+        result.push_str(agent_theme::RESET);
     }
     result
 }
@@ -195,16 +192,16 @@ pub fn hjoin2(left: &Panel, right: &Panel, gap: usize) -> Vec<String> {
 // ── Tab bar ───────────────────────────────────────────────────
 
 /// A one-line tab bar: each label padded with a space on each side, the `active`
-/// index shown in reverse video (`\x1b[7m`), the rest dim (`\x1b[2m`). Out-of-range
-/// `active` simply highlights nothing.
+/// index in the selection style (reverse video by default), the rest muted.
+/// Out-of-range `active` simply highlights nothing.
 #[cfg(feature = "tui")]
 pub fn tab_bar(tabs: &[&str], active: usize) -> String {
     let mut out = String::new();
     for (i, label) in tabs.iter().enumerate() {
         if i == active {
-            let _ = write!(out, "\x1b[7m {label} \x1b[0m");
+            out.push_str(&agent_theme::paint(agent_theme::Role::Selection, format!(" {label} ")));
         } else {
-            let _ = write!(out, "\x1b[2m {label} \x1b[0m");
+            out.push_str(&agent_theme::paint(agent_theme::Role::Muted, format!(" {label} ")));
         }
     }
     out
@@ -216,16 +213,23 @@ pub fn tab_bar(tabs: &[&str], active: usize) -> String {
 mod tests {
     use super::*;
 
-    const RED: &str = "\x1b[0;31m";
-    const RST: &str = "\x1b[0m";
+    use agent_theme::{Color, ColorDepth, Painter, Role, RESET as RST};
+
+    fn pinned() -> Painter {
+        Painter::terminal(ColorDepth::TrueColor)
+    }
+
+    fn red(s: &str) -> String {
+        pinned().paint(Role::Err, s)
+    }
 
     #[test]
     fn visible_len_ignores_ansi() {
         assert_eq!(visible_len("abc"), 3);
-        assert_eq!(visible_len(&format!("{RED}abc{RST}")), 3);
+        assert_eq!(visible_len(&red("abc")), 3);
         assert_eq!(visible_len(""), 0);
         // Truecolor SGR (ends in 'm') is fully skipped.
-        assert_eq!(visible_len("\x1b[38;2;99;179;237m●\x1b[0m"), 1);
+        assert_eq!(visible_len(&pinned().paint(Color::rgb(99, 179, 237), "●")), 1);
     }
 
     #[test]
@@ -233,18 +237,18 @@ mod tests {
         assert_eq!(truncate_visible("abcdef", 3), "abc");
         assert_eq!(truncate_visible("abc", 10), "abc"); // shorter → unchanged
         // Styled content truncated mid-style gets a reset appended.
-        let t = truncate_visible(&format!("{RED}abcdef{RST}"), 3);
+        let t = truncate_visible(&red("abcdef"), 3);
         assert_eq!(visible_len(&t), 3);
         assert!(t.ends_with(RST), "truncation must seal the style: {t:?}");
         // Not truncated → no extra reset beyond the original.
-        let whole = truncate_visible(&format!("{RED}ab{RST}"), 5);
-        assert_eq!(whole, format!("{RED}ab{RST}"));
+        let whole = truncate_visible(&red("ab"), 5);
+        assert_eq!(whole, red("ab"));
     }
 
     #[test]
     fn pad_and_fit_reach_exact_visible_width() {
         assert_eq!(pad_visible("ab", 5), "ab   ");
-        assert_eq!(visible_len(&pad_visible(&format!("{RED}ab{RST}"), 5)), 5);
+        assert_eq!(visible_len(&pad_visible(&red("ab"), 5)), 5);
         assert_eq!(pad_visible("abcde", 3), "abcde"); // wider → unchanged
         // fit both truncates and pads to land exactly on width.
         assert_eq!(visible_len(&fit_visible("abcdef", 4)), 4);
@@ -257,7 +261,7 @@ mod tests {
         assert_eq!(p.width, 4);
         assert_eq!(p.height(), 3);
         // ANSI doesn't inflate the measured width.
-        let styled = Panel::from_lines(vec![format!("{RED}abc{RST}")]);
+        let styled = Panel::from_lines(vec![red("abc")]);
         assert_eq!(styled.width, 3);
     }
 
@@ -318,7 +322,7 @@ mod tests {
 
     #[test]
     fn hjoin_keeps_alignment_under_ansi() {
-        let left = Panel::from_lines(vec![format!("{RED}aa{RST}")]);
+        let left = Panel::from_lines(vec![red("aa")]);
         let right = Panel::from_lines(vec!["z".into()]);
         let rows = hjoin(&[left, right], 2);
         // Visible width: 2 (left) + 2 (gap) + 1 (right) = 5.
@@ -327,10 +331,11 @@ mod tests {
 
     #[test]
     fn tab_bar_highlights_active_only() {
+        let _g = agent_theme::scoped(pinned());
         let bar = tab_bar(&["Replay", "Why"], 1);
-        assert!(bar.contains("\x1b[7m Why \x1b[0m"), "active is reversed");
-        assert!(bar.contains("\x1b[2m Replay \x1b[0m"), "inactive is dim");
+        assert!(bar.contains(&pinned().paint(Role::Selection, " Why ")), "active is reversed");
+        assert!(bar.contains(&pinned().paint(Role::Muted, " Replay ")), "inactive is dim");
         // Out-of-range active highlights nothing (no reverse-video sequence).
-        assert!(!tab_bar(&["a", "b"], 9).contains("\x1b[7m"));
+        assert!(!tab_bar(&["a", "b"], 9).contains(&pinned().sgr(Role::Selection)));
     }
 }

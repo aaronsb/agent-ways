@@ -6,36 +6,33 @@
 //!       .gradient(&agent_fmt::GRADIENT_CORAL)
 //!       .print();
 
+use agent_theme::{paint, Color, Role, Style};
 use figlet_rs::FIGlet;
 
 /// ANSI Shadow font embedded at compile time.
 const ANSI_SHADOW_FLF: &str = include_str!("../fonts/ansi-shadow.flf");
 
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const UNDERLINE: &str = "\x1b[4m";
-
-/// Warm coral-to-amber gradient (ways).
-pub const GRADIENT_CORAL: [&str; 7] = [
-    "\x1b[38;5;209m",
-    "\x1b[38;5;210m",
-    "\x1b[38;5;216m",
-    "\x1b[38;5;222m",
-    "\x1b[38;5;179m",
-    "\x1b[38;5;172m",
-    "\x1b[38;5;130m",
+/// Warm coral-to-amber gradient (ways). A banner gradient is not a theme
+/// role (ADR-504 §4): it is drawn as fixed xterm-256 colours.
+pub const GRADIENT_CORAL: [Color; 7] = [
+    Color::Indexed(209),
+    Color::Indexed(210),
+    Color::Indexed(216),
+    Color::Indexed(222),
+    Color::Indexed(179),
+    Color::Indexed(172),
+    Color::Indexed(130),
 ];
 
 /// Cool teal gradient (attend).
-pub const GRADIENT_TEAL: [&str; 7] = [
-    "\x1b[38;5;73m",
-    "\x1b[38;5;79m",
-    "\x1b[38;5;80m",
-    "\x1b[38;5;116m",
-    "\x1b[38;5;109m",
-    "\x1b[38;5;66m",
-    "\x1b[38;5;66m",
+pub const GRADIENT_TEAL: [Color; 7] = [
+    Color::Indexed(73),
+    Color::Indexed(79),
+    Color::Indexed(80),
+    Color::Indexed(116),
+    Color::Indexed(109),
+    Color::Indexed(66),
+    Color::Indexed(66),
 ];
 
 pub struct Banner<'a> {
@@ -43,7 +40,7 @@ pub struct Banner<'a> {
     title: &'a str,
     subtitle: Option<&'a str>,
     version: Option<&'a str>,
-    gradient: &'a [&'a str],
+    gradient: &'a [Color],
 }
 
 impl<'a> Banner<'a> {
@@ -72,7 +69,7 @@ impl<'a> Banner<'a> {
         self
     }
 
-    pub fn gradient(mut self, g: &'a [&'a str]) -> Self {
+    pub fn gradient(mut self, g: &'a [Color]) -> Self {
         self.gradient = g;
         self
     }
@@ -82,32 +79,32 @@ impl<'a> Banner<'a> {
             Ok(f) => f,
             Err(_) => {
                 // Fallback: just print the text bold
-                println!("\n  {BOLD}{}{RESET}\n", self.text);
+                println!("\n  {}\n", paint(Style::new().bold(), self.text));
                 return;
             }
         };
         let figure = match font.convert(self.text) {
             Some(f) => f,
             None => {
-                println!("\n  {BOLD}{}{RESET}\n", self.text);
+                println!("\n  {}\n", paint(Style::new().bold(), self.text));
                 return;
             }
         };
 
         println!();
-        println!("  {DIM}{UNDERLINE}{}{RESET}", self.title);
+        println!("  {}", paint(Style::new().role(Role::Muted).underline(), self.title));
         println!();
 
         for (i, line) in figure.to_string().lines().enumerate() {
             let color = self.gradient[i % self.gradient.len()];
-            println!("{color}{line}{RESET}");
+            println!("{}", paint(color, line));
         }
 
         if let Some(sub) = self.subtitle {
-            println!("  {DIM}{sub}{RESET}");
+            println!("  {}", paint(Role::Muted, sub));
         }
         if let Some(ver) = self.version {
-            println!("  {DIM}{ver}{RESET}");
+            println!("  {}", paint(Role::Muted, ver));
         }
         println!();
     }
@@ -116,9 +113,9 @@ impl<'a> Banner<'a> {
 /// Format a help section with consistent styling.
 /// Each entry is (command_name, description).
 pub fn print_commands(heading: &str, commands: &[(&str, &str)]) {
-    println!("{BOLD}{heading}:{RESET}");
+    println!("{}", paint(Style::new().bold(), format!("{heading}:")));
     let max_name = commands.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
     for (name, desc) in commands {
-        println!("  {BOLD}{name:<max_name$}{RESET}  {DIM}{desc}{RESET}");
+        println!("  {}  {}", paint(Style::new().bold(), format!("{name:<max_name$}")), paint(Role::Muted, desc));
     }
 }

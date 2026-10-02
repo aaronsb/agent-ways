@@ -11,6 +11,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::session;
+use agent_theme::{pair, paint, Role, Style};
 
 /// Return paths to off-root, per-session state files that hooks write
 /// outside `sessions_root()`. Reset must clear these alongside the main
@@ -102,12 +103,17 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
 
     if dry_run {
         println!();
-        println!("\x1b[1;33mDry run\x1b[0m — no files removed. Add \x1b[1m--confirm\x1b[0m to execute.");
+        println!(
+            "{} — no files removed. Add {} to execute.",
+            paint(Style::new().role(Role::Warn).bold(), "Dry run"),
+            paint(Style::new().bold(), "--confirm")
+        );
         println!();
-        println!("\x1b[2mNote: resetting mid-session causes all ways to re-fire on the next");
+        let (dim, off) = pair(Role::Muted);
+        println!("{dim}Note: resetting mid-session causes all ways to re-fire on the next");
         println!("hook invocation. Core guidance, checks, and progressive disclosure");
         println!("state will restart from scratch. This is safe but noisy — best used");
-        println!("when the session feels jammed or after significant context shifts.\x1b[0m");
+        println!("when the session feels jammed or after significant context shifts.{off}");
     } else if total > 0 {
         println!("\nReset complete. Ways will re-disclose on next hook invocation.");
     } else {

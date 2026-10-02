@@ -24,6 +24,7 @@ use std::io::Write;
 use super::layout::fit_to_terminal;
 #[cfg(feature = "tui")]
 use super::model::TermGuard;
+use agent_theme::{pair, paint, Role, Style};
 
 #[derive(serde::Serialize)]
 pub(crate) struct SessionInfo {
@@ -112,10 +113,13 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
 
     println!();
     println!(
-        "\x1b[1m{:<14} {:<20} {:<30} {:>6} {:>6} {:>8}\x1b[0m",
-        "Session", "Date", "Project", "Events", "Ways", "Duration"
+        "{}",
+        paint(
+            Style::new().bold(),
+            format!("{:<14} {:<20} {:<30} {:>6} {:>6} {:>8}", "Session", "Date", "Project", "Events", "Ways", "Duration")
+        )
     );
-    println!("\x1b[2m{}\x1b[0m", "─".repeat(90));
+    println!("{}", paint(Role::Muted, "─".repeat(90)));
 
     for s in sessions.iter().rev().take(50) {
         let short_id = &s.id[..s.id.len().min(12)];
@@ -129,8 +133,11 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
     }
     println!();
     println!(
-        "\x1b[2m  {} sessions total. Use --session <id> or run without args for interactive picker.\x1b[0m",
-        sessions.len()
+        "{}",
+        paint(
+            Role::Muted,
+            format!("  {} sessions total. Use --session <id> or run without args for interactive picker.", sessions.len())
+        )
     );
     println!();
     Ok(())
@@ -157,16 +164,20 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "\x1b[1m  Select a session to replay\x1b[0m  \x1b[2m({} sessions)\x1b[0m",
-            sessions.len()
+            "{}  {}",
+            paint(Style::new().bold(), "  Select a session to replay"),
+            paint(Role::Muted, format!("({} sessions)", sessions.len()))
         );
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "  \x1b[1m{:<14} {:<18} {:<28} {:>5} {:>5} {:>8}\x1b[0m",
-            "Session", "Date", "Project", "Evts", "Ways", "Duration"
+            "  {}",
+            paint(
+                Style::new().bold(),
+                format!("{:<14} {:<18} {:<28} {:>5} {:>5} {:>8}", "Session", "Date", "Project", "Evts", "Ways", "Duration")
+            )
         );
-        let _ = writeln!(out, "  \x1b[2m{}\x1b[0m", "─".repeat(82));
+        let _ = writeln!(out, "  {}", paint(Role::Muted, "─".repeat(82)));
 
         let page_start = (selected / page_size) * page_size;
         let page_end = (page_start + page_size).min(sessions.len());
@@ -177,11 +188,7 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
             let project_short = s.project.split('/').next_back().unwrap_or(&s.project);
             let duration = format_duration(s.duration_secs);
 
-            let (prefix, suffix) = if i == selected {
-                ("\x1b[7m", "\x1b[0m")
-            } else {
-                ("", "")
-            };
+            let (prefix, suffix) = if i == selected { pair(Role::Selection) } else { (String::new(), "") };
 
             let _ = writeln!(
                 out,
@@ -193,16 +200,13 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "  \x1b[2mPage {}/{}\x1b[0m",
-            selected / page_size + 1,
-            sessions.len().div_ceil(page_size)
+            "  {}",
+            paint(Role::Muted, format!("Page {}/{}", selected / page_size + 1, sessions.len().div_ceil(page_size)))
         );
         let _ = writeln!(out);
-        let _ = writeln!(out, "\x1b[2m{}\x1b[0m", "─".repeat(85));
-        let _ = write!(
-            out,
-            " \x1b[7m ▲▼ \x1b[0m select  \x1b[7m ⏎ \x1b[0m replay  \x1b[7m esc \x1b[0m quit"
-        );
+        let _ = writeln!(out, "{}", paint(Role::Muted, "─".repeat(85)));
+        let cap = |k: &str| paint(Style::new().reverse(), format!(" {k} "));
+        let _ = write!(out, " {} select  {} replay  {} quit", cap("▲▼"), cap("⏎"), cap("esc"));
 
         let fitted = fit_to_terminal(&out, tw as usize, th as usize);
         execute!(stdout, cursor::MoveTo(0, 0), terminal::Clear(ClearType::All)).ok();

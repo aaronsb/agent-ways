@@ -17,7 +17,11 @@ pub fn run(path: String, jaccard: bool) -> Result<()> {
     let files = find_way_files(&tree_path)?;
 
     println!();
-    println!("\x1b[1m{}\x1b[0m  \x1b[2m({} files)\x1b[0m", rel_root, files.len());
+    println!(
+        "{}  {}",
+        agent_theme::paint(agent_theme::Style::new().bold(), rel_root),
+        agent_theme::paint(agent_theme::Role::Muted, format!("({} files)", files.len()))
+    );
     println!();
 
     if jaccard {

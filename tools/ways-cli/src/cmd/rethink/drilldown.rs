@@ -10,6 +10,9 @@ use ways_core::introspection::{MatchCriteria, SessionIntrospection};
 
 use super::layout::{header_lines, render_status_bar};
 use super::model::{ActiveWay, Player};
+use agent_theme::{paint, Role, Style};
+
+const BOLD: Style = Style::new().bold();
 
 /// One channel's "why it fired" for a way, aggregated from the model across the
 /// way's fires *on that channel*. Matched spans are collected distinctly.
@@ -97,27 +100,27 @@ fn read_way_body(path: &str) -> Option<String> {
 #[cfg(feature = "tui")]
 fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>, width: usize) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "\x1b[1m{way_id}\x1b[0m");
+    let _ = writeln!(out, "{}", paint(BOLD, way_id));
     let Some(e) = entry else {
-        let _ = writeln!(out, "\x1b[2mno fire record in the model for this way\x1b[0m");
+        let _ = writeln!(out, "{}", paint(Role::Muted, "no fire record in the model for this way"));
         return out;
     };
     if let Some(p) = &e.way_path {
-        let _ = writeln!(out, "\x1b[2m{p}\x1b[0m");
+        let _ = writeln!(out, "{}", paint(Role::Muted, p));
     }
     let _ = writeln!(out);
 
     let channel = render::format_trigger(&e.trigger_channel);
     match e.fire_score {
         Some(s) => {
-            let _ = writeln!(out, "\x1b[1mTrigger\x1b[0m  {channel}  \x1b[2m(score {s:.2})\x1b[0m");
+            let _ = writeln!(out, "{}  {channel}  {}", paint(BOLD, "Trigger"), paint(Role::Muted, format!("(score {s:.2})")));
         }
         None => {
-            let _ = writeln!(out, "\x1b[1mTrigger\x1b[0m  {channel}");
+            let _ = writeln!(out, "{}  {channel}", paint(BOLD, "Trigger"));
         }
     }
 
-    let _ = writeln!(out, "\x1b[1mCriteria\x1b[0m");
+    let _ = writeln!(out, "{}", paint(BOLD, "Criteria"));
     let c = &e.criteria;
     let mut wrote = false;
     for (label, val) in [
@@ -129,31 +132,31 @@ fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>, width: usize) -> St
         ("scope", &c.scope),
     ] {
         if let Some(v) = val {
-            let _ = writeln!(out, "  \x1b[2m{label}:\x1b[0m {v}");
+            let _ = writeln!(out, "  {} {v}", paint(Role::Muted, format!("{label}:")));
             wrote = true;
         }
     }
     if !wrote {
-        let _ = writeln!(out, "  \x1b[2m(none recorded)\x1b[0m");
+        let _ = writeln!(out, "  {}", paint(Role::Muted, "(none recorded)"));
     }
 
     let _ = writeln!(out);
-    let _ = writeln!(out, "\x1b[1mMatched\x1b[0m");
+    let _ = writeln!(out, "{}", paint(BOLD, "Matched"));
     if e.matched_spans.is_empty() {
         if e.trigger_channel.starts_with("semantic") {
-            let _ = writeln!(out, "  \x1b[2msemantic fire — matched by embedding; no recoverable term\x1b[0m");
+            let _ = writeln!(out, "  {}", paint(Role::Muted, "semantic fire — matched by embedding; no recoverable term"));
         } else {
-            let _ = writeln!(out, "  \x1b[2mno span recorded (fired before matched-span enrichment)\x1b[0m");
+            let _ = writeln!(out, "  {}", paint(Role::Muted, "no span recorded (fired before matched-span enrichment)"));
         }
     } else {
         for span in &e.matched_spans {
-            let _ = writeln!(out, "  \x1b[0;36m“{span}”\x1b[0m");
+            let _ = writeln!(out, "  {}", paint(Role::Accent, format!("“{span}”")));
         }
     }
 
     if let Some(body) = e.way_path.as_deref().and_then(read_way_body) {
         let _ = writeln!(out);
-        let _ = writeln!(out, "\x1b[2m── way ─────────────\x1b[0m");
+        let _ = writeln!(out, "{}", paint(Role::Muted, "── way ─────────────"));
         // Render the authored markdown to ANSI rather than dumping raw `#`/`**`/`` ` ``
         // symbols; the compositor's visible_len ignores the added SGR (super::markdown).
         for line in super::markdown::render_markdown(&body, width) {
@@ -224,28 +227,27 @@ pub(super) fn render_why(player: &mut Player) -> String {
                 // so the highlight bar starts at the Way column, not in the margin.
                 let raw = format!("{bullet} e{:>ew$} {}", w.epoch_fired, w.id, ew = epoch_w);
                 left_lines.push(format!(
-                    "  \x1b[7m{}\x1b[0m",
-                    compositor::fit_visible(&raw, left_w.saturating_sub(2))
+                    "  {}",
+                    paint(Role::Selection, compositor::fit_visible(&raw, left_w.saturating_sub(2)))
                 ));
             } else {
                 // Dim the epoch tag so the way id stays prominent.
                 left_lines.push(format!(
-                    "  {bullet} \x1b[2me{:>ew$}\x1b[0m {}",
-                    w.epoch_fired,
-                    w.id,
-                    ew = epoch_w
+                    "  {bullet} {} {}",
+                    paint(Role::Muted, format!("e{:>ew$}", w.epoch_fired, ew = epoch_w)),
+                    w.id
                 ));
             }
         }
         if left_lines.is_empty() {
-            left_lines.push("  \x1b[2m(no ways in this frame)\x1b[0m".to_string());
+            left_lines.push(format!("  {}", paint(Role::Muted, "(no ways in this frame)")));
         }
 
         let detail = frame
             .ways
             .get(sel)
             .map(|w| render_why_detail(&w.id, facet(w), right_w))
-            .unwrap_or_else(|| "\x1b[2mno ways fired in this frame\x1b[0m".to_string());
+            .unwrap_or_else(|| paint(Role::Muted, "no ways fired in this frame"));
 
         (
             Panel::from_lines(left_lines).fixed_width(left_w),
@@ -273,14 +275,12 @@ pub(super) fn render_why(player: &mut Player) -> String {
     // Shared header, with the drill-down's own column labels + rule so the two
     // panels are named the way the Timeline's columns are.
     let labels = format!(
-        "\x1b[1m{}\x1b[0m{}\x1b[1mWhy it fired\x1b[0m",
-        compositor::pad_visible("  Way · epoch", left_w),
+        "{}{}{}",
+        paint(BOLD, compositor::pad_visible("  Way · epoch", left_w)),
         " ".repeat(gap),
+        paint(BOLD, "Why it fired"),
     );
-    let rule = format!(
-        "\x1b[2m{}\x1b[0m",
-        "─".repeat((left_w + gap + right_w).min(total_w))
-    );
+    let rule = paint(Role::Muted, "─".repeat((left_w + gap + right_w).min(total_w)));
     let header = header_lines(player, vec![labels, rule]);
 
     // header (4) + body (body_h) + footer (2) = exactly the drawable height, so the

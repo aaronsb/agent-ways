@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use serde_json::{json, Value};
+use agent_theme::{paint, Role, Style};
 
 pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     let ways = match manifest["ways"].as_object() {
@@ -68,15 +69,15 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     }
 
     println!();
-    println!("\x1b[1mClaim Traceability Matrix\x1b[0m");
+    println!("{}", paint(Style::new().bold(), "Claim Traceability Matrix"));
     println!();
     println!(
-        "  \x1b[1m{:<28} {:<50} JUSTIFICATION\x1b[0m",
-        "WAY", "CONTROL"
+        "  {}",
+        paint(Style::new().bold(), format!("{:<28} {:<50} JUSTIFICATION", "WAY", "CONTROL"))
     );
     println!(
-        "  \x1b[2m{:<28} {:<50} -------------\x1b[0m",
-        "---", "-------"
+        "  {}",
+        paint(Role::Muted, format!("{:<28} {:<50} -------------", "---", "-------"))
     );
 
     for (way, ctrl, just) in &rows {
@@ -87,7 +88,8 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     let total_j = rows.iter().filter(|(_, _, j)| !j.starts_with('(')).count();
     println!();
     println!(
-        "  \x1b[2mTotal: {total_c} control claims, {total_j} justifications\x1b[0m"
+        "  {}",
+        paint(Role::Muted, format!("Total: {total_c} control claims, {total_j} justifications"))
     );
 
     Ok(())

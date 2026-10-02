@@ -183,11 +183,11 @@ impl Table {
             let w = widths.get(i).copied().unwrap_or(10);
             header.push_str(&pad_cell(h, w, self.aligns.get(i).copied().unwrap_or(Align::Left)));
         }
-        println!("{pad}\x1b[1m{header}\x1b[0m");
+        println!("{pad}{}", agent_theme::paint(agent_theme::Style::new().bold(), header));
 
         // Separator
         let total_width: usize = widths.iter().sum::<usize>() + ncols.saturating_sub(1);
-        println!("{pad}\x1b[2m{}\x1b[0m", "─".repeat(total_width));
+        println!("{pad}{}", agent_theme::paint(agent_theme::Role::Muted, "─".repeat(total_width)));
 
         // Rows
         for row in &self.rows {
@@ -269,7 +269,7 @@ pub fn truncate_visible(s: &str, max: usize) -> String {
     }
     result.push('…');
     // Close any open ANSI sequence
-    result.push_str("\x1b[0m");
+    result.push_str(agent_theme::RESET);
     result
 }
 

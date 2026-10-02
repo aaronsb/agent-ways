@@ -11,21 +11,27 @@
 //! re-materialized (reset + re-apply) on each text run, so nested emphasis never
 //! has to reason about SGR off-codes (bold-off `22` also clears dim, etc.).
 
+use agent_theme::{paint, sgr, Role, Style};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-const RST: &str = "\x1b[0m";
-const CODE: &str = "\x1b[33m"; // inline `code` / fenced blocks: yellow
+const RST: &str = agent_theme::RESET;
 
-fn heading_sgr(level: HeadingLevel) -> &'static str {
+/// Inline `code` and fenced blocks: the theme's second accent.
+fn code() -> String {
+    sgr(Role::Alt)
+}
+
+fn heading_sgr(level: HeadingLevel) -> String {
     // Typographic ladder: weight for the top levels, italic below, underline
-    // marking only H1 — so the levels read distinctly by style, with cyan
+    // marking only H1 — so the levels read distinctly by style, with the accent
     // grouping the headings (H4+ drop the color as they recede).
-    match level {
-        HeadingLevel::H1 => "\x1b[1;4;36m", // bold + underline + cyan
-        HeadingLevel::H2 => "\x1b[1;36m",   // bold + cyan
-        HeadingLevel::H3 => "\x1b[3;36m",   // italic + cyan
-        _ => "\x1b[3m",                     // italic
-    }
+    let accent = Style::new().role(Role::Accent);
+    sgr(match level {
+        HeadingLevel::H1 => accent.bold().underline(),
+        HeadingLevel::H2 => accent.bold(),
+        HeadingLevel::H3 => accent.italic(),
+        _ => Style::new().italic(),
+    })
 }
 
 /// End the current line: seal any open style, then push it and clear `cur`.
@@ -42,7 +48,7 @@ fn flush(lines: &mut Vec<String>, cur: &mut String) {
 /// after a styled span would otherwise inherit the popped style and bleed its
 /// color/weight onto following text (and, in a table cell, onto later text in the
 /// same cell). Resetting every run keeps each run scoped to its own styles.
-fn emit(cur: &mut String, styles: &[&str], text: &str) {
+fn emit(cur: &mut String, styles: &[String], text: &str) {
     cur.push_str(RST);
     for s in styles {
         cur.push_str(s);
@@ -52,12 +58,12 @@ fn emit(cur: &mut String, styles: &[&str], text: &str) {
 
 /// Inline `code`: distinct color, then restore the surrounding style stack so
 /// text after the span keeps its context (e.g. code inside a heading).
-fn emit_code(cur: &mut String, styles: &[&str], text: &str) {
+fn emit_code(cur: &mut String, styles: &[String], text: &str) {
     cur.push_str(RST);
     for s in styles {
         cur.push_str(s);
     }
-    cur.push_str(CODE);
+    cur.push_str(&code());
     cur.push_str(text);
     cur.push_str(RST);
     for s in styles {
@@ -171,7 +177,7 @@ fn render_table(lines: &mut Vec<String>, rows: &[(bool, Vec<String>)], width: us
                 let seg = segs.get(k).map(String::as_str).unwrap_or("");
                 line.push_str(&pad_visible(seg, w[c]));
                 if c + 1 < ncols {
-                    line.push_str(" \x1b[2m│\x1b[0m "); // dim column divider
+                    line.push_str(&format!(" {} ", paint(Role::Muted, "│"))); // dim column divider
                 }
             }
             if line.contains('\x1b') {
@@ -181,7 +187,7 @@ fn render_table(lines: &mut Vec<String>, rows: &[(bool, Vec<String>)], width: us
         }
         // A dim rule under the (first) header row.
         if *is_header && i == 0 {
-            lines.push(format!("\x1b[2m{}\x1b[0m", "─".repeat(total)));
+            lines.push(paint(Role::Muted, "─".repeat(total)));
         }
     }
 }
@@ -200,7 +206,7 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
 
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
-    let mut styles: Vec<&str> = Vec::new(); // active inline/block SGR sequences
+    let mut styles: Vec<String> = Vec::new(); // active inline/block SGR sequences
     let mut list_ctr: Vec<Option<u64>> = Vec::new(); // ordered-list counters by depth
     let mut in_code_block = false;
     // Tables are buffered (a table's rows accumulate) so columns can be measured
@@ -219,10 +225,10 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                     }
                     styles.push(heading_sgr(level));
                 }
-                Tag::Strong => styles.push("\x1b[1m"),
-                Tag::Emphasis => styles.push("\x1b[3m"),
-                Tag::Strikethrough => styles.push("\x1b[9m"),
-                Tag::Link { .. } => styles.push("\x1b[4;36m"), // underline + cyan
+                Tag::Strong => styles.push(sgr(Style::new().bold())),
+                Tag::Emphasis => styles.push(sgr(Style::new().italic())),
+                Tag::Strikethrough => styles.push(sgr(Style::new().strike())),
+                Tag::Link { .. } => styles.push(sgr(Style::new().role(Role::Accent).underline())),
                 Tag::List(start) => list_ctr.push(start),
                 Tag::Item => {
                     let indent = "  ".repeat(list_ctr.len().saturating_sub(1));
@@ -230,12 +236,12 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                         Some(Some(n)) => {
                             let m = *n;
                             *n = m + 1;
-                            cur.push_str(&format!("{indent}\x1b[2m{m}.\x1b[0m "));
+                            cur.push_str(&format!("{indent}{} ", paint(Role::Muted, format!("{m}."))));
                         }
-                        _ => cur.push_str(&format!("{indent}\x1b[36m•\x1b[0m ")),
+                        _ => cur.push_str(&format!("{indent}{} ", paint(Role::Accent, "•"))),
                     }
                 }
-                Tag::BlockQuote(_) => styles.push("\x1b[2m"), // dim
+                Tag::BlockQuote(_) => styles.push(sgr(Role::Muted)),
                 Tag::CodeBlock(_) => {
                     if !cur.is_empty() {
                         flush(&mut lines, &mut cur);
@@ -251,7 +257,7 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                 }
                 Tag::TableHead => {
                     trow.clear();
-                    styles.push("\x1b[1m"); // header cells bold
+                    styles.push(sgr(Style::new().bold())); // header cells bold
                 }
                 Tag::TableRow => trow.clear(),
                 Tag::TableCell => tcell.clear(),
@@ -320,7 +326,7 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                             flush(&mut lines, &mut cur);
                         }
                         if !seg.is_empty() {
-                            cur.push_str(CODE);
+                            cur.push_str(&code());
                             cur.push_str(seg);
                         }
                     }
@@ -350,7 +356,7 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
                 if !cur.is_empty() {
                     flush(&mut lines, &mut cur);
                 }
-                lines.push("\x1b[2m────────────────\x1b[0m".to_string());
+                lines.push(paint(Role::Muted, "────────────────"));
             }
             _ => {}
         }
@@ -370,9 +376,19 @@ mod tests {
     use super::*;
     use crate::cmd::compositor::visible_len;
 
-    /// Render at a generous width so non-table content is unaffected.
+    /// Render at a generous width so non-table content is unaffected, with
+    /// the terminal palette pinned so the run's environment cannot strip SGR.
     fn render(md: &str) -> Vec<String> {
+        let _g = agent_theme::scoped(pinned());
         render_markdown(md, 100)
+    }
+
+    fn pinned() -> agent_theme::Painter {
+        agent_theme::Painter::terminal(agent_theme::ColorDepth::TrueColor)
+    }
+
+    fn esc(s: impl Into<Style>) -> String {
+        pinned().sgr(s)
     }
 
     /// The visible (SGR-stripped) text of a rendered line.
@@ -397,7 +413,7 @@ mod tests {
     fn heading_strips_hashes_and_styles() {
         let out = render("# Title\n\nbody");
         assert_eq!(visible(&out[0]), "Title", "hashes gone, text kept");
-        assert!(out[0].contains("\x1b["), "heading is styled");
+        assert!(out[0].contains('\x1b'), "heading is styled");
         assert!(out[0].ends_with(RST), "line seals its style");
     }
 
@@ -406,8 +422,8 @@ mod tests {
         let out = render("a **bold** and *italic* and `code` here");
         let v = visible(&out[0]);
         assert_eq!(v, "a bold and italic and code here", "markers gone: {v:?}");
-        assert!(out[0].contains("\x1b[1m"), "bold SGR present");
-        assert!(out[0].contains("\x1b[3m"), "italic SGR present");
+        assert!(out[0].contains(&esc(Style::new().bold())), "bold SGR present");
+        assert!(out[0].contains(&esc(Style::new().italic())), "italic SGR present");
     }
 
     #[test]
@@ -441,7 +457,7 @@ mod tests {
         // Text after a **bold** span must not stay bold. The bold run is sealed
         // with a reset before the trailing plain text.
         let line = &render("a **b** c")[0];
-        let bold_at = line.find("\x1b[1m").expect("bold present");
+        let bold_at = line.find(&esc(Style::new().bold())).expect("bold present");
         let c_at = line.find(" c").expect("trailing text present");
         let between = &line[bold_at..c_at];
         assert!(
@@ -460,7 +476,7 @@ mod tests {
             .find(|l| visible(l).contains("after para"))
             .expect("paragraph rendered");
         assert!(
-            !after.contains(CODE),
+            !after.contains(&esc(Role::Alt)),
             "paragraph after a code block must not be code-colored: {after:?}"
         );
     }

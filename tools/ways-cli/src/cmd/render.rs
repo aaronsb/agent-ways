@@ -4,6 +4,7 @@
 //! All rendering writes to a String buffer; callers handle output.
 
 use std::fmt::Write;
+use agent_theme::{pair, paint, painter, Role, Style};
 
 // ── Way trait ─────────────────────────────────────────────────
 
@@ -27,18 +28,6 @@ pub trait WayRow {
 
 pub const PIN_SYMBOLS: [char; 10] = ['●', '◆', '■', '▲', '◉', '▶', '★', '◈', '♦', '▪'];
 
-pub const PIN_COLORS: [&str; 10] = [
-    "\x1b[38;2;99;179;237m",  // blue
-    "\x1b[38;2;78;205;196m",  // teal
-    "\x1b[38;2;126;211;33m",  // green
-    "\x1b[38;2;255;234;167m", // yellow
-    "\x1b[38;2;253;203;110m", // orange
-    "\x1b[38;2;255;118;117m", // red
-    "\x1b[38;2;162;155;254m", // purple
-    "\x1b[38;2;253;121;168m", // magenta
-    "\x1b[38;2;116;185;255m", // sky
-    "\x1b[38;2;85;239;196m",  // mint
-];
 
 // ── Layout ───────────────────────────────────────────────────
 
@@ -186,27 +175,30 @@ pub fn cluster_of(bar_pos: usize, unique_positions: &[usize]) -> usize {
         % PIN_SYMBOLS.len()
 }
 
-/// Render pin symbol for a cluster index.
+/// Render pin symbol for a cluster index. Clusters are told apart by colour
+/// alone, so the colour is agent-identity's categorical palette (ADR-504
+/// §6), at the terminal's depth.
 pub fn pin_str(cluster_idx: usize) -> String {
-    format!(
-        "{}{}\x1b[0m",
-        PIN_COLORS[cluster_idx % PIN_COLORS.len()],
-        PIN_SYMBOLS[cluster_idx % PIN_SYMBOLS.len()]
-    )
+    let symbol = PIN_SYMBOLS[cluster_idx % PIN_SYMBOLS.len()];
+    let p = painter();
+    match agent_identity::categorical(cluster_idx).color(p.depth()) {
+        Some(c) => p.paint(c, symbol),
+        None => symbol.to_string(),
+    }
 }
 
 /// Render table header against a content-sized layout (`Layout::for_rows`).
 pub fn write_table_header_with(out: &mut String, layout: &Layout) {
     let g = " ".repeat(COL_GAP);
-    let _ = writeln!(
-        out,
-        "  \x1b[1m{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{pin:^pin_w$}{g}{rd:<rd_w$}{g}Agent\x1b[0m",
+    let head = format!(
+        "{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{pin:^pin_w$}{g}{rd:<rd_w$}{g}Agent",
         way = "Way", ep = "Epoch", di = "Dist", tr = "Trigger",
         pin = "\u{2316}", rd = "Re-disclosure",
         way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W,
         tr_w = TRIG_W, pin_w = PIN_W, rd_w = RD_W,
     );
-    let _ = writeln!(out, "  \x1b[2m{}\x1b[0m", "─".repeat(layout.separator));
+    let _ = writeln!(out, "  {}", paint(Style::new().bold(), head));
+    let _ = writeln!(out, "  {}", paint(Role::Muted, "─".repeat(layout.separator)));
 }
 
 /// Render a single way row against a content-sized layout (`Layout::for_rows`).
@@ -234,13 +226,10 @@ pub fn write_way_row_with<W: WayRow>(
     let display_id = format!("{prefix}{}", w.id());
     let trigger_display = format_trigger(w.trigger());
 
-    let dist_color = if distance == 0 || (current_epoch > 0 && distance < current_epoch / 3) {
-        "\x1b[0;32m"
-    } else if current_epoch > 0 && distance < current_epoch * 2 / 3 {
-        "\x1b[1;33m"
-    } else {
-        "\x1b[0;31m"
-    };
+    let (dist_on, dist_off) = pair(traffic(
+        distance == 0 || (current_epoch > 0 && distance < current_epoch / 3),
+        current_epoch > 0 && distance < current_epoch * 2 / 3,
+    ));
 
     let pin = if let Some(bar_pos) = bar_positions.get(index).copied().flatten() {
         pin_str(cluster_of(bar_pos, unique_pos))
@@ -249,7 +238,7 @@ pub fn write_way_row_with<W: WayRow>(
     };
 
     let agent_display = if w.agent_id() == "main" {
-        "\x1b[2mmain\x1b[0m".to_string()
+        paint(Role::Muted, "main")
     } else {
         agent_fmt::truncate_visible(w.agent_id(), 12)
     };
@@ -260,10 +249,11 @@ pub fn write_way_row_with<W: WayRow>(
     let g = " ".repeat(COL_GAP);
     let _ = writeln!(
         out,
-        "  {row_prefix}{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}\x1b[0m{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}{row_suffix}",
+        "  {row_prefix}{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}{dc_off}{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}{row_suffix}",
         way = agent_fmt::truncate_visible(&display_id, layout.way_col),
         ep = w.epoch_fired(),
-        dc = dist_color,
+        dc = dist_on,
+        dc_off = dist_off,
         di = distance,
         tr = trigger_display,
         pin = pin,
@@ -276,9 +266,8 @@ pub fn write_way_row_with<W: WayRow>(
         let decay = 1.0 / (w.check_fires() as f64 + 1.0);
         let _ = writeln!(
             out,
-            "  \x1b[2m  ✓ check ({} fires, decay={:.2})\x1b[0m",
-            w.check_fires(),
-            decay
+            "  {}",
+            paint(Role::Muted, format!("  ✓ check ({} fires, decay={:.2})", w.check_fires(), decay))
         );
     }
 }
@@ -353,13 +342,7 @@ pub fn write_token_timeline<W: WayRow>(
     };
 
     // Usage bar
-    let bar_color = if pct < 50 {
-        "\x1b[0;32m"
-    } else if pct < 75 {
-        "\x1b[1;33m"
-    } else {
-        "\x1b[0;31m"
-    };
+    let bar_style = traffic(pct < 50, pct < 75);
 
     let zoom_bar_start = if context_window_k > 0 && zoom_span > 0 {
         ((zoom_start * bar_width as u64) / context_window_k) as usize
@@ -383,7 +366,8 @@ pub fn write_token_timeline<W: WayRow>(
     }
     let _ = writeln!(
         out,
-        "  {bar_color}{bar}\x1b[0m {pct}% ({current_tokens_k}K / {context_window_k}K)"
+        "  {} {pct}% ({current_tokens_k}K / {context_window_k}K)",
+        paint(bar_style, &bar)
     );
 
     // Zoom boundary arrows
@@ -396,7 +380,7 @@ pub fn write_token_timeline<W: WayRow>(
                 arrow_line.push(' ');
             }
         }
-        let _ = writeln!(out, "\x1b[2m{arrow_line}\x1b[0m");
+        let _ = writeln!(out, "{}", paint(Role::Muted, arrow_line));
     }
 
     // Forecast
@@ -414,7 +398,9 @@ pub fn write_token_timeline<W: WayRow>(
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "  \x1b[1mForecast\x1b[0m \x1b[2m({zoom_start}K → {zoom_end}K)\x1b[0m"
+            "  {} {}",
+            paint(Style::new().bold(), "Forecast"),
+            paint(Role::Muted, format!("({zoom_start}K → {zoom_end}K)"))
         );
 
         let mut marker_str = String::from("  ");
@@ -431,9 +417,9 @@ pub fn write_token_timeline<W: WayRow>(
         let mid_pos = bar_width / 2;
         let end_label = format!("{zoom_end}K");
         let end_pos = bar_width - end_label.len();
-        let mut label_line = String::from("  ");
+        let mut label_line = String::new();
         let start_label = format!("{zoom_start}K");
-        label_line.push_str(&format!("\x1b[2m{start_label}"));
+        label_line.push_str(&start_label);
         let pad1 = mid_pos.saturating_sub(start_label.len());
         label_line.push_str(&" ".repeat(pad1));
         let mid_label = format!("{mid_k}K");
@@ -441,20 +427,19 @@ pub fn write_token_timeline<W: WayRow>(
         let pad2 = end_pos.saturating_sub(mid_pos + mid_label.len());
         label_line.push_str(&" ".repeat(pad2));
         label_line.push_str(&end_label);
-        label_line.push_str("\x1b[0m");
-        let _ = writeln!(out, "{label_line}");
+        let _ = writeln!(out, "  {}", paint(Role::Muted, label_line));
     }
 
     // Zone summary
     let mut zones = Vec::new();
     if zone_past > 0 {
-        zones.push(format!("\x1b[0;32m● {zone_past} re-disclose now\x1b[0m"));
+        zones.push(paint(Role::Ok, format!("● {zone_past} re-disclose now")));
     }
     if zone_soon > 0 {
-        zones.push(format!("\x1b[1;33m◐ {zone_soon} approaching\x1b[0m"));
+        zones.push(paint(WARN, format!("◐ {zone_soon} approaching")));
     }
     if zone_later > 0 {
-        zones.push(format!("\x1b[2m○ {zone_later} distant\x1b[0m"));
+        zones.push(paint(Role::Muted, format!("○ {zone_later} distant")));
     }
 
     if !zones.is_empty() {
@@ -476,17 +461,33 @@ pub fn write_token_timeline<W: WayRow>(
         };
         let _ = writeln!(
             out,
-            "  {}  \x1b[2m│ {interval_label}\x1b[0m",
-            zones.join("  ")
+            "  {}  {}",
+            zones.join("  "),
+            paint(Role::Muted, format!("│ {interval_label}"))
         );
         let _ = writeln!(
             out,
-            "  \x1b[2mnow = past threshold, will re-inject on next match  │  approaching = near threshold  │  distant = far from re-injection\x1b[0m"
+            "  {}",
+            paint(Role::Muted, "now = past threshold, will re-inject on next match  │  approaching = near threshold  │  distant = far from re-injection")
         );
     }
 }
 
 // ── Shared helpers ────────────────────────────────────────────
+
+/// Warn is drawn bold wherever it stands for "approaching".
+const WARN: Style = Style::new().role(Role::Warn).bold();
+
+/// The traffic-light style: ok when `good`, warn when `fair`, else err.
+fn traffic(good: bool, fair: bool) -> Style {
+    if good {
+        Style::new().role(Role::Ok)
+    } else if fair {
+        WARN
+    } else {
+        Style::new().role(Role::Err)
+    }
+}
 
 /// Predict when a way will next re-disclose against its own curve.
 pub fn predict_next<W: WayRow>(
@@ -500,13 +501,13 @@ pub fn predict_next<W: WayRow>(
     let token_pct = (token_distance_k * 100).checked_div(threshold_k).unwrap_or(0);
 
     if token_pct >= 100 {
-        return "\x1b[0;32m● now\x1b[0m".to_string();
+        return paint(Role::Ok, "● now");
     }
     if token_pct >= 75 {
-        return format!("\x1b[1;33m◐ {token_pct}%\x1b[0m");
+        return paint(WARN, format!("◐ {token_pct}%"));
     }
     if token_pct >= 50 {
-        return format!("\x1b[2m◔ {token_pct}%\x1b[0m");
+        return paint(Role::Muted, format!("◔ {token_pct}%"));
     }
 
     let epoch_distance = current_epoch.saturating_sub(w.epoch_fired());
@@ -517,16 +518,13 @@ pub fn predict_next<W: WayRow>(
         let next_epoch = w.epoch_fired() + needed_distance;
         if epoch_distance < needed_distance {
             if needed_distance > 500 {
-                return format!(
-                    "\x1b[2mcheck ~{} (suppressed)\x1b[0m",
-                    fmt_epoch(next_epoch)
-                );
+                return paint(Role::Muted, format!("check ~{} (suppressed)", fmt_epoch(next_epoch)));
             }
-            return format!("\x1b[2mcheck at epoch ~{next_epoch}\x1b[0m");
+            return paint(Role::Muted, format!("check at epoch ~{next_epoch}"));
         }
     }
 
-    "\x1b[2m─\x1b[0m".to_string()
+    paint(Role::Muted, "─")
 }
 
 pub fn format_trigger(trigger: &str) -> String {
