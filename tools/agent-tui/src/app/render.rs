@@ -78,10 +78,18 @@ pub(super) fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
-/// A fixed-width mask once anything is typed, so the key's length never
-/// reaches the screen.
-fn mask(n: usize) -> String {
-    if n == 0 { String::new() } else { "••••••••".into() }
+/// The most dots the masked entry draws; past it a count follows, so the
+/// hint beside the entry stays on screen for a long key.
+const MASK_DOTS: usize = 24;
+
+/// One dot per character typed, so each keystroke shows; the characters
+/// never reach the screen.
+pub(crate) fn mask(n: usize) -> String {
+    if n <= MASK_DOTS {
+        "•".repeat(n)
+    } else {
+        format!("{}… {n}", "•".repeat(MASK_DOTS))
+    }
 }
 
 impl App {

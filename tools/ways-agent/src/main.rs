@@ -74,7 +74,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum KeyAction {
-    /// Store a key. Reads --from-file, else stdin when piped, else a hidden prompt.
+    /// Store a key. Reads --from-file, else stdin when piped, else a prompt that shows a dot per character.
     Add {
         #[arg(long)]
         provider: String,
@@ -314,7 +314,8 @@ fn warn_exposure(source: &keys::Source) {
     }
 }
 
-/// The key, from a file, from piped stdin, or from a prompt that does not echo.
+/// The key, from a file, from piped stdin, or from a prompt that shows a dot
+/// for each character typed.
 fn read_secret(provider: Provider, from_file: Option<PathBuf>) -> Result<String> {
     if let Some(path) = from_file {
         return std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()));
@@ -325,51 +326,194 @@ fn read_secret(provider: Provider, from_file: Option<PathBuf>) -> Result<String>
         stdin.lock().read_to_string(&mut s).context("reading the key from stdin")?;
         return Ok(s);
     }
-    eprint!("Paste your {provider} API key (input hidden): ");
+    eprint!("Paste your {provider} API key (shown as dots): ");
     read_hidden_line()
 }
 
-/// The terminal settings to put back if Ctrl-C arrives mid-prompt.
+/// The terminal settings to put back if a signal ends the prompt.
 #[cfg(unix)]
 static mut SAVED_TERMIOS: Option<libc::termios> = None;
 
 #[cfg(unix)]
-extern "C" fn restore_and_exit(_signal: libc::c_int) {
+extern "C" fn restore_and_exit(signal: libc::c_int) {
     // SAFETY: tcsetattr and _exit are async-signal-safe; SAVED_TERMIOS is
     // written once before this handler is installed and only read here.
     unsafe {
         if let Some(t) = *std::ptr::addr_of!(SAVED_TERMIOS) {
-            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &t);
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSAFLUSH, &t);
         }
-        libc::_exit(130);
+        libc::_exit(128 + signal);
     }
 }
 
+/// What one byte typed at the key prompt does to the key read so far.
+#[derive(Debug, PartialEq)]
+enum Typed {
+    /// The key is complete.
+    Done,
+    /// A character was added: draw one dot.
+    Dot,
+    /// Nothing to draw: a byte inside a character or an escape sequence,
+    /// or a control byte.
+    Continue,
+    /// This many dots to erase.
+    Erase(usize),
+}
+
+/// Where the editor is in an escape sequence: an arrow key, a function key,
+/// or the markers a terminal puts around a bracketed paste. None of it is
+/// part of the key.
+#[derive(Debug, PartialEq)]
+enum Escape {
+    None,
+    /// ESC seen.
+    Start,
+    /// ESC [ or ESC O seen: bytes until a final one in 0x40..=0x7E.
+    Sequence,
+}
+
+/// The key as typed at the prompt. Erased bytes are zeroed before they are
+/// dropped, so no copy of a removed character stays in the buffer.
+struct KeyEditor {
+    key: Vec<u8>,
+    escape: Escape,
+}
+
+impl KeyEditor {
+    fn new() -> KeyEditor {
+        KeyEditor { key: Vec::with_capacity(512), escape: Escape::None }
+    }
+
+    /// Zero the key from `at` on and drop it.
+    fn cut(&mut self, at: usize) {
+        self.key[at..].iter_mut().for_each(|b| *b = 0);
+        self.key.truncate(at);
+    }
+
+    /// Apply one byte typed at the prompt.
+    fn feed(&mut self, b: u8) -> Typed {
+        // The start of a UTF-8 character: not a continuation byte.
+        let starts = |b: u8| b & 0xC0 != 0x80;
+        // A control byte is never part of a sequence: Enter, Backspace or
+        // Ctrl-U after a lone ESC, or inside a broken sequence, still acts.
+        let control = b < 0x20 || b == 0x7f;
+        match self.escape {
+            Escape::Start if b == b'[' || b == b'O' => {
+                self.escape = Escape::Sequence;
+                return Typed::Continue;
+            }
+            Escape::Start | Escape::Sequence if control => self.escape = Escape::None,
+            // A printable byte after a lone ESC is an Alt chord: dropped.
+            Escape::Start => {
+                self.escape = Escape::None;
+                return Typed::Continue;
+            }
+            Escape::Sequence => {
+                if (0x40..=0x7E).contains(&b) {
+                    self.escape = Escape::None;
+                }
+                return Typed::Continue;
+            }
+            Escape::None => {}
+        }
+        match b {
+            b'\r' | b'\n' => Typed::Done,
+            // Ctrl-D on an empty line ends it as Enter would; otherwise ignored.
+            0x04 if self.key.is_empty() => Typed::Done,
+            0x1b => {
+                self.escape = Escape::Start;
+                Typed::Continue
+            }
+            0x7f | 0x08 => match self.key.iter().rposition(|&b| starts(b)) {
+                Some(at) => {
+                    self.cut(at);
+                    Typed::Erase(1)
+                }
+                None => Typed::Erase(0),
+            },
+            // Ctrl-U clears the line.
+            0x15 => {
+                let n = self.key.iter().filter(|&&b| starts(b)).count();
+                self.cut(0);
+                Typed::Erase(n)
+            }
+            b if b < 0x20 => Typed::Continue,
+            b => {
+                self.key.push(b);
+                if starts(b) { Typed::Dot } else { Typed::Continue }
+            }
+        }
+    }
+}
+
+/// The value that turns off a terminal control character.
+#[cfg(target_os = "linux")]
+const CC_DISABLED: libc::cc_t = 0;
+#[cfg(all(unix, not(target_os = "linux")))]
+const CC_DISABLED: libc::cc_t = 0xff;
+
 #[cfg(unix)]
 fn read_hidden_line() -> Result<String> {
+    use std::io::Write;
+    const SIGNALS: [libc::c_int; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
     // SAFETY: termios calls on stdin with a struct tcgetattr fills; the
-    // original settings are restored on every path, including Ctrl-C through
-    // the handler above. Echo is never left on: a failed switch reads nothing.
+    // original settings are restored on every path, including a signal
+    // through the handler above. Echo is never left on: a failed switch reads
+    // nothing.
     unsafe {
         let mut original: libc::termios = std::mem::zeroed();
         if libc::tcgetattr(libc::STDIN_FILENO, &mut original) != 0 {
             bail!("cannot read terminal settings; pipe the key on stdin or use --from-file");
         }
         *std::ptr::addr_of_mut!(SAVED_TERMIOS) = Some(original);
-        let previous = libc::signal(libc::SIGINT, restore_and_exit as *const () as libc::sighandler_t);
-        let mut hidden = original;
-        hidden.c_lflag &= !libc::ECHO;
-        hidden.c_lflag |= libc::ECHONL;
-        if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &hidden) != 0 {
-            libc::signal(libc::SIGINT, previous);
+        let previous: Vec<libc::sighandler_t> =
+            SIGNALS.iter().map(|&sig| libc::signal(sig, restore_and_exit as *const () as libc::sighandler_t)).collect();
+        let put_back = |previous: &[libc::sighandler_t]| {
+            for (&sig, &handler) in SIGNALS.iter().zip(previous) {
+                libc::signal(sig, handler);
+            }
+        };
+        // Byte at a time, no echo: each character draws its own dot. Ctrl-\
+        // and Ctrl-Z are off, so neither can stop or kill the prompt with the
+        // terminal raw; Ctrl-C still ends it, through the handler.
+        let mut raw = original;
+        raw.c_lflag &= !(libc::ECHO | libc::ICANON);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        raw.c_cc[libc::VQUIT] = CC_DISABLED;
+        raw.c_cc[libc::VSUSP] = CC_DISABLED;
+        #[cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
+        {
+            raw.c_cc[libc::VDSUSP] = CC_DISABLED;
+        }
+        if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw) != 0 {
+            put_back(&previous);
             bail!("cannot turn off terminal echo; pipe the key on stdin or use --from-file");
         }
-        let mut line = String::new();
-        let read = std::io::stdin().read_line(&mut line);
-        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &original);
-        libc::signal(libc::SIGINT, previous);
-        read.context("reading the key")?;
-        Ok(line)
+        let mut editor = KeyEditor::new();
+        let mut err = std::io::stderr();
+        let result = loop {
+            let mut b = 0u8;
+            match libc::read(libc::STDIN_FILENO, (&mut b as *mut u8).cast(), 1) {
+                1 => {}
+                0 => break Err(std::io::Error::other("the terminal closed before Enter")),
+                _ => break Err(std::io::Error::last_os_error()),
+            }
+            match editor.feed(b) {
+                Typed::Done => break Ok(()),
+                Typed::Dot => drop(write!(err, "•")),
+                Typed::Erase(n) => drop(write!(err, "{}", "\x08 \x08".repeat(n))),
+                Typed::Continue => {}
+            }
+            let _ = err.flush();
+        };
+        // TCSAFLUSH drops what was typed past Enter: the rest of a multi-line
+        // paste never reaches the shell.
+        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSAFLUSH, &original);
+        put_back(&previous);
+        eprintln!();
+        result.context("reading the key")?;
+        String::from_utf8(std::mem::take(&mut editor.key)).context("the key is not UTF-8 text")
     }
 }
 
@@ -442,6 +586,73 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `s` with each `^` as the ESC byte, so no raw escape literal sits in
+    /// the source (the agent-theme SGR lint).
+    fn esc(s: &str) -> Vec<u8> {
+        s.bytes().map(|b| if b == b'^' { 0x1b } else { b }).collect()
+    }
+
+    fn feed(e: &mut KeyEditor, bytes: &[u8]) -> Vec<Typed> {
+        bytes.iter().map(|&b| e.feed(b)).collect()
+    }
+
+    /// Each character typed draws one dot, a multi-byte one included;
+    /// Backspace erases a whole character, Ctrl-U the line, Enter ends it.
+    #[test]
+    fn the_key_prompt_draws_a_dot_per_character() {
+        let mut e = KeyEditor::new();
+        assert_eq!(feed(&mut e, "sk-é".as_bytes()), [Typed::Dot, Typed::Dot, Typed::Dot, Typed::Dot, Typed::Continue]);
+        assert_eq!(e.feed(0x7f), Typed::Erase(1));
+        assert_eq!(e.key, b"sk-");
+        assert_eq!(e.feed(0x15), Typed::Erase(3));
+        assert!(e.key.is_empty());
+        assert_eq!(e.feed(0x7f), Typed::Erase(0), "nothing left to erase");
+        assert_eq!(e.feed(b'k'), Typed::Dot);
+        assert_eq!(e.feed(b'\r'), Typed::Done);
+        assert_eq!(e.key, b"k");
+    }
+
+    /// An arrow key and the markers around a bracketed paste add nothing to
+    /// the key and draw no dot.
+    #[test]
+    fn escape_sequences_stay_out_of_the_key() {
+        let mut e = KeyEditor::new();
+        feed(&mut e, &esc("ab^[Dc^OD"));
+        assert_eq!(e.key, b"abc", "arrow keys, normal and application mode");
+        let mut p = KeyEditor::new();
+        let typed = feed(&mut p, &esc("^[200~sk-abc^[201~"));
+        assert_eq!(p.key, b"sk-abc");
+        assert_eq!(typed.iter().filter(|t| **t == Typed::Dot).count(), 6, "a dot per key character only");
+    }
+
+    /// An erased character is zeroed in the buffer, not just dropped.
+    #[test]
+    fn erased_key_bytes_are_zeroed() {
+        let mut e = KeyEditor::new();
+        feed(&mut e, b"secret");
+        e.feed(0x15);
+        // SAFETY: test-only; these six bytes were written, then zeroed before
+        // the truncate left them in the spare capacity.
+        let left: Vec<u8> = e.key.spare_capacity_mut()[..6].iter().map(|b| unsafe { b.assume_init_read() }).collect();
+        assert_eq!(left, [0u8; 6]);
+    }
+
+    /// A control byte after a lone ESC, or inside a sequence, is not eaten:
+    /// Enter still ends the line and Backspace still erases.
+    #[test]
+    fn a_control_byte_ends_an_escape_and_acts() {
+        let mut e = KeyEditor::new();
+        assert_eq!(feed(&mut e, &esc("^\r")), [Typed::Continue, Typed::Done]);
+        let mut e = KeyEditor::new();
+        assert_eq!(feed(&mut e, &esc("^[\r")), [Typed::Continue, Typed::Continue, Typed::Done]);
+        let mut e = KeyEditor::new();
+        feed(&mut e, b"ab");
+        assert_eq!(feed(&mut e, &esc("^\x7f")), [Typed::Continue, Typed::Erase(1)]);
+        assert_eq!(e.key, b"a");
+        assert_eq!(feed(&mut e, &esc("^x")), [Typed::Continue, Typed::Continue], "Alt-x is dropped");
+        assert_eq!(e.key, b"a");
+    }
 
     #[test]
     fn cost_note_marks_pricier_models() {

@@ -230,11 +230,14 @@ pub struct Action {
     /// The key that runs it in browse mode and in the menu. Unset: one is
     /// assigned from the label ([`action_keys`]).
     pub key: Option<char>,
+    /// It only reads: it runs at once, outside the queue, with nothing to
+    /// review, and its outcome goes to the bottom bar.
+    pub reads: bool,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, command: impl Into<String>) -> Self {
-        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new(), key: None }
+        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new(), key: None, reads: false }
     }
     pub fn doc(mut self, doc: impl Into<String>) -> Self {
         self.doc = doc.into();
@@ -248,6 +251,11 @@ impl Action {
         self.arg = arg;
         self
     }
+    pub fn reads(mut self) -> Self {
+        self.reads = true;
+        self
+    }
+
     pub fn confirm(mut self) -> Self {
         self.confirm = true;
         self

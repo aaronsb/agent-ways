@@ -592,7 +592,11 @@ impl App {
 
     /// An action was chosen: ask for its argument, or stage it at once.
     pub(super) fn pick(&mut self, path: Vec<usize>, action: usize) {
-        match tree::get(&self.roots, &path).actions[action].arg.clone() {
+        let a = &tree::get(&self.roots, &path).actions[action];
+        if a.reads && matches!(a.arg, Arg::None) {
+            return self.read_now(&path, action);
+        }
+        match a.arg.clone() {
             Arg::None => self.stage(&path, action, "", None),
             Arg::Text(_) => self.mode = Mode::Arg { path, action, buf: String::new() },
             Arg::Secret => self.mode = Mode::Secret { path, action, buf: SecretBuf::default() },
@@ -633,6 +637,43 @@ impl App {
         } else {
             self.enqueue(queued);
         }
+    }
+
+    /// Run an action that only reads, at once and outside the queue: there
+    /// is nothing to review or apply. Its outcome goes to the bottom bar.
+    pub(super) fn read_now(&mut self, path: &[usize], action: usize) {
+        if self.reading.is_some() {
+            self.msg = "a check is running".into();
+            return;
+        }
+        let a = &tree::get(&self.roots, path).actions[action];
+        let q = Queued::new(tree::key(&self.roots, path), a.label.clone(), a.render(""), false);
+        self.msg = format!("{}: running…", a.label);
+        let job = self.adapter.start(&q);
+        self.reading = Some((a.label.clone(), job));
+        self.tick_reading();
+    }
+
+    /// Poll the reading action, if one runs: when it ends, say how, and read
+    /// the tree again, since what it found may show there. A tree is read
+    /// again only when nothing is open over it; otherwise the stamp is
+    /// cleared so the next watch reads it.
+    pub(crate) fn tick_reading(&mut self) {
+        let Some((label, job)) = &mut self.reading else { return };
+        let Some(outcome) = job.poll() else { return };
+        let said = match outcome {
+            Ok(()) => format!("{label}: ok"),
+            Err(e) => format!("{label}: {e}"),
+        };
+        self.reading = None;
+        if !matches!(self.mode, Mode::Browse | Mode::Review { run: None, .. }) {
+            self.msg = said;
+            self.stamp = None;
+            self.owed = true;
+            return;
+        }
+        let r = self.reload();
+        self.msg = if r.is_clean() { said } else { format!("{said} · {}", r.message()) };
     }
 
     pub(super) fn enqueue(&mut self, q: Queued) {

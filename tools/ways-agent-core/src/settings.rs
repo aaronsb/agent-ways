@@ -163,7 +163,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Secret,
         computed: Some(key_presence),
         doc: "Whether a provider key is present.",
-        long: "Never shown and never passed as an argument (ADR-503 §12). Add or rotate one with `ways agent key add --provider <p>`, which reads it from stdin or a hidden prompt.",
+        long: "Never shown and never passed as an argument (ADR-503 §12). Add or rotate one with `ways agent key add --provider <p>`, which reads it from stdin or a prompt that shows a dot per character.",
         ..BASE
     },
 ];
