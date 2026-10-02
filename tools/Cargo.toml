@@ -23,6 +23,11 @@ members = [
     "attend-instances",
     "attend-session",
     "attend-state",
+    "agent-theme",
+    "agent-settings",
+    "agent-tui",
+    "claude-sessions",
+    "attend-config",
 ]
 resolver = "2"
 

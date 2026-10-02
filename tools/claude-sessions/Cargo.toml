@@ -1,0 +1,10 @@
+[package]
+name = "claude-sessions"
+version = "0.1.0"
+edition = "2021"
+description = "Locates Claude Code config directories, projects, sessions and transcripts"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "claude_sessions"
+path = "src/lib.rs"

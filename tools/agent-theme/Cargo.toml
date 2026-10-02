@@ -1,0 +1,10 @@
+[package]
+name = "agent-theme"
+version = "0.1.0"
+edition = "2021"
+description = "Theme engine for agent-ways: terminal colour detection and ANSI and ratatui outputs"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "agent_theme"
+path = "src/lib.rs"
