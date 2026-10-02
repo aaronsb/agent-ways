@@ -62,7 +62,7 @@ enum Command {
         session: Option<String>,
         /// Group rows by session, project, day or month.
         #[arg(long, value_enum, default_value = "day")]
-        by: report::By,
+        by: ways_agent_core::spend::By,
         /// Print JSON with every grouping.
         #[arg(long)]
         json: bool,

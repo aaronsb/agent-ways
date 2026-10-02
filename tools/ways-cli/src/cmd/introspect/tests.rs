@@ -20,7 +20,7 @@ use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, Join
 
 use super::frames::{build_frames, has_verdicts};
 use super::model::WayEvent;
-use super::screen::{reselect_by_anchor, Introspect, Picker, Replay};
+use super::screen::{reselect_by_anchor, session_spend, Introspect, Picker, Replay};
 use super::sessions::{gather_sessions, SessionInfo};
 use super::why::build_why_index;
 
@@ -479,4 +479,32 @@ fn a_row_blocked_with_its_ancestor_names_it() {
     press(&mut s, &[KeyCode::Char('f')]);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("⊘ itops/incident/sev1 (with itops/incident)"), "{t}");
+}
+
+/// The header gives the session's judge spend, its own calls only, in
+/// tokens; `$` turns it to cost, an unknown-cost call counted apart.
+#[test]
+fn the_header_gives_the_judges_spend_and_dollar_toggles_tokens_and_cost() {
+    let log = [
+        serde_json::json!({"event": "judge_call", "ts": "2026-07-03T16:52:01Z", "session": SESSION, "input_tokens": "1000", "output_tokens": "200", "cost_usd": "0.0200", "cost_source": "price_table"}),
+        serde_json::json!({"event": "judge_call", "ts": "2026-07-03T16:53:01Z", "session": SESSION, "outcome": "fallback", "reason": "timeout", "cost_source": "unknown"}),
+        serde_json::json!({"event": "judge_call", "ts": "2026-07-03T16:53:02Z", "session": "other", "input_tokens": "5000", "cost_usd": "0.5000", "cost_source": "provider"}),
+    ]
+    .map(|v| v.to_string())
+    .join("\n");
+    let mut r = replay(false);
+    r.spend = session_spend(&log, SESSION);
+    let mut s = Introspect::showing(r, terminal(), Shape::PLAIN);
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("judge ×2 · 1.2K tokens") && t.contains("$ cost"), "{t}");
+    press(&mut s, &[KeyCode::Char('$')]);
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("judge ×2 · $0.0200 + 1 unknown") && t.contains("$ tokens"), "{t}");
+
+    assert!(session_spend(&log, "absent").is_none());
+    let mut quiet = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let t = text(&render(&mut quiet, 80, 25));
+    assert!(!t.contains("judge ") && !t.contains("$ cost"), "no calls, no spend: {t}");
+    press(&mut quiet, &[KeyCode::Char('$')]);
+    assert_eq!(text(&render(&mut quiet, 80, 25)), t, "$ does nothing without spend");
 }
