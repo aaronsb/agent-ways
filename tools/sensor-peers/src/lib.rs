@@ -233,9 +233,8 @@ impl PeerSensor {
     /// Return the set of live Claude session IDs currently visible to
     /// the peer sensor. Callers cross-reference this against
     /// `_groups.yaml` member lists when they need a liveness-checked
-    /// view (focus-group routing in `attend send --channel`, etc.) — the
-    /// yaml count alone trusts `Groups::session_alive`, which is a
-    /// best-effort placeholder that returns `true` for everyone.
+    /// view (channel routing in `attend send --channel`, etc.) — the
+    /// yaml count alone trusts membership records that outlive their session.
     pub fn live_session_ids(&self) -> std::collections::HashSet<String> {
         self.discover_peers().into_keys().collect()
     }

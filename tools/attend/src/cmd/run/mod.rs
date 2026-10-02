@@ -260,7 +260,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     loop {
         // Heartbeat — touched at the top of every tick so a single
         // skipped poll cannot evict this session from peer liveness
-        // checks (groups::session_alive, attend-chat known_identities
+        // checks (attend_groups::member_alive, attend-chat known_identities
         // filter). Best-effort: a missing write is recoverable on the
         // next iteration.
         attend_heartbeat::touch(&heartbeat_id).ok();
