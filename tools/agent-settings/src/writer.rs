@@ -87,6 +87,22 @@ impl Lock {
         Ok(lock)
     }
 
+    /// Take the lock on `target`, waiting at most `limit` for another holder
+    /// to let go: `Ok(None)` when it did not. For a writer that must not
+    /// block on a holder that hangs, such as one on a screen's own thread.
+    pub fn acquire_within(target: &Path, limit: std::time::Duration) -> io::Result<Option<Lock>> {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(l) = Self::take(target, false)? {
+                return Ok(Some(l));
+            }
+            if start.elapsed() >= limit {
+                return Ok(None);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     /// Take the lock on `target` if it is free: `Ok(None)` while another
     /// holder has it. For a single-instance guard held for a process's life.
     pub fn try_acquire(target: &Path) -> io::Result<Option<Lock>> {
@@ -253,8 +269,31 @@ pub fn edit_file<T>(
     header: Option<&str>,
     f: impl FnOnce(&mut Doc) -> Result<T, EditError>,
 ) -> Result<(T, bool), WriteError> {
+    edit_file_within(path, header, None, f)
+}
+
+/// [`edit_file`], waiting at most `limit` for the lock when one is given; a
+/// holder that keeps it longer fails the write with a `TimedOut` lock error
+/// and nothing written.
+pub fn edit_file_within<T>(
+    path: &Path,
+    header: Option<&str>,
+    limit: Option<std::time::Duration>,
+    f: impl FnOnce(&mut Doc) -> Result<T, EditError>,
+) -> Result<(T, bool), WriteError> {
     let path = &resolve(path);
-    let _lock = Lock::acquire(path).map_err(|e| WriteError::Lock(path.to_path_buf(), e))?;
+    let lock = match limit {
+        None => Lock::acquire(path).map(Some),
+        Some(l) => Lock::acquire_within(path, l),
+    };
+    let _lock = match lock {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            let e = io::Error::new(io::ErrorKind::TimedOut, "another writer holds it");
+            return Err(WriteError::Lock(path.to_path_buf(), e));
+        }
+        Err(e) => return Err(WriteError::Lock(path.to_path_buf(), e)),
+    };
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -287,6 +326,22 @@ pub fn create_new(path: &Path, body: &str) -> Result<bool, WriteError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bounded_write_gives_up_on_a_held_lock_and_writes_nothing() {
+        let d = tmp("within");
+        let f = d.join("c.yaml");
+        std::fs::write(&f, "a: 1\n").unwrap();
+        let held = Lock::acquire(&f).unwrap();
+        let start = std::time::Instant::now();
+        let r = edit_file_within(&f, None, Some(std::time::Duration::from_millis(200)), |doc| doc.set(&["a".into()], &serde_yaml::Value::from(2)));
+        assert!(matches!(&r, Err(WriteError::Lock(_, e)) if e.kind() == io::ErrorKind::TimedOut), "{r:?}");
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "a: 1\n");
+        drop(held);
+        edit_file_within(&f, None, Some(std::time::Duration::from_millis(200)), |doc| doc.set(&["a".into()], &serde_yaml::Value::from(2))).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "a: 2\n");
+    }
 
     /// A kept lock leaves its file in place on release, so a holder that never
     /// unlinks (an older binary) and a newer one always lock the same inode.
