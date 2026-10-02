@@ -4,16 +4,10 @@
 # Outputs nothing if the project has no ADRs (way content still shows as a reminder,
 # but without concrete commands it stays lightweight).
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
-# Find ADR script
-ADR_SCRIPT=""
-for path in "docs/scripts/adr" "scripts/adr" "tools/adr"; do
-  if [[ -x "$PROJECT_DIR/$path" ]]; then
-    ADR_SCRIPT="$path"
-    break
-  fi
-done
+# `ways` exports the project's ADR tool path when it has one.
+ADR_SCRIPT="${WAYS_ADR_TOOL:-}"
 
 if [[ -n "$ADR_SCRIPT" ]]; then
   # Tooling installed — show quick-reference

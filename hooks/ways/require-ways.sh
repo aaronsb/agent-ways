@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Guard: exit silently if ways binary is not available.
-# Source this at the top of any hook script that calls the ways binary.
+# Sourced by every hook adapter under hooks/ways. A hook script is a transport
+# adapter (ADR-504 §11): `ways hook <event>` reads Claude Code's payload on
+# stdin, decides, and prints what the hook returns.
 #
-# Usage: source "$(dirname "$0")/require-ways.sh"
+# Usage: source "$(dirname "$0")/require-ways.sh"; ways_hook <event>
 #
-# If the binary is missing, the script exits 0 (no error, no output).
-# The SessionStart check-setup.sh hook handles the user-facing diagnostic.
+# If the binary is missing, the hook exits 0 with no output. The SessionStart
+# check-setup.sh hook handles the user-facing diagnostic.
 
 WAYS_BIN="${HOME}/.claude/bin/ways"
 if [[ ! -x "$WAYS_BIN" ]]; then
@@ -18,3 +19,11 @@ fi
 # opportunistically alongside user git activity, so optional locks are always
 # safe here — we never rely on the cache being rewritten.
 export GIT_OPTIONAL_LOCKS=0
+
+# Run the event and end the hook. These hooks guide and never block, so the
+# hook exits 0 whatever the binary returns: exit 2 would read as "block the
+# prompt" or "block the tool".
+ways_hook() {
+  "$WAYS_BIN" hook "$1"
+  exit 0
+}

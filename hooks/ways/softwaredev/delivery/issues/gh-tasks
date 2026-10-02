@@ -153,10 +153,18 @@ team_list_id() {
 store_dir() { printf '%s/tasks/%s' "$CONFIG_DIR" "$(list_id)"; }
 
 # Per-session bridge state lives beside the other hook state, under the
-# sessions root shared with the ways binary (sessions-root.sh is the one
-# rule). Never inside the task store: Claude Code parses every *.json there.
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/sessions-root.sh"
-state_dir() { printf '%s/%s/gh-tasks' "$SESSIONS_ROOT" "$SESSION"; }
+# sessions root the ways binary owns (`ways sessions-root` is the one rule).
+# Never inside the task store: Claude Code parses every *.json there.
+# The installed binary, as the hooks use; PATH only when it is absent.
+# WAYS_BIN names another build (the tests). A missing binary leaves the root
+# empty, so commands that keep no state still run.
+WAYS_BIN="${WAYS_BIN:-$HOME/.claude/bin/ways}"
+[[ -x "$WAYS_BIN" ]] || WAYS_BIN="$(command -v ways || true)"
+SESSIONS_ROOT=$([[ -n "$WAYS_BIN" ]] && "$WAYS_BIN" sessions-root 2>/dev/null) || SESSIONS_ROOT=""
+state_dir() {
+  [[ -n "$SESSIONS_ROOT" ]] || die "cannot resolve the sessions root: \`ways sessions-root\` is unavailable"
+  printf '%s/%s/gh-tasks' "$SESSIONS_ROOT" "$SESSION"
+}
 
 # ── locks (proper-lockfile compatible) ───────────────────────────
 

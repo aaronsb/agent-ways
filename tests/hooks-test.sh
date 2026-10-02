@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Hook scripts under hooks/ways, run against a temp HOME, XDG dirs and
-# sessions root: clear-markers.sh clears only its own session's state, the
-# memory macro finds MEMORY.md under Claude Code's project slug, and
-# inject-subagent.sh injects stashed ways from every ways root. The hooks
-# call the ways binary at $HOME/.claude/bin/ways; the test links the build
-# named by $WAYS_TEST_BIN (default tools/target/debug/ways) there.
+# sessions root. Each script is an adapter over `ways hook <event>`: the
+# SessionStart clear and `ways reset` clear only a plain session id, the Stop
+# hook records the last response, the post-tool scan runs postchecks,
+# inject-subagent.sh injects stashed ways from every ways root, and a macro
+# gets its session, scope and sessions root. The hooks call the ways binary
+# at $HOME/.claude/bin/ways; the test links the build named by
+# $WAYS_TEST_BIN (default tools/target/debug/ways) there.
 
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-HOOKS="$ROOT/hooks/ways"
+# WAYS_TEST_HOOKS runs the suite against another checkout's hooks, with
+# WAYS_TEST_BIN naming its binary: how a new check is shown to fail before.
+HOOKS="${WAYS_TEST_HOOKS:-$ROOT/hooks/ways}"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 fail=0
@@ -230,8 +234,122 @@ check "config-updates: a non-upstream origin stamps behind=0" "0" "$(sed -n 's/^
 restore_cfg_cache
 rm -rf "$APP"
 
-# events-log.sh resolves the XDG state default when the binary is missing.
-EV=$(HOME="$WORK/nohome" XDG_STATE_HOME="$WORK/evstate" bash -c 'source "$1"; echo "$EVENTS_LOG"' _ "$HOOKS/events-log.sh")
-check "events-log.sh defaults to the XDG state log" "$WORK/evstate/agent-ways/events.jsonl" "$EV"
+# ── ways hook (#702): the hooks are adapters over the binary ──────────────
+
+# `ways reset` and the SessionStart clear share one rule: a session id that
+# climbs out of the sessions root removes nothing.
+seed_sessions
+mkdir -p "$XDG_RUNTIME_DIR/victim"
+"$WAYS_TEST_BIN" reset --session ../victim --confirm >/dev/null 2>&1
+check "ways reset ignores a session id that escapes the root" "present" "$([[ -d $XDG_RUNTIME_DIR/victim ]] && echo present || echo absent)"
+"$WAYS_TEST_BIN" reset --session sess-a --confirm >/dev/null 2>&1
+check "ways reset clears the named session" "absent|present" \
+    "$([[ -e $SESSIONS/sess-a ]] && echo present || echo absent)|$([[ -e $SESSIONS/sess-b ]] && echo present || echo absent)"
+
+# Stop records Claude's last response in the session's state, where the
+# SessionStart clear removes it; a stop the hook itself continued writes
+# nothing, and a turn that ended without text clears the record.
+assistant() { jq -cn --arg t "$1" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'; }
+TRANSCRIPT="$WORK/transcript.jsonl"
+{ assistant "older reply"; echo '{"type":"user","message":{"content":"q"}}'; assistant "The Reply"; } > "$TRANSCRIPT"
+rm -rf "$SESSIONS"
+stop() { jq -cn --arg s "$1" --arg t "$TRANSCRIPT" --argjson a "${2:-false}" \
+    '{session_id:$s,transcript_path:$t,stop_hook_active:$a}' | bash "$HOOKS/check-response.sh"; }
+stop sess-stop true
+check "stop hook skips a stop it continued" "absent" "$([[ -e $SESSIONS/sess-stop/response-context.json ]] && echo present || echo absent)"
+stop sess-stop
+check "stop hook records the last response in the session" "The Reply" \
+    "$(jq -r .context "$SESSIONS/sess-stop/response-context.json" 2>/dev/null)"
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}' >> "$TRANSCRIPT"
+stop sess-stop
+check "stop hook clears the record after a turn without text" "absent" "$([[ -e $SESSIONS/sess-stop/response-context.json ]] && echo present || echo absent)"
+
+# The post-tool scan: a fired way's envelope names the event that ran it; a
+# postcheck sees the sessions root; a project way's postcheck shadows the
+# core way's of the same id, as the way itself does.
+CORE="$HOME/.claude/hooks/ways"
+PROJ="$WORK/project"
+postcheck() {  # dir body
+    printf '#!/bin/sh\n%s\n' "$2" > "$1/postcheck.sh"
+    chmod +x "$1/postcheck.sh"
+}
+way "$CORE" postdom/fires agent "# Fires body"
+postcheck "$CORE/postdom/fires" "echo \"\$WAYS_SESSIONS_ROOT\" > \"$WORK/postcheck-root\"; exit 0"
+way "$CORE" postdom/shadowed agent "# Core shadowed body"
+postcheck "$CORE/postdom/shadowed" "exit 0"
+way "$PROJ/.claude/ways" postdom/shadowed agent "# Project shadowed body"
+postcheck "$PROJ/.claude/ways/postdom/shadowed" "exit 1"
+post() {  # session event
+    jq -cn --arg s "$1" --arg e "$2" --arg c "$PROJ" '{session_id:$s,hook_event_name:$e,cwd:$c,tool_name:"Bash"}' \
+        | bash "$HOOKS/check-post.sh"
+}
+out=$(post sess-post-1 PostToolUseFailure)
+check "post-tool envelope names PostToolUseFailure" "PostToolUseFailure" "$(jq -r .hookSpecificOutput.hookEventName <<< "$out")"
+check "post-tool fires the way whose postcheck exits 0" "yes" "$(grep -q 'Fires body' <<< "$out" && echo yes || echo no)"
+check "a project postcheck shadows the core one" "no" "$(grep -q 'shadowed body' <<< "$out" && echo yes || echo no)"
+check "a postcheck sees WAYS_SESSIONS_ROOT" "$SESSIONS" "$(cat "$WORK/postcheck-root" 2>/dev/null)"
+# `ways reconcile` projects the core root as a symlink into the app; the
+# scan walks through it (find(1) does not descend a symlinked start point).
+mv "$CORE" "$WORK/core-real" && ln -s "$WORK/core-real" "$CORE"
+out=$(post sess-post-2 PostToolUse)
+check "post-tool finds postchecks under a symlinked core root" "yes" "$(grep -q 'Fires body' <<< "$out" && echo yes || echo no)"
+rm "$CORE" && mv "$WORK/core-real" "$CORE"
+rm -rf "$CORE/postdom" "$PROJ/.claude/ways/postdom"
+
+# One broken way does not stop the scan: aa/broken has no `refire:` (an
+# error on the fire path), and zz/ok after it still fires.
+mkdir -p "$CORE/aa/broken"
+printf -- '---\ndescription: broken way\nscope: agent\n---\n# Broken body\n' > "$CORE/aa/broken/broken.md"
+postcheck "$CORE/aa/broken" "exit 0"
+way "$CORE" zz/ok agent "# Ok body"
+postcheck "$CORE/zz/ok" "exit 0"
+out=$(post sess-post-5 PostToolUse)
+check "post-tool fires zz/ok past a broken way" "yes" "$(grep -q 'Ok body' <<< "$out" && echo yes || echo no)"
+rm -rf "$CORE/aa" "$CORE/zz"
+
+# A hung postcheck does not hang the hook: the scan gives every postcheck one
+# deadline, and the fast one's way still fires.
+way "$CORE" hangdom/slow agent "# Slow body"
+postcheck "$CORE/hangdom/slow" "sleep 8; exit 0"
+way "$CORE" hangdom/fast agent "# Fast body"
+postcheck "$CORE/hangdom/fast" "exit 0"
+secs=$( { time ( post sess-post-6 PostToolUse > "$WORK/hang.json" ); } 2>&1 )
+check "post-tool returns under 4 s beside a hung postcheck (took ${secs} s)" "yes" "$(under "$secs" 4)"
+check "post-tool still fires the fast postcheck's way" "yes" "$(grep -q 'Fast body' "$WORK/hang.json" && echo yes || echo no)"
+check "post-tool drops the hung postcheck's way" "no" "$(grep -q 'Slow body' "$WORK/hang.json" && echo yes || echo no)"
+rm -rf "$CORE/hangdom"
+
+# A project-local postcheck is project code, gated like a project macro: it
+# runs only for a project listed in ~/.claude/trusted-project-macros.
+way "$PROJ/.claude/ways" projdom/local agent "# Project local body"
+postcheck "$PROJ/.claude/ways/projdom/local" "touch \"$WORK/project-postcheck-ran\"; exit 0"
+rm -f "$WORK/project-postcheck-ran" "$HOME/.claude/trusted-project-macros"
+out=$(post sess-post-3 PostToolUse)
+check "an untrusted project's postcheck does not run" "absent" "$([[ -e $WORK/project-postcheck-ran ]] && echo present || echo absent)"
+echo "$PROJ" > "$HOME/.claude/trusted-project-macros"
+out=$(post sess-post-4 PostToolUse)
+check "a trusted project's postcheck runs" "present" "$([[ -e $WORK/project-postcheck-ran ]] && echo present || echo absent)"
+check "a trusted project's postcheck fires its way" "yes" "$(grep -q 'Project local body' <<< "$out" && echo yes || echo no)"
+rm -rf "$PROJ/.claude/ways/projdom" "$HOME/.claude/trusted-project-macros" "$WORK/project-postcheck-ran"
+
+# #689: a macro run for a subagent gets the parent's session id, its own
+# agent id, the scope it runs for and the sessions root, and the markdown
+# queue macros leave the parent's queue for the parent.
+mkdir -p "$CORE/envdom/env"
+printf -- '---\ndescription: test way\nscope: subagent\nrefire: 0.15\nmacro: append\n---\n# Env way body\n' > "$CORE/envdom/env/env.md"
+printf '#!/bin/bash\necho "env=$CLAUDE_SESSION_ID|$WAYS_SCOPE|$CLAUDE_AGENT_ID|$WAYS_SESSIONS_ROOT|$CLAUDE_PROJECT_DIR"\n' > "$CORE/envdom/env/macro.sh"
+mkdir -p "$CORE/documentation/markdown"
+cp -R "$HOOKS/documentation/markdown/density" "$CORE/documentation/markdown/density"
+rm -rf "$SESSIONS"
+mkdir -p "$SESSIONS/sess-env/subagent-stash" "$SESSIONS/sess-env/markdown-density"
+printf '%s\tdocs/x.md\t500\t3\t6\t20\n' "$(date +%s)" > "$SESSIONS/sess-env/markdown-density/pending"
+echo '{"ways":["envdom/env","documentation/markdown/density"],"channels":["prompt","prompt"]}' > "$SESSIONS/sess-env/subagent-stash/001.json"
+ctx=$(jq -cn --arg c "$PROJ" '{session_id:"sess-env",agent_id:"agent-9",cwd:$c}' \
+    | bash "$HOOKS/inject-subagent.sh" | jq -r '.hookSpecificOutput.additionalContext // empty')
+check "a subagent macro gets session, scope, agent, root and project" \
+    "env=sess-env|subagent|agent-9|$SESSIONS|$PROJ" "$(grep '^env=' <<< "$ctx")"
+check "a subagent leaves the parent's density queue" "present" \
+    "$([[ -s $SESSIONS/sess-env/markdown-density/pending ]] && echo present || echo absent)"
+rm -rf "$CORE/envdom" "$CORE/documentation"
 
 exit $fail

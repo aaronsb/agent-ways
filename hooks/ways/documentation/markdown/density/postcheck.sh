@@ -19,8 +19,6 @@
 # way's own directory, bounded, and never an input to the exit code.
 set -euo pipefail
 
-source "$(dirname "$0")/../../../sessions-root.sh"
-
 INPUT=$(cat)
 
 # One jq pass — this runs on every Edit/Write PostToolUse, so bail early and
@@ -37,7 +35,7 @@ case "$tool" in Write | Edit | MultiEdit) ;; *) exit 1 ;; esac
 # it counts.
 [[ "$path" == */documentation/markdown/* ]] && exit 1
 
-STATE_DIR="${SESSIONS_ROOT}/${session}/markdown-density"
+STATE_DIR="${WAYS_SESSIONS_ROOT:?}/${session}/markdown-density"
 SEEN="${STATE_DIR}/seen"
 PENDING="${STATE_DIR}/pending"
 

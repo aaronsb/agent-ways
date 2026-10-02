@@ -10,7 +10,7 @@
 # .claude/no-adr-tooling so a repo can adopt ADRs but not the doc catalog
 # (or vice versa).
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
 # State 1: Declined
 if [[ -f "$PROJECT_DIR/.claude/no-doc-tooling" ]]; then
@@ -19,13 +19,8 @@ if [[ -f "$PROJECT_DIR/.claude/no-doc-tooling" ]]; then
 fi
 
 # State 2: Installed — check common locations
-DOC_SCRIPT=""
-for path in "docs/scripts/doc" "scripts/doc" "tools/doc"; do
-  if [[ -x "$PROJECT_DIR/$path" ]]; then
-    DOC_SCRIPT="$path"
-    break
-  fi
-done
+# `ways` exports the project's doc tool path when it has one.
+DOC_SCRIPT="${WAYS_DOC_TOOL:-}"
 
 if [[ -n "$DOC_SCRIPT" ]]; then
   echo "## Documentation Catalog Tooling"

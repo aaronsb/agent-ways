@@ -5,10 +5,8 @@
 # and how to invoke it. The user installs on first use.
 
 # Check which writing-relevant skills are installed
-installed=""
-if command -v claude >/dev/null 2>&1; then
-  installed=$(claude plugin list 2>/dev/null | grep '✔ enabled' || true)
-fi
+# `ways` exports the enabled plugin ids, one per line (name@marketplace).
+installed="${WAYS_ENABLED_PLUGINS:-}"
 
 echo ""
 echo "## Skills for Writing"

@@ -319,22 +319,18 @@ enum Commands {
         #[arg(long)]
         confirm: bool,
     },
-    /// Print the per-session response-topics state file path (single source
-    /// of truth for the Stop hook writer, the UserPromptSubmit consumer, and
-    /// `ways reset`'s side-file cleanup).
-    ResponseTopicsPath {
-        /// Session ID
-        session: String,
+    /// Serve one Claude Code hook: read its JSON payload on stdin and print
+    /// what the hook returns (ADR-504 §11). The scripts under hooks/ways call
+    /// this and nothing else.
+    Hook {
+        #[arg(value_enum)]
+        event: cmd::hook::HookEvent,
     },
-    /// Print the per-user sessions root directory. Lets the hook scripts (and
-    /// CI) verify they resolve the same path as the binary on every platform —
-    /// the contract documented in `hooks/ways/sessions-root.sh`.
+    /// Print the per-user sessions root directory, for scripts the binary does
+    /// not run (macros and postchecks get it as WAYS_SESSIONS_ROOT).
     SessionsRoot,
-    /// Print the canonical events-log path. The single source of truth for every
-    /// telemetry writer — the Rust `session::log_event` and the shell hooks
-    /// (`clear-markers.sh`, `inject-subagent.sh` via `events-log.sh`) — and every
-    /// reader (`firing::load_events`). Resolving through the binary keeps the
-    /// hooks from hardcoding a path that drifts from `paths::events_log()`.
+    /// Print the canonical events-log path (`paths::events_log()`), which
+    /// every telemetry writer and reader resolves.
     EventsLogPath,
     /// Print the directory name Claude Code gives a project under its projects
     /// dir (`claude_sessions::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
@@ -664,18 +660,6 @@ enum ShowCommand {
         /// Trigger channel (keyword, semantic:embedding)
         #[arg(long, default_value = "unknown")]
         trigger: String,
-        /// Characters of the hook's additionalContext already spent by the
-        /// caller (check-post.sh assembles one context across several calls).
-        /// Charges the way against the 10,000-character hook cap; a value
-        /// at or past the cap leaves no room. When the way is
-        /// withheld for the cap, nothing is printed, nothing is recorded, and
-        /// the exit status is 3.
-        #[arg(long)]
-        budget_used: Option<usize>,
-        /// Render the way for a subagent's SubagentStart: no scope check,
-        /// refire gate or fire record (inject-subagent.sh).
-        #[arg(long, conflicts_with = "budget_used")]
-        subagent: bool,
     },
     /// Display a check (with scoring curve)
     Check {
@@ -1014,23 +998,9 @@ fn run() -> Result<()> {
             }
         },
         Commands::Show { what } => match what {
-            ShowCommand::Way { id, session, subagent: true, .. } => {
-                print!("{}", cmd::show::subagent_way(&id, &session)?);
-                Ok(())
-            }
-            ShowCommand::Way { id, session, trigger, budget_used: None, .. } => {
+            ShowCommand::Way { id, session, trigger } => {
                 let out = cmd::show::way(&id, &session, &trigger)?;
                 if !out.is_empty() { print!("{out}"); }
-                Ok(())
-            }
-            ShowCommand::Way { id, session, trigger, budget_used: Some(used), .. } => {
-                let mut budget = cmd::show::ContextBudget::hook_with_used(used);
-                let out = cmd::show::way_scored(&id, &session, &trigger, None, None, None, Some(&mut budget))?;
-                if !out.is_empty() {
-                    print!("{out}");
-                } else if budget.refusals() > 0 {
-                    std::process::exit(3);
-                }
                 Ok(())
             }
             ShowCommand::Check { id, session, trigger, score } => {
@@ -1121,10 +1091,7 @@ fn run() -> Result<()> {
             println!("{}", claude_sessions::project_slug(&project));
             Ok(())
         }
-        Commands::ResponseTopicsPath { session } => {
-            println!("{}", session::response_topics_path(&session).display());
-            Ok(())
-        }
+        Commands::Hook { event } => cmd::hook::run(event),
         Commands::Permissions { action, global } => {
             match action {
                 PermissionsCommand::Audit => cmd::permissions::audit(global),

@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 # Inject context budget facts into introspection way
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-
-if command -v ways &>/dev/null; then
-  JSON=$(ways context --json 2>/dev/null)
-  if [[ -n "$JSON" ]]; then
-    REMAINING=$(echo "$JSON" | jq -r '.tokens_remaining')
-    PCT=$(echo "$JSON" | jq -r '.pct_remaining')
-    USED=$(echo "$JSON" | jq -r '.tokens_used')
+# `ways` exports the WAYS_CONTEXT_* budget to a macro that names it.
+if [[ -n "${WAYS_CONTEXT_REMAINING:-}" ]]; then
+    REMAINING=$WAYS_CONTEXT_REMAINING
+    PCT=$WAYS_CONTEXT_PCT_REMAINING
+    USED=$WAYS_CONTEXT_USED
 
     echo "**Context budget: ~${USED} tokens used, ~${REMAINING} remaining (${PCT}% of window).**"
     if [[ $PCT -le 25 ]]; then
@@ -17,5 +14,4 @@ if command -v ways &>/dev/null; then
       echo "There is room to work, but this is a good time to capture session learnings. Doing it now means the introspection gets full context rather than a post-compaction summary."
     fi
     echo ""
-  fi
 fi

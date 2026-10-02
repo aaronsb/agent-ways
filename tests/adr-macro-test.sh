@@ -36,7 +36,13 @@ project() {
   echo "$dir"
 }
 
-run_macro() { CLAUDE_PROJECT_DIR="$1" ADR_UNIVERSAL_TOOL="$TOOL" bash "$MACRO" 2>&1; }
+# The binary exports WAYS_ADR_TOOL to the macro (its discovery has a unit
+# test in ways-cli); every fixture here vendors the tool at docs/scripts/adr.
+run_macro() {
+  local tool=""
+  [[ -x "$1/docs/scripts/adr" ]] && tool="docs/scripts/adr"
+  CLAUDE_PROJECT_DIR="$1" WAYS_ADR_TOOL="$tool" ADR_UNIVERSAL_TOOL="$TOOL" bash "$MACRO" 2>&1
+}
 CURRENT=$(sed -nE 's/^TOOL_VERSION = "([^"]+)"$/\1/p' "$TOOL" | head -1)
 
 echo "Not a git repo, declined, not installed"
@@ -172,17 +178,17 @@ check "fat capability: notice" contains "_45 adr/v1 records use 1 capability (in
 check "fat capability: no domain notice under v1" lacks "records in" "$out"
 # Fail quiet: the notice needs the installed tool to answer.
 fat="$WORK/shape-fat"
-out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/no-such-tool" bash "$MACRO" 2>&1)
+out=$(CLAUDE_PROJECT_DIR="$fat" WAYS_ADR_TOOL=docs/scripts/adr ADR_UNIVERSAL_TOOL="$WORK/no-such-tool" bash "$MACRO" 2>&1)
 check "missing installed tool: no notice" lacks "records in" "$out"
 check "missing installed tool: guidance still printed" contains "Record format (adr/v0)" "$out"
 printf '#!/usr/bin/env python3\nprint("Notice: 1 records in 1 domain.")\nraise SystemExit(1)\n' > "$WORK/failing-tool"
-out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/failing-tool" bash "$MACRO" 2>&1)
+out=$(CLAUDE_PROJECT_DIR="$fat" WAYS_ADR_TOOL=docs/scripts/adr ADR_UNIVERSAL_TOOL="$WORK/failing-tool" bash "$MACRO" 2>&1)
 check "installed tool exits nonzero: no notice" lacks "records in" "$out"
 printf '#!/usr/bin/env python3\nimport sys\nsys.exit(2 if "--shape" in sys.argv else 0)\n' > "$WORK/old-tool"
-out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/old-tool" bash "$MACRO" 2>&1)
+out=$(CLAUDE_PROJECT_DIR="$fat" WAYS_ADR_TOOL=docs/scripts/adr ADR_UNIVERSAL_TOOL="$WORK/old-tool" bash "$MACRO" 2>&1)
 check "installed tool without --shape: no notice" lacks "records in" "$out"
 printf '#!/usr/bin/env python3\nprint("Traceback (most recent call last):")\nprint("Notice-ish")\n' > "$WORK/noisy-tool"
-out=$(CLAUDE_PROJECT_DIR="$fat" ADR_UNIVERSAL_TOOL="$WORK/noisy-tool" bash "$MACRO" 2>&1)
+out=$(CLAUDE_PROJECT_DIR="$fat" WAYS_ADR_TOOL=docs/scripts/adr ADR_UNIVERSAL_TOOL="$WORK/noisy-tool" bash "$MACRO" 2>&1)
 check "installed tool prints other lines: none passed on" lacks "Traceback" "$out"
 
 echo "v1 guide content"

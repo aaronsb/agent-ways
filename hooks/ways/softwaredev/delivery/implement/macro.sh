@@ -5,7 +5,7 @@
 # This macro adds detailed planning tables only when the project
 # signals enough complexity to warrant parallelization thinking.
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
 # --- Complexity signals ---
 has_adrs=false

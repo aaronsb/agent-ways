@@ -5,7 +5,6 @@
 #   1. CRLF line endings on files that bash/cargo expect to be LF.
 #   2. Non-portable shebangs (`#!/bin/bash` instead of `#!/usr/bin/env bash`).
 #   3. Hardcoded absolute home paths (`/home/<user>/...`) in code/config.
-#   4. The ways binary and the hook scripts disagreeing on sessions_root().
 #
 # Runs in the pre-commit hook and in CI on Windows + macOS + Linux. Vendored
 # third-party trees (llama.cpp) and generated build output are excluded.
@@ -36,7 +35,7 @@ is_excluded() {
 tracked() { git ls-files "$@"; }
 
 # ── 1. CRLF on LF-only files ─────────────────────────────────────
-echo "[1/4] line endings"
+echo "[1/3] line endings"
 crlf_hits=0
 while IFS= read -r f; do
   is_excluded "$f" && continue
@@ -49,7 +48,7 @@ done < <(tracked '*.sh' '*.bash' '*.rs' '*.toml' '*.cpp' '*.h' '*.hpp' '*.c' 'Ma
 [ "$crlf_hits" -eq 0 ] && ok "no CRLF on LF-only files"
 
 # ── 2. Non-portable shebangs ─────────────────────────────────────
-echo "[2/4] shebangs"
+echo "[2/3] shebangs"
 shebang_hits=0
 while IFS= read -r f; do
   is_excluded "$f" && continue
@@ -65,7 +64,7 @@ done < <(tracked '*.sh' 'hooks/pre-commit' 'scripts/project-pulse')
 [ "$shebang_hits" -eq 0 ] && ok "all shebangs portable"
 
 # ── 3. Hardcoded absolute home paths ─────────────────────────────
-echo "[3/4] hardcoded home paths"
+echo "[3/3] hardcoded home paths"
 # Only lint files that are EXECUTED/READ at runtime with real paths: shell
 # scripts, Makefiles, and settings.json. Rust sources are excluded — their
 # `/home/...` occurrences are hermetic test fixtures and doc comments, not
@@ -82,26 +81,6 @@ done < <(
     | xargs -r grep -nE '/home/[a-z_][a-z0-9_-]*/|/Users/[A-Za-z][A-Za-z0-9 _-]*/' 2>/dev/null
 )
 [ "$home_hits" -eq 0 ] && ok "no hardcoded home paths in executed code/config"
-
-# ── 4. sessions_root() agreement (binary vs shell) ───────────────
-echo "[4/4] sessions_root agreement"
-WAYS_BIN=""
-for cand in tools/target/release/ways tools/target/release/ways.exe \
-            tools/target/debug/ways tools/target/debug/ways.exe; do
-  [ -x "$cand" ] && { WAYS_BIN="$cand"; break; }
-done
-if [ -z "$WAYS_BIN" ]; then
-  note "ways binary not built — skipping (run: make ways)"
-else
-  bin_root="$("$WAYS_BIN" sessions-root 2>/dev/null)"
-  # shellcheck disable=SC1091
-  source hooks/ways/sessions-root.sh
-  if [ "$bin_root" = "$SESSIONS_ROOT" ]; then
-    ok "binary and sessions-root.sh agree: $bin_root"
-  else
-    fail "sessions_root mismatch — binary='$bin_root' shell='$SESSIONS_ROOT'"
-  fi
-fi
 
 # ── Informational: bare /tmp in shell (non-failing) ──────────────
 echo "[i] bare /tmp in shell scripts (review — Unix fallbacks are expected):"

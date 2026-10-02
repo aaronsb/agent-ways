@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 # Check MEMORY.md state and inject context budget for the current project
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${PROJECT_DIR:-.}}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
-# Context budget
-if command -v ways &>/dev/null; then
-  JSON=$(ways context --json 2>/dev/null)
-  if [[ -n "$JSON" ]]; then
-    REMAINING=$(echo "$JSON" | jq -r '.tokens_remaining')
-    PCT=$(echo "$JSON" | jq -r '.pct_remaining')
-    echo "**Context budget: ~${REMAINING} tokens remaining (${PCT}% of window).** After compaction, session details are summarized and specifics are lost. Per ADR-128: project knowledge belongs in ways/ADRs/notes/issues/PRs — MEMORY.md is narrow (short cross-project user facts only). Before saving a memory entry, check: could this be a way?"
+# Context budget: `ways` exports WAYS_CONTEXT_* to a macro that names them.
+if [[ -n "${WAYS_CONTEXT_REMAINING:-}" ]]; then
+    echo "**Context budget: ~${WAYS_CONTEXT_REMAINING} tokens remaining (${WAYS_CONTEXT_PCT_REMAINING}% of window).** After compaction, session details are summarized and specifics are lost. Per ADR-128: project knowledge belongs in ways/ADRs/notes/issues/PRs — MEMORY.md is narrow (short cross-project user facts only). Before saving a memory entry, check: could this be a way?"
     echo ""
-  fi
 fi
 
 # MEMORY.md state, under the dir Claude Code names the project by

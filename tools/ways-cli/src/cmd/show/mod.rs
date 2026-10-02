@@ -11,7 +11,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::{frontmatter, session};
-use helpers::{extract_attend_signals, is_project_trusted, check_sections_text, run_macro};
+use helpers::{extract_attend_signals, check_sections_text, run_macro, MacroRun};
+pub(crate) use helpers::{is_executable, is_project_trusted};
 use crate::frontmatter::body_text;
 use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_text, update_status_text};
 
@@ -81,15 +82,6 @@ impl ContextBudget {
     /// A budget sized to Claude Code's hook `additionalContext` cap.
     pub fn hook() -> Self {
         Self::new(HOOK_CONTEXT_CAP)
-    }
-
-    /// A hook budget with `used` characters already spent, for a caller that
-    /// assembles the context across several `ways` processes (check-post.sh).
-    /// A `used` at or past the cap leaves room for nothing.
-    pub fn hook_with_used(used: usize) -> Self {
-        let mut b = Self::hook();
-        b.used = used;
-        b
     }
 
     fn fits_chars(&self, n: usize) -> bool {
@@ -399,20 +391,19 @@ fn render_way(
     content: &str,
     way_file: &Path,
     is_project_local: bool,
-    project_dir: &str,
-    session_id: &str,
+    run: &MacroRun,
 ) -> String {
     let macro_pos = crate::frontmatter::field_in(content, "macro");
     let way_dir = way_file.parent().unwrap_or(Path::new("."));
     let macro_file = way_dir.join("macro.sh");
     let macro_out = if macro_pos.is_some() && macro_file.is_file() {
-        if is_project_local && !is_project_trusted(project_dir) {
+        if is_project_local && !is_project_trusted(run.project_dir) {
             Some(format!(
                 "**Note**: Project-local macro skipped (add {} to ~/.claude/trusted-project-macros to enable)",
-                project_dir
+                run.project_dir
             ))
         } else {
-            run_macro(&macro_file, session_id)
+            run_macro(&macro_file, run)
         }
     } else {
         None
@@ -438,13 +429,15 @@ fn render_way(
     output
 }
 
-/// A way as a subagent receives it at SubagentStart (`inject-subagent.sh`):
-/// disable-checked, resolved across the project, user and core roots, and
-/// rendered as [`way_scored`] renders it, but with no scope check, refire gate
-/// or fire record. The matching `ways scan task` already chose the way for the
-/// subagent's scope, and the subagent starts with fresh context whatever the
-/// parent session has already been shown. Empty when disabled or missing.
-pub fn subagent_way(id: &str, session_id: &str) -> Result<String> {
+/// A way as a subagent receives it at SubagentStart (`ways hook
+/// subagent-start`): disable-checked, resolved across the project, user and
+/// core roots, and rendered as [`way_scored`] renders it, but with no scope
+/// check, refire gate or fire record. The matching `ways scan task` already
+/// chose the way for the subagent's scope (`subagent` or `teammate`, exported
+/// to its macro as `WAYS_SCOPE`), and the subagent starts with fresh context
+/// whatever the parent session has already been shown. Empty when disabled or
+/// missing.
+pub fn subagent_way(id: &str, session_id: &str, scope: &str) -> Result<String> {
     let project_dir = crate::util::project_dir();
     let domain = id.split('/').next().unwrap_or(id);
     if session::domain_disabled(domain) || session::way_disabled(id) {
@@ -455,7 +448,8 @@ pub fn subagent_way(id: &str, session_id: &str) -> Result<String> {
     };
     let content = std::fs::read_to_string(&way_file)?;
     let body = static_way_body(&content);
-    Ok(render_way(&body, &content, &way_file, is_project_local, &project_dir, session_id))
+    let run = MacroRun { session_id, project_dir: &project_dir, scope };
+    Ok(render_way(&body, &content, &way_file, is_project_local, &run))
 }
 
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
@@ -529,7 +523,8 @@ pub fn way_scored(
 
     // The macro runs outside the engagement lock: a macro may call git or gh,
     // and holding the lock across it would serialize parallel hooks.
-    let output = render_way(&body, &content, &way_file, is_project_local, &project_dir, session_id);
+    let run = MacroRun { session_id, project_dir: &project_dir, scope: &scope };
+    let output = render_way(&body, &content, &way_file, is_project_local, &run);
 
     // Critical section: re-check, admit, record. Parallel tool calls run
     // concurrent hooks, and another process may have fired this way while the
@@ -816,7 +811,9 @@ pub fn core(session_id: &str) -> Result<String> {
     // Run the macro for the dynamic ways table
     let macro_file = ways_dir.join("macro.sh");
     if macro_file.is_file() {
-        if let Some(out) = run_macro(&macro_file, session_id) {
+        let project_dir = crate::util::project_dir();
+        let run = MacroRun { session_id, project_dir: &project_dir, scope: "agent" };
+        if let Some(out) = run_macro(&macro_file, &run) {
             output.push_str(&out);
             output.push('\n');
         }
@@ -1176,18 +1173,6 @@ mod tests {
         assert!(b.admit("0123"));
         b.commit_reservation();
         assert!(!b.admit("xyz"), "18 + 3 is over");
-    }
-
-    #[test]
-    fn hook_with_used_resumes_or_has_no_room() {
-        let mut b = ContextBudget::hook_with_used(7_000);
-        assert!(!b.admit(&"x".repeat(4_000)));
-        let mut b = ContextBudget::hook_with_used(7_000);
-        assert!(b.admit(&"x".repeat(3_000)));
-        let mut b = ContextBudget::hook_with_used(HOOK_CONTEXT_CAP + 1);
-        assert!(!b.admit("x"), "a spent budget has room for nothing");
-        let mut b = ContextBudget::hook_with_used(0);
-        assert!(b.admit(&"x".repeat(12_000)), "zero spent keeps the first-unit rule");
     }
 
     #[test]

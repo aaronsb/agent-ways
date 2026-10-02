@@ -949,42 +949,52 @@ fn scenario_13_concurrent_scans_fire_a_way_once() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// ── Scenario 14: `show way --budget-used` for check-post.sh ─────
+// ── Scenario 14: the post-tool scan shares one budget (#702) ────
 
+#[cfg(unix)]
 #[test]
-fn scenario_14_show_way_budget_used_withholds_with_exit_3() {
-    let base = std::env::temp_dir().join(format!("ways-sim-show-{}", std::process::id()));
+fn scenario_14_post_tool_scan_shares_one_budget_across_postchecks() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    let base = std::env::temp_dir().join(format!("ways-sim-post-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let home = base.join("home");
     let state = base.join("state");
-    write_commit_way(&home.join(".claude/hooks/ways/showdomain"), "big", 3960, None);
+    let root = home.join(".claude/hooks/ways/postdomain");
+    // Two 6,000-character ways whose postchecks both request firing: the
+    // first is admitted, the second does not fit what is left of the cap.
+    for id in ["a", "b"] {
+        write_commit_way(&root, id, 6000, None);
+        let check = root.join(id).join("postcheck.sh");
+        std::fs::write(&check, "#!/bin/sh\ncat >/dev/null\nexit 0\n").unwrap();
+        std::fs::set_permissions(&check, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let session = format!("sim-s14-{}", std::process::id());
     clean_markers(&session);
 
-    let show = |used: &str| {
-        ways_cmd(&home, &home.join(".cache"), &state)
-            .args(["show", "way", "showdomain/big", "--session", &session, "--trigger", "postcheck"])
-            .arg(format!("--budget-used={used}"))
-            .env("CLAUDE_PROJECT_DIR", "/tmp/nonexistent-project")
-            .output()
-            .expect("Failed to run ways show way")
-    };
+    let mut child = ways_cmd(&home, &home.join(".cache"), &state)
+        .args(["hook", "post-tool"])
+        .env("CLAUDE_PROJECT_DIR", "/tmp/nonexistent-project")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to run ways hook post-tool");
+    let payload = format!(r#"{{"session_id":"{session}","hook_event_name":"PostToolUse","tool_name":"Edit"}}"#);
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
 
-    // 7,000 already spent: a 4,000-character way does not fit.
-    let out = show("7000");
-    assert_eq!(out.status.code(), Some(3), "withheld for the cap exits 3");
-    assert!(out.stdout.is_empty());
-    assert_marker_absent("showdomain/big", &session);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim()).expect("one JSON envelope");
+    assert_eq!(envelope["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+    let ctx = envelope["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    assert!(ctx.contains("# Marker a") && !ctx.contains("# Marker b"), "{ctx:.80}");
+    assert_marker_exists("postdomain/a", &session);
+    assert_marker_absent("postdomain/b", &session);
     assert_eq!(
         events_of(&state, &session, "way_suppressed"),
-        vec![("showdomain/big".to_string(), "context_cap".to_string())]
+        vec![("postdomain/b".to_string(), "context_cap".to_string())]
     );
-
-    // Nothing spent yet: the way is shown and recorded.
-    let out = show("0");
-    assert_eq!(out.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("# Marker big"));
-    assert_marker_exists("showdomain/big", &session);
 
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
