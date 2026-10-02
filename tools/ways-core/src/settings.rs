@@ -267,8 +267,7 @@ fn closed_off(v: &Value) -> Option<Value> {
 /// `disabled_domains`: whatever names can be read stay disabled, from a
 /// list or from text such as `ea,itops`.
 fn closed_domains(v: &Value) -> Option<Value> {
-    // Text salvaged from a broken list keeps its brackets and quotes.
-    let clean = |s: &str| s.trim().trim_matches(|c| matches!(c, '[' | ']' | '"' | '\'')).trim().to_string();
+    let clean = |s: &str| s.trim().to_string();
     let mut names: Vec<Value> = Vec::new();
     let mut add = |s: &str| {
         for part in s.split(',') {
@@ -302,37 +301,22 @@ fn closed_deny(v: &Value) -> Option<Value> {
     (v != &Value::Bool(false)).then_some(Value::Bool(true))
 }
 
-/// One `targets` item (as a one-item list): a valid item stays as written,
-/// so a broken file never drops a target into the implicit default; an
-/// invalid one with a readable path is kept disabled, so it is withdrawn,
-/// never projected into.
+/// One `targets` item (as a one-item list): a valid item stays as written;
+/// an invalid one with a readable path is kept disabled, so it is withdrawn,
+/// never projected into. With no value at all, the list is empty.
 fn closed_targets(v: &Value) -> Option<Value> {
-    let item = v.as_sequence()?.first()?;
+    // No value (a file that does not parse): no target, so nothing is
+    // projected and the implicit default never applies.
+    let Some(items) = v.as_sequence() else { return Some(Value::Sequence(Vec::new())) };
+    let item = items.first()?;
     if check_targets(v).is_ok() {
         return Some(v.clone());
     }
-    let path = match item {
-        Value::Mapping(_) => item.get("path")?.as_str()?.to_string(),
-        // An item salvaged from text that does not parse, kept as its text.
-        Value::String(raw) => path_in(raw)?,
-        _ => return None,
-    };
-    let path = path.as_str();
+    let path = item.get("path")?.as_str()?;
     let mut m = serde_yaml::Mapping::new();
     m.insert("path".into(), path.into());
     m.insert("enabled".into(), Value::Bool(false));
     Some(Value::Sequence(vec![Value::Mapping(m)]))
-}
-
-/// The `path:` named in the raw text of a broken target entry.
-fn path_in(raw: &str) -> Option<String> {
-    let at = raw.find("path:")? + "path:".len();
-    let rest = raw[at..].trim_start();
-    let value = match rest.chars().next()? {
-        q @ ('"' | '\'') => rest[1..].split(q).next()?,
-        _ => rest.split([',', '}', '\n']).next()?.trim(),
-    };
-    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn check_targets(v: &Value) -> Result<(), String> {

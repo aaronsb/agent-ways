@@ -162,7 +162,17 @@ pub(super) fn header_for(path: &Path) -> Option<&'static str> {
 }
 
 pub(super) fn write_failed(e: agent_settings::writer::WriteError) -> Failure {
-    fail(exit::WRITE_FAILED, format!("{e}; nothing written"))
+    use agent_settings::writer::WriteError;
+    use agent_settings::yaml_edit::EditError;
+    match &e {
+        // The writer edits text it can parse; a file that does not parse is
+        // repaired by hand, and until then it fails closed.
+        WriteError::Edit(_, EditError::Parse { .. } | EditError::NotMapping) => fail(
+            exit::WRITE_FAILED,
+            format!("{e}; nothing written. Fix the file's syntax by hand; until then it fails closed"),
+        ),
+        _ => fail(exit::WRITE_FAILED, format!("{e}; nothing written")),
+    }
 }
 
 /// After a write to `written`, whether `b` resolves from somewhere else.

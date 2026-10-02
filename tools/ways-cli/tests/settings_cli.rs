@@ -517,11 +517,11 @@ fn fix_repairs_a_per_entry_section_until_lint_is_clean() {
 
 #[test]
 fn an_unparseable_project_file_keeps_ways_switched_off() {
-    // B2 on the ways side: before, the whole file was lost with `enabled: false`.
+    // Before this PR the whole file was ignored, `enabled: false` with it.
+    // Now the whole file fails closed: ways are off in the project.
     let f = Fx::new();
     f.write(&f.overlay(), "enabled: false\nlanguage: [\nways:\n  itops/incident: false\n");
     assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n");
-    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\n");
 }
 
 #[test]
@@ -605,74 +605,132 @@ fn a_refire_preset_above_one_keeps_the_matching_section() {
     assert_eq!(f.run(&["settings", "lint"]).2, 0);
 }
 
-// ── salvage of unparseable files (#713 re-check) ───────────────
+// ── a file that does not parse fails closed (#713) ─────────────
+//
+// The operator's decision, "whole file fails closed": a settings file that
+// does not parse sets nothing, and every switch in its scope is off. Hooks
+// never fail over it, and each says so on stderr in one line.
 
-/// The re-check's broken project files, each with something switched off.
+/// Broken shapes from the review rounds. Each fails to parse; the second
+/// half (BOM, indented lines before the first entry, tab indent, quoted
+/// brackets) are the N3 shapes that line-by-line salvage missed.
 const BROKEN: &[&str] = &[
     "  language: en\n#ña\nenabled: false\n",
-    "  language: en\nenabled: false\n",
     "enabled: \"false\n",
-    "enabled: 'false\n",
     "enabled: false\nenabled: true\n",
     "{enabled: false, x: [}\n",
+    "\u{feff}enabled: false\nx: [\n",
+    "  enabled: false\nlanguage: [\n",
+    "\tenabled: false\n",
+    "ways:\n\ta/b: false\n  c/d: false\n",
+    "{note: \"{\", enabled: false, x: [}\n",
+    // A file that turns nothing off, broken: closed all the same.
+    "enabled: true\nlanguage: [\n",
 ];
 
-#[test]
-fn hooks_never_fail_over_a_broken_config_file() {
-    // N1: the first of these made every hook panic (exit 101).
-    let f = Fx::new();
-    for text in BROKEN {
-        f.write(&f.overlay(), text);
-        f.write(&f.user(), text);
-        for args in [
-            vec!["show", "core", "--session=s1"],
-            vec!["scan", "prompt", "--query=write a unit test", "--session=s1"],
-            vec!["scan", "command", "--command=git status", "--session=s1"],
-            vec!["settings", "get", "ways.enabled"],
-            vec!["config", "show"],
-        ] {
-            let (_, err, code) = f.run(&args);
-            assert_eq!(code, 0, "{text:?} {args:?}: {err}");
-            assert!(!err.contains("panicked"), "{text:?} {args:?}: {err}");
+const HOOKS: &[&[&str]] = &[
+    &["show", "core", "--session=s1"],
+    &["scan", "prompt", "--query=write a unit test", "--session=s1"],
+    &["scan", "command", "--command=git status", "--session=s1"],
+    &["scan", "state", "--session=s1", "--hook-event=SessionStart"],
+];
+
+/// Every hook exits 0. Each hook that loads the settings names the file,
+/// its line and its closed scope; `show core` reads no settings, so it has
+/// nothing to report.
+fn hooks_say_the_file_is_closed(f: &Fx, file: &str, text: &str) {
+    for args in HOOKS {
+        let (_, err, code) = f.run(args);
+        assert_eq!(code, 0, "{text:?} {args:?}: {err}");
+        if args[0] == "show" {
+            continue;
         }
+        let line = err.lines().find(|l| l.contains(file) && l.contains("does not parse"));
+        let line = line.unwrap_or_else(|| panic!("{text:?} {args:?}: no parse line for {file}: {err}"));
+        assert!(line.contains("whole file fails closed"), "{line}");
+        assert!(line.contains(&format!("{file}:")), "the line names the file and line: {line}");
     }
 }
 
 #[test]
-fn a_broken_project_file_keeps_ways_switched_off() {
-    // N1 and N2: each of these read `enabled` as on before.
-    let f = Fx::new();
+fn an_unparseable_project_file_switches_ways_off_for_the_project() {
     for text in BROKEN {
+        let f = Fx::new();
+        assert!(serde_yaml::from_str::<serde_yaml::Value>(text).is_err(), "{text:?} parses");
         f.write(&f.overlay(), text);
         assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n", "{text:?}");
+        hooks_say_the_file_is_closed(&f, "<ROOT>/proj/.claude/ways.yaml", text);
+        // lint and status show the same line.
+        let (out, _, code) = f.run(&["settings", "lint"]);
+        assert_eq!(code, 3);
+        assert!(out.contains("<ROOT>/proj/.claude/ways.yaml") && out.contains("whole file fails closed"), "{out}");
     }
 }
 
 #[test]
-fn broken_toggles_and_domains_stay_off() {
-    let f = Fx::new();
-    let list = |f: &Fx| f.run(&["disable", "--list", "--names-only"]).0;
-    f.write(&f.overlay(), "ways:\n  a/b: \"false\n  e/f: false\n");
-    assert_eq!(list(&f), "a/b\ne/f\n");
-    f.write(&f.overlay(), "ways:\n  a/b: false\n  c/d: [\n");
-    assert_eq!(list(&f), "a/b\nc/d\n");
-    f.write(&f.overlay(), "ways:\n  a/b: false\n  a/b: true\n");
-    assert_eq!(list(&f), "a/b\n");
-    for text in ["disabled_domains: [ea, itops\n", "disabled_domains:\n  - ea\n  - [itops\n"] {
-        f.write(&f.overlay(), text);
-        assert_eq!(f.run(&["settings", "get", "ways.disabled_domains"]).0, "[\"ea\",\"itops\"]\n", "{text:?}");
+fn an_unparseable_user_file_projects_nowhere() {
+    // The N3 user rows: a broken user file that withdraws ~/.claude must not
+    // fall to the implicit ~/.claude.
+    for text in [
+        "\u{feff}targets:\n  - path: ~/.claude\n    enabled: false\nx: [\n",
+        "  targets:\n    - path: ~/.claude\n      enabled: false\nx: [\n",
+        "{note: \"{\", targets: [{path: ~/.claude, enabled: false}], x: [}\n",
+    ] {
+        let f = Fx::new();
+        f.write(&f.user(), text);
+        assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n", "{text:?}");
+        assert_eq!(f.run(&["settings", "get", "install.targets"]).0, "[]\n", "{text:?}");
+        assert_eq!(f.run(&["settings", "get", "install.secret_path_deny"]).0, "true\n", "{text:?}");
+        let (out, _, _) = f.run(&["config", "show"]);
+        assert!(!out.contains("(implicit)"), "{text:?}: {out}");
+        hooks_say_the_file_is_closed(&f, "<ROOT>/xdg/config/agent-ways/config.yaml", text);
+        let (out, _, _) = f.run(&["status"]);
+        assert!(out.contains("whole file fails closed"), "status shows it: {out}");
     }
 }
 
 #[test]
-fn a_broken_targets_list_keeps_its_targets_withdrawn() {
-    // N2: this file used to fall to the implicit ~/.claude, which it disables.
+fn an_unparseable_target_file_switches_ways_off_for_that_target() {
     let f = Fx::new();
-    f.write(&f.user(), "targets:\n  - {path: ~/.claude, enabled: false}\n  - {path: ~/.claude-work, enabled: [}\n");
-    let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "install.targets"]).0).unwrap();
-    assert_eq!(v, serde_json::json!([{"path": "~/.claude", "enabled": false}, {"path": "~/.claude-work", "enabled": false}]));
-    let (out, _, _) = f.run(&["config", "show"]);
-    assert!(!out.contains("(implicit)"), "{out}");
+    let target_cfg = f.root.join("target.yaml");
+    let home = f.root.join("home").join(".claude");
+    f.write(
+        &f.user(),
+        &format!("targets:\n  - path: '{}'\n    config: '{}'\n", home.display(), target_cfg.display()),
+    );
+    f.write(&target_cfg, "enabled: true\nsecret_path_deny: false\nx: [\n");
+    assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n");
+    assert_eq!(f.run(&["settings", "get", "install.secret_path_deny"]).0, "true\n");
+    hooks_say_the_file_is_closed(&f, "<ROOT>/target.yaml", "target file");
+}
+
+#[test]
+fn an_unparseable_agent_yaml_turns_the_gate_off() {
+    // With a key file present, so the gate would run: the hook stays exit 0,
+    // names the file, and the gate is off (no provider call: see
+    // gate::a_broken_agent_yaml_or_bad_mode_never_calls_the_provider).
+    let f = Fx::new();
+    let keys = f.root.join("xdg/config/agent-ways/keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    std::fs::write(keys.join("anthropic"), "sk-ant-test-not-a-real-key-0000").unwrap();
+    f.write(&f.root.join("xdg/config/agent-ways/agent.yaml"), "mode: shadow\nprofiles:\n  anthropic: [\n");
+    assert_eq!(f.run(&["settings", "get", "gate.mode"]).0, "off\n");
+    let (_, err, code) = f.run(&["scan", "prompt", "--query=write a unit test", "--session=s1"]);
+    assert_eq!(code, 0, "{err}");
+    let line = err.lines().find(|l| l.contains("<ROOT>/xdg/config/agent-ways/agent.yaml") && l.contains("does not parse"));
+    let line = line.unwrap_or_else(|| panic!("{err}"));
+    assert!(line.contains("gate is off until it is fixed"), "{line}");
+}
+
+#[test]
+fn fix_refuses_an_unparseable_file_and_says_to_fix_it_by_hand() {
+    let f = Fx::new();
+    let text = "language: es\nx: [\n";
+    f.write(&f.user(), text);
+    let (_, err, code) = f.run(&["settings", "fix", "ways"]);
+    assert_eq!(code, 5, "{err}");
+    assert!(err.contains("Fix the file's syntax by hand"), "{err}");
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), text);
 }
 
 #[test]

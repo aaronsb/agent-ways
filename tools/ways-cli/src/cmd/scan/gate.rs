@@ -86,7 +86,10 @@ fn settings(
     match profile::gate_settings(path, has_key) {
         Ok(s) => s.filter(|s| s.mode != Mode::Off),
         Err(e) => {
+            // Logged for the tuning passes, and said on stderr, since a hook
+            // shows nothing else: the gate is off until agent.yaml is fixed.
             (log.sink)(&[("event", "gate_fallback"), ("reason", &format!("config: {e:#}"))]);
+            eprintln!("[ways] settings: {e:#}");
             None
         }
     }

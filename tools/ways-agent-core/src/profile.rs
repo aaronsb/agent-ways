@@ -246,16 +246,15 @@ impl UserLayer {
         let doc = match load::parse_text(text, path) {
             Ok(d) => d,
             Err(f) => {
-                // Only the switches salvaged from the text apply; the gate
-                // itself treats a parse failure as off (`fails_closed`).
-                let salvaged = load::closed_from_salvage(
+                // Whole file fails closed: nothing it says applies, and the
+                // gate is off (`fails_closed` turns it off for the hook too).
+                let closed = load::closed_file(
                     &crate::settings::SCHEMA,
                     crate::settings::FILE,
                     agent_settings::LayerScope::User,
-                    text,
                     Some(crate::settings::GATE_SECTIONS),
                 );
-                let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(salvaged)).unwrap_or_default();
+                let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(closed)).unwrap_or_default();
                 return Ok((layer, vec![*f]));
             }
         };

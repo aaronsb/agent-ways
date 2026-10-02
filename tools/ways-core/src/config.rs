@@ -491,11 +491,10 @@ fn checked_text(text: &str, path: Option<&Path>, scope: LayerScope, sections: &[
         Ok(d) => d,
         Err(f) => {
             report(&f.diagnostic("ways"));
-            // Fails closed: the switches the text turns off stay off
-            // (ADR-503 addendum); nothing else in the file applies.
-            let salvaged =
-                load::closed_from_salvage(&crate::settings::SCHEMA, crate::settings::FILE, scope, text, Some(sections));
-            return Some(serde_yaml::Value::Mapping(salvaged));
+            // Whole file fails closed (ADR-503 addendum): it sets nothing,
+            // and every switch in its scope is off.
+            let closed = load::closed_file(&crate::settings::SCHEMA, crate::settings::FILE, scope, Some(sections));
+            return Some(serde_yaml::Value::Mapping(closed));
         }
     };
     // Every finding goes to stderr, one line each: a unit that fell back,
@@ -620,11 +619,12 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_does_not_parse_contributes_nothing() {
+    fn a_file_that_does_not_parse_sets_nothing_and_switches_its_scope_off() {
         let mut cfg = Config::default();
         cfg.apply_yaml("language: es\nsemantic_fire_probability: [\n");
         assert_eq!(cfg.language, "auto");
         assert_eq!(cfg.semantic_fire_probability, 0.5);
+        assert!(!cfg.enabled, "whole file fails closed");
     }
 
     // ── ADR-131: project-scope per-way disable ─────────────────────
@@ -890,14 +890,50 @@ mod tests {
     }
 
     #[test]
-    fn an_unparseable_project_file_keeps_its_off_switches() {
-        // ADR-503 addendum: a file that does not parse still keeps what it
-        // switches off. Before, `enabled: false` was lost with the file.
+    fn an_unparseable_file_fails_closed_for_its_scope() {
+        // "Whole file fails closed" (#713): nothing the file says applies,
+        // readable or not, and every switch its scope holds is off.
+        let closed = |text: &str, scope| checked_text(text, None, scope, crate::settings::HOOK_SECTIONS).unwrap();
+        let broken = "enabled: true\nlanguage: es\nways:\n  itops/incident: false\nx: [\n";
+        // Project: ways are off for the project.
+        assert_eq!(closed(broken, LayerScope::Project), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, secret_path_deny: true}").unwrap());
+        // User: off, no projection target, the deny baseline merged.
+        assert_eq!(
+            closed(broken, LayerScope::User),
+            serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, targets: [], secret_path_deny: true}").unwrap()
+        );
+        // A target's file: its keys, which do not include targets.
+        assert_eq!(closed(broken, LayerScope::Target), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, secret_path_deny: true}").unwrap());
         let mut cfg = Config::default();
-        apply_project(&mut cfg, "enabled: false\nlanguage: [\nways:\n  itops/incident: false\n");
+        apply_project(&mut cfg, broken);
         assert!(!cfg.enabled);
-        assert_eq!(cfg.disabled_ways(), &["itops/incident".to_string()]);
-        assert_eq!(cfg.language, "auto", "only the switches are salvaged");
+        assert!(cfg.disabled_ways().is_empty(), "nothing the file says is read");
+    }
+
+    #[test]
+    fn the_review_inputs_that_do_not_parse_fail_closed() {
+        // N1-N3 shapes: each fails to parse, so the whole file is closed.
+        for text in [
+            "  language: en\n#ña\nenabled: false\n",
+            "  language: en\nenabled: false\n",
+            "enabled: \"false\n",
+            "enabled: false\nenabled: true\n",
+            "{enabled: false, x: [}\n",
+            "\u{feff}enabled: false\nx: [\n",
+            "  enabled: false\nlanguage: [\n",
+            "\tenabled: false\n",
+            "ways:\n\ta/b: false\n  c/d: false\n",
+            "{note: \"{\", enabled: false, x: [}\n",
+        ] {
+            assert!(serde_yaml::from_str::<serde_yaml::Value>(text).is_err(), "{text:?} parses; test it as parsed");
+            let mut cfg = Config::default();
+            apply_project(&mut cfg, text);
+            assert!(!cfg.enabled, "{text:?}");
+        }
+        // A BOM on a file that parses is read as written.
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "\u{feff}enabled: false\n");
+        assert!(!cfg.enabled);
     }
 
     #[test]
@@ -925,52 +961,8 @@ mod tests {
         assert_eq!(t.iter().map(|t| (t.path.as_str(), t.enabled)).collect::<Vec<_>>(), vec![("~/.claude", false), ("~/.claude-work", false)]);
     }
 
-    fn project_off(text: &str) -> Config {
-        let mut cfg = Config::default();
-        apply_project(&mut cfg, text);
-        cfg
-    }
-
     #[test]
-    fn salvage_keeps_off_switches_off_in_broken_files() {
-        // N1: an indented first line, with and without a multibyte comment.
-        assert!(!project_off("  language: en\n#ña\nenabled: false\n").enabled);
-        assert!(!project_off("  language: en\nenabled: false\n").enabled);
-        // N2: an unreadable switch reads closed.
-        assert!(!project_off("enabled: \"false\n").enabled);
-        assert!(!project_off("enabled: 'false\n").enabled);
-        // Duplicates: closed wins.
-        assert!(!project_off("enabled: false\nenabled: true\n").enabled);
-        // Toggles: unreadable or duplicated entries stay disabled.
-        assert_eq!(project_off("ways:\n  a/b: \"false\n  e/f: false\n").disabled_ways(), &["a/b".to_string(), "e/f".to_string()]);
-        assert_eq!(project_off("ways:\n  a/b: false\n  c/d: [\n").disabled_ways(), &["a/b".to_string(), "c/d".to_string()]);
-        assert_eq!(project_off("ways:\n  a/b: false\n  a/b: true\n").disabled_ways(), &["a/b".to_string()]);
-        // Domains: an unterminated flow list, and a block list with a broken item.
-        assert_eq!(project_off("disabled_domains: [ea, itops\n").disabled_domains, vec!["ea", "itops"]);
-        assert_eq!(project_off("disabled_domains:\n  - ea\n  - [itops\n").disabled_domains, vec!["ea", "itops"]);
-        // A one-line flow document.
-        assert!(!project_off("{enabled: false, x: [}\n").enabled);
-    }
-
-    #[test]
-    fn a_broken_targets_list_never_falls_to_the_implicit_target() {
-        let accepted = |text: &str| {
-            let doc = checked_text(text, None, LayerScope::User, crate::settings::HOOK_SECTIONS).unwrap();
-            doc.get("targets").and_then(Config::read_targets_value)
-        };
-        let t = accepted("targets:\n  - {path: ~/.claude, enabled: false}\n  - {path: ~/.claude-work, enabled: [}\n").unwrap();
-        assert_eq!(t.iter().map(|t| (t.path.as_str(), t.enabled)).collect::<Vec<_>>(), vec![("~/.claude", false), ("~/.claude-work", false)]);
-        // Named but unreadable: an explicit empty list, not the implicit default.
-        assert_eq!(accepted("targets: [\nlanguage: es\n"), Some(Vec::new()));
-    }
-
-    #[test]
-    fn loading_never_panics_on_generated_config_text() {
-        const PIECES: &[&str] = &[
-            "enabled", "ways", "targets", "disabled_domains", "secret_path_deny", "language", ":", ": ", " ", "  ",
-            "\t", "\n", "\n", "- ", "-", "\"", "'", "[", "]", "{", "}", ",", "#", "ñ", "日本", "false", "true", "no",
-            "a/b", "path: ", "~/.claude", "|", "&a", "*a", "---", "...", "\r\n", "\u{feff}", "0", "null",
-        ];
+    fn loading_never_panics_on_arbitrary_bytes() {
         let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
         let mut next = || {
             seed ^= seed << 13;
@@ -978,15 +970,16 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        for _ in 0..20_000 {
-            let len = (next() % 40) as usize;
-            let text: String = (0..len).map(|_| PIECES[(next() % PIECES.len() as u64) as usize]).collect();
+        const BYTES: &[u8] = b"enabled:targets-ways []{}\"'#\t \n\r\n,|&*!?false~\xef\xbb\xbf\xc3\xb1\xff";
+        for _ in 0..5_000 {
+            let len = (next() % 64) as usize;
+            let bytes: Vec<u8> = (0..len).map(|_| BYTES[(next() % BYTES.len() as u64) as usize]).collect();
+            let text = String::from_utf8_lossy(&bytes);
             for scope in [LayerScope::User, LayerScope::Target, LayerScope::Project] {
                 if let Some(doc) = checked_text(&text, None, scope, crate::settings::HOOK_SECTIONS) {
                     let mut cfg = Config::default();
                     cfg.apply_values(&doc);
                     cfg.apply_project_ways_overlay_value(&doc);
-                    let _ = doc.get("targets").and_then(Config::read_targets_value);
                 }
             }
         }

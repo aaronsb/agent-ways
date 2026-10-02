@@ -222,9 +222,9 @@ pub struct KeySpec {
     pub computed: Option<fn(&[String]) -> Value>,
     /// The closed reading of a value, for a key that switches something off
     /// (ADR-503 addendum): what the key takes when its unit fails the schema,
-    /// or when its file does not parse and the value is salvaged from the
-    /// text. `None` from the function means no opinion: the key falls through
-    /// to the layers beneath. Keys without one fall through.
+    /// given the bad value, and when its file does not parse, given no value
+    /// (`Value::Null`). `None` from the function means no opinion: the key
+    /// falls through to the layers beneath. Keys without one fall through.
     pub fail_closed: Option<FailClosed>,
 }
 
