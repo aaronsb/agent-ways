@@ -377,7 +377,12 @@ fn body_confirm(bin: &Path, model: &Path, surface: &[String], body_path: &Path) 
 /// Chunk a way's `.md` body for confirmation: drop YAML frontmatter and fenced
 /// code, then sentence-split the prose and cap the count.
 fn chunk_body(content: &str) -> Vec<String> {
-    let body = crate::frontmatter::split(content).map_or(content, |(_, body)| body);
+    // An unclosed frontmatter block is not body: nothing after its fence is prose.
+    let body = if crate::frontmatter::opens_with_fence(content) {
+        crate::frontmatter::split(content).map_or("", |(_, body)| body)
+    } else {
+        content
+    };
     let mut prose = String::new();
     let mut in_fence = false;
     for line in body.lines() {
@@ -463,6 +468,15 @@ mod tests {
         let chunks = chunk_body(body);
         assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
         assert!(chunks.iter().any(|c| c.contains("real guidance")));
+    }
+
+    /// An unclosed frontmatter block is not body: nothing after its opening
+    /// fence is read as prose, the rule `frontmatter::split` holds elsewhere.
+    #[test]
+    fn chunk_body_reads_nothing_after_an_unclosed_fence() {
+        let body = "---\nvocabulary: leaked yaml words that are long enough\nmore leaked yaml text here.\n";
+        let chunks = chunk_body(body);
+        assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
     }
 
     #[test]
