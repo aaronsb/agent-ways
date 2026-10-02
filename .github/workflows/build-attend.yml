@@ -11,6 +11,7 @@ on:
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-attend.yml'
+      - '.github/workflows/reusable-build.yml'
   pull_request:
     paths:
       - 'tools/attend/**'
@@ -19,119 +20,19 @@ on:
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-attend.yml'
+      - '.github/workflows/reusable-build.yml'
   workflow_dispatch:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            platform: linux-x86_64
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            platform: linux-aarch64
-            os: ubuntu-latest
-          - target: x86_64-apple-darwin
-            platform: darwin-x86_64
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            platform: darwin-arm64
-            os: macos-latest
-
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install cargo-zigbuild (Linux cross-compile)
-        if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          pip3 install --retries 10 --timeout 60 ziglang
-          cargo install cargo-zigbuild
-
-      - name: Build (native)
-        if: "!(runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu')"
-        run: cargo build --release --manifest-path tools/Cargo.toml -p attend --target ${{ matrix.target }}
-
-      - name: Build (zigbuild cross-compile)
-        if: runner.os == 'Linux' && matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo zigbuild --release --manifest-path tools/Cargo.toml -p attend --target ${{ matrix.target }}
-
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp tools/target/${{ matrix.target }}/release/attend dist/attend-${{ matrix.platform }}
-
-      - name: Smoke test
-        if: "!(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') && !(matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
-        run: dist/attend-${{ matrix.platform }} --version
-
-      - name: Verify binary (cross-compiled)
-        if: "(matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux') || (matrix.target == 'x86_64-apple-darwin' && runner.arch == 'ARM64')"
-        run: |
-          file dist/attend-${{ matrix.platform }}
-          ls -lh dist/attend-${{ matrix.platform }}
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: attend-${{ matrix.platform }}
-          path: dist/attend-${{ matrix.platform }}
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Run tests
-        run: cargo test --manifest-path tools/Cargo.toml -p attend
-
-  collect:
-    needs: [build, test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v5
-        with:
-          path: binaries
-          merge-multiple: true
-
-      - name: Generate checksums
-        run: |
-          cd binaries
-          sha256sum attend-* > checksums.txt
-          cat checksums.txt
-          ls -lh
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: attend-all-platforms
-          path: binaries/
-
-  release:
-    needs: collect
-    if: startsWith(github.ref, 'refs/tags/attend-v')
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/reusable-build.yml
     permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v5
-        with:
-          name: attend-all-platforms
-          path: binaries
+      contents: write  # the release job publishes; the others drop to read
+    with:
+      component: attend
+      test: |
+        cargo test --manifest-path tools/Cargo.toml -p attend
+      release-notes: |-
+        Pre-built attend binaries for 4 platforms.
 
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "attend ${TAG#attend-}" \
-            --notes "Pre-built attend binaries for 4 platforms.
-
-          Build from source: \`make attend\`" \
-            binaries/*
+        Build from source: `make attend`

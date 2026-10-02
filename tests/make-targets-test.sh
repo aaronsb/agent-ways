@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The suite list in tools/suite-bins drives the Makefile's get-or-build and
-# -rebuild pattern rules, `make link` and scripts/install.sh. Check each
-# consumer against the list.
+# -rebuild pattern rules, `make link`, scripts/install.sh, and one
+# build-<name>.yml workflow per binary. Check each consumer against the list.
 
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,6 +28,8 @@ for b in $bins; do
     re=$(make -s -n -C "$ROOT" "$b-rebuild" 2>&1)
     check "make $b-rebuild builds with cargo -p $b" "yes" "$(has "$re" "cargo build --release --manifest-path tools/Cargo.toml -p $b")"
     check "make $b-rebuild skips the download" "no" "$(has "$re" "download-prebuilt")"
+    check "build-$b.yml builds component $b" "yes" \
+        "$(grep -qE "^ *component: $b\$" "$ROOT/.github/workflows/build-$b.yml" 2>/dev/null && echo yes || echo no)"
 done
 
 db=$(make -s -n -p -C "$ROOT" help 2>/dev/null)
