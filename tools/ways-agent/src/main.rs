@@ -363,9 +363,8 @@ enum Typed {
 /// Where the editor is in an escape sequence: an arrow key, a function key,
 /// or the markers a terminal puts around a bracketed paste. None of it is
 /// part of the key.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Escape {
-    #[default]
     None,
     /// ESC seen.
     Start,
@@ -375,7 +374,6 @@ enum Escape {
 
 /// The key as typed at the prompt. Erased bytes are zeroed before they are
 /// dropped, so no copy of a removed character stays in the buffer.
-#[derive(Default)]
 struct KeyEditor {
     key: Vec<u8>,
     escape: Escape,
@@ -396,9 +394,18 @@ impl KeyEditor {
     fn feed(&mut self, b: u8) -> Typed {
         // The start of a UTF-8 character: not a continuation byte.
         let starts = |b: u8| b & 0xC0 != 0x80;
+        // A control byte is never part of a sequence: Enter, Backspace or
+        // Ctrl-U after a lone ESC, or inside a broken sequence, still acts.
+        let control = b < 0x20 || b == 0x7f;
         match self.escape {
+            Escape::Start if b == b'[' || b == b'O' => {
+                self.escape = Escape::Sequence;
+                return Typed::Continue;
+            }
+            Escape::Start | Escape::Sequence if control => self.escape = Escape::None,
+            // A printable byte after a lone ESC is an Alt chord: dropped.
             Escape::Start => {
-                self.escape = if b == b'[' || b == b'O' { Escape::Sequence } else { Escape::None };
+                self.escape = Escape::None;
                 return Typed::Continue;
             }
             Escape::Sequence => {
@@ -618,12 +625,27 @@ mod tests {
     fn erased_key_bytes_are_zeroed() {
         let mut e = KeyEditor::new();
         feed(&mut e, b"secret");
-        let base = e.key.as_ptr();
         e.feed(0x15);
-        // SAFETY: the capacity is 512 and nothing reallocated; the six bytes
-        // were written and then zeroed in place.
-        let left = unsafe { std::slice::from_raw_parts(base, 6) };
+        // SAFETY: test-only; these six bytes were written, then zeroed before
+        // the truncate left them in the spare capacity.
+        let left: Vec<u8> = e.key.spare_capacity_mut()[..6].iter().map(|b| unsafe { b.assume_init_read() }).collect();
         assert_eq!(left, [0u8; 6]);
+    }
+
+    /// A control byte after a lone ESC, or inside a sequence, is not eaten:
+    /// Enter still ends the line and Backspace still erases.
+    #[test]
+    fn a_control_byte_ends_an_escape_and_acts() {
+        let mut e = KeyEditor::new();
+        assert_eq!(feed(&mut e, b"\x1b\r"), [Typed::Continue, Typed::Done]);
+        let mut e = KeyEditor::new();
+        assert_eq!(feed(&mut e, b"\x1b[\r"), [Typed::Continue, Typed::Continue, Typed::Done]);
+        let mut e = KeyEditor::new();
+        feed(&mut e, b"ab");
+        assert_eq!(feed(&mut e, b"\x1b\x7f"), [Typed::Continue, Typed::Erase(1)]);
+        assert_eq!(e.key, b"a");
+        assert_eq!(feed(&mut e, b"\x1bx"), [Typed::Continue, Typed::Continue], "Alt-x is dropped");
+        assert_eq!(e.key, b"a");
     }
 
     #[test]
