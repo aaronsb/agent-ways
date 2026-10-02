@@ -16,16 +16,14 @@ pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, g
         None
     };
     let project_filter = project_filter.or(detected_project.as_deref());
-    let stats_file = crate::paths::events_log();
-
-    if !stats_file.is_file() {
+    if crate::paths::events_log_sources().is_empty() {
         if !json_output {
             println!("No events recorded yet. Stats will appear after ways start firing.");
         }
         return Ok(());
     }
 
-    let content = std::fs::read_to_string(&stats_file)?;
+    let content = ways_core::firing::load_events_text();
     let events = parse_events(&content, days, project_filter);
 
     if json_output {

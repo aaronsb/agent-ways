@@ -324,8 +324,7 @@ fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<Strin
 }
 
 fn latest_session_for_project(project: &str) -> Option<String> {
-    let path = crate::paths::events_log();
-    let content = std::fs::read_to_string(&path).ok()?;
+    let content = ways_core::firing::load_events_text();
 
     let mut latest: Option<String> = None;
     for line in content.lines() {

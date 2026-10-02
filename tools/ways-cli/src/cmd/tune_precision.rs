@@ -41,7 +41,6 @@
 use agent_fmt::{Align, Table};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::Path;
 
 
 /// A family's share of a session's fires must clear this to count as part of
@@ -121,9 +120,8 @@ pub fn run(
     way_filter: Option<String>,
     json_output: bool,
 ) -> Result<()> {
-    let events_path = crate::paths::events_log();
-    if !events_path.is_file() {
-        println!("no events log found at {}", events_path.display());
+    if crate::paths::events_log_sources().is_empty() {
+        println!("no events log found at {}", crate::paths::events_log().display());
         println!("ways tune-precision needs real firing data — run ways for a few sessions first.");
         return Ok(());
     }
@@ -131,7 +129,7 @@ pub fn run(
     // Load ALL fires (project filter only). The way filter is applied at the
     // report stage, never here: a session's activity class must be computed
     // from every way that fired in it, not just the way under inspection.
-    let fires = load_fires(&events_path, project_filter.as_deref())?;
+    let fires = load_fires(&ways_core::firing::load_events_text(), project_filter.as_deref());
     if fires.is_empty() {
         println!("no way_fired events found in the selected window.");
         return Ok(());
@@ -147,8 +145,7 @@ pub fn run(
     Ok(())
 }
 
-fn load_fires(path: &Path, project_filter: Option<&str>) -> Result<Vec<Fire>> {
-    let content = std::fs::read_to_string(path)?;
+fn load_fires(content: &str, project_filter: Option<&str>) -> Vec<Fire> {
     let mut fires = Vec::new();
 
     for line in content.lines() {
@@ -188,7 +185,7 @@ fn load_fires(path: &Path, project_filter: Option<&str>) -> Result<Vec<Fire>> {
         let family = family_of(&way);
         fires.push(Fire { way, family, session, trigger });
     }
-    Ok(fires)
+    fires
 }
 
 /// Per-session view: which families fired, and how many distinct ways landed.
