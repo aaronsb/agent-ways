@@ -1,0 +1,17 @@
+# Lifted from ~/.dotfiles/theme/palettes/dracula.theme (Dracula).
+name = "dracula"
+label = "Dracula"
+kind = "dark"
+background = "fill"
+
+[slots]
+bg = "#282a36"
+fg = "#f8f8f2"
+dim = "#6272a4"
+subtle = "#44475a"
+accent = "#bd93f9"
+info = "#8be9fd"
+ok = "#50fa7b"
+warn = "#ffb86c"
+err = "#ff5555"
+alt = "#ff79c6"

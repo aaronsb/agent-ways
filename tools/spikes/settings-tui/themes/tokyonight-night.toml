@@ -1,0 +1,17 @@
+# Lifted from ~/.dotfiles/theme/palettes/tokyonight-night.theme (Tokyo Night).
+name = "tokyonight-night"
+label = "Tokyo Night"
+kind = "dark"
+background = "fill"
+
+[slots]
+bg = "#1a1b26"
+fg = "#c0caf5"
+dim = "#565f89"
+subtle = "#292e42"
+accent = "#bb9af7"
+info = "#7aa2f7"
+ok = "#9ece6a"
+warn = "#ff9e64"
+err = "#f7768e"
+alt = "#7dcfff"

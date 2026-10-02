@@ -1,0 +1,226 @@
+# Spike: one settings tree for `ways`, and a shared TUI for it
+
+Status: spike on branch `spike/settings-tui`. Nothing here ships, and the crate sits outside the `tools/` workspace.
+
+## Try it
+
+```
+cargo run --manifest-path tools/spikes/settings-tui/Cargo.toml
+cargo run --manifest-path tools/spikes/settings-tui/Cargo.toml -- --project ~/some/repo
+cargo run --manifest-path tools/spikes/settings-tui/Cargo.toml -- --print gate
+```
+
+It reads your real user config, the project's `.claude/ways.yaml`, `agent.yaml` and the shipped engine profiles. Edits stay in memory. Actions are queued, not run. On exit it prints the change set, file by file, that a real `ways settings` would write, then the queued commands in order, with secrets shown as `<stdin>`. Key files are checked for existence and never opened. `?` lists the keys.
+
+Four settings tabs run across the top, `ways`, `matching`, `gate` and `install`, then `theme`. Tab and Shift-Tab or `1` to `5` switch between them, and each tab keeps its own cursor and open groups. A tab shows `●n` when it holds `n` value changes or queued actions. `/` filters every tab at once, with matches grouped under their tab's name, and Enter on a match jumps to it in its own tab.
+
+Try it on a provider key: go to the `gate` tab, open `keys` and press Enter on a provider to type a key (it shows only as dots), or `a` for set/rotate, remove and check. On the `install` tab, press `a` on `targets` to add or plan a target, on a target to enable, disable or remove it, and on `install` to reconcile. `c` shows the pending changes and queued actions together; `x` drops the last queued action.
+
+The mouse works too: click a tab or a row, click the selected row or its ▸/▾ to act, scroll with the wheel, and click a menu item or the `y`/`n` targets of a confirm. `m` turns mouse capture off so the terminal can select text.
+
+## The problem
+
+`ways --help` lists 37 top-level commands. Two kinds are mixed together:
+
+- **Commands an operator runs:** status, update, uninstall, reconcile, config,
+  agent, disable, enable.
+- **Authoring, tuning and plumbing:** lint, reflow, corpus, match, embed,
+  siblings, graph, tree, suggest, template, language, tune, tune-precision,
+  permissions, manifest, scan, init, response-topics-path, sessions-root,
+  events-log-path. `rethink` duplicates `introspect replay`.
+
+Settings live in four files, each with its own writer:
+
+| What | File | Changed by |
+|---|---|---|
+| Matching, disclosure, domains, targets | `config.yaml` | hand edits; `ways config target …` |
+| A way on or off in one project | `.claude/ways.yaml` | `ways disable` / `ways enable` |
+| Gate engine, mode, profile tuning | `agent.yaml` | `ways agent use` / `mode`; hand edits |
+| Provider keys | `keys/<provider>` | `ways agent key` |
+
+`ways config show` lists the first file and `ways agent config` the third. No command shows all of them, and most values can only be set by editing YAML.
+
+## Proposal
+
+### 1. `ways settings`: one tree, one schema
+
+Every setting gets a dotted key in one tree. Its four roots are the tabs of the TUI:
+
+```
+ways.enabled                              .claude/ways.yaml
+ways.domains.itops                        config.yaml   disabled_domains
+ways.project.softwaredev.code.quality     .claude/ways.yaml   ways:
+matching.semantic_fire_probability        config.yaml
+matching.disclosure.refire_presets.normal config.yaml
+gate.mode                                 agent.yaml
+gate.profiles.anthropic.max_candidates    agent.yaml
+gate.keys.anthropic                       present / absent; actions set, rotate, remove, check
+install.targets./home/me/.claude          read-only value; actions enable, disable, remove
+install.secret_path_deny                  config.yaml
+```
+
+A schema registry holds each key's type, range, default, doc line, the layers it reads and the file and key it writes. Every front end reads that registry:
+
+```
+ways settings                      TUI on a terminal, the tree as text in a pipe
+ways settings get <key>            value and the layer it came from
+ways settings set <key> <value>    validated, written to the owning file
+ways settings unset <key>          back to the layer below
+ways settings list [prefix] [--json]
+```
+
+`ways disable`, `ways enable`, `ways agent use`, `ways agent mode` and `ways config show|path|init` become thin aliases over `settings`. Actions stay commands: target add/remove (they reconcile), key add/rotate (secret input), reconcile, update.
+
+### 2. Regroup the command surface
+
+```
+ways status | update | uninstall | reconcile | settings      operator
+ways target  plan|add|enable|disable|remove                  from `config target`
+ways agent   key|models|serve|status|load|unload             unchanged, minus use/mode
+ways session list|context|stats|reset|introspect …           from top level
+ways author  lint|reflow|template|suggest|show|match|embed|siblings|tree|graph
+ways tune    alias|precision|language|permissions
+ways internal scan|corpus|manifest|init|paths …              hidden from --help
+```
+
+Hooks, scripts and skills call 25 distinct `ways` subcommands today (`lint` 22 times, `tune` 20, `reconcile` 19, `corpus` 15, `match` 13). The old names stay as hidden aliases, so no hook changes in the release that regroups, and a later release retires them.
+
+### 3. A shared TUI crate
+
+The spike splits into a generic half and an adapter:
+
+- `tree.rs`: the roots as tabs, typed settings (bool, bounded float and int, choice, text, read-only, secret), a node that may be both a setting and a group (a way with child ways), actions and their queue, filtering, and the change set.
+- `ui.rs` and `ui/render.rs`: the tab bar with pending counts, browse, filter across tabs, edit with validation, reset to default, revert, the action menu, confirm and masked entry, the pending pane. It knows nothing about ways.
+- `ways.rs`: the adapter that loads the four files into the tree.
+
+As a crate (`ways-tui`, or `agent-tui` beside `agent-fmt`), the first two serve `ways settings`, `ways-agent` (a separate binary that today only prints its config) and any later picker. The tree becomes the registry's view, and the adapter becomes the registry.
+
+### Look: the operator's status line
+
+The style comes from the operator's Claude Code status line (`statusline.sh`, `statusline-here.sh` and `statusline-sessions.sh` in their dotfiles). The repo's own `statusline.sh` is emoji text with no palette, so it is not the reference.
+
+The palette is the status line's colour tokens: ok green (ANSI 32), warn yellow (33), error red (31), hot orange (256-colour 208), muted grey (90), lozenge ink 16, lozenge text 255 and rule 239. The accent is one agent-ways identity colour, sky `#5ac8fa`, with the status line's two derived stages, dim `#367896` and shade `#033e59`.
+
+Tabs and the mode on the bottom line are powerline lozenges, built the way the status line builds a session cell. The shown tab is ink on the accent, the others text on dim, and a pending count is a badge segment on yellow. The bottom line then runs flat parts between thin `│` rules, as the status line's first line does.
+
+Each attribute means one thing: bold is something pending that needs you, and italic grey is secondary text such as hints. A changed value is bold yellow, a value off its default is dim accent, read-only is grey, a present key is green, a queued command is orange. The selected row sits on the accent shade with an accent `▌` beside it, and keeps its value's colour.
+
+The lozenge caps are Nerd Font glyphs. The TUI reads the status line's own `SESSIONS_SHAPE` setting, so `plain` drops the glyphs and leaves the coloured segments abutting.
+
+The look is one module, `ui/theme.rs`, in the generic half. It draws every colour from the shown theme's derived roles at the terminal's colour depth (see Themes). In the shared crate it becomes the look of every ways TUI.
+
+## Why tabs
+
+One tree mixes separate concerns: which ways are on, how matching is tuned, the relevance gate, and where ways install. The ways list alone is about 200 rows, and it pushed everything else off screen. Each root is now a tab with its own cursor and open groups, so a concern is one keypress away and the pending count on each tab shows where edits sit. The pending pane and the filter still span every tab.
+
+## Actions and keys
+
+A node holds a value, actions, or both. A value is something `ways settings set` writes to a file. An action is a named `ways` command line that the tree queues and does not run: a target add, a key rotation, a reconcile. The generic half (`tree.rs`, `ui.rs`) knows an action as a label, a command, an argument kind and a confirm flag; `ways.rs` supplies the real commands.
+
+Actions are queued, in order, beside the value changes. The pending pane (`c`) lists both, `x` unqueues the last action, and the exit summary prints the value changes by file and then the commands. This is the order a real `ways settings` would apply them.
+
+An API key is a `Kind::Secret` node. It shows present or absent, taken from whether the key file exists. Enter opens a masked entry; committing queues `ways agent key add|rotate --provider <p> < <stdin>` and does not change the value. The real command would pipe the typed key to the existing stdin path of `ways agent key`, so the key never appears in argv, in the process list or on the screen. The typed text lives in a buffer whose `Debug` is redacted, which is overwritten when it drops, and which the queue never receives; the queued line carries only `<stdin>`.
+
+An action is confirmed (y/n) when it is destructive or reconciles: key remove, target add, disable and remove, and `ways reconcile`. Key set, rotate and check, target plan and enable queue at once. A declined confirm queues nothing.
+
+Per-target state stays a read-only value because enabling or disabling reconciles. Way toggles under `project.ways` stay values; the real command for them is `ways disable <id>` and `ways enable <id>`.
+
+### Applying changes
+
+Save and discard are per tab. While the current tab has anything pending, a bold orange `● N unsaved in <tab> · w review & apply` segment sits at the right of the bottom bar. N counts the tab's value changes plus its queued actions, and an action belongs to the tab of the node that queued it. Clicking the segment, `w` and Ctrl-S enter review. Every tab's badge stays on the tab bar, so pending elsewhere stays visible.
+
+Review is a mode of the browser, not another screen. The tab bar, the tree on the left, the detail pane on the right and the bottom bar stay where they are, and the bar's mode segment reads `review` in orange where browse reads blue. The bar offers `a apply <tab> · X discard <tab> · Esc back`, each clickable, and drops the tab names when the message would not otherwise fit.
+
+The tree shows only what is pending: changed settings under their ancestor groups, all open, then a `queued` group holding the tab's commands as numbered rows in run order, the confirmed ones marked `▲`. Queued rows sit in one group, not under the nodes that queued them, because run order is the queue's and not the tree's, and the numbered list reads as what apply will do. The detail pane names the node that queued the selected command. Tabs with nothing pending are dimmed and skipped by Tab, Shift-Tab and the digits, but a click still opens one and shows "nothing pending in <tab>". Each tab keeps its own review cursor.
+
+Review is read-only. Arrows, `j` `k`, PgUp, PgDn, the wheel and clicks move the cursor, and Enter, `→`, `←` and a click on the marker open and close groups. Enter on a setting, Space, `e`, `d`, `u` and `x` change nothing and the bar says "read-only in review; Esc to edit". Esc returns to browse with the browse cursor where it was.
+
+The detail pane describes the change under the cursor. For a setting it shows the key, the old value struck through and muted beside the new one in green, the layer the old value came from, the layer the new one will be written to, the file and the key inside it, and the setting's doc line. For a group it counts the changes under it and lists the files they touch. For a queued command it shows the command line, with a secret as `<stdin>`, whether it asks for confirmation and why, what it does, and the files or directories it touches when the adapter knows them.
+
+Apply acts on the current tab only. It runs the value writes first, one step per file, then the queued commands in order. A value write is atomic per file and cannot be half done, while a command can fail midway, so doing writes first leaves a failure with only commands to sort out. Progress shows in place: each pending row gets a glyph in a gutter, `·` pending, `◐` running, `✓` done, `✗` failed, the cursor follows the running row, and its detail pane shows the step as "would write <file> (N keys)" or "would run <command>".
+
+On success the tab's rows clear, the bar says "applied N in <tab>", and review moves to the next tab with anything pending, or ends in browse when none has. A failure stops the run. Steps before it count as applied and clear, the failed step and everything after it stay, the failed row keeps its `✗` and its detail pane shows the error, and review stays on that tab. Other tabs' pending items are not touched.
+
+The spike only simulates the run, on a short tick per state. `SPIKE_FAIL_STEP=<n>`, read once at startup, makes step n fail.
+
+`X` in browse, or a click on the `↺` in a tab's badge, discards that tab's pending items after a y/n prompt naming the tab and the count. Its values revert to loaded and its actions are unqueued.
+
+`q`, Esc and Ctrl-C with anything pending in any tab open an exit prompt. It lists each tab with pending items and its count, and offers Back (the default), Review of the first tab with pending (it enters review on that tab) and Quit and discard all, which asks a second confirm. With nothing pending anywhere, quit is immediate. A running apply is not interrupted by Ctrl-C. The exit summary prints what remains pending, or "nothing pending".
+
+Each tab's tree starts at its root's children, since the tab already names the root. The tab badge and every group badge count value changes plus queued actions under them. The root's own actions, such as `ways reconcile` on the install tab, open from `a` on any row that has none of its own.
+
+### Helpers
+
+A job that takes several decisions gets a guided flow: a modal of three steps, `1 pick · 2 preview · 3 confirm`, with Back, Next and Cancel by key or click.
+
+The pick step is a filterable list whose rows carry a label, a detail line and a state badge, single or multi select, with an "Other…" row that takes a typed path. The preview step scrolls styled lines (kept, added, replaced, removed, refused). The confirm step lists the commands it will queue, with optional checkboxes.
+
+Finishing queues the flow's commands on the tab that launched it, so they go through that tab's review and apply like any other pending item. Cancel, or Esc on the first step, queues nothing.
+
+Activating agent-ways in Claude instances starts from the install tab, or from the hint that shows when no target is recorded. The picker offers the recorded targets, `~/.claude`, `$CLAUDE_CONFIG_DIR`, and directories under `$HOME` and `$XDG_CONFIG_HOME` named like Claude that hold `settings.json` or `projects/`, each badged active, disabled, available or not a Claude dir. The preview is the real `ways config target plan <dir>`, each root and settings entry by its verb, and a refused root in the error colour with the `--force` note. Finishing queues `ways config target add <dir>` for each pick, or `enable` for a disabled recorded target.
+
+Setting up a project starts from the ways tab. The picker offers the current directory, then projects with Claude sessions that still exist, badged `ways.yaml`, `ways/` or none. The preview lists what `ways init --project <dir>` writes and marks existing files as kept. Finishing queues `ways init --project <dir>`, with a checkbox that also queues `ways settings set ways.enabled true --project <dir>`.
+
+The Flow widget is in the generic half and knows nothing about ways, so it moves to the shared crate with `tree.rs` and `ui.rs`. An adapter supplies the candidates, the preview and the commands.
+
+## The files are the settings; the TUI and the CLI are two ways in
+
+The config files are the source of truth. The TUI and the CLI read and write the same files through the same writer, so they are interchangeable: configure in the TUI and the file holds the result; copy a file to another machine and the CLI or TUI there reads it; inspect any copy with the CLI. The TUI suits browsing, setting and reviewing several changes at once. The CLI suits agents, integrations, and people who know what they are changing: it assumes the caller wants the thing done and says nothing more.
+
+- **One writer.** Every write goes through one settings layer that changes only the keys it sets and keeps the rest of the file, comments and order as they were, so a hand-edited or copied file survives a TUI or CLI edit.
+- **Any file.** `--file <path>` points `get`, `list` and the TUI at a file other than the live one, to inspect or prepare a copy before it is installed.
+- **Changes from outside.** When a file changes on disk while the TUI is open (a CLI `set`, a hand edit, a copy), the TUI reloads it. A tab with pending edits to that file shows the conflict in its review instead of overwriting the outside change.
+
+- **One help registry.** Each setting carries its doc line, type, range, default and the file it writes; each command carries a one-line summary and a longer body. The TUI's detail pane and help overlay and the CLI's `--help` render from the same registry, so the long help is the TUI's text replayed.
+- **Terse by default.** `ways settings get <key>` prints the value; `list [prefix]` prints `key=value` lines; `set` and `unset` print nothing on success and exit 0. `--json` adds source, default and the file written. The top-level `ways --help` lists one line per command.
+- **Verbose on request.** `ways <command> --help` prints the long body; `ways settings help <key>` prints the detail pane for that key, and `ways settings help <tab>` for a whole tab.
+- **Comfortable for a person.** The same content on a terminal and in a pipe; a terminal gets colour and aligned columns, a pipe or `NO_COLOR` gets plain text. A failure is one line on stderr that names the problem and the command explaining it. Shell completion for commands and keys comes from the registry.
+- **Bare `ways settings` on a terminal opens the TUI.**
+
+Ways that teach agents about agent-ways point at `ways settings help <key>` instead of restating a setting's meaning. Hooks and scripts that parse today's prose output move to `--json`; old command names stay as hidden aliases for one release.
+
+## Themes
+
+agent-ways owns its themes: no runtime link to the shell's theme tool. A theme is a TOML file of ten slots (bg, fg, dim, subtle, accent, info, ok, warn, err, alt), a light or dark kind and a background mode, the slot set the operator's dotfiles palettes use. Derived colours (hot, rule, faded text, selection) are computed and can be pinned. A shared theme crate maps roles onto ratatui styles and plain ANSI and owns the NO_COLOR and colour-depth check; identity colours and the banner gradient stay outside themes.
+
+Text roles are lifted until they read on bg and on the selection, 4.5:1 for text and 3:1 for muted. The lift moves lightness in OKLCH and keeps hue and saturation as far as sRGB allows; the earlier blend toward fg greyed Nord's err, hot, warn and accent into one dusty pink.
+
+The status roles (accent, err, ok, warn, info, hot) also stay at least 0.08 apart in ΔE OK, four just-noticeable differences, because each is read as a lone word in thin glyphs. Derivation settles them in that order, each moved the least that clears the ones before it by turning hue, raising chroma or pushing lightness away from the ground. Hot, halfway between warn and err, is the one it moves most often.
+
+The background mode is `terminal`, which keeps the terminal's own ground, or `fill`, which paints bg behind every cell of every screen. Under NO_COLOR nothing is coloured and lozenges are reverse video.
+
+Bundled themes ship in the binary: an agent-ways default on the identity palette's sky, and a few lifted by hand from the dotfiles palettes as starting points. The operator's own live in `$XDG_CONFIG_HOME/agent-ways/themes/`, with the active choice in a file beside them.
+
+A `theme` tab follows the settings tabs. It lists bundled and user themes, marks the active one and any user file that overrides a bundled name, and shows the selected theme's source, slots and checks. Moving the cursor previews a theme in place across the whole UI; leaving the tab or Esc returns to the active theme, and Enter makes the one under the cursor active.
+
+New, copy, rename, delete and edit run from the action menu. Bundled themes are read-only, so editing one starts a named copy. The editor lists the slots as swatches with their hex, and for the selected slot shows hue, saturation and lightness sliders, hex entry, the slot's role in context, and the contrast and distinctness results with any failing role named in the error colour. A failing check does not block saving.
+
+Theme files and the active choice save on their own, outside the settings review. Enter writes the choice, new, copy, rename and delete write at once, and Ctrl-S writes an edited theme. Unsaved edits badge the theme tab, Esc in the editor asks to save, discard or go back, and the exit prompt lists them beside the settings tabs.
+
+The spike writes theme files and the active choice for real, but only into `$SPIKE_THEME_DIR`, or the session scratchpad when that is unset. The theme tab's detail pane names the directory.
+
+Surfaces move onto the crate one PR at a time: the settings TUI, then `rethink` and introspect, the `agent-fmt` tables and status output, `attend-chat` through an adapter to its own TUI library, and the attend CLI.
+
+## Decided
+
+- **ratatui for every TUI.** The repo has a hand-rolled crossterm TUI (`rethink`, about 2,900 lines) and an iocraft one (`attend-chat`). The shared crate is built on ratatui, the maintained Rust TUI library, whose `TestBackend` renders frames in tests. Moving `rethink` and `attend-chat` onto it are separate increments.
+
+## Testing TUIs: a way, two skills and the crate's test half
+
+roguemap develops its TUI through a loop written in its CLAUDE.md, Makefile and `docs/testing.md`, with no Claude skills of its own: render a frame headless, look at it as a PNG, iterate the look without tests, then pin what settled as golden frames in `cargo test`. In its two recorded sessions the agent read rendered PNGs 94 times. agent-ways adopts the loop in three parts.
+
+- **The crate's test half.** A headless `render(state, w, h) -> Buffer` entry point and a `--snap W H OUT key=value…` flag; one shot list (name and state) that drives both the snapshot command and the golden test; a frame format of glyph, foreground, background and modifiers; a comparator that reports identical cells, colour distance and the first differing cells, exact by default for text UIs, with record, strict and dump switches; a PNG renderer for review. The comparator is tested itself: identical frames, one changed cell, a shift.
+- **A way, `softwaredev/code/testing/tui`.** Guidance only: render headless from the start; judge the look from an image; iterate the look before pinning it; golden frames are a reviewed baseline, and a re-record names its frames and the reason in the commit; a failure shows what drifted; cover the minimum size (80x25) and a reference size; drive interaction through the real key handler; add a seeded random session for state-dependent faults; name the property under test; builders gate on check and goldens in a worktree, reviewers stay read-only.
+- **Skills, shipped to every project.** `tui-snap` renders one or more shots to PNGs in the scratchpad, reads each, and reports what changed, with variants side by side. `tui-golden` runs the golden check; on a diff it renders expected and actual, reviews each frame, and on an intended change re-records and drafts the commit text naming the frames and why. Both find the project's commands through `make help` or the crate's flags. A `tui-scaffold` skill that wires the crate into a new ratatui project is optional.
+
+The settings spike is the first user: its one render test today only checks that a key name appears in the frame.
+
+## Decisions this spike leaves open
+
+1. **Where `set` writes when a project overrides.** The spike writes the user file and shows the source layer. A project override then hides the edit. The options are `--project` on `set`, or writing to whichever layer currently wins.
+2. **Domain switches by project.** `disabled_domains` is user scope and `ways:` is project scope (ADR-131), so the `ways` tab has `ways.domains.*` and `ways.project.*` side by side. One switch per scope at every level of the tree would be simpler to read, at the cost of changing ADR-131.
+3. **An ADR.** The command regrouping and the settings schema are decisions other tools and docs depend on; both go through `docs/scripts/adr` before implementation.
+
+## What the spike does not do
+
+It writes no settings files and runs no commands; theme files are written only into the sandboxed themes directory. It does not preserve YAML comments; the real writer would reuse the key-block replacement in `ways-core::config`. Validation is per field only; there are no cross-field checks such as `max_candidates` against `timeout_ms`. It reads the user ways root only through the projected corpus in `~/.claude/hooks/ways`.

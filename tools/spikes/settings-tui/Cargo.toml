@@ -1,0 +1,20 @@
+[package]
+name = "ways-settings-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-or-later"
+description = "Spike: the ways settings as one tree, browsed and edited in a TUI. Reads the real config; writes only theme files, into a sandboxed themes directory."
+
+# Its own workspace, so the spike builds without joining tools/Cargo.toml.
+[workspace]
+
+[[bin]]
+name = "ways-settings-spike"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30"
+serde_yaml = "0.9"
+serde = "1"
+toml = "0.8"
