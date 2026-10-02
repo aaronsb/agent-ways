@@ -172,12 +172,10 @@ impl App {
         for (i, r) in self.roots.iter().enumerate() {
             let label = format!(" {} {} ", i + 1, r.name);
             let pending = tree::pending(r, &self.queue);
-            let mut segs = vec![if i == active {
-                Seg::on(label, Ground::Accent).bold()
-            } else if review && pending == 0 {
+            let mut segs = vec![if review && pending == 0 && i != active {
                 Seg::faded(label)
             } else {
-                Seg::on(label, Ground::AccentDim)
+                crate::strip::tab_seg(label, i == active)
             }];
             if pending > 0 {
                 segs.push(Seg::on(format!(" ●{pending} ↺ "), Ground::Warn).bold());
@@ -198,13 +196,7 @@ impl App {
         // The theme tab: no review, so dimmed there; a badge for unsaved edits, with no discard mark.
         let i = self.theme_tab();
         let label = format!(" {} theme ", i + 1);
-        let mut segs = vec![if i == active && !review {
-            Seg::on(label, Ground::Accent).bold()
-        } else if review {
-            Seg::faded(label)
-        } else {
-            Seg::on(label, Ground::AccentDim)
-        }];
+        let mut segs = vec![if review { Seg::faded(label) } else { crate::strip::tab_seg(label, i == active) }];
         if self.theme_dirty() {
             segs.push(Seg::on(" ●1 ", Ground::Warn).bold());
         }

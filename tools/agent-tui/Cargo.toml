@@ -17,8 +17,9 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm",
 agent-theme = { path = "../agent-theme", features = ["ratatui"] }
 # The termination signals the run loop restores the terminal on.
 signal-hook = "0.3"
-# Markdown to styled text (`markdown`), and the column widths it wraps by.
+# Markdown to styled text (`markdown`).
 pulldown-cmark = { version = "0.13", default-features = false }
+# Display widths for wrapping text and the input's rows.
 unicode-width = "0.2"
 
 [target.'cfg(unix)'.dependencies]

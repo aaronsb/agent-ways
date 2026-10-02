@@ -11,7 +11,8 @@ use std::path::Path;
 
 use agent_theme::{ColorDepth, ThemeSet};
 use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use agent_tui::screen::{render, Screen};
+use agent_tui::screen::Screen;
+use agent_tui::testkit::render_screen as render;
 use agent_tui::testkit::{frame, text, Goldens};
 use agent_tui::theme::{Palette, Shape};
 use agent_tui::timeline::Playback;
