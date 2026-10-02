@@ -24,7 +24,10 @@ impl Fixture {
     }
 
     fn run(&self, args: &[&str]) -> (String, String, i32) {
-        let out = Command::new(env!("CARGO_BIN_EXE_ways-agent"))
+        // AGENT_TEST_BIN runs the suite against another build, such as the
+        // commit before a fix, to see which tests fail first.
+        let bin = std::env::var_os("AGENT_TEST_BIN").map(PathBuf::from).unwrap_or_else(|| env!("CARGO_BIN_EXE_ways-agent").into());
+        let out = Command::new(bin)
             .args(args)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
@@ -117,4 +120,48 @@ fn mode_and_use_keep_comments_and_keys_they_do_not_set() {
 
 fn no_stray_files(dir: &Path) -> bool {
     std::fs::read_dir(dir).unwrap().flatten().all(|e| e.file_name() == "agent.yaml")
+}
+
+#[test]
+fn use_never_deletes_a_hand_tuned_profile() {
+    // The review's case: a typo in another profile must not cost this one
+    // its tuning, its comment or its other fields.
+    let f = Fixture::new("tuned");
+    let path = f.agent_yaml();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let src = "# mine\nprofiles:\n  anthropic:\n    threshold: 0.4  # tuned\n    timeout_ms: 3000\n  openrouter:\n    treshold: 0.3\n";
+    std::fs::write(&path, src).unwrap();
+    let (_, err, code) = f.run(&["use", "anthropic"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("profiles.openrouter.treshold"), "the other profile's typo is reported: {err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{src}engine: anthropic\n"));
+    let (_, err, code) = f.run(&["use", "anthropic", "--model", "claude-sonnet-5-5"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "# mine\nprofiles:\n  anthropic:\n    threshold: 0.4  # tuned\n    timeout_ms: 3000\n    model: claude-sonnet-5-5\n  openrouter:\n    treshold: 0.3\nengine: anthropic\n"
+    );
+}
+
+#[test]
+fn use_refuses_when_the_profile_it_edits_fell_back() {
+    let f = Fixture::new("refuse");
+    let path = f.agent_yaml();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let src = "profiles:\n  anthropic:\n    threshold: 0.4\n    model: claude-x\n    treshold: 0.3\n";
+    std::fs::write(&path, src).unwrap();
+    let (_, err, code) = f.run(&["use", "anthropic"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("ways settings lint") && err.contains("not changed"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+}
+
+#[test]
+fn a_top_level_typo_is_reported_not_silent() {
+    let f = Fixture::new("typo");
+    let path = f.agent_yaml();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "mdoe: off\n").unwrap();
+    let (_, err, _) = f.run(&["config"]);
+    assert!(err.contains("mdoe") && err.contains("unknown key"), "{err}");
 }

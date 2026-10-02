@@ -12,12 +12,16 @@ use crate::profile::{self, Provider};
 pub const FILE: &str = "agent";
 
 /// The sections the relevance gate reads on the hook path (ADR-503 §5).
-pub const GATE_SECTIONS: &[&str] = &["gate", "gate.profiles"];
+pub const GATE_SECTIONS: &[&str] = &["gate", "gate.mode", "gate.profiles"];
 
+/// `mode` is a section of its own, so a bad `engine` never turns a gate the
+/// operator switched off back on; profiles fall back one profile at a time,
+/// so a typo in one never drops another's tuning.
 const SECTIONS: &[SectionSpec] = &[
-    SectionSpec { name: "gate", file: FILE, top: &["engine", "mode"], doc: "The relevance gate: which engine judges and what its verdict does." },
-    SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], doc: "Changes to the shipped engine profiles, and profiles of your own." },
-    SectionSpec { name: "gate.keys", file: "keys", top: &[], doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
+    SectionSpec { name: "gate", file: FILE, top: &["engine"], per_entry: false, doc: "The engine profile the relevance gate uses." },
+    SectionSpec { name: "gate.mode", file: FILE, top: &["mode"], per_entry: false, doc: "What the gate does with a verdict: enforce, shadow or off." },
+    SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], per_entry: true, doc: "Changes to the shipped engine profiles, and profiles of your own. Each profile falls back alone." },
+    SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -49,7 +53,7 @@ const KEYS: &[KeySpec] = &[
     },
     KeySpec {
         name: "gate.mode",
-        section: "gate",
+        section: "gate.mode",
         path: &["mode"],
         kind: Kind::Choice(&["enforce", "shadow", "off"]),
         default: DefaultValue::Yaml("enforce"),

@@ -245,7 +245,7 @@ impl UserLayer {
         use agent_settings::load;
         let doc = match load::parse_text(text, path) {
             Ok(d) => d,
-            Err(f) => return Ok((UserLayer::default(), vec![f])),
+            Err(f) => return Ok((UserLayer::default(), vec![*f])),
         };
         let checked = load::check(
             &crate::settings::SCHEMA,
@@ -270,18 +270,29 @@ impl UserLayer {
     }
 
     /// Writes only the named fields (`engine`, `mode`, `profiles.<name>`) of
-    /// this layer to `path`, under the settings writer's lock, by temp file
-    /// and rename (ADR-503 §6). Every other key and every comment in the
-    /// file stays. A field this layer leaves unset, or an empty profile
-    /// patch, is removed from the file.
+    /// this layer to `path`. See [`UserLayer::save_keys`].
     pub fn save_fields(&self, path: &Path, fields: &[&str]) -> Result<()> {
+        let keys: Vec<Vec<&str>> = fields
+            .iter()
+            .map(|f| match f.split_once('.') {
+                Some((a, b)) => vec![a, b],
+                None => vec![*f],
+            })
+            .collect();
+        let refs: Vec<&[&str]> = keys.iter().map(Vec::as_slice).collect();
+        self.save_keys(path, &refs)
+    }
+
+    /// Writes only the given key paths of this layer to `path`, such as
+    /// `["profiles", "anthropic", "model"]`, under the settings writer's
+    /// lock, by temp file and rename (ADR-503 §6). Every other key and every
+    /// comment in the file stays. A key this layer leaves unset, or an empty
+    /// mapping, is removed from the file, with any parent it leaves empty.
+    pub fn save_keys(&self, path: &Path, keys: &[&[&str]]) -> Result<()> {
         let value = serde_yaml::to_value(self)?;
         agent_settings::writer::edit_file(path, Some(HEADER), |doc| {
-            for f in fields {
-                let key: Vec<String> = match f.split_once('.') {
-                    Some((a, b)) => vec![a.to_string(), b.to_string()],
-                    None => vec![f.to_string()],
-                };
+            for k in keys {
+                let key: Vec<String> = k.iter().map(|s| s.to_string()).collect();
                 let desired = agent_settings::yaml_edit::value_at(&value, &key)
                     .filter(|v| !v.as_mapping().is_some_and(|m| m.is_empty()));
                 match desired {
@@ -468,7 +479,20 @@ mod tests {
         let (user, findings) = UserLayer::parse("mode: loud\nprofiles:\n  anthropic:\n    threshold: 0.5\n", None).unwrap();
         assert_eq!(user.mode, None);
         assert_eq!(user.profiles["anthropic"].threshold, Some(0.5));
-        assert_eq!(findings[0].section.as_deref(), Some("gate"));
+        assert_eq!(findings[0].section.as_deref(), Some("gate.mode"));
+        // A bad engine never drops `mode: off`, and a typo in one profile
+        // never drops another's tuning.
+        let (user, _) = UserLayer::parse(
+            "engine: 5\nmode: off\nprofiles:\n  anthropic:\n    threshold: 0.4\n  openrouter:\n    treshold: 0.3\n",
+            None,
+        )
+        .unwrap();
+        assert_eq!((user.engine, user.mode), (None, Some(Mode::Off)));
+        assert_eq!(user.profiles["anthropic"].threshold, Some(0.4));
+        assert!(!user.profiles.contains_key("openrouter"));
+        // A top-level typo is reported, not silent.
+        let (_, findings) = UserLayer::parse("mdoe: off\n", None).unwrap();
+        assert_eq!(findings[0].key.as_deref(), Some("mdoe"));
         let (user, findings) = UserLayer::parse("mode: [\n", None).unwrap();
         assert_eq!(user, UserLayer::default());
         assert!(findings[0].message.contains("does not parse"));

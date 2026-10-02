@@ -536,16 +536,9 @@ fn checked_text(text: &str, path: Option<&Path>, scope: LayerScope, sections: &[
             return None;
         }
     };
-    // ADR-156 retired the raw-cosine threshold config keys. A silently
-    // ignored key would revert an operator's deliberate tuning; name it and
-    // point at the replacement instead.
-    if let Some(m) = doc.as_mapping() {
-        for (retired, message) in crate::settings::SCHEMA.files[0].retired {
-            if m.contains_key(*retired) {
-                eprintln!("[ways] config: {message}.");
-            }
-        }
-    }
+    // Every finding goes to stderr, one line each: a section that fell back,
+    // and a top-level key no section owns, such as a typo or a key ADR-156
+    // retired, which the check reports by name with its replacement.
     let checked = load::check(&crate::settings::SCHEMA, crate::settings::FILE, scope, &doc, Some(sections));
     if !checked.is_clean() {
         for f in checked.findings(None, path, text) {
@@ -885,5 +878,47 @@ mod tests {
         assert!(d.config_path().starts_with(crate::paths::target_config_root(&dir)));
         assert!(d.config_path().ends_with("config.yaml"));
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    fn apply_project(cfg: &mut Config, text: &str) {
+        let doc = checked_text(text, None, LayerScope::Project, crate::settings::HOOK_SECTIONS).unwrap();
+        cfg.apply_values(&doc);
+        cfg.apply_project_ways_overlay_value(&doc);
+    }
+
+    #[test]
+    fn a_bad_domain_list_never_switches_a_project_back_on() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "disabled_domains: ea,itops\nenabled: false\n");
+        assert!(!cfg.enabled, "enabled: false is its own section");
+    }
+
+    #[test]
+    fn one_bad_toggle_never_re_enables_the_other_disabled_ways() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "ways:\n  itops/incident: false\n  meta/introspection: no\n  ea/x:\n    enabled: false\n");
+        assert_eq!(cfg.disabled_ways(), &["itops/incident".to_string(), "ea/x".to_string()]);
+    }
+
+    #[test]
+    fn a_bad_secret_path_deny_keeps_the_targets() {
+        let doc = checked_text(
+            "secret_path_deny: \"false\"\ntargets:\n  - path: /a\n    enabled: false\n",
+            None,
+            LayerScope::User,
+            crate::settings::HOOK_SECTIONS,
+        )
+        .unwrap();
+        let t = doc.get("targets").and_then(Config::read_targets_value).unwrap();
+        assert_eq!((t.len(), t[0].enabled), (1, false));
+        assert!(doc.get("secret_path_deny").is_none());
+    }
+
+    #[test]
+    fn a_refire_preset_above_one_is_valid() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("semantic_fire_probability: 0.35\nrefire_presets:\n  never: 5\n");
+        assert_eq!(cfg.semantic_fire_probability, 0.35);
+        assert_eq!(cfg.refire_presets.get("never").copied(), Some(5.0));
     }
 }

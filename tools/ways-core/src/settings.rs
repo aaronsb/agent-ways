@@ -11,17 +11,37 @@ use std::path::{Path, PathBuf};
 /// The file kind: user, target and project files all take these keys.
 pub const FILE: &str = "config";
 
-/// The sections the hook commands read (ADR-503 §5). Every ways section is
-/// read on the hook path; the list is explicit so a new section has to be
-/// named here before a hook loads it.
-pub const HOOK_SECTIONS: &[&str] = &["ways", "matching", "install", "ways.project"];
+/// The sections the hook commands read (ADR-503 §5). `config::global()`
+/// serves the hooks and `reconcile` alike, so every ways section is read on
+/// the hook path. The list is explicit so a hook names each section it loads,
+/// through `load-sections`, never a whole-file `load-all`.
+pub const HOOK_SECTIONS: &[&str] =
+    &["ways", "ways.switch", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project"];
 
+/// The fallback unit is the section (ADR-503 §4), so each switch that turns
+/// something off is a section of its own: a bad value elsewhere can never
+/// switch it back on. Per-way toggles fall back one entry at a time.
 const SECTIONS: &[SectionSpec] = &[
     SectionSpec {
         name: "ways",
         file: FILE,
-        top: &["language", "default_scope", "disabled_domains", "enabled"],
-        doc: "Whether ways run, their language, and which domains are off.",
+        top: &["language", "default_scope"],
+        per_entry: false,
+        doc: "The language ways are written in and the default scope of a way.",
+    },
+    SectionSpec {
+        name: "ways.switch",
+        file: FILE,
+        top: &["enabled"],
+        per_entry: false,
+        doc: "Whether ways run at all; false in a project's .claude/ways.yaml switches them off there.",
+    },
+    SectionSpec {
+        name: "ways.domains",
+        file: FILE,
+        top: &["disabled_domains"],
+        per_entry: false,
+        doc: "Domains switched off everywhere.",
     },
     SectionSpec {
         name: "matching",
@@ -34,19 +54,29 @@ const SECTIONS: &[SectionSpec] = &[
             "near_miss_margin",
             "refire_presets",
         ],
+        per_entry: false,
         doc: "When a way fires: the calibrated probabilities, the parent boost, and how often a way may fire again.",
     },
     SectionSpec {
-        name: "install",
+        name: "install.targets",
         file: FILE,
-        top: &["targets", "secret_path_deny"],
-        doc: "Where agent-ways is active and what it merges into settings.json.",
+        top: &["targets"],
+        per_entry: false,
+        doc: "Where agent-ways is active. Changed by `ways config target`, which reconciles.",
+    },
+    SectionSpec {
+        name: "install.secret_path_deny",
+        file: FILE,
+        top: &["secret_path_deny"],
+        per_entry: false,
+        doc: "Whether the secret-path permissions.deny baseline is merged into settings.json.",
     },
     SectionSpec {
         name: "ways.project",
         file: FILE,
         top: &["ways"],
-        doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml.",
+        per_entry: true,
+        doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
     },
 ];
 
@@ -76,6 +106,7 @@ const PROB: Kind = Kind::Float { min: 0.0, max: 1.0 };
 const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "ways.enabled",
+        section: "ways.switch",
         path: &["enabled"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
@@ -101,6 +132,7 @@ const KEYS: &[KeySpec] = &[
     },
     KeySpec {
         name: "ways.disabled_domains",
+        section: "ways.domains",
         path: &["disabled_domains"],
         kind: Kind::List,
         default: DefaultValue::Yaml("[]"),
@@ -173,7 +205,8 @@ const KEYS: &[KeySpec] = &[
         name: "matching.refire_presets.*",
         section: "matching",
         path: &["refire_presets", "*"],
-        kind: PROB,
+        // frontmatter's REFIRE_NUMERIC_MAX: above 1.0 is valid but rare.
+        kind: Kind::Float { min: 0.0, max: 10.0 },
         default: DefaultValue::Fn(refire_default),
         instances: &["once", "rare", "normal", "frequent"],
         doc: "A refire preset: the fraction of the context window before a way may fire again.",
@@ -182,7 +215,7 @@ const KEYS: &[KeySpec] = &[
     },
     KeySpec {
         name: "install.targets",
-        section: "install",
+        section: "install.targets",
         path: &["targets"],
         kind: Kind::ReadOnly,
         scope: Scope::User,
@@ -193,7 +226,7 @@ const KEYS: &[KeySpec] = &[
     },
     KeySpec {
         name: "install.secret_path_deny",
-        section: "install",
+        section: "install.secret_path_deny",
         path: &["secret_path_deny"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
