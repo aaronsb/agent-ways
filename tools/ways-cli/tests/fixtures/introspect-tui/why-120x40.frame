@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| introspect    timeline    why fired                                                                                    |
+| introspect    1 timeline    2 fires    3 spend                                                                         |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
 |epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out                                  |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
@@ -41,8 +41,9 @@ agent-tui frame 120x40
 | why   ↑↓ way  j/k read  ←→ frame  esc timeline  f matched  q quit                                                      |
 styles
   0   0-11  White Blue -
-  0  14-23  White DarkGray DIM
-  0  26-36  Black Cyan BOLD
+  0  14-25  Black Cyan BOLD
+  0  28-36  White DarkGray DIM
+  0  39-47  White DarkGray DIM
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM

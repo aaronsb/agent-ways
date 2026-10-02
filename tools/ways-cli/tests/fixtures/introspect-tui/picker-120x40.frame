@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| introspect    sessions                                                                                                 |
+| introspect    1 sessions    2 timeline    3 fires    4 spend                                                           |
 |┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Session      Date             Project                                                Events  Ways Duration Transcript│|
 |│ 8f3a2c1d-5e6 2026-07-03 16:52 proj                                                       10     9      18s yes       │|
@@ -41,7 +41,10 @@ agent-tui frame 120x40
 | pick   ↑↓ select  ⏎ replay  q quit                                                                                  2/3|
 styles
   0   0-11  White Blue -
-  0  14-23  Black Cyan BOLD
+  0  14-25  Black Cyan BOLD
+  0  28-39  White DarkGray DIM
+  0  42-50  White DarkGray DIM
+  0  53-61  White DarkGray DIM
   1   0-0   - - DIM
   1   1-30  Blue - BOLD|DIM
   1  31-119 - - DIM

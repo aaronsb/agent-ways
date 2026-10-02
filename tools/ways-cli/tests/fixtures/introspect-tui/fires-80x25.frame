@@ -1,10 +1,10 @@
 agent-tui frame 80x25
-| introspect    1 sessions    2 timeline    3 fires    4 spend                   |
-|┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────┐|
-|│ Session      Date             Project        Events  Ways Duration Transcript│|
-|│ 8f3a2c1d-5e6 2026-07-03 16:52 proj               10     9      18s yes       │|
-|│▌1b2c3d4e-000 2026-07-01 09:10 proj                4     3      12s yes       │|
-|│ 9e8d7c6b-000 2026-06-28 22:05 other_proj          2     1      10s gone      │|
+| introspect    1 timeline    2 fires    3 spend                                 |
+|Session 8f3a2c1d-5e6  lowest score first · ↻ a re-disclosure                    |
+|┌ 2 semantic fires ────────────────────────────────────────────────────────────┐|
+|│ Score   Way                             Surface                              │|
+|│ 0.405 ↻ softwaredev/docs/adr            record the decision                  │|
+|│▌0.612   softwaredev/code/testing        add a unit test for the parser       │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -23,30 +23,28 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| pick   ↑↓ select  ⏎ replay  q quit                                          2/3|
+| fires   ↑↓ select  q quit                                                   2/2|
 styles
   0   0-11  White Blue -
-  0  14-25  Black Cyan BOLD
-  0  28-39  White DarkGray DIM
-  0  42-50  White DarkGray DIM
-  0  53-61  White DarkGray DIM
-  1   0-0   - - DIM
-  1   1-30  Blue - BOLD|DIM
-  1  31-79  - - DIM
+  0  14-25  White DarkGray DIM
+  0  28-36  Black Cyan BOLD
+  0  39-47  White DarkGray DIM
+  1   0-7   - - BOLD
+  1  20-59  - - DIM
   2   0-0   - - DIM
-  2   1-78  - - BOLD
-  2  79-79  - - DIM
+  2   1-18  Blue - BOLD|DIM
+  2  19-79  - - DIM
   3   0-0   - - DIM
-  3  69-71  Green - -
+  3   1-78  - - BOLD
   3  79-79  - - DIM
   4   0-0   - - DIM
-  4   1-1   Cyan - BOLD|REVERSED
-  4   2-68  - - BOLD|REVERSED
-  4  69-71  Green - BOLD|REVERSED
-  4  72-78  - - BOLD|REVERSED
+  4  42-60  - - DIM
   4  79-79  - - DIM
   5   0-0   - - DIM
-  5  69-72  - - DIM
+  5   1-1   Cyan - BOLD|REVERSED
+  5   2-41  - - BOLD|REVERSED
+  5  42-71  - - BOLD|DIM|REVERSED
+  5  72-78  - - BOLD|REVERSED
   5  79-79  - - DIM
   6   0-0   - - DIM
   6  79-79  - - DIM
@@ -83,11 +81,9 @@ styles
  22   0-0   - - DIM
  22  79-79  - - DIM
  23   0-79  - - DIM
- 24   0-5   Black Cyan BOLD
- 24   8-9   Cyan - BOLD
- 24  10-16  - - DIM|ITALIC
- 24  19-19  Cyan - BOLD
- 24  20-26  - - DIM|ITALIC
- 24  29-29  Cyan - BOLD
- 24  30-34  - - DIM|ITALIC
+ 24   0-6   Black Cyan BOLD
+ 24   9-10  Cyan - BOLD
+ 24  11-17  - - DIM|ITALIC
+ 24  20-20  Cyan - BOLD
+ 24  21-25  - - DIM|ITALIC
  24  77-79  - - DIM

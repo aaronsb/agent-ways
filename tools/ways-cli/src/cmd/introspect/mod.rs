@@ -16,6 +16,9 @@
 mod dump;
 mod frames;
 mod model;
+mod picker;
+mod fires_tab;
+mod report;
 mod scope;
 mod screen;
 mod sessions;
@@ -34,7 +37,8 @@ use agent_tui::theme::{Palette, Shape};
 
 use crate::session;
 pub(crate) use model::Frame;
-use screen::{Introspect, Picker, Replay};
+use picker::Picker;
+use screen::{Introspect, Replay};
 
 /// A session id shortened for a table or a message: its first 12
 /// characters. Cut by characters, since an id from the command line or the
@@ -143,9 +147,11 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
         }
         r
     };
+    let shown = scope.clone().unwrap_or_else(|| "every project".into());
+    let spend = report::Spend::new(ways_agent_core::spend::load(), scope.as_deref(), shown.clone());
     let screen = match session {
         Some(id) => match Replay::load(&content, id, None, false) {
-            Ok(r) => Introspect::showing(with_speed(r), palette, shape),
+            Ok(r) => Introspect::showing(with_speed(r), spend, palette, shape),
             Err(e) => {
                 println!("{e}");
                 return Ok(());
@@ -158,9 +164,8 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
                 return Ok(());
             }
             sessions::find_transcripts(&mut found, &ways_core::paths::claude_dir());
-            let shown = scope.clone().unwrap_or_else(|| "every project".into());
             let opener: screen::Opener = Box::new(move |id| Replay::load(&content, id, None, false).map(with_speed));
-            Introspect::picking(Picker::new(found, shown), opener, palette, shape)
+            Introspect::picking(Picker::new(found, shown), opener, spend, palette, shape)
         }
     };
     show(screen, open)
@@ -212,7 +217,13 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
     need_terminal(open, "live")?;
     let (palette, shape) = look(depth_of(open.depth.as_deref())?);
     match Replay::load(&content, &session_id, Some(&launch_project), true) {
-        Ok(r) => show(Introspect::showing(r, palette, shape), open),
+        Ok(r) => {
+            // The spend is scoped to the project's root, as judge calls record
+            // it, though the monitor may have been launched in a subdirectory.
+            let root = project.map(str::to_string).or_else(ways_core::util::project_root).unwrap_or_else(|| launch_project.clone());
+            let spend = report::Spend::new(ways_agent_core::spend::load(), Some(&root), root.clone());
+            show(Introspect::showing(r, spend, palette, shape), open)
+        }
         Err(_) => {
             println!("No events for the current session yet.");
             Ok(())
@@ -328,50 +339,57 @@ pub fn fires(
     Ok(())
 }
 
-/// The `fires` listing of `session_id` from the event log `content`, and
-/// with `matched` the ways the relevance judge kept out.
-fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: Option<usize>, matched: bool) -> String {
-    use std::fmt::Write;
-    let mut out = String::new();
-    // Pull semantic fires for this session. A fire is semantic when its trigger
-    // begins `semantic:` (`semantic:embedding:en|multi`); keyword/state fires have
-    // no score or surface to eyeball, so they are out of scope for this view.
-    let mut rows: Vec<(f64, String, String, bool)> = Vec::new();
+/// One semantic fire of a session: its score, the way, the text it
+/// matched, and whether it was a re-disclosure.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SemanticFire {
+    pub(crate) score: f64,
+    pub(crate) way: String,
+    pub(crate) surface: String,
+    pub(crate) redisclosed: bool,
+}
+
+/// The semantic fires of `session_id` in the event log `content`, lowest
+/// score first: the borderline fires, whose relevance is most in question,
+/// lead. A fire is semantic when its trigger begins `semantic:`
+/// (`semantic:embedding:en|multi`); keyword and state fires carry no score
+/// or surface.
+pub(crate) fn semantic_fires(content: &str, session_id: &str) -> Vec<SemanticFire> {
+    let mut rows = Vec::new();
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
         if v.get("session").and_then(|s| s.as_str()) != Some(session_id) {
             continue;
         }
-        let event = v.get("event").and_then(|e| e.as_str()).unwrap_or("");
-        let redisclosed = match event {
+        let redisclosed = match v.get("event").and_then(|e| e.as_str()).unwrap_or("") {
             "way_fired" => false,
             "way_redisclosed" => true,
             _ => continue,
         };
-        let trigger = v.get("trigger").and_then(|t| t.as_str()).unwrap_or("");
-        if !trigger.starts_with("semantic:") {
+        if !v.get("trigger").and_then(|t| t.as_str()).unwrap_or("").starts_with("semantic:") {
             continue;
         }
         // `fire_score` is written as a formatted string field (see show::way_scored).
-        let Some(score) = v.get("fire_score").and_then(|s| s.as_str()).and_then(|s| s.parse::<f64>().ok())
-        else {
+        let Some(score) = v.get("fire_score").and_then(|s| s.as_str()).and_then(|s| s.parse::<f64>().ok()) else {
             continue;
         };
-        if let Some(cap) = max_score {
-            if score > cap {
-                continue;
-            }
-        }
         let way = v.get("way").and_then(|w| w.as_str()).unwrap_or("?").to_string();
         // `surface` only rides fires logged after the read-side instrument shipped;
-        // older events legitimately lack it — show a placeholder rather than drop them.
-        let surface = v
-            .get("surface")
-            .and_then(|s| s.as_str())
-            .unwrap_or("—")
-            .to_string();
-        rows.push((score, way, surface, redisclosed));
+        // older events lack it, and show a placeholder rather than drop out.
+        let surface = v.get("surface").and_then(|s| s.as_str()).unwrap_or("—").to_string();
+        rows.push(SemanticFire { score, way, surface, redisclosed });
     }
+    rows.sort_by(|a, b| a.score.total_cmp(&b.score));
+    rows
+}
+
+/// The `fires` listing of `session_id` from the event log `content`, and
+/// with `matched` the ways the relevance judge kept out.
+fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: Option<usize>, matched: bool) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let mut rows = semantic_fires(content, session_id);
+    rows.retain(|f| max_score.is_none_or(|cap| f.score <= cap));
 
     if rows.is_empty() {
         let _ = writeln!(
@@ -385,9 +403,6 @@ fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: 
         return out;
     }
 
-    // Borderline first: the lowest-scoring fires are the ones whose relevance is
-    // most in question, so they lead the readout.
-    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let total = rows.len();
     let shown = limit.unwrap_or(total).min(total);
 
@@ -399,9 +414,9 @@ fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: 
         short_id(session_id),
         max_score.map(|c| format!(" · ≤ {c:.2}")).unwrap_or_default(),
     );
-    for (score, way, surface, redisclosed) in rows.into_iter().take(shown) {
-        let mark = if redisclosed { "↻" } else { " " };
-        let _ = writeln!(out, "  {score:.3} {mark} {way:<44}  {surface}");
+    for f in rows.into_iter().take(shown) {
+        let mark = if f.redisclosed { "↻" } else { " " };
+        let _ = writeln!(out, "  {:.3} {mark} {:<44}  {}", f.score, f.way, f.surface);
     }
     if shown < total {
         let _ = writeln!(out, "  … {} more (raise --limit)", total - shown);

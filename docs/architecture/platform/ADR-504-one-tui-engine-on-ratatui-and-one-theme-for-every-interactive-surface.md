@@ -282,3 +282,7 @@ The settings screens (#697) settle §5's active choice. It is the key `theme.act
 ## Note (2026-10-02): views, and the adapter may refuse one
 
 §3 lists what an adapter supplies. Since #743 (PR #757) it may also supply views. An action with `Arg::View(name)` queues nothing. The shell calls `Adapter::view(name, pending)`, where `pending` holds the store of each pending value edit, and reloads the tree when the adapter switches. The adapter refuses, with a reason the bottom bar shows, a view in which a pending edit would no longer show, since the reload would drop it; nothing changes then. `Adapter::title(tab)` names the view in the tree pane's title. The settings screens use this for the ways tab's switch between this project's ways and every known project's.
+
+## Note (2026-10-02): screens that are not a settings tree stay on `Screen`
+
+The settings shell (`App`) holds a tree of settings, a queue of edits and commands, and the apply that runs it. The session screens show a timeline, and attend-chat shows a message feed; neither has values to edit or an apply to run. Both stay on the `Screen` trait of §3 (#738, #749). The settings screens share their theme, panic hook, terminal guard and test kit with these screens already. The other conventions those screens lack, a footer built from declarations and mouse capture (#739), come as helpers a `Screen` calls. `ways session` is the first `Screen` with tabs (#738): a digit picks a tab, and each tab is named with its digit, as the settings screens pick theirs.
