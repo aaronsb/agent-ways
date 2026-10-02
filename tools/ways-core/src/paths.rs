@@ -242,16 +242,6 @@ mod tests {
     }
 
     #[test]
-    fn event_sources_lists_only_the_state_log() {
-        let log = events_log();
-        assert!(log.ends_with("events.jsonl"));
-        assert!(log.starts_with(state_root()));
-        for p in events_log_sources() {
-            assert_eq!(p, log, "no source other than the state log");
-        }
-    }
-
-    #[test]
     fn projection_is_dotclaude() {
         assert!(projection_root().ends_with(".claude"));
     }

@@ -7,9 +7,10 @@ use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 /// The message is a trailing, hyphen-tolerant argument, so clap hands any
 /// unknown flag (a removed `--broadcast` or `--focus`, or a typo such as
 /// `--chanel`) over as message text, and the send would go out with the flag in
-/// its body. A leading token shaped like a long flag is refused unless the raw
-/// arguments carried an explicit `--` (the escape hatch for a message that
-/// really starts with one).
+/// its body. A leading token shaped like a long flag is refused unless a `--`
+/// sits immediately before it in the raw arguments (the escape hatch for a
+/// message that really starts with one); a later `--` in the text does not
+/// count.
 fn flag_like_refusal(message: &[String], raw_args: &[String]) -> Option<String> {
     let first = message.first()?.as_str();
     let name = first.split('=').next().unwrap_or(first);
@@ -17,11 +18,14 @@ fn flag_like_refusal(message: &[String], raw_args: &[String]) -> Option<String> 
         && name.starts_with("--")
         && name[2..].starts_with(|c: char| c.is_ascii_lowercase())
         && name[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-');
-    if !flag_like || raw_args.iter().any(|a| a == "--") {
+    let escaped = raw_args.windows(2).any(|w| w[0] == "--" && w[1] == first);
+    if !flag_like || escaped {
         return None;
     }
     let hint = match name {
+        // transition: removed by #717 (ADR-506)
         "--broadcast" => " It was removed: a send with no routing flag already reaches everyone.",
+        // transition: removed by #717 (ADR-506)
         "--focus" => " It was removed: use --channel.",
         _ => "",
     };
@@ -457,6 +461,13 @@ mod removed_flag_tests {
     fn explicit_double_dash_escapes() {
         let raw = v(&["attend", "send", "--", "--broadcast", "is", "gone"]);
         assert!(flag_like_refusal(&v(&["--broadcast", "is", "gone"]), &raw).is_none());
+    }
+
+    #[test]
+    fn a_later_double_dash_does_not_escape() {
+        let raw = v(&["attend", "send", "--chanel", "deploy", "deploying", "now", "--", "ETA", "5m"]);
+        let msg = v(&["--chanel", "deploy", "deploying", "now", "--", "ETA", "5m"]);
+        assert!(flag_like_refusal(&msg, &raw).is_some());
     }
 
     #[test]

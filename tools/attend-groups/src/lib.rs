@@ -81,9 +81,9 @@ impl Groups {
     /// caller is attend-chat (ADR-170).
     ///
     /// Only the member-scoped operations (`join`, `leave`,
-    /// `my_groups`, `joined_group_names`, `receive_dirs`) read it;
+    /// `my_groups`, `joined_group_names`) read it;
     /// the collection operations (`dissolve`, `cleanup_stale`,
-    /// `all_groups`, `has_group`, `members`, `pin`/`unpin`) act on
+    /// `all_groups`, `members`, `pin`/`unpin`) act on
     /// the group state as a whole and ignore it.
     pub fn new(signals_base: &Path, member_id: &str) -> Self {
         Self {
@@ -284,15 +284,6 @@ impl Groups {
             .filter(|(_, entry)| entry.members.contains(&self.member_id))
             .map(|(name, entry)| (name.clone(), entry.pinned))
             .collect()
-    }
-
-    /// Whether `_groups.yaml` currently has an entry for `name`.
-    /// Exists so callers (notably the ADR-124 migration) can avoid
-    /// triggering a full `save_state` rewrite when the work is
-    /// already done — narrows the read-modify-write window against
-    /// peer sessions editing the same file.
-    pub fn has_group(&self, name: &str) -> bool {
-        self.load_state().contains_key(name)
     }
 
     /// List member ids in a named group, or None if the group does not

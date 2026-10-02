@@ -143,15 +143,18 @@ first, or move your state by hand as below.
 
 ## Moving state by hand
 
-Each of these was read by a pre-ADR-506 binary and is not read now. Move what you want to keep:
+Each of these was read by a pre-ADR-506 binary and is not read now. The XDG variables are
+usually unset, so every command spells out its default; run them as written.
 
-| Old location | What it held | Move it to |
+| Old location | What it held | Move it |
 |---|---|---|
-| `$XDG_CACHE_HOME/claude-ways/` | model, corpus (derived) | nothing to move; `make setup` rebuilds `$XDG_CACHE_HOME/agent-ways/`. To keep the model: `mv $XDG_CACHE_HOME/claude-ways $XDG_CACHE_HOME/agent-ways` |
-| `~/.claude/stats/events.jsonl` | firing history | `cat ~/.claude/stats/events.jsonl >> $XDG_STATE_HOME/agent-ways/events.jsonl` |
-| `~/.claude/ways.json` | `disabled` domains, `output_language` | `$XDG_CONFIG_HOME/agent-ways/config.yaml`: `disabled` becomes `disabled_domains`, `output_language` becomes `language` |
-| `$XDG_CONFIG_HOME/ways/config.yaml` | user config | `mv` it to `$XDG_CONFIG_HOME/agent-ways/config.yaml` |
+| `${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways/` | model, corpus (derived) | Nothing to move: run `make setup` in the app dir, then `rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways"`. To keep the model instead: `c=${XDG_CACHE_HOME:-$HOME/.cache}; mkdir -p "$c/agent-ways/user" && mv "$c"/claude-ways/user/*.gguf "$c/agent-ways/user/" && rm -rf "$c/claude-ways"` (the engine reads `agent-ways/user/`, so a plain `mv` of the directory would nest it one level too deep) |
+| `~/.claude/stats/events.jsonl` | firing history | `s=${XDG_STATE_HOME:-$HOME/.local/state}; mkdir -p "$s/agent-ways" && cat ~/.claude/stats/events.jsonl >> "$s/agent-ways/events.jsonl"` |
+| `~/.claude/ways.json` | `disabled` domains, `output_language` | Add `disabled_domains: [...]` and `language: ...` to `${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/config.yaml` by hand: `disabled` becomes `disabled_domains`, `output_language` becomes `language` |
+| `${XDG_CONFIG_HOME:-$HOME/.config}/ways/config.yaml` | user config | Copy its keys into `agent-ways/config.yaml` by hand; a key already there wins. Do not `mv` it over that file: the first `ways reconcile` wrote `targets:` into it |
 | `~/.claude/.claude-upstream` | upstream marker for renamed clones | nothing reads it; delete it |
+| `ways uninstall` and `claude-ways` | the old cache dir | `ways uninstall` no longer removes `${XDG_CACHE_HOME:-$HOME/.cache}/claude-ways`; `rm -rf` it by hand |
+| `make update` | the retired target | After the stubs go (#717), a `make update` that stops with `No rule to make target 'install'` is an update from an old Makefile: run `ways update` |
 
 ## After migrating
 

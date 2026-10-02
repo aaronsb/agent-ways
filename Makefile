@@ -132,9 +132,11 @@ link:
 		fi; \
 	done
 	@if [ -e "$(CURDIR)/$(WAY_EMBED_BIN)" ]; then \
-		mkdir -p "$(CLAUDE_BIN)"; \
-		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$(CLAUDE_BIN)/way-embed" ]; then :; \
-		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$(CLAUDE_BIN)/way-embed"; fi; \
+		mkdir -p "$(CLAUDE_BIN)"; dst="$(CLAUDE_BIN)/way-embed"; \
+		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$$dst" ]; then :; \
+		elif [ -e "$$dst" ] && [ ! -L "$$dst" ]; then \
+			echo "  ⚠ $$dst is a real file; not replacing it (ways reconcile --force moves it aside)"; \
+		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$$dst"; fi; \
 	fi
 
 # Install any suite binary the install lacks, then link. `ways update` runs this
@@ -426,6 +428,7 @@ test-hooks:
 	@echo "Running hook script tests..."
 	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
+	@bash tests/make-link-test.sh
 	@bash tests/gh-tasks-test.sh
 
 test-unit:

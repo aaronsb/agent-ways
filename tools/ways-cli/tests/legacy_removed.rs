@@ -38,6 +38,50 @@ fn match_corpus_flag_is_rejected() {
     assert!(err.contains("unexpected argument"), "stderr: {err}");
 }
 
+/// The pre-1.0 events log (`~/.claude/stats/events.jsonl`) and cache dir
+/// (`$XDG_CACHE_HOME/claude-ways`) are no longer read (ADR-506): the events log
+/// and the model path resolve under the fixture's XDG dirs even when the old
+/// locations exist.
+#[test]
+fn old_events_log_and_cache_are_not_read() {
+    let home = std::env::temp_dir().join(format!("ways-legacy-paths-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".claude/stats")).unwrap();
+    std::fs::create_dir_all(home.join(".cache/claude-ways/user")).unwrap();
+    std::fs::write(home.join(".claude/stats/events.jsonl"), "{\"event\":\"x\"}\n").unwrap();
+    std::fs::write(home.join(".cache/claude-ways/user/minilm-l6-v2.gguf"), "model").unwrap();
+
+    let run = |args: &[&str]| -> String {
+        let out = Command::new(env!("CARGO_BIN_EXE_ways"))
+            .args(args)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_STATE_HOME", home.join(".local/state"))
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("CLAUDE_PROJECT_DIR", home.join("proj"))
+            .output()
+            .expect("run ways");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+
+    let log = run(&["events-log-path"]);
+    assert_eq!(log.trim(), home.join(".local/state/agent-ways/events.jsonl").to_string_lossy());
+    let status = run(&["status"]);
+    let model_line = status.lines().find(|l| l.starts_with("Model:")).expect("a Model: line");
+    assert!(model_line.contains(".cache/agent-ways/user/"), "{model_line}");
+    assert!(model_line.contains("MISSING"), "the old dir's model must not count: {model_line}");
+
+    // Control: a model at the current path is found, so the probe can see one.
+    std::fs::create_dir_all(home.join(".cache/agent-ways/user")).unwrap();
+    std::fs::write(home.join(".cache/agent-ways/user/minilm-l6-v2.gguf"), "model").unwrap();
+    let status = run(&["status"]);
+    let model_line = status.lines().find(|l| l.starts_with("Model:")).expect("a Model: line");
+    assert!(!model_line.contains("MISSING"), "{model_line}");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// The pre-1.0 config layers (`~/.claude/ways.json`, `$XDG_CONFIG_HOME/ways/config.yaml`)
 /// are no longer read (ADR-506); only `$XDG_CONFIG_HOME/agent-ways/config.yaml` is.
 #[test]

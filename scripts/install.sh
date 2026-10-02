@@ -191,6 +191,18 @@ is_agent_ways_repo() {
   return 1
 }
 
+# Shown when `ways reconcile` refuses: a real path sits at a projected root.
+print_projection_stopped() {
+  echo ""
+  echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
+  echo "  Read the list above. Move those paths aside (or copy what you want to keep"
+  echo "  into a project's .claude/skills/), then run:"
+  echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
+  echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+  echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
+  echo "  see docs/migration-1.0.md."
+}
+
 # Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.
 # Uses `if` (not `&&`) and an explicit `return 0` so a missing binary in the last
 # loop iteration can't make the function return non-zero and trip `set -e`.
@@ -294,7 +306,10 @@ if is_agent_ways_repo "$APP_DIR"; then
   echo ""
   if [[ -x "$APP_DIR/bin/ways" ]]; then
     echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-    "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" || true
+    if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
+      print_projection_stopped
+      exit 1
+    fi
     echo ""
     echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
     embedding_engine_ok || print_recovery_card
@@ -354,12 +369,7 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo ""
   mkdir -p "$DEST"
   if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
-    echo ""
-    echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
-    echo "  Read the list above. Move those paths aside (or copy what you want to keep"
-    echo "  into a project's .claude/skills/), then run:"
-    echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
-    echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+    print_projection_stopped
     exit 1
   fi
   echo ""

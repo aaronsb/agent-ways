@@ -415,10 +415,13 @@ fn converge_one(
         bail!(
             "{} projection root(s) under {} are real paths, not ways symlinks:\n{}\n\
              reconcile will not delete them. Move them aside yourself, or re-run with \
-             --force to rename each to a timestamped sibling (<name>.ways-backup-<seconds>).",
+             --force to rename each to a timestamped sibling (<name>.ways-backup-<seconds>). \
+             If {} is itself a git clone of agent-ways (pre-1.0), do not use --force; \
+             see docs/migration-1.0.md.",
             foreign.len(),
             dest_root.display(),
-            list
+            list,
+            dest_root.display()
         );
     }
 
@@ -1110,6 +1113,7 @@ mod tests {
         let s = |p: &Path| Some(p.to_string_lossy().into_owned());
         let err = run(s(&src), s(&dst), None, false, true, false).unwrap_err();
         assert!(err.to_string().contains("real paths"), "should refuse: {err}");
+        assert!(err.to_string().contains("do not use --force"), "should warn off --force: {err}");
         assert_eq!(
             std::fs::read_to_string(dst.join("skills/mine/SKILL.md")).unwrap(),
             "mine\n",

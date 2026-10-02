@@ -199,6 +199,8 @@ CFG_CACHE="/tmp/.claude-config-update-state-$(id -u)"
 CFG_BAK="$WORK/cfg-cache.bak"
 [[ -f "$CFG_CACHE" ]] && cp "$CFG_CACHE" "$CFG_BAK"
 restore_cfg_cache() { if [[ -f "$CFG_BAK" ]]; then cp "$CFG_BAK" "$CFG_CACHE"; else rm -f "$CFG_CACHE"; fi; }
+# An abort between here and the end still puts the user's cache back.
+trap 'restore_cfg_cache; rm -rf "$WORK"' EXIT
 
 rm -f "$CFG_CACHE"
 bash "$ROOT/hooks/check-config-updates.sh"

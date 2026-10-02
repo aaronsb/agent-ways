@@ -1,6 +1,6 @@
 name: Test
 
-# One job that runs every crate's tests. The per-binary build-*.yml workflows
+# One job that runs every crate's tests and the hook script tests. The per-binary build-*.yml workflows
 # test only their own crate, so a change confined to a library crate
 # (attend-groups, agent-fmt, sensor-peers) ran no tests at all.
 
@@ -9,10 +9,16 @@ on:
     branches: [main]
     paths:
       - 'tools/**'
+      - 'hooks/**'
+      - 'tests/**'
+      - 'Makefile'
       - '.github/workflows/test.yml'
   pull_request:
     paths:
       - 'tools/**'
+      - 'hooks/**'
+      - 'tests/**'
+      - 'Makefile'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
@@ -25,3 +31,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: test
         run: cargo test --manifest-path tools/Cargo.toml --workspace
+      - name: hook tests
+        run: make test-hooks
