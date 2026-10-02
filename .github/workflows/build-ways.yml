@@ -6,8 +6,13 @@ on:
     tags: ['ways-v*']
     paths:
       - 'tools/ways-cli/**'
-      - 'tools/ways-core/**'
       - 'tools/agent-fmt/**'
+      - 'tools/agent-identity/**'
+      - 'tools/agent-theme/**'
+      - 'tools/claude-sessions/**'
+      - 'tools/sensor-trait/**'
+      - 'tools/ways-agent-core/**'
+      - 'tools/ways-core/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-ways.yml'
@@ -15,8 +20,13 @@ on:
   pull_request:
     paths:
       - 'tools/ways-cli/**'
-      - 'tools/ways-core/**'
       - 'tools/agent-fmt/**'
+      - 'tools/agent-identity/**'
+      - 'tools/agent-theme/**'
+      - 'tools/claude-sessions/**'
+      - 'tools/sensor-trait/**'
+      - 'tools/ways-agent-core/**'
+      - 'tools/ways-core/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-ways.yml'

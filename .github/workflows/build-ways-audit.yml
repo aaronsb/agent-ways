@@ -6,6 +6,9 @@ on:
     tags: ['ways-audit-v*']
     paths:
       - 'tools/ways-audit/**'
+      - 'tools/agent-theme/**'
+      - 'tools/claude-sessions/**'
+      - 'tools/sensor-trait/**'
       - 'tools/ways-core/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
@@ -14,6 +17,9 @@ on:
   pull_request:
     paths:
       - 'tools/ways-audit/**'
+      - 'tools/agent-theme/**'
+      - 'tools/claude-sessions/**'
+      - 'tools/sensor-trait/**'
       - 'tools/ways-core/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'

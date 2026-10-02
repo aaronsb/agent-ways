@@ -13,6 +13,9 @@ on:
       - 'tests/**'
       - 'Makefile'
       - 'scripts/install.sh'
+      - 'scripts/workflow-paths.py'
+      - '.github/workflows/build-*.yml'
+      - '.github/workflows/reusable-build.yml'
       - '.github/workflows/test.yml'
   pull_request:
     paths:
@@ -21,6 +24,9 @@ on:
       - 'tests/**'
       - 'Makefile'
       - 'scripts/install.sh'
+      - 'scripts/workflow-paths.py'
+      - '.github/workflows/build-*.yml'
+      - '.github/workflows/reusable-build.yml'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 

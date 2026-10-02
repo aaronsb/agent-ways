@@ -96,7 +96,7 @@ jobs:
           mkdir -p build ../../dist
           cd build
           cmake -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra }} ..
-          cmake --build . --target way-embed -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          cmake --build . --target way-embed -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
           cd ..
           cp build/way-embed "../../$BIN"
 

@@ -19,6 +19,13 @@ has() {  # haystack needle
 bins=$(awk '/^[a-z]/ { print $1 }' "$ROOT/tools/suite-bins")
 check "tools/suite-bins lists binaries" "yes" "$([[ -n $bins ]] && echo yes || echo no)"
 
+# Every entry is a real package of the workspace, so a stale entry fails here.
+packages=" $(cargo metadata --manifest-path "$ROOT/tools/Cargo.toml" --no-deps --offline --format-version 1 2>/dev/null \
+    | jq -r '.packages[].name' | tr '\n' ' ')"
+for b in $bins; do
+    check "$b is a package in tools/Cargo.toml" "yes" "$([[ $packages == *" $b "* ]] && echo yes || echo no)"
+done
+
 # Pattern rules, dry-run. Neither recipe calls $(MAKE) directly, so -n runs nothing.
 for b in $bins; do
     get=$(make -s -n -C "$ROOT" "$b" 2>&1)
@@ -37,6 +44,31 @@ expected_rebuilds="$(printf '%s-rebuild ' $bins)way-embed-rebuild"
 check "update-binaries rebuilds every suite binary and way-embed" "$expected_rebuilds" \
     "$(sed -n 's/^update-binaries: //p' <<< "$db")"
 check "relink installs from the same list" "$(echo $bins)" "$(sed -n 's/^SUITE_BINS := //p' <<< "$db")"
+
+# Each caller's paths: filter lists its crate's workspace dependencies.
+check "build-*.yml paths match cargo metadata" "0" \
+    "$(python3 "$ROOT/scripts/workflow-paths.py" --check >/dev/null 2>&1; echo $?)"
+
+# test.yml runs this test, so it must run when a build workflow changes.
+for w in "build-*.yml" "reusable-build.yml"; do
+    check "test.yml triggers on $w" "2" "$(grep -cF -- "- '.github/workflows/$w'" "$ROOT/.github/workflows/test.yml")"
+done
+
+# A failed cargo build stops the get-or-build rule and leaves no bin/attend.
+# The app dir holds what the recipe reads; a fake gh finds no release and a
+# fake cargo fails its build.
+FAILAPP="$WORK/failapp"
+mkdir -p "$FAILAPP/tools/scripts" "$FAILAPP/scripts" "$WORK/failbin" "$WORK/failfake"
+cp "$ROOT/tools/suite-bins" "$FAILAPP/tools/"
+cp "$ROOT/tools/scripts/download-prebuilt.sh" "$ROOT/tools/scripts/prebuilt-lib.sh" "$FAILAPP/tools/scripts/"
+cp "$ROOT/scripts/check-rust.sh" "$FAILAPP/scripts/"
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "cargo 1.95.0"; exit 0; }\nexit 101\n' > "$WORK/failbin/cargo"
+chmod +x "$WORK/failbin/cargo"
+PATH="$WORK/failbin:$ROOT/tests/fixtures/prebuilt:$PATH" FAKE="$WORK/failfake" FAKE_GH_FAIL=api RETRY_MAX=1 \
+    HOME="$WORK/home" XDG_CACHE_HOME="$WORK/cache" \
+    make -s -f "$ROOT/Makefile" -C "$FAILAPP" attend >/dev/null 2>&1
+check "make attend fails when the download and the cargo build both fail" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+check "and leaves no bin/attend" "no" "$([[ -e $FAILAPP/bin/attend || -L $FAILAPP/bin/attend ]] && echo yes || echo no)"
 
 # `make link` and install.sh link the same names from one app dir.
 APP="$WORK/app"

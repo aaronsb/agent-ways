@@ -290,6 +290,7 @@ test-hooks:
 	@bash tests/make-link-test.sh
 	@bash tests/make-targets-test.sh
 	@bash tests/prebuilt-lib-test.sh
+	@bash tests/download-prebuilt-test.sh
 	@bash tests/gh-tasks-test.sh
 
 test-unit:

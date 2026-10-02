@@ -7,6 +7,7 @@ on:
     paths:
       - 'tools/ways-mcp/**'
       - 'tools/attend-session/**'
+      - 'tools/claude-sessions/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-ways-mcp.yml'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'tools/ways-mcp/**'
       - 'tools/attend-session/**'
+      - 'tools/claude-sessions/**'
       - 'tools/Cargo.toml'
       - 'tools/Cargo.lock'
       - '.github/workflows/build-ways-mcp.yml'
