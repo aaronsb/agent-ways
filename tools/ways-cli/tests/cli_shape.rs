@@ -48,13 +48,25 @@ fn plumbing_is_hidden_and_still_runs() {
 
 #[test]
 fn a_group_with_no_verb_prints_its_help_and_exits_2() {
-    for group in ["target", "session", "author", "tune"] {
+    for group in ["target", "author", "tune"] {
         let out = ways(&[group]);
         assert_eq!(out.status.code(), Some(2), "{group}");
         let text = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
         // The binary is `ways.exe` on Windows.
         assert!(text.contains(&format!(" {group} <COMMAND>")), "{group}: {text}");
     }
+}
+
+/// A bare `ways session` opens the session screen on a terminal; in a pipe,
+/// as here, it prints its help and exits 2 like a group that needs a verb
+/// (ADR-507 §7, note of 2026-10-02).
+#[test]
+fn a_bare_session_in_a_pipe_prints_its_help_and_exits_2() {
+    let out = ways(&["session"]);
+    assert_eq!(out.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains(" session [COMMAND]") && text.contains("replay"), "{text}");
+    assert!(stdout(&out).is_empty(), "help goes to stderr, as a usage error's does");
 }
 
 #[test]

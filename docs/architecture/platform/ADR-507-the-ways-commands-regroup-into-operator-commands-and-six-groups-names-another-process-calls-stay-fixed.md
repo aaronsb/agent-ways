@@ -235,3 +235,7 @@ Issue #751 adds a footer to the help that item 7 governs. The top-level help (a 
 ## Note (2026-10-02): every screen has a command an agent can run
 
 A screen is a view, for a person. An agent authors, refactors and tunes ways through commands, and reads their `--json` form to decide its next edit. So everything a screen shows comes from a command that runs without a terminal and has a `--json` form, scoped as the screen is: the session screen's tabs read what `ways session replay --json`, `ways session fires --json`, `ways agent cost --json`, `ways tune stats --json` and `ways tune precision --json` print, scoped as the tab is (#738). A screen may add navigation and nothing else. Its data stays with the command. A group that opens a screen when run bare on a terminal (#748) keeps every verb, and keeps item 7's help and exit 2 in a pipe.
+
+## Note (2026-10-02): `session` is the first group that opens its screen bare
+
+Since #738, `ways session` is the first group the note above covers: bare on a terminal (stdin and stdout), it opens the session screen on its sessions tab. Its usage line reads `[COMMAND]`, so the call-site check lists it among the groups a script must still give a verb. `target` and `agent` follow in #748; `projects` keeps `list` in a pipe.
