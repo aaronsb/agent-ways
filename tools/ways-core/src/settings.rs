@@ -351,31 +351,12 @@ pub fn project_file(project_dir: &Path) -> PathBuf {
     project_dir.join(".claude").join("ways.yaml")
 }
 
-/// Every layer a ways key resolves through, lowest first: the legacy
-/// `ways.json` and `$XDG_CONFIG_HOME/ways/config.yaml`, the user file, the
-/// current target's file, and the project overlay.
+/// Every layer a ways key resolves through, lowest first: the user file,
+/// the current target's file, and the project overlay. ADR-506 retired the
+/// pre-1.0 `ways.json` and `$XDG_CONFIG_HOME/ways/config.yaml` layers.
 pub fn layers(project_dir: &Path) -> Vec<Layer> {
     let mut out = Vec::new();
-    let home = crate::util::home_dir();
-    let json = home.join(".claude/ways.json");
-    if let Ok(text) = std::fs::read_to_string(&json) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-            let mut m = serde_yaml::Mapping::new();
-            if let Some(l) = v.get("output_language").and_then(|l| l.as_str()) {
-                m.insert("language".into(), l.into());
-            }
-            if let Some(d) = v.get("disabled").and_then(|d| d.as_array()) {
-                let list: Vec<Value> = d.iter().filter_map(|x| x.as_str()).map(Value::from).collect();
-                m.insert("disabled_domains".into(), Value::Sequence(list));
-            }
-            out.push(Layer::from_value(&SCHEMA, "legacy", FILE, LayerScope::User, Some(&json), &Value::Mapping(m)));
-        }
-    }
-    let legacy = crate::config::legacy_user_config();
     let user = crate::paths::user_config();
-    if legacy != user && legacy.is_file() {
-        out.push(Layer::read(&SCHEMA, "legacy", FILE, LayerScope::User, &legacy));
-    }
     let user_layer = Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &user);
     let targets: Option<Vec<crate::config::Target>> =
         user_layer.get(&["targets".into()]).and_then(|v| serde_yaml::from_value(v.clone()).ok());

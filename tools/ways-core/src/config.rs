@@ -288,31 +288,15 @@ impl Config {
     pub fn load_sections(project_dir: &str, sections: &[&str]) -> Self {
         let mut cfg = Config::default();
 
-        // Layer 1: legacy ways.json
-        let ways_json = home_dir().join(".claude/ways.json");
-        if let Ok(content) = std::fs::read_to_string(&ways_json) {
-            cfg.apply_ways_json(&content);
-        }
-
-        // Layer 2: legacy XDG user config ($XDG_CONFIG_HOME/ways/config.yaml).
-        // Kept as a fallback for installs written before the app-namespaced path.
-        let legacy_xdg = legacy_user_config();
-        if let Some(doc) = checked_file(&legacy_xdg, LayerScope::User, sections) {
-            cfg.apply_values(&doc);
-        }
-
-        // Layer 3: canonical user config ($XDG_CONFIG_HOME/agent-ways/config.yaml) —
-        // the app-namespaced location, matching user_ways_root's parent. This is the
-        // single source of truth for the path (paths::user_config); it overrides
-        // the legacy `ways/config.yaml` above when both exist.
+        // User config ($XDG_CONFIG_HOME/agent-ways/config.yaml) — the
+        // app-namespaced location, matching user_ways_root's parent. This is the
+        // single source of truth for the path (paths::user_config).
         let user_config = crate::paths::user_config();
-        if user_config != legacy_xdg {
-            if let Some(doc) = checked_file(&user_config, LayerScope::User, sections) {
-                cfg.apply_values(&doc);
-                // Targets are user scope only (ADR-184): a project cannot
-                // redirect where the install lands.
-                cfg.targets = doc.get("targets").and_then(Self::read_targets_value);
-            }
+        if let Some(doc) = checked_file(&user_config, LayerScope::User, sections) {
+            cfg.apply_values(&doc);
+            // Targets are user scope only (ADR-184): a project cannot
+            // redirect where the install lands.
+            cfg.targets = doc.get("targets").and_then(Self::read_targets_value);
         }
 
         // Layer 3.5: the current target's own config (ADR-184). The session's
@@ -336,25 +320,6 @@ impl Config {
         }
 
         cfg
-    }
-
-    /// Apply values from legacy ways.json.
-    fn apply_ways_json(&mut self, content: &str) {
-        let v: serde_json::Value = match serde_json::from_str(content) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-
-        if let Some(lang) = v.get("output_language").and_then(|v| v.as_str()) {
-            self.language = lang.to_string();
-        }
-
-        if let Some(disabled) = v.get("disabled").and_then(|v| v.as_array()) {
-            self.disabled_domains = disabled
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-        }
     }
 
     /// Apply a YAML config file's text, checked as a user-scope layer.
@@ -504,20 +469,12 @@ impl Config {
         format!(
             "user:    {}\nproject: $PROJECT/.claude/ways.yaml",
             crate::paths::user_config().display(),
-            legacy_user_config().display(),
-            home_dir().join(".claude/ways.json").display()
         )
     }
 }
 
 fn home_dir() -> PathBuf {
     crate::util::home_dir()
-}
-
-/// The pre-namespace user config, `$XDG_CONFIG_HOME/ways/config.yaml`, still
-/// read beneath the canonical one.
-pub fn legacy_user_config() -> PathBuf {
-    xdg_config_dir().join("ways/config.yaml")
 }
 
 /// Read and check one settings file. `None` when it is absent or does not
@@ -566,12 +523,6 @@ fn report(line: &str) {
 
 fn targets_value(list: &[Target]) -> serde_yaml::Value {
     serde_yaml::to_value(list).unwrap_or(serde_yaml::Value::Sequence(Vec::new()))
-}
-
-fn xdg_config_dir() -> PathBuf {
-    std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".config"))
 }
 
 #[cfg(test)]
