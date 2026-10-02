@@ -55,57 +55,106 @@ fn fixture_ways_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ways")
 }
 
-fn generate_corpus(name: &str) -> PathBuf {
-    // Per-test corpus dir avoids races when tests run in parallel
-    let corpus_dir = std::env::temp_dir().join(format!("ways-sim-corpus-{}-{}", name, std::process::id()));
-    std::fs::create_dir_all(&corpus_dir).unwrap();
-    let corpus_file = corpus_dir.join("ways-corpus.jsonl");
+/// A `ways` command isolated from the operator's install and session.
+///
+/// HOME and every XDG base dir point at the test's own tree, so the binary
+/// never reads the real `~/.claude`, user config, app data, or state. The
+/// working directory and `PWD` point at an empty project dir the test owns:
+/// with `CLAUDE_PROJECT_DIR` unset, project config (`.claude/ways.yaml`) is
+/// read from `PWD`, so the directory `cargo test` was started in would
+/// otherwise decide which ways are enabled. The variables Claude Code and
+/// agent-ways export into an agent shell are cleared. Callers that need one
+/// of them set it after this call. `XDG_RUNTIME_DIR` is inherited: the
+/// session markers live under it and [`sessions_root`] reads the same value.
+fn ways_cmd(home: &Path, cache: &Path, state: &Path) -> Command {
+    let project = sim_root().join("project");
+    let mut cmd = Command::new(ways_bin());
+    cmd.current_dir(&project)
+        .env("PWD", &project)
+        .env("HOME", home)
+        // home_dir() prefers USERPROFILE on Windows, so set both or the
+        // fixture-home redirection is ignored and the binary reads the real
+        // ~/.claude. See util::home_dir().
+        .env("USERPROFILE", home)
+        .env("XDG_CACHE_HOME", cache)
+        .env("XDG_STATE_HOME", state)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_BIN_HOME", home.join(".local/bin"));
+    for var in [
+        "CLAUDE_PROJECT_DIR",
+        "CLAUDE_AGENT_ID",
+        "CLAUDE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CONFIG_DIR",
+        "WAYS_AGENT_SOCK",
+        "WAYS_CLAUDE_BIN",
+    ] {
+        cmd.env_remove(var);
+    }
+    cmd
+}
 
-    let _status = Command::new(ways_bin())
+/// Build the fixture corpus into a per-scenario XDG cache root and return
+/// that root. The embedding engine is looked up under the fixture data dir,
+/// where none is installed, so the corpus is keyword-only on every machine.
+fn generate_corpus(name: &str) -> PathBuf {
+    // Per-test cache root avoids races when tests run in parallel
+    let cache = sim_root().join(format!("corpus-{name}"));
+    let _ = std::fs::remove_dir_all(&cache);
+    std::fs::create_dir(&cache).unwrap();
+
+    let home = fixture_home();
+    let output = ways_cmd(&home, &cache, &home.join(".local/state"))
         .args(["corpus", "--ways-dir"])
         .arg(fixture_ways_dir())
         .arg("--quiet")
-        .env("XDG_CACHE_HOME", &corpus_dir)
-        .status()
+        .output()
         .expect("Failed to run ways corpus");
+    assert!(
+        output.status.success(),
+        "ways corpus failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    // The corpus goes to XDG_CACHE_HOME/agent-ways/user/ways-corpus.jsonl
-    let actual = corpus_dir.join("agent-ways/user/ways-corpus.jsonl");
-    if actual.exists() {
-        return actual;
-    }
-    // Fallback
-    corpus_file
+    let corpus = cache.join("agent-ways/user/ways-corpus.jsonl");
+    assert!(corpus.exists(), "ways corpus wrote no corpus at {}", corpus.display());
+    cache
 }
 
 struct Session {
     id: String,
-    corpus: PathBuf,
+    /// The XDG cache root holding this session's corpus.
+    cache: PathBuf,
 }
 
 impl Session {
+    /// A `ways` command against the fixture home and this session's corpus.
+    fn cmd(&self) -> Command {
+        self.cmd_with_home(&fixture_home())
+    }
+
+    /// A `ways` command against `home` and this session's corpus.
+    fn cmd_with_home(&self, home: &Path) -> Command {
+        ways_cmd(home, &self.cache, &home.join(".local/state"))
+    }
+
     fn new(name: &str) -> Self {
         let id = format!("sim-{}-{}", name, std::process::id());
-        let corpus = generate_corpus(name);
+        let cache = generate_corpus(name);
         // Clean any stale markers
         clean_markers(&id);
-        Session { id, corpus }
+        Session { id, cache }
     }
 
     fn scan_prompt(&self, query: &str) -> String {
-        let output = Command::new(ways_bin())
+        let output = self.cmd()
             .args([
                 "scan", "prompt",
                 "--query", query,
                 "--session", &self.id,
                 "--project", "/tmp/nonexistent-project",
             ])
-            .env("HOME", fixture_home())
-            // home_dir() prefers USERPROFILE on Windows, so set both or the
-            // fixture-home redirection is ignored and the binary reads the real
-            // ~/.claude. See util::home_dir().
-            .env("USERPROFILE", fixture_home())
-            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan prompt");
 
@@ -113,19 +162,13 @@ impl Session {
     }
 
     fn scan_command(&self, cmd: &str) -> String {
-        let output = Command::new(ways_bin())
+        let output = self.cmd()
             .args([
                 "scan", "command",
                 "--command", cmd,
                 "--session", &self.id,
                 "--project", "/tmp/nonexistent-project",
             ])
-            .env("HOME", fixture_home())
-            // home_dir() prefers USERPROFILE on Windows, so set both or the
-            // fixture-home redirection is ignored and the binary reads the real
-            // ~/.claude. See util::home_dir().
-            .env("USERPROFILE", fixture_home())
-            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan command");
 
@@ -133,19 +176,13 @@ impl Session {
     }
 
     fn scan_file(&self, path: &str) -> String {
-        let output = Command::new(ways_bin())
+        let output = self.cmd()
             .args([
                 "scan", "file",
                 "--path", path,
                 "--session", &self.id,
                 "--project", "/tmp/nonexistent-project",
             ])
-            .env("HOME", fixture_home())
-            // home_dir() prefers USERPROFILE on Windows, so set both or the
-            // fixture-home redirection is ignored and the binary reads the real
-            // ~/.claude. See util::home_dir().
-            .env("USERPROFILE", fixture_home())
-            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan file");
 
@@ -153,19 +190,13 @@ impl Session {
     }
 
     fn scan_prompt_with_project(&self, query: &str, project: &str) -> String {
-        let output = Command::new(ways_bin())
+        let output = self.cmd()
             .args([
                 "scan", "prompt",
                 "--query", query,
                 "--session", &self.id,
                 "--project", project,
             ])
-            .env("HOME", fixture_home())
-            // home_dir() prefers USERPROFILE on Windows, so set both or the
-            // fixture-home redirection is ignored and the binary reads the real
-            // ~/.claude. See util::home_dir().
-            .env("USERPROFILE", fixture_home())
-            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan prompt");
 
@@ -173,16 +204,13 @@ impl Session {
     }
 
     fn scan_prompt_with_home(&self, query: &str, home: &Path) -> String {
-        let output = Command::new(ways_bin())
+        let output = self.cmd_with_home(home)
             .args([
                 "scan", "prompt",
                 "--query", query,
                 "--session", &self.id,
                 "--project", "/tmp/nonexistent-project",
             ])
-            .env("HOME", home)
-            .env("USERPROFILE", home) // see scan_prompt: home_dir() prefers USERPROFILE on Windows
-            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan prompt");
 
@@ -206,14 +234,8 @@ impl Session {
             args.push("--hook-event");
             args.push(ev);
         }
-        let output = Command::new(ways_bin())
+        let output = self.cmd()
             .args(&args)
-            .env("HOME", fixture_home())
-            // home_dir() prefers USERPROFILE on Windows, so set both or the
-            // fixture-home redirection is ignored and the binary reads the real
-            // ~/.claude. See util::home_dir().
-            .env("USERPROFILE", fixture_home())
-            .env("XDG_CACHE_HOME", self.corpus.parent().unwrap().parent().unwrap().parent().unwrap())
             .output()
             .expect("Failed to run ways scan state");
 
@@ -230,33 +252,74 @@ impl Drop for Session {
     }
 }
 
-/// The fixture HOME — ways looks for ~/.claude/hooks/ways/
-fn fixture_home() -> PathBuf {
-    let home = std::env::temp_dir().join("ways-sim-home");
-    let ways_link = home.join(".claude/hooks/ways");
-    if !ways_link.exists() {
+/// Prefix of the per-process sim root under the temp dir.
+const SIM_ROOT_PREFIX: &str = "ways-sim-home-";
+
+/// Sim roots older than this belong to finished runs and are swept.
+const SIM_ROOT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// This test process's private tree: the fixture home (`home/`), the
+/// per-scenario corpus caches (`corpus-<name>/`), scenario homes, and the
+/// empty project dir `ways_cmd` runs in (`project/`).
+///
+/// One per test process, built fresh on first use. A home shared by path
+/// across runs outlived the checkout it linked to: a removed worktree left
+/// `hooks/ways` dangling, `exists()` reported it missing, the relink failed
+/// silently on the existing link, and every fixture way went unseen.
+///
+/// A test binary has no global teardown, so each run sweeps the sim roots of
+/// runs older than [`SIM_ROOT_MAX_AGE`] instead of removing its own.
+fn sim_root() -> &'static Path {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        let tmp = std::env::temp_dir();
+        let root = tmp.join(format!("{SIM_ROOT_PREFIX}{}", std::process::id()));
+        sweep_stale_sim_roots(&tmp, &root);
+        let _ = std::fs::remove_dir_all(&root); // a reused pid's leftovers
+        // create_dir, not create_dir_all: a directory that survived the wipe
+        // (one another user owns in a shared /tmp) fails here, loudly.
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(root.join("project")).unwrap();
+
+        let ways_link = root.join("home/.claude/hooks/ways");
         std::fs::create_dir_all(ways_link.parent().unwrap()).unwrap();
         // Put the fixture ways where the binary expects them
         // ($HOME/.claude/hooks/ways).
         #[cfg(unix)]
-        std::os::unix::fs::symlink(fixture_ways_dir(), &ways_link).ok();
+        std::os::unix::fs::symlink(fixture_ways_dir(), &ways_link).unwrap();
         // Windows symlinks need admin / Developer Mode (the Makefile copies for
-        // the same reason), so copy the tree in. Stage in a pid-unique dir and
-        // atomically rename, so parallel tests never observe a half-copy.
+        // the same reason), so copy the tree in.
         #[cfg(windows)]
-        {
-            let staging =
-                home.join(format!(".claude/hooks/ways.staging-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&staging);
-            if copy_dir_all(&fixture_ways_dir(), &staging).is_ok()
-                && std::fs::rename(&staging, &ways_link).is_err()
-            {
-                // Another test won the race; discard our copy.
-                let _ = std::fs::remove_dir_all(&staging);
-            }
+        copy_dir_all(&fixture_ways_dir(), &ways_link).unwrap();
+        root
+    })
+}
+
+/// Remove sibling sim roots last modified more than [`SIM_ROOT_MAX_AGE`] ago.
+/// A run still in progress created its root moments ago, so it is never swept.
+fn sweep_stale_sim_roots(tmp: &Path, own: &Path) {
+    let Ok(entries) = std::fs::read_dir(tmp) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_sim_root = entry.file_name().to_string_lossy().starts_with(SIM_ROOT_PREFIX);
+        if !is_sim_root || path == own {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > SIM_ROOT_MAX_AGE);
+        if stale {
+            let _ = std::fs::remove_dir_all(&path);
         }
     }
-    home
+}
+
+/// The fixture HOME — ways looks for ~/.claude/hooks/ways/
+fn fixture_home() -> PathBuf {
+    sim_root().join("home")
 }
 
 #[cfg(windows)]
@@ -384,6 +447,35 @@ fn scenario_1_basic_prompt_matching() {
     s.scan_prompt("refactor extract method decompose this function");
     assert_epoch(&s.id, 3);
     assert_marker_exists("testdomain/parent/child2", &s.id);
+}
+
+#[test]
+fn scenario_1_ignores_the_invokers_project_config() {
+    // Project config is read from PWD when CLAUDE_PROJECT_DIR is unset. Run
+    // scenario 1 as a child test process from a directory whose ways.yaml
+    // disables the way it expects to fire: ways_cmd must not let it through.
+    let cwd = sim_root().join("invoker-cwd");
+    let _ = std::fs::remove_dir_all(&cwd);
+    std::fs::create_dir_all(cwd.join(".claude")).unwrap();
+    std::fs::write(
+        cwd.join(".claude/ways.yaml"),
+        "ways:\n  testdomain/parent/child: false\n",
+    )
+    .unwrap();
+
+    let out = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "scenario_1_basic_prompt_matching", "--test-threads=1"])
+        .current_dir(&cwd)
+        .env("PWD", &cwd)
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .output()
+        .expect("Failed to rerun scenario 1");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("1 passed"),
+        "scenario 1 failed when run from a dir that disables its way:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 // ── Scenario 2: Command Triggers ───────────────────────────────
@@ -561,24 +653,19 @@ fn scenario_9_domain_disable() {
     let s = Session::new("s9");
 
     // Create a fixture home with ways.json that disables "testdomain"
-    let home = std::env::temp_dir().join("ways-sim-home-s9");
+    // (inside this process's sim root, so no other run shares it)
+    let home = sim_root().join("home-s9");
+    let _ = std::fs::remove_dir_all(&home);
     let claude_dir = home.join(".claude");
-    std::fs::create_dir_all(&claude_dir).unwrap();
 
     // Place fixture ways under this scenario's private home.
     let ways_link = claude_dir.join("hooks/ways");
     std::fs::create_dir_all(ways_link.parent().unwrap()).unwrap();
     #[cfg(unix)]
-    {
-        let _ = std::fs::remove_file(&ways_link);
-        std::os::unix::fs::symlink(fixture_ways_dir(), &ways_link).unwrap();
-    }
+    std::os::unix::fs::symlink(fixture_ways_dir(), &ways_link).unwrap();
     // Windows: copy instead of symlink (needs admin/Developer Mode otherwise).
     #[cfg(windows)]
-    {
-        let _ = std::fs::remove_dir_all(&ways_link);
-        copy_dir_all(&fixture_ways_dir(), &ways_link).unwrap();
-    }
+    copy_dir_all(&fixture_ways_dir(), &ways_link).unwrap();
 
     // Write ways.json disabling testdomain
     std::fs::write(
@@ -669,20 +756,13 @@ fn scenario_11_hook_event_misroute_warning() {
 /// Run `ways scan command` against an isolated HOME and XDG state dir, so the
 /// test owns its ways corpus and reads its own event log.
 fn scan_command_isolated(session: &str, cmd: &str, home: &Path, state: &Path) -> String {
-    let output = Command::new(ways_bin())
+    let output = ways_cmd(home, &home.join(".cache"), state)
         .args([
             "scan", "command",
             "--command", cmd,
             "--session", session,
             "--project", "/tmp/nonexistent-project",
         ])
-        .env("HOME", home)
-        .env("USERPROFILE", home) // see scan_prompt
-        .env("XDG_STATE_HOME", state)
-        .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env("XDG_CONFIG_HOME", home.join(".config"))
-        .env_remove("CLAUDE_PROJECT_DIR")
-        .env_remove("CLAUDE_AGENT_ID")
         .output()
         .expect("Failed to run ways scan command");
     String::from_utf8_lossy(&output.stdout).to_string()
@@ -884,15 +964,10 @@ fn scenario_14_show_way_budget_used_withholds_with_exit_3() {
     clean_markers(&session);
 
     let show = |used: &str| {
-        Command::new(ways_bin())
+        ways_cmd(&home, &home.join(".cache"), &state)
             .args(["show", "way", "showdomain/big", "--session", &session, "--trigger", "postcheck"])
             .arg(format!("--budget-used={used}"))
-            .env("HOME", &home)
-            .env("USERPROFILE", &home)
-            .env("XDG_STATE_HOME", &state)
-            .env("XDG_CONFIG_HOME", home.join(".config"))
             .env("CLAUDE_PROJECT_DIR", "/tmp/nonexistent-project")
-            .env_remove("CLAUDE_AGENT_ID")
             .output()
             .expect("Failed to run ways show way")
     };
@@ -920,20 +995,13 @@ fn scenario_14_show_way_budget_used_withholds_with_exit_3() {
 // ── Scenarios 15–16: the file lane's admission order (#634) ────
 
 fn scan_file_isolated(session: &str, path: &str, home: &Path, state: &Path) -> String {
-    let output = Command::new(ways_bin())
+    let output = ways_cmd(home, &home.join(".cache"), state)
         .args([
             "scan", "file",
             "--path", path,
             "--session", session,
             "--project", "/tmp/nonexistent-project",
         ])
-        .env("HOME", home)
-        .env("USERPROFILE", home) // see scan_prompt
-        .env("XDG_STATE_HOME", state)
-        .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env("XDG_CONFIG_HOME", home.join(".config"))
-        .env_remove("CLAUDE_PROJECT_DIR")
-        .env_remove("CLAUDE_AGENT_ID")
         .output()
         .expect("Failed to run ways scan file");
     String::from_utf8_lossy(&output.stdout).to_string()
@@ -1060,20 +1128,14 @@ fn write_transcript(home: &Path, slug: &str, session: &str, tokens: u64) {
 /// [`scan_command_isolated`]; returns the `token_position` of each `way_fired`
 /// row for `session`.
 fn fired_token_positions(session: &str, project: &str, home: &Path, state: &Path) -> Vec<u64> {
-    Command::new(ways_bin())
+    ways_cmd(home, &home.join(".cache"), state)
         .args([
             "scan", "command",
             "--command", "git commit -m x",
             "--session", session,
             "--project", project,
         ])
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .env("XDG_STATE_HOME", state)
-        .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("CLAUDE_PROJECT_DIR", project)
-        .env_remove("CLAUDE_AGENT_ID")
         .output()
         .expect("Failed to run ways scan command");
     let log = std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
@@ -1126,15 +1188,8 @@ fn scenario_18_token_position_finds_an_underscore_project() {
 
     // The scan above falls back to every project dir on a slug miss, so it
     // cannot pin the slug. `ways context --project` reads the slug's dir alone.
-    let out = Command::new(ways_bin())
+    let out = ways_cmd(&home, &home.join(".cache"), &state)
         .args(["context", "--project", project, "--json"])
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env("XDG_STATE_HOME", &state)
-        .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env("XDG_CONFIG_HOME", home.join(".config"))
-        .env_remove("CLAUDE_SESSION_ID")
-        .env_remove("CLAUDE_PROJECT_DIR")
         .output()
         .expect("Failed to run ways context");
     let json: serde_json::Value = serde_json::from_slice(&out.stdout)
