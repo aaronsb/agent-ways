@@ -431,7 +431,16 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
 
 fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
     let path = profile::user_layer_path();
-    let mut user = UserLayer::load(&path)?;
+    let (mut user, findings) = UserLayer::load_with_findings(&path)?;
+    // The profile being edited, or the engine, fell back: what was loaded is
+    // not what the file says, so writing from it could lose hand edits.
+    let profile_unit = format!("gate.profiles.{name}");
+    if let Some(f) = findings.iter().find(|f| f.fallback && matches!(f.unit.as_deref(), Some(u) if u == "gate" || u == "gate.profiles" || u == profile_unit)) {
+        bail!("{f}; the engine was not changed. `ways settings lint` lists the findings");
+    }
+    for f in &findings {
+        eprintln!("{}", f.diagnostic("ways"));
+    }
     user.engine = Some(name.to_string());
     // Without --model a shipped profile returns to its tuned model; a profile
     // the user defined keeps the model it names.
@@ -459,7 +468,9 @@ fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
     if let Some(net::Check::ModelUnavailable(model)) = &result {
         bail!("{} does not offer model {model}; the engine was not changed", p.provider);
     }
-    user.save(&path)?;
+    // Only the keys `use` sets: the engine, and the profile's provider and
+    // model. The profile's other fields stay as the file has them.
+    user.save_keys(&path, &[&["engine"], &["profiles", name, "provider"], &["profiles", name, "model"]])?;
     println!("engine: {name} ({} {}), mode {}", p.provider, p.model, resolved.mode.as_str());
     if !p.provider.is_recommended(&p.model) {
         println!(
@@ -486,7 +497,7 @@ fn set_mode(mode: Mode) -> Result<ExitCode> {
     let path = profile::user_layer_path();
     let mut user = UserLayer::load(&path)?;
     user.mode = (mode != Mode::default()).then_some(mode);
-    user.save(&path)?;
+    user.save_fields(&path, &["mode"])?;
     let note = match mode {
         Mode::Enforce => "ways judged irrelevant are not injected",
         Mode::Shadow => "every candidate is judged and logged; the matcher still decides",
@@ -497,6 +508,14 @@ fn set_mode(mode: Mode) -> Result<ExitCode> {
 }
 
 fn show_config() -> Result<ExitCode> {
+    let path = profile::user_layer_path();
+    let (_, findings) = UserLayer::load_with_findings(&path)?;
+    if let Some(f) = profile::fails_closed(&findings) {
+        println!("user layer: {}", path.display());
+        println!("gate: off ({f}; the gate fails closed until it is fixed)");
+        println!("`ways settings lint` lists the findings");
+        return Ok(ExitCode::SUCCESS);
+    }
     let (user, settings) = current_settings()?;
     println!("user layer: {}", profile::user_layer_path().display());
     let Some(s) = settings else {

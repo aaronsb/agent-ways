@@ -24,5 +24,6 @@ pub mod paths;
 pub mod provenance;
 pub mod reflow;
 pub mod scanner;
+pub mod settings;
 pub mod transcript;
 pub mod util;

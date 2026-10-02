@@ -188,3 +188,25 @@ Open, and left to that record or a later one: whether domain switches (user scop
 - **All schemas in `agent-settings`.** One crate would define every component's keys, so `attend` or the daemon could not change or ship a key without a release of the shared crate, and neither could leave the workspace on its own.
 - **`ways-cli` depends on the `attend` crate for its schema.** It pulls a binary crate and its dependencies into `ways` for a set of types.
 - **Folding the command regrouping into this record.** Rejected for the reason in §14.
+
+## Addendum, 2026-10-01: fallback units, as built (§2, §4)
+
+Appended after acceptance; nothing above is changed. The first build (PR #713, issue #695) settles two points of §2 and §4, on the operator's decision in that PR's review.
+
+- **A unit that fails falls through, not to canonical.** A section that fails the schema is left out of that file's layer only. Its keys then resolve from the layers beneath, which end at canonical, so a broken section in a project's `.claude/ways.yaml` takes the user's values, not the shipped ones. For a key set in one file only, the result is canonical, as §4 says. The diagnostic says the keys resolve from the layers beneath.
+- **The fallback unit is narrower than a section of related keys.** A switch that turns something off is a section of its own: `enabled`, `disabled_domains`, `targets`, `secret_path_deny` and the gate's `mode`. A bad value in a neighbouring key cannot switch it back on. In a section that is a collection of switches or profiles (`ways:` per-way toggles, `profiles:`), each entry is its own unit: a bad entry is dropped, and the others load. A value outside its range is a lint finding, and its unit falls back; it is not clamped.
+- **A switch that turns something off fails closed.** In a file that parses, when the switch's own value is bad, it stays off rather than falling through:
+  - **`gate.mode`** fails closed to `off`. With the gate off, nothing is sent to a provider.
+  - **`enabled`:** anything but `true` reads as off.
+  - **A per-way toggle:** anything but an explicit on reads as disabled.
+  - **`disabled_domains`:** the names that can be read stay disabled.
+  - **`secret_path_deny`:** anything but a valid `false` keeps the deny baseline merged, which is its closed side.
+  - **A bad `targets` entry** is kept disabled, so it is withdrawn and never projected into. A valid entry stays as written.
+- **A file that does not parse fails closed as a whole.** The operator chose "Whole file fails closed" in PR #713, after three review rounds of a line-by-line salvage of broken YAML that kept missing keys a person could see. Such a file sets nothing, and every switch in its scope reads closed:
+  - a project's `.claude/ways.yaml`: `enabled: false`, so ways are off for that project;
+  - the user `config.yaml`: `enabled: false`, `targets: []` (no projection, and never the implicit default) and `secret_path_deny: true`;
+  - a target's config file: the same, for that target's keys;
+  - `agent.yaml`: the gate is off, logged as `gate_fallback`.
+
+  Hooks never fail over it. Each hook that reads the file prints one line on stderr naming the file, the line and the parse error, and saying the whole file fails closed until its syntax is fixed by hand. `ways status` and `ways settings lint` show the same finding. `ways settings fix` cannot edit such a file; it exits 5, writes nothing, and says to fix the syntax by hand.
+- **`ways settings fix` repairs only what has a finding.** A switch takes its closed reading. In a project or target file, a bad key is removed. In the user file, it takes its canonical value. A section named exactly is fixed alone; a prefix covers the sections under it.

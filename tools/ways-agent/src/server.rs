@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 
 use crate::judge::{self, Candidate};
-use crate::profile::{self, Mode, Provider, Settings, UserLayer};
+use crate::profile::{self, Mode, Provider, Settings};
 use crate::protocol::{self, Envelope, JudgeRequest, Judged, Reply, Request, Status, Verdict};
 use crate::{keys, net};
 
@@ -280,9 +280,9 @@ impl State {
 
     /// Settings re-read per request, so `ways agent use`, `mode` and key
     /// changes apply without a restart.
+    /// A broken agent.yaml or a bad `mode` fails closed: the gate is off.
     fn settings() -> Result<Option<Settings>> {
-        let user = UserLayer::load(&profile::user_layer_path())?;
-        profile::resolve(&user, |p| keys::locate(p).is_some())
+        profile::gate_settings(&profile::user_layer_path(), |p| keys::locate(p).is_some())
     }
 
     fn judge(&self, req: JudgeRequest) -> Reply {

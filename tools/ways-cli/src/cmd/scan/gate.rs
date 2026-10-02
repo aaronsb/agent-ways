@@ -18,7 +18,6 @@ use ways_agent_core::judge::{way_text, Candidate, Role, Turn};
 use ways_agent_core::profile::{self, Mode, Settings};
 use ways_agent_core::protocol::{JudgeRequest, Judged, Reply, Request};
 
-use crate::session;
 
 /// Grace beyond the engine's deadline for the hook's read: covers starting the
 /// agent and waiting for a provider slot, both inside the agent's own deadline.
@@ -51,31 +50,46 @@ pub(super) fn apply(
     response_context: Option<&str>,
     log: &LogContext<'_>,
 ) -> HashSet<String> {
-    let Some(settings) = settings() else { return HashSet::new() };
-    run(pending, prompt, response_context, &settings, log, |req, timeout| {
+    use ways_agent_core::keys;
+    // The agent reads the key file, never a hook's environment, so only a key
+    // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
+    // must not send every prompt to an agent with no key to use.
+    apply_from(&profile::user_layer_path(), |p| keys::key_path(p).is_file(), pending, prompt, response_context, log, |req, timeout| {
         ways_agent_core::client::call(Request::Judge(req), timeout, true)
     })
 }
 
-/// The gate's settings, read from key locations alone. `None` when the gate is
-/// off: no engine and no key, mode off, or a configuration error (logged).
-fn settings() -> Option<Settings> {
-    use ways_agent_core::keys;
-    let user = match profile::UserLayer::load(&profile::user_layer_path()) {
-        Ok(u) => u,
+/// [`apply`] with the agent file, the key check and the agent call injected,
+/// so a test can show which configurations never reach a provider.
+fn apply_from(
+    path: &std::path::Path,
+    has_key: impl Fn(ways_agent_core::profile::Provider) -> bool,
+    pending: &[Pending<'_>],
+    prompt: &str,
+    response_context: Option<&str>,
+    log: &LogContext<'_>,
+    call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
+) -> HashSet<String> {
+    let Some(settings) = settings(path, has_key, log) else { return HashSet::new() };
+    run(pending, prompt, response_context, &settings, log, call)
+}
+
+/// The gate's settings. `None` when the gate is off: no engine and no key,
+/// mode off, or a configuration error (logged as `gate_fallback`). An
+/// agent.yaml that does not parse, or a bad `mode`, fails closed: the gate is
+/// off and nothing is sent to a provider (ADR-503 addendum).
+fn settings(
+    path: &std::path::Path,
+    has_key: impl Fn(ways_agent_core::profile::Provider) -> bool,
+    log: &LogContext<'_>,
+) -> Option<Settings> {
+    match profile::gate_settings(path, has_key) {
+        Ok(s) => s.filter(|s| s.mode != Mode::Off),
         Err(e) => {
-            session::log_event(&[("event", "gate_fallback"), ("reason", &format!("config: {e:#}"))]);
-            return None;
-        }
-    };
-    // The agent reads the key file, never a hook's environment, so only a key
-    // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
-    // must not send every prompt to an agent with no key to use.
-    match profile::resolve(&user, |p| keys::key_path(p).is_file()) {
-        Ok(Some(s)) if s.mode != Mode::Off => Some(s),
-        Ok(_) => None,
-        Err(e) => {
-            session::log_event(&[("event", "gate_fallback"), ("reason", &format!("config: {e:#}"))]);
+            // Logged for the tuning passes, and said on stderr, since a hook
+            // shows nothing else: the gate is off until agent.yaml is fixed.
+            (log.sink)(&[("event", "gate_fallback"), ("reason", &format!("config: {e:#}"))]);
+            eprintln!("[ways] settings: {e:#}");
             None
         }
     }
@@ -383,5 +397,37 @@ mod tests {
         assert_eq!(turns("p", Some("  ")).len(), 1);
         let t = turns("p", Some("r"));
         assert_eq!((t[0].role, t[1].role), (Role::Assistant, Role::User));
+    }
+
+    #[test]
+    fn a_broken_agent_yaml_or_bad_mode_never_calls_the_provider() {
+        // With a key present: the parent turned these off, the first build of
+        // ADR-503 turned them back on. They fail closed and are logged.
+        let dir = std::env::temp_dir().join(format!("ways-gate-closed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.yaml");
+        for (text, closed) in [
+            ("mode: off\nengine: anthropic\nprofiles:\n  anthropic: [\n", true),
+            ("mode: of\n", true),
+            ("mode: off\n", false),
+            ("mode: shadow\n", false),
+        ] {
+            std::fs::write(&path, text).unwrap();
+            let events = Events::default();
+            let sink = recorder(&events);
+            let calls = std::cell::Cell::new(0);
+            apply_from(&path, |_| true, &pending(), "add a secret", None, &log(&sink), |_, _| {
+                calls.set(calls.get() + 1);
+                Err("stub".into())
+            });
+            let fallback = events.borrow().iter().any(|e| field(e, "event") == "gate_fallback" && field(e, "reason").starts_with("config:"));
+            if text.starts_with("mode: shadow") {
+                assert_eq!(calls.get(), 1, "the control reaches the stub");
+            } else {
+                assert_eq!(calls.get(), 0, "{text:?} must never call the provider");
+            }
+            assert_eq!(fallback, closed, "{text:?}: {:?}", events.borrow());
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

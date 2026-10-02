@@ -20,3 +20,4 @@ pulldown-cmark = { version = "0.13", default-features = false }
 anyhow = "1"
 sensor-trait = { path = "../sensor-trait" }
 claude-sessions = { path = "../claude-sessions" }
+agent-settings = { path = "../agent-settings" }

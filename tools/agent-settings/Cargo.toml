@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "Settings registry machinery for agent-ways: layered loading, lint, emit and writer"
 license = "AGPL-3.0-or-later"
+# File::lock (the writer's lock) was stabilised in 1.89.
+rust-version = "1.89"
 
 [lib]
 name = "agent_settings"
 path = "src/lib.rs"
+
+[dependencies]
+serde_yaml = "0.9"
+serde_json = { version = "1", features = ["preserve_order"] }

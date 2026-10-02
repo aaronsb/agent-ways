@@ -1,0 +1,15 @@
+  Setting                     Value                                      
+  ───────────────────────────────────────────────────────────────────────
+  language                    es                                         
+  default_scope               agent                                      
+  enabled                     true                                       
+  disabled_domains            (none)                                     
+  disabled_ways               (none)                                     
+  parent_threshold_multiplier 0.8                                        
+  parent_boost_floor          0.3                                        
+  semantic_fire_probability   0.4                                        
+  keyword_floor_probability   0.15                                       
+  near_miss_margin            0.05                                       
+  refire_presets              frequent=0.05, normal=0.2, once=1, rare=0.4
+  secret_path_deny            true                                       
+  targets                     <ROOT>/home/.claude (implicit)

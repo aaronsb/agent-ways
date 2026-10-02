@@ -154,7 +154,9 @@ fn store_in(dir: &Path, provider: Provider, key: &str) -> Result<PathBuf> {
 }
 
 /// A process-local sequence number, so temp files written by one process's
-/// threads never share a name.
+/// threads never share a name. Off Unix only tests call it: agent.yaml is
+/// written by the settings writer, and the key store is Unix-only.
+#[cfg(any(unix, test))]
 pub(crate) fn unique() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);

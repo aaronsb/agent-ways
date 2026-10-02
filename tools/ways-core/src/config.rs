@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use agent_settings::LayerScope;
+
 /// Global config, loaded once on first access.
 /// Access via `config::global()` — grep-friendly for future context refactor.
 static GLOBAL: LazyLock<Config> = LazyLock::new(|| {
@@ -74,109 +76,6 @@ impl Target {
     pub fn observes(&self) -> bool {
         self.observe.unwrap_or(self.enabled)
     }
-}
-
-/// A lock file beside the user config, held for the span of one
-/// read-modify-write of the `targets` key. Created exclusively; a holder that
-/// died leaves a stale file, which is taken over after a short wait.
-struct TargetsLock(PathBuf);
-
-impl TargetsLock {
-    fn acquire(config_path: &Path) -> std::io::Result<Self> {
-        let lock = config_path.with_extension("yaml.lock");
-        if let Some(parent) = lock.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        for attempt in 0..50u32 {
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
-                Ok(_) => return Ok(TargetsLock(lock)),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    // Take over a lock older than five seconds: its holder is
-                    // gone, no writer of this key runs that long.
-                    let stale = std::fs::metadata(&lock)
-                        .and_then(|m| m.modified())
-                        .map(|t| t.elapsed().map(|d| d.as_secs() >= 5).unwrap_or(false))
-                        .unwrap_or(true);
-                    if stale && attempt > 0 {
-                        let _ = std::fs::remove_file(&lock);
-                        continue;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        Err(std::io::Error::other(format!("could not lock {} for the targets write", lock.display())))
-    }
-}
-
-impl Drop for TargetsLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-/// Quote a scalar for YAML when it needs it (a leading `~` or `*`, a colon,
-/// a hash, or leading or trailing space); otherwise write it bare.
-fn yaml_scalar(s: &str) -> String {
-    let needs = s.is_empty()
-        || s.starts_with(['~', '*', '&', '!', '%', '@', '`', '\'', '"', '[', '{', '#', '-', '?', '|', '>'])
-        || s.contains(": ")
-        || s.contains(" #")
-        || s.ends_with(':')
-        || s.trim() != s;
-    if needs {
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        s.to_string()
-    }
-}
-
-/// Replace the top-level `key:` block in a YAML text with `block`, or append
-/// `block` when the key is absent. A top-level block runs from its key line
-/// to the next line that starts a top-level key or the end of the text.
-/// Comments and every other key are left byte for byte.
-fn replace_top_level_block(text: &str, key: &str, block: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let is_top_key = |l: &str, k: &str| l.starts_with(k) && l[k.len()..].trim_start().starts_with(':');
-    let is_any_top_key = |l: &str| {
-        !l.is_empty()
-            && !l.starts_with([' ', '\t', '#', '-'])
-            && l.contains(':')
-    };
-    let is_block_line = |l: &str| l.starts_with([' ', '\t']) || l.starts_with("- ") || l == "-";
-    let mut out: Vec<String> = Vec::new();
-    let mut i = 0;
-    let mut replaced = false;
-    while i < lines.len() {
-        if !replaced && is_top_key(lines[i], key) {
-            out.push(block.trim_end_matches('\n').to_string());
-            // The old block ends at its last indented or list line. Comments
-            // and blank lines after that belong to whatever follows and stay.
-            let mut end = i;
-            let mut j = i + 1;
-            while j < lines.len() && !is_any_top_key(lines[j]) {
-                if is_block_line(lines[j]) {
-                    end = j;
-                }
-                j += 1;
-            }
-            i = end + 1;
-            replaced = true;
-            continue;
-        }
-        out.push(lines[i].to_string());
-        i += 1;
-    }
-    if !replaced {
-        if !out.is_empty() && !out.last().map(|l| l.is_empty()).unwrap_or(true) {
-            out.push(String::new());
-        }
-        out.push(block.trim_end_matches('\n').to_string());
-    }
-    let mut s = out.join("\n");
-    s.push('\n');
-    s
 }
 
 fn expand_tilde(p: &str) -> PathBuf {
@@ -328,83 +227,46 @@ impl Config {
     }
 
     /// Read the targets as the user file has them right now, apply `edit`, and
-    /// write the result, all under a lock file beside the config. Every writer
-    /// of the key goes through here, so a hook's migration write and an
-    /// operator's `target add` cannot lose each other's change. `edit` returns
-    /// `None` to leave the file alone. Returns the list written, or the list
-    /// found when nothing was written.
+    /// write the result, all under the settings writer's lock (ADR-503 §6).
+    /// Every writer of the key goes through here, so a hook's migration write
+    /// and an operator's `target add` cannot lose each other's change. `edit`
+    /// returns `None` to leave the file alone. Returns the list written, or
+    /// the list found when nothing was written.
     pub fn edit_user_targets<F>(edit: F) -> std::io::Result<(PathBuf, Vec<Target>)>
     where
         F: FnOnce(Option<Vec<Target>>) -> Option<Vec<Target>>,
     {
         let path = crate::paths::user_config();
-        let _lock = TargetsLock::acquire(&path)?;
-        let current = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|t| serde_yaml::from_str::<serde_yaml::Value>(&t).ok())
-            .and_then(|doc| Self::read_targets(&doc));
-        let found = current.clone().unwrap_or_default();
-        match edit(current) {
-            Some(list) => {
-                Self::write_targets_to(&path, &list)?;
-                Ok((path, list))
+        let (list, _) = agent_settings::writer::edit_file(&path, None, |doc| {
+            let current = doc.get(&["targets".to_string()]).and_then(Self::read_targets_value);
+            let found = current.clone().unwrap_or_default();
+            match edit(current) {
+                Some(list) => {
+                    doc.set(&["targets".to_string()], &targets_value(&list))?;
+                    Ok(list)
+                }
+                None => Ok(found),
             }
-            None => Ok((path, found)),
-        }
+        })?;
+        Ok((path, list))
     }
 
     /// The writer behind [`Config::edit_user_targets`]: rewrites only the
-    /// `targets` key of the file at `path`, keeping every other key as it was,
-    /// and creates the file when absent. On an explicit path so tests never
-    /// touch the real config.
+    /// `targets` key of the file at `path` through the settings writer,
+    /// keeping every other key and comment as it was, and creates the file
+    /// when absent. On an explicit path so tests never touch the real config.
     pub fn write_targets_to(path: &Path, list: &[Target]) -> std::io::Result<()> {
-        let existing = std::fs::read_to_string(path).unwrap_or_default();
-        // The file is edited textually so its comments survive: the template
-        // `ways config init` writes is comments only, and serde_yaml would
-        // drop every one of them. A parse failure of what is there is an
-        // error; a comments-only or empty file parses as null and is fine.
-        if !existing.trim().is_empty() {
-            match serde_yaml::from_str::<serde_yaml::Value>(&existing) {
-                Ok(serde_yaml::Value::Mapping(_)) | Ok(serde_yaml::Value::Null) => {}
-                Ok(_) => return Err(std::io::Error::other("user config is not a mapping")),
-                Err(e) => return Err(std::io::Error::other(e)),
-            }
-        }
-        let mut block = String::from("targets:\n");
-        if list.is_empty() {
-            block = String::from("targets: []\n");
-        }
-        for t in list {
-            block.push_str(&format!("  - path: {}\n    enabled: {}\n", yaml_scalar(&t.path), t.enabled));
-            if let Some(o) = t.observe {
-                block.push_str(&format!("    observe: {o}\n"));
-            }
-            if let Some(c) = &t.config {
-                block.push_str(&format!("    config: {}\n", yaml_scalar(c)));
-            }
-        }
-        let mut body = replace_top_level_block(&existing, "targets", &block);
-        if existing.contains("\r\n") {
-            body = body.replace('\n', "\r\n");
-        }
-        // The edit is textual; prove the result still parses and carries
-        // exactly this list before it replaces the file.
-        match serde_yaml::from_str::<serde_yaml::Value>(&body) {
-            Ok(doc) if Self::read_targets(&doc).as_deref() == Some(list) => {}
-            Ok(_) => return Err(std::io::Error::other("targets write did not round-trip; file left unchanged")),
-            Err(e) => return Err(std::io::Error::other(format!("targets write produced invalid YAML: {e}"))),
-        }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let tmp = path.with_extension(format!("yaml.tmp.{}", std::process::id()));
-        std::fs::write(&tmp, body)?;
-        std::fs::rename(&tmp, path)
+        agent_settings::writer::edit_file(path, None, |doc| doc.set(&["targets".to_string()], &targets_value(list)))?;
+        Ok(())
     }
 
     /// Parse a `targets:` sequence from a YAML document, used by the user layer.
+    #[cfg(test)]
     fn read_targets(doc: &serde_yaml::Value) -> Option<Vec<Target>> {
-        let seq = doc.get("targets")?;
+        doc.get("targets").and_then(Self::read_targets_value)
+    }
+
+    fn read_targets_value(seq: &serde_yaml::Value) -> Option<Vec<Target>> {
         match serde_yaml::from_value::<Vec<Target>>(seq.clone()) {
             Ok(list) => Some(list),
             Err(e) => {
@@ -414,21 +276,27 @@ impl Config {
         }
     }
 
-    /// Load config with full resolution chain.
+    /// Load config with full resolution chain. Each file is parsed once and
+    /// checked section by section against the schema (ADR-503 §4-5): a
+    /// section that fails drops out of that file's layer, with a diagnostic
+    /// on stderr, and its keys resolve from the layers beneath.
     pub fn load(project_dir: &str) -> Self {
+        Self::load_sections(project_dir, crate::settings::HOOK_SECTIONS)
+    }
+
+    /// [`Config::load`], reading only the named schema sections.
+    pub fn load_sections(project_dir: &str, sections: &[&str]) -> Self {
         let mut cfg = Config::default();
 
         // User config ($XDG_CONFIG_HOME/agent-ways/config.yaml) — the
         // app-namespaced location, matching user_ways_root's parent. This is the
         // single source of truth for the path (paths::user_config).
         let user_config = crate::paths::user_config();
-        if let Ok(content) = std::fs::read_to_string(&user_config) {
-            cfg.apply_yaml(&content);
+        if let Some(doc) = checked_file(&user_config, LayerScope::User, sections) {
+            cfg.apply_values(&doc);
             // Targets are user scope only (ADR-184): a project cannot
             // redirect where the install lands.
-            if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                cfg.targets = Self::read_targets(&doc);
-            }
+            cfg.targets = doc.get("targets").and_then(Self::read_targets_value);
         }
 
         // Layer 3.5: the current target's own config (ADR-184). The session's
@@ -437,44 +305,34 @@ impl Config {
         let current = crate::paths::current_config_dir();
         if let Some(t) = cfg.targets().iter().find(|t| t.matches_dir(&current)) {
             let path = t.config_path();
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                cfg.apply_yaml(&content);
+            if let Some(doc) = checked_file(&path, LayerScope::Target, sections) {
+                cfg.apply_values(&doc);
                 cfg.target_config = Some(path);
             }
         }
 
         // Layer 4: project overlay — only this layer may populate `disabled_ways`
         // (ADR-131: per-way disable is project-scope only).
-        let project_config = Path::new(project_dir).join(".claude/ways.yaml");
-        if let Ok(content) = std::fs::read_to_string(&project_config) {
-            cfg.apply_yaml(&content);
-            cfg.apply_project_ways_overlay(&content);
+        let project_config = crate::settings::project_file(Path::new(project_dir));
+        if let Some(doc) = checked_file(&project_config, LayerScope::Project, sections) {
+            cfg.apply_values(&doc);
+            cfg.apply_project_ways_overlay_value(&doc);
         }
 
         cfg
     }
 
-    /// Read a probability-valued config key, clamped to `[0, 1]`, warning on an
-    /// out-of-range value. `None` when the key is absent or non-numeric.
-    fn read_probability(doc: &serde_yaml::Value, key: &str) -> Option<f64> {
-        let v = doc.get(key)?.as_f64()?;
-        let clamped = v.clamp(0.0, 1.0);
-        if !(0.0..=1.0).contains(&v) {
-            eprintln!("[ways] config: {key} {v} out of range, clamped to {clamped}");
+    /// Apply a YAML config file's text, checked as a user-scope layer.
+    #[cfg(test)]
+    fn apply_yaml(&mut self, content: &str) {
+        if let Some(doc) = checked_text(content, None, LayerScope::User, crate::settings::HOOK_SECTIONS) {
+            self.apply_values(&doc);
         }
-        Some(clamped)
     }
 
-    /// Apply values from a YAML config file.
-    fn apply_yaml(&mut self, content: &str) {
-        let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[ways] config: parse error: {}", e);
-                return;
-            }
-        };
-
+    /// Apply the values of a checked layer. Every value here has passed the
+    /// schema, so each key is read at its type.
+    fn apply_values(&mut self, doc: &serde_yaml::Value) {
         if let Some(v) = doc.get("language").and_then(|v| v.as_str()) {
             self.language = v.to_string();
         }
@@ -493,31 +351,14 @@ impl Config {
         if let Some(v) = doc.get("parent_boost_floor").and_then(|v| v.as_f64()) {
             self.parent_boost_floor = v;
         }
-        // Probabilities live in [0, 1]; a value outside that range is a config
-        // typo that must not silently invert firing.
-        if let Some(v) = Self::read_probability(&doc, "semantic_fire_probability") {
+        if let Some(v) = doc.get("semantic_fire_probability").and_then(|v| v.as_f64()) {
             self.semantic_fire_probability = v;
         }
-        if let Some(v) = Self::read_probability(&doc, "keyword_floor_probability") {
+        if let Some(v) = doc.get("keyword_floor_probability").and_then(|v| v.as_f64()) {
             self.keyword_floor_probability = v;
         }
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
-        }
-        // ADR-156 retired the raw-cosine threshold config keys. A silently
-        // ignored key would revert an operator's deliberate tuning; name it and
-        // point at the replacement instead.
-        for (retired, replacement) in [
-            ("default_embed_threshold", "semantic_fire_probability"),
-            ("default_multi_embed_threshold", "semantic_fire_probability"),
-            ("keyword_gate_fraction", "keyword_floor_probability"),
-        ] {
-            if doc.get(retired).is_some() {
-                eprintln!(
-                    "[ways] config: `{retired}` was retired by ADR-156 (calibrated scoring) \
-                     and is ignored — use `{replacement}` (a probability in [0,1])."
-                );
-            }
         }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
@@ -553,10 +394,12 @@ impl Config {
     }
 
     fn apply_project_ways_overlay(&mut self, content: &str) {
-        let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
-            Ok(v) => v,
-            Err(_) => return, // already reported by apply_yaml
-        };
+        if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(content) {
+            self.apply_project_ways_overlay_value(&doc);
+        }
+    }
+
+    fn apply_project_ways_overlay_value(&mut self, doc: &serde_yaml::Value) {
         let Some(ways) = doc.get("ways").and_then(|v| v.as_mapping()) else {
             return;
         };
@@ -582,9 +425,6 @@ impl Config {
         let path = crate::paths::user_config();
         if path.exists() {
             return path;
-        }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
         }
         let content = "# ways configuration
 # User scope: $XDG_CONFIG_HOME/agent-ways/config.yaml
@@ -619,7 +459,8 @@ impl Config {
 #       enabled: false
 # Or run `ways disable <name>` / `ways enable <name>` from the project root.
 ";
-        std::fs::write(&path, content).ok();
+        // Creates the file only when none exists (ADR-503 §6).
+        let _ = agent_settings::writer::create_new(&path, content);
         path
     }
 
@@ -634,6 +475,53 @@ impl Config {
 
 fn home_dir() -> PathBuf {
     crate::util::home_dir()
+}
+
+/// Read and check one settings file. `None` when it is absent or does not
+/// parse; a section that fails is left out, with a diagnostic on stderr.
+fn checked_file(path: &Path, scope: LayerScope, sections: &[&str]) -> Option<serde_yaml::Value> {
+    // Read lossily: a stray byte must not hide the switches in the file.
+    let text = String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned();
+    checked_text(&text, Some(path), scope, sections)
+}
+
+fn checked_text(text: &str, path: Option<&Path>, scope: LayerScope, sections: &[&str]) -> Option<serde_yaml::Value> {
+    use agent_settings::load;
+    let doc = match load::parse_text(text, path) {
+        Ok(d) => d,
+        Err(f) => {
+            report(&f.diagnostic("ways"));
+            // Whole file fails closed (ADR-503 addendum): it sets nothing,
+            // and every switch in its scope is off.
+            let closed = load::closed_file(&crate::settings::SCHEMA, crate::settings::FILE, scope, Some(sections));
+            return Some(serde_yaml::Value::Mapping(closed));
+        }
+    };
+    // Every finding goes to stderr, one line each: a unit that fell back,
+    // and a top-level key no section owns, such as a typo or a key ADR-156
+    // retired, which the check reports by name with its replacement.
+    let checked = load::check(&crate::settings::SCHEMA, crate::settings::FILE, scope, &doc, Some(sections));
+    if !checked.is_clean() {
+        for f in checked.findings(None, path, text) {
+            report(&f.diagnostic("ways"));
+        }
+    }
+    Some(serde_yaml::Value::Mapping(checked.accepted))
+}
+
+/// Print a diagnostic once per process: a hook that loads the config more
+/// than once reports each finding one time.
+fn report(line: &str) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if !seen.iter().any(|l| l == line) {
+        seen.push(line.to_string());
+        eprintln!("{line}");
+    }
+}
+
+fn targets_value(list: &[Target]) -> serde_yaml::Value {
+    serde_yaml::to_value(list).unwrap_or(serde_yaml::Value::Sequence(Vec::new()))
 }
 
 #[cfg(test)]
@@ -703,11 +591,40 @@ mod tests {
     }
 
     #[test]
-    fn probability_fields_clamp_out_of_range() {
+    fn an_out_of_range_value_falls_its_section_back_and_the_rest_load() {
+        // ADR-503 §4: the matching section fails the schema, so all of it
+        // loads as canonical; the ways section of the same file loads as
+        // written. Before, each key was clamped or skipped on its own.
         let mut cfg = Config::default();
-        cfg.apply_yaml("semantic_fire_probability: 1.5\nkeyword_floor_probability: -0.2");
-        assert_eq!(cfg.semantic_fire_probability, 1.0);
-        assert_eq!(cfg.keyword_floor_probability, 0.0);
+        cfg.apply_yaml("language: es\nsemantic_fire_probability: 1.5\nkeyword_floor_probability: 0.2\n");
+        assert_eq!(cfg.semantic_fire_probability, 0.5);
+        assert_eq!(cfg.keyword_floor_probability, 0.15, "the whole section falls back");
+        assert_eq!(cfg.language, "es");
+    }
+
+    #[test]
+    fn a_wrong_type_or_unknown_key_falls_back_only_its_section() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("disabled_domains: ea\nparent_boost_floor: 0.25\n");
+        assert_eq!(cfg.disabled_domains, vec!["ea".to_string()], "a bad domain list keeps the names it can read disabled");
+        assert_eq!(cfg.parent_boost_floor, 0.25);
+        let mut cfg = Config::default();
+        cfg.apply_yaml("refire_presets:\n  normal: 0.2\n  bad: lots\nlanguage: ja\n");
+        assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
+        assert_eq!(cfg.language, "ja");
+        // A key no section owns is reported and ignored; nothing falls back.
+        let mut cfg = Config::default();
+        cfg.apply_yaml("mystery: 1\nsemantic_fire_probability: 0.6\n");
+        assert_eq!(cfg.semantic_fire_probability, 0.6);
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_sets_nothing_and_switches_its_scope_off() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("language: es\nsemantic_fire_probability: [\n");
+        assert_eq!(cfg.language, "auto");
+        assert_eq!(cfg.semantic_fire_probability, 0.5);
+        assert!(!cfg.enabled, "whole file fails closed");
     }
 
     // ── ADR-131: project-scope per-way disable ─────────────────────
@@ -928,5 +845,143 @@ mod tests {
         assert!(d.config_path().starts_with(crate::paths::target_config_root(&dir)));
         assert!(d.config_path().ends_with("config.yaml"));
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    fn apply_project(cfg: &mut Config, text: &str) {
+        let doc = checked_text(text, None, LayerScope::Project, crate::settings::HOOK_SECTIONS).unwrap();
+        cfg.apply_values(&doc);
+        cfg.apply_project_ways_overlay_value(&doc);
+    }
+
+    #[test]
+    fn a_bad_domain_list_never_switches_a_project_back_on() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "disabled_domains: ea,itops\nenabled: false\n");
+        assert!(!cfg.enabled, "enabled: false is its own section");
+    }
+
+    #[test]
+    fn one_bad_toggle_never_re_enables_the_other_disabled_ways() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "ways:\n  itops/incident: false\n  meta/introspection: no\n  ea/x:\n    enabled: false\n");
+        assert_eq!(cfg.disabled_ways(), &["itops/incident".to_string(), "meta/introspection".to_string(), "ea/x".to_string()], "a bad toggle reads as disabled");
+    }
+
+    #[test]
+    fn a_bad_secret_path_deny_keeps_the_targets() {
+        let doc = checked_text(
+            "secret_path_deny: \"false\"\ntargets:\n  - path: /a\n    enabled: false\n",
+            None,
+            LayerScope::User,
+            crate::settings::HOOK_SECTIONS,
+        )
+        .unwrap();
+        let t = doc.get("targets").and_then(Config::read_targets_value).unwrap();
+        assert_eq!((t.len(), t[0].enabled), (1, false));
+        assert_eq!(doc.get("secret_path_deny"), Some(&serde_yaml::Value::Bool(true)), "a bad value keeps the deny baseline");
+    }
+
+    #[test]
+    fn a_refire_preset_above_one_is_valid() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("semantic_fire_probability: 0.35\nrefire_presets:\n  never: 5\n");
+        assert_eq!(cfg.semantic_fire_probability, 0.35);
+        assert_eq!(cfg.refire_presets.get("never").copied(), Some(5.0));
+    }
+
+    #[test]
+    fn an_unparseable_file_fails_closed_for_its_scope() {
+        // "Whole file fails closed" (#713): nothing the file says applies,
+        // readable or not, and every switch its scope holds is off.
+        let closed = |text: &str, scope| checked_text(text, None, scope, crate::settings::HOOK_SECTIONS).unwrap();
+        let broken = "enabled: true\nlanguage: es\nways:\n  itops/incident: false\nx: [\n";
+        // Project: ways are off for the project.
+        assert_eq!(closed(broken, LayerScope::Project), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, secret_path_deny: true}").unwrap());
+        // User: off, no projection target, the deny baseline merged.
+        assert_eq!(
+            closed(broken, LayerScope::User),
+            serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, targets: [], secret_path_deny: true}").unwrap()
+        );
+        // A target's file: its keys, which do not include targets.
+        assert_eq!(closed(broken, LayerScope::Target), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, secret_path_deny: true}").unwrap());
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, broken);
+        assert!(!cfg.enabled);
+        assert!(cfg.disabled_ways().is_empty(), "nothing the file says is read");
+    }
+
+    #[test]
+    fn the_review_inputs_that_do_not_parse_fail_closed() {
+        // N1-N3 shapes: each fails to parse, so the whole file is closed.
+        for text in [
+            "  language: en\n#ña\nenabled: false\n",
+            "  language: en\nenabled: false\n",
+            "enabled: \"false\n",
+            "enabled: false\nenabled: true\n",
+            "{enabled: false, x: [}\n",
+            "\u{feff}enabled: false\nx: [\n",
+            "  enabled: false\nlanguage: [\n",
+            "\tenabled: false\n",
+            "ways:\n\ta/b: false\n  c/d: false\n",
+            "{note: \"{\", enabled: false, x: [}\n",
+        ] {
+            assert!(serde_yaml::from_str::<serde_yaml::Value>(text).is_err(), "{text:?} parses; test it as parsed");
+            let mut cfg = Config::default();
+            apply_project(&mut cfg, text);
+            assert!(!cfg.enabled, "{text:?}");
+        }
+        // A BOM on a file that parses is read as written.
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "\u{feff}enabled: false\n");
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn a_bad_switch_value_fails_closed() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "enabled: nope\ndisabled_domains: ea,itops\nways:\n  a/b: maybe\n");
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.disabled_domains, vec!["ea".to_string(), "itops".to_string()]);
+        assert_eq!(cfg.disabled_ways(), &["a/b".to_string()]);
+        let mut cfg = Config { secret_path_deny: false, ..Default::default() };
+        cfg.apply_yaml("secret_path_deny: \"false\"\n");
+        assert!(cfg.secret_path_deny, "the deny baseline is the closed side");
+    }
+
+    #[test]
+    fn one_bad_target_keeps_the_others_and_is_kept_disabled() {
+        let doc = checked_text(
+            "targets:\n  - path: ~/.claude\n    enabled: false\n  - path: ~/.claude-work\n    enabled: maybe\n",
+            None,
+            LayerScope::User,
+            crate::settings::HOOK_SECTIONS,
+        )
+        .unwrap();
+        let t = doc.get("targets").and_then(Config::read_targets_value).unwrap();
+        assert_eq!(t.iter().map(|t| (t.path.as_str(), t.enabled)).collect::<Vec<_>>(), vec![("~/.claude", false), ("~/.claude-work", false)]);
+    }
+
+    #[test]
+    fn loading_never_panics_on_arbitrary_bytes() {
+        let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        const BYTES: &[u8] = b"enabled:targets-ways []{}\"'#\t \n\r\n,|&*!?false~\xef\xbb\xbf\xc3\xb1\xff";
+        for _ in 0..5_000 {
+            let len = (next() % 64) as usize;
+            let bytes: Vec<u8> = (0..len).map(|_| BYTES[(next() % BYTES.len() as u64) as usize]).collect();
+            let text = String::from_utf8_lossy(&bytes);
+            for scope in [LayerScope::User, LayerScope::Target, LayerScope::Project] {
+                if let Some(doc) = checked_text(&text, None, scope, crate::settings::HOOK_SECTIONS) {
+                    let mut cfg = Config::default();
+                    cfg.apply_values(&doc);
+                    cfg.apply_project_ways_overlay_value(&doc);
+                }
+            }
+        }
     }
 }

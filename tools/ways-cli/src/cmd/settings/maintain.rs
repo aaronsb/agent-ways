@@ -1,0 +1,183 @@
+//! emit, lint and fix.
+
+use super::*;
+
+// ── emit, lint, fix ────────────────────────────────────────────
+
+pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Out {
+    let reg = registry();
+    let prefix = prefix.unwrap_or("");
+    let layers = if effective { Some(live_layers(&project_dir(project))) } else { None };
+    if let Some(l) = &layers {
+        report(l);
+    }
+    if reg.concrete(prefix, layers.as_deref().unwrap_or(&[])).is_empty() {
+        return Err(fail(exit::USAGE, format!("no key under {prefix}; `ways settings help` lists the sections")));
+    }
+    let files = reg.emit(prefix, layers.as_deref());
+    let many = files.len() > 1;
+    for (i, (file, v)) in files.iter().enumerate() {
+        if many {
+            if i > 0 {
+                println!("---");
+            }
+            println!("# {}", file_label(file));
+        }
+        print!("{}", serde_yaml::to_string(v).unwrap_or_default());
+    }
+    Ok(())
+}
+
+pub(super) fn file_label(file: &str) -> &'static str {
+    if file == ways_agent_core::settings::FILE {
+        "agent.yaml"
+    } else {
+        "config.yaml (or a project's .claude/ways.yaml)"
+    }
+}
+
+pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
+    agent_settings::load::trace("lint");
+    let layers = layers_for(file, project)?;
+    let mut n = 0;
+    for l in layers.iter().filter(|l| l.present) {
+        for f in &l.findings {
+            println!("{f}");
+            n += 1;
+        }
+    }
+    if n > 0 {
+        return Err(fail(exit::REJECTED, format!("{n} finding{}; `ways settings fix <section>` repairs what a section's findings point at", if n == 1 { "" } else { "s" })));
+    }
+    Ok(())
+}
+
+/// The sections `fix <arg>` covers: the section named exactly, else every
+/// section under the prefix. `fix gate` is `gate` alone, never `gate.mode`;
+/// `fix install` is both `install.*` sections.
+fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Schema, &'static agent_settings::SectionSpec)> {
+    let exact: Vec<_> = reg.sections().filter(|(_, s)| s.name == arg).collect();
+    if !exact.is_empty() {
+        return exact;
+    }
+    reg.sections().filter(|(_, s)| agent_settings::registry::under(s.name, arg)).collect()
+}
+
+/// `fix <section|prefix>`: repair what the named sections' findings point
+/// at, and nothing else.
+///
+/// Each failing key path is repaired on its own:
+/// - a switch takes its fail-closed reading, so a switch stays off;
+/// - a read-only key is left for its action command, which is named;
+/// - in a project or target file the bad key is removed, so the layers
+///   beneath apply;
+/// - in the user file it takes its canonical value, or is removed when it has
+///   none;
+/// - a key this file may not hold (a project-only toggle in the user file,
+///   `targets` in a project file) is removed;
+/// - an unknown key, a non-text key, or a value of the wrong shape is
+///   removed.
+///
+/// A top-level key no section owns is not removed: it may be a typo to
+/// correct by hand. `fix ""` reports it and exits 3.
+///
+/// The file is checked again after the edit; exit 3 if a finding remains.
+pub fn fix(section: &str, project: Option<&Path>) -> Out {
+    let reg = registry();
+    let sections = sections_for(&reg, section);
+    if sections.is_empty() {
+        return Err(fail(exit::USAGE, format!("no section {section}; `ways settings help` lists them")));
+    }
+    let mut by_file: Vec<(PathBuf, Vec<(&'static agent_settings::Schema, &'static agent_settings::SectionSpec)>)> = Vec::new();
+    for (schema, sec) in sections {
+        let path = if sec.file == ways_agent_core::settings::FILE {
+            ways_agent_core::profile::user_layer_path()
+        } else if sec.file == ways_core::settings::FILE {
+            match project {
+                Some(_) => ways_core::settings::project_file(&project_dir(project)),
+                None => ways_core::paths::user_config(),
+            }
+        } else {
+            continue;
+        };
+        match by_file.iter_mut().find(|(p, _)| *p == path) {
+            Some((_, list)) => list.push((schema, sec)),
+            None => by_file.push((path, vec![(schema, sec)])),
+        }
+    }
+    let mut left = Vec::new();
+    for (path, list) in &by_file {
+        let user_file = path == &ways_core::paths::user_config() || path == &ways_agent_core::profile::user_layer_path();
+        let scope = if path.file_name().is_some_and(|n| n == "ways.yaml") { LayerScope::Project } else { LayerScope::User };
+        let names: Vec<&str> = list.iter().map(|(_, s)| s.name).collect();
+        let file = list[0].1.file;
+        let schema = list[0].0;
+        agent_settings::writer::edit_file(path, None, |d| {
+            let raw = d.value().clone();
+            let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
+            for (sec, key) in checked.failing() {
+                if sec.is_none() {
+                    continue; // a top-level key no section owns; not this fix
+                }
+                let at = agent_settings::yaml_edit::value_at(&raw, &key).cloned();
+                let spec = reg.lookup_path(file, &key);
+                match (spec, at) {
+                    // A key this file may not hold is ignored here anyway:
+                    // removing it is the repair, whatever its kind.
+                    (Some(b), _) if !scope.admits(b.spec.scope) => {
+                        d.unset(&key)?;
+                    }
+                    (Some(b), _) if matches!(b.spec.kind, Kind::ReadOnly) => {}
+                    (Some(b), Some(v)) if b.spec.fail_closed.is_some() && path_is_text(&raw, &key) => {
+                        match (b.spec.fail_closed.expect("checked"))(&v) {
+                            Some(c) => d.set(&key, &c)?,
+                            None => {
+                                d.unset(&key)?;
+                            }
+                        }
+                    }
+                    (Some(b), _) if user_file && path_is_text(&raw, &key) => match b.spec.default_for(&b.bound) {
+                        Some(c) => d.set(&key, &c)?,
+                        None => {
+                            d.unset(&key)?;
+                        }
+                    },
+                    _ => {
+                        d.unset(&key)?;
+                    }
+                }
+            }
+            Ok(())
+        })
+        .map_err(write_failed)?;
+        // Check again: what fix could not repair is reported, with its command.
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        if let Ok(doc) = agent_settings::load::parse_text(&text, Some(path)) {
+            let after = agent_settings::load::check(schema, file, scope, &doc, Some(&names));
+            // `fix ""` covers the whole file, so a key no section owns is
+            // reported too; fix leaves it, since it may be a typo to correct.
+            left.extend(after.findings(None, Some(path), &text).into_iter().filter(|f| f.section.is_some() || section.is_empty()));
+        }
+    }
+    if !left.is_empty() {
+        for f in &left {
+            eprintln!("{}", f.diagnostic("ways"));
+        }
+        return Err(fail(exit::REJECTED, format!("{} finding(s) fix cannot repair; the line above names the command that can", left.len())));
+    }
+    Ok(())
+}
+
+/// Whether every segment of `key` names a text key in `raw`. A key written
+/// as `123:` is not one; fix removes it rather than write under it.
+fn path_is_text(raw: &Value, key: &[String]) -> bool {
+    let mut cur = raw;
+    for seg in key {
+        let Some(m) = cur.as_mapping() else { return true };
+        match m.get(seg.as_str()) {
+            Some(c) => cur = c,
+            None => return !m.keys().any(|k| !k.is_string() && agent_settings::schema::show(k) == *seg),
+        }
+    }
+    true
+}

@@ -1,0 +1,1 @@
+Error: invalid way name 'Bad Name': segments must match [a-z0-9_-]+ (got 'Bad Name')
