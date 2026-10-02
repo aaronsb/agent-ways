@@ -27,23 +27,58 @@ pub fn session_project_ways(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Every project Claude Code has a transcript directory for, with its ways
-/// directory, as `(project path, ways dir)`. `progress` hears each encoded
-/// name before it is resolved: resolving probes the filesystem, and an
-/// unreachable mount stalls there.
+/// directory, as `(project path, ways dir)`. `progress` hears each step as
+/// a line: the directory read, each encoded name before it is resolved
+/// (resolving probes the filesystem, and an unreachable mount stalls there),
+/// and what was skipped and why.
 pub fn known_project_ways(progress: &dyn Fn(&str)) -> Vec<(String, PathBuf)> {
     let root = ways_core::paths::transcripts_root();
-    let Ok(entries) = std::fs::read_dir(&root) else { return Vec::new() };
+    progress(&format!("enumerating projects: {}", root.display()));
+    let entries = match std::fs::read_dir(&root) {
+        Ok(e) => e,
+        Err(e) => {
+            progress(&format!("  cannot read {}: {e}", root.display()));
+            return Vec::new();
+        }
+    };
     let mut out = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                progress(&format!("  unreadable entry skipped: {e}"));
+                continue;
+            }
+        };
         if !entry.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }
         let encoded = entry.file_name().to_string_lossy().to_string();
-        progress(&encoded);
-        let Some(project) = claude_sessions::resolve_project_path(&root, &encoded) else { continue };
+        progress(&format!("  resolving {encoded}"));
+        let Some(project) = claude_sessions::resolve_project_path(&root, &encoded) else {
+            progress("    unresolved — skipped");
+            continue;
+        };
         if let Some(ways) = session_project_ways(Path::new(&project)) {
             out.push((project, ways));
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_s_ways_are_found_at_or_above_it_and_a_project_s_at_its_root() {
+        let base = std::env::temp_dir().join(format!("ways-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("proj/.claude/ways/a")).unwrap();
+        std::fs::create_dir_all(base.join("proj/src/deep")).unwrap();
+        assert_eq!(project_ways(&base.join("proj")), Some(base.join("proj/.claude/ways")));
+        assert_eq!(project_ways(&base.join("proj/src")), None, "a project's root is not searched above");
+        assert_eq!(session_project_ways(&base.join("proj/src/deep")), Some(base.join("proj/.claude/ways")));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

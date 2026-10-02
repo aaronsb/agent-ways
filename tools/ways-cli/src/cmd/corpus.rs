@@ -173,8 +173,7 @@ pub fn run(
     }
 
     // Every other project Claude Code knows, from its transcript directories.
-    vlog("enumerating projects");
-    for (project_path, ways_path) in super::ways_roots::known_project_ways(&|encoded| vlog(&format!("  resolving {encoded}"))) {
+    for (project_path, ways_path) in super::ways_roots::known_project_ways(&|line| vlog(line)) {
         vlog(&format!("    ways: {}", ways_path.display()));
         // Dedup: multiple encoded dirs (and the current project above) may
         // resolve to the same .claude/ways/. Compare canonical paths.

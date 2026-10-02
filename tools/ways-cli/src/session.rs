@@ -572,7 +572,9 @@ pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, b
     None
 }
 
-fn find_way_in_dir(dir: &Path) -> Option<PathBuf> {
+/// The way file in a way's directory: its first `.md` that opens with
+/// frontmatter, whatever its name.
+pub(crate) fn find_way_in_dir(dir: &Path) -> Option<PathBuf> {
     if !dir.is_dir() {
         return None;
     }

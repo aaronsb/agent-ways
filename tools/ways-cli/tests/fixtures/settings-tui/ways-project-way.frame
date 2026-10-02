@@ -18,15 +18,15 @@ agent-tui frame 100x30
 |│                                                     ││Two modes for every endpoint, read and     │|
 |│                                                     ││write.                                     │|
 |│                                                     ││                                           │|
-|│                                                     ││scope      this project ·                  │|
-|│                                                     ││~/proj/.claude/ways/api/dual/dual.md       │|
+|│                                                     ││from       this project                    │|
+|│                                                     ││           ~/proj/.claude/ways/api/dual/dua│|
+|│                                                     ││l.md                                       │|
 |│                                                     ││vocabulary endpoint read write mode        │|
 |│                                                     ││pattern    \bapi\b                         │|
 |│                                                     ││refire     normal                          │|
-|│                                                     ││macro      prepend ·                       │|
-|│                                                     ││~/proj/.claude/ways/api/dual/macro.sh      │|
-|│                                                     ││           ls src/routes                   │|
-|│                                                     ││                                           │|
+|│                                                     ││macro      prepend                         │|
+|│                                                     ││           ~/proj/.claude/ways/api/dual/mac│|
+|│                                                     ││ro.sh                                      │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
 | browse  0 changed │ 0 queued │ mouse on (m) │ s set up                                             |
 styles

@@ -3,11 +3,11 @@ agent-tui frame 100x30
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││ways.project                               │|
 |│     enabled                   true                  ││                                           │|
-|│     language                  auto                  ││2 entries, 0 changed                       │|
-|│     default_scope             agent                 ││                                           │|
-|│     disabled_domains          []                    ││                                           │|
+|│     language                  auto                  ││Per-way switches for one project (ADR-131),│|
+|│     default_scope             agent                 ││in its .claude/ways.yaml. Each entry falls │|
+|│     disabled_domains          []                    ││back alone.                                │|
 |│▌▾ project · way               enabled               ││                                           │|
-|│   ▾ this project                                    ││                                           │|
+|│   ▾ this project                                    ││2 entries, 0 changed                       │|
 |│       (no project ways)       none · ways init      ││                                           │|
 |│   ▾ shipped                                         ││                                           │|
 |│     ▸ itops                                         ││                                           │|
@@ -15,7 +15,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     │└───────────────────────────────────────────┘|
 |│                                                     │┌ways───────────────────────────────────────┐|
-|│                                                     ││4 ways, 0 switched off here.               │|
+|│                                                     ││3 ways, 0 switched off as loaded.          │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -52,7 +52,7 @@ styles
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4  54-75  - - DIM
+  4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
   5  54-55  - - DIM
@@ -71,7 +71,7 @@ styles
   7  99-99  - - DIM
   8   0-0   - - DIM
   8   2-17  - - BOLD
-  8  54-55  - - DIM
+  8  54-75  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  32-47  - - DIM

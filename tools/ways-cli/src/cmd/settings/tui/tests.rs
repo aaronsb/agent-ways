@@ -398,7 +398,8 @@ fn the_ways_tab_lists_every_scope_each_way_once_where_it_wins() {
     assert_eq!(st.key, "ways.project.api/dual", "a project way's switch has the same key as any other");
     assert!(dual.about.contains("pattern    \\bapi\\b") && dual.about.contains("macro      prepend") && dual.about.contains("curl -s localhost/api"), "{}", dual.about);
     assert!(!dual.about.contains("says what"), "the macro's comments are not what it runs");
-    assert_eq!(section(project, "this project").about, "1 way, 0 switched off here.");
+    assert_eq!(section(project, "this project").about, "1 way, 0 switched off as loaded.");
+    assert!(dual.about.contains("from       this project"), "{}", dual.about);
 }
 
 #[test]
@@ -409,6 +410,43 @@ fn a_project_without_ways_says_how_to_add_them() {
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
     let none = &section(project, "this project").children[0];
     assert_eq!(none.setting.as_ref().unwrap().value, "none · ways init");
+    assert_eq!(section(project, "this project").about, "0 ways, 0 switched off as loaded.", "the placeholder is no way");
+}
+
+#[test]
+fn a_way_file_is_found_by_its_frontmatter_whatever_its_name() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    fx.file("work/current/.claude/ways/api/dual/way.md", "---\ndescription: named way.md\nscope: agent, subagent\n---\n");
+    let r = roots(&fx);
+    let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
+    let dual = &section(project, "this project").children[0].children[0];
+    assert!(dual.about.starts_with("named way.md") && dual.about.contains("scope      agent, subagent"), "{}", dual.about);
+}
+
+#[test]
+fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    fx.file("work/current/.claude/ways.yaml", "ways:\n  gone/old: false\n");
+    // The project's file only: the user layer would read this machine's config.
+    let file = fx.root.join("work/current/.claude/ways.yaml");
+    let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
+    let ctx = Ctx {
+        project: fx.root.join("work/current"),
+        home: fx.root.clone(),
+        corpus: fx.root.join("corpus"),
+        user_ways: fx.root.join(".config/agent-ways/ways"),
+        themes: None,
+        xdg_config: fx.root.join(".config"),
+        claude_config_dir: None,
+        claude: fx.root.join(".claude"),
+    };
+    let r = Ways::new(ctx).build(&[project]);
+    let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
+    let gone = &section(project, "not found").children[0].children[0];
+    assert_eq!(gone.setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.gone/old");
+    assert_eq!(section(project, "not found").about, "1 way, 1 switched off as loaded.");
 }
 
 // ── the adapter's write, under the real paths ──────────────────

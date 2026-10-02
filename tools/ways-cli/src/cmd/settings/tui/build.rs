@@ -142,9 +142,6 @@ fn segments(b: &Bound) -> Vec<String> {
     out
 }
 
-/// Put `leaf` at `path` under `root`, making the groups between. A node
-/// already there keeps its children and takes the leaf's setting: a way
-/// with ways under it is both.
 /// Where a way's file comes from, highest precedence first.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WayScope {
@@ -181,45 +178,53 @@ impl WayScope {
 /// A way's scope and its file.
 struct Located {
     scope: WayScope,
-    file: PathBuf,
+    /// None when the directory holds no way file sessions would read.
+    file: Option<PathBuf>,
 }
 
-/// A way's file: `<root>/<id>/<last segment>.md`.
-fn way_file(root: &Path, id: &str) -> PathBuf {
-    let name = id.rsplit('/').next().unwrap_or(id);
-    root.join(id).join(format!("{name}.md"))
+/// A way's file, found as sessions find it: the first `.md` with
+/// frontmatter in `<root>/<id>/`, whatever its name.
+fn way_file(root: &Path, id: &str) -> Option<PathBuf> {
+    crate::session::find_way_in_dir(&root.join(id))
 }
 
 /// What a way is, for the detail pane: its description, then the fields
 /// that decide when it fires, and its macro with the first lines it runs.
 fn way_about(w: &Located, home: &Path) -> String {
-    let text = std::fs::read_to_string(&w.file).unwrap_or_default();
+    let row = |k: &str, v: String| format!("{k:<11}{v}");
+    let Some(file) = &w.file else {
+        return format!("No way file in this way's directory, so sessions skip it.\n\n{}", row("from", w.scope.label().into()));
+    };
+    let text = std::fs::read_to_string(file).unwrap_or_default();
     let field = |name: &str| ways_core::frontmatter::field_in(&text, name).filter(|v| !v.is_empty());
     let mut out = vec![field("description").unwrap_or_else(|| "(no description)".into()), String::new()];
-    let row = |k: &str, v: String| format!("{k:<11}{v}");
-    out.push(row("scope", format!("{} · {}", w.scope.label(), tilde(&w.file, home))));
-    for k in ["vocabulary", "pattern", "files", "commands", "trigger", "refire"] {
+    out.push(row("from", w.scope.label().into()));
+    out.push(row("", tilde(file, home)));
+    for k in ["vocabulary", "pattern", "files", "commands", "trigger", "scope", "refire"] {
         if let Some(v) = field(k) {
             out.push(row(k, v));
         }
     }
     if let Some(m) = field("macro") {
-        let script = w.file.with_file_name("macro.sh");
-        out.push(row("macro", format!("{m} · {}", tilde(&script, home))));
+        let script = file.with_file_name("macro.sh");
+        out.push(row("macro", m));
+        out.push(row("", tilde(&script, home)));
         let body = std::fs::read_to_string(&script).unwrap_or_default();
         let runs = body.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(3);
-        out.extend(runs.map(|l| format!("{:<11}{l}", "")));
+        out.extend(runs.map(|l| row("", l.to_string())));
     }
     out.join("\n")
 }
 
-/// Each group under `n` sums up its switches: how many ways, how many off.
+/// Each group under `n` sums up its switches, as the files were read:
+/// how many ways, how many off. Only a row with a store is a switch.
 /// Returns `(ways, off)` for `n`.
 fn summarize(n: &mut Node) -> (usize, usize) {
-    if let Some(s) = n.setting.as_ref().filter(|_| n.children.is_empty()) {
-        return (1, usize::from(s.value == "false"));
+    let own = n.setting.as_ref().filter(|s| s.store.is_some()).map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
+    if n.children.is_empty() {
+        return own;
     }
-    let (mut ways, mut off) = n.setting.as_ref().map_or((0, 0), |s| (1, usize::from(s.value == "false")));
+    let (mut ways, mut off) = own;
     for c in &mut n.children {
         let (w, o) = summarize(c);
         ways += w;
@@ -227,11 +232,15 @@ fn summarize(n: &mut Node) -> (usize, usize) {
     }
     if n.about.is_empty() {
         let noun = if ways == 1 { "way" } else { "ways" };
-        *n = std::mem::replace(n, Node::group("", "", vec![])).about("ways", format!("{ways} {noun}, {off} switched off here."));
+        n.about_title = "ways".into();
+        n.about = format!("{ways} {noun}, {off} switched off as loaded.");
     }
     (ways, off)
 }
 
+/// Put `leaf` at `path` under `root`, making the groups between. A node
+/// already there keeps its children and takes the leaf's setting: a way
+/// with ways under it is both.
 fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> String, prefix: &str) {
     let (first, rest) = path.split_first().expect("a key has a name");
     let name = format!("{prefix}.{first}");
@@ -257,7 +266,7 @@ fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> S
 impl Ways {
     /// The keys of a tab: every concrete key under it, and a toggle for each
     /// way of the corpus on the ways tab.
-    fn keys_of(&self, tab: &Tab, layers: &[Layer]) -> Vec<Bound> {
+    fn keys_of(&self, tab: &Tab, layers: &[Layer], scopes: &BTreeMap<String, Located>) -> Vec<Bound> {
         let mut keys = self.reg.concrete(tab.prefix, layers);
         keys.retain(|b| tab.holds(&b.name()));
         if tab.name == "ways" {
@@ -267,7 +276,7 @@ impl Ways {
                 // so setting a toggle never moves a row.
                 let project = |k: &Bound| k.spec.name == b.spec.name;
                 let mut ids: BTreeSet<String> = keys.iter().filter(|k| project(k)).filter_map(|k| k.bound.first().cloned()).collect();
-                ids.extend(self.way_scopes().into_keys());
+                ids.extend(scopes.keys().cloned());
                 let at = keys.iter().position(project).unwrap_or(keys.len());
                 keys.retain(|k| !project(k));
                 let ways: Vec<Bound> = ids.into_iter().map(|id| Bound { bound: vec![id], ..b.clone() }).collect();
@@ -300,7 +309,7 @@ impl Ways {
         // The parts of a name the tab itself stands for.
         let depth = tab.prefix.split('.').count();
         let scopes = if tab.name == "ways" { self.way_scopes() } else { BTreeMap::new() };
-        for b in self.keys_of(tab, layers) {
+        for b in self.keys_of(tab, layers, &scopes) {
             files.insert(b.spec.file);
             let segs = segments(&b);
             let rest = &segs[depth.min(segs.len())..];
