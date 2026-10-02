@@ -460,3 +460,36 @@ fn child_stops_a_command_and_its_children() {
 fn stopping_a_command_ends_what_it_started_at_once() {
     let _ = std::fs::remove_dir_all(in_fixture("child_stops_a_command_and_its_children"));
 }
+
+#[cfg(unix)]
+#[test]
+#[ignore = "run by a_stop_does_not_wait_on_a_process_that_left_the_group"]
+fn child_does_not_wait_on_a_process_out_of_the_group() {
+    let Some((mut ways, _)) = child() else { return };
+    let root = PathBuf::from(std::env::var_os("WAYS_TUI_FIXTURE").unwrap());
+    let pidfile = root.join("stray.pid");
+    // A process in a session of its own still holds the command's pipes;
+    // killing the group cannot reach it.
+    std::fs::write(root.join("runner.sh"), format!("#!/bin/sh\nsetsid sleep 45 &\necho $! > {}\nwait\n", pidfile.display())).unwrap();
+    std::fs::set_permissions(root.join("runner.sh"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut job = ways.start(&Queued::new("gate", "check", "ways agent key check", false));
+    let start = std::time::Instant::now();
+    while !pidfile.exists() && start.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let stray = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+    let start = std::time::Instant::now();
+    job.stop();
+    let ended = job.poll();
+    let took = start.elapsed();
+    let _ = std::process::Command::new("kill").args(["-9", &stray]).status();
+    assert!(took < std::time::Duration::from_secs(1), "the stop waited on output a stray process holds: {took:?}");
+    assert!(matches!(ended, Some(Err(_))), "{ended:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stop_does_not_wait_on_a_process_that_left_the_group() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_does_not_wait_on_a_process_out_of_the_group"));
+}
