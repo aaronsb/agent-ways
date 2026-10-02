@@ -180,14 +180,19 @@ fn describe(g: &Group) -> String {
 }
 
 /// `since` is where the log begins, stated once on the total line.
-pub fn render_text(calls: &[Call], by: By, since: Option<&str>) -> String {
+/// The report as text. `log_from` is the date of the earliest judge call the
+/// log still holds, given when it bounds the query: the log is compacted, so
+/// calls before it are gone.
+pub fn render_text(calls: &[Call], by: By, log_from: Option<&str>) -> String {
     if calls.is_empty() {
         return "no judge calls recorded\n".into();
     }
-    let from = since.map(|d| format!(" since {}", d.get(..10).unwrap_or(d))).unwrap_or_default();
-    let mut out = format!("total{from}: {}\n", describe(&total(calls)));
+    let mut out = format!("total: {}\n", describe(&total(calls)));
     for g in aggregate(calls, by) {
         out.push_str(&format!("  {}: {}\n", g.key, describe(&g)));
+    }
+    if let Some(d) = log_from {
+        out.push_str(&format!("earliest call in the log: {}\n", d.get(..10).unwrap_or(d)));
     }
     out
 }
@@ -205,7 +210,9 @@ pub fn run(since: Option<&str>, session: Option<&str>, by: By, json: bool) -> Re
     if json {
         println!("{}", serde_json::to_string_pretty(&report(&calls, covers))?);
     } else {
-        print!("{}", render_text(&calls, by, covers.as_deref()));
+        // The log's start bounds the query unless --since starts later.
+        let bounds = covers.as_deref().filter(|c| since.as_deref().is_none_or(|s| s < &c[..c.len().min(10)]));
+        print!("{}", render_text(&calls, by, bounds));
     }
     Ok(())
 }
@@ -290,7 +297,8 @@ not json
         assert_eq!(v["covers_since"], "2026-09-01T10:00:00Z");
         assert!(serde_json::to_value(report(&[], None)).unwrap()["covers_since"].is_null());
         let text = render_text(&calls(), By::Day, covers.as_deref());
-        assert!(text.starts_with("total since 2026-09-01: 4 calls, "));
+        assert!(text.starts_with("total: 4 calls, ") && text.ends_with("earliest call in the log: 2026-09-01\n"));
+        assert!(!render_text(&calls(), By::Day, None).contains("earliest"));
     }
 
     #[test]
@@ -321,10 +329,11 @@ not json
     #[test]
     fn text_output_is_exact() {
         let text = render_text(&calls(), By::Day, Some("2026-09-01T10:00:00Z"));
-        let want = "total since 2026-09-01: 4 calls, $0.0400 + 2 calls of unknown cost, tokens 157 in / 16 out\n\
+        let want = "total: 4 calls, $0.0400 + 2 calls of unknown cost, tokens 157 in / 16 out\n\
 \x20 2026-10-02: 2 calls, $0.0400, tokens 150 in / 15 out\n\
 \x20 2026-09-30: 1 call, cost unknown, tokens 0 in / 0 out\n\
-\x20 2026-09-01: 1 call, cost unknown, tokens 7 in / 1 out\n";
+\x20 2026-09-01: 1 call, cost unknown, tokens 7 in / 1 out\n\
+earliest call in the log: 2026-09-01\n";
         assert_eq!(text, want);
     }
 }

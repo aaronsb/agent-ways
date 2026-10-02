@@ -144,7 +144,7 @@ const KEYS: &[KeySpec] = &[
         path: &["profiles", "*", "price_in_per_mtok"],
         kind: PRICE,
         doc: "USD per million input tokens, for pricing judge calls.",
-        long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: Claude Haiku 4.5's list price for that model and its dated ids, else the call's cost is unknown. Set with price_out_per_mtok. `ways agent cost` reports the spend.",
+        long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: Claude Haiku 4.5's list price for that model and its dated ids, else the call's cost is unknown. Applies only with price_out_per_mtok set too. `ways agent cost` reports the spend.",
         ..BASE
     },
     KeySpec {

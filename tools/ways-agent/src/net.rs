@@ -192,7 +192,8 @@ pub fn models(provider: Provider, key: Option<&str>) -> Result<Vec<ModelInfo>> {
 /// A judge call that gave no verdicts. `reason` is the fallback reason:
 /// `deadline`, `provider_<status>: …`, `transport: …` or `answer: …`.
 /// `usage` is set when the provider answered with one, so the call is priced
-/// even though its answer was unusable, and at zero when it refused the call.
+/// even though its answer was unusable, and at zero when it refused the call
+/// with a 4xx.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JudgeFailure {
     pub reason: String,
@@ -266,9 +267,12 @@ pub fn judge(
     // Status first: an HTML error page from a proxy is still a provider error.
     let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status != 200 {
-        // A provider that refuses a request does not bill it.
-        let refused = Usage { provider_cost_usd: Some(0.0), ..Default::default() };
-        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage: Some(refused) });
+        // A provider that refuses a request (4xx) does not bill it. A
+        // timeout or a 5xx, from the provider or a proxy, may come after the
+        // model ran, so its cost is unknown.
+        let refused = (400..500).contains(&status) && status != 408;
+        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
+        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
     }
     let usage = usage(provider, &reply);
     let failed = |reason: String| JudgeFailure { reason, usage: usage.clone() };

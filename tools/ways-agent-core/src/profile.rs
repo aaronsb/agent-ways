@@ -133,7 +133,8 @@ pub struct Profile {
     /// ships one ([`crate::cost::list_price`]), else the cost is unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_in_per_mtok: Option<f64>,
-    /// USD per million output tokens. Set with the input price or not at all.
+    /// USD per million output tokens. Prices apply as a pair: one set alone is
+    /// ignored, never an error, since a price must not turn the gate off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_out_per_mtok: Option<f64>,
 }
@@ -149,14 +150,8 @@ impl Profile {
         if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 || self.max_candidates == 0 {
             bail!("profile '{name}': turns, max_turn_chars, concurrency and max_candidates must be at least 1");
         }
-        match (self.price_in_per_mtok, self.price_out_per_mtok) {
-            (Some(_), None) | (None, Some(_)) => {
-                bail!("profile '{name}': set price_in_per_mtok and price_out_per_mtok together, or neither")
-            }
-            (Some(i), Some(o)) if !(i.is_finite() && o.is_finite() && i >= 0.0 && o >= 0.0) => {
-                bail!("profile '{name}': prices must be zero or more")
-            }
-            _ => {}
+        if [self.price_in_per_mtok, self.price_out_per_mtok].into_iter().flatten().any(|p| !p.is_finite() || p < 0.0) {
+            bail!("profile '{name}': prices must be zero or more");
         }
         if !valid_model_id(&self.model) {
             bail!("profile '{name}': model '{}' is not a model id (letters, digits and . _ : / - only)", self.model);
@@ -414,12 +409,10 @@ mod tests {
     }
 
     #[test]
-    fn prices_are_set_together_or_not_at_all() {
-        let lone: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    price_in_per_mtok: 1.0\n").unwrap();
-        assert!(profiles(&lone).unwrap_err().to_string().contains("together"));
-        let both: UserLayer =
-            serde_yaml::from_str("profiles:\n  anthropic:\n    price_in_per_mtok: 3.0\n    price_out_per_mtok: 15.0\n").unwrap();
-        assert_eq!(profiles(&both).unwrap()["anthropic"].price_out_per_mtok, Some(15.0));
+    fn a_lone_price_never_turns_the_gate_off() {
+        let lone: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    price_in_per_mtok: 3.0\n").unwrap();
+        let s = resolve(&lone, |_| true).unwrap().unwrap();
+        assert_eq!((s.profile.price_in_per_mtok, s.profile.price_out_per_mtok), (Some(3.0), None));
     }
 
     #[test]

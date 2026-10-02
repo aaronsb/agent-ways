@@ -31,7 +31,7 @@ pub struct Usage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CostSource {
-    /// The provider's usage block reported it.
+    /// The provider reported it, or refused the call (zero).
     Provider,
     /// Tokens times the profile's prices, or the model's list price.
     PriceTable,
@@ -87,11 +87,14 @@ impl JudgeCall {
 /// agent-ways ships a profile for and whose provider reports no cost:
 /// Claude Haiku 4.5 on Anthropic, under its alias or a dated id.
 pub fn list_price(provider: Provider, model: &str) -> Option<(f64, f64)> {
-    (provider == Provider::Anthropic && provider.is_recommended(model)).then_some((1.0, 5.0))
+    let haiku_4_5 = model
+        .strip_prefix("claude-haiku-4-5")
+        .is_some_and(|rest| rest.is_empty() || rest.strip_prefix('-').is_some_and(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit())));
+    (provider == Provider::Anthropic && haiku_4_5).then_some((1.0, 5.0))
 }
 
 /// The provider's figure where it reported one, else tokens times the
-/// profile's prices or the model's list price, else unknown.
+/// profile's prices (both set) or the model's list price, else unknown.
 pub fn price(usage: &Usage, profile: &Profile) -> (Option<f64>, CostSource) {
     if let Some(c) = usage.provider_cost_usd {
         return (Some(c), CostSource::Provider);
@@ -143,6 +146,11 @@ mod tests {
         assert_eq!(price(&u, &p), (Some(1.0), CostSource::PriceTable));
         p.model = "claude-sonnet-4-5".into();
         assert_eq!(price(&u, &p), (None, CostSource::Unknown));
+        p.price_in_per_mtok = Some(3.0);
+        assert_eq!(price(&u, &p), (None, CostSource::Unknown), "a lone price is ignored");
+        p.model = "claude-haiku-4-5".into();
+        assert_eq!(price(&u, &p), (Some(1.0), CostSource::PriceTable));
+        p.model = "claude-sonnet-4-5".into();
         (p.price_in_per_mtok, p.price_out_per_mtok) = (Some(3.0), Some(15.0));
         assert_eq!(price(&u, &p), (Some(3.0), CostSource::PriceTable));
     }
