@@ -15,6 +15,7 @@ use agent_tui::ratatui::Frame as Draw;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{self, Ground, Palette, Seg, Shape};
 use agent_tui::timeline::{key_bar, Playback, Scrubber};
+use ways_agent_core::spend::{self, Group};
 use ways_core::introspection::SessionIntrospection;
 
 use super::model::{ActiveWay, Frame, Outcome};
@@ -54,6 +55,10 @@ pub(crate) struct Replay {
     /// Whether the relevance judge saw this session: the header names the
     /// injected view only then.
     pub(crate) judged: bool,
+    /// What the judge spent on this session, while it made a call.
+    pub(crate) spend: Option<Group>,
+    /// Whether the header gives the spend as cost; tokens otherwise.
+    pub(crate) cost: bool,
     /// The selected way of the frame shown, in both views.
     sel: usize,
     /// The why-fired detail's scroll, and its page from the last frame.
@@ -85,6 +90,8 @@ impl Replay {
             view: View::Timeline,
             matched: false,
             judged: false,
+            spend: None,
+            cost: false,
             sel: 0,
             scroll: 0,
             page: 10,
@@ -122,6 +129,7 @@ impl Replay {
         let mut r = Replay::new(session_id.to_string(), project, window / 1000, frames, play);
         r.from_log = true;
         r.judged = super::frames::has_verdicts(&events);
+        r.spend = session_spend(content, session_id);
         if live {
             r.sig = events_signature();
         }
@@ -250,6 +258,7 @@ impl Replay {
             (View::Timeline, KeyCode::End | KeyCode::Char('G')) => self.travel(Playback::end),
             (View::Timeline, KeyCode::Char(' ')) => self.travel(Playback::toggle),
             (_, KeyCode::Char('f')) => self.toggle_matched(),
+            (_, KeyCode::Char('$')) if self.spend.is_some() => self.cost = !self.cost,
             (View::Timeline, KeyCode::Char('+') | KeyCode::Char('=')) => self.play.faster(),
             (View::Timeline, KeyCode::Char('-') | KeyCode::Char('_')) => self.play.slower(),
             _ => {}
@@ -300,6 +309,7 @@ impl Replay {
             return;
         }
         self.judged = super::frames::has_verdicts(&events);
+        self.spend = session_spend(&content, &self.session_id);
         self.take_frames(frames);
     }
 
@@ -321,6 +331,13 @@ impl Replay {
             }
         }
     }
+}
+
+/// The judge's spend on `session` in the event log `content`; `None`
+/// while it made no call.
+pub(super) fn session_spend(content: &str, session: &str) -> Option<Group> {
+    let calls = spend::filter(spend::parse_log(content), None, Some(session));
+    (!calls.is_empty()).then(|| spend::total(&calls))
 }
 
 /// The row in `frame` that best keeps an anchor across a frame change: the
@@ -598,12 +615,21 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
         metrics.retain(|(p, _)| *p != drop);
     }
     let metrics: Vec<Span<'static>> = metrics.into_iter().map(|(_, s)| s).collect();
+    // The spend goes before the project, so a narrow line cuts the path;
+    // when the spend itself would not fit, the session id is shortened.
+    let spend = r.spend.as_ref().map(|g| {
+        let amount = if r.cost { g.cost_short() } else { format!("{} tokens", g.tokens_short()) };
+        Span::styled(format!("  judge ×{} · {amount}", g.calls), theme::accent())
+    });
+    let mut id = r.session_id.clone();
+    if "Session ".len() + id.chars().count() + spend.as_ref().map_or(0, Span::width) > width as usize {
+        id = super::short_id(&id);
+    }
+    let mut title = vec![Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)), Span::raw(id)];
+    title.extend(spend);
+    title.push(Span::styled(format!("  {}", r.project), theme::muted()));
     vec![
-        Line::from(vec![
-            Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
-            Span::raw(r.session_id.clone()),
-            Span::styled(format!("  {}", r.project), theme::muted()),
-        ]),
+        Line::from(title),
         Line::from(metrics),
     ]
 }
@@ -647,6 +673,9 @@ fn draw_replay(f: &mut Draw, r: &mut Replay, shape: Shape) {
         keys.push(("esc", "timeline"));
     }
     keys.push(("f", if r.matched { "injected" } else { "matched" }));
+    if r.spend.is_some() {
+        keys.push(("$", if r.cost { "tokens" } else { "cost" }));
+    }
     keys.push(("q", "quit"));
     f.render_widget(Paragraph::new(key_bar(shape, mode, ground, &keys, Vec::new(), status.width)), status);
 }

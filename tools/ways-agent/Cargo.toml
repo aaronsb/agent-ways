@@ -17,7 +17,7 @@ clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ways-agent-core = { path = "../ways-agent-core" }
+ways-agent-core = { path = "../ways-agent-core", features = ["clap"] }
 ways-core = { path = "../ways-core" }
 ureq = { version = "3", features = ["json"] }
 
