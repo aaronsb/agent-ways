@@ -227,7 +227,7 @@ fn esc_leaves_the_why_view_for_the_timeline_before_it_leaves_the_session() {
     assert!(text(&render(&mut s, 120, 40)).contains("why it fired"));
     press(&mut s, &[KeyCode::Esc]);
     let t = text(&render(&mut s, 120, 40));
-    assert!(t.contains("ways at epoch") && t.contains(&format!("Session {SESSION}")), "{t}");
+    assert!(t.contains(" ways at epoch ") && t.contains(&format!("Session {SESSION}")), "{t}");
 }
 
 #[test]

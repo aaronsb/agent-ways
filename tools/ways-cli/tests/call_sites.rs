@@ -128,10 +128,18 @@ fn invocations(code: &str) -> Vec<(String, Option<String>)> {
         let rest = code[end..].trim_start_matches('"');
         let Some(rest) = rest.strip_prefix(' ') else { continue };
         let Some(a) = word(rest) else { continue };
-        let after = rest[a.len()..].strip_prefix(' ').and_then(word).map(str::to_string);
-        found.push((a.to_string(), after));
+        found.push((a.to_string(), second(&rest[a.len()..])));
     }
     found
+}
+
+/// The word after a command: a verb, or `-` for a flag, which a group rejects.
+fn second(rest: &str) -> Option<String> {
+    let rest = rest.strip_prefix(' ')?;
+    if rest.starts_with('-') {
+        return Some("-".into());
+    }
+    word(rest).map(str::to_string)
 }
 
 /// `Command::new(<ways binary>).arg("x")` or `.args(["x", "y"])` in Rust.
@@ -143,7 +151,8 @@ fn spawns(text: &str) -> Vec<(String, Option<String>)> {
         i = start + 13;
         let Some(close) = text[i..].find(')') else { break };
         let target = &text[i..i + close];
-        if !(target.contains("ways_bin") || target.contains("\"ways\"") || target.contains("ways_exe")) {
+        let t = target.trim();
+        if !(t == "exe" || t.contains("ways_bin") || t.contains("\"ways\"") || t.contains("ways_exe")) {
             continue;
         }
         let tail = &text[i + close..(i + close + 200).min(text.len())];
@@ -163,8 +172,13 @@ fn spawns(text: &str) -> Vec<(String, Option<String>)> {
     found
 }
 
-fn call_sites(root: &Path) -> BTreeMap<(String, Option<String>), Vec<String>> {
-    let mut sites: BTreeMap<(String, Option<String>), Vec<String>> = BTreeMap::new();
+/// Each call site, with the places it appears. A place in shell code is
+/// marked: a bare group there runs and exits 2, while a backticked `ways
+/// <group>` in prose names the group.
+type Sites = BTreeMap<(String, Option<String>), Vec<(String, bool)>>;
+
+fn call_sites(root: &Path) -> Sites {
+    let mut sites = Sites::new();
     for path in tracked_files(root) {
         if !in_scope(&path) || path.ends_with("tests/call_sites.rs") {
             continue;
@@ -175,8 +189,12 @@ fn call_sites(root: &Path) -> BTreeMap<(String, Option<String>), Vec<String>> {
         let mut fence: Option<bool> = None;
         for (n, line) in text.lines().enumerate() {
             let mut found = Vec::new();
+            let mut shell = false;
             match k {
-                Kind::Shell => found.extend(invocations(shell_code(line))),
+                Kind::Shell => {
+                    shell = true;
+                    found.extend(invocations(shell_code(line)));
+                }
                 Kind::Markdown => {
                     if let Some(lang) = line.trim_start().strip_prefix("```") {
                         fence = match fence {
@@ -185,8 +203,9 @@ fn call_sites(root: &Path) -> BTreeMap<(String, Option<String>), Vec<String>> {
                         };
                         continue;
                     }
-                    if let Some(shell) = fence {
-                        if shell {
+                    if let Some(code) = fence {
+                        if code {
+                            shell = true;
                             found.extend(invocations(shell_code(line)));
                         }
                     } else {
@@ -199,21 +218,23 @@ fn call_sites(root: &Path) -> BTreeMap<(String, Option<String>), Vec<String>> {
                     for span in backticked(line) {
                         found.extend(invocations(span.trim_start()));
                     }
-                    // An indented string is a help listing: "  ways author lint <path>".
+                    // A string that starts with `ways` is a command the code prints or
+                    // runs; an indented one is a help listing ("  ways author lint").
                     for quoted in line.split('"').skip(1).step_by(2) {
-                        if quoted.starts_with("  ") {
-                            found.extend(invocations(quoted.trim_start()));
+                        let q = if quoted.starts_with("  ") { quoted.trim_start() } else { quoted };
+                        if q.starts_with("ways ") {
+                            found.extend(invocations(q));
                         }
                     }
                 }
             }
             for site in found {
-                sites.entry(site).or_default().push(format!("{path}:{}", n + 1));
+                sites.entry(site).or_default().push((format!("{path}:{}", n + 1), shell));
             }
         }
         if k == Kind::Rust {
             for site in spawns(&text) {
-                sites.entry(site).or_default().push(format!("{path} (spawn)"));
+                sites.entry(site).or_default().push((format!("{path} (spawn)"), true));
             }
         }
     }
@@ -243,6 +264,8 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
         assert!(sites.contains_key(&key), "the scan missed `ways {} {}`", must.0, must.1.unwrap_or(""));
     }
 
+    // Per command: None when the CLI rejects it, else whether it needs a verb
+    // (its usage line reads `<COMMAND>`, as `session` does; `settings` runs bare).
     let mut groups: BTreeMap<String, Option<bool>> = BTreeMap::new();
     let mut bad = Vec::new();
     for ((a, b), places) in &sites {
@@ -257,15 +280,16 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
                 return Some(false);
             }
             let (ok, out) = ways_help(&[a]);
-            ok.then(|| out.contains("\nCommands:\n"))
+            ok.then(|| out.lines().any(|l| l.starts_with("Usage:") && l.contains("<COMMAND>")))
         });
         let ok = match (*group, b) {
             (None, _) => false,
-            (Some(true), Some(b)) => ways_help(&[a, b]).0,
-            (Some(_), _) => true,
+            (Some(true), Some(b)) => b != "-" && ways_help(&[a, b]).0,
+            (Some(true), None) => !places.iter().any(|(_, shell)| *shell),
+            (Some(false), _) => true,
         };
         if !ok {
-            let shown = places.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+            let shown = places.iter().take(3).map(|(p, _)| p.clone()).collect::<Vec<_>>().join(", ");
             bad.push(format!("ways {a}{}  ({shown})", b.as_ref().map(|b| format!(" {b}")).unwrap_or_default()));
         }
     }
@@ -280,6 +304,7 @@ fn the_scan_reads_each_call_site_form() {
     assert_eq!(invocations("x=$(ways session ways --json)"), [("session".into(), Some("ways".into()))]);
     assert_eq!(invocations("> cd ~/.claude && ways author match \"x\""), [("author".into(), Some("match".into()))]);
     assert_eq!(invocations("timeout 10 ways corpus"), [("corpus".into(), None)]);
+    assert_eq!(invocations("ways tune --lang es"), [("tune".into(), Some("-".into()))]);
     assert!(invocations("always lint").is_empty());
     assert!(invocations("echo 'ways binary not found'").is_empty());
     assert!(invocations("how ways match a prompt").is_empty());
@@ -292,4 +317,5 @@ fn the_scan_reads_each_call_site_form() {
         spawns("Command::new(ways_bin).args([\"corpus\", \"--quiet\"])"),
         [("corpus".into(), None)]
     );
+    assert_eq!(spawns("Command::new(exe).args([\"target\", \"plan\"])"), [("target".into(), Some("plan".into()))]);
 }

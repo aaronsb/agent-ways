@@ -149,7 +149,7 @@ impl Sensor for ContextSensor {
         // plus velocity context that ways can't provide.
         let thresholds: &[(u8, f64, &str)] = &[
             (50, 1.5, "halfway through the context window — if the work's on track, keep going; if you've barely started, this is a calm moment to scope the next stages"),
-            (65, 3.0, "ways will capture todos (75%) and memory (80%) shortly"),
+            (65, 3.0, "agent-ways will capture todos (75%) and memory (80%) shortly"),
             (83, 4.0, "compaction checkpoint fires at 85% — finish the current task and sync"),
             (90, 5.0, "stop or compact right now — quality degrades past here, and auto-compact is off"),
         ];

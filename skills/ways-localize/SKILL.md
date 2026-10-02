@@ -51,7 +51,7 @@ the same bar the delivery skills hold.)
 ## 3. Flip the mode switch
 
 The **effective** switch is the user-scope `language` in
-`$XDG_CONFIG_HOME/agent-ways/config.yaml` (`ways settings list --json` prints it). Set it to
+`$XDG_CONFIG_HOME/agent-ways/config.yaml`. Set it to
 the code:
 
 ```bash

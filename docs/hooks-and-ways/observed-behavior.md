@@ -54,7 +54,7 @@ The mechanism in short form: **task hierarchy preservation under redirection.** 
 
 ### What the observation does not test
 
-1. **Parameter calibration.** The observation says "ways helped"; it says nothing about whether the specific curve shapes, half-lives, or firing thresholds in the current implementation are optimal. Those are still empirical questions for [`ways tune locale`](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) to answer.
+1. **Parameter calibration.** The observation says "ways helped"; it says nothing about whether the specific curve shapes, half-lives, or firing thresholds in the current implementation are optimal. Those are still empirical questions for the calibration work of [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) to answer.
 
 2. **Which ways were load-bearing.** The full stack was active on Machine B. This observation cannot discriminate between "quality.md was load-bearing" and "github.md was load-bearing" and "it was all of them together." Ablation by individual way would be needed for that.
 

@@ -1,6 +1,6 @@
 //! The replay as JSON, and the session lists agents pick from.
 //!
-//! `introspect replay` draws a session's frames on the screen; `replay
+//! `session replay` draws a session's frames on the screen; `replay
 //! --json` writes the same reconstructed timeline, with a session summary,
 //! the relevance gate's work and the near-miss events the screen omits, as
 //! one JSON document on stdout, for agents and scripts. It needs no

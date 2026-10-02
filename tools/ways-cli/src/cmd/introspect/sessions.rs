@@ -1,5 +1,5 @@
 //! Session enumeration: the sessions the event log records, the plain
-//! table `introspect list` prints, and which of them Claude Code still has a
+//! table `session list` prints, and which of them Claude Code still has a
 //! transcript for, found through claude-sessions.
 
 use std::collections::{HashMap, HashSet};
@@ -96,7 +96,7 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
     sessions
 }
 
-/// The plain session table of `introspect list`, newest first.
+/// The plain session table of `session list`, newest first.
 pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Result<()> {
     let mut sessions = gather_sessions(content, project_filter);
     find_transcripts(&mut sessions, &ways_core::paths::claude_dir());

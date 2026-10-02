@@ -48,7 +48,7 @@ fn context(home: &Path, project: &Path, extra: &[(&str, &str)]) -> Vec<u8> {
     for (k, v) in extra {
         cmd.env(k, v);
     }
-    let out = cmd.output().expect("ways runs");
+    let out = cmd.output().expect("run ways");
     assert!(out.status.success(), "ways context failed: {}", String::from_utf8_lossy(&out.stderr));
     out.stdout
 }

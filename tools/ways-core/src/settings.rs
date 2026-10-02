@@ -157,7 +157,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         scope: Scope::Project,
         doc: "One way on or off in this project.",
-        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` and `ways settings unset ways.project.<id>` write the same key.",
+        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` turns a way off; `ways settings unset ways.project.<id>` turns it back on.",
         ..BASE
     },
     KeySpec {

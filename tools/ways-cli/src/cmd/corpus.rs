@@ -148,7 +148,7 @@ pub fn run(
     // Current project first, straight from CLAUDE_PROJECT_DIR. This is the
     // Windows-safe path: no lossy decode of the ~/.claude/projects/ dir name.
     // The namespace key is derived from the REAL project root via
-    // encode_project_key, so it matches exactly what `ways scan --project`
+    // encode_project_key, so it matches exactly what `ways scan <lane> --project`
     // computes for the same directory (the fix for Bug B).
     if let Some(cpd) = crate::util::env_project_dir() {
         vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
@@ -210,7 +210,7 @@ pub fn run(
             }
 
             // Key off the resolved REAL path, not the lossy encoded dir name, so
-            // it matches `ways scan --project <that project>`.
+            // it matches `ways scan <lane> --project <that project>`.
             let key = crate::util::encode_project_key(Path::new(&project_path));
             project_total += embed_one_project(
                 &ways_path,

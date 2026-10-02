@@ -13,7 +13,7 @@ use super::model::{ActiveWay, Frame, WayEvent};
 
 /// Reconstruct the full replay frame timeline for a session. Loads the token
 /// timeline, pre-resolves per-way refire thresholds, and clusters events into
-/// epoch frames. Shared by the replay screens and `introspect replay --json`.
+/// epoch frames. Shared by the replay screens and `session replay --json`.
 ///
 /// Refire thresholds reflect each way's *current* curve — this is a replay,
 /// so a curve edited since the recorded session shows today's value. That's the

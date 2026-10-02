@@ -223,3 +223,7 @@ This amends ADR-503's Decision at §14: the groups are the ones above, and old n
 - **Every operator command in a group, `context` under `session` and `init`, `corpus` and `reconcile` under an `install` group.** Rejected. Each is called by a running session's hook table, the previous updater or a running `attend`, so moving it needs an alias or breaks those callers.
 - **Keep `disable` and `enable` as permanent top-level verbs over the settings writer.** This was a real option: they would be designed verbs, not compatibility. Not chosen, because ADR-503 §11 makes a one-file change a setting and gives settings one front end. It is the second probe.
 - **Leave the surface flat and only shorten the help lines.** Rejected. It fixes the width and leaves 37 entries mixing hook plumbing with operator commands, which is the problem ADR-503's basis names.
+
+## Note (2026-10-02): the agent.yaml write path is gone
+
+Decision item 4 said the change rewrites the header `ways-agent-core` writes to a new `agent.yaml`. The implementation removed that header and the `UserLayer` write path instead, since `ways agent use` and `mode` were its only callers. `ways settings set gate.…` now writes `agent.yaml` through the settings writer, and a new file has no header. An existing file keeps its old comment, as the Negative consequences say.

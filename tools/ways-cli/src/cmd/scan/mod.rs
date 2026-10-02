@@ -1023,7 +1023,7 @@ fn match_prompt(
 /// Emit a `way_nearmiss` telemetry event (ADR-134 Decision 1): a way that did
 /// not fire but scored within the near-miss margin of its threshold. This is
 /// persistence of already-computed scores, not new work — the tuning passes
-/// (`ways tune locale --cadence/--precision`) consume the stream. The leading fields
+/// of ADR-134 consume the stream. The leading fields
 /// (`event`, `way`, `domain`, `trigger`, `scope`, `project`, `session`) follow
 /// the `way_fired` convention (scan/state.rs) for reader symmetry; the score
 /// fields are near-miss-specific. There is no `team` field — team attribution
