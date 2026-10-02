@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::cost::JudgeCall;
 use crate::judge::{Candidate, Turn};
 use crate::profile::{Mode, Provider};
 
@@ -66,7 +67,13 @@ pub struct ReplyEnvelope {
 pub enum Reply {
     Judged(Judged),
     /// The gate did not judge; the hook keeps the matcher's decision.
-    Fallback { reason: String, latency_ms: u64 },
+    /// `call` is set when a provider call was made, since it may be billed.
+    Fallback {
+        reason: String,
+        latency_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<Box<JudgeCall>>,
+    },
     Status(Status),
     Ok,
     Error { message: String },
@@ -81,6 +88,10 @@ pub struct Judged {
     pub threshold: f64,
     pub verdicts: Vec<Verdict>,
     pub latency_ms: u64,
+    /// The provider call behind the verdicts. An agent older than #741
+    /// sends none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<JudgeCall>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,11 +227,26 @@ mod tests {
 
         let reply = ReplyEnvelope {
             agent: AgentId { version: "0.1.0".into(), core: "0.1.0".into(), exe: "/x/ways-agent".into() },
-            reply: Reply::Fallback { reason: "no_key".into(), latency_ms: 0 },
+            reply: Reply::Fallback { reason: "no_key".into(), latency_ms: 0, call: None },
         };
         let line = serde_json::to_string(&reply).unwrap();
         assert!(line.contains("\"kind\":\"fallback\"") && line.contains("\"exe\":\"/x/ways-agent\""));
         assert_eq!(serde_json::from_str::<ReplyEnvelope>(&line).unwrap(), reply);
+    }
+
+    #[test]
+    fn replies_decode_across_the_call_field_in_both_directions() {
+        // A hook built before #741 reading a new reply ignores `call`, and a
+        // new hook reading an old reply gets none.
+        let old = r#"{"kind":"judged","engine":"anthropic","provider":"anthropic","model":"m","mode":"enforce","threshold":0.3,"verdicts":[],"latency_ms":5}"#;
+        let Reply::Judged(j) = serde_json::from_str::<Reply>(old).unwrap() else { panic!("not judged") };
+        assert_eq!(j.call, None);
+        let profile = crate::profile::shipped()["anthropic"].clone();
+        let call = Box::new(JudgeCall::priced("anthropic", &profile, 2, None));
+        let reply = Reply::Fallback { reason: "deadline".into(), latency_ms: 2000, call: Some(call) };
+        let line = serde_json::to_string(&reply).unwrap();
+        assert!(line.contains("\"cost_source\":\"unknown\"") && !line.contains("cost_usd"));
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);
     }
 
     #[cfg(unix)]

@@ -41,6 +41,7 @@ const BASE: KeySpec = KeySpec {
 };
 
 const POSITIVE: Kind = Kind::Int { min: 1, max: i64::MAX };
+const PRICE: Kind = Kind::Float { min: 0.0, max: 1000.0 };
 
 const KEYS: &[KeySpec] = &[
     KeySpec {
@@ -136,6 +137,22 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Fn(|b| shipped_field(b, "max_candidates")),
         doc: "Candidates judged per request; the rest pass unjudged.",
         long: "Taken in the matcher's order. Judge latency grows with each candidate.",
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.profiles.*.price_in_per_mtok",
+        path: &["profiles", "*", "price_in_per_mtok"],
+        kind: PRICE,
+        doc: "USD per million input tokens, for pricing judge calls.",
+        long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: Claude Haiku 4.5's list price for that model and its dated ids, else the call's cost is unknown. Applies only with price_out_per_mtok set too. `ways agent cost` reports the spend.",
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.profiles.*.price_out_per_mtok",
+        path: &["profiles", "*", "price_out_per_mtok"],
+        kind: PRICE,
+        doc: "USD per million output tokens, for pricing judge calls.",
+        long: "Set with price_in_per_mtok; see it for the default.",
         ..BASE
     },
     KeySpec {

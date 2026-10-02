@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
+use crate::cost::Usage;
 use crate::profile::Provider;
 
 const ANTHROPIC: &str = "https://api.anthropic.com";
@@ -188,9 +189,25 @@ pub fn models(provider: Provider, key: Option<&str>) -> Result<Vec<ModelInfo>> {
         .collect())
 }
 
-/// Asks the engine one batched question: P(yes) per candidate, in order.
-/// `Err` carries a fallback reason: `deadline`, `provider_<status>: …`,
-/// `transport: …` or `answer: …`.
+/// A judge call that gave no verdicts. `reason` is the fallback reason:
+/// `deadline`, `provider_<status>: …`, `transport: …` or `answer: …`.
+/// `usage` is set when the provider answered with one, so the call is priced
+/// even though its answer was unusable, and at zero when it refused the call
+/// with a 4xx.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JudgeFailure {
+    pub reason: String,
+    pub usage: Option<Usage>,
+}
+
+impl JudgeFailure {
+    fn bare(reason: String) -> JudgeFailure {
+        JudgeFailure { reason, usage: None }
+    }
+}
+
+/// Asks the engine one batched question: P(yes) per candidate, in order,
+/// with the usage the provider reported.
 pub fn judge(
     http: &ureq::Agent,
     provider: Provider,
@@ -199,7 +216,7 @@ pub fn judge(
     prompt: &str,
     n: usize,
     timeout: Duration,
-) -> std::result::Result<Vec<f64>, String> {
+) -> std::result::Result<(Vec<f64>, Option<Usage>), JudgeFailure> {
     use crate::judge;
     let max_tokens = 64 + 48 * n;
     let (url, body) = match provider {
@@ -244,14 +261,21 @@ pub fn judge(
         Provider::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
         Provider::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
     };
-    let mut resp = req.send_json(&body).map_err(transport_reason)?;
+    let mut resp = req.send_json(&body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
     let status = resp.status().as_u16();
-    let text = resp.body_mut().read_to_string().map_err(transport_reason)?;
+    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
     // Status first: an HTML error page from a proxy is still a provider error.
     let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status != 200 {
-        return Err(format!("provider_{status}: {}", error_message(&reply)));
+        // A provider that refuses a request (4xx) does not bill it. A
+        // timeout or a 5xx, from the provider or a proxy, may come after the
+        // model ran, so its cost is unknown.
+        let refused = (400..500).contains(&status) && status != 408;
+        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
+        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
     }
+    let usage = usage(provider, &reply);
+    let failed = |reason: String| JudgeFailure { reason, usage: usage.clone() };
     let input = match provider {
         Provider::Anthropic => reply
             .get("content")
@@ -259,16 +283,45 @@ pub fn judge(
             .and_then(|blocks| blocks.iter().find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")))
             .and_then(|b| b.get("input"))
             .cloned()
-            .ok_or_else(|| format!("answer: no tool_use block (stop_reason {})", reply["stop_reason"]))?,
+            .ok_or_else(|| failed(format!("answer: no tool_use block (stop_reason {})", reply["stop_reason"])))?,
         Provider::Openrouter => {
             let args = reply
                 .pointer("/choices/0/message/tool_calls/0/function/arguments")
                 .and_then(Value::as_str)
-                .ok_or_else(|| "answer: no tool call".to_string())?;
-            serde_json::from_str(args).map_err(|e| format!("answer: arguments are not JSON: {e}"))?
+                .ok_or_else(|| failed("answer: no tool call".to_string()))?;
+            serde_json::from_str(args).map_err(|e| failed(format!("answer: arguments are not JSON: {e}")))?
         }
     };
-    judge::parse_judgements(&input, n).map_err(|e| format!("answer: {e}"))
+    let p_yes = judge::parse_judgements(&input, n).map_err(|e| failed(format!("answer: {e}")))?;
+    Ok((p_yes, usage))
+}
+
+/// The usage block of a 200 reply, in either provider's shape. `None` when
+/// the reply carries no token counts.
+fn usage(provider: Provider, reply: &Value) -> Option<Usage> {
+    let u = reply.get("usage")?;
+    let n = |ptr: &str| u.pointer(ptr).and_then(Value::as_u64);
+    match provider {
+        Provider::Anthropic => Some(Usage {
+            input_tokens: n("/input_tokens")?,
+            output_tokens: n("/output_tokens")?,
+            cache_read_tokens: n("/cache_read_input_tokens").unwrap_or(0),
+            cache_write_tokens: n("/cache_creation_input_tokens").unwrap_or(0),
+            provider_cost_usd: None,
+        }),
+        // OpenRouter's prompt_tokens counts cache reads and writes too.
+        Provider::Openrouter => {
+            let cached = n("/prompt_tokens_details/cached_tokens").unwrap_or(0);
+            let written = n("/prompt_tokens_details/cache_write_tokens").unwrap_or(0);
+            Some(Usage {
+                input_tokens: n("/prompt_tokens")?.saturating_sub(cached + written),
+                output_tokens: n("/completion_tokens")?,
+                cache_read_tokens: cached,
+                cache_write_tokens: written,
+                provider_cost_usd: u.get("cost").and_then(Value::as_f64),
+            })
+        }
+    }
 }
 
 fn transport_reason(e: ureq::Error) -> String {
@@ -315,6 +368,21 @@ mod tests {
         assert_eq!(status_check(402, &json!({})), Check::NoCredit);
         assert_eq!(status_check(429, &Value::Null), Check::RateLimited);
         assert_eq!(status_check(500, &Value::Null), Check::Failed(500, "no message".into()));
+    }
+
+    #[test]
+    fn usage_reads_both_provider_shapes() {
+        let anthropic = json!({"usage": {"input_tokens": 900, "output_tokens": 40, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}});
+        assert_eq!(
+            usage(Provider::Anthropic, &anthropic),
+            Some(Usage { input_tokens: 900, output_tokens: 40, ..Default::default() })
+        );
+        let openrouter = json!({"usage": {"prompt_tokens": 1000, "completion_tokens": 40, "cost": 0.0012, "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 50}}});
+        assert_eq!(
+            usage(Provider::Openrouter, &openrouter),
+            Some(Usage { input_tokens: 850, output_tokens: 40, cache_read_tokens: 100, cache_write_tokens: 50, provider_cost_usd: Some(0.0012) })
+        );
+        assert_eq!(usage(Provider::Anthropic, &json!({"content": []})), None);
     }
 
     #[test]

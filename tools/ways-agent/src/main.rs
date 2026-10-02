@@ -14,6 +14,7 @@ use clap::{Parser, Subcommand};
 use ways_agent::keys;
 use ways_agent::net;
 use ways_agent::profile::{self, Provider, UserLayer};
+use ways_agent::report;
 
 #[derive(Parser)]
 #[command(name = "ways-agent", version, about = "The ways agent: relevance judging and key custody for agent-ways")]
@@ -51,6 +52,21 @@ enum Command {
     Load,
     /// Stop the running agent.
     Unload,
+    /// Report what the judge has cost, from the events log.
+    Cost {
+        /// Only calls on or after this UTC date (YYYY-MM-DD).
+        #[arg(long)]
+        since: Option<String>,
+        /// Only this session id.
+        #[arg(long)]
+        session: Option<String>,
+        /// Group rows by session, project, day or month.
+        #[arg(long, value_enum, default_value = "day")]
+        by: report::By,
+        /// Print JSON with every grouping.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -121,6 +137,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Command::Load => {
             ways_agent::client::clear_start_backoff();
             agent_status(true)
+        }
+        Command::Cost { since, session, by, json } => {
+            report::run(since.as_deref(), session.as_deref(), by, json)?;
+            Ok(ExitCode::SUCCESS)
         }
         Command::Unload => {
             let stopped = ways_agent::server::stop()?;
