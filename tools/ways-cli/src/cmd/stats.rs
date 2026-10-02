@@ -83,7 +83,7 @@ fn parse_events(content: &str, days: Option<u32>, project_filter: Option<&str>) 
 
             let project = v["project"].as_str().unwrap_or("").to_string();
             if let Some(pf) = project_filter {
-                if !project.contains(pf) {
+                if !ways_core::util::in_project(&project, pf) {
                     return None;
                 }
             }

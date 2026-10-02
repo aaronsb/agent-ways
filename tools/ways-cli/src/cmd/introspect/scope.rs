@@ -25,18 +25,15 @@ pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<
     }
 }
 
-/// Whether an event's stored `project` path belongs to `scope`, compared as
-/// normalized absolute paths — replacing the old loose `contains` substring test
-/// that let unrelated projects (`/a/foo` vs `/a/foo-bar`) bleed together.
-///
-/// The comparison is exact (modulo trailing slash). On the primary path this is
-/// right: `CLAUDE_PROJECT_DIR` is the scope at both write and read time, so the
-/// strings match. On a *manual* run where scope falls back to `detect_project_dir`
-/// (a symlink-resolved cwd), a session whose stored `project` was a logical or
-/// symlinked path — or a subdirectory `$PWD` — won't match and is simply absent
-/// from the list (not an error). Pass `--all` or an explicit `--project` to see it.
+/// Whether an event's stored `project` path belongs to `scope`: the project
+/// itself or a path under it, such as an agent worktree
+/// ([`ways_core::util::in_project`]). On a manual run where scope falls back
+/// to `detect_project_dir` (a symlink-resolved cwd), a session whose stored
+/// `project` was a logical or symlinked path won't match and is simply absent
+/// from the list (not an error). Pass `--all` or an explicit `--project` to
+/// see it.
 pub(crate) fn project_matches(stored: &str, scope: &str) -> bool {
-    ways_core::util::same_project(stored, scope)
+    ways_core::util::in_project(stored, scope)
 }
 
 #[cfg(test)]
@@ -44,7 +41,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn project_matches_is_exact_not_substring() {
+    fn project_matches_the_project_and_what_is_under_it() {
         // Exact path (and trailing-slash normalization) matches.
         assert!(project_matches("/home/a/proj", "/home/a/proj"));
         assert!(project_matches("/home/a/proj/", "/home/a/proj"));
@@ -54,6 +51,10 @@ mod tests {
         assert!(!project_matches("/home/a/proj-2", "/home/a/proj"));
         assert!(!project_matches("/home/a/proj", "proj"));
         assert!(!project_matches("/home/a/other", "/home/a/proj"));
+        // An agent worktree under the project is part of it; the project is
+        // not part of its worktree.
+        assert!(project_matches("/home/a/proj/.claude/worktrees/agent-1", "/home/a/proj"));
+        assert!(!project_matches("/home/a/proj", "/home/a/proj/.claude/worktrees/agent-1"));
     }
 
     #[test]

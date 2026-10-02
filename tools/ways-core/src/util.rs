@@ -120,10 +120,13 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Whether a recorded project path is `scope`: the same path, a trailing
-/// slash aside. Exact, so a worktree under a project is its own project.
-pub fn same_project(project: &str, scope: &str) -> bool {
-    project.trim_end_matches('/') == scope.trim_end_matches('/')
+/// Whether a recorded project path is in the project `scope`: the same path,
+/// or a path under it, trailing slashes aside. A worktree under a project,
+/// such as an agent's in `.claude/worktrees/`, is part of it; a sibling whose
+/// name only begins the same (`/a/foo-bar` for `/a/foo`) is not.
+pub fn in_project(project: &str, scope: &str) -> bool {
+    let (p, s) = (project.trim_end_matches('/'), scope.trim_end_matches('/'));
+    p == s || p.strip_prefix(s).is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the

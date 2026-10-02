@@ -572,7 +572,7 @@ enum TuneCommand {
         /// Off-class rate at or above which a way is flagged (0.0–1.0)
         #[arg(long, default_value_t = cmd::tune_precision::FLAG_THRESHOLD)]
         flag_threshold: f64,
-        /// Filter to events whose project path contains this substring
+        /// Filter to events in this project path or under it
         #[arg(long)]
         project: Option<String>,
         /// Filter to ways whose id contains this substring
@@ -587,7 +587,7 @@ enum TuneCommand {
         /// Last N days only
         #[arg(long)]
         days: Option<u32>,
-        /// Filter to specific project path (default: CLAUDE_PROJECT_DIR)
+        /// Filter to this project path or under it (default: CLAUDE_PROJECT_DIR)
         #[arg(long)]
         project: Option<String>,
         /// Machine-readable JSON output

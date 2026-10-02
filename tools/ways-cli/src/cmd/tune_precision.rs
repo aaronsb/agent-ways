@@ -186,7 +186,7 @@ fn load_fires(content: &str, project_filter: Option<&str>) -> Vec<Fire> {
         }
         if let Some(pat) = project_filter {
             match row.get("project").and_then(|v| v.as_str()) {
-                Some(p) if p.contains(pat) => {}
+                Some(p) if ways_core::util::in_project(p, pat) => {}
                 _ => continue,
             }
         }
