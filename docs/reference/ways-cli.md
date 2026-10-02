@@ -552,7 +552,7 @@ ways author permissions --global
 
 **Bare:** on a terminal, `ways projects` opens the projects screen: the projects as `list` shows them, the selected one as `show` prints it (`J`/`K` scroll it), and `/` to filter as `search` matches. In a pipe it runs `list`.
 
-The `--json` forms give each project's `path` as shown (`~/…`) and its `absolute_path`, times as UTC ISO timestamps, and `null` for a value the project lacks.
+The `--json` forms give each project's `path` as shown (`~/…`) and its `absolute_path`, times as UTC ISO timestamps (the session index's own, else the newest transcript's), and `null` for a value the project lacks.
 
 **Tells you:** Depends on subcommand. `cleanup` and `hygiene` list what they would remove, ask first, and move it to a `.trash-<stamp>` dir under `~/.claude/projects` rather than deleting it; `--dry-run` only lists. `relocate` prints a plan and changes nothing unless given `--execute`. It refuses while a session is running in the project, and a rerun after a failed step resumes from where it stopped.
 

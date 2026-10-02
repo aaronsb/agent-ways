@@ -189,7 +189,8 @@ impl Screen for Projects {
         };
         // The lines the detail wraps to, so the scroll stops at its end.
         let inner = detail.width.saturating_sub(2).max(1) as usize;
-        let rows: usize = lines.iter().map(|l| l.width().max(1).div_ceil(inner)).sum();
+        // Wrapping at words can take a row more than the width alone needs.
+        let rows: usize = lines.iter().map(|l| l.width().max(1)).map(|w| w.div_ceil(inner) + usize::from(w > inner)).sum();
         let visible = detail.height.saturating_sub(2) as usize;
         self.scroll = self.scroll.min(rows.saturating_sub(visible) as u16);
         let mut block = pane(title);

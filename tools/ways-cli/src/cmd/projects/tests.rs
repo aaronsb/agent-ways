@@ -648,6 +648,7 @@ fn show_takes_an_exact_path_before_a_newer_one_containing_it() {
     assert_eq!(path("nothing-here"), None);
     let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into(), json: true });
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["last_active"], "2026-08-20T10:00:00Z", "the index's own time, not its day at midnight");
     assert_eq!(v["session_list"][0]["summary"], "Port the parser");
     assert_eq!(v["session_list"][1]["sidechain"], true);
 }
@@ -679,7 +680,7 @@ fn show_finds_a_home_project_by_its_expanded_path() {
     assert_eq!(v["last_branch"], serde_json::Value::Null, "absent is null, not \"\"");
     assert!(v["last_active"].as_str().is_some_and(|t| t.ends_with('Z') && t.contains('T')), "a full timestamp: {}", v["last_active"]);
     let (_, text) = f.run(ProjectsCommand::Show { project: "~/work/app".into(), json: false });
-    assert!(text.contains("/work/app"), "{text}");
+    assert!(text.contains("Dir: ") && !text.contains("No project matching"), "found by its ~ form: {text}");
 }
 
 /// With no projects at all the screen says so, and the detail names no

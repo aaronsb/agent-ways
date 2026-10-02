@@ -194,6 +194,10 @@ struct Project {
     entries: Vec<Value>,
     /// Whether the project has a `sessions-index.json`.
     indexed: bool,
+    /// The index's own `created` and `modified` times for the oldest and
+    /// newest session, as it wrote them; `first_active` and `last_active`
+    /// keep only their day.
+    index_times: (Option<String>, Option<String>),
 }
 
 impl Project {
@@ -204,7 +208,8 @@ impl Project {
     /// The project as `list --json` gives it; `show --json` adds its
     /// sessions with `sessions` set. A value the project lacks is `null`.
     fn json(&self, env: &Env, sessions: bool) -> Value {
-        let time = |e: Option<u64>| e.map(agent_fmt::when::utc_iso);
+        // The index's times as it wrote them; else a transcript's mtime.
+        let time = |raw: &Option<String>, e: Option<u64>| raw.clone().or(e.map(agent_fmt::when::utc_iso));
         let text = |s: &str| (!s.is_empty()).then(|| s.to_string());
         let mut v = serde_json::json!({
             "path": self.path,
@@ -214,8 +219,8 @@ impl Project {
             "transcripts": self.transcripts,
             "transcript_bytes": self.transcript_bytes,
             "memory_files": self.memory_files,
-            "first_active": time(self.first_active),
-            "last_active": time(self.last_active),
+            "first_active": time(&self.index_times.0, self.first_active),
+            "last_active": time(&self.index_times.1, self.last_active),
             "last_branch": text(&self.last_branch),
             "last_summary": text(&self.last_summary),
             "recent_prompts": self.recent_prompts,
@@ -295,11 +300,14 @@ fn scan_project(env: &Env, dir: &Path) -> Project {
         recent_prompts: Vec::new(),
         entries: Vec::new(),
         indexed: dir.join("sessions-index.json").exists(),
+        index_times: (None, None),
     };
 
     if let (Some(latest), Some(oldest)) = (entries.first(), entries.last()) {
         p.last_active = date_epoch(str_field(latest, "modified"));
         p.first_active = date_epoch(str_field(oldest, "created"));
+        let raw = |e: &Value, k: &str| Some(str_field(e, k).to_string()).filter(|s| !s.is_empty());
+        p.index_times = (raw(oldest, "created"), raw(latest, "modified"));
         p.last_summary = str_field(latest, "summary").to_string();
         p.last_branch = str_field(latest, "gitBranch").to_string();
         p.recent_prompts = entries
