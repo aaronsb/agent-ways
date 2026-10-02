@@ -34,13 +34,7 @@ use std::path::PathBuf;
 /// Build the path that stores the last-inbound signal id for the given
 /// attend-owner session id. Does not create the directory.
 pub fn path(session_id: &str) -> PathBuf {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"));
-    home.join(".cache")
-        .join("attend")
-        .join("state")
-        .join(format!("{session_id}.last-inbound"))
+    attend_presence::cache::state_dir().join(format!("{session_id}.last-inbound"))
 }
 
 /// Record `signal_id` as the most-recent inbound signal for `session_id`.
@@ -78,7 +72,7 @@ mod tests {
     fn path_contains_session_id_and_ext() {
         let p = path("test-session-123");
         assert!(p.to_string_lossy().contains("test-session-123.last-inbound"));
-        assert!(p.to_string_lossy().contains(".cache/attend/state"));
+        assert!(p.starts_with(attend_presence::cache::state_dir()));
     }
 
     #[test]

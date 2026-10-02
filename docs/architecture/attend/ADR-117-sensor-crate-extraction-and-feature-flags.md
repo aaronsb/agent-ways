@@ -153,3 +153,7 @@ Disabling a crate sensor via config (`-processes`) means it's never instantiated
 8. Verify `make lint`, `make attend-rebuild`, all existing behavior preserved
 9. Test minimal build: `cargo build -p attend --no-default-features`
 10. Update CI workflow to test both default and minimal feature sets
+
+## Addendum, 2026-10-01: no minimal-feature build
+
+Appended after acceptance; nothing above is changed. #701 (ADR-505) folded `sensor-git`, `sensor-context` and `sensor-disclosure` into attend as modules, which are always compiled, and removed their features. A `--no-default-features` build of attend did not compile before that change either, because the keepwarm command imports `sensor_keepwarm` unconditionally, and neither CI nor the Makefile builds one. The minimal build this record describes no longer exists. Config remains the control plane for turning a sensor off.

@@ -148,7 +148,7 @@ pub fn resolve_group_dir(name: &str) -> Option<PathBuf> {
 /// tests.
 pub fn resolve_group_dir_in(base: &Path, name: &str) -> Option<PathBuf> {
     if name == BASE_CHANNEL_NAME {
-        return Some(base.join("_broadcast"));
+        return Some(base.join(attend_groups::BROADCAST_DIR));
     }
     let dir = base.join(format!("{GROUP_PREFIX}{name}"));
     if dir.is_dir() || attend_groups::load_groups(base).contains_key(name) {
@@ -191,7 +191,7 @@ pub fn live_peer_count(name: &str, exclude_member: &str) -> usize {
 /// + heartbeats under a tempdir without touching `$HOME`.
 pub fn live_peer_count_in(base: &Path, name: &str, exclude_member: &str) -> usize {
     live_peer_count_with(base, name, exclude_member, |sid| {
-        attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE)
+        attend_presence::alive(sid, &Default::default())
     })
 }
 

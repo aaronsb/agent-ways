@@ -155,9 +155,9 @@ where
 
 /// Heartbeat-based liveness check (ADR-129). Wrapped here so the
 /// known_identities filter has a single name for the gate; the
-/// underlying `attend_heartbeat::is_fresh` is the source of truth.
+/// underlying `attend_presence::alive` is the source of truth.
 fn claude_is_live(session_id: &str) -> bool {
-    attend_heartbeat::is_fresh(session_id, attend_heartbeat::DEFAULT_GRACE)
+    attend_presence::alive(session_id, &Default::default())
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ use crate::legend::{
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
-    compose_self_echo, compose_status_block, cwd_dir, own_tray_names, signals_base, write_broadcast,
+    compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
     write_signal, Signal,
 };
 use crate::tabs::{self, Tab};
@@ -191,7 +191,7 @@ fn send_to_recipients(
 /// leave a just-joined group looking dead to peer sends.
 fn run_join(name: &str) -> EnterAction {
     let member = crate::signal::human_member_id();
-    let _ = attend_heartbeat::touch(&member);
+    let _ = attend_presence::heartbeat::touch(&member);
     join_group_in(&signals_base(), &member, name)
 }
 
@@ -538,7 +538,7 @@ fn run_purge(channel: Option<String>, foreground: &Tab) -> EnterAction {
     // planned tightening — planned exactly because no consumption
     // record existed to consult until the drain shipped one).
     let consumers = crate::consumers::live_consumer_seen_sets(&base, target);
-    purge_channel_in(&base, target, attend_heartbeat::DEFAULT_GRACE, &consumers)
+    purge_channel_in(&base, target, attend_presence::heartbeat::DEFAULT_GRACE, &consumers)
 }
 
 /// Filesystem-effect core of `/purge` — delete a channel's on-disk
@@ -558,7 +558,7 @@ fn purge_channel_in(
     consumers: &[std::collections::HashSet<String>],
 ) -> EnterAction {
     let (label, dir) = match channel {
-        None => ("open".to_string(), base.join("_broadcast")),
+        None => ("open".to_string(), base.join(attend_groups::BROADCAST_DIR)),
         Some(g) => {
             let dir = base.join(format!("@{g}"));
             if !dir.is_dir() && !attend_groups::load_groups(base).contains_key(g) {
@@ -640,11 +640,9 @@ fn sender_watches(dest: &std::path::Path) -> bool {
     let own_cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let own_trays = own_tray_names(&own_cwd);
     // `accept_path` classifies by the first path component (the inbox dir
     // name); hand it a probe file inside `dest` so it judges that dir.
-    accept_path(&base, &own_trays, &dest.join("probe.signal"))
+    accept_path(&base, &encode_cwd(&own_cwd), &dest.join("probe.signal"))
 }
 
 /// Render the addressed recipients back as their `@name` / `#group`
@@ -1130,7 +1128,7 @@ mod tests {
 
         // Real grace window: a fresh signal survives.
         std::fs::write(bdir.join("fresh.signal"), "from|p|/x|hi\n").unwrap();
-        match purge_channel_in(&base, None, attend_heartbeat::DEFAULT_GRACE, &[]) {
+        match purge_channel_in(&base, None, attend_presence::heartbeat::DEFAULT_GRACE, &[]) {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("purged 0 signals from #open (1 kept)"), "got: {s}")
             }

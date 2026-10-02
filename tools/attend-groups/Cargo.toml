@@ -10,4 +10,6 @@ name = "attend_groups"
 path = "src/lib.rs"
 
 [dependencies]
-attend-heartbeat = { path = "../attend-heartbeat" }
+agent-settings = { path = "../agent-settings" }
+attend-presence = { path = "../attend-presence" }
+claude-sessions = { path = "../claude-sessions" }

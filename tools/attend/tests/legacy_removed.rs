@@ -90,7 +90,7 @@ fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
     // Control: seed a last-inbound so a plain reply can succeed in this
     // fixture, and show it writes exactly one signal where the guarded one
     // wrote none.
-    let state = home.join(".cache").join("attend").join("state");
+    let state = home.join("cache").join("attend").join("state");
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(state.join("test-session-rbcast.last-inbound"), "peer-1-1").unwrap();
     let ok = Command::new(env!("CARGO_BIN_EXE_attend"))
@@ -139,7 +139,7 @@ fn joined_view_is_read_only() {
     // A stale group file (member with no heartbeat) is what `cleanup_stale`
     // would rewrite. The read-only `--joined` view must leave it byte-identical.
     let home = fixture("joined");
-    let signals = home.join(".cache").join("attend").join("signals");
+    let signals = home.join("cache").join("attend").join("signals");
     std::fs::create_dir_all(&signals).unwrap();
     let groups = signals.join("_groups.yaml");
     std::fs::write(&groups, "ghost:\n  pinned: false\n  members:\n    - dead-member\n").unwrap();

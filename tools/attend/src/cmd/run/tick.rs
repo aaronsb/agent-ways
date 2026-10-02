@@ -90,16 +90,11 @@ pub(super) fn build_engagement(cfg: &config::Config) -> sensor_trait::Curve {
     }
 }
 
-/// Hash a file's contents with the std default hasher. Returns `None`
-/// if the file can't be read. Used as the binary-identity check on the
-/// self-reload path — cheap, no external dep, and only invoked when the
-/// mtime has already moved (a rare event).
+/// Hash a file's contents (FNV-1a, stable across Rust releases). Returns
+/// `None` if the file can't be read. Used as the binary-identity check on
+/// the self-reload path, only invoked when the mtime has already moved.
 fn hash_file(path: &Path) -> Option<u64> {
-    use std::hash::{Hash, Hasher};
-    let bytes = std::fs::read(path).ok()?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Some(hasher.finish())
+    Some(agent_identity::identity::fnv1a_64(&std::fs::read(path).ok()?))
 }
 
 /// Capture the running binary's content hash at startup, paired with its
@@ -126,7 +121,7 @@ pub(super) fn maybe_self_reload(
     self_exe: Option<&Path>,
     baseline_mtime: &mut Option<SystemTime>,
     baseline_hash: Option<u64>,
-    slots: &[SensorSlot],
+    slots: &mut [SensorSlot],
     state_store: &state::StateStore,
 ) {
     let Some(exe) = self_exe else {
@@ -155,6 +150,7 @@ pub(super) fn maybe_self_reload(
         return;
     }
     emit::log("binary changed — checkpointing and reloading");
+    flush_message_lane(slots);
     let snapshot = collect_snapshot(slots);
     state_store.checkpoint(&snapshot);
 
@@ -169,27 +165,25 @@ pub(super) fn maybe_self_reload(
         env!("CARGO_PKG_VERSION"),
         env!("ATTEND_COMMIT")
     );
+    reexec("ATTEND_RELOADED_FROM", &prev_version);
+}
 
-    // exec self: replace process on Unix, spawn+exit on Windows
+/// Re-execute this `attend run` with `var=value` set, so the new process
+/// can say why it started. Replaces the process on Unix; spawns and exits
+/// on Windows. Returns only on failure, which is logged.
+pub(super) fn reexec(var: &str, value: &str) {
     let args: Vec<String> = std::env::args().collect();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&args[0])
-            .args(&args[1..])
-            .env("ATTEND_RELOADED_FROM", &prev_version)
-            .exec();
+        let err = std::process::Command::new(&args[0]).args(&args[1..]).env(var, value).exec();
         // exec() only returns on failure
-        emit::log(&format!("self-reload failed: {}", err));
+        emit::log(&format!("re-exec failed: {}", err));
     }
     #[cfg(not(unix))]
-    match std::process::Command::new(&args[0])
-        .args(&args[1..])
-        .env("ATTEND_RELOADED_FROM", &prev_version)
-        .spawn()
-    {
+    match std::process::Command::new(&args[0]).args(&args[1..]).env(var, value).spawn() {
         Ok(_) => std::process::exit(0),
-        Err(err) => emit::log(&format!("self-reload failed: {}", err)),
+        Err(err) => emit::log(&format!("re-exec failed: {}", err)),
     }
 }
 
@@ -219,6 +213,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
                     .seen_signals
                     .into_iter()
                     .map(|k| ("seen_signal".to_string(), k))
+                    .chain(snap.baselined.then(|| ("baselined".to_string(), "true".to_string())))
                     .collect();
                 if !marks.is_empty() {
                     s.slots[i].import_state(&marks);
@@ -435,9 +430,32 @@ fn try_disclose(
     }
 }
 
+/// Emit every message-lane line the disclosure governor is holding, before
+/// a checkpoint that precedes an exec. The sensor marks a message seen when
+/// it scans it; a line still held in the cooldown at exec time would
+/// otherwise be recorded as consumed and never shown.
+pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
+    let held: Vec<usize> = (0..slots.len())
+        .filter(|&i| rides_message_lane(slots[i].name()) && slots[i].accumulator.magnitude > 0.0)
+        .collect();
+    if held.is_empty() {
+        return;
+    }
+    let batch: Vec<_> = held
+        .iter()
+        .map(|&i| (slots[i].name().to_string(), "high".to_string(), slots[i].accumulator.drain_events()))
+        .collect();
+    emit::log(&format!("flushing {} held message-lane batch(es) before exec", batch.len()));
+    emit::emit_batch(&batch);
+    for &i in &held {
+        slots[i].accumulator.reset();
+    }
+}
+
 pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSnapshot {
     let mut snapshot = state::StateSnapshot::default();
     for slot in slots {
+        let peers = slot.name() == "peers";
         for (key, value) in slot.export_state() {
             match key.as_str() {
                 "seen_signal" => {
@@ -453,6 +471,11 @@ pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSna
                 }
                 "context_pct" => {
                     snapshot.context_pct = value.parse().ok();
+                }
+                // The message lane's cold-start mark: only the peers sensor
+                // applies the rule.
+                "baselined" if peers => {
+                    snapshot.baselined |= value == "true";
                 }
                 _ => {}
             }

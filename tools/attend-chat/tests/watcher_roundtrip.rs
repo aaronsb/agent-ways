@@ -59,8 +59,7 @@ fn write_broadcast_arrives_through_watcher() {
     let own_cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let own_trays = signal::own_tray_names(&own_cwd);
-    watcher::spawn_watcher(signal::signals_base(), own_trays, tx)
+    watcher::spawn_watcher(signal::signals_base(), signal::encode_cwd(&own_cwd), tx)
         .expect("watcher must initialise against a fresh temp dir");
 
     // Drain anything the backfill produced (should be nothing in a

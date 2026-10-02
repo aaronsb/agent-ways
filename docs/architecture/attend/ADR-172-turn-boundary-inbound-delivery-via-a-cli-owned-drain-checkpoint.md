@@ -235,3 +235,21 @@ guard (Decision 6).
   persistent poller, and may later subsume the Monitor conduit. Out of scope
   here — it is a heavier, separately-gated capability; the turn-boundary drain
   is the cheap win that needs no new transport.
+
+## Addendum, 2026-10-01: enrollment and one cold-start rule
+
+Appended after acceptance; nothing above is changed. #720 and the review of PR #725 settle who the drain delivers to and what the first scan of a session does.
+
+- **The drain delivers only to an enrolled session.** A session enrolls by running `attend run` or by joining a channel, and the enrollment is a durable per-session record in attend's cache. It ends only on an explicit opt-out, not on liveness. For any other session the drain is a silent no-op that writes nothing, not even the heartbeat.
+- **One cold-start rule for both conduits.** Decision 2's cold-start baseline (the backlog older than the fresh window is marked seen without delivery) is replaced, for the drain and the peers sensor alike, by `attend_state::cold_start`:
+  - Messages addressed to the project (`--to`) are never baselined. They are delivered whatever their age, the newest 50 at most.
+  - `#open` and channel messages older than the 120-second window are baselined as before.
+  - Whatever is held back is announced with the first delivery, as `N earlier messages not shown; attend inbox`. A cold start no longer consumes a message with nothing shown.
+- **A session id that changes under a running `attend run`** (`/clear`) is followed. The run moves the seen-set, the enrollment record, the registry slot and channel memberships to the new id, then restarts under it.
+
+## Addendum, 2026-10-02: warm means baselined
+
+Appended after acceptance; nothing above is changed. The re-review of PR #725 found that the peers sensor checkpoints on its first poll, before it scans messages, so a drain in that window treated the session as warm and skipped the cold-start rule.
+
+- **A session is warm only once a conduit applied the rule.** The state file now carries `baselined: true`, written by the drain's baseline or by the sensor's checkpoint after its first message scan. A file without it is cold.
+- **Deliver-then-record holds across an exec.** Before `attend run` re-executes, for a binary reload or a session-id change, it shows every message line its disclosure cooldown still holds. Nothing it has marked seen goes unshown.

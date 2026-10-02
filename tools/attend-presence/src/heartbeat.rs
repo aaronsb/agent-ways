@@ -1,6 +1,7 @@
 //! Per-session liveness heartbeat (ADR-129).
 //!
-//! Each running attend touches `~/.cache/attend/heartbeat/<session-id>`
+//! Each running attend touches `<cache>/attend/heartbeat/<session-id>`
+//! (see [`crate::cache`])
 //! on every tick. The file's mtime is the last_seen timestamp — there
 //! is no body, no parsing, no schema. Consumers read mtime and compare
 //! against a grace window:
@@ -36,10 +37,7 @@ pub const DEFAULT_GRACE: Duration = Duration::from_secs(90);
 
 /// Directory holding all heartbeat files for the current user.
 pub fn heartbeat_dir() -> PathBuf {
-    home_dir()
-        .join(".cache")
-        .join("attend")
-        .join("heartbeat")
+    crate::cache::dir().join("heartbeat")
 }
 
 /// Path to the heartbeat file for a given session id.
@@ -145,12 +143,11 @@ fn lock_path(session_id: &str) -> PathBuf {
 /// attend's non-blocking attempt fails fast instead of silently
 /// double-running.
 ///
-/// Self-reload via `exec()` (Unix) keeps the same PID, but file
-/// descriptors are normally inherited (no `O_CLOEXEC`), and the
-/// kernel's flock state is keyed on the open-file-description. The
-/// new code path inherits the lock automatically — it does not have
-/// to re-acquire. Callers in the reload path should skip the lock
-/// attempt entirely (e.g., gated on `ATTEND_RELOADED_FROM`).
+/// Self-reload via `exec()` (Unix) keeps the same PID. Rust's standard
+/// library opens files with `O_CLOEXEC`, so the lock's descriptor closes
+/// at `exec()` and the kernel releases the lock; the re-executed process
+/// acquires it again. A reload that finds it held (`Ok(None)` under
+/// `ATTEND_RELOADED_FROM`) proceeds rather than exiting.
 ///
 /// On Windows self-reload spawns a new process rather than exec()ing,
 /// so the lock IS released before the child starts; the new process
@@ -196,34 +193,43 @@ pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLo
     }
 }
 
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            if cfg!(windows) {
-                PathBuf::from("C:\\Users\\Public")
-            } else {
-                PathBuf::from("/tmp")
-            }
-        })
+/// Whether an `attend run` holds the session lock for `session_id`.
+/// Unlike [`try_acquire_session_lock`] this never creates the heartbeat
+/// file, so asking does not make the session look alive.
+pub fn run_is_live(session_id: &str) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(file) = fs::OpenOptions::new().write(true).open(heartbeat_path(session_id)) else {
+            return false;
+        };
+        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if ret == 0 {
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+            return false;
+        }
+        io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK)
+    }
+    #[cfg(windows)]
+    {
+        // The run holds `<id>.lock` with no sharing, so any other open of
+        // it fails with ERROR_SHARING_VIOLATION (32) while the run lives.
+        matches!(
+            fs::OpenOptions::new().write(true).open(lock_path(session_id)),
+            Err(e) if e.raw_os_error() == Some(32)
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use std::time::Duration;
 
-    // `$HOME` is process-global. cargo runs tests in parallel by
-    // default, so without serialization one test's tempdir overrides
-    // another's mid-run. The mutex makes `with_home` the only writer
-    // at a time. Held across the whole closure body so every read
-    // and write inside sees a consistent `$HOME`.
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
+    // `HOME` and `XDG_CACHE_HOME` are process-global, and cargo runs
+    // tests in parallel, so every test that points them somewhere holds
+    // the crate's one env lock for its whole body.
     fn with_home<F: FnOnce(&PathBuf)>(f: F) {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!(
             "attend-hb-test-{}-{}",
             std::process::id(),
@@ -233,12 +239,16 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&home).unwrap();
-        let prev = std::env::var("HOME").ok();
+        let prev = (std::env::var_os("HOME"), std::env::var_os("XDG_CACHE_HOME"));
         std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_CACHE_HOME");
         f(&home);
-        match prev {
+        match prev.0 {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
+        }
+        if let Some(v) = prev.1 {
+            std::env::set_var("XDG_CACHE_HOME", v);
         }
         fs::remove_dir_all(&home).ok();
     }
@@ -324,6 +334,18 @@ mod tests {
                 .expect("b holds — different session must not contend");
             drop(a);
             drop(b);
+        });
+    }
+
+    #[test]
+    fn run_is_live_follows_the_lock_and_creates_nothing() {
+        with_home(|_| {
+            assert!(!run_is_live("sess-live"));
+            assert!(!heartbeat_path("sess-live").exists(), "asking must not create a heartbeat");
+            let lock = try_acquire_session_lock("sess-live").unwrap().unwrap();
+            assert!(run_is_live("sess-live"));
+            drop(lock);
+            assert!(!run_is_live("sess-live"));
         });
     }
 

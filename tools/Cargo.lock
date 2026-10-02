@@ -273,18 +273,14 @@ dependencies = [
  "agent-fmt",
  "agent-identity",
  "agent-theme",
+ "attend-chat",
  "attend-groups",
- "attend-heartbeat",
- "attend-identity-view",
  "attend-instances",
- "attend-session",
+ "attend-presence",
  "attend-state",
  "clap",
  "clap-markdown",
  "claude-sessions",
- "sensor-context",
- "sensor-disclosure",
- "sensor-git",
  "sensor-keepwarm",
  "sensor-peers",
  "sensor-processes",
@@ -300,10 +296,8 @@ dependencies = [
  "agent-theme",
  "async-channel",
  "attend-groups",
- "attend-heartbeat",
- "attend-identity-view",
  "attend-instances",
- "attend-session",
+ "attend-presence",
  "attend-state",
  "claude-sessions",
  "iocraft",
@@ -319,43 +313,39 @@ version = "0.1.0"
 name = "attend-groups"
 version = "0.1.0"
 dependencies = [
- "attend-heartbeat",
-]
-
-[[package]]
-name = "attend-heartbeat"
-version = "0.1.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "attend-identity-view"
-version = "0.1.0"
-dependencies = [
- "agent-identity",
- "agent-theme",
- "attend-instances",
+ "agent-settings",
+ "attend-presence",
+ "claude-sessions",
 ]
 
 [[package]]
 name = "attend-instances"
 version = "0.1.0"
 dependencies = [
+ "agent-fmt",
+ "agent-identity",
+ "agent-settings",
+ "agent-theme",
+ "attend-presence",
+ "claude-sessions",
+]
+
+[[package]]
+name = "attend-presence"
+version = "0.1.0"
+dependencies = [
+ "agent-settings",
  "claude-sessions",
  "libc",
 ]
 
 [[package]]
-name = "attend-session"
-version = "0.1.0"
-dependencies = [
- "claude-sessions",
-]
-
-[[package]]
 name = "attend-state"
 version = "0.1.0"
+dependencies = [
+ "attend-groups",
+ "attend-presence",
+]
 
 [[package]]
 name = "autocfg"
@@ -1747,27 +1737,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
-name = "sensor-context"
-version = "0.6.0"
-dependencies = [
- "sensor-trait",
-]
-
-[[package]]
-name = "sensor-disclosure"
-version = "0.6.0"
-dependencies = [
- "sensor-trait",
-]
-
-[[package]]
-name = "sensor-git"
-version = "0.6.0"
-dependencies = [
- "sensor-trait",
-]
-
-[[package]]
 name = "sensor-keepwarm"
 version = "0.1.0"
 dependencies = [
@@ -1780,8 +1749,10 @@ dependencies = [
 name = "sensor-peers"
 version = "0.6.0"
 dependencies = [
- "attend-identity-view",
- "attend-session",
+ "agent-identity",
+ "attend-groups",
+ "attend-instances",
+ "attend-presence",
  "attend-state",
  "claude-sessions",
  "sensor-trait",
@@ -2513,7 +2484,7 @@ dependencies = [
 name = "ways-mcp"
 version = "0.1.0"
 dependencies = [
- "attend-session",
+ "attend-presence",
  "serde_json",
 ]
 

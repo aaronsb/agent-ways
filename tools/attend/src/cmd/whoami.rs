@@ -19,7 +19,7 @@ use agent_identity::Identity;
 use agent_theme::ColorDepth;
 
 pub(crate) fn cmd_whoami(machine: bool, display: bool) {
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
 
     if machine {
         for line in machine_lines(&ident) {
@@ -49,6 +49,10 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
     ]);
     t.add(vec!["display", rendered.as_str()]);
     t.print();
+    // Two processes with different XDG_CACHE_HOME share no mesh; the root
+    // in use is how an operator sees that. Printed whole, outside the
+    // table, which would cut a long path to its width.
+    println!("cache: {}", attend_presence::cache::dir().display());
 
     if !ident.resolved() {
         eprintln!(
@@ -60,7 +64,7 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
 
 /// The rendered display name: the origin path's nickname, plus the
 /// instance suffix when several sessions share that origin.
-fn display_name(ident: &attend_session::SessionIdentity) -> String {
+fn display_name(ident: &attend_presence::session::SessionIdentity) -> String {
     let nickname = Identity::for_cwd(&ident.origin_path, ColorDepth::detect()).nickname;
     let instance = attend_instances::Registry::new()
         .lookup(&ident.origin_path, &ident.session_id);
@@ -78,7 +82,7 @@ fn join_display(nickname: &str, instance: Option<&str>) -> String {
 /// identity fields, nothing else. Downstream consumers (hooks, the
 /// drain checkpoint) key on these; the display name is deliberately
 /// absent — ordinals are presentation, never keys.
-fn machine_lines(ident: &attend_session::SessionIdentity) -> Vec<String> {
+fn machine_lines(ident: &attend_presence::session::SessionIdentity) -> Vec<String> {
     vec![
         format!("session_id={}", ident.session_id),
         format!("origin_path={}", ident.origin_path),
@@ -92,11 +96,12 @@ mod tests {
 
     #[test]
     fn machine_output_is_stable_fields_only() {
-        let ident = attend_session::SessionIdentity {
+        let ident = attend_presence::session::SessionIdentity {
             session_id: "sess-x".into(),
             origin_path: "/proj".into(),
             session_resolved: true,
             origin_resolved: true,
+            claude_pid: None,
         };
         let lines = machine_lines(&ident);
         assert_eq!(

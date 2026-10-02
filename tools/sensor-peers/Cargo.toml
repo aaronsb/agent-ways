@@ -6,8 +6,10 @@ description = "discovers Claude Code sessions and reads peer signals"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-attend-identity-view = { path = "../attend-identity-view" }
-attend-session = { path = "../attend-session" }
+agent-identity = { path = "../agent-identity" }
+attend-groups = { path = "../attend-groups" }
+attend-instances = { path = "../attend-instances" }
+attend-presence = { path = "../attend-presence" }
 attend-state = { path = "../attend-state" }
 claude-sessions = { path = "../claude-sessions" }
 sensor-trait = { path = "../sensor-trait" }

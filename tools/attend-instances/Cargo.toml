@@ -9,8 +9,11 @@ license = "AGPL-3.0-or-later"
 name = "attend_instances"
 path = "src/lib.rs"
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 [dependencies]
+# The settings crates' lock, atomic writer and clock (#727).
+agent-fmt = { path = "../agent-fmt" }
+agent-settings = { path = "../agent-settings" }
+agent-identity = { path = "../agent-identity" }
+agent-theme = { path = "../agent-theme" }
+attend-presence = { path = "../attend-presence" }
 claude-sessions = { path = "../claude-sessions" }

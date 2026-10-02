@@ -1,0 +1,18 @@
+[package]
+name = "attend-presence"
+version = "0.1.0"
+edition = "2021"
+description = "Who a session is and whether it is alive on the attend mesh: session identity, heartbeat, attend's cache root, process inspection"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "attend_presence"
+path = "src/lib.rs"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dependencies]
+# The atomic writer and the edit lock the settings crates share.
+agent-settings = { path = "../agent-settings" }
+claude-sessions = { path = "../claude-sessions" }

@@ -1,9 +1,0 @@
-[package]
-name = "sensor-disclosure"
-version = "0.6.0"
-edition = "2021"
-description = "reheats affordance instructions on token-distance drift"
-license = "AGPL-3.0-or-later"
-
-[dependencies]
-sensor-trait = { path = "../sensor-trait" }

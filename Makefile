@@ -292,6 +292,8 @@ test-hooks:
 	@bash tests/prebuilt-lib-test.sh
 	@bash tests/download-prebuilt-test.sh
 	@bash tests/gh-tasks-test.sh
+	@bash tests/workflow-crates-test.sh
+	@bash tests/workflow-crates-selftest.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."
@@ -350,7 +352,7 @@ clean:
 	rm -rf dist/
 
 # Wipe all attend / attend-chat runtime cache state under
-# ~/.cache/attend/. Recovery target only — NEVER a dependency of
+# $XDG_CACHE_HOME/attend/ (~/.cache/attend/ by default). Recovery target only — NEVER a dependency of
 # setup, update-binaries, or any rebuild target.
 # An advisory hint is printed at the end of attend / attend-chat
 # build targets pointing operators here when they update.
@@ -362,8 +364,9 @@ clean:
 #
 # Does NOT touch ~/.claude/sessions/*.json or ~/.claude/projects/ —
 # those are Claude Code's own session state, owned outside attend.
+purge-attend-state: ATTEND_CACHE = $(or $(filter /%,$(XDG_CACHE_HOME)),$(HOME)/.cache)/attend
 purge-attend-state:
-	@echo "Wiping ~/.cache/attend/ (peers, signals, channels, instances, heartbeats, sensor state)"
+	@echo "Wiping $(ATTEND_CACHE)/ (peers, signals, channels, instances, heartbeats, sensor state)"
 	@if pgrep -f 'attend run' >/dev/null 2>&1; then \
 		echo ""; \
 		echo "WARNING: at least one 'attend run' is currently running."; \
@@ -374,5 +377,5 @@ purge-attend-state:
 		echo "         Aborting."; \
 		exit 1; \
 	fi
-	@rm -rf "$(HOME)/.cache/attend"
+	@rm -rf "$(ATTEND_CACHE)"
 	@echo "Done. Next attend launch starts from a clean slate."

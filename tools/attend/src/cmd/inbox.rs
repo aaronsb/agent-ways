@@ -4,28 +4,21 @@
 //! here; `cmd::send` consults `is_valid_signal_id` when validating `--re`
 //! ids, so the parser owns what a valid id looks like.
 
-use attend_identity_view::render_sender_label;
+use attend_groups::Room;
+use attend_instances::view::render_sender_label;
 use attend_instances::SnapshotCache;
 use crate::util::{get_groups, own_session_id, signals_base};
-use claude_sessions::attend_tray_names;
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
 pub(crate) fn cmd_inbox_read(msg_id: &str) {
-    let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
-    let r = get_groups();
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let mut scan_dirs: Vec<_> = attend_tray_names(&cwd).iter().map(|n| base.join(n)).collect();
-    scan_dirs.push(base.join("_broadcast"));
-    for name in r.joined_group_names() {
-        scan_dirs.push(r.group_dir(&name));
-    }
+    let scan_dirs = get_groups().receive_dirs(&cwd);
 
     // Search for the signal file by ID
     let target = format!("{msg_id}.signal");
     for dir in &scan_dirs {
-        let path = dir.join(&target);
+        let path = dir.path.join(&target);
         if !path.is_file() {
             continue;
         }
@@ -65,20 +58,11 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
 }
 
 pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
-    let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let own_session_id = own_session_id().unwrap_or_default();
 
-    // Scan same dirs as the peer sensor: own project + broadcast + focus group
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let own_trays = attend_tray_names(&cwd);
-    let r = get_groups();
-    let mut scan_dirs: Vec<_> = own_trays.iter().map(|n| base.join(n)).collect();
-    scan_dirs.push(base.join("_broadcast"));
-    // Add focus group dirs
-    for name in r.joined_group_names() {
-        scan_dirs.push(r.group_dir(&name));
-    }
+    // The same receive set as the peer sensor and the drain.
+    let scan_dirs = get_groups().receive_dirs(&cwd);
 
     // Collect all messages with mtime for chronological ordering
     struct InboxEntry {
@@ -95,22 +79,15 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     let instances = SnapshotCache::new();
 
     for dir in &scan_dirs {
-        let dir_entries = match std::fs::read_dir(dir) {
+        let dir_entries = match std::fs::read_dir(&dir.path) {
             Ok(e) => e,
             Err(_) => continue,
         };
 
-        let dir_name = dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?")
-            .to_string();
-        let scope = if dir_name == "_broadcast" {
-            "#open"
-        } else if own_trays.contains(&dir_name) {
-            "project"
-        } else {
-            "channel"
+        let scope = match dir.room {
+            Room::Open => "#open",
+            Room::Project => "project",
+            Room::Channel(_) => "channel",
         };
 
         for entry in dir_entries.flatten() {
@@ -272,16 +249,6 @@ const MAX_DRAIN_ROUNDS: u32 = 5;
 /// burst from flooding a single turn injection.
 const DRAIN_RENDER_MAX: usize = 10;
 
-/// On a cold start (no seen-set on disk) the drain baselines the durable
-/// backlog without delivering — but only messages older than this
-/// window. A younger message is live conversation, not backlog:
-/// baselining it would mark it consumed with no conduit ever delivering
-/// it (the sensor imports the mark and stays silent too — loss, the
-/// PR #385 blocking finding). The window comfortably exceeds the
-/// sensor's checkpoint cadence so the first-checkpoint race can't
-/// reclassify a live message as backlog.
-const BASELINE_FRESH_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
-
 /// One scanned pending message. Module scope (not fn-local) so the scan
 /// core is testable without the identity/HOME plumbing around it.
 struct Drained {
@@ -305,33 +272,53 @@ impl DrainedView for Drained {
     fn body(&self) -> &str { &self.body }
 }
 
-/// Scan core: walk `scan_dirs` (paired with their scope labels) and
-/// split unseen signals into (deliverable, keys-to-mark). Pure with
-/// respect to identity and config — the caller supplies the seen-set,
-/// the session id, and the baselining decision, so tests drive it with
-/// temp dirs (PR #385 review, finding 6).
+/// What one drain scan found: the messages to deliver, the seen-set keys
+/// to record, and on a cold start the line announcing what it held back.
+struct Scan {
+    delivered: Vec<Drained>,
+    mark: Vec<String>,
+    note: Option<String>,
+}
+
+/// The scope label a drained message carries for its room.
+fn room_label(room: &Room) -> String {
+    match room {
+        Room::Project => "project".to_string(),
+        Room::Open => "#open".to_string(),
+        // "@group" reads naturally as the channel name.
+        Room::Channel(name) => format!("@{name}"),
+    }
+}
+
+/// Scan core: walk the receive set and split unseen signals into
+/// deliverable messages and keys to mark. Pure with respect to identity
+/// and config: the caller supplies the seen-set, the session id and the
+/// baselining decision, so tests drive it with temp dirs (PR #385 review,
+/// finding 6).
 ///
-/// Marking rules: own messages mark without delivering (dedup
-/// bookkeeping); under `baselining`, messages older than `fresh_window`
-/// mark without delivering (backlog flood-guard) while younger ones
-/// deliver normally (live conversation, not backlog).
+/// Own messages are marked without delivering (dedup bookkeeping). Under
+/// `baselining` (no seen-set yet) the messages from others go through
+/// `attend_state::cold_start`, the rule the peers sensor applies too:
+/// addressed mail is delivered whatever its age, old `#open` and channel
+/// backlog is marked without being shown, and the scan reports a note
+/// counting what it held back.
 fn scan_pending(
-    scan_dirs: &[(std::path::PathBuf, String)],
+    scan_dirs: &[attend_groups::ReceiveDir],
     seen: &std::collections::HashSet<String>,
     own_session_id: &str,
     baselining: bool,
-    fresh_window: std::time::Duration,
-) -> (Vec<Drained>, Vec<String>) {
-    let mut delivered: Vec<Drained> = Vec::new();
+) -> Scan {
+    struct Found {
+        room: usize,
+        key: String,
+        path: std::path::PathBuf,
+        mtime: std::time::SystemTime,
+        content: String,
+    }
     let mut mark: Vec<String> = Vec::new();
-    // One registry snapshot per distinct cwd for this scan.
-    let instances = SnapshotCache::new();
-
-    for (dir, scope) in scan_dirs {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+    let mut found: Vec<Found> = Vec::new();
+    for (room, dir) in scan_dirs.iter().enumerate() {
+        let Ok(entries) = std::fs::read_dir(&dir.path) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
             let filename = match path.file_name().and_then(|f| f.to_str()) {
@@ -343,54 +330,55 @@ fn scan_pending(
             if seen.contains(&key) {
                 continue;
             }
-            let content = match std::fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            let sig = match parse_signal(content.trim()) {
-                Some(s) => s,
-                None => continue,
-            };
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Some(sig) = parse_signal(content.trim()) else { continue };
             // Own messages: mark (dedup bookkeeping) but never deliver.
-            if let Some((_, identity)) = sig.from.split_once(':') {
-                if identity == own_session_id {
-                    mark.push(key);
-                    continue;
-                }
+            if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
+                mark.push(key);
+                continue;
             }
             let mtime = std::fs::metadata(&path)
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
-            if baselining {
-                let old = mtime
-                    .elapsed()
-                    .map(|age| age > fresh_window)
-                    .unwrap_or(true);
-                if old {
-                    mark.push(key);
-                    continue;
-                }
-            }
-            // Escape-free by construction: the drain's output is
-            // hook-injection text (or a pipe), never a styled terminal,
-            // so it is drawn plain whatever the environment says (#388).
-            // The label is the same form the peers sensor shows under
-            // Monitor (#534); the wire `from` rides along as the id.
-            delivered.push(Drained {
-                when: agent_fmt::compact_time(mtime, std::time::SystemTime::now()),
-                mtime,
-                sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
-                sender_id: sig.from.to_string(),
-                scope: scope.clone(),
-                id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
-                body: sig.message.to_string(),
-                source_cwd: sig.cwd.to_string(),
-            });
-            mark.push(key);
+            found.push(Found { room, key, path, mtime, content });
         }
     }
-    (delivered, mark)
+
+    let plan = baselining.then(|| {
+        let pending: Vec<_> = found
+            .iter()
+            .map(|f| (&scan_dirs[f.room].room, f.mtime.elapsed().unwrap_or_default()))
+            .collect();
+        attend_state::cold_start::plan(&pending)
+    });
+
+    let mut delivered: Vec<Drained> = Vec::new();
+    // One registry snapshot per distinct cwd for this scan.
+    let instances = SnapshotCache::new();
+    for (i, f) in found.into_iter().enumerate() {
+        mark.push(f.key);
+        if plan.as_ref().is_some_and(|p| !p.deliver[i]) {
+            continue;
+        }
+        let Some(sig) = parse_signal(f.content.trim()) else { continue };
+        // Escape-free by construction: the drain's output is
+        // hook-injection text (or a pipe), never a styled terminal,
+        // so it is drawn plain whatever the environment says (#388).
+        // The label is the same form the peers sensor shows under
+        // Monitor (#534); the wire `from` rides along as the id.
+        delivered.push(Drained {
+            when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
+            mtime: f.mtime,
+            sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
+            sender_id: sig.from.to_string(),
+            scope: room_label(&scan_dirs[f.room].room),
+            id: f.path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+            body: sig.message.to_string(),
+            source_cwd: sig.cwd.to_string(),
+        });
+    }
+    Scan { delivered, mark, note: plan.and_then(|p| p.note()) }
 }
 
 /// Drain pending authored messages for this session: deliver the unseen,
@@ -398,8 +386,9 @@ fn scan_pending(
 /// format) emit the Stop-hook block JSON that injects them into the
 /// ending turn. Every guard degrades to "deliver nothing, mark nothing":
 /// unresolved identity and the re-entry ceiling leave the tray for the
-/// Monitor conduit; a cold start marks only the stale backlog and always
-/// persists the state file so it happens exactly once.
+/// Monitor conduit; a cold start applies `attend_state::cold_start`,
+/// announces what it held back, and always persists the state file so it
+/// happens exactly once.
 pub(crate) fn cmd_inbox_drain(format: &str) {
     let hook_mode = match format {
         "hook" => true,
@@ -413,7 +402,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // Resolved-gate (ADR-172 Decision 4): marking consumption under a
     // pid-fallback identity would alias sessions and corrupt the shared
     // seen-set. Under unresolved identity, Monitor remains the conduit.
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
     if !ident.resolved() {
         if !hook_mode {
             eprintln!("(identity unresolved — drain is a no-op; the Monitor poller still delivers)");
@@ -421,12 +410,34 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         return;
     }
     let session_id = ident.session_id.clone();
+    // Enrollment gate (#720): a session that never ran attend and joined
+    // no channel has chosen not to take part, so the drain delivers it
+    // nothing and writes nothing, not even the heartbeat below.
+    if !attend_presence::enrollment::is_enrolled(&session_id) {
+        // `/clear` gives the process a new id. An enrollment recorded for
+        // this same Claude Code process under its previous id moves here,
+        // with its seen-set and channels, as `attend run` would move it.
+        // The process key costs a `ps` off Linux, so it is computed only
+        // when some enrollment was ever recorded under a process key.
+        let previous = attend_presence::enrollment::any_indexed()
+            .then(|| ident.claude_key())
+            .flatten()
+            .and_then(|key| attend_presence::enrollment::previous_id(&key, &session_id));
+        let Some(old) = previous else { return };
+        crate::util::move_session(&old, &session_id, &ident.origin_path);
+        // The record moved with any pending opt-out; apply it now.
+        if !attend_presence::enrollment::is_enrolled(&session_id) {
+            return;
+        }
+    }
+    let base = signals_base();
+    let r = crate::groups::Groups::new(&base, &session_id);
 
     // Liveness: a drain-only session (no Monitor running) must still
     // look alive to /purge's consumer consult, or the Decision 5
     // protection this PR co-ships would skip exactly the sessions that
     // depend on it (PR #385 review, finding 4).
-    attend_heartbeat::touch(&session_id).ok();
+    attend_presence::heartbeat::touch(&session_id).ok();
 
     // Re-entry guard (Decision 6). Only the hook path carries the
     // harness's stop_hook_active signal on stdin; a manual plain-mode
@@ -434,7 +445,16 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // empty drain (below), so continuations forced by OTHER Stop hooks
     // cannot inflate it across turns.
     let stop_active = hook_mode && stdin_stop_hook_active();
-    let rounds = bump_drain_rounds(&session_id, stop_active);
+    // The ceiling fails closed: a forced continuation that cannot record
+    // its round (state dir unwritable) would read round 1 forever.
+    let rounds = match bump_drain_rounds(&session_id, stop_active) {
+        Some(r) => r,
+        None if stop_active => {
+            eprintln!("(cannot record the drain round — deferring to the Monitor conduit)");
+            return;
+        }
+        None => 1,
+    };
     if rounds > MAX_DRAIN_ROUNDS {
         eprintln!("(drain round {rounds} > {MAX_DRAIN_ROUNDS} — deferring to the Monitor conduit)");
         return;
@@ -442,32 +462,19 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 
     let store = attend_state::StateStore::new(Some(session_id.clone()));
 
-    // Cold start = no state file. Load once; existence decides the
-    // baselining branch and the same snapshot supplies the seen-set.
+    // Cold start = no conduit has applied the cold-start rule yet: no
+    // state file, or one without `baselined` (the peers sensor checkpoints
+    // on its first poll, before it scans messages). Load once; the same
+    // snapshot supplies the seen-set.
     let snapshot = store.load();
-    let baselining = snapshot.is_none();
+    let baselining = !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
-    let base = signals_base();
-    let cwd = crate::util::own_origin_cwd();
-    let r = get_groups();
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let mut scan_dirs: Vec<_> = attend_tray_names(&cwd)
-        .iter()
-        .map(|n| (base.join(n), "project".to_string()))
-        .collect();
-    scan_dirs.push((base.join("_broadcast"), "#open".to_string()));
-    for name in r.joined_group_names() {
-        // "@group" reads naturally as the channel name.
-        let label = format!("@{name}");
-        scan_dirs.push((r.group_dir(&name), label));
-    }
-
-    let (mut delivered, mark) =
-        scan_pending(&scan_dirs, &seen, &session_id, baselining, BASELINE_FRESH_WINDOW);
+    let cwd = ident.origin_path.clone();
+    let Scan { mut delivered, mark, note } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
     delivered.sort_by_key(|d| d.mtime);
 
-    if delivered.is_empty() {
+    if delivered.is_empty() && note.is_none() {
         // Empty drain: reset the re-entry counter (this boundary chain
         // is ending) and say nothing in hook mode so the turn ends —
         // the termination property the re-entry design leans on.
@@ -481,11 +488,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
             store.mark_seen(mark);
         }
         if !hook_mode {
-            if baselining {
-                eprintln!("(cold start — baselined the stale backlog without delivering; see attend inbox)");
-            } else {
-                println!("no pending messages");
-            }
+            println!("no pending messages");
         }
         return;
     }
@@ -496,7 +499,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // consumed with no conduit having shown them: loss on BOTH conduits,
     // since the sensor imports drain marks (PR #385 review, finding 2).
     if hook_mode {
-        let reason = render_drain_reason(&delivered);
+        let reason = render_drain_reason(&delivered, note.as_deref());
         println!(
             "{{\"decision\": \"block\", \"reason\": \"{}\"}}",
             json_escape(&reason)
@@ -513,6 +516,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
             println!("  cwd:     {}", d.source_cwd);
             println!("  message: {}", d.body);
             println!();
+        }
+        if let Some(note) = &note {
+            println!("{note}");
         }
         println!("{} message(s) drained and marked consumed", delivered.len());
     }
@@ -537,11 +543,20 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 /// a drained message informs the turn — the standing messaging
 /// guidance (reply autonomy, silence-is-valid) rides along verbatim so
 /// turn-boundary delivery never reads as a command to respond.
-fn render_drain_reason(delivered: &[impl DrainedView]) -> String {
+///
+/// `note` is the cold start's count of messages it held back; it rides the
+/// first delivery after enrollment, or goes alone when nothing else does.
+fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>) -> String {
+    if delivered.is_empty() {
+        return format!("[attend] {}", note.unwrap_or("no peer messages"));
+    }
     let mut out = format!(
         "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain):\n",
         delivered.len()
     );
+    if let Some(note) = note {
+        out.push_str(&format!("({note})\n"));
+    }
     for d in delivered.iter().take(DRAIN_RENDER_MAX) {
         // The canonical id is usually already the id stem's prefix;
         // spell it out only when it is not, so the reason does not
@@ -627,15 +642,11 @@ fn parse_stop_hook_active(payload: &str) -> bool {
 /// each hook-forced continuation increments. The file is tiny and
 /// self-healing — an unreadable count is treated as a fresh boundary.
 fn drain_rounds_path(session_id: &str) -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(home)
-        .join(".cache")
-        .join("attend")
-        .join("state")
-        .join(format!("{session_id}.drain-rounds"))
+    attend_presence::cache::state_dir().join(format!("{session_id}.drain-rounds"))
 }
 
-fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
+/// The round this drain is, or `None` when the counter cannot be written.
+fn bump_drain_rounds(session_id: &str, stop_active: bool) -> Option<u32> {
     let path = drain_rounds_path(session_id);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).ok();
@@ -652,10 +663,8 @@ fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
     // tmp + rename: a torn write that parses as garbage would read as
     // "fresh boundary" forever and quietly disable the ceiling.
     let tmp = path.with_extension(format!("drain-rounds.tmp.{}", std::process::id()));
-    if std::fs::write(&tmp, rounds.to_string()).is_ok() {
-        std::fs::rename(&tmp, &path).ok();
-    }
-    rounds
+    let written = std::fs::write(&tmp, rounds.to_string()).is_ok() && std::fs::rename(&tmp, &path).is_ok();
+    written.then_some(rounds)
 }
 
 /// An empty drain ends the boundary chain: remove the counter (also the
@@ -743,7 +752,7 @@ mod drain_tests {
     #[test]
     fn drain_reason_renders_messages_and_contract_line() {
         let msgs = vec![msg(1), msg(2)];
-        let reason = render_drain_reason(&msgs);
+        let reason = render_drain_reason(&msgs, None);
         assert!(reason.contains("2 peer message(s)"));
         assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
@@ -769,22 +778,28 @@ mod drain_tests {
         attend_state::seen_key(&file)
     }
 
-    const HOUR: std::time::Duration = std::time::Duration::from_secs(3600);
+    fn dirs(path: &std::path::Path, room: Room) -> Vec<attend_groups::ReceiveDir> {
+        vec![attend_groups::ReceiveDir { path: path.to_path_buf(), room }]
+    }
+
+    fn age(dir: &std::path::Path, name: &str, by: std::time::Duration) {
+        let f = std::fs::File::options().write(true).open(dir.join(format!("{name}.signal"))).unwrap();
+        f.set_modified(std::time::SystemTime::now() - by).unwrap();
+    }
 
     #[test]
     fn a_signal_moved_between_trays_stays_seen() {
-        // Read in the old tray, then moved into the key tray by cleanup:
-        // keyed by directory it would be delivered again.
+        // Read in one tray, then moved into another: keyed by directory
+        // it would be delivered again. The key is the filename.
         let root = scan_fixture("moved");
-        let (old, new) = (root.join("-srv-my proj"), root.join("-srv-my-proj-bte5w6"));
+        let (old, new) = (root.join("tray-a"), root.join("tray-b"));
         std::fs::create_dir_all(&old).unwrap();
         std::fs::create_dir_all(&new).unwrap();
         let key = write_signal(&old, "m1", "claude:other-session", "once");
         let seen: std::collections::HashSet<String> = [key].into_iter().collect();
         std::fs::rename(old.join("m1.signal"), new.join("m1.signal")).unwrap();
-        let dirs = vec![(new.clone(), "project".to_string())];
-        let (delivered, _) = scan_pending(&dirs, &seen, "my-session", false, HOUR);
-        assert!(delivered.is_empty());
+        let scan = scan_pending(&dirs(&new, Room::Project), &seen, "my-session", false);
+        assert!(scan.delivered.is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -794,13 +809,12 @@ mod drain_tests {
         let k1 = write_signal(&dir, "peer-1", "claude:other-session", "already seen");
         let k2 = write_signal(&dir, "peer-2", "claude:other-session", "new message");
         let seen: std::collections::HashSet<String> = [k1].into_iter().collect();
-        let dirs = vec![(dir.clone(), "#open".to_string())];
-
-        let (delivered, mark) = scan_pending(&dirs, &seen, "my-session", false, HOUR);
+        let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &seen, "my-session", false);
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].body, "new message");
         assert_eq!(delivered[0].scope, "#open");
         assert_eq!(mark, vec![k2]);
+        assert_eq!(note, None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -808,10 +822,7 @@ mod drain_tests {
     fn scan_marks_own_messages_without_delivering() {
         let dir = scan_fixture("own");
         let k = write_signal(&dir, "self-1", "claude:my-session", "my own send");
-        let dirs = vec![(dir.clone(), "#open".to_string())];
-
-        let (delivered, mark) =
-            scan_pending(&dirs, &Default::default(), "my-session", false, HOUR);
+        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert!(delivered.is_empty(), "own message must not deliver");
         assert_eq!(mark, vec![k], "own message must still be marked (dedup bookkeeping)");
         std::fs::remove_dir_all(&dir).ok();
@@ -824,32 +835,38 @@ mod drain_tests {
     fn baseline_delivers_fresh_messages() {
         let dir = scan_fixture("baseline-fresh");
         let k = write_signal(&dir, "peer-1", "claude:other-session", "arrived just now");
-        let dirs = vec![(dir.clone(), "#open".to_string())];
-
-        let (delivered, mark) =
-            scan_pending(&dirs, &Default::default(), "my-session", true, HOUR);
+        let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert_eq!(delivered.len(), 1, "fresh message must survive the baseline");
         assert_eq!(mark, vec![k]);
+        assert_eq!(note, None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// The flip side: genuinely stale backlog baselines quietly (a zero
-    /// fresh-window makes every just-written file count as old).
+    /// The flip side: stale `#open` backlog is marked without being shown,
+    /// and counted in the note, never consumed silently.
     #[test]
-    fn baseline_marks_stale_backlog_without_delivering() {
+    fn baseline_marks_stale_backlog_and_announces_it() {
         let dir = scan_fixture("baseline-stale");
         let k = write_signal(&dir, "peer-1", "claude:other-session", "durable backlog");
-        let dirs = vec![(dir.clone(), "#open".to_string())];
+        age(&dir, "peer-1", std::time::Duration::from_secs(600));
 
-        let (delivered, mark) = scan_pending(
-            &dirs,
-            &Default::default(),
-            "my-session",
-            true,
-            std::time::Duration::ZERO,
-        );
+        let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
+        assert_eq!(note.as_deref(), Some("1 earlier message not shown; attend inbox"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Addressed mail survives a cold start whatever its age.
+    #[test]
+    fn baseline_delivers_old_addressed_mail() {
+        let dir = scan_fixture("baseline-addressed");
+        write_signal(&dir, "peer-1", "claude:other-session", "sent with --to an hour ago");
+        age(&dir, "peer-1", std::time::Duration::from_secs(3600));
+
+        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), "my-session", true);
+        assert_eq!(scan.delivered.len(), 1);
+        assert_eq!(scan.note, None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -865,32 +882,21 @@ mod drain_tests {
 
         let dir = scan_fixture("conduits");
         write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
-        let dirs = vec![(dir.clone(), "project".to_string())];
-
         // Drain path.
-        let (delivered, _) =
-            scan_pending(&dirs, &Default::default(), "my-session", false, HOUR);
+        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), "my-session", false);
         assert_eq!(delivered.len(), 1);
         let drained = &delivered[0];
 
-        // Monitor path: the sensor scans its standard trays plus the
-        // fixture. Import the host's durable `#open` backlog as already
-        // seen — exactly what a warm restart restores — so it neither
-        // floods the poll into a digest nor leaks into the assertion;
-        // a non-empty import also skips the cold-start baseline that
-        // would otherwise swallow the fixture, and `reply_hint_shown`
-        // keeps the hint off the body.
+        // Monitor path: the sensor scans only the fixture, as its project
+        // tray. A non-empty state import skips the cold-start baseline
+        // that would otherwise swallow the fixture, and
+        // `reply_hint_shown` keeps the hint off the body.
         let mut sensor = sensor_peers::PeerSensor::new();
-        let extra = dir.clone();
-        sensor.set_extra_scan_dirs_provider(std::sync::Arc::new(move || vec![extra.clone()]));
-        let broadcast = signals_base().join("_broadcast");
-        let mut state = vec![("reply_hint_shown".to_string(), "true".to_string())];
-        if let Ok(entries) = std::fs::read_dir(&broadcast) {
-            for name in entries.flatten().filter_map(|e| e.file_name().into_string().ok()) {
-                state.push(("seen_signal".to_string(), attend_state::seen_key(&name)));
-            }
-        }
-        sensor.import_state(&state);
+        let fixture = dir.clone();
+        sensor.set_receive_dirs_provider(std::sync::Arc::new(move |_: &str| {
+            vec![attend_groups::ReceiveDir { path: fixture.clone(), room: attend_groups::Room::Project }]
+        }));
+        sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
         // The fixture's cwd doubles as the focus so the sensor's
         // `attend reply` bookkeeping (keyed on the host session) sees
         // an own-project message and records nothing.
@@ -930,7 +936,7 @@ mod drain_tests {
             id: "abc123-1712345-0".into(),
             body: "hi".into(),
         };
-        let reason = render_drain_reason(&[carried]);
+        let reason = render_drain_reason(&[carried], None);
         assert!(reason.contains("Jovan-alpha (ws) (project, id abc123-1712345-0):"), "{reason}");
         assert!(!reason.contains("from claude:"), "{reason}");
 
@@ -941,10 +947,19 @@ mod drain_tests {
         assert!(!from_is_id_prefix("claude:", "-1-0"));
     }
 
+    /// A cold start with nothing to deliver sends the note alone, not a
+    /// "0 peer message(s) delivered" header.
+    #[test]
+    fn note_only_reason_is_the_note() {
+        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 earlier messages not shown; attend inbox"));
+        assert!(reason.starts_with("[attend] 3 earlier messages not shown; attend inbox"), "{reason}");
+        assert!(!reason.contains("0 peer message"), "{reason}");
+    }
+
     #[test]
     fn drain_reason_caps_render_and_counts_remainder() {
         let msgs: Vec<FakeMsg> = (0..14).map(msg).collect();
-        let reason = render_drain_reason(&msgs);
+        let reason = render_drain_reason(&msgs, None);
         assert!(reason.contains("14 peer message(s)"));
         assert!(reason.contains("body 9"));
         assert!(!reason.contains("body 10"));

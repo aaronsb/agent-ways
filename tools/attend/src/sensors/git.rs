@@ -95,7 +95,13 @@ impl Sensor for GitSensor {
         "git"
     }
 
-    sensor_trait::sensor_metadata!();
+    fn description(&self) -> &str {
+        "tracks dirty files, branch changes, and upstream divergence"
+    }
+
+    fn source(&self) -> String {
+        concat!("attend@", env!("CARGO_PKG_VERSION")).to_string()
+    }
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let current = match self.snapshot(focus) {

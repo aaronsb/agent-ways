@@ -32,7 +32,6 @@ use std::collections::HashMap;
 #[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The canonical identity tuple. `session_id` and `origin_path` are
 /// the stable key downstream state must use; display naming (nickname
@@ -52,6 +51,8 @@ pub struct SessionIdentity {
     /// Distinct from `session_resolved` so "no session at all" and
     /// "session record without a cwd" stay distinguishable.
     pub origin_resolved: bool,
+    /// The Claude Code process whose session record matched, when one did.
+    pub claude_pid: Option<u32>,
 }
 
 impl SessionIdentity {
@@ -60,6 +61,14 @@ impl SessionIdentity {
     /// whoami's fallback warning) branch on this.
     pub fn resolved(&self) -> bool {
         self.session_resolved && self.origin_resolved
+    }
+
+    /// The key of the Claude Code process this session runs in: its pid and
+    /// start time, which together outlive a session-id change (`/clear`)
+    /// and are never reused for another process.
+    pub fn claude_key(&self) -> Option<String> {
+        let pid = self.claude_pid?;
+        Some(format!("{pid}-{}", crate::process::start_time(pid)?))
     }
 }
 
@@ -91,8 +100,8 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default()
     };
-    match find_session_id_in(dir, pid) {
-        Some(sid) => {
+    match find_session_in(dir, pid) {
+        Some((sid, claude_pid)) => {
             let origin = origin_path_in(dir, &sid);
             let origin_resolved = origin.is_some();
             SessionIdentity {
@@ -100,6 +109,7 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
                 session_id: sid,
                 session_resolved: true,
                 origin_resolved,
+                claude_pid: Some(claude_pid),
             }
         }
         None => SessionIdentity {
@@ -107,29 +117,9 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
             origin_path: process_cwd(),
             session_resolved: false,
             origin_resolved: false,
+            claude_pid: None,
         },
     }
-}
-
-/// Is `ancestor` in `pid`'s process ancestry (inclusive)? The
-/// canonical home for ancestry checks — sensor-peers' own-session
-/// detection delegates here so hop limits and parent-pid resolution
-/// cannot drift between crates.
-pub fn pid_has_ancestor(pid: u32, ancestor: u32) -> bool {
-    let mut cur = pid;
-    for _ in 0..15 {
-        if cur == ancestor {
-            return true;
-        }
-        if cur <= 1 {
-            break;
-        }
-        match get_parent_pid(cur) {
-            Some(ppid) if ppid != cur => cur = ppid,
-            _ => break,
-        }
-    }
-    false
 }
 
 /// Find the Claude Code session owning `own_pid` by climbing its
@@ -167,7 +157,7 @@ pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
         if pid <= 1 {
             break;
         }
-        match get_parent_pid(pid) {
+        match crate::process::parent_pid(pid) {
             Some(ppid) if ppid != pid => pid = ppid,
             _ => break,
         }
@@ -208,41 +198,6 @@ fn sessions_dir() -> PathBuf {
     claude_sessions::ClaudeDir::user().sessions_dir()
 }
 
-/// Return the parent PID of `pid`, or `None` if it cannot be
-/// determined. Byte-compatible with the sensor-peers implementation
-/// this crate canonicalizes.
-#[cfg(not(windows))]
-fn get_parent_pid(pid: u32) -> Option<u32> {
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "ppid="])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout);
-        s.trim().parse::<u32>().ok().filter(|&p| p > 0)
-    } else {
-        None
-    }
-}
-
-#[cfg(windows)]
-fn get_parent_pid(pid: u32) -> Option<u32> {
-    let script = format!(
-        "(Get-CimInstance Win32_Process -Filter 'ProcessId={}').ParentProcessId",
-        pid
-    );
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout);
-        s.trim().parse::<u32>().ok().filter(|&p| p > 0)
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +219,7 @@ mod tests {
     #[test]
     fn find_session_in_returns_the_matched_ancestor_pid() {
         let dir = tempdir_like();
-        let parent = get_parent_pid(std::process::id()).expect("a parent pid");
+        let parent = crate::process::parent_pid(std::process::id()).expect("a parent pid");
         write_session(&dir, "sess-parent", parent, "/via/hop");
         assert_eq!(find_session_in(&dir, std::process::id()), Some(("sess-parent".to_string(), parent)));
         fs::remove_dir_all(&dir).ok();
@@ -319,16 +274,6 @@ mod tests {
         assert!(!id.origin_resolved);
         assert!(!id.resolved());
         assert_eq!(id.session_id, "sess-nocwd");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn pid_has_ancestor_finds_parent_and_self() {
-        let me = std::process::id();
-        assert!(pid_has_ancestor(me, me));
-        assert!(pid_has_ancestor(me, std::os::unix::process::parent_id()));
-        // A pid that cannot be in our ancestry (pid 0 never is).
-        assert!(!pid_has_ancestor(me, 0));
     }
 
     #[test]

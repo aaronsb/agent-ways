@@ -31,9 +31,7 @@ fn main() {
     let own_cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    // transition read: removed by #701 (ADR-506) — the old tray names after the key.
-    let own_trays = signal::own_tray_names(&own_cwd);
-    if let Err(e) = watcher::spawn_watcher(base.clone(), own_trays, tx) {
+    if let Err(e) = watcher::spawn_watcher(base.clone(), signal::encode_cwd(&own_cwd), tx) {
         eprintln!("attend-chat: failed to start signal watcher: {}", e);
         eprintln!("  signals base: {}", base.display());
         eprintln!("  (no point opening the TUI — nothing would stream in.)");

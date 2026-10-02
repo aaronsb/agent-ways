@@ -50,7 +50,7 @@ impl Component {
             // other two or agents will receive inconsistent guidance at
             // different points in a session:
             //   - skills/attend/SKILL.md                               (primer read at /attend invocation)
-            //   - tools/sensor-disclosure/src/disclosures/messaging.md (this file — runtime reheat)
+            //   - tools/attend/src/sensors/disclosures/messaging.md (this file — runtime reheat)
             //   - hooks/ways/softwaredev/environment/attend/attend.md  (just-in-time way via commands: attend)
             // Note: the .md file is embedded via include_str! and
             // becomes the literal reheat payload, so no HTML comments
@@ -81,7 +81,7 @@ impl DisclosureSensor {
     }
 
     /// Shell out to `ways context --json` and return the `tokens_used` field.
-    /// Matches `sensor-context`'s integration pattern.
+    /// Matches the context sensor's integration pattern.
     fn read_tokens_used(&self, focus: &Focus) -> Option<(u64, u64)> {
         let output = Command::new("ways")
             .args(["context", "--json"])
@@ -154,7 +154,13 @@ impl Sensor for DisclosureSensor {
         "disclosure"
     }
 
-    sensor_trait::sensor_metadata!();
+    fn description(&self) -> &str {
+        "reheats affordance instructions on token-distance drift"
+    }
+
+    fn source(&self) -> String {
+        concat!("attend@", env!("CARGO_PKG_VERSION")).to_string()
+    }
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let (tokens_used, tokens_total) = match self.read_tokens_used(focus) {
@@ -165,13 +171,13 @@ impl Sensor for DisclosureSensor {
     }
 
     fn emission_threshold(&self) -> f64 {
-        // Matches `sensor-context` — disclosures are high-priority by
+        // Matches the context sensor — disclosures are high-priority by
         // nature (they carry instructional payload, not telemetry).
         1.5
     }
 
     fn base_interval(&self) -> Duration {
-        // Poll at the same rest cadence as `sensor-context`. The subprocess
+        // Poll at the same rest cadence as the context sensor. The subprocess
         // call is the same operation against the same file.
         Duration::from_secs(60)
     }

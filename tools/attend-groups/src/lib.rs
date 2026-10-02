@@ -14,7 +14,7 @@
 //! **Member identity.** A member id is either a Claude Code session
 //! UUID (claude sessions, via attend) or a sanitized username (humans,
 //! via attend-chat). Both kinds are judged for liveness the same way:
-//! against the heartbeat sidecar (`attend-heartbeat`, ADR-129). The
+//! against the heartbeat sidecar (`attend_presence::heartbeat`, ADR-129). The
 //! yaml does not distinguish them — liveness was always
 //! heartbeat-shaped, not UUID-shaped.
 
@@ -44,6 +44,28 @@ pub struct Groups {
 }
 
 const GROUP_PREFIX: &str = "@";
+
+/// The directory under the signals base that backs `#open`, the base
+/// channel every enrolled member receives (ADR-124).
+pub const BROADCAST_DIR: &str = "_broadcast";
+
+/// Which room a receive directory is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Room {
+    /// The member's project tray: messages sent to its project with `--to`.
+    Project,
+    /// `#open`, under [`BROADCAST_DIR`].
+    Open,
+    /// A joined channel, by name.
+    Channel(String),
+}
+
+/// One directory a member reads signals from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiveDir {
+    pub path: PathBuf,
+    pub room: Room,
+}
 
 /// The single-line description contract, shared by every write path
 /// (create, set_description). Control characters — newlines above
@@ -90,6 +112,23 @@ impl Groups {
             base: signals_base.to_path_buf(),
             member_id: member_id.to_string(),
         }
+    }
+
+    /// Every directory this member receives from, in a fixed order: the
+    /// project tray of `origin` (named by `claude_sessions::attend_key`),
+    /// `#open`, then each joined channel. The one receive set the drain,
+    /// `attend inbox`, `attend status` and the peers sensor all read.
+    pub fn receive_dirs(&self, origin: &str) -> Vec<ReceiveDir> {
+        let mut dirs = vec![
+            ReceiveDir { path: self.base.join(claude_sessions::attend_key(origin)), room: Room::Project },
+            ReceiveDir { path: self.base.join(BROADCAST_DIR), room: Room::Open },
+        ];
+        dirs.extend(
+            self.joined_group_names()
+                .into_iter()
+                .map(|name| ReceiveDir { path: self.group_dir(&name), room: Room::Channel(name) }),
+        );
+        dirs
     }
 
     /// Path to a named group's signal directory.
@@ -178,6 +217,23 @@ impl Groups {
         entry.description = normalized;
         self.save_state(&state);
         Ok(())
+    }
+
+    /// Move every membership of `old` to `new`, for a member whose id
+    /// changed under it (Claude Code's `/clear` gives a session a new id).
+    pub fn rename_member(&self, old: &str, new: &str) {
+        let mut state = self.load_state();
+        let mut changed = false;
+        for entry in state.values_mut() {
+            if entry.members.iter().any(|m| m == old) {
+                entry.members.retain(|m| m != old && m != new);
+                entry.members.push(new.to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_state(&state);
+        }
     }
 
     /// Leave a named group.
@@ -289,7 +345,7 @@ impl Groups {
     /// List member ids in a named group, or None if the group does not
     /// exist. Returns raw `_groups.yaml` membership — callers that need
     /// a liveness-checked view should filter with
-    /// `attend_heartbeat::is_fresh` (see attend's `cmd_send` for the
+    /// `attend_presence::alive` (see attend's `cmd_send` for the
     /// routing-validation shape).
     pub fn members(&self, name: &str) -> Option<Vec<String>> {
         self.load_state().get(name).map(|e| e.members.clone())
@@ -327,12 +383,10 @@ impl Groups {
     /// writers `create_dir_all` their target, and the chat's group
     /// resolver falls back to the yaml entry.
     ///
-    /// Reserved names are never swept: a lingering `@open/` belongs
-    /// to the ADR-124 migration (`attend run` moves its signals into
-    /// `_broadcast/`), and sweeping it here would silently destroy
-    /// what that migration exists to preserve.
+    /// A reserved name (`open`, `broadcast`) can never be a group, so an
+    /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
     pub fn cleanup_stale(&self) {
-        self.cleanup_stale_with(member_alive, attend_heartbeat::DEFAULT_GRACE);
+        self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE);
     }
 
     /// [`Groups::cleanup_stale`] with an injectable liveness predicate
@@ -389,12 +443,7 @@ impl Groups {
             let Some(bare) = name.strip_prefix(GROUP_PREFIX) else {
                 continue;
             };
-            // Reserved names route elsewhere (`open` → the ADR-124
-            // migration) — never sweep them here.
-            if bare.is_empty() || bare == "open" || bare == "broadcast" {
-                continue;
-            }
-            if state.contains_key(bare) {
+            if bare.is_empty() || state.contains_key(bare) {
                 continue;
             }
             let path = entry.path();
@@ -431,22 +480,10 @@ impl Groups {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
         }
-        let content = serialize_groups_yaml(state);
-        // Per-writer tmp name. A shared `_groups.yaml.tmp` would let two
-        // concurrent writers (multiple attend sessions + a chat instance)
-        // interleave truncate-writes into the same file and publish a
-        // torn hybrid via rename — worse than either writer's state,
-        // and the line parser would round-trip the garbage as truth.
-        // With unique tmps the failure mode collapses to plain
-        // last-writer-wins on the rename, which callers already accept.
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let tmp = path.with_extension(format!("yaml.{}-{}.tmp", std::process::id(), nanos));
-        if fs::write(&tmp, &content).is_ok() {
-            fs::rename(&tmp, &path).ok();
-        }
+        // Atomic, through a temporary file unique to the writer: two
+        // concurrent writers (attend sessions, a chat instance) end in plain
+        // last-writer-wins on the rename, never a torn hybrid.
+        agent_settings::writer::write_atomic(&path, serialize_groups_yaml(state)).ok();
     }
 }
 
@@ -489,17 +526,17 @@ pub fn validate_group_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check whether a member is still alive, using attend's heartbeat
-/// sidecar (ADR-129). A claude session's attend touches its heartbeat
-/// on every tick; a human's attend-chat touches the username heartbeat
-/// on its refresh tick (ADR-170). Anything without a fresh heartbeat —
-/// claude exited, attend never started, chat closed — is stale.
+/// Whether a member is still alive for cleanup: [`attend_presence::alive`]
+/// with no process scan, so only a fresh heartbeat counts (ADR-129). A
+/// claude session's attend touches its heartbeat on every tick, and an
+/// enrolled session's drain at every turn end; a human's attend-chat
+/// touches the username heartbeat on its refresh tick (ADR-170).
 ///
-/// PID-aliveness is intentionally not checked: a claude with no running
+/// Running Claude processes are not consulted: a claude with no running
 /// attend cannot participate in the focus-group mesh, so for cleanup
 /// purposes it is functionally identical to a dead claude.
 pub fn member_alive(member_id: &str) -> bool {
-    attend_heartbeat::is_fresh(member_id, attend_heartbeat::DEFAULT_GRACE)
+    attend_presence::alive(member_id, &std::collections::HashSet::new())
 }
 
 // ── Minimal YAML parser/serializer ─────────────────────────────
@@ -764,7 +801,7 @@ mod tests {
         g.join("temp", false).unwrap();
         // Everyone is stale → member removed, empty unpinned group
         // dissolved, dir gone.
-        g.cleanup_stale_with(|_| false, attend_heartbeat::DEFAULT_GRACE);
+        g.cleanup_stale_with(|_| false, attend_presence::heartbeat::DEFAULT_GRACE);
         assert!(g.members("temp").is_none());
         assert!(!base.join("@temp").exists());
     }
@@ -774,7 +811,7 @@ mod tests {
         let base = tempdir_like();
         let g = Groups::new(&base, "live-sess");
         g.join("deploy", false).unwrap();
-        g.cleanup_stale_with(|_| true, attend_heartbeat::DEFAULT_GRACE);
+        g.cleanup_stale_with(|_| true, attend_presence::heartbeat::DEFAULT_GRACE);
         assert_eq!(g.members("deploy").unwrap(), vec!["live-sess"]);
         assert!(base.join("@deploy").is_dir());
     }
@@ -796,7 +833,7 @@ mod tests {
         // sweep under the real grace window.
         let base = tempdir_like();
         fs::create_dir_all(base.join("@fresh")).unwrap();
-        Groups::new(&base, "x").cleanup_stale_with(|_| true, attend_heartbeat::DEFAULT_GRACE);
+        Groups::new(&base, "x").cleanup_stale_with(|_| true, attend_presence::heartbeat::DEFAULT_GRACE);
         assert!(base.join("@fresh").is_dir());
     }
 
@@ -811,16 +848,28 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_never_sweeps_reserved_open_dir() {
-        // `@open/` is the ADR-124 migration's responsibility — it
-        // moves pending legacy signals into `_broadcast/`. The sweep
-        // must not destroy them first, however old the dir is.
+    fn rename_member_moves_every_membership() {
+        let base = tempdir_like();
+        Groups::new(&base, "old").join("a", false).unwrap();
+        Groups::new(&base, "old").join("b", false).unwrap();
+        Groups::new(&base, "other").join("b", false).unwrap();
+        Groups::new(&base, "x").rename_member("old", "new");
+        assert_eq!(Groups::new(&base, "new").joined_group_names().len(), 2);
+        assert!(Groups::new(&base, "old").joined_group_names().is_empty());
+        assert_eq!(Groups::new(&base, "x").members("b").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn cleanup_sweeps_a_reserved_name_dir_as_an_orphan() {
+        // `open` and `broadcast` are reserved, so no group of that name
+        // can exist: an `@open/` dir is an orphan like any other. No
+        // migration reads it any more (ADR-506).
         let base = tempdir_like();
         fs::create_dir_all(base.join("@open")).unwrap();
         fs::write(base.join("@open").join("a.signal"), "from|p|/x|hi\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
         Groups::new(&base, "x").cleanup_stale_with(|_| true, std::time::Duration::ZERO);
-        assert!(base.join("@open").join("a.signal").exists());
+        assert!(!base.join("@open").exists());
     }
 }
 

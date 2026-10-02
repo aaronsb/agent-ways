@@ -151,8 +151,7 @@ pub(crate) fn cmd_send(
             Some(ids) => ids
                 .iter()
                 .filter(|sid| {
-                    (live_ids.contains(*sid)
-                        || attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE))
+                    attend_presence::alive(sid, &live_ids)
                         && self_id.as_ref().map(|s| s != *sid).unwrap_or(true)
                 })
                 .count(),
@@ -202,12 +201,10 @@ pub(crate) fn cmd_send(
         vec![base.join(encode_project(&resolved))]
     } else {
         // Default: reach everyone via the broadcast dir.
-        vec![base.join("_broadcast")]
+        vec![base.join(attend_groups::BROADCAST_DIR)]
     };
 
-    let (sender_id, source_kind) = identify_sender();
-    let project = cwd.rsplit('/').next().unwrap_or("?");
-
+    let (sender_id, source_kind) = agent_identity::signal::identify_sender(own_session_id());
     let from = format!("{}:{}", source_kind, sender_id);
     // Build the filename stem, which doubles as the signal id `re:<id>`
     // replies reference. `signal_filename` normalizes the sender id
@@ -216,18 +213,11 @@ pub(crate) fn cmd_send(
     // issue #368) and makes the name collision-proof. The `from` field
     // above keeps the un-normalized identity.
     let filename = agent_identity::signal_filename(&sender_id);
-    // Wire format: `from|project|cwd|message` (legacy) or
-    // `from|project|cwd|re:signal-id|message` (threaded reply). The `re:`
-    // field is only emitted when --re was given; unthreaded sends stay
-    // byte-identical to the pre-ADR-120 format.
-    //
-    // **Wire-format mirror.** `tools/attend-chat/src/signal.rs::write_broadcast`
-    // produces the legacy branch of this format. Keep the two in
-    // lockstep; there is no shared crate gating the contract.
-    let content = match &reply_to {
-        Some(id) => format!("{}|{}|{}|re:{}|{}\n", from, project, cwd, id, message),
-        None => format!("{}|{}|{}|{}\n", from, project, cwd, message),
-    };
+    // Wire format (ADR-120): `from|project|cwd|message`, or with `re:<id>`
+    // before the message when --re was given. attend-chat writes through
+    // the same `agent_identity::signal` functions.
+    let project = agent_identity::signal::project_label(&cwd);
+    let content = agent_identity::signal::format_signal(&from, &project, &cwd, reply_to.as_deref(), &message);
 
     let scope = if target_channel.is_some() {
         "channel"
@@ -238,22 +228,8 @@ pub(crate) fn cmd_send(
     };
 
     for dest_dir in &dest_dirs {
-        std::fs::create_dir_all(dest_dir).ok();
-        let path = dest_dir.join(&filename);
-        let tmp_path = dest_dir.join(format!("{}.tmp", filename));
-
-        match std::fs::write(&tmp_path, &content) {
-            Ok(_) => {
-                if let Err(e) = std::fs::rename(&tmp_path, &path) {
-                    eprintln!("[attend] error renaming signal: {}", e);
-                    std::fs::remove_file(&tmp_path).ok();
-                }
-            }
-            Err(e) => eprintln!(
-                "[attend] error writing signal to {}: {}",
-                dest_dir.display(),
-                e
-            ),
+        if let Err(e) = agent_identity::signal::write_signal_file(dest_dir, &filename, &content) {
+            eprintln!("[attend] error writing signal to {}: {}", dest_dir.display(), e);
         }
     }
 
@@ -356,66 +332,6 @@ pub(crate) fn cmd_reply(
 ) {
     eprintln!("attend reply: sensor-peers feature is not compiled in this build");
     std::process::exit(1);
-}
-
-// --- Sender identity helpers ---
-
-/// Determine who is sending this signal.
-/// Returns (identity_string, source_kind) where source_kind is "claude" or "external".
-fn identify_sender() -> (String, &'static str) {
-    // First, try to find a Claude session ID (we're inside a Claude session)
-    if let Some(sid) = own_session_id() {
-        return (sid, "claude");
-    }
-
-    // Not inside Claude — build identity from environment
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
-
-    // Detect terminal: check common terminal-specific env vars
-    let terminal = detect_terminal();
-
-    let identity = if !terminal.is_empty() {
-        format!("{}@{}", user, terminal)
-    } else {
-        user
-    };
-
-    (identity, "external")
-}
-
-/// Best-effort terminal detection from environment variables.
-fn detect_terminal() -> String {
-    // Specific terminal emulators set their own env vars
-    if std::env::var("KITTY_PID").is_ok() {
-        return "kitty".to_string();
-    }
-    if std::env::var("ALACRITTY_SOCKET").is_ok() {
-        return "alacritty".to_string();
-    }
-    if std::env::var("WEZTERM_PANE").is_ok() {
-        return "wezterm".to_string();
-    }
-    if std::env::var("TMUX").is_ok() {
-        return "tmux".to_string();
-    }
-    if std::env::var("STY").is_ok() {
-        return "screen".to_string();
-    }
-    // TERM_PROGRAM is set by some terminals (macOS Terminal, iTerm2, VS Code)
-    if let Ok(tp) = std::env::var("TERM_PROGRAM") {
-        return tp.to_lowercase();
-    }
-    // SSH session
-    if std::env::var("SSH_CONNECTION").is_ok() {
-        return "ssh".to_string();
-    }
-    // Fallback: try TERMINAL or just use the shell
-    if let Ok(t) = std::env::var("TERMINAL") {
-        return t.rsplit('/').next().unwrap_or(&t).to_string();
-    }
-    String::new()
 }
 
 /// Find the closest matching peer path by comparing path suffixes.

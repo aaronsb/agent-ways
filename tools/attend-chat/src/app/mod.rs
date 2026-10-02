@@ -118,7 +118,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             // agent-side `send --channel` validation. Touched before
             // the first sleep so presence starts at launch, not one
             // tick later. Best-effort like every heartbeat write.
-            let _ = attend_heartbeat::touch(&crate::signal::human_member_id());
+            let _ = attend_presence::heartbeat::touch(&crate::signal::human_member_id());
             smol::Timer::after(std::time::Duration::from_secs(5)).await;
             let next = tick.get().wrapping_add(1);
             tick.set(next);

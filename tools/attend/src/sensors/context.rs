@@ -107,7 +107,13 @@ impl Sensor for ContextSensor {
         "context"
     }
 
-    sensor_trait::sensor_metadata!();
+    fn description(&self) -> &str {
+        "tracks context window usage and projects compaction"
+    }
+
+    fn source(&self) -> String {
+        concat!("attend@", env!("CARGO_PKG_VERSION")).to_string()
+    }
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let current = match self.read_context(focus) {

@@ -22,9 +22,7 @@ agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
 agent-theme = { path = "../agent-theme" }
 attend-groups = { path = "../attend-groups" }
-attend-heartbeat = { path = "../attend-heartbeat" }
-attend-identity-view = { path = "../attend-identity-view" }
-attend-state = { path = "../attend-state" }
+attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
-attend-session = { path = "../attend-session" }
+attend-state = { path = "../attend-state" }
 claude-sessions = { path = "../claude-sessions" }

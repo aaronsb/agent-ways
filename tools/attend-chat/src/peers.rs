@@ -38,7 +38,7 @@ pub struct Peer {
 pub fn roster(caps: ColorDepth, instances: &SnapshotCache) -> Vec<Peer> {
     roster_with(
         &discover_sessions(),
-        |sid| attend_heartbeat::is_fresh(sid, attend_heartbeat::DEFAULT_GRACE),
+        |sid| attend_presence::alive(sid, &Default::default()),
         caps,
         instances,
     )
@@ -62,7 +62,7 @@ pub fn roster_with<F: Fn(&str) -> bool>(
         // a sibling row (#394).
         .filter(|s| seen.insert(s.session_id.clone()))
         .map(|s| {
-            let root = attend_session::normalize_origin(&s.cwd);
+            let root = attend_presence::session::normalize_origin(&s.cwd);
             // Identity anchors on the root so the name matches what
             // peers see on this session's signals even mid-hop. The
             // instance suffix may be registered under either the

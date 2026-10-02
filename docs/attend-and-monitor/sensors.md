@@ -15,7 +15,7 @@ This page covers what each built-in observes, what magnitudes it emits, and what
 
 All four use the adaptive interval scheme — they poll fast (`min_interval`) during active change and slow (`base_interval`) when quiet. All four participate in the action potential engagement model (ADR-123) with the shared global config.
 
-## `sensor-context` — interoceptive
+## `context` — interoceptive
 
 The canonical first sensor from ADR-113 — the one that prevents Claude from silently running off the context cliff. It's called "interoceptive" because it's the one sensor that watches *Claude itself* rather than the external world. The data source is `ways context --json`, which reads the running session's current token usage.
 
@@ -46,7 +46,7 @@ Each tier is disclosed once per session — once you've crossed 65%, you won't s
 
 Doesn't enforce anything. Doesn't compact for you. Doesn't save state. It only surfaces observations — the response is up to the agent and to the ways layer that fires at specific thresholds.
 
-## `sensor-git` — working tree state
+## `git` — working tree state
 
 Watches git state in the current working directory. Reports application-level deltas (branch changed, N new commits, M new dirty files) rather than file-by-file churn. The underlying data comes from `git` shell-outs (with `GIT_OPTIONAL_LOCKS=0` to avoid races against foreground commits).
 
@@ -207,7 +207,7 @@ Also doesn't batch multiple events from the same build tool. If `cargo` starts, 
 
 If you want attend to notice *something new*, ask in order:
 
-1. **Does an existing built-in cover it?** If you want to know when git state changes, `sensor-git` already does. Don't duplicate.
+1. **Does an existing built-in cover it?** If you want to know when git state changes, the `git` sensor already does. Don't duplicate.
 2. **Can it be done with an external script?** Anything you can observe with a shell command is a candidate for an external sensor. This is usually the right choice — no recompile, no Rust required, fast iteration. See [`authoring-sensors.md`](authoring-sensors.md).
 3. **Does it need native performance, shared state, or complex logic?** If yes, write a new crate sensor. Create a new `sensor-*` crate in `tools/`, implement `Sensor`, add it to `attend`'s Cargo.toml as an optional dep + feature, register it in `sensors/mod.rs`.
 

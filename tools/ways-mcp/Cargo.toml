@@ -10,5 +10,5 @@ name = "ways-mcp"
 path = "src/main.rs"
 
 [dependencies]
-attend-session = { path = "../attend-session" }
+attend-presence = { path = "../attend-presence" }
 serde_json = "1"

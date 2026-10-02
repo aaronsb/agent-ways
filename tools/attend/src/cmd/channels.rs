@@ -9,12 +9,16 @@ use crate::util::get_groups;
 pub(crate) fn cmd_join(name: &str, pin: bool) {
     let name = name.trim_start_matches('#');
     let r = get_groups();
+    // Enrolled first, so a crash between the two never leaves a member
+    // that is not enrolled; a failed join takes the enrollment back.
+    crate::util::enroll_by_join();
     match r.join(name, pin) {
         Ok(()) => {
             let suffix = if pin { " (pinned)" } else { "" };
             println!("[attend] joined #{name}{suffix}");
         }
         Err(e) => {
+            crate::util::settle_join_enrollment(&r);
             eprintln!("[attend] join: {e}");
             std::process::exit(1);
         }
@@ -29,6 +33,7 @@ pub(crate) fn cmd_leave(name: &str) {
         return;
     }
     r.leave(name).ok();
+    crate::util::settle_join_enrollment(&r);
     println!("[attend] left #{name}");
 }
 

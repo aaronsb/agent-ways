@@ -6,11 +6,30 @@ use crate::util::get_groups;
 pub(crate) fn cmd_scene(name: &str) {
     let r = get_groups();
     match scenes::activate(name, &r) {
-        Ok(result) => println!("[attend] scene '{name}': {result}"),
+        Ok(result) => {
+            settle_scene_enrollment(name, &r);
+            println!("[attend] scene '{name}': {result}");
+        }
         Err(e) => {
             eprintln!("[attend] scene: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// A scene that leaves the session in channels enrolls it as a join. One
+/// that leaves it in none withdraws the join, and `private` is the explicit
+/// opt-out: it also ends `attend run`'s enrollment, at once when no run
+/// holds the session, or once the live one has gone (#720).
+fn settle_scene_enrollment(name: &str, groups: &crate::groups::Groups) {
+    if !groups.my_groups().is_empty() {
+        crate::util::enroll_by_join();
+        return;
+    }
+    crate::util::settle_join_enrollment(groups);
+    let ident = attend_presence::session::identity();
+    if name == "private" && ident.resolved() {
+        attend_presence::enrollment::opt_out(&ident.session_id).ok();
     }
 }
 

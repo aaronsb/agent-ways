@@ -2,17 +2,17 @@
 //!
 //! A message reaches a session over two conduits (ADR-172): the
 //! Monitor-hosted `peers` sensor and the Stop-hook drain. Both render
-//! the sender through this crate, so one message wears one name on
+//! the sender through this module, so one message wears one name on
 //! both — `Nickname-instance (project)` — instead of a path on one
 //! and a persona on the other (issue #534). The canonical id stays the
-//! wire `from` field (`claude:<session-id>`, ADR-171); this crate is
+//! wire `from` field (`claude:<session-id>`, ADR-171); this module is
 //! presentation over that key, never a substitute for it.
 //!
 //! attend-chat draws a two-line chip rather than this one-line label,
 //! but its first line comes from the same [`with_instance`] derivation,
 //! so a session wears one persona across the sensor, the drain, and
 //! the chat TUI. The label and the chip both route through
-//! `agent_identity`; this crate is the glue that picks the right
+//! `agent_identity`; this module is the glue that picks the right
 //! constructor (user vs. cwd) per sender kind and appends the ADR-129
 //! instance suffix.
 //!
@@ -27,9 +27,7 @@ use agent_theme::Role;
 /// Re-exported for the same reason: a caller passes the painter that
 /// draws the label, and `Painter::plain()` for machine-carried text.
 pub use agent_theme::Painter;
-/// Re-exported so a renderer's crate needs only this dependency to
-/// build the per-pass cache every function here takes.
-pub use attend_instances::SnapshotCache;
+pub use crate::SnapshotCache;
 
 /// Render a sender label from the wire `from`/`cwd` pair, drawn by
 /// `painter`.
@@ -100,7 +98,7 @@ fn compose(primary: &str, secondary: &str, id: &Identity, painter: &Painter) -> 
 mod tests {
     use super::*;
     use agent_theme::ColorDepth;
-    use attend_instances::Registry;
+    use crate::Registry;
 
     /// A cache over an empty registry: no instance suffixes, no
     /// dependence on the test host's `~/.cache`.

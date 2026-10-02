@@ -13,6 +13,7 @@
 //! the outer loop that calls `tick::tick_iteration` once per beat.
 
 mod governor;
+mod rekey;
 mod tick;
 
 use std::collections::BinaryHeap;
@@ -37,28 +38,20 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // process cwd here is what keeps a stray shell `cd` at launch
     // (e.g. a Monitor inheriting a build directory) from putting this
     // session on the bus as a different persona.
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
     let mut focus = Focus::default_focus();
     if ident.resolved() {
         focus.working_dir = ident.origin_path.clone();
     }
     emit::log(&format!("focus: {} ({})", focus.description, focus.working_dir));
 
+    // After `/clear`, the old id's state moves to this one before anything
+    // below reads it, and before `enroll(Run)` repoints the Claude-process
+    // index at the new id.
+    let moved_from = if ident.resolved() { rekey::complete_move(&ident) } else { None };
+
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
-
-    // Old-named trays are emptied into their attend-key trays before the
-    // first sweep or read.
-    // transition read: removed by #701 (ADR-506)
-    let moved = crate::cmd::cleanup::migrate_legacy_trays(
-        &signals_base(),
-        &crate::util::projects_base(),
-        &crate::cmd::cleanup::known_project_paths(),
-        false,
-    );
-    if moved > 0 {
-        emit::log(&format!("moved {moved} signal(s) from old-named trays"));
-    }
 
     // Initialize channels for signal routing (ADR-118)
     let session_id = ident.session_id.clone();
@@ -68,22 +61,16 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // the same session. The lock is released by the kernel on process
     // exit, so a panicking or killed attend does not need a janitor.
     //
-    // Self-reload exec() keeps file descriptors and their flocks open,
-    // so the post-exec process *should* already hold the lock through
-    // FD inheritance. Re-acquiring with a fresh FD on that path will
-    // therefore return EWOULDBLOCK — we treat that as success on the
-    // reload path (gated on `ATTEND_RELOADED_FROM`).
-    //
-    // We still attempt the acquire on the reload path so the
-    // bootstrap migration works: when an older binary that did not
-    // take a lock execs into a new binary that does, the new process
-    // has no inherited lock, and the attempt below cleanly grabs one.
+    // Rust opens files with O_CLOEXEC, so a self-reload or a hand-over
+    // after an id change releases the lock at exec() and the new process
+    // acquires it here. A reload that finds it held (`Ok(None)` under
+    // `ATTEND_RELOADED_FROM`) proceeds rather than exiting.
     //
     // The lock value lives on the stack until `cmd_run` returns; the
     // sensor loop never returns under normal operation, so the lock
     // effectively lives for the life of the process.
     let reloaded = std::env::var("ATTEND_RELOADED_FROM").is_ok();
-    let _session_lock = match attend_heartbeat::try_acquire_session_lock(&session_id) {
+    let _session_lock = match attend_presence::heartbeat::try_acquire_session_lock(&session_id) {
         Ok(Some(lock)) => Some(lock),
         Ok(None) if reloaded => {
             // The old binary's lock is still held through the inherited
@@ -127,6 +114,11 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // The roster enumerates addressable coordinating units; a
     // `pid-<pid>` fallback runner is not one, and registering it
     // would allocate a Greek slot to a persona nobody can address.
+    // Enrollment (#720): a resolved session that starts attend is enrolled
+    // until it opts out, whatever its liveness does later.
+    if ident.resolved() {
+        attend_presence::enrollment::enroll(&session_id, attend_presence::enrollment::Source::Run).ok();
+    }
     let my_instance = if ident.resolved() {
         match instance_registry.register(&focus.working_dir, &session_id) {
             Ok(s) => {
@@ -192,6 +184,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
                         "reply_hint_shown".to_string(),
                         snapshot.reply_hint_shown.to_string(),
                     )))
+                    .chain(snapshot.baselined.then(|| ("baselined".to_string(), "true".to_string())))
                     .collect(),
                 "context" => snapshot
                     .disclosed_thresholds
@@ -206,7 +199,12 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         }
     }
 
-    print_startup_banner(&enabled_names, &focus_desc);
+    match &moved_from {
+        Some(old) => println!(
+            "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over"
+        ),
+        None => print_startup_banner(&enabled_names, &focus_desc),
+    }
 
     let mut governor = DisclosureGovernor::new(
         cfg.governor.base_cooldown,
@@ -271,19 +269,28 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     let heartbeat_id = session_id.clone();
 
     loop {
+        // `/clear` gives this session a new id under us. Checked every
+        // tick, not at the registry interval, so the drain under the new
+        // id finds it enrolled before the next turn ends.
+        if ident.resolved() {
+            if let Some(new_id) = rekey::changed_id(&heartbeat_id) {
+                rekey::hand_over(&heartbeat_id, &new_id, &mut slots, &state_store);
+            }
+        }
+
         // Heartbeat — touched at the top of every tick so a single
         // skipped poll cannot evict this session from peer liveness
         // checks (attend_groups::member_alive, attend-chat known_identities
         // filter). Best-effort: a missing write is recoverable on the
         // next iteration.
-        attend_heartbeat::touch(&heartbeat_id).ok();
+        attend_presence::heartbeat::touch(&heartbeat_id).ok();
 
         if last_reload_check.elapsed() >= RELOAD_CHECK_INTERVAL {
             maybe_self_reload(
                 self_exe.as_deref(),
                 &mut initial_mtime,
                 initial_hash,
-                &slots,
+                &mut slots,
                 &state_store,
             );
             last_reload_check = Instant::now();

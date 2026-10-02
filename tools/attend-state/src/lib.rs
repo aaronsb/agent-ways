@@ -23,6 +23,8 @@
 //! session, no persistence" — an unresolved `pid-<pid>` fallback must
 //! never write, or it would alias sessions and corrupt the shared set).
 
+pub mod cold_start;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,10 +40,16 @@ use std::time::Duration;
 ///   reply_hint_shown: true
 ///   git_branch: main
 ///   git_head: abc1234
+///   baselined: true
 ///   version: 0.1.0
 #[derive(Debug, Default)]
 pub struct StateSnapshot {
     pub seen_signals: HashSet<String>,
+    /// A conduit applied the cold-start rule (`cold_start`) for this
+    /// session. Until one has, the session is cold whatever else the file
+    /// holds: the peers sensor checkpoints on its first poll, before its
+    /// first message scan.
+    pub baselined: bool,
     pub disclosed_thresholds: Vec<u8>,
     pub context_pct: Option<f64>,
     pub reply_hint_shown: bool,
@@ -85,6 +93,10 @@ impl StateSnapshot {
             lines.push(format!("git_head: {}", head));
         }
 
+        if self.baselined {
+            lines.push("baselined: true".to_string());
+        }
+
         lines.push(format!("version: {}", env!("CARGO_PKG_VERSION")));
 
         lines.join("\n") + "\n"
@@ -101,8 +113,7 @@ impl StateSnapshot {
             if let Some((key, value)) = line.split_once(": ") {
                 match key {
                     "seen_signal" => {
-                        // transition read: removed by #701 (ADR-506)
-                        state.seen_signals.insert(normalize_seen_key(&value.replace("\\n", "\n")));
+                        state.seen_signals.insert(value.replace("\\n", "\n"));
                     }
                     "disclosed_thresholds" => {
                         state.disclosed_thresholds = value.split(',')
@@ -121,6 +132,9 @@ impl StateSnapshot {
                     "git_head" => {
                         state.git_head = Some(value.to_string());
                     }
+                    "baselined" => {
+                        state.baselined = value == "true";
+                    }
                     _ => {} // ignore unknown keys for forward compat
                 }
             }
@@ -135,17 +149,6 @@ impl StateSnapshot {
 /// another keeps its key and is not delivered twice.
 pub fn seen_key(filename: &str) -> String {
     filename.to_string()
-}
-
-// transition read: removed by #701 (ADR-506)
-/// A key written before keys were filenames, `<scan-dir>:<filename>`, read
-/// as its filename. Signal filenames never contain `:`, so the part after
-/// the last colon is the filename; a key with no colon is returned as is.
-pub fn normalize_seen_key(key: &str) -> String {
-    match key.rsplit_once(':') {
-        Some((_, file)) => file.to_string(),
-        None => key.to_string(),
-    }
 }
 
 /// The filenames of every signal under `signals_base`, one level of trays
@@ -180,11 +183,7 @@ const LOCK_STALE: Duration = Duration::from_secs(5);
 
 impl StateStore {
     pub fn new(session_id: Option<String>) -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        Self::new_in(
-            PathBuf::from(home).join(".cache").join("attend").join("state"),
-            session_id,
-        )
+        Self::new_in(attend_presence::cache::state_dir(), session_id)
     }
 
     /// Test seam: a store rooted at an explicit directory. Signals are
@@ -251,30 +250,33 @@ impl StateStore {
         self.write_merged(&snap, true);
     }
 
-    /// Record a cold-start baseline. Unlike [`mark_seen`], this ALWAYS
-    /// writes, even with no keys: the state file's existence is what
-    /// "warm" means, so an empty baseline that skipped the write would
-    /// leave the next drain cold and make it baseline again — silently
-    /// swallowing whatever arrived in between (PR #385 review,
-    /// blocking finding).
-    pub fn baseline<I, S>(&self, keys: I)
+    /// Record a cold-start baseline: the keys, and `baselined: true`.
+    /// Unlike [`mark_seen`], this ALWAYS writes, even with no keys: the
+    /// field is what "warm" means, so an empty baseline that skipped the
+    /// write would leave the next drain cold and make it baseline again,
+    /// silently swallowing whatever arrived in between (PR #385 review,
+    /// blocking finding). Returns whether the file was written.
+    pub fn baseline<I, S>(&self, keys: I) -> bool
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
         let snap = StateSnapshot {
             seen_signals: keys.into_iter().map(Into::into).collect(),
+            baselined: true,
             ..Default::default()
         };
-        self.write_merged(&snap, true);
+        self.write_merged(&snap, true)
     }
 
     /// Shared read-union-prune-write cycle under the advisory lock.
-    /// `fields_from_disk` selects which side's non-seen fields survive.
-    fn write_merged(&self, mem: &StateSnapshot, fields_from_disk: bool) {
+    /// `fields_from_disk` selects which side's non-seen fields survive;
+    /// `baselined` survives from either. Returns whether the file was
+    /// written.
+    fn write_merged(&self, mem: &StateSnapshot, fields_from_disk: bool) -> bool {
         let path = match self.state_path() {
             Some(p) => p,
-            None => return,
+            None => return false,
         };
         fs::create_dir_all(&self.state_dir).ok();
 
@@ -287,6 +289,7 @@ impl StateStore {
 
         let mut merged = StateSnapshot {
             seen_signals: HashSet::new(),
+            baselined: disk.baselined || mem.baselined,
             ..if fields_from_disk {
                 StateSnapshot {
                     disclosed_thresholds: disk.disclosed_thresholds.clone(),
@@ -323,9 +326,7 @@ impl StateStore {
         // Per-writer tmp name: two writers that both fell through the
         // lock timeout must not interleave on one tmp file.
         let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
-        if fs::write(&tmp, merged.serialize()).is_ok() {
-            fs::rename(&tmp, &path).ok();
-        }
+        fs::write(&tmp, merged.serialize()).is_ok() && fs::rename(&tmp, &path).is_ok()
     }
 
     /// Remove state file (on clean exit if desired).
@@ -343,11 +344,7 @@ impl StateStore {
 /// drain per ADR-172 Decision 5): a live session's unconsumed message
 /// must survive a purge.
 pub fn seen_keys_for(session_id: &str) -> Option<HashSet<String>> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    seen_keys_for_in(
-        &PathBuf::from(home).join(".cache").join("attend").join("state"),
-        session_id,
-    )
+    seen_keys_for_in(&attend_presence::cache::state_dir(), session_id)
 }
 
 /// Test seam for [`seen_keys_for`].
@@ -530,14 +527,6 @@ mod tests {
         assert!(!after.seen_signals.contains(&dead_key),
             "mark for a deleted signal should be pruned");
         fs::remove_dir_all(&dir).ok();
-    }
-
-    /// A state file written with `<dir>:<filename>` keys reads as filenames.
-    #[test]
-    fn old_dir_keyed_marks_read_as_filenames() {
-        let back = StateSnapshot::deserialize("seen_signal: /home/u/.cache/attend/signals/-p:abc-1.signal\n");
-        assert!(back.seen_signals.contains("abc-1.signal"));
-        assert_eq!(normalize_seen_key("abc-1.signal"), "abc-1.signal");
     }
 
     /// "No session, no persistence": a store with no id never writes.
