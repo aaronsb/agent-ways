@@ -1,12 +1,12 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
-|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│ ▾ settings                    value                 ││ways.project.(hidden)                      │|
+|┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
+|│ ▾ settings                    value                 ││other projects, not shown                  │|
 |│     enabled                   true                  ││                                           │|
 |│     language                  auto                  ││This view leaves out 4 more ways in 2 other│|
-|│     default_scope             agent                 ││projects. The all projects action (p) lists│|
-|│     disabled_domains          []                    ││them here, a group per project; a switch   │|
-|│ ▾ project · way               enabled               ││there writes that project's                │|
+|│     default_scope             agent                 ││projects. The projects: all action (p)     │|
+|│     disabled_domains          []                    ││lists them here, a group per project; a    │|
+|│ ▾ project · way               enabled               ││switch there writes that project's         │|
 |│   ▾ this project                                    ││.claude/ways.yaml.                         │|
 |│     ▸ api                                           ││                                           │|
 |│   ▾ shipped                                         ││value    4 ways · p shows them             │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m) │ s set up · p all projects                            |
+| browse  0 changed │ 0 queued │ mouse on (m) │ s set up · p projects: all                           |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -38,15 +38,15 @@ styles
   0  59-69  White Blue -
   0  72-80  White Blue -
   1   0-0   - - DIM
-  1   1-24  Blue - BOLD|DIM
-  1  25-55  - - DIM
+  1   1-39  Blue - BOLD|DIM
+  1  40-55  - - DIM
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   2-11  - - BOLD
   2  32-36  - - DIM
   2  54-55  - - DIM
-  2  56-76  - - BOLD
+  2  56-80  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3  54-55  - - DIM
@@ -147,4 +147,4 @@ styles
  29  47-48  Cyan - -
  29  49-57  - - DIM|ITALIC
  29  58-59  Cyan - -
- 29  60-71  - - DIM|ITALIC
+ 29  60-72  - - DIM|ITALIC

@@ -507,13 +507,14 @@ fn the_view_action_switches_between_this_project_and_every_known_one() {
     assert_eq!(hint.len(), 1, "one row stands for them all");
     let k = view_key(&r);
     assert_eq!(hint[0].setting.as_ref().unwrap().value, format!("3 ways · {k} shows them"), "this project's own ways are not counted");
-    assert!(hint[0].doc.contains(&format!("3 more ways in 2 other projects. The all projects action ({k})")), "{}", hint[0].doc);
+    assert!(hint[0].doc.contains(&format!("3 more ways in 2 other projects. The projects: all action ({k})")), "{}", hint[0].doc);
 
-    assert_eq!(ways.view("projects").as_deref(), Some("showing every known project's ways"));
+    assert_eq!(ways.view("projects", &[]), Ok(Some("showing every known project's ways".into())));
     let r = ways.build(&[]);
     let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, ["third", "other"], "a group per other project, in path order");
-    assert!(r[0].actions.iter().any(|a| a.label == "this project only"));
+    assert_eq!(names, ["other", "third"], "a group per other project, by name");
+    assert!(r[0].actions.iter().any(|a| a.label == "projects: this one"));
+    assert_eq!(view_key(&r), k, "one key switches both ways");
     let other = section(others(&r), "other");
     assert!(!other.section, "a project's name is part of its ways' keys");
     assert_eq!(other.columns, Some(("way".into(), "enabled".into())));
@@ -522,7 +523,7 @@ fn the_view_action_switches_between_this_project_and_every_known_one() {
     let keys: Vec<String> = agent_tui::tree::keyed(&r).into_iter().map(|(_, k)| k).collect();
     assert!(keys.contains(&"ways.project.other.api.dual.deep".to_string()), "{keys:?}");
 
-    assert_eq!(ways.view("projects").as_deref(), Some("showing this project's ways"));
+    assert_eq!(ways.view("projects", &[]), Ok(Some("showing this project's ways".into())));
     assert_eq!(others(&ways.build(&[])).children[0].name, "(hidden)");
 }
 
@@ -532,7 +533,7 @@ fn another_project_s_switch_reads_and_writes_that_project_s_file() {
     let other = known(&fx, "work/other", &["api/dual", "api/rest"]);
     fx.file("work/other/.claude/ways.yaml", "ways:\n  api/rest: false\n");
     let mut ways = Ways::new(ctx_of(&fx));
-    ways.view("projects");
+    ways.view("projects", &[]).unwrap();
     let r = ways.build(&[]);
     let api = &section(others(&r), "other").children[0];
     let (dual, rest) = (&api.children[0], &api.children[1]);
@@ -571,10 +572,66 @@ fn projects_of_one_name_are_told_apart_by_their_parent() {
     known(&fx, "c/api", &["x/y"]);
     fx.file("work/current/.claude/ways/api/dual/dual.md", "---\ndescription: d\n---\n");
     let mut ways = Ways::new(ctx_of(&fx));
-    ways.view("projects");
+    ways.view("projects", &[]).unwrap();
     let r = ways.build(&[]);
     let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
     assert_eq!(names, ["a/app", "b/app", "c/api"], "`api` is this project's way, so the project named api takes its parent");
+}
+
+#[test]
+fn a_dotted_project_name_never_shares_a_key_with_another_project_s_way() {
+    let fx = Fixture::home();
+    known(&fx, "work/foo", &["js/x"]);
+    known(&fx, "work/foo.js", &["x"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    ways.view("projects", &[]).unwrap();
+    let r = ways.build(&[]);
+    let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["foo", "foo·js"]);
+    let keys: Vec<String> = agent_tui::tree::keyed(&r).into_iter().map(|(_, k)| k).filter(|k| k.ends_with(".x")).collect();
+    assert_eq!(keys, ["ways.project.foo.js.x", "ways.project.foo·js.x"], "each way keeps a key of its own");
+}
+
+#[test]
+fn back_to_this_project_is_refused_while_an_edit_elsewhere_is_pending() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    known(&fx, "work/other", &["api/dual"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    ways.view("projects", &[]).unwrap();
+    let r = ways.build(&[]);
+    let elsewhere = section(others(&r), "other").children[0].children[0].setting.clone().unwrap().store.unwrap();
+    let here = section(project_group(&r), "shipped").children[0].children[0].setting.clone().unwrap().store.unwrap();
+    let e = ways.view("projects", &[&here, &elsewhere]).expect_err("the edit to work/other would be dropped");
+    assert_eq!(e, "1 pending change to other projects' ways.yaml would be dropped; review and apply, or undo, it first");
+    assert_eq!(ways.title("ways").unwrap(), format!(" ways settings — ~/work/current · all projects "), "the view stays");
+    assert!(ways.view("projects", &[&here]).is_ok(), "an edit to this project's file shows in both views");
+    assert_eq!(ways.title("ways").unwrap(), " ways settings — ~/work/current · this project ");
+    assert_eq!(ways.title("matching"), None, "only the ways tab has views");
+}
+
+#[test]
+fn a_view_switch_finds_the_other_projects_again() {
+    let fx = Fixture::home();
+    known(&fx, "work/other", &["api/dual"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    assert_eq!(ways.others().len(), 1);
+    known(&fx, "work/later", &["x/y"]);
+    assert_eq!(ways.others().len(), 1, "kept between builds");
+    ways.view("projects", &[]).unwrap();
+    assert_eq!(ways.others().len(), 2);
+}
+
+#[test]
+fn a_write_to_a_ways_yaml_no_known_project_owns_is_refused() {
+    let fx = Fixture::home();
+    known(&fx, "work/other", &["api/dual"]);
+    let mut ways = Ways::new(ctx_of(&fx));
+    let file = fx.root.join("stray/.claude/ways.yaml");
+    let st = agent_tui::tree::Setting::new(agent_tui::tree::Kind::Bool, "true", "default").store("project", file.clone(), "ways.project.api/dual").store.unwrap();
+    let e = ways.write(&file, &[Write { store: &st, value: "false", loaded: "true" }]).expect_err("no known project owns it");
+    assert!(e.contains("stray/.claude/ways.yaml is the ways.yaml of neither this project nor one Claude Code knows"), "{e}");
+    assert!(!file.exists());
 }
 
 // ── the adapter's write, under the real paths ──────────────────

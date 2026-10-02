@@ -603,8 +603,18 @@ impl App {
 
     /// Change what the tree shows: the adapter switches, the tree reloads,
     /// and pending edits and the cursor are found again by key.
+    /// The adapter may refuse a view in which a pending edit would not
+    /// show; nothing changes then and the bottom bar says why.
     pub(super) fn switch_view(&mut self, name: &str) {
-        let said = self.adapter.view(name);
+        let changes = tree::changes(&self.roots);
+        let pending: Vec<&tree::Store> = changes.iter().filter_map(|c| c.1.as_ref()).collect();
+        let said = match self.adapter.view(name, &pending) {
+            Ok(said) => said,
+            Err(why) => {
+                self.msg = format!("refused: {why}");
+                return;
+            }
+        };
         let r = self.reload();
         // A view may read other files, which the watch now covers: stamp
         // them as just read, so the watch does not reload a second time.

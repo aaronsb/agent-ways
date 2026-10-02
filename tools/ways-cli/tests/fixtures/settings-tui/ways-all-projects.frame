@@ -1,6 +1,6 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
-|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
+|┌ ways settings — ~/proj · all projects ──────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││ways.project.gateway.api.rate-limit        │|
 |│     enabled                   true                  ││                                           │|
 |│     language                  auto                  ││value    false                             │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  showing every known project's ways │ s set up · t this|
+| browse  0 changed │ 0 queued │ mouse on (m)  showing every known project's ways │ s set up · p proj|
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -38,8 +38,8 @@ styles
   0  59-69  White Blue -
   0  72-80  White Blue -
   1   0-0   - - DIM
-  1   1-24  Blue - BOLD|DIM
-  1  25-55  - - DIM
+  1   1-39  Blue - BOLD|DIM
+  1  40-55  - - DIM
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM

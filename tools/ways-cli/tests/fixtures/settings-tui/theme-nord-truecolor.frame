@@ -1,6 +1,6 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
-|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
+|┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
 |│▌▾ settings                    value                 ││ways · settings                            │|
 |│     enabled                   true                  ││                                           │|
 |│     language                  auto                  ││The tab's own keys.                        │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme │ s set up · p all projects  |
+| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme │ s set up · p projects: all |
 styles
   0   0-7   #2e3440 #c99fc1 BOLD
   0  10-21  #2e3440 #bfa2c3 -
@@ -38,8 +38,8 @@ styles
   0  59-69  #2e3440 #bfa2c3 -
   0  72-80  #2e3440 #bfa2c3 -
   1   0-0   #434c5e - -
-  1   1-24  #bfa2c3 - BOLD
-  1  25-55  #434c5e - -
+  1   1-39  #bfa2c3 - BOLD
+  1  40-55  #434c5e - -
   1  56-61  #bfa2c3 - BOLD
   1  62-99  #434c5e - -
   2   0-0   #434c5e - -
@@ -140,4 +140,4 @@ styles
  29  73-74  #c99fc1 - -
  29  75-83  #7c8baa - ITALIC
  29  84-85  #c99fc1 - -
- 29  86-97  #7c8baa - ITALIC
+ 29  86-98  #7c8baa - ITALIC

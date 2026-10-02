@@ -278,3 +278,7 @@ The default theme is the 16-colour terminal palette: the status roles are the te
 ## Note (2026-10-01): the active theme is a settings key
 
 The settings screens (#697) settle §5's active choice. It is the key `theme.active` in the user `config.yaml`, in ways' schema (ADR-503), beside `theme.shape`, which names the lozenge caps. The theme tab writes it through the settings writer, as `ways settings set theme.active <name>` does. A reader takes the name from the registry and passes it to `agent_theme::Painter::named`; `agent-theme` reads no settings file. `terminal` names the 16-colour default. The provisional `themes/active` file of #711 is not read, and there is no transition read (ADR-506). The `theme` section is not among the sections the hook commands load (§11).
+
+## Note (2026-10-02): views, and the adapter may refuse one
+
+§3 lists what an adapter supplies. Since #743 (PR #757) it may also supply views. An action with `Arg::View(name)` queues nothing. The shell calls `Adapter::view(name, pending)`, where `pending` holds the store of each pending value edit, and reloads the tree when the adapter switches. The adapter refuses, with a reason the bottom bar shows, a view in which a pending edit would no longer show, since the reload would drop it; nothing changes then. `Adapter::title(tab)` names the view in the tree pane's title. The settings screens use this for the ways tab's switch between this project's ways and every known project's.

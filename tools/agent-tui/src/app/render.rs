@@ -275,7 +275,8 @@ impl App {
                 ListItem::new(Line::from(spans)).style(if i == self.cursor { theme::selected_text() } else { Style::new() })
             })
             .collect();
-        let title = if self.filter.is_empty() { self.title.clone() } else { format!("{} — /{}", self.title, self.filter) };
+        let own = self.roots.get(self.tab).and_then(|t| self.adapter.title(&t.name)).unwrap_or_else(|| self.title.clone());
+        let title = if self.filter.is_empty() { own } else { format!("{own} — /{}", self.filter) };
         let block = pane(title);
         self.hits.list = block.inner(area);
         let list = List::new(items)
@@ -290,7 +291,7 @@ impl App {
     fn draw_detail(&self, f: &mut Frame, area: Rect, path: &[usize]) {
         let n = tree::get(&self.roots, path);
         let dim = theme::muted();
-        let title = tree::label(&self.roots, path);
+        let title = n.heading.clone().unwrap_or_else(|| tree::label(&self.roots, path));
         let mut lines = vec![Line::styled(title, Style::new().add_modifier(Modifier::BOLD)), Line::raw("")];
         // A setting beside its `about` shows its controls alone; a group
         // keeps its doc above the summary.

@@ -7,11 +7,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use agent_settings::load::{resolve, Finding, Layer};
-use agent_settings::{Bound, Kind, LayerScope, Scope};
-use agent_tui::tree::{self, quote, Action, Arg, Kind as TKind, Node, Setting};
+use agent_settings::{Bound, Kind, Scope};
+use agent_tui::tree::{quote, Action, Arg, Kind as TKind, Node, Setting};
 use serde_yaml::Value;
 
 use super::super::{help_text, layer_label, plain, target_file};
@@ -145,7 +144,7 @@ fn segments(b: &Bound) -> Vec<String> {
 
 /// Where a way's file comes from, highest precedence first.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum WayScope {
+pub(super) enum WayScope {
     Project,
     User,
     Shipped,
@@ -181,65 +180,23 @@ impl WayScope {
 }
 
 /// A way's scope and its file.
-struct Located {
-    scope: WayScope,
+pub(super) struct Located {
+    pub(super) scope: WayScope,
     /// The root of its scope, which the detail names its file against.
-    root: PathBuf,
+    pub(super) root: PathBuf,
     /// None when the directory holds no way file sessions would read.
-    file: Option<PathBuf>,
-}
-
-/// Another project Claude Code knows, with ways of its own.
-pub struct Other {
-    pub project: PathBuf,
-    pub ways: PathBuf,
-    pub ids: Vec<String>,
-}
-
-/// A name for each of `projects` under the `project` group: its directory's
-/// name, else with its parent's, else its whole path, whichever first
-/// differs from every other project's and from the names in `taken`.
-fn project_names(projects: &[&Path], taken: &BTreeSet<String>, home: &Path) -> Vec<String> {
-    let name = |p: &Path, level: usize| {
-        let base = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let parent = p.parent().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned());
-        match (level, parent) {
-            (0, _) => base,
-            (1, Some(parent)) => format!("{parent}/{base}"),
-            _ => tilde(p, home),
-        }
-    };
-    let mut levels = vec![0; projects.len()];
-    loop {
-        let names: Vec<String> = projects.iter().zip(&levels).map(|(p, l)| name(p, *l)).collect();
-        let mut moved = false;
-        for (i, n) in names.iter().enumerate() {
-            let clash = taken.contains(n) || names.iter().enumerate().any(|(j, m)| j != i && m == n);
-            if clash && levels[i] < 2 {
-                levels[i] += 1;
-                moved = true;
-            }
-        }
-        if !moved {
-            return names;
-        }
-    }
-}
-
-/// `n` and the noun for it, one or many.
-fn count(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
+    pub(super) file: Option<PathBuf>,
 }
 
 /// A way's file, found as sessions find it: the first `.md` with
 /// frontmatter in `<root>/<id>/`, whatever its name.
-fn way_file(root: &Path, id: &str) -> Option<PathBuf> {
+pub(super) fn way_file(root: &Path, id: &str) -> Option<PathBuf> {
     crate::session::find_way_in_dir(&root.join(id))
 }
 
 /// What a way is, for the detail pane: its description, then the fields
 /// that decide when it fires, and its macro with the first lines it runs.
-fn way_about(w: &Located, home: &Path) -> String {
+pub(super) fn way_about(w: &Located, home: &Path) -> String {
     let row = |k: &str, v: String| format!("{k:<11}{v}");
     let Some(file) = &w.file else {
         return format!("No way file in this way's directory, so sessions skip it.\n\n{}", row("from", w.scope.label().into()));
@@ -268,7 +225,7 @@ fn way_about(w: &Located, home: &Path) -> String {
 /// Each group under `n` sums up its switches, as the files were read:
 /// how many ways, how many off. Only a row with a store is a switch.
 /// Returns `(ways, off)` for `n`.
-fn summarize(n: &mut Node) -> (usize, usize) {
+pub(super) fn summarize(n: &mut Node) -> (usize, usize) {
     let own = n.setting.as_ref().filter(|s| s.store.is_some()).map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
     if n.children.is_empty() {
         return own;
@@ -290,7 +247,7 @@ fn summarize(n: &mut Node) -> (usize, usize) {
 /// Put `leaf` at `path` under `root`, making the groups between. A node
 /// already there keeps its children and takes the leaf's setting: a way
 /// with ways under it is both.
-fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> String, prefix: &str) {
+pub(super) fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> String, prefix: &str) {
     let (first, rest) = path.split_first().expect("a key has a name");
     let name = format!("{prefix}.{first}");
     let at = match root.children.iter().position(|c| c.name == *first) {
@@ -342,7 +299,7 @@ impl Ways {
 
     /// The doc of a group: its section's, or for one of attend's sensors, a
     /// line on that sensor.
-    fn section_doc(&self, name: &str) -> String {
+    pub(super) fn section_doc(&self, name: &str) -> String {
         if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
             return attend_config::schema::sensor_doc(s);
         }
@@ -488,121 +445,17 @@ impl Ways {
 
     /// The ways tab's actions: the setup flow, and the switch between this
     /// project's ways and every known project's.
-    fn ways_actions(&self) -> Vec<Action> {
+    pub(super) fn ways_actions(&self) -> Vec<Action> {
         let view = if self.all_projects.get() {
-            Action::new("this project only", "view: this project's ways").doc("Lists this project's ways again, beside your own and the shipped ones.")
+            Action::new("projects: this one", "view: this project's ways").doc("Lists this project's ways again, beside your own and the shipped ones.")
         } else {
-            Action::new("all projects", "view: every known project's ways")
+            Action::new("projects: all", "view: every known project's ways")
                 .doc("Lists the ways of every project Claude Code knows on this machine, a group per project under this one's. A switch there writes that project's .claude/ways.yaml.")
         };
         vec![
             Action::new("set up", "guided: pick a project, preview what `ways init` writes there").arg(Arg::Flow("setup".into())),
             view.arg(Arg::View("projects".into())),
         ]
-    }
-
-    /// The other projects Claude Code knows that have ways, found once per
-    /// adapter. This project is left out, by its ways directory.
-    pub(super) fn others(&self) -> Rc<Vec<Other>> {
-        if let Some(o) = self.others.borrow().as_ref() {
-            return o.clone();
-        }
-        let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-        let mut seen: BTreeSet<PathBuf> = crate::cmd::ways_roots::project_ways(&self.ctx.project).map(|w| canon(&w)).into_iter().collect();
-        let mut out: Vec<Other> = Vec::new();
-        for (project, ways) in crate::cmd::ways_roots::known_project_ways_in(&self.ctx.claude.join("projects"), &|_| {}) {
-            if !seen.insert(canon(&ways)) {
-                continue;
-            }
-            let mut ids: Vec<String> = crate::cmd::scan::candidates::way_ids(&ways).into_iter().collect();
-            ids.sort();
-            if !ids.is_empty() {
-                // The project is the directory its ways sit in, which may be
-                // above where the session started.
-                let project = ways.parent().and_then(Path::parent).map_or_else(|| PathBuf::from(project), Path::to_path_buf);
-                out.push(Other { project, ways, ids });
-            }
-        }
-        out.sort_by(|a, b| a.project.cmp(&b.project));
-        let out = Rc::new(out);
-        *self.others.borrow_mut() = Some(out.clone());
-        out
-    }
-
-    /// The ways tab's other projects, in a section after this one's scopes:
-    /// in the all projects view a group per project, else a row saying what
-    /// is left out.
-    fn other_projects(&self, root: &mut Node) {
-        let others = self.others();
-        if others.is_empty() {
-            return;
-        }
-        let at = match root.children.iter().position(|n| n.name == "project") {
-            Some(i) => i,
-            None => {
-                root.children.push(Node::group("project", self.section_doc("ways.project"), vec![]));
-                root.children.len() - 1
-            }
-        };
-        let project = &mut root.children[at];
-        let ways: usize = others.iter().map(|o| o.ids.len()).sum();
-        let rows = if self.all_projects.get() {
-            // A section adds nothing to its rows' keys, so its rows' names
-            // are taken at this level too.
-            let taken: BTreeSet<String> =
-                project.children.iter().flat_map(|c| if c.section { c.children.iter().collect() } else { vec![c] }).map(|c| c.name.clone()).collect();
-            let paths: Vec<&Path> = others.iter().map(|o| o.project.as_path()).collect();
-            others.iter().zip(project_names(&paths, &taken, &self.ctx.home)).map(|(o, name)| self.other_project(o, name)).collect()
-        } else {
-            let actions = self.ways_actions();
-            let key = actions.iter().zip(tree::action_keys(&actions)).find(|(a, _)| matches!(a.arg, Arg::View(_))).and_then(|(_, k)| k);
-            let (shows, by) = match key {
-                Some(k) => (format!(" · {k} shows them"), format!(" ({k})")),
-                None => (String::new(), String::new()),
-            };
-            let doc = format!(
-                "This view leaves out {} in {}. The all projects action{by} lists them here, a group per project; a switch there writes that project's .claude/ways.yaml.",
-                count(ways, "more way", "more ways"),
-                count(others.len(), "other project", "other projects"),
-            );
-            vec![Node::leaf("(hidden)", doc, Setting::new(TKind::ReadOnly, format!("{}{shows}", count(ways, "way", "ways")), "known projects"))]
-        };
-        let doc = format!("The projects Claude Code knows on this machine, besides this one, with ways of their own: {}.", count(others.len(), "project", "projects"));
-        project.children.push(Node::section("other projects", doc, ("", ""), rows));
-    }
-
-    /// One other project's ways as a group: a switch per way, read from and
-    /// written to that project's .claude/ways.yaml.
-    fn other_project(&self, o: &Other, name: String) -> Node {
-        let home = &self.ctx.home;
-        let file = ways_core::settings::project_file(&o.project);
-        let shown = tilde(&file, home);
-        let layers = [Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, LayerScope::Project, &file)];
-        let doc = format!("The ways of {}, in {}. A switch here writes {shown}.", tilde(&o.project, home), tilde(&o.ways, home));
-        let mut g = Node::group(name, doc, vec![]).columns(("way", "enabled"));
-        let Some(b) = self.reg.lookup("ways.project.x") else { return g };
-        let broken = broken(&layers);
-        for id in &o.ids {
-            let bound = vec![id.clone()];
-            let r = resolve(b.spec, &bound, &layers);
-            let source = match layer_label(&r, &layers) {
-                (layer, Some(f)) => format!("{layer} · {}", tilde(Path::new(&f), home)),
-                (layer, None) => layer,
-            };
-            let mut s = Setting::new(TKind::Bool, display(r.value.as_ref(), b.spec.kind), source)
-                .default("true")
-                .store("project", file.clone(), format!("ways.project.{id}"))
-                .shown_as(shown.clone());
-            if !broken.is_empty() {
-                s = s.lock(format!("{shown} does not parse, so it fails closed: it sets nothing and takes no write until its syntax is fixed by hand"));
-            }
-            let w = Located { scope: WayScope::Other, root: o.ways.clone(), file: way_file(&o.ways, id) };
-            let leaf = Node::leaf(id.rsplit('/').next().unwrap_or(id), format!("One way on or off in {}.", tilde(&o.project, home)), s).about("way", way_about(&w, home));
-            let at: Vec<String> = id.split('/').map(str::to_string).collect();
-            insert(&mut g, &at, leaf, &|_| String::new(), "");
-        }
-        summarize(&mut g);
-        g
     }
 
     /// The row a project without ways of its own shows: how to start.

@@ -10,6 +10,7 @@
 
 pub mod build;
 pub mod flows;
+pub mod others;
 #[cfg(test)]
 mod tests;
 
@@ -30,7 +31,8 @@ use agent_tui::{Adapter, App, Themes, Write};
 use serde_yaml::Value;
 
 use super::{fail, live_layers, lookup, project_dir, registry, target_file, write_file, write_file_checked, Failure, Out};
-use build::{display, tilde, Other, TABS};
+use build::{display, tilde, TABS};
+use others::Other;
 
 /// Where the screens look: the project, the home directory paths are shown
 /// under, the corpus whose ways get per-project toggles, and the places the
@@ -217,8 +219,8 @@ impl Adapter for Ways {
     fn write(&mut self, file: &Path, values: &[Write]) -> Result<(), String> {
         self.refuse_broken(file)?;
         // A project-scope key may be another project's, from the all
-        // projects view: its project is the one whose file it names.
-        let elsewhere = file.parent().and_then(Path::parent).map(Path::to_path_buf);
+        // projects view: one of the projects listed there, whose file it
+        // names.
         let mut project = self.ctx.project.clone();
         let mut edits = Vec::new();
         for w in values {
@@ -227,9 +229,17 @@ impl Adapter for Ways {
             let at = |p: &Path| target_file(&b, (b.spec.scope == Scope::Project).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
             if path != file && b.spec.scope == Scope::Project {
-                if let Some(other) = elsewhere.as_deref().filter(|o| at(o).is_ok_and(|p| p == file)) {
-                    project = other.to_path_buf();
-                    path = file.to_path_buf();
+                match self.other_owning(file) {
+                    Some(other) => {
+                        project = other;
+                        path = file.to_path_buf();
+                    }
+                    None => {
+                        return Err(self.short(&format!(
+                            "{} is the ways.yaml of neither this project nor one Claude Code knows; nothing was written",
+                            file.display()
+                        )))
+                    }
                 }
             }
             if path != file {
@@ -262,6 +272,9 @@ impl Adapter for Ways {
     /// with the line's arguments, a secret on stdin. It runs in the
     /// background; the screens poll it.
     fn start(&mut self, q: &Queued) -> Box<dyn Job> {
+        // A command, such as the `ways init` the setup flow queues, may give
+        // a project ways: the other projects are found again.
+        self.forget_others();
         let ended = |r: Result<(), String>| -> Box<dyn Job> { Box::new(Ended(Some(r))) };
         let line = q.command.strip_suffix(" < <stdin>").unwrap_or(&q.command).to_string();
         let argv = match split(&line) {
@@ -351,14 +364,27 @@ impl Adapter for Ways {
     }
 
     /// `projects` switches the ways tab between this project's ways and
-    /// every known project's.
-    fn view(&mut self, name: &str) -> Option<String> {
+    /// every known project's. Back to this project's is refused while an
+    /// edit to another project's file is pending, which it would drop.
+    /// Either way the other projects are found again.
+    fn view(&mut self, name: &str, pending: &[&Store]) -> Result<Option<String>, String> {
         if name != "projects" {
-            return None;
+            return Ok(None);
         }
         let all = !self.all_projects.get();
+        if !all {
+            if let Some(why) = self.narrow_refusal(pending) {
+                return Err(why);
+            }
+        }
+        self.forget_others();
         self.all_projects.set(all);
-        Some(if all { "showing every known project's ways" } else { "showing this project's ways" }.into())
+        Ok(Some(if all { "showing every known project's ways" } else { "showing this project's ways" }.into()))
+    }
+
+    /// The ways tab names the view it shows.
+    fn title(&self, tab: &str) -> Option<String> {
+        (tab == "ways").then(|| format!(" ways settings — {} · {} ", tilde(&self.ctx.project, &self.ctx.home), if self.all_projects.get() { "all projects" } else { "this project" }))
     }
 
     fn help(&self, tab: &str) -> Option<String> {
