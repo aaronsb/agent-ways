@@ -273,6 +273,30 @@ ${YELLOW}⚠ Semantic (meaning-based) way-matching is OFF${RESET} — keyword/pa
 CARD
 }
 
+# The relevance judge (ADR-196): `ways judge-setup` checks the stored keys and,
+# when none passes, says ways is degraded and offers to add one. The installer
+# often runs from a pipe, so the offer reads /dev/tty when it can be opened;
+# without one the command warns and never prompts.
+judge_setup() {
+  local ways="$APP_DIR/bin/ways"
+  if ! "$ways" judge-setup --help >/dev/null 2>&1; then
+    # A ways binary from before judge-setup: warn when no key file exists.
+    local keys="${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys"
+    if [[ ! -e "$keys/anthropic" && ! -e "$keys/openrouter" ]]; then
+      echo -e "  ${YELLOW}Ways is degraded: the relevance judge is off, so every matched way is injected.${RESET}"
+      echo -e "  Fix: ${CYAN}ways agent key add --provider anthropic|openrouter${RESET}"
+      echo ""
+    fi
+    return 0
+  fi
+  if { : </dev/tty >/dev/tty; } 2>/dev/null; then
+    "$ways" judge-setup </dev/tty >/dev/tty || true
+  else
+    "$ways" judge-setup || true
+  fi
+  echo ""
+}
+
 # --- Clobber: remove the app dir AND ~/.claude (backs ~/.claude up first) ---
 
 if [[ "$CLOBBER" == "true" ]]; then
@@ -317,6 +341,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     echo ""
     echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
     embedding_engine_ok || print_recovery_card
+    judge_setup
   else
     echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
     echo "  Fix the build (cd $APP_DIR && make setup), then run: ways reconcile"
@@ -385,13 +410,7 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   # ADR-146 verify: the projection is up, but if semantic matching didn't come
   # up (no prebuilt way-embed for this platform / toolchain missing), guide recovery.
   embedding_engine_ok || print_recovery_card
-  # Optional relevance gate: a hint only. Never prompt; the installer runs from a pipe.
-  # The agent reads only the key file, so only a key file counts here.
-  if [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/anthropic" ] \
-     && [ ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys/openrouter" ]; then
-    echo -e "  Optional: turn on the relevance gate (Claude Haiku judges each matched way) with ${CYAN}ways agent key add --provider anthropic${RESET}"
-    echo ""
-  fi
+  judge_setup
 else
   # No binary → don't create an empty ~/.claude. The app is staged; finish by hand.
   echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"

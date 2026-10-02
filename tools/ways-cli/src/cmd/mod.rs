@@ -6,6 +6,7 @@ pub mod graph;
 pub mod hook;
 pub mod init;
 pub mod introspect;
+pub mod judge;
 pub mod language;
 pub mod lint;
 pub mod list;

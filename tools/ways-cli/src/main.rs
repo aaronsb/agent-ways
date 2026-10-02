@@ -253,6 +253,10 @@ enum Commands {
     /// every telemetry writer and reader resolves.
     #[command(hide = true)]
     EventsLogPath,
+    /// Check the relevance judge's keys and, on a terminal, offer to add one.
+    /// `ways update` runs this; the installer calls it.
+    #[command(hide = true)]
+    JudgeSetup,
 }
 
 #[derive(Subcommand)]
@@ -905,15 +909,28 @@ fn main() -> Result<()> {
 
 fn run() -> Result<()> {
     // A bare `ways` prints help, with the banner only on a terminal
-    // (ADR-507 §7). `--help` and `help` are clap's and carry no banner.
-    let cli = Cli::parse();
-    let Some(command) = cli.command else {
-        use clap::CommandFactory;
+    // (ADR-507 §7). `--help` and `help` are clap's and carry no banner. The
+    // top-level help ends with the judge's warning when it cannot gate; only
+    // that help reads the judge's state, so other commands never pay for it.
+    use clap::CommandFactory;
+    let help = || {
+        let help = Cli::command();
+        match cmd::judge::help_footer() {
+            Some(warning) => help.after_help(warning),
+            None => help,
+        }
+    };
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.len() == 2 && matches!(args[1].to_str(), Some("--help" | "-h" | "help")) {
+        help().get_matches_from(args);
+        unreachable!("clap prints the help and exits");
+    }
+    let Some(command) = Cli::parse_from(args).command else {
         use std::io::IsTerminal;
         if std::io::stdout().is_terminal() {
             cmd::banner::run()?;
         }
-        Cli::command().print_help()?;
+        help().print_help()?;
         println!();
         return Ok(());
     };
@@ -1096,6 +1113,7 @@ fn run() -> Result<()> {
         Commands::Hook { event } => cmd::hook::run(event),
         Commands::Agent { args } => cmd::agent::run(&args),
         Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
+        Commands::JudgeSetup => cmd::judge::setup(),
         Commands::Uninstall { yes, purge } => cmd::uninstall::run(yes, purge),
     }
 }
