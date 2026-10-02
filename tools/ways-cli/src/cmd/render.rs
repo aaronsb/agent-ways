@@ -247,9 +247,8 @@ pub fn write_way_row_with<W: WayRow>(
     let next_padded = crate::cmd::compositor::pad_visible(&next, RD_W);
 
     let g = " ".repeat(COL_GAP);
-    let _ = writeln!(
-        out,
-        "  {row_prefix}{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}{dc_off}{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}{row_suffix}",
+    let cells = format!(
+        "{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}{dc_off}{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}",
         way = agent_fmt::truncate_visible(&display_id, layout.way_col),
         ep = w.epoch_fired(),
         dc = dist_on,
@@ -261,6 +260,14 @@ pub fn write_way_row_with<W: WayRow>(
         agent = agent_display,
         way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W, tr_w = TRIG_W,
     );
+    // A row style (the selection) must survive the resets the cells end
+    // their own colours with, or it stops partway along the row.
+    let cells = if row_prefix.is_empty() {
+        cells
+    } else {
+        cells.replace(agent_theme::RESET, &format!("{}{row_prefix}", agent_theme::RESET))
+    };
+    let _ = writeln!(out, "  {row_prefix}{cells}{row_suffix}");
 
     if w.check_fires() > 0 {
         let decay = 1.0 / (w.check_fires() as f64 + 1.0);
@@ -571,6 +578,25 @@ mod tests {
         fn check_fires(&self) -> u64 { 0 }
         fn depth(&self) -> u64 { self.depth }
         fn refire_threshold_k(&self) -> u64 { 40 }
+    }
+
+    #[test]
+    fn a_row_style_survives_the_cells_own_resets() {
+        let p = agent_theme::Painter::terminal(agent_theme::ColorDepth::TrueColor);
+        let _g = agent_theme::scoped(p);
+        let (on, off) = p.pair(Role::Selection);
+        let layout = Layout::for_id_width_in(3, 120);
+        let mut row = String::new();
+        write_way_row_with(&mut row, &MockWay { id: "adr", depth: 0 }, 9, 0, &[None], &[], 0, &on, off, &layout);
+        let line = row.lines().next().unwrap();
+        let body = line.strip_suffix(off).expect("the row ends with its own reset");
+        let resets = body.matches(agent_theme::RESET).count();
+        assert!(resets > 0, "the cells carry their own colours: {line:?}");
+        assert_eq!(body.matches(&format!("{}{on}", agent_theme::RESET)).count(), resets, "every inner reset re-applies the row style: {line:?}");
+        // Without a row style nothing is re-applied.
+        let mut plain = String::new();
+        write_way_row_with(&mut plain, &MockWay { id: "adr", depth: 0 }, 9, 0, &[None], &[], 0, "", "", &layout);
+        assert!(!plain.contains(&format!("{}{on}", agent_theme::RESET)));
     }
 
     #[test]

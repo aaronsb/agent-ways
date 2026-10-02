@@ -118,8 +118,10 @@ pub struct Resolved {
 
 /// The rich palette in categorical order: for things told apart by colour
 /// alone, the `i`th thing takes `categorical(i)`. Neighbours differ in hue,
-/// so a handful of categories read as distinct.
-pub const CATEGORICAL: [usize; 10] = [6, 5, 4, 2, 1, 0, 8, 10, 7, 18];
+/// and in their ANSI code too, so adjacent categories stay apart on a
+/// 16-colour terminal: sky, mint, coral, iris, gold, rose (six distinct
+/// codes), then teal, lime, amber, azure.
+pub const CATEGORICAL: [usize; 10] = [6, 4, 0, 8, 2, 10, 5, 3, 1, 7];
 
 /// The `i`th categorical colour, cycling after ten.
 pub fn categorical(i: usize) -> PaletteEntry {
@@ -221,6 +223,17 @@ mod tests {
         assert_eq!(e.color(ColorDepth::TrueColor), Some(Color::rgb(0xff, 0x6b, 0x6b)));
         assert_eq!(e.color(ColorDepth::Ansi16), Some(Color::Ansi(9)));
         assert_eq!(e.color(ColorDepth::NoColor), None);
+    }
+
+    #[test]
+    fn categorical_neighbours_differ_on_a_16_colour_terminal() {
+        let codes: Vec<u8> = (0..CATEGORICAL.len()).map(|i| categorical(i).ansi16).collect();
+        for i in 0..codes.len() {
+            let next = codes[(i + 1) % codes.len()];
+            assert_ne!(codes[i], next, "clusters {i} and {} share ANSI {next}", (i + 1) % codes.len());
+        }
+        let first6: std::collections::HashSet<_> = codes[..6].iter().collect();
+        assert_eq!(first6.len(), 6, "the first six clusters each get their own code: {codes:?}");
     }
 
     #[test]
