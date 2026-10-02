@@ -37,6 +37,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      # tui-harness drives a real tmux session. The runner image ships tmux
+      # today, but its package list is not a contract, so install it. With
+      # TUI_HARNESS_REQUIRE_TMUX set, the tmux test fails rather than skips.
+      - name: install tmux
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q tmux
+          echo "TUI_HARNESS_REQUIRE_TMUX=1" >> "$GITHUB_ENV"
       - name: test
         run: cargo test --manifest-path tools/Cargo.toml --workspace
       - name: hook tests

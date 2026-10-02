@@ -1,0 +1,23 @@
+[package]
+name = "tui-harness"
+version = "0.1.0"
+edition = "2021"
+description = "Drive a TUI in a detached tmux terminal, send it keys, and screenshot what it renders as a PNG"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "tui_harness"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tui-harness"
+path = "src/main.rs"
+
+[dependencies]
+ab_glyph = "0.2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+unicode-width = "0.2"
+vte = { version = "0.15", default-features = false }
