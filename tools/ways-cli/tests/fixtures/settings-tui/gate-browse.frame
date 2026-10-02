@@ -13,8 +13,8 @@ agent-tui frame 100x30
 |│       max_turn_chars          1200                  ││                                           │|
 |│       concurrency             8                     ││                                           │|
 |│       max_candidates          8                     ││                                           │|
-|│       price_in_per_mtok       1.0                   ││                                           │|
-|│       price_out_per_mtok      5.0                   ││                                           │|
+|│       price_in_per_mtok                             ││                                           │|
+|│       price_out_per_mtok                            ││                                           │|
 |│   ▸ openrouter                                      ││                                           │|
 |│ ▸ keys                                              ││                                           │|
 |│                                                     ││                                           │|

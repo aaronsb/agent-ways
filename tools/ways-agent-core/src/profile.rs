@@ -129,10 +129,11 @@ pub struct Profile {
     /// latency grows with each candidate, so the rest pass unjudged.
     pub max_candidates: usize,
     /// USD per million input tokens, for pricing a call whose provider does
-    /// not report its cost. Unset: such a call's cost is unknown.
+    /// not report its cost. Unset: the model's list price where agent-ways
+    /// ships one ([`crate::cost::list_price`]), else the cost is unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_in_per_mtok: Option<f64>,
-    /// USD per million output tokens.
+    /// USD per million output tokens. Set with the input price or not at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_out_per_mtok: Option<f64>,
 }
@@ -148,8 +149,14 @@ impl Profile {
         if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 || self.max_candidates == 0 {
             bail!("profile '{name}': turns, max_turn_chars, concurrency and max_candidates must be at least 1");
         }
-        if [self.price_in_per_mtok, self.price_out_per_mtok].into_iter().flatten().any(|p| !p.is_finite() || p < 0.0) {
-            bail!("profile '{name}': prices must be zero or more");
+        match (self.price_in_per_mtok, self.price_out_per_mtok) {
+            (Some(_), None) | (None, Some(_)) => {
+                bail!("profile '{name}': set price_in_per_mtok and price_out_per_mtok together, or neither")
+            }
+            (Some(i), Some(o)) if !(i.is_finite() && o.is_finite() && i >= 0.0 && o >= 0.0) => {
+                bail!("profile '{name}': prices must be zero or more")
+            }
+            _ => {}
         }
         if !valid_model_id(&self.model) {
             bail!("profile '{name}': model '{}' is not a model id (letters, digits and . _ : / - only)", self.model);
@@ -196,10 +203,6 @@ pub struct ProfilePatch {
 
 impl ProfilePatch {
     fn apply(&self, base: &Profile) -> Profile {
-        // The base's prices are for the base's model: a patch that changes
-        // the model and names no prices leaves the cost unknown.
-        let same_model = self.model.as_ref().is_none_or(|m| *m == base.model);
-        let inherited = |p: Option<f64>| if same_model { p } else { None };
         Profile {
             provider: self.provider.unwrap_or(base.provider),
             model: self.model.clone().unwrap_or_else(|| base.model.clone()),
@@ -209,8 +212,8 @@ impl ProfilePatch {
             max_turn_chars: self.max_turn_chars.unwrap_or(base.max_turn_chars),
             concurrency: self.concurrency.unwrap_or(base.concurrency),
             max_candidates: self.max_candidates.unwrap_or(base.max_candidates),
-            price_in_per_mtok: self.price_in_per_mtok.or(inherited(base.price_in_per_mtok)),
-            price_out_per_mtok: self.price_out_per_mtok.or(inherited(base.price_out_per_mtok)),
+            price_in_per_mtok: self.price_in_per_mtok.or(base.price_in_per_mtok),
+            price_out_per_mtok: self.price_out_per_mtok.or(base.price_out_per_mtok),
         }
     }
 }
@@ -408,6 +411,15 @@ mod tests {
         assert_eq!(s.mode, Mode::Enforce);
         let s = resolve(&UserLayer::default(), |_| true).unwrap().unwrap();
         assert_eq!(s.engine, "anthropic");
+    }
+
+    #[test]
+    fn prices_are_set_together_or_not_at_all() {
+        let lone: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    price_in_per_mtok: 1.0\n").unwrap();
+        assert!(profiles(&lone).unwrap_err().to_string().contains("together"));
+        let both: UserLayer =
+            serde_yaml::from_str("profiles:\n  anthropic:\n    price_in_per_mtok: 3.0\n    price_out_per_mtok: 15.0\n").unwrap();
+        assert_eq!(profiles(&both).unwrap()["anthropic"].price_out_per_mtok, Some(15.0));
     }
 
     #[test]

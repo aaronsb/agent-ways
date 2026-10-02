@@ -236,8 +236,9 @@ struct State {
     http: ureq::Agent,
     slots: Mutex<usize>,
     freed: Condvar,
-    /// One key check at a time, so a burst of first prompts checks once.
-    check_lock: Mutex<()>,
+    /// Set while a key check runs in the background, so a burst of first
+    /// prompts starts one check.
+    checking: Arc<std::sync::atomic::AtomicBool>,
     stats: Mutex<Stats>,
 }
 
@@ -259,7 +260,7 @@ impl State {
             http: net::agent(Duration::from_secs(60)),
             slots: Mutex::new(0),
             freed: Condvar::new(),
-            check_lock: Mutex::new(()),
+            checking: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             stats: Mutex::new(Stats::default()),
         }
     }
@@ -341,8 +342,11 @@ impl State {
 
     /// A working key is the operator's approval to gate (ADR-196 §6): judge
     /// only with a key whose last recorded check passed. A key never checked,
-    /// or replaced since, is checked once here and the result recorded; a
-    /// check that could not reach a verdict is retried after five minutes.
+    /// or replaced since, is checked in the background, and requests fall
+    /// back until the result is recorded: a check takes up to 15 s per call,
+    /// past any hook's deadline, and a hook that stops reading must mean the
+    /// provider call is in flight. A check that could not reach a verdict is
+    /// retried after five minutes.
     fn verified(&self, provider: Provider, key: &str, source: &keys::Source, model: &str) -> Result<(), String> {
         // How long a result stands before it is checked again: a check that
         // reached no verdict soon, a key without credit after an hour (it may
@@ -355,26 +359,36 @@ impl State {
         let current = |r: &keys::CheckRecord| {
             r.describes(source, model) && retry_after(&r.result).is_none_or(|s| r.age_s() < s)
         };
-        let record = match keys::last_check(provider).filter(current) {
-            Some(r) => r,
-            None => {
-                let _guard = self.check_lock.lock().unwrap_or_else(|e| e.into_inner());
-                // Another request may have checked while this one waited.
-                match keys::last_check(provider).filter(current) {
-                    Some(r) => r,
-                    None => {
-                        let result = net::check(provider, key, model);
-                        let record = keys::CheckRecord::now(result.record_word(), model, source);
-                        keys::record_check(provider, &record);
-                        record
-                    }
-                }
-            }
+        let Some(record) = keys::last_check(provider).filter(current) else {
+            self.check_in_background(provider, key, source, model);
+            return Err("key_unverified: checking".to_string());
         };
         match record.result.as_str() {
             "valid" => Ok(()),
             other => Err(format!("key_unverified: last check {other}")),
         }
+    }
+
+    /// Starts a key check unless one is running, and records its result.
+    fn check_in_background(&self, provider: Provider, key: &str, source: &keys::Source, model: &str) {
+        if self.checking.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // Cleared on every exit from the thread, unwinding included, so a
+        // failed check never stops the next one.
+        struct Clear(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for Clear {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let clear = Clear(Arc::clone(&self.checking));
+        let (key, source, model) = (key.to_string(), source.clone(), model.to_string());
+        std::thread::spawn(move || {
+            let _clear = clear;
+            let result = net::check(provider, &key, &model);
+            keys::record_check(provider, &keys::CheckRecord::now(result.record_word(), &model, &source));
+        });
     }
 
     /// Waits up to `wait` for one of `cap` provider slots.

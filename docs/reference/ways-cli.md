@@ -123,13 +123,13 @@ ways session fires --session <id> --max-score 0.6   # the borderline semantic fi
 
 **Run from:** Anywhere. It reads the events log, which every project shares.
 
-**Tells you:** The judge's provider calls with their tokens and cost in USD, as a total and one row per day (`--by month`, `session` or `project` for the other groupings). The hook logs each call as one `judge_call` event in `events.jsonl`, beside the `way_judged` events the call produced. OpenRouter reports each call's cost. An Anthropic call is priced from tokens times the profile's `price_in_per_mtok` and `price_out_per_mtok`, which ship with Claude Haiku 4.5's list prices. A call that returned no usage, such as one that hit its deadline, or one whose profile has no prices, is counted as unknown cost. Those calls are listed apart and never summed as zero. `--json` prints the total and all four groupings.
+**Tells you:** The judge's provider calls with their tokens and cost in USD, as a total and one row per day (`--by month`, `session` or `project` for the other groupings). The total line names the date the events log begins: the log keeps its newest 24 MiB, so older calls drop out. The hook logs each call as one `judge_call` event in `events.jsonl`, beside the `way_judged` events the call produced. OpenRouter reports each call's cost, and a request a provider refuses costs nothing. An Anthropic call is priced from its tokens at the profile's `price_in_per_mtok` and `price_out_per_mtok`, or, when those are unset, at Claude Haiku 4.5's list price for that model. A call that returned no usage, such as one that hit its deadline, or one with no price for its model, has unknown cost: it is counted apart and never summed as zero. `--json` prints the total, all four groupings and `covers_since`, with `cost_usd` null for a group whose calls all have unknown cost.
 
 ```
 ways agent cost                          # spend per day
 ways agent cost --by session --since 2026-10-01
 ways agent cost --session <id> --json
-ways settings set gate.profiles.anthropic.price_in_per_mtok 1.0
+ways settings set gate.profiles.anthropic.price_in_per_mtok 3.0   # with price_out_per_mtok
 ```
 
 ---

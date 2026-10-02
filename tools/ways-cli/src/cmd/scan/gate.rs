@@ -155,16 +155,25 @@ fn run(
             blocked
         }
         Ok(Reply::Fallback { reason, call, .. }) => {
-            if let Some(call) = call {
-                log_call(&call, Some(&reason), log);
+            // An agent older than #741 sends no call; its reason says whether
+            // it reached the provider.
+            let reached = ["deadline", "transport", "provider_", "answer"].iter().any(|p| reason.starts_with(p));
+            match call {
+                Some(call) => log_call(&call, Some(&reason), log),
+                None if reached => {
+                    log_call(&JudgeCall::priced(&settings.engine, &settings.profile, judged.len(), None), Some(&reason), log)
+                }
+                None => {}
             }
             fallback(&reason, judged.len(), log, &elapsed_ms)
         }
         Ok(Reply::Error { message }) => fallback(&format!("agent_error: {message}"), judged.len(), log, &elapsed_ms),
         Ok(other) => fallback(&format!("unexpected_reply: {other:?}"), judged.len(), log, &elapsed_ms),
         Err(reason) => {
-            // The hook stopped reading while the agent may still have been
-            // waiting on the provider: count a call of unknown cost.
+            // The hook stopped reading while the agent was waiting on the
+            // provider (the agent answers within its own deadline otherwise):
+            // count a call of unknown cost. An agent that dies mid-call
+            // (`io`, `agent_closed`) logs nothing; the call is not known.
             if reason == "deadline" {
                 log_call(&JudgeCall::priced(&settings.engine, &settings.profile, judged.len(), None), Some(&reason), log);
             }
@@ -372,6 +381,8 @@ mod tests {
             // An agent older than #741 sends no call with its verdicts.
             (Ok(judged(Mode::Enforce, &[])), "judged", ""),
             (Ok(Reply::Fallback { reason: "deadline".into(), latency_ms: 2000, call: Some(Box::new(unpriced)) }), "fallback", "deadline"),
+            // An agent older than #741 sends a reached-provider fallback without its call.
+            (Ok(Reply::Fallback { reason: "transport: reset".into(), latency_ms: 300, call: None }), "fallback", "transport: reset"),
             // The hook gave up reading; the agent may still have called.
             (Err("deadline".into()), "fallback", "deadline"),
         ];

@@ -33,10 +33,10 @@ pub struct Usage {
 pub enum CostSource {
     /// The provider's usage block reported it.
     Provider,
-    /// Tokens times the profile's prices.
+    /// Tokens times the profile's prices, or the model's list price.
     PriceTable,
-    /// No usage came back (deadline, transport or provider error), or the
-    /// profile has no prices for its model. The call may still be billed.
+    /// No usage came back (deadline or transport failure), or there is no
+    /// price for the model. The call may still be billed.
     Unknown,
 }
 
@@ -83,21 +83,32 @@ impl JudgeCall {
     }
 }
 
+/// The list price, USD per million input and output tokens, of a model
+/// agent-ways ships a profile for and whose provider reports no cost:
+/// Claude Haiku 4.5 on Anthropic, under its alias or a dated id.
+pub fn list_price(provider: Provider, model: &str) -> Option<(f64, f64)> {
+    (provider == Provider::Anthropic && provider.is_recommended(model)).then_some((1.0, 5.0))
+}
+
 /// The provider's figure where it reported one, else tokens times the
-/// profile's prices, else unknown.
+/// profile's prices or the model's list price, else unknown.
 pub fn price(usage: &Usage, profile: &Profile) -> (Option<f64>, CostSource) {
     if let Some(c) = usage.provider_cost_usd {
         return (Some(c), CostSource::Provider);
     }
-    match (profile.price_in_per_mtok, profile.price_out_per_mtok) {
-        (Some(p_in), Some(p_out)) => {
+    let prices = match (profile.price_in_per_mtok, profile.price_out_per_mtok) {
+        (Some(p_in), Some(p_out)) => Some((p_in, p_out)),
+        _ => list_price(profile.provider, &profile.model),
+    };
+    match prices {
+        Some((p_in, p_out)) => {
             let input = usage.input_tokens as f64
                 + usage.cache_read_tokens as f64 * CACHE_READ_FACTOR
                 + usage.cache_write_tokens as f64 * CACHE_WRITE_FACTOR;
             let cost = (input * p_in + usage.output_tokens as f64 * p_out) / 1e6;
             (Some(cost), CostSource::PriceTable)
         }
-        _ => (None, CostSource::Unknown),
+        None => (None, CostSource::Unknown),
     }
 }
 
@@ -122,6 +133,18 @@ mod tests {
         let u = Usage { cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000, ..Default::default() };
         let (cost, _) = price(&u, &haiku());
         assert!((cost.unwrap() - 1.35).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_list_price_follows_the_model_and_an_override_wins() {
+        let u = Usage { input_tokens: 1_000_000, ..Default::default() };
+        let mut p = haiku();
+        p.model = "claude-haiku-4-5-20251001".into();
+        assert_eq!(price(&u, &p), (Some(1.0), CostSource::PriceTable));
+        p.model = "claude-sonnet-4-5".into();
+        assert_eq!(price(&u, &p), (None, CostSource::Unknown));
+        (p.price_in_per_mtok, p.price_out_per_mtok) = (Some(3.0), Some(15.0));
+        assert_eq!(price(&u, &p), (Some(3.0), CostSource::PriceTable));
     }
 
     #[test]

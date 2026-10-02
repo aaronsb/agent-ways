@@ -234,6 +234,21 @@ mod tests {
         assert_eq!(serde_json::from_str::<ReplyEnvelope>(&line).unwrap(), reply);
     }
 
+    #[test]
+    fn replies_decode_across_the_call_field_in_both_directions() {
+        // A hook built before #741 reading a new reply ignores `call`, and a
+        // new hook reading an old reply gets none.
+        let old = r#"{"kind":"judged","engine":"anthropic","provider":"anthropic","model":"m","mode":"enforce","threshold":0.3,"verdicts":[],"latency_ms":5}"#;
+        let Reply::Judged(j) = serde_json::from_str::<Reply>(old).unwrap() else { panic!("not judged") };
+        assert_eq!(j.call, None);
+        let profile = crate::profile::shipped()["anthropic"].clone();
+        let call = Box::new(JudgeCall::priced("anthropic", &profile, 2, None));
+        let reply = Reply::Fallback { reason: "deadline".into(), latency_ms: 2000, call: Some(call) };
+        let line = serde_json::to_string(&reply).unwrap();
+        assert!(line.contains("\"cost_source\":\"unknown\"") && !line.contains("cost_usd"));
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);
+    }
+
     #[cfg(unix)]
     #[test]
     fn secure_dir_creates_0700_and_refuses_loose_or_linked_dirs() {

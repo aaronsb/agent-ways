@@ -192,7 +192,7 @@ pub fn models(provider: Provider, key: Option<&str>) -> Result<Vec<ModelInfo>> {
 /// A judge call that gave no verdicts. `reason` is the fallback reason:
 /// `deadline`, `provider_<status>: …`, `transport: …` or `answer: …`.
 /// `usage` is set when the provider answered with one, so the call is priced
-/// even though its answer was unusable.
+/// even though its answer was unusable, and at zero when it refused the call.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JudgeFailure {
     pub reason: String,
@@ -252,8 +252,6 @@ pub fn judge(
                     "parameters": judge::tool_schema(n),
                 }}],
                 "tool_choice": {"type": "function", "function": {"name": judge::TOOL_NAME}},
-                // Asks for the call's cost in the usage block.
-                "usage": {"include": true},
             }),
         ),
     };
@@ -268,7 +266,9 @@ pub fn judge(
     // Status first: an HTML error page from a proxy is still a provider error.
     let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status != 200 {
-        return Err(JudgeFailure::bare(format!("provider_{status}: {}", error_message(&reply))));
+        // A provider that refuses a request does not bill it.
+        let refused = Usage { provider_cost_usd: Some(0.0), ..Default::default() };
+        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage: Some(refused) });
     }
     let usage = usage(provider, &reply);
     let failed = |reason: String| JudgeFailure { reason, usage: usage.clone() };
@@ -305,14 +305,15 @@ fn usage(provider: Provider, reply: &Value) -> Option<Usage> {
             cache_write_tokens: n("/cache_creation_input_tokens").unwrap_or(0),
             provider_cost_usd: None,
         }),
-        // OpenRouter's prompt_tokens counts cached tokens too.
+        // OpenRouter's prompt_tokens counts cache reads and writes too.
         Provider::Openrouter => {
             let cached = n("/prompt_tokens_details/cached_tokens").unwrap_or(0);
+            let written = n("/prompt_tokens_details/cache_write_tokens").unwrap_or(0);
             Some(Usage {
-                input_tokens: n("/prompt_tokens")?.saturating_sub(cached),
+                input_tokens: n("/prompt_tokens")?.saturating_sub(cached + written),
                 output_tokens: n("/completion_tokens")?,
                 cache_read_tokens: cached,
-                cache_write_tokens: n("/prompt_tokens_details/cache_write_tokens").unwrap_or(0),
+                cache_write_tokens: written,
                 provider_cost_usd: u.get("cost").and_then(Value::as_f64),
             })
         }
@@ -372,10 +373,10 @@ mod tests {
             usage(Provider::Anthropic, &anthropic),
             Some(Usage { input_tokens: 900, output_tokens: 40, ..Default::default() })
         );
-        let openrouter = json!({"usage": {"prompt_tokens": 1000, "completion_tokens": 40, "cost": 0.0012, "prompt_tokens_details": {"cached_tokens": 100}}});
+        let openrouter = json!({"usage": {"prompt_tokens": 1000, "completion_tokens": 40, "cost": 0.0012, "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 50}}});
         assert_eq!(
             usage(Provider::Openrouter, &openrouter),
-            Some(Usage { input_tokens: 900, output_tokens: 40, cache_read_tokens: 100, cache_write_tokens: 0, provider_cost_usd: Some(0.0012) })
+            Some(Usage { input_tokens: 850, output_tokens: 40, cache_read_tokens: 100, cache_write_tokens: 50, provider_cost_usd: Some(0.0012) })
         );
         assert_eq!(usage(Provider::Anthropic, &json!({"content": []})), None);
     }

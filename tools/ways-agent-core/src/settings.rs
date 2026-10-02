@@ -143,18 +143,16 @@ const KEYS: &[KeySpec] = &[
         name: "gate.profiles.*.price_in_per_mtok",
         path: &["profiles", "*", "price_in_per_mtok"],
         kind: PRICE,
-        default: DefaultValue::Fn(|b| shipped_field(b, "price_in_per_mtok")),
         doc: "USD per million input tokens, for pricing judge calls.",
-        long: "Used when the provider does not report a call's cost, as Anthropic does not. Shipped for Claude Haiku 4.5; a profile that changes model and sets no prices records its calls as unknown cost. `ways agent cost` reports the spend.",
+        long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: Claude Haiku 4.5's list price for that model and its dated ids, else the call's cost is unknown. Set with price_out_per_mtok. `ways agent cost` reports the spend.",
         ..BASE
     },
     KeySpec {
         name: "gate.profiles.*.price_out_per_mtok",
         path: &["profiles", "*", "price_out_per_mtok"],
         kind: PRICE,
-        default: DefaultValue::Fn(|b| shipped_field(b, "price_out_per_mtok")),
         doc: "USD per million output tokens, for pricing judge calls.",
-        long: "",
+        long: "Set with price_in_per_mtok; see it for the default.",
         ..BASE
     },
     KeySpec {

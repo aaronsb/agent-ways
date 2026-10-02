@@ -35,8 +35,8 @@ pub struct Group {
     pub calls: u64,
     pub known_calls: u64,
     pub unknown_calls: u64,
-    /// Sum over the known calls only.
-    pub cost_usd: f64,
+    /// Sum over the known calls only; `None` while no call's cost is known.
+    pub cost_usd: Option<f64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -45,6 +45,8 @@ pub struct Group {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
+    /// Earliest `ts` in the whole log, before any filter: where history begins.
+    pub covers_since: Option<String>,
     pub total: Group,
     pub by_session: Vec<Group>,
     pub by_project: Vec<Group>,
@@ -77,7 +79,7 @@ pub fn parse_log(text: &str) -> Vec<Call> {
     text.lines().filter_map(parse_line).collect()
 }
 
-/// Validate a `YYYY-MM-DD` date.
+/// Validate a `YYYY-MM-DD` date: the shape and the month and day ranges, not the calendar.
 pub fn parse_date(s: &str) -> Result<String> {
     let b = s.as_bytes();
     let digits = |r: std::ops::Range<usize>| b.get(r).is_some_and(|d| d.iter().all(u8::is_ascii_digit));
@@ -114,7 +116,7 @@ fn add(g: &mut Group, c: &Call) {
     match c.cost_usd {
         Some(x) => {
             g.known_calls += 1;
-            g.cost_usd += x;
+            g.cost_usd = Some(g.cost_usd.unwrap_or(0.0) + x);
         }
         None => g.unknown_calls += 1,
     }
@@ -140,13 +142,25 @@ pub fn aggregate(calls: &[Call], by: By) -> Vec<Group> {
     let mut groups: Vec<Group> = map.into_values().collect();
     match by {
         By::Day | By::Month => groups.reverse(),
-        By::Session | By::Project => groups.sort_by(|a, b| b.cost_usd.total_cmp(&a.cost_usd)),
+        By::Session | By::Project => groups.sort_by(|a, b| match (a.cost_usd, b.cost_usd) {
+            (Some(x), Some(y)) => y.total_cmp(&x),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+        .then_with(|| a.key.cmp(&b.key))),
     }
     groups
 }
 
-pub fn report(calls: &[Call]) -> Report {
+/// The earliest `ts` among the calls.
+pub fn covers_since(calls: &[Call]) -> Option<String> {
+    calls.iter().map(|c| c.ts.as_str()).min().map(str::to_string)
+}
+
+pub fn report(calls: &[Call], covers_since: Option<String>) -> Report {
     Report {
+        covers_since,
         total: total(calls),
         by_session: aggregate(calls, By::Session),
         by_project: aggregate(calls, By::Project),
@@ -156,24 +170,22 @@ pub fn report(calls: &[Call]) -> Report {
 }
 
 fn describe(g: &Group) -> String {
-    let calls = if g.calls == 1 { "call" } else { "calls" };
-    let mut s = format!("{} {calls}, ", g.calls);
-    if g.known_calls == 0 {
-        s.push_str("cost unknown");
-    } else if g.unknown_calls > 0 {
-        s.push_str(&format!("${:.4} (known calls only), {} of unknown cost", g.cost_usd, g.unknown_calls));
-    } else {
-        s.push_str(&format!("${:.4}", g.cost_usd));
-    }
-    s.push_str(&format!(", tokens {} in / {} out", g.input_tokens, g.output_tokens));
-    s
+    let n = |k: u64| format!("{k} {}", if k == 1 { "call" } else { "calls" });
+    let cost = match g.cost_usd {
+        None => "cost unknown".to_string(),
+        Some(c) if g.unknown_calls > 0 => format!("${c:.4} + {} of unknown cost", n(g.unknown_calls)),
+        Some(c) => format!("${c:.4}"),
+    };
+    format!("{}, {cost}, tokens {} in / {} out", n(g.calls), g.input_tokens, g.output_tokens)
 }
 
-pub fn render_text(calls: &[Call], by: By) -> String {
+/// `since` is where the log begins, stated once on the total line.
+pub fn render_text(calls: &[Call], by: By, since: Option<&str>) -> String {
     if calls.is_empty() {
         return "no judge calls recorded\n".into();
     }
-    let mut out = format!("total: {}\n", describe(&total(calls)));
+    let from = since.map(|d| format!(" since {}", d.get(..10).unwrap_or(d))).unwrap_or_default();
+    let mut out = format!("total{from}: {}\n", describe(&total(calls)));
     for g in aggregate(calls, by) {
         out.push_str(&format!("  {}: {}\n", g.key, describe(&g)));
     }
@@ -187,11 +199,13 @@ pub fn load() -> Vec<Call> {
 
 pub fn run(since: Option<&str>, session: Option<&str>, by: By, json: bool) -> Result<()> {
     let since = since.map(parse_date).transpose()?;
-    let calls = filter(load(), since.as_deref(), session);
+    let all = load();
+    let covers = covers_since(&all);
+    let calls = filter(all, since.as_deref(), session);
     if json {
-        println!("{}", serde_json::to_string_pretty(&report(&calls))?);
+        println!("{}", serde_json::to_string_pretty(&report(&calls, covers))?);
     } else {
-        print!("{}", render_text(&calls, by));
+        print!("{}", render_text(&calls, by, covers.as_deref()));
     }
     Ok(())
 }
@@ -224,7 +238,7 @@ not json
         let keys: Vec<_> = g.iter().map(|g| g.key.as_str()).collect();
         assert_eq!(keys, ["2026-10-02", "2026-09-30", "2026-09-01"]);
         assert_eq!(g[0].calls, 2);
-        assert!((g[0].cost_usd - 0.04).abs() < 1e-9);
+        assert!((g[0].cost_usd.unwrap() - 0.04).abs() < 1e-9);
     }
 
     #[test]
@@ -249,12 +263,34 @@ not json
     fn unknown_calls_are_counted_never_summed_as_zero() {
         let t = total(&calls());
         assert_eq!((t.calls, t.known_calls, t.unknown_calls), (4, 2, 2));
-        assert!((t.cost_usd - 0.04).abs() < 1e-9);
+        assert!((t.cost_usd.unwrap() - 0.04).abs() < 1e-9);
         assert_eq!((t.cache_read_tokens, t.cache_write_tokens), (3, 2));
-        let text = render_text(&calls(), By::Day);
-        assert!(text.contains("known calls only") && text.contains("2 of unknown cost"));
-        let known_only = render_text(&calls()[..2], By::Day);
-        assert!(!known_only.contains("unknown"));
+        let text = render_text(&calls(), By::Day, None);
+        assert!(text.contains("$0.0400 + 2 calls of unknown cost"));
+        assert!(!text.contains("known calls only"));
+        assert!(!render_text(&calls()[..2], By::Day, None).contains("unknown"));
+    }
+
+    #[test]
+    fn all_unknown_group_has_null_cost_and_sorts_last() {
+        let g = aggregate(&calls(), By::Session);
+        assert_eq!(g.iter().map(|g| g.key.as_str()).collect::<Vec<_>>(), ["s2", "s1", "s3"]);
+        assert_eq!(g[2].cost_usd, None);
+        let v = serde_json::to_value(report(&calls(), None)).unwrap();
+        assert!(v["by_session"][2]["cost_usd"].is_null());
+        assert!(v["total"]["cost_usd"].is_number());
+    }
+
+    #[test]
+    fn covers_since_is_the_earliest_ts_before_filters() {
+        let all = calls();
+        let covers = covers_since(&all);
+        assert_eq!(covers.as_deref(), Some("2026-09-01T10:00:00Z"));
+        let v = serde_json::to_value(report(&filter(all, Some("2026-10-01"), None), covers.clone())).unwrap();
+        assert_eq!(v["covers_since"], "2026-09-01T10:00:00Z");
+        assert!(serde_json::to_value(report(&[], None)).unwrap()["covers_since"].is_null());
+        let text = render_text(&calls(), By::Day, covers.as_deref());
+        assert!(text.starts_with("total since 2026-09-01: 4 calls, "));
     }
 
     #[test]
@@ -274,8 +310,8 @@ not json
 
     #[test]
     fn empty_says_so_and_json_has_all_groupings() {
-        assert_eq!(render_text(&[], By::Day), "no judge calls recorded\n");
-        let v = serde_json::to_value(report(&calls())).unwrap();
+        assert_eq!(render_text(&[], By::Day, None), "no judge calls recorded\n");
+        let v = serde_json::to_value(report(&calls(), None)).unwrap();
         for k in ["total", "by_session", "by_project", "by_day", "by_month"] {
             assert!(v.get(k).is_some(), "{k}");
         }
@@ -283,8 +319,12 @@ not json
     }
 
     #[test]
-    fn sample_output() {
-        println!("{}", render_text(&calls(), By::Day));
-        println!("{}", serde_json::to_string(&report(&calls()[..2])).unwrap());
+    fn text_output_is_exact() {
+        let text = render_text(&calls(), By::Day, Some("2026-09-01T10:00:00Z"));
+        let want = "total since 2026-09-01: 4 calls, $0.0400 + 2 calls of unknown cost, tokens 157 in / 16 out\n\
+\x20 2026-10-02: 2 calls, $0.0400, tokens 150 in / 15 out\n\
+\x20 2026-09-30: 1 call, cost unknown, tokens 0 in / 0 out\n\
+\x20 2026-09-01: 1 call, cost unknown, tokens 7 in / 1 out\n";
+        assert_eq!(text, want);
     }
 }
