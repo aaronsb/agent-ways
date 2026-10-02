@@ -120,10 +120,38 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Whether a recorded project path is `scope`: the same path, a trailing
-/// slash aside. Exact, so a worktree under a project is its own project.
-pub fn same_project(project: &str, scope: &str) -> bool {
-    project.trim_end_matches('/') == scope.trim_end_matches('/')
+/// Whether a recorded project path is in the project `scope`: the same path,
+/// or a path under it, trailing separators aside. A worktree under a project,
+/// such as an agent's in `.claude/worktrees/`, is part of it; a sibling whose
+/// name only begins the same (`/a/foo-bar` for `/a/foo`) is not. `/` and `\`
+/// both separate, since Windows records backslash paths. An empty scope is no
+/// project and holds nothing.
+pub fn in_project(project: &str, scope: &str) -> bool {
+    const SEP: [char; 2] = ['/', '\\'];
+    if scope.is_empty() {
+        return false;
+    }
+    let (p, s) = (project.trim_end_matches(SEP), scope.trim_end_matches(SEP));
+    p == s || p.strip_prefix(s).is_some_and(|rest| rest.starts_with(SEP))
+}
+
+/// A `--project` path as events record it: a relative one, such as `.`,
+/// resolved against the working directory.
+pub fn project_arg(path: &str) -> String {
+    let p = Path::new(path);
+    // A rooted path stands as given: `/x` has no drive on Windows, yet names
+    // no working directory either.
+    if p.is_absolute() || p.has_root() {
+        return path.to_string();
+    }
+    // On Windows `absolute` normalizes `..` and gives the `C:\...` form events
+    // record, where `canonicalize` would give a `\\?\` verbatim path; on Unix
+    // `absolute` keeps `..`, so the real path is taken.
+    #[cfg(windows)]
+    let resolved = std::path::absolute(p);
+    #[cfg(not(windows))]
+    let resolved = std::fs::canonicalize(p).or_else(|_| std::path::absolute(p));
+    resolved.map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string())
 }
 
 /// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
@@ -346,5 +374,26 @@ mod tests {
         // canonicalize the same real dir to the same key.
         let dir = std::env::temp_dir();
         assert_eq!(encode_project_key(&dir), encode_project_key(&dir));
+    }
+
+    #[test]
+    fn in_project_takes_the_project_and_what_is_under_it_on_either_separator() {
+        assert!(in_project("/a/proj", "/a/proj/"));
+        assert!(in_project("/a/proj/.claude/worktrees/x", "/a/proj"));
+        assert!(!in_project("/a/proj-2", "/a/proj"));
+        assert!(in_project(r"C:\a\proj\.claude\worktrees\x", r"C:\a\proj"));
+        assert!(in_project(r"C:\a\proj", r"C:\a\proj\"));
+        assert!(!in_project(r"C:\a\proj-2", r"C:\a\proj"));
+        assert!(in_project("/a/proj", "/"), "the root holds every path");
+        assert!(!in_project("/a/proj", ""), "an empty scope holds nothing");
+    }
+
+    #[test]
+    fn a_relative_project_resolves_to_the_working_directory() {
+        let cwd = std::env::current_dir().unwrap();
+        let resolved = super::project_arg(".");
+        assert!(!resolved.starts_with(r"\\?\"), "no verbatim prefix: {resolved}");
+        assert!(in_project(&cwd.to_string_lossy(), &resolved) || in_project(&std::fs::canonicalize(&cwd).unwrap().to_string_lossy(), &resolved), "{resolved}");
+        assert_eq!(super::project_arg("/abs/p"), "/abs/p");
     }
 }

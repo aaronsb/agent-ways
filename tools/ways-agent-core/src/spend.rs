@@ -104,10 +104,10 @@ pub fn filter(calls: Vec<Call>, since: Option<&str>, session: Option<&str>) -> V
         .collect()
 }
 
-/// Keep the calls of one project, matched by
-/// [`ways_core::util::same_project`].
+/// Keep the calls of one project and the paths under it, matched by
+/// [`ways_core::util::in_project`].
 pub fn filter_project(calls: Vec<Call>, project: Option<&str>) -> Vec<Call> {
-    calls.into_iter().filter(|c| project.is_none_or(|p| ways_core::util::same_project(&c.project, p))).collect()
+    calls.into_iter().filter(|c| project.is_none_or(|p| ways_core::util::in_project(&c.project, p))).collect()
 }
 
 fn key_of(c: &Call, by: By) -> String {
@@ -271,11 +271,13 @@ not json
     }
 
     #[test]
-    fn a_project_matches_exactly_a_trailing_slash_aside() {
+    fn a_project_takes_the_paths_under_it() {
         let kept = |p: &str| filter_project(calls(), Some(p)).into_iter().map(|c| c.session).collect::<Vec<_>>();
         assert_eq!(kept("/p/a"), ["s1", "s1", "s3"]);
         assert_eq!(kept("/p/a/"), ["s1", "s1", "s3"]);
-        assert!(kept("/p").is_empty(), "a parent path is not the project");
+        assert_eq!(kept("/p").len(), 4, "a parent takes the projects under it");
+        assert!(kept("/p/a-other").is_empty(), "a sibling whose name begins the same is not under it");
+        assert_eq!(kept("/p/").len(), 4);
         assert_eq!(filter_project(calls(), None).len(), 4);
     }
 

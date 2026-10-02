@@ -150,6 +150,7 @@ pub fn run(
     // Load ALL fires (project filter only). The way filter is applied at the
     // report stage, never here: a session's activity class must be computed
     // from every way that fired in it, not just the way under inspection.
+    let project_filter = project_filter.as_deref().map(ways_core::util::project_arg);
     let fires = load_fires(&ways_core::firing::load_events_text(), project_filter.as_deref());
     if fires.is_empty() {
         println!("no way_fired events found in the selected window.");
@@ -186,7 +187,7 @@ fn load_fires(content: &str, project_filter: Option<&str>) -> Vec<Fire> {
         }
         if let Some(pat) = project_filter {
             match row.get("project").and_then(|v| v.as_str()) {
-                Some(p) if p.contains(pat) => {}
+                Some(p) if ways_core::util::in_project(p, pat) => {}
                 _ => continue,
             }
         }
