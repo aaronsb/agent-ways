@@ -5,6 +5,9 @@
 //! were captured from the commit before `ways settings` (cda1042b) by running
 //! the same sequence; the fixture root here has the same length as the one
 //! that capture used, so `config show`'s padded table compares byte for byte.
+//! `show-empty.out` and `show-user.out` were re-captured on main at 02e0fab2,
+//! where `config show` honours `NO_COLOR` (#694); they equal the first capture
+//! with its ANSI codes removed.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -552,4 +555,103 @@ fn a_refire_preset_above_one_keeps_the_matching_section() {
     let (out, err, _) = f.run(&["settings", "get", "matching.semantic_fire_probability"]);
     assert_eq!(out, "0.35\n", "{err}");
     assert_eq!(f.run(&["settings", "lint"]).2, 0);
+}
+
+// ── salvage of unparseable files (#713 re-check) ───────────────
+
+/// The re-check's broken project files, each with something switched off.
+const BROKEN: &[&str] = &[
+    "  language: en\n#ña\nenabled: false\n",
+    "  language: en\nenabled: false\n",
+    "enabled: \"false\n",
+    "enabled: 'false\n",
+    "enabled: false\nenabled: true\n",
+    "{enabled: false, x: [}\n",
+];
+
+#[test]
+fn hooks_never_fail_over_a_broken_config_file() {
+    // N1: the first of these made every hook panic (exit 101).
+    let f = Fx::new();
+    for text in BROKEN {
+        f.write(&f.overlay(), text);
+        f.write(&f.user(), text);
+        for args in [
+            vec!["show", "core", "--session=s1"],
+            vec!["scan", "prompt", "--query=write a unit test", "--session=s1"],
+            vec!["scan", "command", "--command=git status", "--session=s1"],
+            vec!["settings", "get", "ways.enabled"],
+            vec!["config", "show"],
+        ] {
+            let (_, err, code) = f.run(&args);
+            assert_eq!(code, 0, "{text:?} {args:?}: {err}");
+            assert!(!err.contains("panicked"), "{text:?} {args:?}: {err}");
+        }
+    }
+}
+
+#[test]
+fn a_broken_project_file_keeps_ways_switched_off() {
+    // N1 and N2: each of these read `enabled` as on before.
+    let f = Fx::new();
+    for text in BROKEN {
+        f.write(&f.overlay(), text);
+        assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n", "{text:?}");
+    }
+}
+
+#[test]
+fn broken_toggles_and_domains_stay_off() {
+    let f = Fx::new();
+    let list = |f: &Fx| f.run(&["disable", "--list", "--names-only"]).0;
+    f.write(&f.overlay(), "ways:\n  a/b: \"false\n  e/f: false\n");
+    assert_eq!(list(&f), "a/b\ne/f\n");
+    f.write(&f.overlay(), "ways:\n  a/b: false\n  c/d: [\n");
+    assert_eq!(list(&f), "a/b\nc/d\n");
+    f.write(&f.overlay(), "ways:\n  a/b: false\n  a/b: true\n");
+    assert_eq!(list(&f), "a/b\n");
+    for text in ["disabled_domains: [ea, itops\n", "disabled_domains:\n  - ea\n  - [itops\n"] {
+        f.write(&f.overlay(), text);
+        assert_eq!(f.run(&["settings", "get", "ways.disabled_domains"]).0, "[\"ea\",\"itops\"]\n", "{text:?}");
+    }
+}
+
+#[test]
+fn a_broken_targets_list_keeps_its_targets_withdrawn() {
+    // N2: this file used to fall to the implicit ~/.claude, which it disables.
+    let f = Fx::new();
+    f.write(&f.user(), "targets:\n  - {path: ~/.claude, enabled: false}\n  - {path: ~/.claude-work, enabled: [}\n");
+    let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "install.targets"]).0).unwrap();
+    assert_eq!(v, serde_json::json!([{"path": "~/.claude", "enabled": false}, {"path": "~/.claude-work", "enabled": false}]));
+    let (out, _, _) = f.run(&["config", "show"]);
+    assert!(!out.contains("(implicit)"), "{out}");
+}
+
+#[test]
+fn fix_removes_a_key_the_file_may_not_hold() {
+    // S1: project-only toggles in the user file; fix used to loop on them.
+    let f = Fx::new();
+    f.write(&f.user(), "language: es\nways:\n  a/b: false\n  c/d: maybe\n");
+    let (_, err, code) = f.run(&["settings", "fix", "ways.project"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), "language: es\n");
+    assert_eq!(f.run(&["settings", "lint"]).2, 0);
+    // L2: targets in a project file is removed by fix, which the diagnostic names.
+    f.write(&f.overlay(), "targets: 5\nenabled: false\n");
+    let p = f.root.join("proj");
+    let (_, err, _) = f.run(&["settings", "get", "ways.enabled"]);
+    assert!(err.contains("ways settings fix install.targets"), "{err}");
+    assert_eq!(f.run(&["settings", "fix", "install", "--project", p.to_str().unwrap()]).2, 0);
+    assert_eq!(std::fs::read_to_string(f.overlay()).unwrap(), "enabled: false\n");
+}
+
+#[test]
+fn fix_all_reports_a_key_no_section_owns() {
+    // L1: `fix ""` exited 0 while lint still exited 3.
+    let f = Fx::new();
+    f.write(&f.user(), "mdoe: 1\nlanguage: es\n");
+    let (_, err, code) = f.run(&["settings", "fix", ""]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("mdoe"), "{err}");
+    assert_eq!(f.run(&["settings", "lint"]).2, 3);
 }

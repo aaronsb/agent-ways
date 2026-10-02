@@ -17,7 +17,7 @@ pub fn help(topic: Option<&str>) -> Out {
         println!("  emit [prefix]        the canonical fragment (--effective: the values in effect)");
         println!("  apply                write a settings object from stdin or --file; answers in JSON");
         println!("  lint                 check the files; exit 3 with findings");
-        println!("  fix <section>        write a section's canonical fragment");
+        println!("  fix <section>        repair what the section's findings point at; a switch stays off");
         println!("  help <key|section>   what a key or section does\n");
         println!("exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden by a higher layer, 5 write failed\n");
         println!("sections:");

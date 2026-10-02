@@ -47,7 +47,7 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
         }
     }
     if n > 0 {
-        return Err(fail(exit::REJECTED, format!("{n} finding{}; `ways settings fix <section>` rewrites a section from canonical", if n == 1 { "" } else { "s" })));
+        return Err(fail(exit::REJECTED, format!("{n} finding{}; `ways settings fix <section>` repairs what a section's findings point at", if n == 1 { "" } else { "s" })));
     }
     Ok(())
 }
@@ -73,8 +73,13 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Sche
 ///   beneath apply;
 /// - in the user file it takes its canonical value, or is removed when it has
 ///   none;
+/// - a key this file may not hold (a project-only toggle in the user file,
+///   `targets` in a project file) is removed;
 /// - an unknown key, a non-text key, or a value of the wrong shape is
 ///   removed.
+///
+/// A top-level key no section owns is not removed: it may be a typo to
+/// correct by hand. `fix ""` reports it and exits 3.
 ///
 /// The file is checked again after the edit; exit 3 if a finding remains.
 pub fn fix(section: &str, project: Option<&Path>) -> Out {
@@ -117,6 +122,11 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
                 let at = agent_settings::yaml_edit::value_at(&raw, &key).cloned();
                 let spec = reg.lookup_path(file, &key);
                 match (spec, at) {
+                    // A key this file may not hold is ignored here anyway:
+                    // removing it is the repair, whatever its kind.
+                    (Some(b), _) if !scope.admits(b.spec.scope) => {
+                        d.unset(&key)?;
+                    }
                     (Some(b), _) if matches!(b.spec.kind, Kind::ReadOnly) => {}
                     (Some(b), Some(v)) if b.spec.fail_closed.is_some() && path_is_text(&raw, &key) => {
                         match (b.spec.fail_closed.expect("checked"))(&v) {
@@ -144,7 +154,9 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
         let text = std::fs::read_to_string(path).unwrap_or_default();
         if let Ok(doc) = agent_settings::load::parse_text(&text, Some(path)) {
             let after = agent_settings::load::check(schema, file, scope, &doc, Some(&names));
-            left.extend(after.findings(None, Some(path), &text).into_iter().filter(|f| f.section.is_some()));
+            // `fix ""` covers the whole file, so a key no section owns is
+            // reported too; fix leaves it, since it may be a typo to correct.
+            left.extend(after.findings(None, Some(path), &text).into_iter().filter(|f| f.section.is_some() || section.is_empty()));
         }
     }
     if !left.is_empty() {
