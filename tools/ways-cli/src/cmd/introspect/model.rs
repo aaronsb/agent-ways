@@ -13,6 +13,8 @@ pub(crate) struct WayEvent {
     /// The relevance gate's P(yes) and verdict on a `way_judged` event (ADR-196).
     pub(super) p_yes: String,
     pub(super) verdict: String,
+    /// The blocked ancestor of a way the gate blocked with it, unjudged.
+    pub(super) ancestor: String,
 }
 
 /// What the relevance judge's verdict left of a way in a frame (ADR-196).
@@ -62,6 +64,9 @@ pub(crate) struct ActiveWay {
     pub(crate) outcome: Outcome,
     /// The judge's P(yes) on a blocked or would-block row; empty otherwise.
     pub(crate) p_yes: String,
+    /// On a row blocked with its ancestor, the ancestor whose P(yes) it
+    /// shows; empty otherwise.
+    pub(crate) ancestor: String,
 }
 
 impl WayRow for ActiveWay {

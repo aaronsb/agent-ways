@@ -68,7 +68,7 @@ pub(crate) fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
 }
 
 /// One verdict: the outcome, P(yes) against the threshold, and the call
-/// that gave it.
+/// that gave it. A way blocked with its ancestor shows the ancestor's.
 fn verdict_line(v: &JudgeVerdict) -> Line<'static> {
     let (word, cmp) = match v.verdict.as_str() {
         "pass" => ("pass", "≥"),
@@ -77,11 +77,15 @@ fn verdict_line(v: &JudgeVerdict) -> Line<'static> {
         other => (other, "vs"),
     };
     let style = if v.verdict == "pass" { Style::new() } else { theme::warn() };
-    Line::from(vec![
+    let mut line = vec![
         Span::styled(format!("  {word:<12}"), style),
         Span::raw(format!("P(yes) {:.2} {cmp} {:.2}", v.p_yes, v.threshold)),
-        Span::styled(format!("  {} · {} {} · {} ms", v.mode, v.engine, v.model, v.judge_ms), theme::muted()),
-    ])
+    ];
+    if let Some(a) = &v.ancestor {
+        line.push(Span::raw(format!(" for {a}")));
+    }
+    line.push(Span::styled(format!("  {} · {} {} · {} ms", v.mode, v.engine, v.model, v.judge_ms), theme::muted()));
+    Line::from(line)
 }
 
 /// Read a way file's body: everything after a leading `---`/`---` frontmatter
@@ -191,6 +195,7 @@ mod tests {
             trigger_channel: channel.into(),
             gated: false,
             suppressed: None,
+            redisclosed: false,
             fire_score: score,
             way_path: None,
             criteria: MatchCriteria { pattern: Some("p".into()), ..Default::default() },
@@ -288,6 +293,42 @@ mod tests {
         // Keyword fire, no span (pre-enrichment) → says so, invents nothing.
         let none = build_why_index(&model(vec![vec![fired("d/n", "keyword", None, None)]]));
         assert!(detail("d/n", none.get(&key("d/n", "keyword"))).contains("no span recorded"));
+    }
+
+    fn verdict(v: &str, p: f64, ancestor: Option<&str>) -> JudgeVerdict {
+        JudgeVerdict {
+            verdict: v.into(),
+            p_yes: p,
+            threshold: 0.3,
+            mode: "enforce".into(),
+            engine: "anthropic".into(),
+            model: "claude-haiku-4-5".into(),
+            judge_ms: 700,
+            reason: ancestor.map(|_| "ancestor".into()),
+            ancestor: ancestor.map(str::to_string),
+        }
+    }
+
+    /// The Judge section lists each verdict against the threshold; a way
+    /// the judge blocked says it was kept out, and one blocked with its
+    /// ancestor names the ancestor whose P(yes) it shows.
+    #[test]
+    fn detail_shows_the_judges_verdicts_and_what_was_kept_out() {
+        let passed = FiredWay { judge: Some(verdict("pass", 0.91, None)), ..fired("d/a", "keyword", Some("commit"), None) };
+        let blocked = FiredWay { suppressed: Some("judge".into()), judge: Some(verdict("block", 0.05, None)), ..fired("d/b", "judge", None, None) };
+        let child = FiredWay { suppressed: Some("judge".into()), judge: Some(verdict("block", 0.05, Some("d/b"))), ..fired("d/b/c", "judge", None, None) };
+        let idx = build_why_index(&model(vec![vec![passed, blocked, child]]));
+
+        let a = detail("d/a", idx.get(&key("d/a", "keyword")));
+        assert!(a.contains("Judge\n  pass        P(yes) 0.91 ≥ 0.30  enforce · anthropic claude-haiku-4-5 · 700 ms"), "{a}");
+        assert!(a.contains("“commit”") && !a.contains("kept out"), "{a}");
+
+        let b = detail("d/b", idx.get(&key("d/b", "judge")));
+        assert!(b.contains("  blocked     P(yes) 0.05 < 0.30  enforce"), "{b}");
+        assert!(b.contains("matched, then kept out by the relevance judge: nothing was injected"), "{b}");
+
+        let c = detail("d/b/c", idx.get(&key("d/b/c", "judge")));
+        assert!(c.contains("  blocked     P(yes) 0.05 < 0.30 for d/b  enforce"), "{c}");
     }
 
     #[test]

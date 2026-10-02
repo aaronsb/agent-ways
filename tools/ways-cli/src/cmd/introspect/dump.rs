@@ -86,6 +86,9 @@ struct DumpWay {
     outcome: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     p_yes: Option<String>,
+    /// On a way blocked with its ancestor, the ancestor whose P(yes) it shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ancestor: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -205,6 +208,7 @@ fn to_dump_frame(f: &Frame) -> DumpFrame {
             refire_threshold_k: w.refire_threshold_k,
             outcome: w.outcome.as_str(),
             p_yes: Some(w.p_yes.clone()).filter(|p| !p.is_empty()),
+            ancestor: Some(w.ancestor.clone()).filter(|a| !a.is_empty()),
         })
         .collect();
     DumpFrame {
@@ -413,4 +417,40 @@ fn field_f64(v: &serde_json::Value, key: &str) -> f64 {
         .and_then(|s| s.parse().ok())
         .or_else(|| v[key].as_f64())
         .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_dump;
+
+    const LOG: &str = concat!(
+        r#"{"event":"way_judged","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/a","p_yes":"0.100","threshold":"0.30","verdict":"would_block"}"#, "\n",
+        r#"{"event":"way_fired","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword"}"#, "\n",
+        r#"{"event":"way_judged","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/b","p_yes":"0.050","threshold":"0.30","verdict":"block"}"#, "\n",
+        r#"{"event":"way_judged","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/b/c","p_yes":"0.050","threshold":"0.30","verdict":"block","reason":"ancestor","ancestor":"d/b"}"#, "\n",
+    );
+
+    /// The rows of the first frame as (id, outcome, p_yes, ancestor).
+    fn rows(matched: bool) -> Vec<(String, String, String, String)> {
+        let dump = serde_json::to_value(build_dump(LOG, "dump-test", matched).unwrap()).unwrap();
+        let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+        dump["frames"][0]["active_ways"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| (s(&w["id"]), s(&w["outcome"]), s(&w["p_yes"]), s(&w["ancestor"])))
+            .collect()
+    }
+
+    /// `replay --json` marks each way with its outcome and P(yes);
+    /// `--matched` adds the ways the judge blocked.
+    #[test]
+    fn replay_json_carries_outcomes_and_matched_adds_the_blocked() {
+        let row = |id: &str, o: &str, p: &str, a: &str| (id.to_string(), o.to_string(), p.to_string(), a.to_string());
+        assert_eq!(rows(false), [row("d/a", "would_block", "0.100", "")]);
+        assert_eq!(
+            rows(true),
+            [row("d/a", "would_block", "0.100", ""), row("d/b", "blocked", "0.050", ""), row("d/b/c", "blocked", "0.050", "d/b")]
+        );
+    }
 }

@@ -156,6 +156,7 @@ pub(super) fn build_frames(
                             refire_threshold_k: refire_for(&ev.way),
                             outcome: Outcome::Injected,
                             p_yes: String::new(),
+                            ancestor: String::new(),
                         });
                     }
                 }
@@ -183,6 +184,10 @@ pub(super) fn build_frames(
                             w.token_pos = token_k * 1000;
                             w.is_redisclosed = true;
                             w.is_new = false;
+                            // A new injection: this frame's verdict, if any,
+                            // marks it below, not the last one's.
+                            w.outcome = Outcome::Injected;
+                            w.p_yes.clear();
                         })
                         .or_insert_with(|| ActiveWay {
                             id: ev.way.clone(),
@@ -195,6 +200,7 @@ pub(super) fn build_frames(
                             refire_threshold_k: refire_for(&ev.way),
                             outcome: Outcome::Injected,
                             p_yes: String::new(),
+                            ancestor: String::new(),
                         });
                 }
                 "way_judged" if !ev.way.is_empty() && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
@@ -203,10 +209,11 @@ pub(super) fn build_frames(
         }
 
         // ADR-196, #742: the judge's verdict is a mark on the way's row. A
-        // shadow would-block marks the fire it judged; a block is a row of
-        // its own in this frame, which injected nothing. A verdict with no
-        // row to mark (a shadow verdict on no fire, a block on a way already
-        // active) stays an event note, so each fact is said once.
+        // shadow would-block marks the fire or re-disclosure it judged; a
+        // block is a row of its own in this frame, which injected nothing,
+        // beside the way's active row when it was already active. A shadow
+        // verdict with no row to mark stays an event note, so each fact is
+        // said once.
         let mut blocked: Vec<ActiveWay> = Vec::new();
         for ev in judged {
             if ev.verdict == "would_block" {
@@ -217,8 +224,6 @@ pub(super) fn build_frames(
                     }
                     _ => new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes)),
                 }
-            } else if active_ways.contains_key(&ev.way) {
-                new_events.push(format!("⊘ {} (gate {})", ev.way, ev.p_yes));
             } else if !blocked.iter().any(|b| b.id == ev.way) {
                 blocked.push(ActiveWay {
                     id: ev.way.clone(),
@@ -232,6 +237,7 @@ pub(super) fn build_frames(
                     refire_threshold_k: 0,
                     outcome: Outcome::Blocked,
                     p_yes: ev.p_yes.clone(),
+                    ancestor: ev.ancestor.clone(),
                 });
             }
         }
@@ -253,6 +259,11 @@ pub(super) fn build_frames(
     }
 
     frames
+}
+
+/// Whether the relevance judge gave a verdict in this session.
+pub(crate) fn has_verdicts(events: &[WayEvent]) -> bool {
+    events.iter().any(|e| e.event == "way_judged")
 }
 
 fn build_token_timeline(project: &str, session_id: &str) -> Vec<(String, u64)> {
@@ -323,6 +334,7 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 check: v["check"].as_str().unwrap_or("").to_string(),
                 p_yes: v["p_yes"].as_str().unwrap_or("").to_string(),
                 verdict: v["verdict"].as_str().unwrap_or("").to_string(),
+                ancestor: v["ancestor"].as_str().unwrap_or("").to_string(),
             })
         })
         .collect();
@@ -379,6 +391,7 @@ mod tests {
             check: String::new(),
             p_yes: String::new(),
             verdict: String::new(),
+            ancestor: String::new(),
         };
         // Window 1: origin session_start + two fires. A second session_start
         // (a compaction) opens window 2, which starts fresh with one fire.
@@ -420,6 +433,7 @@ mod tests {
             check: String::new(),
             p_yes: String::new(),
             verdict: String::new(),
+            ancestor: String::new(),
         };
         let events = vec![
             ev("2026-01-01T00:00:00Z", "d/a"),
@@ -448,6 +462,7 @@ mod tests {
                 check: String::new(),
                 p_yes: String::new(),
                 verdict: String::new(),
+                ancestor: String::new(),
             })
             .collect();
         let frames = build_frames(&events, &[], &HashMap::new(), 50);
@@ -464,6 +479,7 @@ mod tests {
             check: String::new(),
             p_yes: if event == "way_judged" { "0.050".into() } else { String::new() },
             verdict: verdict.into(),
+            ancestor: String::new(),
         }
     }
 
@@ -520,9 +536,10 @@ mod tests {
         assert_eq!(frames[1].ways.iter().find(|w| w.id == "d/b").map(|w| w.outcome), Some(Outcome::WouldBlock), "the shadow mark stays with its fire");
     }
 
-    /// A verdict with no row to mark stays an event note.
+    /// A shadow verdict with no row to mark stays an event note; a block on
+    /// a way already active is a row beside the active one, at this epoch.
     #[test]
-    fn a_verdict_with_no_row_stays_a_note() {
+    fn a_block_on_an_active_way_is_a_row_and_a_shadow_verdict_on_no_row_a_note() {
         let t = "2026-01-01T00:00:02Z";
         let events = vec![
             at("2026-01-01T00:00:00Z", "way_fired", "d/a", ""),
@@ -530,8 +547,31 @@ mod tests {
             at(t, "way_judged", "d/b", "would_block"),
         ];
         let frames = build_frames(&events, &[], &HashMap::new(), 50);
-        assert_eq!(frames[0].new_events, ["d/a (keyword)", "⊘ d/a (gate 0.050)", "◌ d/b (gate 0.050, shadow)"]);
-        assert_eq!(outcomes(&frames[0]), [("d/a", Outcome::Injected)]);
+        let f = &frames[0];
+        assert_eq!(f.new_events, ["d/a (keyword)", "◌ d/b (gate 0.050, shadow)"]);
+        assert_eq!(outcomes(f), [("d/a", Outcome::Injected), ("d/a", Outcome::Blocked)]);
+        assert_eq!(f.blocked(), 1);
+        assert_eq!(f.ways[1].epoch_fired, f.epoch);
+        assert_eq!(outcomes(&f.shown(false)), [("d/a", Outcome::Injected)]);
+    }
+
+    /// A re-disclosure is a new injection: the shadow mark of an earlier
+    /// fire does not carry onto it when the judge passed it.
+    #[test]
+    fn a_redisclosure_drops_the_last_verdicts_mark() {
+        let events = vec![
+            at("2026-01-01T00:00:00Z", "way_judged", "d/a", "would_block"),
+            at("2026-01-01T00:00:00Z", "way_fired", "d/a", ""),
+            at("2026-01-01T00:10:00Z", "way_judged", "d/a", "pass"),
+            at("2026-01-01T00:10:00Z", "way_redisclosed", "d/a", ""),
+            at("2026-01-01T00:20:00Z", "way_judged", "d/a", "would_block"),
+            at("2026-01-01T00:20:00Z", "way_redisclosed", "d/a", ""),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        let mark = |i: usize| (frames[i].ways[0].outcome, frames[i].ways[0].p_yes.clone());
+        assert_eq!(mark(0), (Outcome::WouldBlock, "0.050".into()));
+        assert_eq!(mark(1), (Outcome::Injected, String::new()));
+        assert_eq!(mark(2), (Outcome::WouldBlock, "0.050".into()), "this frame's verdict marks it again");
     }
 
     #[test]
@@ -544,6 +584,7 @@ mod tests {
             check: String::new(),
             p_yes: String::new(),
             verdict: String::new(),
+            ancestor: String::new(),
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no
         // fresh fire) in window 2 — as a mature window mostly does. It must still show

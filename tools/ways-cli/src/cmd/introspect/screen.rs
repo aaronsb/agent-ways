@@ -51,6 +51,9 @@ pub(crate) struct Replay {
     /// Which ways the frames show: the injected ones, or with `matched`
     /// every matched candidate, the judge-blocked ones too (#742).
     matched: bool,
+    /// Whether the relevance judge saw this session: the header names the
+    /// injected view only then.
+    pub(crate) judged: bool,
     /// The selected way of the frame shown, in both views.
     sel: usize,
     /// The why-fired detail's scroll, and its page from the last frame.
@@ -81,6 +84,7 @@ impl Replay {
             play,
             view: View::Timeline,
             matched: false,
+            judged: false,
             sel: 0,
             scroll: 0,
             page: 10,
@@ -117,6 +121,7 @@ impl Replay {
         let play = if live { Playback::live(frames.len()) } else { Playback::replay(frames.len()) };
         let mut r = Replay::new(session_id.to_string(), project, window / 1000, frames, play);
         r.from_log = true;
+        r.judged = super::frames::has_verdicts(&events);
         if live {
             r.sig = events_signature();
         }
@@ -294,6 +299,7 @@ impl Replay {
         if frames.is_empty() {
             return;
         }
+        self.judged = super::frames::has_verdicts(&events);
         self.take_frames(frames);
     }
 
@@ -318,13 +324,15 @@ impl Replay {
 }
 
 /// The row in `frame` that best keeps an anchor across a frame change: the
-/// same way if it is still active, else the nearest active way that fired
+/// same row, by id and epoch, which tells a way's blocked row from its
+/// active one; else the same way; else the nearest active way that fired
 /// at or before the anchor's epoch (the ways are in epoch order, so the
 /// last such row), else the first row. Epochs restart at each compaction
 /// window, so across one the id match does the work and the fallback only
 /// places the cursor.
 pub(super) fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_epoch: u64) -> usize {
-    if let Some(i) = frame.ways.iter().position(|w| w.id == anchor_id) {
+    let same = |w: &&ActiveWay| w.id == anchor_id;
+    if let Some(i) = frame.ways.iter().position(|w| same(&w) && w.epoch_fired == anchor_epoch).or_else(|| frame.ways.iter().position(|w| same(&w))) {
         return i;
     }
     frame.ways.iter().rposition(|w| w.epoch_fired <= anchor_epoch).unwrap_or(0)
@@ -563,9 +571,10 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
         (1, Span::styled(format!(" · {}", friendly_ts(&fr.timestamp)), theme::muted())),
     ];
     // The filter, named as the follow state is: which ways the table holds.
+    // A session the judge never saw is all injected, and keeps the room.
     if r.matched {
         metrics.push((0, Span::styled("  ◆ matched", theme::accent().add_modifier(Modifier::BOLD))));
-    } else {
+    } else if r.judged {
         metrics.push((0, Span::styled("  ◇ injected", theme::accent())));
         let blocked = fr.blocked();
         if blocked > 0 {
@@ -692,11 +701,12 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
 
 /// A candidate the judge blocked, in the table's columns: judged in this
 /// frame, its P(yes) where the trigger goes, and nothing to re-disclose,
-/// for it injected nothing.
+/// for it injected nothing. A way blocked with its ancestor names it.
 fn blocked_row(w: &ActiveWay, epoch: u64) -> Row<'static> {
     let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
+    let with = if w.ancestor.is_empty() { String::new() } else { format!(" (with {})", w.ancestor) };
     Row::new(vec![
-        Cell::from(format!("{}{}", w.outcome.mark(), w.id)),
+        Cell::from(format!("{}{}{with}", w.outcome.mark(), w.id)),
         right(w.epoch_fired.to_string()),
         right(epoch.saturating_sub(w.epoch_fired).to_string()),
         Cell::from(format!("{} {}", w.trigger, w.p_yes)),

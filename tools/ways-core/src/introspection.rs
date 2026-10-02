@@ -30,8 +30,9 @@
 //! **The clustering shares the `≤3s` gap *rule* with the replay's `build_frames`, but
 //! is deliberately not identical to it** — and, per the boundary above, is not
 //! meant to be. Deliberate differences: this model clusters the *fire* stream only
-//! (a [`Turn`] is defined by the ways that fired, not by the `session_start` /
-//! `way_redisclosed` events the replay also folds in), sorts by timestamp, numbers
+//! (a [`Turn`] is defined by the ways that fired, were re-disclosed, or were
+//! matched and withheld, not by the `session_start` / `check_fired` events the
+//! replay also folds in), sorts by timestamp, numbers
 //! epochs over fire-bearing clusters only, and takes each turn's token position
 //! from the event's own recorded value rather than a transcript-timeline lookup.
 //! A consumer that needs the cumulative timeline reads `build_frames`; one that
@@ -117,6 +118,12 @@ pub struct FiredWay {
     /// `way_suppressed` event. `None` for a fire.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suppressed: Option<String>,
+    /// `true` for a re-disclosure (a `way_redisclosed` event): the way's body
+    /// injected again once its refire curve allowed. It injected, so it can
+    /// carry a verdict, but it is not a fire: the summary counts it in
+    /// `redisclosures`, as `session replay --json` does.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub redisclosed: bool,
     /// Way-level cosine for semantic fires; `None` for deterministic channels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fire_score: Option<f64>,
@@ -145,6 +152,13 @@ pub struct JudgeVerdict {
     pub model: String,
     /// The judge call's latency.
     pub judge_ms: u64,
+    /// `ancestor` when the way was blocked with an ancestor the judge
+    /// blocked, unjudged itself; the P(yes) and threshold are the ancestor's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The blocked ancestor, when `reason` is `ancestor`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestor: Option<String>,
 }
 
 impl JudgeVerdict {
@@ -158,6 +172,8 @@ impl JudgeVerdict {
             engine: s("engine"),
             model: s("model"),
             judge_ms: str_or_num_u64(&v["judge_ms"]).unwrap_or(0),
+            reason: v["reason"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
+            ancestor: v["ancestor"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
         })
     }
 }
@@ -193,6 +209,11 @@ pub struct IntrospectionSummary {
     pub turns: usize,
     pub distinct_ways: usize,
     pub total_fires: u64,
+    /// Re-disclosures (`way_redisclosed`). Counted apart from `total_fires`
+    /// and `distinct_ways`, which count first fires as `session replay
+    /// --json` does.
+    #[serde(skip_serializing_if = "u64_is_zero")]
+    pub redisclosures: u64,
     /// Pattern hits vetoed by the semantic keyword gate (ADR-155). Counted
     /// separately — a gated candidate injected nothing, so it never inflates
     /// `total_fires` or `distinct_ways`.
@@ -260,7 +281,7 @@ impl SessionIntrospection {
             .filter(|e| {
                 matches!(
                     e["event"].as_str(),
-                    Some("way_fired") | Some("way_keyword_gated") | Some("way_suppressed")
+                    Some("way_fired") | Some("way_redisclosed") | Some("way_keyword_gated") | Some("way_suppressed")
                 )
             })
             .filter_map(FireRow::from_value)
@@ -297,18 +318,21 @@ impl SessionIntrospection {
                 .map(|t| t.fired_ways.iter().filter(|w| pred(w)).count() as u64)
                 .sum()
         };
-        let total_fires = count(FiredWay::injected);
+        let fired = |w: &FiredWay| w.injected() && !w.redisclosed;
+        let total_fires = count(fired);
+        let redisclosures = count(|w| w.redisclosed);
         let gated_candidates = count(|w| w.gated);
         let suppressed_candidates = count(|w| w.suppressed.is_some());
         let judge_blocked = count(|w| w.suppressed.as_deref() == Some("judge"));
         let distinct: HashSet<&str> = turns
             .iter()
-            .flat_map(|t| t.fired_ways.iter().filter(|w| w.injected()).map(|w| w.way_id.as_str()))
+            .flat_map(|t| t.fired_ways.iter().filter(|w| fired(w)).map(|w| w.way_id.as_str()))
             .collect();
         let summary = IntrospectionSummary {
             turns: turns.len(),
             distinct_ways: distinct.len(),
             total_fires,
+            redisclosures,
             gated_candidates,
             suppressed_candidates,
             judge_blocked,
@@ -327,6 +351,8 @@ impl SessionIntrospection {
     /// The model without the rows of ways the relevance judge blocked, and
     /// without the turns that held only those: what reached the session.
     /// The summary keeps its counts, so it still says how many were blocked.
+    /// Turns keep the epochs they have with `--matched`, so the numbers skip
+    /// where a turn held only blocked ways.
     pub fn injected_only(mut self) -> Self {
         for t in &mut self.turns {
             t.fired_ways.retain(|w| w.suppressed.as_deref() != Some("judge"));
@@ -418,6 +444,7 @@ fn build_turn(cluster: &[&FireRow], epoch: u64, criteria: &CriteriaMap) -> Turn 
                 trigger_channel: f.trigger.clone(),
                 gated: f.gated,
                 suppressed: f.suppressed.clone(),
+                redisclosed: f.redisclosed,
                 fire_score: f.fire_score,
                 way_path: meta.path,
                 criteria: meta.criteria,
@@ -457,6 +484,8 @@ struct FireRow {
     gated: bool,
     /// The `reason` of a `way_suppressed` event: a matched way withheld.
     suppressed: Option<String>,
+    /// `true` for a `way_redisclosed` event.
+    redisclosed: bool,
     judge: Option<JudgeVerdict>,
 }
 
@@ -482,6 +511,7 @@ impl FireRow {
             matched_span: v["matched_span"].as_str().map(|s| s.to_string()),
             gated,
             suppressed,
+            redisclosed: v["event"].as_str() == Some("way_redisclosed"),
             judge: None,
         })
     }
@@ -492,6 +522,7 @@ impl FireRow {
 pub struct JudgeBlock {
     pub way: String,
     pub ts: String,
+    #[serde(flatten)]
     pub verdict: JudgeVerdict,
 }
 
@@ -510,9 +541,10 @@ pub fn judge_blocks(events_text: &str, session_id: &str) -> Vec<JudgeBlock> {
 }
 
 /// The gate logs `way_judged` just before the fire it allows, in the same
-/// hook run. A pass or a shadow would-block joins the fire of the same way
-/// within the turn's 3 s; a block becomes a withheld row of its own, since
-/// no fire follows it.
+/// hook run. A pass or a shadow would-block joins the nearest row of the same
+/// way within 3 s that has no verdict yet: a fire, a re-disclosure, or a way
+/// the context cap then withheld. A block becomes a withheld row of its own,
+/// since no fire follows it.
 fn attach_verdicts(fires: &mut Vec<FireRow>, events: &[Value], session_id: &str) {
     let judged = events
         .iter()
@@ -531,13 +563,14 @@ fn attach_verdicts(fires: &mut Vec<FireRow>, events: &[Value], session_id: &str)
                 matched_span: None,
                 gated: false,
                 suppressed: Some("judge".into()),
+                redisclosed: false,
                 judge: Some(verdict),
             });
             continue;
         }
         let near = fires
             .iter_mut()
-            .filter(|f| f.way == way && f.judge.is_none() && f.suppressed.is_none() && !f.gated)
+            .filter(|f| f.way == way && f.judge.is_none() && !f.gated)
             .filter_map(|f| Some((parse_utc_iso(&f.ts)?.abs_diff(at), f)))
             .filter(|(d, _)| *d <= 3)
             .min_by_key(|(d, _)| *d);
@@ -979,6 +1012,93 @@ scope: subagent
         assert_eq!(m.summary.judge_blocked, 2, "the summary still counts what was kept out");
         let blocks = judge_blocks(&text, "s1");
         assert_eq!(blocks.iter().map(|b| b.way.as_str()).collect::<Vec<_>>(), ["d/b", "d/c"]);
+    }
+
+    fn verdict_at(ts: &str, way: &str, verdict: &str, p: &str) -> Value {
+        json!({"event":"way_judged","session":"s1","ts":ts,"way":way,"p_yes":p,"threshold":"0.30","verdict":verdict,"mode":"shadow","engine":"e","model":"m","judge_ms":"1"})
+    }
+
+    fn row_at(ts: &str, event: &str, way: &str) -> Value {
+        json!({"event":event,"session":"s1","ts":ts,"way":way,"trigger":"keyword","reason":"context_cap"})
+    }
+
+    /// The verdicts on each row of `way`, in turn order.
+    fn p_yes_of(m: &SessionIntrospection, way: &str) -> Vec<Option<f64>> {
+        m.turns.iter().flat_map(|t| &t.fired_ways).filter(|w| w.way_id == way).map(|w| w.judge.as_ref().map(|v| v.p_yes)).collect()
+    }
+
+    /// A re-disclosure is an injected row that carries its verdict; the
+    /// summary counts it apart from the fires.
+    #[test]
+    fn a_redisclosure_carries_its_verdict_and_is_not_a_fire() {
+        let events = vec![
+            row_at("2026-01-01T00:00:00Z", "way_fired", "d/a"),
+            verdict_at("2026-01-01T00:10:00Z", "d/a", "would_block", "0.100"),
+            row_at("2026-01-01T00:10:00Z", "way_redisclosed", "d/a"),
+        ];
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        let r = &m.turns[1].fired_ways[0];
+        assert!(r.redisclosed && r.injected());
+        assert_eq!(r.judge.as_ref().map(|v| v.verdict.as_str()), Some("would_block"));
+        let s = &m.summary;
+        assert_eq!((s.total_fires, s.distinct_ways, s.redisclosures), (1, 1, 1));
+    }
+
+    /// A verdict joins a row within 3 s of it, never one further away.
+    #[test]
+    fn a_verdict_joins_a_row_within_three_seconds_only() {
+        let events = vec![
+            verdict_at("2026-01-01T00:00:00Z", "d/a", "pass", "0.900"),
+            row_at("2026-01-01T00:00:03Z", "way_fired", "d/a"),
+            verdict_at("2026-01-01T00:01:00Z", "d/b", "pass", "0.900"),
+            row_at("2026-01-01T00:01:04Z", "way_fired", "d/b"),
+        ];
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        assert_eq!(p_yes_of(&m, "d/a"), [Some(0.9)]);
+        assert_eq!(p_yes_of(&m, "d/b"), [None], "4 s is another hook run");
+    }
+
+    /// Two verdicts on one way close together each join their nearest row.
+    #[test]
+    fn two_close_verdicts_on_one_way_each_join_the_nearest_row() {
+        let events = vec![
+            verdict_at("2026-01-01T00:00:00Z", "d/a", "pass", "0.900"),
+            row_at("2026-01-01T00:00:00Z", "way_fired", "d/a"),
+            verdict_at("2026-01-01T00:00:02Z", "d/a", "would_block", "0.100"),
+            row_at("2026-01-01T00:00:02Z", "way_redisclosed", "d/a"),
+        ];
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        assert_eq!(p_yes_of(&m, "d/a"), [Some(0.9), Some(0.1)]);
+    }
+
+    /// A way the judge passed and the context cap then withheld keeps the
+    /// verdict on its withheld row; it is not counted as a fire.
+    #[test]
+    fn a_verdict_whose_fire_the_context_cap_withheld_joins_the_withheld_row() {
+        let events = vec![
+            verdict_at("2026-01-01T00:00:00Z", "d/a", "pass", "0.900"),
+            row_at("2026-01-01T00:00:00Z", "way_suppressed", "d/a"),
+        ];
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        let w = &m.turns[0].fired_ways[0];
+        assert_eq!(w.suppressed.as_deref(), Some("context_cap"));
+        assert_eq!(w.judge.as_ref().map(|v| v.p_yes), Some(0.9));
+        assert_eq!((m.summary.total_fires, m.summary.suppressed_candidates), (0, 1));
+    }
+
+    /// A way blocked with its ancestor carries the ancestor's verdict and
+    /// names it; the block's JSON keeps the verdict's fields flat.
+    #[test]
+    fn an_ancestor_block_names_the_ancestor() {
+        let mut v = verdict_at("2026-01-01T00:00:00Z", "p/c", "block", "0.050");
+        v["reason"] = json!("ancestor");
+        v["ancestor"] = json!("p");
+        let m = SessionIntrospection::build(std::slice::from_ref(&v), "s1", "/p", 200, &CriteriaMap::new());
+        let j = m.turns[0].fired_ways[0].judge.clone().unwrap();
+        assert_eq!((j.reason.as_deref(), j.ancestor.as_deref()), (Some("ancestor"), Some("p")));
+        let blocks = judge_blocks(&format!("{v}\n"), "s1");
+        let out = serde_json::to_value(&blocks).unwrap();
+        assert_eq!((out[0]["way"].as_str(), out[0]["p_yes"].as_f64(), out[0]["ancestor"].as_str()), (Some("p/c"), Some(0.05), Some("p")));
     }
 
     #[test]
