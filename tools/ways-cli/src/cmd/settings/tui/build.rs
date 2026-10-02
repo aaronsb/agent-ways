@@ -258,6 +258,7 @@ impl Ways {
             }
             insert(&mut root, rest, node, &docs, tab.prefix);
         }
+        self.headers(&mut root, tab.prefix);
         let mut found = self.findings(tab, &files, layers);
         if !found.children.is_empty() {
             found.open = true;
@@ -279,6 +280,22 @@ impl Ways {
             _ => {}
         }
         root
+    }
+
+    /// Header rows for a tab's sections: its loose keys gather under one
+    /// `settings` section, and each top-level group names its columns as
+    /// its section declares them, else `setting` and `value`.
+    fn headers(&self, root: &mut Node, prefix: &str) {
+        let loose = |n: &Node| n.setting.is_some() && n.children.is_empty();
+        if let Some(at) = root.children.iter().position(loose) {
+            let (keys, rest): (Vec<Node>, Vec<Node>) = std::mem::take(&mut root.children).into_iter().partition(loose);
+            root.children = rest;
+            root.children.insert(at.min(root.children.len()), Node::section("settings", "The tab's own keys.", ("", "value"), keys));
+        }
+        for g in root.children.iter_mut().filter(|g| !g.section && g.columns.is_none()) {
+            let declared = self.reg.section(&format!("{prefix}.{}", g.name)).and_then(|(_, s)| s.columns);
+            g.columns = Some(declared.map_or(("setting".into(), "value".into()), |(a, b)| (a.into(), b.into())));
+        }
     }
 
     /// The commands that change a key the screens do not set: a provider
@@ -341,8 +358,8 @@ impl Ways {
             rows.push(
                 Node::leaf(
                     "(none recorded)",
-                    "No target is recorded, so the default ~/.claude applies. `a` guides activating agent-ways in a Claude instance.",
-                    Setting::new(TKind::ReadOnly, "a: activate in a Claude instance", "default"),
+                    "No target is recorded, so the default ~/.claude applies. Its activate action guides activating agent-ways in a Claude instance.",
+                    Setting::new(TKind::ReadOnly, "~/.claude (default)", "default"),
                 )
                 .with_actions(vec![activate()]),
             );

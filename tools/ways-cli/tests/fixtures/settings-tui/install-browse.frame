@@ -1,10 +1,10 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│▌▾ targets                      [a]                  ││install.targets                            │|
-|│     (none recorded)           a: activate in a Claud││                                           │|
-|│   secret_path_deny            true                  ││The Claude Code config directories         │|
-|│                                                     ││agent-ways is active in.                   │|
+|│▌▾ targets · target            state [a]             ││install.targets                            │|
+|│     (none recorded)           ~/.claude (default) [a││                                           │|
+|│ ▾ settings                    value                 ││The Claude Code config directories         │|
+|│     secret_path_deny          true                  ││agent-ways is active in.                   │|
 |│                                                     ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways target                   │|
@@ -14,13 +14,13 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││1 entry, 0 changed                         │|
 |│                                                     ││                                           │|
-|│                                                     ││actions (a)                                │|
-|│                                                     ││  activate                                 │|
+|│                                                     ││actions                                    │|
+|│                                                     ││  t activate                               │|
 |│                                                     ││    guided: pick Claude config directories,│|
 |│                                                     ││preview the plan                           │|
-|│                                                     ││  add (asks first)                         │|
+|│                                                     ││  A add (asks first)                       │|
 |│                                                     ││    ways target add '<arg>'                │|
-|│                                                     ││  plan                                     │|
+|│                                                     ││  p plan                                   │|
 |│                                                     ││    ways target plan '<arg>'               │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters all tabs            |
+| browse  0 changed │ 0 queued │ mouse on (m) │ t activate · A add · p plan                          |
 styles
   0   0-7   White Blue -
   0  10-21  White Blue -
@@ -44,16 +44,23 @@ styles
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   1-1   Cyan - BOLD|REVERSED
-  2   2-31  - - BOLD|REVERSED
-  2  32-35  - - BOLD|DIM|ITALIC|REVERSED
-  2  36-53  - - BOLD|REVERSED
+  2   2-10  - - BOLD|REVERSED
+  2  11-19  - - BOLD|DIM|REVERSED
+  2  20-31  - - BOLD|REVERSED
+  2  32-36  - - BOLD|DIM|REVERSED
+  2  37-40  - - BOLD|DIM|ITALIC|REVERSED
+  2  41-53  - - BOLD|REVERSED
   2  54-55  - - DIM
   2  56-70  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
-  3  32-55  - - DIM
+  3  32-50  - - DIM
+  3  51-53  - - DIM|ITALIC
+  3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
+  4   2-11  - - BOLD
+  4  32-36  - - DIM
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
@@ -87,10 +94,11 @@ styles
  14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-66  - - DIM
+ 15  54-62  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-55  - - DIM
+ 16  56-59  Cyan - -
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-99  - - DIM
@@ -99,12 +107,14 @@ styles
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM
+ 19  56-59  Cyan - -
  19  99-99  - - DIM
  20   0-0   - - DIM
  20  54-82  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
  21  54-55  - - DIM
+ 21  56-59  Cyan - -
  21  99-99  - - DIM
  22   0-0   - - DIM
  22  54-83  - - DIM
@@ -131,3 +141,10 @@ styles
  29  21-28  - - DIM|ITALIC
  29  29-31  - - DIM
  29  32-43  - - DIM|ITALIC
+ 29  44-46  - - DIM
+ 29  47-48  Cyan - -
+ 29  49-59  - - DIM|ITALIC
+ 29  60-61  Cyan - -
+ 29  62-67  - - DIM|ITALIC
+ 29  68-69  Cyan - -
+ 29  70-73  - - DIM|ITALIC

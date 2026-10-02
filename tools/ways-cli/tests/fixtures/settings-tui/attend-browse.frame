@@ -1,9 +1,9 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│ ▸ governor                                          ││attend.cleanup                             │|
-|│ ▸ engagement                                        ││                                           │|
-|│▌▾ cleanup                                           ││The background sweep of signals whose      │|
+|│ ▸ governor · setting          value                 ││attend.cleanup                             │|
+|│ ▸ engagement · setting        value                 ││                                           │|
+|│▌▾ cleanup · setting           value                 ││The background sweep of signals whose      │|
 |│     enabled                   true                  ││project is gone (ADR-136).                 │|
 |│     interval                  600                   ││                                           │|
 |│                                                     ││2 entries, 0 changed                       │|
@@ -44,16 +44,24 @@ styles
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   2-11  - - BOLD
+  2  12-21  - - DIM
+  2  32-36  - - DIM
   2  54-55  - - DIM
   2  56-69  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3   2-13  - - BOLD
+  3  14-23  - - DIM
+  3  32-36  - - DIM
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
   4   1-1   Cyan - BOLD|REVERSED
-  4   2-53  - - BOLD|REVERSED
+  4   2-10  - - BOLD|REVERSED
+  4  11-20  - - BOLD|DIM|REVERSED
+  4  21-31  - - BOLD|REVERSED
+  4  32-36  - - BOLD|DIM|REVERSED
+  4  37-53  - - BOLD|REVERSED
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM

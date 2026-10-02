@@ -1,21 +1,21 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate  ●2 ↺    4 install    5 attend    6 sensors    7 theme              |
 |┌ ways settings — ~/proj — review ────────────────────┐┌detail─────────────────────────────────────┐|
-|│▌    mode                  enforce → shadow          ││gate.mode                                  │|
-|│   ▾ queued  ●1                                      ││                                           │|
-|│       1. $ ways agent…ey check --provider anthropic ││What the gate does with a verdict: enforce,│|
-|│                                                     ││shadow or off.                             │|
+|│▌  ▾ settings              ●1                        ││gate · settings                            │|
+|│       mode                enforce → shadow          ││                                           │|
+|│   ▾ queued  ●1                                      ││The tab's own keys.                        │|
+|│       1. $ ways agent…ey check --provider anthropic ││                                           │|
+|│                                                     ││1 change under this group                  │|
 |│                                                     ││                                           │|
-|│                                                     ││enforce blocks candidates judged           │|
-|│                                                     ││irrelevant; shadow judges and logs every   │|
-|│                                                     ││candidate while the matcher decides; off   │|
-|│                                                     ││judges nothing (ADR-196 §6).               │|
+|│                                                     ││file it writes                             │|
+|│                                                     ││  ~/.config/agent-ways/agent.yaml          │|
 |│                                                     ││                                           │|
-|│                                                     ││change    enforce → shadow                 │|
-|│                                                     ││from      default layer                    │|
-|│                                                     ││to        user layer                       │|
-|│                                                     ││file      ~/.config/agent-ways/agent.yaml  │|
-|│                                                     ││key       gate.mode                        │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -46,33 +46,34 @@ styles
   2   0-0   - - DIM
   2   1-1   Cyan - BOLD|REVERSED
   2   2-27  - - BOLD|REVERSED
-  2  28-34  - - BOLD|DIM|REVERSED|CROSSED_OUT
-  2  35-37  - - BOLD|REVERSED
-  2  38-43  Green - BOLD|REVERSED
-  2  44-53  - - BOLD|REVERSED
+  2  28-29  Yellow - BOLD|REVERSED
+  2  30-53  - - BOLD|REVERSED
   2  54-55  - - DIM
-  2  56-64  - - BOLD
+  2  56-70  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
-  3   4-11  - - BOLD
-  3  12-15  LightRed - -
+  3  28-34  - - DIM|CROSSED_OUT
+  3  38-43  Green - BOLD
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4  13-52  LightRed - -
+  4   4-11  - - BOLD
+  4  12-15  LightRed - -
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
+  5  13-52  LightRed - -
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6  54-55  - - DIM
+  6  54-80  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
   8  54-55  - - DIM
+  8  56-69  - - BOLD
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  54-55  - - DIM
@@ -84,21 +85,19 @@ styles
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-65  - - DIM
- 12  66-72  - - DIM|CROSSED_OUT
- 12  76-81  Green - BOLD
+ 12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-65  - - DIM
+ 13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-65  - - DIM
+ 14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-65  - - DIM
+ 15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  54-65  - - DIM
+ 16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-55  - - DIM

@@ -1,14 +1,14 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│   enabled                     true                  ││ways.project                               │|
-|│   language                    auto                  ││                                           │|
-|│   default_scope               agent                 ││Per-way switches for one project (ADR-131),│|
-|│   disabled_domains            []                    ││in its .claude/ways.yaml. Each entry falls │|
-|│▌▾ project                                           ││back alone.                                │|
-|│   ▸ itops                                           ││                                           │|
-|│   ▸ softwaredev                                     ││2 entries, 0 changed                       │|
-|│                                                     ││                                           │|
+|│ ▾ settings                    value                 ││ways.project                               │|
+|│     enabled                   true                  ││                                           │|
+|│     language                  auto                  ││Per-way switches for one project (ADR-131),│|
+|│     default_scope             agent                 ││in its .claude/ways.yaml. Each entry falls │|
+|│     disabled_domains          []                    ││back alone.                                │|
+|│▌▾ project · way               enabled               ││                                           │|
+|│   ▸ itops                                           ││2 entries, 0 changed                       │|
+|│   ▸ softwaredev                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters all tabs            |
+| browse  0 changed │ 0 queued │ mouse on (m) │ s set up                                             |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -43,6 +43,8 @@ styles
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  32-36  - - DIM
   2  54-55  - - DIM
   2  56-67  - - BOLD
   2  99-99  - - DIM
@@ -56,19 +58,23 @@ styles
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6   1-1   Cyan - BOLD|REVERSED
-  6   2-53  - - BOLD|REVERSED
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-10  - - BOLD
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-10  - - BOLD|REVERSED
+  7  11-16  - - BOLD|DIM|REVERSED
+  7  17-31  - - BOLD|REVERSED
+  7  32-38  - - BOLD|DIM|REVERSED
+  7  39-53  - - BOLD|REVERSED
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-16  - - BOLD
+  8   2-10  - - BOLD
   8  54-75  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9   2-16  - - BOLD
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
@@ -132,3 +138,6 @@ styles
  29  21-28  - - DIM|ITALIC
  29  29-31  - - DIM
  29  32-43  - - DIM|ITALIC
+ 29  44-46  - - DIM
+ 29  47-48  Cyan - -
+ 29  49-54  - - DIM|ITALIC

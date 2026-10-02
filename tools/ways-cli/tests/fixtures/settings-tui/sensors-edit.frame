@@ -1,18 +1,18 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│ ▸ context                                           ││sensors.git.interval                       │|
-|│ ▾ git                                               ││                                           │|
+|│ ▸ context · setting           value                 ││sensors.git.interval                       │|
+|│ ▾ git · setting               value                 ││                                           │|
 |│     enabled                   true                  ││Seconds between polls while quiet.         │|
 |│▌    interval                  30                    ││                                           │|
 |│     min_interval              10                    ││value    30                                │|
 |│     threshold                 2.0                   ││type     integer 1..=604800 (Enter edits)  │|
 |│     decay_threshold           4                     ││default  30                                │|
 |│     requires                  [Bash(git:*)]         ││from     default                           │|
-|│ ▸ peers                                             ││writes   ~/.config/attend/config.yaml      │|
-|│ ▸ processes                                         ││[attend.sensors.git.interval]              │|
-|│ ▸ disclosure                                        ││                                           │|
-|│ ▸ keepwarm                                          ││                                           │|
+|│ ▸ peers · setting             value                 ││writes   ~/.config/attend/config.yaml      │|
+|│ ▸ processes · setting         value                 ││[attend.sensors.git.interval]              │|
+|│ ▸ disclosure · setting        value                 ││                                           │|
+|│ ▸ keepwarm · setting          value                 ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -44,11 +44,15 @@ styles
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   2-10  - - BOLD
+  2  11-20  - - DIM
+  2  32-36  - - DIM
   2  54-55  - - DIM
   2  56-75  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3   2-6   - - BOLD
+  3   7-16  - - DIM
+  3  32-36  - - DIM
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
@@ -73,18 +77,26 @@ styles
   9  99-99  - - DIM
  10   0-0   - - DIM
  10   2-8   - - BOLD
+ 10   9-18  - - DIM
+ 10  32-36  - - DIM
  10  54-64  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
  11   2-12  - - BOLD
+ 11  13-22  - - DIM
+ 11  32-36  - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
  12   2-13  - - BOLD
+ 12  14-23  - - DIM
+ 12  32-36  - - DIM
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
  13   2-11  - - BOLD
+ 13  12-21  - - DIM
+ 13  32-36  - - DIM
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM

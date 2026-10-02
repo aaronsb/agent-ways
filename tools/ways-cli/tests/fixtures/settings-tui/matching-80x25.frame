@@ -1,13 +1,13 @@
 agent-tui frame 80x25
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme|
 |┌ ways settings — ~/proj ──────────────────┐┌detail────────────────────────────┐|
-|│   semantic_fire_probability 0.5          ││matching.keyword_floor_probability│|
-|│▌  keyword_floor_probability 0.15         ││                                  │|
-|│   parent_threshold_multiplier 0.8        ││Calibrated probability a keyword  │|
-|│   parent_boost_floor    0.3              ││hit must also reach.              │|
-|│   near_miss_margin      0.1              ││                                  │|
-|│ ▸ refire_presets                         ││A pattern: hit fires only when the│|
-|│                                          ││calibrated probability reaches    │|
+|│ ▾ settings              value            ││matching.keyword_floor_probability│|
+|│     semantic_fire_probability 0.5        ││                                  │|
+|│▌    keyword_floor_probability 0.15       ││Calibrated probability a keyword  │|
+|│     parent_threshold_multiplier 0.8      ││hit must also reach.              │|
+|│     parent_boost_floor  0.3              ││                                  │|
+|│     near_miss_margin    0.1              ││A pattern: hit fires only when the│|
+|│ ▸ refire_presets · setting value         ││calibrated probability reaches    │|
 |│                                          ││this floor (ADR-156). Ways opt out│|
 |│                                          ││with pattern_strict: true.        │|
 |│                                          ││                                  │|
@@ -38,29 +38,33 @@ styles
   1  45-50  Blue - BOLD|DIM
   1  51-79  - - DIM
   2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  26-30  - - DIM
   2  43-44  - - DIM
   2  45-78  - - BOLD
   2  79-79  - - DIM
   3   0-0   - - DIM
-  3   1-1   Cyan - BOLD|REVERSED
-  3   2-42  - - BOLD|REVERSED
   3  43-44  - - DIM
   3  79-79  - - DIM
   4   0-0   - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-42  - - BOLD|REVERSED
   4  43-44  - - DIM
   4  79-79  - - DIM
   5   0-0   - - DIM
   5  43-44  - - DIM
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6  26-28  Blue - -
   6  43-44  - - DIM
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7   2-17  - - BOLD
+  7  26-28  Blue - -
   7  43-44  - - DIM
   7  79-79  - - DIM
   8   0-0   - - DIM
+  8   2-17  - - BOLD
+  8  18-27  - - DIM
+  8  29-33  - - DIM
   8  43-44  - - DIM
   8  79-79  - - DIM
   9   0-0   - - DIM

@@ -1,21 +1,21 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│▌  semantic_fire_probability   0.5                   ││matching.semantic_fire_probability         │|
-|│   keyword_floor_probability   0.15                  ││                                           │|
-|│   parent_threshold_multiplier 0.8                   ││Calibrated probability at which a way fires│|
-|│   parent_boost_floor          0.3                   ││on relatedness.                            │|
-|│   near_miss_margin            0.1                   ││                                           │|
-|│ ▸ refire_presets                                    ││A way fires when the calibrated probability│|
-|│                                                     ││of its best model lane reaches this value  │|
-|│                                                     ││(ADR-156). Lower fires more often.         │|
+|│▌▾ settings                    value                 ││matching · settings                        │|
+|│     semantic_fire_probability 0.5                   ││                                           │|
+|│     keyword_floor_probability 0.15                  ││The tab's own keys.                        │|
+|│     parent_threshold_multiplier 0.8                 ││                                           │|
+|│     parent_boost_floor        0.3                   ││5 entries, 0 changed                       │|
+|│     near_miss_margin          0.1                   ││                                           │|
+|│ ▸ refire_presets · setting    value                 ││                                           │|
 |│                                                     ││                                           │|
-|│                                                     ││value    0.5                               │|
-|│                                                     ││type     number 0..=1 (Enter edits)        │|
-|│                                                     ││default  0.5                               │|
-|│                                                     ││from     default                           │|
-|│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
-|│                                                     ││[matching.semantic_fire_probability]       │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -44,9 +44,11 @@ styles
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   1-1   Cyan - BOLD|REVERSED
-  2   2-53  - - BOLD|REVERSED
+  2   2-31  - - BOLD|REVERSED
+  2  32-36  - - BOLD|DIM|REVERSED
+  2  37-53  - - BOLD|REVERSED
   2  54-55  - - DIM
-  2  56-89  - - BOLD
+  2  56-74  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3  54-55  - - DIM
@@ -58,14 +60,16 @@ styles
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6  32-34  Blue - -
-  6  54-55  - - DIM
+  6  54-75  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-17  - - BOLD
+  7  32-34  Blue - -
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8   2-17  - - BOLD
+  8  18-27  - - DIM
+  8  32-36  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
@@ -75,19 +79,19 @@ styles
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-64  - - DIM
+ 11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-64  - - DIM
+ 12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-64  - - DIM
+ 13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-64  - - DIM
+ 14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-64  - - DIM
+ 15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-55  - - DIM

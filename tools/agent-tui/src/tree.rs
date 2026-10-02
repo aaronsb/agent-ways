@@ -135,14 +135,29 @@ pub struct Node {
     pub children: Vec<Node>,
     pub open: bool,
     pub actions: Vec<Action>,
+    /// What the header row calls the two columns, name and value. Set on a
+    /// tab's top-level groups.
+    pub columns: Option<(String, String)>,
+    /// A section that only gathers rows under a header: its name is no part
+    /// of its children's keys ([`key`]).
+    pub section: bool,
 }
 
 impl Node {
     pub fn group(name: impl Into<String>, doc: impl Into<String>, children: Vec<Node>) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![] }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false }
     }
     pub fn leaf(name: impl Into<String>, doc: impl Into<String>, setting: Setting) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![] }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false }
+    }
+    /// Rows gathered under a header that names their columns, keyed as if
+    /// they sat in the parent.
+    pub fn section(name: impl Into<String>, doc: impl Into<String>, columns: (&str, &str), children: Vec<Node>) -> Self {
+        Node { section: true, ..Node::group(name, doc, children).columns(columns) }.opened()
+    }
+    pub fn columns(mut self, (name, value): (&str, &str)) -> Self {
+        self.columns = Some((name.to_string(), value.to_string()));
+        self
     }
     pub fn opened(mut self) -> Self {
         self.open = true;
@@ -193,11 +208,14 @@ pub struct Action {
     pub doc: String,
     /// The files or directories it changes, when known.
     pub touches: String,
+    /// The key that runs it in browse mode and in the menu. Unset: one is
+    /// assigned from the label ([`action_keys`]).
+    pub key: Option<char>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, command: impl Into<String>) -> Self {
-        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new() }
+        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new(), key: None }
     }
     pub fn doc(mut self, doc: impl Into<String>) -> Self {
         self.doc = doc.into();
@@ -215,6 +233,10 @@ impl Action {
         self.confirm = true;
         self
     }
+    pub fn key(mut self, key: char) -> Self {
+        self.key = Some(key);
+        self
+    }
 
     /// The command line as queued. A secret shows as `<stdin>`.
     pub fn render(&self, text: &str) -> String {
@@ -225,6 +247,52 @@ impl Action {
             Arg::Flow(_) => self.command.clone(),
         }
     }
+}
+
+/// The keys browse mode binds itself (`app/keys.rs`), which no action takes.
+pub const RESERVED_KEYS: &str = " 123456789/?GXacdeghjklmquwx";
+
+/// The key of each action, in order: its own key, else the first of the
+/// label's letters, then the label's letters in upper case, then any letter,
+/// that neither a reserved key nor an earlier action holds. `None` when every
+/// letter is taken.
+pub fn action_keys(actions: &[Action]) -> Vec<Option<char>> {
+    let mut taken: Vec<char> = RESERVED_KEYS.chars().chain(actions.iter().filter_map(|a| a.key)).collect();
+    actions
+        .iter()
+        .map(|a| {
+            // A reserved key would name a key that does something else.
+            if let Some(k) = a.key {
+                return (!RESERVED_KEYS.contains(k)).then_some(k);
+            }
+            let letters: Vec<char> = a.label.chars().filter(char::is_ascii_alphabetic).map(|c| c.to_ascii_lowercase()).collect();
+            let k = letters
+                .iter()
+                .copied()
+                .chain(letters.iter().map(char::to_ascii_uppercase))
+                .chain('a'..='z')
+                .chain('A'..='Z')
+                .find(|c| !taken.contains(c))?;
+            taken.push(k);
+            Some(k)
+        })
+        .collect()
+}
+
+/// What is wrong with one node's action keys: a key two actions hold, a key
+/// browse mode reserves, an action left without a key. Empty when sound.
+pub fn key_conflicts(actions: &[Action]) -> Vec<String> {
+    let keys = action_keys(actions);
+    let mut out = Vec::new();
+    for (i, (a, k)) in actions.iter().zip(&keys).enumerate() {
+        match (k, a.key) {
+            (None, Some(own)) => out.push(format!("{}: {own} is reserved", a.label)),
+            (None, None) => out.push(format!("{}: no key left", a.label)),
+            (Some(k), _) if keys[..i].contains(&Some(*k)) => out.push(format!("{}: {k} is bound twice", a.label)),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Quote one word for a shell, leaving plain paths bare.
@@ -415,52 +483,82 @@ pub fn get_mut<'a>(roots: &'a mut [Node], path: &[usize]) -> &'a mut Node {
     n
 }
 
-/// The node a dotted key names. Names may hold dots (a path), so each level
-/// matches by prefix.
+/// The node a dotted key names.
 pub fn find<'a>(roots: &'a [Node], key: &str) -> Option<&'a Node> {
-    fn within<'a>(n: &'a Node, key: &str) -> Option<&'a Node> {
-        if key == n.name {
-            return Some(n);
-        }
-        let rest = key.strip_prefix(n.name.as_str())?.strip_prefix('.')?;
-        n.children.iter().find_map(|c| within(c, rest))
-    }
-    roots.iter().find_map(|n| within(n, key))
+    path_of(roots, key).map(|p| get(roots, &p))
 }
 
-/// The index path of the node a dotted key names: [`find`]'s match, as a
-/// path from the roots.
+/// The index path of the node a dotted key names, by [`key`].
 pub fn path_of(roots: &[Node], key: &str) -> Option<Vec<usize>> {
-    fn within(n: &Node, key: &str, path: &mut Vec<usize>) -> bool {
-        if key == n.name {
-            return true;
-        }
-        let Some(rest) = key.strip_prefix(n.name.as_str()).and_then(|r| r.strip_prefix('.')) else { return false };
-        for (i, c) in n.children.iter().enumerate() {
-            path.push(i);
-            if within(c, rest, path) {
-                return true;
-            }
-            path.pop();
-        }
-        false
-    }
-    roots.iter().enumerate().find_map(|(i, n)| {
-        let mut path = vec![i];
-        within(n, key, &mut path).then_some(path)
-    })
+    keyed(roots).into_iter().find(|(_, k)| k == key).map(|(p, _)| p)
 }
 
-/// The dotted key of the node at `path`.
-pub fn key(roots: &[Node], path: &[usize]) -> String {
-    let mut parts = Vec::new();
-    let mut n = &roots[path[0]];
-    parts.push(n.name.clone());
-    for &i in &path[1..] {
-        n = &n.children[i];
-        parts.push(n.name.clone());
+/// Every node's path and key, depth first.
+pub fn keyed(roots: &[Node]) -> Vec<(Vec<usize>, String)> {
+    fn go(n: &Node, path: Vec<usize>, under: &str, out: &mut Vec<(Vec<usize>, String)>) {
+        out.push((path.clone(), own_key(under, n)));
+        let below = child_prefix(under, n);
+        for (i, c) in n.children.iter().enumerate() {
+            let mut p = path.clone();
+            p.push(i);
+            go(c, p, &below, out);
+        }
     }
-    parts.join(".")
+    let mut out = Vec::new();
+    for (i, n) in roots.iter().enumerate() {
+        go(n, vec![i], "", &mut out);
+    }
+    out
+}
+
+/// A node's key under its parent's: the dotted name, or for a section,
+/// the parent's key marked with the section's name.
+fn own_key(under: &str, n: &Node) -> String {
+    match (under.is_empty(), n.section) {
+        (_, true) => format!("{under}#{}", n.name),
+        (true, false) => n.name.clone(),
+        (false, false) => format!("{under}.{}", n.name),
+    }
+}
+
+/// The key a node's children are named under: a section passes its
+/// parent's through.
+fn child_prefix(under: &str, n: &Node) -> String {
+    if n.section { under.to_string() } else { own_key(under, n) }
+}
+
+/// The dotted key of the node at `path`. A section adds nothing to the keys
+/// below it.
+pub fn key(roots: &[Node], path: &[usize]) -> String {
+    let mut n = &roots[path[0]];
+    let mut under = String::new();
+    for &i in &path[1..] {
+        under = child_prefix(&under, n);
+        n = &n.children[i];
+    }
+    own_key(&under, n)
+}
+
+/// Queued actions under the node at `path`. A section holds those of the
+/// rows it gathers, whose keys do not carry its name.
+pub fn queued_under(roots: &[Node], path: &[usize], queue: &Queue) -> usize {
+    let n = get(roots, path);
+    if !n.section {
+        return queue.under(&key(roots, path));
+    }
+    (0..n.children.len())
+        .map(|i| {
+            let mut p = path.to_vec();
+            p.push(i);
+            queued_under(roots, &p, queue)
+        })
+        .sum()
+}
+
+/// The node at `path` as the panes name it: its key, with a section named
+/// after its parent's key.
+pub fn label(roots: &[Node], path: &[usize]) -> String {
+    key(roots, path).replace('#', " · ")
 }
 
 /// Rows to draw. With a filter, every node whose key contains it is shown
@@ -510,7 +608,7 @@ fn walk(n: &Node, path: Vec<usize>, key: &str, f: &str, out: &mut Vec<Row>) -> b
     for (i, c) in n.children.iter().enumerate() {
         let mut p = path.clone();
         p.push(i);
-        let ck = format!("{key}.{}", c.name.to_lowercase());
+        let ck = if c.section { key.to_string() } else { format!("{key}.{}", c.name.to_lowercase()) };
         any |= walk(c, p, &ck, f, out);
     }
     if any || key.contains(f) {
@@ -536,7 +634,7 @@ pub fn revert_all(roots: &mut [Node]) {
 pub fn changes(roots: &[Node]) -> Vec<(String, Option<Store>, String, String)> {
     let mut out = Vec::new();
     fn go(n: &Node, prefix: &str, out: &mut Vec<(String, Option<Store>, String, String)>) {
-        let k = if prefix.is_empty() { n.name.clone() } else { format!("{prefix}.{}", n.name) };
+        let k = child_prefix(prefix, n);
         if let Some(s) = &n.setting {
             if s.changed() {
                 out.push((k.clone(), s.store.clone(), s.loaded.clone(), s.value.clone()));
@@ -565,6 +663,25 @@ mod tests {
                 Node::leaf("scope", "", Setting::new(Kind::Choice(vec!["agent".into()]), "agent", "user")),
             ],
         )]
+    }
+
+    #[test]
+    fn action_keys_come_from_the_label_and_skip_reserved_and_taken_keys() {
+        let acts = |labels: &[&str]| labels.iter().map(|l| Action::new(*l, "true")).collect::<Vec<_>>();
+        // "activate": a and c are reserved, t is free. "add": no lower-case
+        // letter is free, so its upper case. "plan": p.
+        assert_eq!(action_keys(&acts(&["activate", "add", "plan"])), [Some('t'), Some('A'), Some('p')]);
+        // A later action never takes an earlier one's key, nor an explicit one.
+        let mut a = acts(&["rotate", "remove", "check"]);
+        a[2] = a[2].clone().key('k');
+        assert_eq!(action_keys(&a)[..2], [Some('r'), Some('o')]);
+        assert!(key_conflicts(&a).iter().any(|c| c.contains("reserved")), "k is a browse key");
+        // Explicit keys are held first, so only two explicit keys collide.
+        (a[1].key, a[2].key) = (Some('r'), Some('r'));
+        assert!(key_conflicts(&a).iter().any(|c| c.contains("twice")));
+        a[1].key = None;
+        a[2].key = None;
+        assert!(key_conflicts(&a).is_empty());
     }
 
     #[test]

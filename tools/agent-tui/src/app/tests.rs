@@ -943,3 +943,20 @@ fn m_toggles_mouse_capture_and_the_status_line_says_so() {
     keys(&mut app, &[KeyCode::Char('m')]);
     assert!(!app.mouse && screen(&mut app).contains("mouse off"));
 }
+
+#[test]
+fn a_key_outside_the_reserved_set_does_nothing_in_browse_without_actions() {
+    // An action may take any key not in RESERVED_KEYS, so browse mode must
+    // bind none of them: a binding added later is caught here.
+    let tree = || vec![Node::group("t", "", vec![Node::leaf("a", "", Setting::new(Kind::Text, "x", "user")), Node::leaf("b", "", Setting::new(Kind::Text, "y", "user"))]).opened()];
+    for c in (' '..='~').filter(|c| !tree::RESERVED_KEYS.contains(*c)) {
+        let mut app = App::new("t", tree());
+        keys(&mut app, &[KeyCode::Down]);
+        let (cursor, msg) = (app.cursor, app.msg.clone());
+        assert!(app.key(press(KeyCode::Char(c))), "{c:?} quit");
+        assert!(app.roots[0].open, "{c:?} closed the group");
+        assert!(matches!(app.mode, Mode::Browse), "{c:?} left browse mode");
+        assert_eq!((app.cursor, app.tab, app.msg.as_str(), app.show_changes), (cursor, 0, msg.as_str(), false), "{c:?} did something");
+        assert!(tree::changes(&app.roots).is_empty() && app.queue.is_empty(), "{c:?} changed something");
+    }
+}
