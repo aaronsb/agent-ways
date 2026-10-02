@@ -97,7 +97,7 @@ setup: setup-binary
 
 # Try download, fall back to build
 setup-binary:
-	@if bash "$(SRCDIR)download-binary.sh" "$(MODEL_DIR)"; then \
+	@if bash "$(SRCDIR)../scripts/download-prebuilt.sh" way-embed "$(MODEL_DIR)"; then \
 		echo "Pre-built binary installed."; \
 	else \
 		echo "No pre-built binary available, building from source..."; \
@@ -105,7 +105,7 @@ setup-binary:
 	fi
 
 # Force re-download (or rebuild) of the platform binary. Removes the
-# cached install so download-binary.sh's "already installed" early-
+# cached install so download-prebuilt.sh's "already installed" early-
 # return does not skip a refresh after an upstream update.
 rebuild-binary:
 	@rm -f "$(MODEL_DIR)/way-embed"

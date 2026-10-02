@@ -20,7 +20,7 @@ If no pre-built binary exists for your platform, it builds from source automatic
 
 ```bash
 # Download binary + model separately
-bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/way-embed/download-binary.sh
+bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/scripts/download-prebuilt.sh way-embed
 bash ${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways/tools/way-embed/download-model.sh
 
 # Regenerate corpus

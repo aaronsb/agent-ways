@@ -209,7 +209,7 @@ print_projection_stopped() {
 link_path_binaries() {
   mkdir -p "$XDG_BIN"
   local b
-  for b in ways ways-audit ways-mcp ways-agent attend attend-chat; do
+  for b in $(suite_bins); do
     if [[ -e "$APP_DIR/bin/$b" ]]; then
       ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
     fi
@@ -220,6 +220,12 @@ link_path_binaries() {
     rm -f "$XDG_BIN/claude-projects"
   fi
   return 0
+}
+
+# Echo the suite binaries from the app's tools/suite-bins, the list the
+# Makefile builds and links from.
+suite_bins() {
+  awk '/^[a-z]/ { print $1 }' "$APP_DIR/tools/suite-bins"
 }
 
 # Platform triple for messages (linux-x86_64, darwin-arm64, …).

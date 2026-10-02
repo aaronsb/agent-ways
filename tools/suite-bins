@@ -1,0 +1,11 @@
+# The agent-ways suite binaries: what the Makefile builds and links, and what
+# scripts/install.sh puts on PATH. One name per line. Each is a Cargo package
+# built to bin/NAME and released as NAME-v* by .github/workflows/build-NAME.yml.
+# way-embed (C++, tools/way-embed) is not listed: it installs to the cache dir
+# and links into ~/.claude/bin.
+ways
+ways-audit
+ways-mcp
+ways-agent
+attend
+attend-chat
