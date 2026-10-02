@@ -953,7 +953,8 @@ fn a_key_outside_the_reserved_set_does_nothing_in_browse_without_actions() {
         let mut app = App::new("t", tree());
         keys(&mut app, &[KeyCode::Down]);
         let (cursor, msg) = (app.cursor, app.msg.clone());
-        keys(&mut app, &[KeyCode::Char(c)]);
+        assert!(app.key(press(KeyCode::Char(c))), "{c:?} quit");
+        assert!(app.roots[0].open, "{c:?} closed the group");
         assert!(matches!(app.mode, Mode::Browse), "{c:?} left browse mode");
         assert_eq!((app.cursor, app.tab, app.msg.as_str(), app.show_changes), (cursor, 0, msg.as_str(), false), "{c:?} did something");
         assert!(tree::changes(&app.roots).is_empty() && app.queue.is_empty(), "{c:?} changed something");
