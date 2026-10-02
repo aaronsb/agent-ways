@@ -2,14 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// XDG cache directory ($XDG_CACHE_HOME or ~/.cache).
-pub fn xdg_cache_dir() -> PathBuf {
-    let p = std::env::var("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".cache"));
-    normalize_path_sep(&p)
-}
-
 /// Normalize path separators to the OS-native separator.
 ///
 /// On Windows, PathBuf::join stores forward slashes verbatim when the join

@@ -109,31 +109,13 @@ enum Commands {
     },
     /// Diagnose how a query matches ways under the live late-interaction matcher
     /// (ADR-160): peak · share · body-confirm · fired, per candidate — the tool for
-    /// authoring a way against how it actually fires. `--cosine` shows the legacy
-    /// single-vector view (which no longer reflects the fire path).
+    /// authoring a way against how it actually fires.
     Match {
         /// The query string to match
         query: String,
-        /// Path to corpus JSONL (single-vector `--cosine` view only)
-        #[arg(long)]
-        corpus: Option<String>,
-        /// Show the legacy single-vector cosine view instead of late-interaction
-        #[arg(long)]
-        cosine: bool,
         /// Project directory (for project-local ways; default: current)
         #[arg(long)]
         project: Option<String>,
-    },
-    /// Score a query against ways using embedding similarity
-    Embed {
-        /// The query string to match
-        query: String,
-        /// Path to corpus JSONL
-        #[arg(long)]
-        corpus: Option<String>,
-        /// Path to GGUF model file
-        #[arg(long)]
-        model: Option<String>,
     },
     /// Score way-vs-way cosine similarity
     Siblings {
@@ -827,14 +809,7 @@ fn run() -> Result<()> {
         Commands::Lint { path, schema, check, fix, all, global } => cmd::lint::run(path, schema, check, fix, all, global),
         Commands::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
-        Commands::Match { query, corpus, cosine, project } => {
-            if cosine {
-                cmd::match_cmd::run(query, corpus)
-            } else {
-                cmd::match_cmd::run_late(query, project.as_deref())
-            }
-        }
-        Commands::Embed { query, corpus, model } => cmd::embed::run(query, corpus, model),
+        Commands::Match { query, project } => cmd::match_cmd::run_late(query, project.as_deref()),
         Commands::Siblings { id, threshold, corpus, model } => {
             cmd::siblings::run(id, threshold, corpus, model)
         }

@@ -73,11 +73,9 @@ ways match "what's new in claude code recently"
 # cosine, summed share, body-confirm, and whether it fired. When the prompt is too
 # sparse to chunk, it falls back to the single-vector view, as the fire path does.
 
-# The legacy single-vector view: ranked list with per-model cosine similarity.
-ways match --cosine "what's new in claude code recently"
-# On that view the raw cosine is the INPUT to g(s), not a fire cutoff. A way fires
-# when its calibrated probability g(s) clears the global bar τ_s (0.5) on the
-# semantic lane, or τ_k (0.15) on a keyword-gated pattern hit — see engine-reference.md.
+# A way fires when its calibrated probability g(s) clears the global bar τ_s (0.5)
+# on the semantic lane, or τ_k (0.15) on a keyword-gated pattern hit — see
+# engine-reference.md.
 ```
 
 The `/ways-tests` skill wraps this with higher-level operations: scoring all ways against a prompt (and surfacing the calibrated `g(s)` alongside the cosine), analyzing vocabulary gaps, checking for cross-way overlap, and validating frontmatter.

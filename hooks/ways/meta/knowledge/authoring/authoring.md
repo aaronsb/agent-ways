@@ -90,7 +90,6 @@ Use the `ways` CLI and `/ways-tests` to validate matching quality. **Use the bui
 
 - `ways corpus` — rebuild the corpus after editing `description` or `vocabulary`, so scores reflect the edit
 - `ways match "sample prompt"` — the live late-interaction matcher (ADR-160): peak, share, body-confirm, and whether each candidate would fire
-- `ways match --cosine "sample prompt"` — the single-vector view of the alias scores
 - `ways lint <path>` — validate frontmatter and the delivered-size cap
 - `ways suggest <way-file>` — analyze vocabulary gaps
 - `ways siblings <way-id>` — way-vs-way cosine similarity, to find confusers

@@ -507,12 +507,6 @@ pub fn detect_with(lines: &[&str], cfg: DetectConfig) -> Vec<WrappedParagraph> {
     found
 }
 
-/// True if any paragraph is hard-wrapped. The predicate the postcheck and the
-/// lint rule both reduce to.
-pub fn is_wrapped(lines: &[&str]) -> bool {
-    !detect(lines).is_empty()
-}
-
 /// Flatten the paragraphs [`detect`] identifies, leaving everything else
 /// byte-identical.
 ///

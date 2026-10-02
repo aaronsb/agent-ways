@@ -147,26 +147,11 @@ ways scan prompt --query "git commit" --session dummy --project ~/my-project
 
 When the query is too sparse to chunk, or the embedding engine cannot run late interaction, it says so on stderr and prints the single-vector view instead, mirroring the fire path's fail-safe.
 
-`--cosine` prints the legacy single-vector view directly: a table of ways with EN and multilingual cosine scores, ranked by the EN score. Those cosines no longer reflect the fire path; on the fallback path they are mapped through the calibrated logistic `g(s)` and fire when `g(s) ≥ τ_s`. See `../hooks-and-ways/engine-reference.md`. `--corpus <path>` scores a corpus built with `ways corpus --output` and applies to the `--cosine` view only.
+On the fallback path the cosines are mapped through the calibrated logistic `g(s)` and fire when `g(s) ≥ τ_s`. See `../hooks-and-ways/engine-reference.md`.
 
 ```
 ways match "how do I test if a way is working"
 ways match "git commit message format" --project ~/my-project
-ways match --cosine "git commit message format"
-```
-
----
-
-### `ways embed`
-
-**When:** Rarely. It is retained as an alias for `ways match --cosine`.
-
-**Run from:** Anywhere.
-
-**Tells you:** The legacy single-vector view: EN and multilingual cosine scores per way. It applies no keyword matching, and neither does `ways match`. `--corpus <path>` scores another corpus; `--model` is accepted and ignored.
-
-```
-ways embed "security vulnerability scanning"
 ```
 
 ---
@@ -350,7 +335,7 @@ ways tree softwaredev --jaccard
 
 ### `ways corpus`
 
-**When:** After adding or editing ways — the corpus is what `match` and `embed` query. Also run when `ways status` shows the corpus as stale.
+**When:** After adding or editing ways — the corpus is what `match` queries. Also run when `ways status` shows the corpus as stale.
 
 **Run from:** Anywhere. Use `--if-stale` to skip the rebuild if no way files have changed since the last build (safe to add to CI pre-flight).
 

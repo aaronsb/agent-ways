@@ -36,9 +36,8 @@ const LEGACY_CACHE: &str = "claude-ways";
 
 // ---------------------------------------------------------------------------
 // XDG base directories (spec defaults; Windows home handling via `home_dir`).
-// `xdg_cache_dir` already lives in `util`; the other three are defined here so
-// the taxonomy is self-contained. A later step folds `config`'s private copy
-// into this module.
+// Defined here so the taxonomy is self-contained. A later step folds `config`'s
+// private copy into this module.
 // ---------------------------------------------------------------------------
 
 /// Resolve an `$XDG_*` base, treating an empty or relative value as unset.
@@ -153,11 +152,6 @@ pub fn core_ways_root() -> PathBuf {
 /// Shipped binaries: `$XDG_DATA/agent-ways/bin`.
 pub fn bin_root() -> PathBuf {
     data_root().join("bin")
-}
-
-/// The lint frontmatter schema shipped with the app.
-pub fn frontmatter_schema() -> PathBuf {
-    core_ways_root().join("frontmatter-schema.yaml")
 }
 
 // --- user ($XDG_CONFIG) ---
