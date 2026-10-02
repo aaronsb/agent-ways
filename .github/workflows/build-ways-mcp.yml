@@ -6,6 +6,7 @@ on:
     tags: ['ways-mcp-v*']
     paths:
       - 'tools/ways-mcp/**'
+      - 'tools/agent-settings/**'
       - 'tools/attend-presence/**'
       - 'tools/claude-sessions/**'
       - 'tools/Cargo.toml'
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'tools/ways-mcp/**'
+      - 'tools/agent-settings/**'
       - 'tools/attend-presence/**'
       - 'tools/claude-sessions/**'
       - 'tools/Cargo.toml'

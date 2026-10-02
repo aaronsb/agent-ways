@@ -313,6 +313,7 @@ version = "0.1.0"
 name = "attend-groups"
 version = "0.1.0"
 dependencies = [
+ "agent-settings",
  "attend-presence",
  "claude-sessions",
 ]
@@ -321,11 +322,12 @@ dependencies = [
 name = "attend-instances"
 version = "0.1.0"
 dependencies = [
+ "agent-fmt",
  "agent-identity",
+ "agent-settings",
  "agent-theme",
  "attend-presence",
  "claude-sessions",
- "libc",
 ]
 
 [[package]]

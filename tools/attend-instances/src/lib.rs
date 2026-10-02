@@ -61,13 +61,12 @@
 pub mod view;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use agent_settings::writer::Lock;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-#[cfg(unix)]
-use std::os::unix::io::AsRawFd;
 
 /// Default age past which an entry's slot is reclaimable. ADR-129
 /// settled on 7 days as the trade between registry growth and resume
@@ -115,18 +114,6 @@ impl Registry {
         self.base_dir.join(format!("{}.yaml", claude_sessions::attend_key(cwd)))
     }
 
-    /// Path to the sentinel lockfile for a cwd. The data file gets
-    /// atomically renamed during commit; flock state lives on the
-    /// open-file-description (i.e. inode), not the path, so a lock
-    /// taken on the data file before the rename does not contend
-    /// with a fresh opener of the path after the rename. The
-    /// lockfile is never renamed — it stays on the same inode for
-    /// the life of the registry, so flock() against it serializes
-    /// concurrent registers correctly across processes and threads.
-    fn lock_path(&self, cwd: &str) -> PathBuf {
-        self.base_dir.join(format!("{}.yaml.lock", claude_sessions::attend_key(cwd)))
-    }
-
     /// Look up the instance assigned to `session_id` in `cwd`. Read
     /// only — no allocation, no GC, no write. Returns `None` when
     /// the registry file is absent or the session has no entry.
@@ -157,7 +144,7 @@ impl Registry {
     /// A crash between read and write leaves only the previous
     /// committed state on disk; the rename is atomic.
     pub fn register(&self, cwd: &str, session_id: &str) -> io::Result<String> {
-        self.register_with_age(cwd, session_id, DEFAULT_GC_AGE, now_secs())
+        self.register_with_age(cwd, session_id, DEFAULT_GC_AGE, agent_fmt::when::now_secs())
     }
 
     /// Same as [`register`] but with explicit GC age + clock — exposed
@@ -171,7 +158,6 @@ impl Registry {
     ) -> io::Result<String> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
-        let lock_path = self.lock_path(cwd);
 
         // Sentinel lockfile (PR #77 review fix). The data file is
         // atomically renamed during commit; locking it before the
@@ -182,12 +168,7 @@ impl Registry {
         //
         // Lock the never-renamed sentinel instead. Held until the
         // File is dropped at the end of this function.
-        let lock_file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)?;
-        acquire_exclusive(&lock_file)?;
+        let lock_file = Lock::acquire_kept(&path)?;
 
         // Read current state. Safe under the lock — no other
         // register/touch on this cwd can be mid-write.
@@ -246,13 +227,12 @@ impl Registry {
     pub fn rename(&self, cwd: &str, old: &str, new: &str) -> io::Result<Option<String>> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
-        let lock_file = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.lock_path(cwd))?;
-        acquire_exclusive(&lock_file)?;
+        let _lock = Lock::acquire_kept(&path)?;
         let mut map = parse_registry(&fs::read_to_string(&path).unwrap_or_default());
         let Some(mut entry) = map.remove(old) else {
             return Ok(map.get(new).map(|e| e.instance.clone()));
         };
-        entry.last_seen = now_secs();
+        entry.last_seen = agent_fmt::when::now_secs();
         let instance = map.entry(new.to_string()).or_insert(entry).instance.clone();
         write_registry(&path, &map)?;
         Ok(Some(instance))
@@ -279,18 +259,9 @@ impl Registry {
             if !content.contains(session_id) {
                 continue;
             }
-            let lock_path = path.with_extension("yaml.lock");
-            let Ok(lock_file) = fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(&lock_path)
-            else {
+            let Ok(_lock) = Lock::acquire_kept(&path) else {
                 continue;
             };
-            if acquire_exclusive(&lock_file).is_err() {
-                continue;
-            }
             // Re-read under the lock; the pre-check above was only a
             // cheap filter.
             let content = fs::read_to_string(&path).unwrap_or_default();
@@ -306,7 +277,7 @@ impl Registry {
     /// a full register call; intended for periodic touches that keep
     /// the GC clock from expiring an active session.
     pub fn touch(&self, cwd: &str, session_id: &str) -> io::Result<()> {
-        self.touch_at(cwd, session_id, now_secs())
+        self.touch_at(cwd, session_id, agent_fmt::when::now_secs())
     }
 
     /// Test seam for [`touch`].
@@ -319,13 +290,7 @@ impl Registry {
         // (PR #77 review fix). flock() against the data file would
         // not serialize correctly with concurrent registers, since
         // the data file is renamed under us during commit.
-        let lock_path = self.lock_path(cwd);
-        let lock_file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)?;
-        acquire_exclusive(&lock_file)?;
+        let _lock = Lock::acquire_kept(&path)?;
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut map = parse_registry(&content);
         let Some(entry) = map.get_mut(session_id) else {
@@ -427,31 +392,6 @@ fn next_free_instance(taken: &std::collections::HashSet<&str>) -> String {
         }
         n += 1;
     }
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-#[cfg(unix)]
-fn acquire_exclusive(file: &fs::File) -> io::Result<()> {
-    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(unix))]
-fn acquire_exclusive(_file: &fs::File) -> io::Result<()> {
-    // No flock on non-Unix platforms — best-effort, accept the race.
-    // attend's targets are Unix today; this branch exists for clean
-    // cross-compile only.
-    Ok(())
 }
 
 // ── YAML parser / serializer ──────────────────────────────────────
@@ -558,11 +498,7 @@ fn write_registry(path: &Path, map: &BTreeMap<String, InstanceEntry>) -> io::Res
     // is the only writer at any moment, so no locked-rename dance is
     // needed — the rename target's flock state is irrelevant on
     // Linux (locks are on open-file-descriptions, not paths).
-    let content = serialize_registry(map);
-    let tmp = path.with_extension("yaml.tmp");
-    fs::write(&tmp, &content)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    agent_settings::writer::write_atomic(path, serialize_registry(map))
 }
 
 #[cfg(test)]
@@ -577,7 +513,7 @@ mod tests {
             "attend-instances-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ))
@@ -797,7 +733,7 @@ sess-a:
         with_registry(|reg| {
             fs::create_dir_all(&reg.base_dir).unwrap();
             let old = reg.base_dir.join("-srv-a b.yaml");
-            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: now_secs() };
+            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: agent_fmt::when::now_secs() };
             write_registry(&old, &BTreeMap::from([("sess-a".to_string(), entry)])).unwrap();
             assert_eq!(reg.lookup("/srv/a b", "sess-a"), None);
             reg.touch_at("/srv/a b", "sess-a", 500).unwrap();

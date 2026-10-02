@@ -480,22 +480,10 @@ impl Groups {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
         }
-        let content = serialize_groups_yaml(state);
-        // Per-writer tmp name. A shared `_groups.yaml.tmp` would let two
-        // concurrent writers (multiple attend sessions + a chat instance)
-        // interleave truncate-writes into the same file and publish a
-        // torn hybrid via rename — worse than either writer's state,
-        // and the line parser would round-trip the garbage as truth.
-        // With unique tmps the failure mode collapses to plain
-        // last-writer-wins on the rename, which callers already accept.
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let tmp = path.with_extension(format!("yaml.{}-{}.tmp", std::process::id(), nanos));
-        if fs::write(&tmp, &content).is_ok() {
-            fs::rename(&tmp, &path).ok();
-        }
+        // Atomic, through a temporary file unique to the writer: two
+        // concurrent writers (attend sessions, a chat instance) end in plain
+        // last-writer-wins on the rename, never a torn hybrid.
+        agent_settings::writer::write_atomic(&path, serialize_groups_yaml(state)).ok();
     }
 }
 

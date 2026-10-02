@@ -90,16 +90,11 @@ pub(super) fn build_engagement(cfg: &config::Config) -> sensor_trait::Curve {
     }
 }
 
-/// Hash a file's contents with the std default hasher. Returns `None`
-/// if the file can't be read. Used as the binary-identity check on the
-/// self-reload path — cheap, no external dep, and only invoked when the
-/// mtime has already moved (a rare event).
+/// Hash a file's contents (FNV-1a, stable across Rust releases). Returns
+/// `None` if the file can't be read. Used as the binary-identity check on
+/// the self-reload path, only invoked when the mtime has already moved.
 fn hash_file(path: &Path) -> Option<u64> {
-    use std::hash::{Hash, Hasher};
-    let bytes = std::fs::read(path).ok()?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Some(hasher.finish())
+    Some(agent_identity::identity::fnv1a_64(&std::fs::read(path).ok()?))
 }
 
 /// Capture the running binary's content hash at startup, paired with its
