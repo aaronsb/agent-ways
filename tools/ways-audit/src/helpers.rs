@@ -11,14 +11,7 @@ pub fn obj_len(v: &Value) -> usize {
 }
 
 pub fn cutoff_date(days: u32) -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let cutoff_secs = secs.saturating_sub(days as u64 * 86400);
-    let days_since = cutoff_secs / 86400;
-    let (y, m, d) = ways_core::util::days_to_ymd(days_since);
-    format!("{y:04}-{m:02}-{d:02}")
+    agent_fmt::when::utc_date(agent_fmt::when::now_secs().saturating_sub(days as u64 * 86400))
 }
 
 pub fn find_stale_ways(manifest: &Value, days: u32) -> Vec<String> {
@@ -68,23 +61,7 @@ pub fn find_incomplete(manifest: &Value) -> Vec<String> {
 
 /// Detect project-local ways directory from CLAUDE_PROJECT_DIR or cwd.
 pub fn detect_project_ways() -> Option<String> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .or_else(|| {
-            let cwd = std::env::current_dir().ok()?;
-            let mut dir = cwd.as_path();
-            loop {
-                let claude_dir = dir.join(".claude");
-                if claude_dir.is_dir()
-                    && (claude_dir.join("settings.json").exists()
-                        || dir.join("CLAUDE.md").exists()
-                        || claude_dir.join("settings.local.json").exists())
-                {
-                    return Some(dir.to_string_lossy().to_string());
-                }
-                dir = dir.parent()?;
-            }
-        })?;
+    let project_dir = ways_core::util::project_root()?;
 
     let project_ways = std::path::PathBuf::from(&project_dir).join(".claude/ways");
     if project_ways.is_dir() {

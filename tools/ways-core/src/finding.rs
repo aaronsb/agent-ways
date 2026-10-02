@@ -105,7 +105,7 @@ fn index_firing(events: &[Value]) -> BTreeMap<String, WayFiring> {
 ///
 /// One row per (claimed way, control). The determination and its provenance are
 /// left empty — assembly never labels (ADR-201 §1). `assembled_at` is injected so
-/// this stays a pure function (the binary supplies `util::now_utc()`).
+/// this stays a pure function (the binary supplies `agent_fmt::when::now_utc_iso()`).
 pub fn assemble(manifest: &Value, events: &[Value], assembled_at: &str) -> Vec<Finding> {
     let firing = index_firing(events);
     let mut findings = Vec::new();

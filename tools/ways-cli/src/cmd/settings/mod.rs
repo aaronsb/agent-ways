@@ -58,13 +58,7 @@ pub fn registry() -> Registry {
 pub(super) fn project_dir(opt: Option<&Path>) -> PathBuf {
     match opt {
         Some(p) => p.to_path_buf(),
-        None => PathBuf::from(
-            std::env::var("CLAUDE_PROJECT_DIR")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .or_else(|| std::env::var("PWD").ok())
-                .unwrap_or_else(|| ".".into()),
-        ),
+        None => PathBuf::from(crate::util::project_dir()),
     }
 }
 

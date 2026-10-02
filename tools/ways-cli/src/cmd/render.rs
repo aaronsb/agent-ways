@@ -244,7 +244,7 @@ pub fn write_way_row_with<W: WayRow>(
     };
 
     // Pad re-disclosure to fixed visible width (ANSI-aware)
-    let next_padded = crate::cmd::compositor::pad_visible(&next, RD_W);
+    let next_padded = agent_fmt::pad_visible(&next, RD_W);
 
     let g = " ".repeat(COL_GAP);
     let cells = format!(
@@ -558,7 +558,7 @@ pub fn fmt_epoch(n: u64) -> String {
     }
 }
 
-// ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `cmd::compositor`
+// ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `agent_fmt`
 // — the canonical home — so `render`, `rethink`, and the compositor share one copy.
 
 #[cfg(test)]

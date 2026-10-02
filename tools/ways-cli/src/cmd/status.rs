@@ -3,15 +3,14 @@
 
 use anyhow::Result;
 use serde_json::json;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::path::Path;
 
 pub fn run(json_output: bool) -> Result<()> {
     let xdg_cache = crate::paths::corpus_dir();
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
     // Engine detection
-    let way_embed = find_way_embed(&xdg_cache);
-    let model_path = xdg_cache.join("minilm-l6-v2.gguf");
+    let way_embed = crate::paths::way_embed_in(&xdg_cache);
+    let model_path = xdg_cache.join(crate::paths::EN_MODEL);
     let corpus_path = xdg_cache.join("ways-corpus.jsonl");
     let manifest_path = xdg_cache.join("embed-manifest.json");
 
@@ -211,7 +210,7 @@ pub fn run(json_output: bool) -> Result<()> {
         // Dual corpus status
         let en_corpus = xdg_cache.join("ways-corpus-en.jsonl");
         let multi_corpus = xdg_cache.join("ways-corpus-multi.jsonl");
-        let multi_model_path = xdg_cache.join("multilingual-minilm-l12-v2-q8.gguf");
+        let multi_model_path = xdg_cache.join(crate::paths::MULTI_MODEL);
         let en_count = if en_corpus.is_file() { count_lines(&en_corpus) } else { 0 };
         let multi_count = if multi_corpus.is_file() { count_lines(&multi_corpus) } else { 0 };
         if en_count > 0 || multi_count > 0 {
@@ -276,51 +275,28 @@ pub fn run(json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn find_way_embed(xdg_cache: &Path) -> Option<PathBuf> {
-    let cache = xdg_cache.join("way-embed");
-    if cache.is_file() {
-        return Some(cache);
-    }
-    let bin = home_dir().join(".claude/bin/way-embed");
-    if bin.is_file() {
-        return Some(bin);
-    }
-    None
-}
-
 fn count_ways(dir: &Path) -> (usize, usize) {
     let mut total = 0;
     let mut semantic = 0;
 
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.contains(".check.") {
-            continue;
-        }
-
-        let content = match std::fs::read_to_string(path) {
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+        let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        if !crate::util::has_frontmatter(&content) {
+        if !crate::frontmatter::opens_with_fence(&content) {
             continue;
         }
 
         total += 1;
 
-        // Check for description + vocabulary (semantic way)
-        let has_desc = content.lines().any(|l| l.starts_with("description:"));
-        let has_vocab = content.lines().any(|l| l.starts_with("vocabulary:"));
-        if has_desc && has_vocab {
-            semantic += 1;
+        // Semantic way: description + vocabulary in its frontmatter (a body
+        // line never counts).
+        if let Some((fm, _)) = crate::frontmatter::split(&content) {
+            let has = |f: &str| fm.lines().any(|l| l.starts_with(f));
+            if has("description:") && has("vocabulary:") {
+                semantic += 1;
+            }
         }
     }
 
@@ -338,8 +314,7 @@ use crate::util::home_dir;
 /// The install state (ADR-184 item 1): installed and inactive, or active with
 /// the targets and their converged state.
 fn install_targets() -> (Vec<crate::config::Target>, bool) {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     let cfg = crate::config::Config::load(&project_dir);
     (cfg.targets(), cfg.targets_explicit())
 }
@@ -394,11 +369,7 @@ fn mcp_binary_line() -> String {
 
 /// Findings in the live settings files: ways' and the agent's.
 fn settings_findings() -> Vec<String> {
-    let project = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("PWD").ok())
-        .unwrap_or_else(|| ".".into());
+    let project = crate::util::project_dir();
     let mut layers = ways_core::settings::layers(std::path::Path::new(&project));
     layers.extend(ways_agent_core::settings::layers());
     layers.iter().filter(|l| l.present).flat_map(|l| l.findings.iter().map(|f| f.to_string())).collect()

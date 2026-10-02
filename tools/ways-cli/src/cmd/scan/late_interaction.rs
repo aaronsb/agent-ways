@@ -39,7 +39,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::reduce::split_sentences;
-use super::scoring::find_way_embed;
 
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
@@ -130,10 +129,10 @@ pub(crate) fn run_diagnostic(
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
 ) -> Option<Vec<DiagRow>> {
-    let bin = find_way_embed()?;
+    let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
-    let model = xdg.join("minilm-l6-v2.gguf");
+    let model = xdg.join(crate::paths::EN_MODEL);
     if !corpus.is_file() || !model.is_file() {
         return None;
     }
@@ -169,10 +168,10 @@ pub(crate) fn run_diagnostic(
 /// caller then falls back to the single-vector semantic gate.
 pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Verdicts> {
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
-    let bin = find_way_embed()?;
+    let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
-    let model = xdg.join("minilm-l6-v2.gguf");
+    let model = xdg.join(crate::paths::EN_MODEL);
     if !corpus.is_file() || !model.is_file() {
         if dbg { eprintln!("LI: corpus/model missing → fallback"); }
         return None;
@@ -378,22 +377,16 @@ fn body_confirm(bin: &Path, model: &Path, surface: &[String], body_path: &Path) 
 /// Chunk a way's `.md` body for confirmation: drop YAML frontmatter and fenced
 /// code, then sentence-split the prose and cap the count.
 fn chunk_body(content: &str) -> Vec<String> {
+    // An unclosed frontmatter block is not body: nothing after its fence is prose.
+    let body = if crate::frontmatter::opens_with_fence(content) {
+        crate::frontmatter::split(content).map_or("", |(_, body)| body)
+    } else {
+        content
+    };
     let mut prose = String::new();
-    let mut in_frontmatter = false;
     let mut in_fence = false;
-    for (i, line) in content.lines().enumerate() {
+    for line in body.lines() {
         let t = line.trim_start();
-        // A leading `---` on line 0 opens a frontmatter block.
-        if i == 0 && t == "---" {
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            if t == "---" {
-                in_frontmatter = false;
-            }
-            continue;
-        }
         if t.starts_with("```") {
             in_fence = !in_fence;
             continue;
@@ -464,6 +457,26 @@ mod tests {
         assert!(chunks.iter().all(|c| !c.contains("code not prose")), "{chunks:?}");
         assert!(chunks.iter().any(|c| c.contains("real guidance")));
         assert!(chunks.iter().any(|c| c.contains("genuine sentence")));
+    }
+
+    /// The frontmatter closes only on a bare `---` line ([`crate::frontmatter::split`]).
+    /// The old chunker trimmed the line first, so an indented `  ---` inside the
+    /// YAML closed the block early and the rest of the YAML was read as prose.
+    #[test]
+    fn chunk_body_closes_frontmatter_only_on_a_bare_fence() {
+        let body = "---\nvocabulary: a\n  ---\nleaked: yaml value that is long enough\n---\nThis is the real guidance sentence.\n";
+        let chunks = chunk_body(body);
+        assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
+        assert!(chunks.iter().any(|c| c.contains("real guidance")));
+    }
+
+    /// An unclosed frontmatter block is not body: nothing after its opening
+    /// fence is read as prose, the rule `frontmatter::split` holds elsewhere.
+    #[test]
+    fn chunk_body_reads_nothing_after_an_unclosed_fence() {
+        let body = "---\nvocabulary: leaked yaml words that are long enough\nmore leaked yaml text here.\n";
+        let chunks = chunk_body(body);
+        assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
     }
 
     #[test]

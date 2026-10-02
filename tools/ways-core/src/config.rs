@@ -14,8 +14,7 @@ use agent_settings::LayerScope;
 /// Global config, loaded once on first access.
 /// Access via `config::global()` — grep-friendly for future context refactor.
 static GLOBAL: LazyLock<Config> = LazyLock::new(|| {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     Config::load(&project_dir)
 });
 

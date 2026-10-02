@@ -10,6 +10,7 @@ name = "ways_core"
 path = "src/lib.rs"
 
 [dependencies]
+agent-fmt = { path = "../agent-fmt" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = { version = "1", features = ["preserve_order"] }

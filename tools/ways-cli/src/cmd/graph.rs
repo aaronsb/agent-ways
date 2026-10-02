@@ -59,11 +59,6 @@ pub fn run(ways_dir: Option<String>, output: Option<String>) -> Result<()> {
 }
 
 fn default_ways_dir() -> PathBuf {
-    dirs_next().join("hooks/ways")
+    crate::paths::projected_ways_root()
 }
 
-fn dirs_next() -> PathBuf {
-    home_dir().join(".claude")
-}
-
-use crate::util::home_dir;

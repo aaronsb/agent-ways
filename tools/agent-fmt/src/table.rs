@@ -9,6 +9,8 @@
 //! Terminal width is auto-detected via ioctl (Unix) or $COLUMNS.
 //! The last column auto-sizes to fill available width.
 
+use crate::width::{truncate_visible, visible_len};
+
 /// Column alignment.
 #[derive(Clone, Copy)]
 pub enum Align {
@@ -216,66 +218,6 @@ impl Table {
     }
 }
 
-/// Measure the visible length of a string (ignoring ANSI escape codes).
-fn visible_len(s: &str) -> usize {
-    let mut len = 0;
-    let mut in_escape = false;
-    for c in s.chars() {
-        if in_escape {
-            if c == 'm' {
-                in_escape = false;
-            }
-        } else if c == '\x1b' {
-            in_escape = true;
-        } else {
-            len += 1;
-        }
-    }
-    len
-}
-
-/// Truncate a string to a visible width, adding ellipsis if needed.
-/// Preserves ANSI codes (doesn't count them toward width).
-pub fn truncate_visible(s: &str, max: usize) -> String {
-    let vlen = visible_len(s);
-    if vlen <= max {
-        return s.to_string();
-    }
-    if max <= 1 {
-        return "…".to_string();
-    }
-
-    let target = max - 1; // room for ellipsis
-    let mut result = String::new();
-    let mut visible = 0;
-    let mut in_escape = false;
-
-    for c in s.chars() {
-        if in_escape {
-            result.push(c);
-            if c == 'm' {
-                in_escape = false;
-            }
-        } else if c == '\x1b' {
-            in_escape = true;
-            result.push(c);
-        } else {
-            if visible >= target {
-                break;
-            }
-            result.push(c);
-            visible += 1;
-        }
-    }
-    result.push('…');
-    // Close any open ANSI sequence. Text with none gets no reset, so plain
-    // output stays free of escapes.
-    if result.contains('\x1b') {
-        result.push_str(agent_theme::RESET);
-    }
-    result
-}
-
 /// Pad a cell to a width with the given alignment.
 fn pad_cell(s: &str, width: usize, align: Align) -> String {
     let vlen = visible_len(s);
@@ -286,25 +228,5 @@ fn pad_cell(s: &str, width: usize, align: Align) -> String {
     match align {
         Align::Left => format!("{s}{}", " ".repeat(padding)),
         Align::Right => format!("{}{s}", " ".repeat(padding)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::truncate_visible;
-    use agent_theme::{ColorDepth, Painter, Role, RESET};
-
-    #[test]
-    fn plain_text_truncates_without_escapes() {
-        let t = truncate_visible("softwaredev/freshness", 6);
-        assert_eq!(t, "softw…");
-        assert!(!t.contains('\x1b'));
-    }
-
-    #[test]
-    fn styled_text_truncated_mid_style_is_sealed() {
-        let red = Painter::terminal(ColorDepth::TrueColor).paint(Role::Err, "abcdef");
-        let t = truncate_visible(&red, 4);
-        assert!(t.ends_with(&format!("…{RESET}")), "{t:?}");
     }
 }

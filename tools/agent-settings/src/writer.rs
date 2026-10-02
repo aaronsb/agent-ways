@@ -66,19 +66,51 @@ pub fn lock_path(target: &Path) -> PathBuf {
 pub struct Lock {
     path: PathBuf,
     file: Option<File>,
+    /// Leave the lock file in place on release ([`Lock::acquire_kept`]).
+    keep: bool,
 }
 
 impl Lock {
+    /// Take the lock on `target`, waiting while another holder has it.
     pub fn acquire(target: &Path) -> io::Result<Lock> {
+        Self::take(target, true).map(|l| l.expect("a blocking take always locks"))
+    }
+
+    /// Take the lock on `target`, waiting, and leave the lock file in place
+    /// when released. For a lock that older binaries also take with a plain
+    /// open and lock and never unlink: with the file never removed, every
+    /// holder locks the same inode, so a waiter from either side cannot end up
+    /// on an unlinked file beside a newer holder. The file stays behind.
+    pub fn acquire_kept(target: &Path) -> io::Result<Lock> {
+        let mut lock = Self::acquire(target)?;
+        lock.keep = true;
+        Ok(lock)
+    }
+
+    /// Take the lock on `target` if it is free: `Ok(None)` while another
+    /// holder has it. For a single-instance guard held for a process's life.
+    pub fn try_acquire(target: &Path) -> io::Result<Option<Lock>> {
+        Self::take(target, false)
+    }
+
+    fn take(target: &Path, wait: bool) -> io::Result<Option<Lock>> {
         let path = lock_path(target);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         loop {
             let file = open_lock_file(&path)?;
-            file.lock()?;
+            if wait {
+                file.lock()?;
+            } else {
+                match file.try_lock() {
+                    Ok(()) => {}
+                    Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+                    Err(std::fs::TryLockError::Error(e)) => return Err(e),
+                }
+            }
             if same_file(&file, &path) {
-                return Ok(Lock { path, file: Some(file) });
+                return Ok(Some(Lock { path, file: Some(file), keep: false }));
             }
         }
     }
@@ -129,6 +161,10 @@ fn same_file(_file: &File, _path: &Path) -> bool {
 
 impl Drop for Lock {
     fn drop(&mut self) {
+        if self.keep {
+            drop(self.file.take());
+            return;
+        }
         #[cfg(unix)]
         {
             // Unlinked while held; the OS lock goes with the handle after.
@@ -177,7 +213,7 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 /// permissions of the file it replaces and is synced to disk before the
 /// rename. Its name is unique to the process and the call; it is removed when
 /// the write fails. `path` is written as given: callers resolve links first.
-pub fn write_atomic(path: &Path, body: &str) -> io::Result<()> {
+pub fn write_atomic(path: &Path, body: impl AsRef<[u8]>) -> io::Result<()> {
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
         _ => PathBuf::from("."),
@@ -191,7 +227,7 @@ pub fn write_atomic(path: &Path, body: &str) -> io::Result<()> {
         if let Some(p) = perms {
             f.set_permissions(p)?;
         }
-        io::Write::write_all(&mut f, body.as_bytes())?;
+        io::Write::write_all(&mut f, body.as_ref())?;
         f.sync_all()?;
         drop(f);
         std::fs::rename(&tmp, path)?;
@@ -232,7 +268,7 @@ pub fn edit_file<T>(
         return Ok((out, false));
     }
     doc.verify().map_err(|e| WriteError::Edit(path.to_path_buf(), e))?;
-    write_atomic(path, &doc.text()).map_err(|e| WriteError::Write(path.to_path_buf(), e))?;
+    write_atomic(path, doc.text()).map_err(|e| WriteError::Write(path.to_path_buf(), e))?;
     Ok((out, true))
 }
 
@@ -251,6 +287,36 @@ pub fn create_new(path: &Path, body: &str) -> Result<bool, WriteError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A kept lock leaves its file in place on release, so a holder that never
+    /// unlinks (an older binary) and a newer one always lock the same inode.
+    #[test]
+    fn a_kept_lock_leaves_its_file_on_release() {
+        let d = tmp("kept-lock");
+        let target = d.join("way");
+        drop(Lock::acquire_kept(&target).unwrap());
+        assert!(lock_path(&target).is_file(), "the kept lock file stays");
+        drop(Lock::acquire_kept(&target).unwrap());
+        assert!(lock_path(&target).is_file());
+    }
+
+    #[test]
+    fn try_acquire_refuses_while_held_and_frees_on_drop() {
+        let d = tmp("try-lock");
+        let target = d.join("agent");
+        let held = Lock::try_acquire(&target).unwrap().expect("free lock");
+        assert!(Lock::try_acquire(&target).unwrap().is_none(), "second holder refused");
+        drop(held);
+        assert!(Lock::try_acquire(&target).unwrap().is_some(), "free again after drop");
+    }
+
+    #[test]
+    fn write_atomic_takes_bytes() {
+        let d = tmp("bytes");
+        let p = d.join("log.jsonl");
+        write_atomic(&p, b"{}\n".as_slice()).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{}\n");
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("agent-settings-{name}-{}", std::process::id()));

@@ -6,6 +6,8 @@ description = "What the ways agent and its clients share: engine profiles and th
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+agent-fmt = { path = "../agent-fmt" }
+agent-identity = { path = "../agent-identity" }
 anyhow = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

@@ -71,27 +71,10 @@ fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
 #[cfg(feature = "tui")]
 fn read_way_body(path: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    let mut lines = content.lines();
-    if lines.next() != Some("---") {
-        return Some(content); // no opening fence — treat all as body
+    match ways_core::frontmatter::split(&content) {
+        Some((_, body)) => Some(body.to_string()),
+        None => Some(content),
     }
-    let mut in_frontmatter = true;
-    let mut body = String::new();
-    for line in lines {
-        if in_frontmatter {
-            if line == "---" {
-                in_frontmatter = false; // consume the closing fence line
-            }
-            continue;
-        }
-        body.push_str(line);
-        body.push('\n');
-    }
-    // Unterminated frontmatter (no closing fence) → don't drop the whole file.
-    if in_frontmatter {
-        return Some(content);
-    }
-    Some(body)
 }
 
 /// Render the detail panel for one way: its trigger, resolved `MatchCriteria`, the
@@ -158,7 +141,7 @@ fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>, width: usize) -> St
         let _ = writeln!(out);
         let _ = writeln!(out, "{}", paint(Role::Muted, "── way ─────────────"));
         // Render the authored markdown to ANSI rather than dumping raw `#`/`**`/`` ` ``
-        // symbols; the compositor's visible_len ignores the added SGR (super::markdown).
+        // symbols; agent_fmt::visible_len ignores the added SGR (super::markdown).
         for line in super::markdown::render_markdown(&body, width) {
             let _ = writeln!(out, "{line}");
         }
@@ -228,7 +211,7 @@ pub(super) fn render_why(player: &mut Player) -> String {
                 let raw = format!("{bullet} e{:>ew$} {}", w.epoch_fired, w.id, ew = epoch_w);
                 left_lines.push(format!(
                     "  {}",
-                    paint(Role::Selection, compositor::fit_visible(&raw, left_w.saturating_sub(2)))
+                    paint(Role::Selection, agent_fmt::fit_visible(&raw, left_w.saturating_sub(2)))
                 ));
             } else {
                 // Dim the epoch tag so the way id stays prominent.
@@ -276,7 +259,7 @@ pub(super) fn render_why(player: &mut Player) -> String {
     // panels are named the way the Timeline's columns are.
     let labels = format!(
         "{}{}{}",
-        paint(BOLD, compositor::pad_visible("  Way · epoch", left_w)),
+        paint(BOLD, agent_fmt::pad_visible("  Way · epoch", left_w)),
         " ".repeat(gap),
         paint(BOLD, "Why it fired"),
     );

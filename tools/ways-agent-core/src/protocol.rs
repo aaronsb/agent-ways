@@ -115,7 +115,7 @@ pub fn socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("WAYS_AGENT_SOCK").filter(|v| !v.is_empty()) {
         return PathBuf::from(p);
     }
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
+    if let Some(dir) = ways_core::paths::xdg_dir("XDG_RUNTIME_DIR") {
         // A runtime directory others can reach is not used; the per-user
         // directory below is made safe instead.
         if runtime_dir_private(&dir) {

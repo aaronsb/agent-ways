@@ -603,10 +603,7 @@ fn move_aside(p: &Path) -> Result<PathBuf> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "root".to_string());
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = agent_fmt::when::now_secs();
     let stem = format!("{name}.ways-backup-{secs}");
     let mut candidate = p.with_file_name(&stem);
     let mut n = 0u32;

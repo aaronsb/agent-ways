@@ -20,6 +20,14 @@ pub use engagement::{
 
 // ── Session directory ──────────────────────────────────────────
 
+/// `$XDG_RUNTIME_DIR/claude-sessions`, or `None` when the variable is unset or
+/// empty: the `[[ -n "${XDG_RUNTIME_DIR:-}" ]]` test of `sessions-root.sh`.
+/// Not the absolute-path guard of `paths::xdg_dir`, which the shell twin does
+/// not apply (a Windows `C:\…` value would split the two).
+fn runtime_sessions_root(xdg: Option<String>) -> Option<String> {
+    xdg.filter(|x| !x.is_empty()).map(|x| format!("{x}/claude-sessions"))
+}
+
 /// Per-user sessions root.
 ///
 /// Resolution order — **must stay identical to `hooks/ways/sessions-root.sh`**.
@@ -33,8 +41,8 @@ pub use engagement::{
 ///   3. `/tmp/.claude-sessions-{uid}`                 (other Unix)
 pub fn sessions_root() -> String {
     // 1. XDG_RUNTIME_DIR (already per-user, no UID needed) — wins on any platform.
-    if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
-        return format!("{xdg}/claude-sessions");
+    if let Some(root) = runtime_sessions_root(std::env::var("XDG_RUNTIME_DIR").ok()) {
+        return root;
     }
 
     // 2. Windows: per-user LOCALAPPDATA base (matches sessions-root.sh).
@@ -208,8 +216,7 @@ pub fn epoch_distance(way_id: &str, session_id: &str) -> u64 {
 /// Read this session's token position from its transcript: the hook's own
 /// `transcript_path` when it names this session, else the session-id lookup.
 pub fn get_token_position(session_id: &str) -> u64 {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     token_position_in(
         &ways_core::paths::claude_dir(),
         crate::cmd::show::firing_transcript(),
@@ -381,11 +388,7 @@ pub fn get_check_fires(way_id: &str, session_id: &str) -> u64 {
 pub fn stamp_core(session_id: &str) {
     let path = session_dir(session_id).join("core");
     ensure_parent(&path);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let _ = std::fs::write(&path, ts.to_string());
+    let _ = std::fs::write(&path, agent_fmt::when::now_secs().to_string());
 }
 
 pub fn core_is_shown(session_id: &str) -> bool {
@@ -467,7 +470,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
         let _ = std::fs::create_dir_all(stats_dir);
     }
 
-    let ts = chrono_utc_now();
+    let ts = agent_fmt::when::now_utc_iso();
     let mut obj = serde_json::Map::new();
     obj.insert("ts".to_string(), serde_json::Value::String(ts));
     for (k, v) in fields {
@@ -493,10 +496,6 @@ pub fn log_event(fields: &[(&str, &str)]) {
     }
 }
 
-/// Monotonic suffix so repeated compactions in one process never collide on the
-/// temp name (paired with the pid for cross-process uniqueness).
-static COMPACT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// Rewrite `path` in place to retain only its most recent `keep_bytes`, cut at a
 /// line boundary so the first retained line is whole. The new contents are
 /// written to a per-process, per-attempt temp, synced, then atomically renamed
@@ -519,39 +518,9 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<
         None => data.len(), // single huge line / no boundary: drop it all
     };
 
-    // Unique temp: pid (cross-process) + sequence (intra-process) so two
+    // The shared writer's temp is unique per process and call, so two
     // concurrent compactions never write the same file and publish a torn tail.
-    let seq = COMPACT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = path.with_extension(format!("jsonl.compact.{}.{seq}.tmp", std::process::id()));
-    let write_then_rename = || -> std::io::Result<()> {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&data[start..])?;
-        f.sync_all()?; // durable before publish — no zero/partial file on crash
-        std::fs::rename(&tmp, path)
-    };
-    let res = write_then_rename();
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp); // never leave a stray temp behind
-    }
-    res
-}
-
-/// UTC timestamp without chrono dependency.
-fn chrono_utc_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days_since_epoch = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-    let (year, month, day) = crate::util::days_to_ymd(days_since_epoch);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z"
-    )
+    agent_settings::writer::write_atomic(path, &data[start..])
 }
 
 // ── Domain disable check ────────────────────────────────────────
@@ -586,7 +555,7 @@ pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, boo
         return Some((f, false));
     }
 
-    let global_dir = home_dir().join(format!(".claude/hooks/ways/{way_id}"));
+    let global_dir = crate::paths::projected_ways_root().join(way_id);
     if let Some(f) = find_way_in_dir(&global_dir) {
         return Some((f, false));
     }
@@ -606,7 +575,7 @@ pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, b
         return Some((f, false));
     }
 
-    let global_dir = home_dir().join(format!(".claude/hooks/ways/{way_id}"));
+    let global_dir = crate::paths::projected_ways_root().join(way_id);
     if let Some(f) = find_check_in_dir(&global_dir) {
         return Some((f, false));
     }
@@ -629,7 +598,7 @@ fn find_way_in_dir(dir: &Path) -> Option<PathBuf> {
             continue;
         }
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if crate::util::has_frontmatter(&content) {
+            if crate::frontmatter::opens_with_fence(&content) {
                 return Some(path);
             }
         }
@@ -747,7 +716,6 @@ fn read_u64_path(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-use crate::util::home_dir;
 
 // Tests for the ADR-123 engagement cluster (classify_outcome,
 // load_engagement_for_tick, FirstFire → ReFire → Suppressed) live in
@@ -757,6 +725,15 @@ use crate::util::home_dir;
 #[cfg(test)]
 mod token_position_tests {
     use super::*;
+
+    /// An empty XDG_RUNTIME_DIR is unset, as in sessions-root.sh. The binary
+    /// used to resolve it to `/claude-sessions` while the hooks used /tmp.
+    #[test]
+    fn empty_runtime_dir_is_unset_like_the_shell_twin() {
+        assert_eq!(runtime_sessions_root(None), None);
+        assert_eq!(runtime_sessions_root(Some(String::new())), None);
+        assert_eq!(runtime_sessions_root(Some("/run/user/1".into())).as_deref(), Some("/run/user/1/claude-sessions"));
+    }
 
     #[test]
     fn non_ascii_project_paths_find_their_transcript() {

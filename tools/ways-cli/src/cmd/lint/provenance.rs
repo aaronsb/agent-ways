@@ -7,22 +7,15 @@
 
 use anyhow::Result;
 use std::path::Path;
-use walkdir::WalkDir;
 
 pub(super) fn lint_provenance_sidecars(
     dir: &Path,
     ways_dir: &Path,
     errors: &mut u32,
 ) -> Result<()> {
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file()
-            || path.file_name().and_then(|n| n.to_str()) != Some("provenance.yaml")
-        {
+    for path in crate::scanner::files(dir) {
+        let path = path.as_path();
+        if path.file_name().and_then(|n| n.to_str()) != Some("provenance.yaml") {
             continue;
         }
 

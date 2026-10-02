@@ -15,7 +15,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{bail, Context, Result};
 
@@ -39,17 +39,14 @@ pub fn serve(options: Options) -> Result<()> {
     let sock = protocol::socket_path();
     let dir = sock.parent().context("socket path has no parent")?.to_path_buf();
     protocol::secure_dir(&dir).map_err(anyhow::Error::msg)?;
-    let lock_path = sock.with_extension("lock");
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("opening {}", lock_path.display()))?;
-    // SAFETY: flock on a file descriptor we own; LOCK_NB returns at once.
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    // The lock names `<target>.lock`: the socket path without its extension,
+    // so the lock file is the `<sock stem>.lock` an older agent also takes.
+    let lock_target = sock.with_extension("");
+    let Some(lock) = agent_settings::writer::Lock::try_acquire(&lock_target)
+        .with_context(|| format!("locking {}", agent_settings::writer::lock_path(&lock_target).display()))?
+    else {
         return Ok(());
-    }
+    };
     // Holding the lock, a socket left behind is stale. Anything else at the
     // path is not ours to delete.
     match std::fs::symlink_metadata(&sock) {
@@ -257,7 +254,7 @@ impl State {
             started: Instant::now(),
             conns: AtomicUsize::new(0),
             draining: std::sync::atomic::AtomicBool::new(false),
-            last_activity: AtomicU64::new(now_s()),
+            last_activity: AtomicU64::new(agent_fmt::when::now_secs()),
             http: net::agent(Duration::from_secs(60)),
             slots: Mutex::new(0),
             freed: Condvar::new(),
@@ -267,11 +264,11 @@ impl State {
     }
 
     fn touch(&self) {
-        self.last_activity.store(now_s(), Ordering::Relaxed);
+        self.last_activity.store(agent_fmt::when::now_secs(), Ordering::Relaxed);
     }
 
     fn idle_for(&self) -> Duration {
-        Duration::from_secs(now_s().saturating_sub(self.last_activity.load(Ordering::Relaxed)))
+        Duration::from_secs(agent_fmt::when::now_secs().saturating_sub(self.last_activity.load(Ordering::Relaxed)))
     }
 
     fn in_flight(&self) -> usize {
@@ -437,10 +434,6 @@ impl Drop for Slot<'_> {
         *used = used.saturating_sub(1);
         self.0.freed.notify_one();
     }
-}
-
-fn now_s() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Asks a running agent to stop. Ok(false) when none was running.

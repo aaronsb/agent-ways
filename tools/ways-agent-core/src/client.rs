@@ -26,7 +26,7 @@ const START_BACKOFF: Duration = Duration::from_secs(300);
 pub fn agent_binary() -> Option<PathBuf> {
     let name = format!("{BIN}{}", std::env::consts::EXE_SUFFIX);
     let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|d| d.join(&name)));
-    let projected = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude").join("bin").join(&name));
+    let projected = Some(ways_core::paths::projected_bin_root().join(&name));
     let on_path = std::env::var_os("PATH")
         .and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(&name)).find(|p| p.is_file()));
     [beside, projected, on_path].into_iter().flatten().find(|p| p.is_file())

@@ -406,7 +406,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         "way-embed source build",
     ) {
         Ok(()) => {
-            // The engine's find_way_embed() resolves the cache copy
+            // The engine's paths::way_embed() resolves the cache copy
             // ($XDG_CACHE/agent-ways/user/way-embed) BEFORE the projected
             // ~/.claude/bin symlink. A prior release install leaves a cache copy
             // that would shadow this fresh source build — which lands in bin/ and

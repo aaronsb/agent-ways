@@ -9,23 +9,19 @@ use std::collections::{BTreeMap, HashMap};
 pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, global: bool) -> Result<()> {
     // Default to project scope: CLAUDE_PROJECT_DIR > detect from cwd > global
     let detected_project = if !global && project_filter.is_none() {
-        std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(detect_project_dir)
+        crate::util::project_root()
     } else {
         None
     };
     let project_filter = project_filter.or(detected_project.as_deref());
-    let stats_file = crate::paths::events_log();
-
-    if !stats_file.is_file() {
+    if crate::paths::events_log_sources().is_empty() {
         if !json_output {
             println!("No events recorded yet. Stats will appear after ways start firing.");
         }
         return Ok(());
     }
 
-    let content = std::fs::read_to_string(&stats_file)?;
+    let content = ways_core::firing::load_events_text();
     let events = parse_events(&content, days, project_filter);
 
     if json_output {
@@ -69,12 +65,7 @@ const INVOCATION_TAIL: usize = 4;
 
 fn parse_events(content: &str, days: Option<u32>, project_filter: Option<&str>) -> Vec<Event> {
     let cutoff = days.map(|d| {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            - (d as u64 * 86400);
-        format_ts(secs)
+        agent_fmt::when::utc_iso(agent_fmt::when::now_secs() - (d as u64 * 86400))
     });
 
     content
@@ -475,31 +466,6 @@ fn print_human(events: &[Event], days: Option<u32>, project_filter: Option<&str>
     }
 }
 
-fn format_ts(secs: u64) -> String {
-    let days = secs / 86400;
-    let tod = secs % 86400;
-    let (y, m, d) = days_to_ymd(days);
-    let h = tod / 3600;
-    let min = (tod % 3600) / 60;
-    let s = tod % 60;
-    format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}Z")
-}
-
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    let z = days + 719468;
-    let era = z / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
-}
-
-use crate::util::detect_project_dir;
 
 #[cfg(test)]
 mod tests {

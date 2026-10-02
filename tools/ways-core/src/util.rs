@@ -12,17 +12,6 @@ pub fn normalize_path_sep(path: &Path) -> PathBuf {
     path.components().collect()
 }
 
-/// True if `content` opens with a `---` YAML frontmatter delimiter.
-///
-/// Uses `lines()` (which strips a trailing `\r`) so a way authored on Windows
-/// with CRLF endings is recognized. A hard `content.starts_with("---\n")` check
-/// fails on `---\r\n` and silently drops the file — on the scan/resolve path
-/// that means the way never matches or renders. Every frontmatter gate routes
-/// through here so the behavior is uniform across platforms.
-pub fn has_frontmatter(content: &str) -> bool {
-    content.lines().next() == Some("---")
-}
-
 /// Join a path's components with '/' regardless of OS separator.
 ///
 /// Way IDs are a stable, cross-platform namespace: a way at
@@ -34,32 +23,6 @@ pub fn path_to_id(rel: &Path) -> String {
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join("/")
-}
-
-/// Parse an ISO-8601 timestamp (`YYYY-MM-DDThh:mm:ss…`) to approximate epoch
-/// seconds — enough for gap and nearest-neighbour comparisons within a session
-/// (the introspection turn clustering and the transcript join). Calendar-correct
-/// on month/year boundaries (cumulative month days + leap years), so adjacent days
-/// never collide the way a naive `month*30` does. The absolute base is arbitrary;
-/// only differences are meaningful, and both sides route through here.
-pub fn parse_ts_secs(ts: &str) -> u64 {
-    if ts.len() < 19 {
-        return 0;
-    }
-    let field = |a: usize, b: usize| ts.get(a..b).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let (year, month, day) = (field(0, 4), field(5, 7), field(8, 10));
-    let (hour, min, sec) = (field(11, 13), field(14, 16), field(17, 19));
-
-    // Days before the 1st of each month in a non-leap year.
-    const CUM: [u64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let m = (month.clamp(1, 12) - 1) as usize;
-    let leap_days = |y: u64| y / 4 - y / 100 + y / 400; // leap days in years [1, y]
-    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let mut days = year * 365 + leap_days(year.saturating_sub(1)) + CUM[m] + day;
-    if m >= 2 && is_leap {
-        days += 1; // this year's Feb-29 precedes March onward
-    }
-    days * 86_400 + hour * 3_600 + min * 60 + sec
 }
 
 /// Encode a real project path into the namespace key that prefixes
@@ -97,22 +60,71 @@ pub fn encode_project_key(path: &Path) -> String {
         .collect()
 }
 
-/// Home directory from $HOME (or USERPROFILE on Windows), falling back to /tmp.
+/// Home directory, separator-normalised: [`claude_sessions::home_dir`]
+/// (USERPROFILE first on Windows, else $HOME, else /tmp; an empty value is
+/// unset), with its components rebuilt by [`normalize_path_sep`].
 ///
 /// On Windows, $HOME is often set by Git Bash to a Unix-style path like /c/Users/name,
 /// which Rust's PathBuf treats as root-relative (\c\Users\name) rather than C:\Users\name.
-/// USERPROFILE is always the correct Windows absolute path, so we prefer it on Windows.
+/// USERPROFILE is always the correct Windows absolute path, so it comes first there.
 pub fn home_dir() -> PathBuf {
-    let p = {
-        #[cfg(windows)]
-        if let Ok(profile) = std::env::var("USERPROFILE") {
-            return normalize_path_sep(&PathBuf::from(profile));
+    normalize_path_sep(&claude_sessions::home_dir())
+}
+
+/// `CLAUDE_PROJECT_DIR` when it is set and not empty. The one read of that
+/// variable: an empty value (a hook that exported an empty cwd) counts as
+/// unset everywhere.
+pub fn env_project_dir() -> Option<String> {
+    std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|s| !s.is_empty())
+}
+
+/// The directory a command acts on: `CLAUDE_PROJECT_DIR` when set, else
+/// `$PWD` when it names the current directory (bash's rule, which keeps the
+/// logical path through a symlink), else the current directory, else `.`.
+pub fn project_dir() -> String {
+    project_dir_from(
+        env_project_dir(),
+        std::env::var("PWD").ok(),
+        std::env::current_dir().ok(),
+    )
+}
+
+fn project_dir_from(env: Option<String>, pwd: Option<String>, cwd: Option<PathBuf>) -> String {
+    if let Some(env) = env {
+        return env;
+    }
+    let pwd = pwd.filter(|s| !s.is_empty());
+    match (pwd, cwd) {
+        (Some(pwd), Some(cwd)) if same_dir(Path::new(&pwd), &cwd) => pwd,
+        (_, Some(cwd)) => cwd.to_string_lossy().into_owned(),
+        // No current directory to check against: $PWD is all there is.
+        (Some(pwd), None) => pwd,
+        (None, None) => ".".to_string(),
+    }
+}
+
+/// Whether two paths name the same directory: device and inode on Unix,
+/// canonical paths elsewhere.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
         }
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp"))
-    };
-    normalize_path_sep(&p)
+    }
+    #[cfg(not(unix))]
+    {
+        matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    }
+}
+
+/// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
+/// project enclosing the current directory ([`detect_project_dir`]). `None`
+/// outside any project.
+pub fn project_root() -> Option<String> {
+    env_project_dir().or_else(detect_project_dir)
 }
 
 /// Detect the project root by walking up from cwd looking for .claude/settings.json or CLAUDE.md.
@@ -135,7 +147,7 @@ pub fn detect_project_dir() -> Option<String> {
 /// Load excluded path segments from frontmatter-schema.yaml.
 /// Returns empty vec if schema can't be read (non-fatal).
 pub fn load_excluded_segments() -> Vec<String> {
-    let schema_path = home_dir().join(".claude/hooks/ways/frontmatter-schema.yaml");
+    let schema_path = crate::paths::projected_ways_root().join("frontmatter-schema.yaml");
     let content = match std::fs::read_to_string(&schema_path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
@@ -199,62 +211,39 @@ pub fn is_excluded_path(path: &Path, excluded_segments: &[String]) -> bool {
     false
 }
 
-/// Current UTC timestamp as `YYYY-MM-DDThh:mm:ssZ`, chrono-free.
-pub fn now_utc() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let time_of_day = secs % 86400;
-    let (y, m, d) = days_to_ymd(secs / 86400);
-    let (hh, mm, ss) = (time_of_day / 3600, (time_of_day % 3600) / 60, time_of_day % 60);
-    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
-}
-
-/// Convert days-since-Unix-epoch to a `(year, month, day)` civil date (UTC).
-///
-/// A dependency-free calendar conversion (Howard Hinnant's `civil_from_days`).
-/// Lives here so both the `ways` session timestamps and the compliance
-/// tooling's date math share one implementation.
-pub fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    let z = days + 719468;
-    let era = z / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// `$PWD` stands only when it names the current directory (bash's rule);
+    /// a stale one inherited from a non-shell parent gives way to the real cwd.
     #[test]
-    fn parse_ts_secs_diffs_are_calendar_correct() {
-        let s = parse_ts_secs;
-        // Same second → equal; a 3s gap is exactly 3.
-        assert_eq!(s("2026-07-03T01:02:03Z"), s("2026-07-03T01:02:03.999Z"));
-        assert_eq!(s("2026-07-03T01:02:06Z") - s("2026-07-03T01:02:03Z"), 3);
-        // Adjacent days across a month boundary differ by exactly one day — the
-        // month*30 bug reported Jan31≡Feb01 (diff 0) here.
-        assert_eq!(s("2026-02-01T00:00:00Z") - s("2026-01-31T00:00:00Z"), 86_400);
-        // Leap year: Feb has 29 days, so Mar 1 is one day after Feb 29 (2024).
-        assert_eq!(s("2024-03-01T00:00:00Z") - s("2024-02-29T00:00:00Z"), 86_400);
-        // Too-short input degrades to 0, not a panic.
-        assert_eq!(s("2026-07"), 0);
+    fn project_dir_ignores_a_stale_pwd() {
+        let cwd = std::env::temp_dir().join(format!("ways-pwd-{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let stale = Some("/nonexistent/stale/pwd".to_string());
+        assert_eq!(project_dir_from(None, stale, Some(cwd.clone())), cwd.to_string_lossy());
+        #[cfg(unix)]
+        {
+            let link = std::env::temp_dir().join(format!("ways-pwd-link-{}", std::process::id()));
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&cwd, &link).unwrap();
+            let logical = link.to_string_lossy().into_owned();
+            assert_eq!(project_dir_from(None, Some(logical.clone()), Some(cwd.clone())), logical);
+            let _ = std::fs::remove_file(&link);
+        }
+        let _ = std::fs::remove_dir_all(&cwd);
     }
 
+    /// An empty `CLAUDE_PROJECT_DIR` is unset. Most readers used to take it as
+    /// the project, so a hook that exported an empty cwd scoped to "".
     #[test]
-    fn days_to_ymd_known_dates() {
-        assert_eq!(days_to_ymd(0), (1970, 1, 1)); // Unix epoch
-        assert_eq!(days_to_ymd(18993), (2022, 1, 1));
-        // 2000-02-29 (leap day) — day count from epoch.
-        assert_eq!(days_to_ymd(11016), (2000, 2, 29));
+    fn project_dir_treats_an_empty_env_as_unset() {
+        let pwd = Some("/work/p".to_string());
+        assert_eq!(project_dir_from(None, pwd.clone(), None), "/work/p");
+        assert_eq!(project_dir_from(Some("/env/p".into()), pwd.clone(), None), "/env/p");
+        assert_eq!(project_dir_from(None, Some(String::new()), Some(PathBuf::from("/cwd"))), "/cwd");
+        assert_eq!(project_dir_from(None, None, None), ".");
     }
 
     #[test]
@@ -313,14 +302,6 @@ mod tests {
     fn handles_deeply_dotted_names() {
         // Last segment is the locale candidate
         assert_eq!(extract_locale_from_filename("some.way.name.ja.md"), Some("ja".to_string()));
-    }
-
-    #[test]
-    fn has_frontmatter_tolerates_crlf() {
-        assert!(has_frontmatter("---\ndescription: x\n---\n"));
-        assert!(has_frontmatter("---\r\ndescription: x\r\n---\r\n"));
-        assert!(!has_frontmatter("no frontmatter\n"));
-        assert!(!has_frontmatter(""));
     }
 
     #[test]

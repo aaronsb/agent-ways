@@ -116,18 +116,8 @@ struct ParsedSeededMemory {
 }
 
 fn parse_seeded_memory(content: &str) -> Option<ParsedSeededMemory> {
-    let mut lines = content.lines();
-    if lines.next()? != "---" {
-        return None;
-    }
-
-    let mut frontmatter = Vec::new();
-    for line in &mut lines {
-        if line == "---" {
-            break;
-        }
-        frontmatter.push(line);
-    }
+    let (frontmatter, rest) = crate::frontmatter::split(content)?;
+    let lines = rest.lines();
 
     let mut body_lines: Vec<&str> = Vec::new();
     let mut user_context_lines: Vec<&str> = Vec::new();
@@ -148,19 +138,11 @@ fn parse_seeded_memory(content: &str) -> Option<ParsedSeededMemory> {
     let body_bytes = body_joined.trim_matches('\n').to_string();
 
     Some(ParsedSeededMemory {
-        frontmatter_seed: frontmatter_value(&frontmatter, "seed"),
-        frontmatter_version: frontmatter_value(&frontmatter, "seed-version")
+        frontmatter_seed: crate::frontmatter::field(&frontmatter, "seed"),
+        frontmatter_version: crate::frontmatter::field(&frontmatter, "seed-version")
             .and_then(|v| v.parse().ok()),
         body_bytes,
         user_context: user_context_lines.join("\n"),
-    })
-}
-
-fn frontmatter_value(frontmatter: &[&str], key: &str) -> Option<String> {
-    let prefix = format!("{key}:");
-    frontmatter.iter().find_map(|line| {
-        line.strip_prefix(&prefix)
-            .map(|rest| rest.trim().to_string())
     })
 }
 
@@ -192,30 +174,7 @@ fn write_drift_diff(memory_dir: &Path, current: &str) -> Result<PathBuf> {
 }
 
 fn today_date() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Calendar date in UTC — avoids bringing in chrono for this one call.
-    let days = secs / 86_400;
-    let (y, m, d) = days_to_ymd(days as i64);
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-/// Convert days since 1970-01-01 UTC to (year, month, day). Public-domain
-/// algorithm (Howard Hinnant's date routines).
-fn days_to_ymd(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
+    agent_fmt::when::utc_date(agent_fmt::when::now_secs())
 }
 
 fn next_serial_for_date(memory_dir: &Path, today: &str) -> u32 {
@@ -343,13 +302,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn days_to_ymd_known_dates() {
-        // Anchors: 1970-01-01 = day 0, 2000-01-01 = day 10957 (common Unix check).
-        assert_eq!(days_to_ymd(0), (1970, 1, 1));
-        assert_eq!(days_to_ymd(10_957), (2000, 1, 1));
-        // 2026-04-22 = 10957 + 26*365 + 7 (leap days 2000..=2024) + 31+28+31+21
-        //            = 10957 + 9490 + 7 + 111 = 20565
-        assert_eq!(days_to_ymd(20_565), (2026, 4, 22));
-    }
 }

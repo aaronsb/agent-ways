@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use super::per_file::lint_file;
 use super::schema::Schema;
@@ -20,23 +19,13 @@ pub(super) fn scan_and_lint(
 ) -> Result<usize> {
     let mut files: Vec<(PathBuf, bool)> = Vec::new(); // (path, is_check)
 
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::All) {
+        let path = path.as_path();
 
         // Check if it has frontmatter
-        let first_line = match std::fs::read_to_string(path) {
-            Ok(c) => c.lines().next().unwrap_or("").to_string(),
-            Err(_) => continue,
-        };
-        if first_line != "---" {
-            continue;
+        match std::fs::read_to_string(path) {
+            Ok(c) if crate::frontmatter::opens_with_fence(&c) => {}
+            _ => continue,
         }
 
         // Excluded paths — backup/sync tool artifacts that pollute the corpus
@@ -50,10 +39,7 @@ pub(super) fn scan_and_lint(
             continue;
         }
 
-        let is_check = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.contains(".check."));
+        let is_check = crate::scanner::is_check(path);
 
         files.push((path.to_path_buf(), is_check));
     }

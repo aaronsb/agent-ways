@@ -6,6 +6,7 @@ on:
     tags: ['ways-audit-v*']
     paths:
       - 'tools/ways-audit/**'
+      - 'tools/agent-fmt/**'
       - 'tools/agent-settings/**'
       - 'tools/agent-theme/**'
       - 'tools/claude-sessions/**'
@@ -18,6 +19,7 @@ on:
   pull_request:
     paths:
       - 'tools/ways-audit/**'
+      - 'tools/agent-fmt/**'
       - 'tools/agent-settings/**'
       - 'tools/agent-theme/**'
       - 'tools/claude-sessions/**'

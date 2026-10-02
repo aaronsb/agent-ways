@@ -3,7 +3,6 @@
 
 use anyhow::{bail, Result};
 
-use crate::util::detect_project_dir;
 
 /// Resolve which project(s) to replay. `Ok(None)` means *every* project
 /// (`--all`); `Ok(Some(path))` scopes to one. Defaults to the current project
@@ -16,10 +15,7 @@ pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<
     if let Some(p) = project {
         return Ok(Some(p.to_string()));
     }
-    match std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .or_else(detect_project_dir)
-    {
+    match crate::util::project_root() {
         Some(p) => Ok(Some(p)),
         None => bail!(
             "couldn't detect the current project: CLAUDE_PROJECT_DIR is unset and no \

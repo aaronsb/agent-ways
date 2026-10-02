@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::cmd::render;
 use crate::session;
-use crate::util::parse_ts_secs;
+use agent_fmt::when::parse_utc_iso;
 
 use super::model::{ActiveWay, Frame, WayEvent};
 
@@ -55,16 +55,17 @@ fn build_frames(
     let mut epoch: u64 = 0;
     let mut window: u64 = 1;
 
-    let start_ts = events.first().map(|e| &e.ts).cloned().unwrap_or_default();
-    let start_secs = parse_ts_secs(&start_ts);
+    // An event whose stamp is not UTC is skipped: read as 0 it would open an
+    // epoch of its own and split the one it sits in.
+    let timed: Vec<(u64, &WayEvent)> = events.iter().filter_map(|e| Some((parse_utc_iso(&e.ts)?, e))).collect();
+    let start_secs = timed.first().map_or(0, |(s, _)| *s);
 
     // Cluster events by timestamp proximity (≤3s gap = same epoch)
     let mut clusters: Vec<Vec<&WayEvent>> = Vec::new();
     let mut current_cluster: Vec<&WayEvent> = Vec::new();
     let mut last_ts_secs: u64 = 0;
 
-    for ev in events {
-        let ts_secs = parse_ts_secs(&ev.ts);
+    for &(ts_secs, ev) in &timed {
         if !current_cluster.is_empty() && ts_secs > last_ts_secs + 3 {
             clusters.push(std::mem::take(&mut current_cluster));
         }
@@ -91,7 +92,7 @@ fn build_frames(
 
         epoch += 1;
         let cluster_ts = cluster[0].ts.clone();
-        let cluster_secs = parse_ts_secs(&cluster_ts);
+        let cluster_secs = parse_utc_iso(&cluster_ts).unwrap_or(start_secs);
         let elapsed = cluster_secs.saturating_sub(start_secs);
 
         let token_k = find_token_position(token_timeline, &cluster_ts);
@@ -346,6 +347,28 @@ mod tests {
         assert!(frames
             .iter()
             .any(|f| f.new_events.iter().any(|e| e.contains("compaction"))));
+    }
+
+    /// An event whose timestamp is not UTC is skipped, not read as 1970.
+    #[test]
+    fn a_non_utc_event_is_skipped_not_epoch_zero() {
+        let ev = |ts: &str, way: &str| WayEvent {
+            ts: ts.into(),
+            event: "way_fired".into(),
+            way: way.into(),
+            trigger: "keyword".into(),
+            check: String::new(),
+            p_yes: String::new(),
+            verdict: String::new(),
+        };
+        let events = vec![
+            ev("2026-01-01T00:00:00Z", "d/a"),
+            ev("2026-01-01T00:00:01+00:00", "d/x"),
+            ev("2026-01-01T00:00:02Z", "d/b"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        assert_eq!(frames.len(), 1, "a and b share one epoch");
+        assert!(frames.iter().all(|f| f.ways.iter().all(|w| w.id != "d/x")), "the non-UTC row is skipped");
     }
 
     #[test]

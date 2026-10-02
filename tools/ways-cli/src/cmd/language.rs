@@ -7,15 +7,13 @@ use anyhow::Result;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use crate::agents;
 use crate::frontmatter;
 use agent_fmt::Table;
-use crate::util::home_dir;
 
 pub fn run(filter_lang: Option<&str>, audit: bool, json_output: bool) -> Result<()> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
     let xdg_way = crate::paths::corpus_dir();
     let excluded = crate::util::load_excluded_segments();
 
@@ -23,8 +21,8 @@ pub fn run(filter_lang: Option<&str>, audit: bool, json_output: bool) -> Result<
     let resolved = agents::resolve_language();
 
     // Model availability
-    let en_model = xdg_way.join("minilm-l6-v2.gguf").is_file();
-    let multi_model = xdg_way.join("multilingual-minilm-l12-v2-q8.gguf").is_file();
+    let en_model = xdg_way.join(crate::paths::EN_MODEL).is_file();
+    let multi_model = xdg_way.join(crate::paths::MULTI_MODEL).is_file();
 
     // Corpus stats
     let en_corpus = xdg_way.join("ways-corpus-en.jsonl");
@@ -150,14 +148,8 @@ fn scan_way_dirs(
     // Collect way directories (each dir with a .md file containing frontmatter)
     let mut way_dirs: BTreeMap<String, PathBuf> = BTreeMap::new();
 
-    for entry in WalkDir::new(dir).follow_links(true).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".check.")) {
-            continue;
-        }
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+        let path = path.as_path();
         if crate::util::is_excluded_path(path, excluded) {
             continue;
         }

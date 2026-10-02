@@ -109,7 +109,7 @@ pub fn run(file: String, min_freq: u32) -> Result<()> {
 }
 
 fn parse_way_file(content: &str) -> Option<(String, String, String)> {
-    if !crate::util::has_frontmatter(content) {
+    if !crate::frontmatter::opens_with_fence(content) {
         return None;
     }
 

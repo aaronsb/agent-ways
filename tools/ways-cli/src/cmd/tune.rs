@@ -21,12 +21,9 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
-use walkdir::WalkDir;
 
 use crate::frontmatter;
-use crate::util::home_dir;
 
 #[derive(Clone)]
 struct FidelityResult {
@@ -75,11 +72,11 @@ pub fn run(
 
     let global_dir = ways_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
+        .unwrap_or_else(crate::paths::projected_ways_root);
     let xdg_way = crate::paths::corpus_dir();
 
     let multi_corpus = xdg_way.join("ways-corpus-multi.jsonl");
-    let multi_model = xdg_way.join("multilingual-minilm-l12-v2-q8.gguf");
+    let multi_model = xdg_way.join(crate::paths::MULTI_MODEL);
 
     if !multi_corpus.is_file() {
         eprintln!("No multilingual corpus to audit — run `ways corpus` (localized mode) first.");
@@ -90,7 +87,7 @@ pub fn run(
         return Ok(());
     }
 
-    let embed_bin = find_way_embed()
+    let embed_bin = crate::paths::way_embed()
         .context("way-embed binary not found. Run `make setup` to install.")?;
 
     let excluded = crate::util::load_excluded_segments();
@@ -184,11 +181,8 @@ fn collect_locale_files(
     excluded: &[String],
 ) -> Result<Vec<(String, PathBuf)>> {
     let mut files: Vec<(String, PathBuf)> = Vec::new();
-    for entry in WalkDir::new(global_dir).follow_links(true).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
+    for path in crate::scanner::files(global_dir) {
+        let path = path.as_path();
         if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".locales.jsonl")) {
             continue;
         }
@@ -236,44 +230,25 @@ fn measure_way(
             entry.vocabulary.as_deref().unwrap_or("")
         );
 
-        let output = Command::new(embed_bin)
-            .args([
-                "match",
-                "--corpus", multi_corpus.to_str().unwrap(),
-                "--model", multi_model.to_str().unwrap(),
-                "--query", &query,
-                "--threshold", "0.0",
-            ])
-            .output()
-            .with_context(|| format!("way-embed match for {way_id}/{lang}", lang = entry.lang))?;
-
-        if !output.status.success() {
+        let Some(rows) = crate::cmd::scan::scoring::way_embed_match(embed_bin, multi_corpus, multi_model, &query)
+            .with_context(|| format!("way-embed match for {way_id}/{lang}", lang = entry.lang))?
+        else {
             continue;
-        }
+        };
 
         // Collect same-way peer scores (excluding self-row at ~1.0) and
         // best non-self score (the top confuser — another way's alias that
         // competes with this stub in embedding space).
         let mut peer_scores: Vec<f64> = Vec::new();
         let mut top_confuser: Option<Confuser> = None;
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let mut parts = line.split('\t');
-            let id = match parts.next() {
-                Some(s) => s,
-                None => continue,
-            };
-            let score: f64 = match parts.next().and_then(|s| s.parse().ok()) {
-                Some(s) => s,
-                None => continue,
-            };
-
+        for (id, score) in rows {
             if id == way_id {
                 if score > 0.999 {
                     continue; // self-match
                 }
                 peer_scores.push(score);
             } else if top_confuser.as_ref().is_none_or(|c| score > c.score) {
-                top_confuser = Some(Confuser { way_id: id.to_string(), score });
+                top_confuser = Some(Confuser { way_id: id, score });
             }
         }
 
@@ -415,14 +390,3 @@ fn nan_to_null(x: f64) -> serde_json::Value {
     }
 }
 
-fn find_way_embed() -> Option<PathBuf> {
-    let xdg = crate::paths::corpus_dir().join("way-embed");
-    if xdg.is_file() {
-        return Some(xdg);
-    }
-    let bin = home_dir().join(".claude/bin/way-embed");
-    if bin.is_file() {
-        return Some(bin);
-    }
-    None
-}

@@ -44,7 +44,7 @@ pub fn enable(name: &str) -> Result<()> {
 }
 
 pub fn list(names_only: bool) -> Result<()> {
-    let cfg = crate::config::Config::load(&project_dir());
+    let cfg = crate::config::Config::load(&crate::util::project_dir());
 
     // Machine-readable mode: bare names, one per line, no decoration, no
     // stderr commentary. Used by the bash subagent injector so it sees the
@@ -73,13 +73,8 @@ pub fn list(names_only: bool) -> Result<()> {
 
 // ── Path resolution ─────────────────────────────────────────────
 
-fn project_dir() -> String {
-    std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()))
-}
-
 fn project_overlay_path() -> Result<PathBuf> {
-    let dir = PathBuf::from(project_dir());
+    let dir = PathBuf::from(crate::util::project_dir());
     Ok(dir.join(".claude").join("ways.yaml"))
 }
 
@@ -108,11 +103,11 @@ fn validate_way_name(name: &str) -> Result<()> {
 }
 
 fn way_exists(name: &str) -> bool {
-    let project = PathBuf::from(project_dir()).join(".claude/ways").join(name);
+    let project = PathBuf::from(crate::util::project_dir()).join(".claude/ways").join(name);
     if project.is_dir() {
         return true;
     }
-    let global = crate::util::home_dir().join(".claude/hooks/ways").join(name);
+    let global = crate::paths::projected_ways_root().join(name);
     global.is_dir()
 }
 

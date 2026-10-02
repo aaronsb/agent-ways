@@ -10,6 +10,7 @@ name = "ways-audit"
 path = "src/main.rs"
 
 [dependencies]
+agent-fmt = { path = "../agent-fmt" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 serde_json = { version = "1", features = ["preserve_order"] }

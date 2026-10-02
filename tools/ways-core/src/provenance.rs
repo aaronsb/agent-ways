@@ -15,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
-use crate::util::{has_frontmatter, home_dir};
+use crate::frontmatter::opens_with_fence;
 
 /// The typed compliance-claim schema stored in a `provenance.yaml` sidecar
 /// (ADR-110, ADR-151 §3). The manifest builder above stays `Value`-based for the
@@ -122,7 +121,7 @@ impl Claim {
 pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
     let root = ways_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
+        .unwrap_or_else(crate::paths::projected_ways_root);
 
     let (ways, with_prov, without_prov) = scan_provenance(&root)?;
 
@@ -181,29 +180,15 @@ fn scan_provenance(
     let mut with_prov = Vec::new();
     let mut without_prov = Vec::new();
 
-    for entry in WalkDir::new(root)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.contains(".check."))
-        {
-            continue;
-        }
+    for path in crate::scanner::md_files(root, crate::scanner::MdKind::Ways) {
+        let path = path.as_path();
 
         // Check frontmatter exists
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        if !has_frontmatter(&content) {
+        if !opens_with_fence(&content) {
             continue;
         }
 

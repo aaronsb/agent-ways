@@ -29,6 +29,7 @@ name = "agent-fmt"
 version = "0.6.0"
 dependencies = [
  "agent-theme",
+ "claude-sessions",
  "figlet-rs",
  "libc",
  "serde_json",
@@ -2451,6 +2452,8 @@ dependencies = [
 name = "ways-agent"
 version = "0.2.0"
 dependencies = [
+ "agent-fmt",
+ "agent-settings",
  "anyhow",
  "clap",
  "libc",
@@ -2466,6 +2469,8 @@ dependencies = [
 name = "ways-agent-core"
 version = "0.1.0"
 dependencies = [
+ "agent-fmt",
+ "agent-identity",
  "agent-settings",
  "anyhow",
  "libc",
@@ -2479,6 +2484,7 @@ dependencies = [
 name = "ways-audit"
 version = "1.0.1"
 dependencies = [
+ "agent-fmt",
  "agent-theme",
  "anyhow",
  "clap",
@@ -2491,6 +2497,7 @@ dependencies = [
 name = "ways-core"
 version = "1.0.0"
 dependencies = [
+ "agent-fmt",
  "agent-settings",
  "anyhow",
  "claude-sessions",

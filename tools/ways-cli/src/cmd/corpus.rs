@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use walkdir::WalkDir;
 
 use crate::frontmatter;
 
@@ -32,7 +31,7 @@ pub fn run(
 
     // The shipped ways: the projection the scanner reads, or the app itself
     // before the projection exists (a fresh install builds the corpus first).
-    let projected = home_dir().join(".claude/hooks/ways");
+    let projected = crate::paths::projected_ways_root();
     let default_core = if projected.is_dir() { projected } else { crate::paths::core_ways_root() };
     let global_dir = ways_dir.as_ref().map(PathBuf::from).unwrap_or_else(|| default_core.clone());
 
@@ -69,12 +68,12 @@ pub fn run(
         let manifest = out_dir.join("embed-manifest.json");
         let corpus = out_dir.join("ways-corpus.jsonl");
         if manifest.is_file() && corpus.is_file() {
-            let project_dir = std::env::var("CLAUDE_PROJECT_DIR").unwrap_or_default();
+            let project_dir = crate::util::env_project_dir().unwrap_or_default();
             vlog("staleness check (walks core + user + project ways)");
-            let bin = resolve_embed_bin(&engine_dir);
+            let bin = crate::paths::way_embed_in(&engine_dir);
             let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
             if !is_stale(&manifest, &global_dir, &project_dir)
-                && !retry_due(&manifest, &engine, unix_now())
+                && !retry_due(&manifest, &engine, agent_fmt::when::now_secs())
             {
                 vlog("corpus is fresh — nothing to do");
                 return Ok(());
@@ -151,28 +150,26 @@ pub fn run(
     // The namespace key is derived from the REAL project root via
     // encode_project_key, so it matches exactly what `ways scan --project`
     // computes for the same directory (the fix for Bug B).
-    if let Ok(cpd) = std::env::var("CLAUDE_PROJECT_DIR") {
-        if !cpd.is_empty() {
-            vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
-            let proj_root = PathBuf::from(&cpd);
-            let ways_path = proj_root.join(".claude/ways");
-            if ways_path.is_dir() {
-                let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
-                seen_ways_dirs.insert(canon);
-                let key = crate::util::encode_project_key(&proj_root);
-                let real = std::fs::canonicalize(&proj_root)
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or(cpd);
-                project_total += embed_one_project(
-                    &ways_path,
-                    &key,
-                    &real,
-                    &excluded,
-                    &mut w,
-                    &mut manifest_projects,
-                    &log,
-                )?;
-            }
+    if let Some(cpd) = crate::util::env_project_dir() {
+        vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
+        let proj_root = PathBuf::from(&cpd);
+        let ways_path = proj_root.join(".claude/ways");
+        if ways_path.is_dir() {
+            let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
+            seen_ways_dirs.insert(canon);
+            let key = crate::util::encode_project_key(&proj_root);
+            let real = std::fs::canonicalize(&proj_root)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or(cpd);
+            project_total += embed_one_project(
+                &ways_path,
+                &key,
+                &real,
+                &excluded,
+                &mut w,
+                &mut manifest_projects,
+                &log,
+            )?;
         }
     }
 
@@ -231,7 +228,7 @@ pub fn run(
     drop(w);
 
     // A failed pass never replaces an embedded corpus (#645).
-    let bin = resolve_embed_bin(&engine_dir);
+    let bin = crate::paths::way_embed_in(&engine_dir);
     let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
     let generate = |bin: &Path, corpus: &Path, model: &Path, what: &str| {
         run_generate(bin, corpus, model, what, verbose, &vlog)
@@ -278,7 +275,7 @@ pub fn run(
         "calibration": calibration,
         "embedded": complete,
         "reason": reason,
-        "failed_at": if complete { None } else { Some(unix_now()) },
+        "failed_at": if complete { None } else { Some(agent_fmt::when::now_secs()) },
         "engine": engine,
     });
     vlog("writing manifest");
@@ -510,8 +507,8 @@ fn engine_fingerprint(bin: Option<&Path>, engine_dir: &Path) -> String {
     };
     [
         bin.map(describe).unwrap_or_else(|| "way-embed:absent".to_string()),
-        describe(&engine_dir.join("minilm-l6-v2.gguf")),
-        describe(&engine_dir.join("multilingual-minilm-l12-v2-q8.gguf")),
+        describe(&engine_dir.join(crate::paths::EN_MODEL)),
+        describe(&engine_dir.join(crate::paths::MULTI_MODEL)),
     ]
     .join("|")
 }
@@ -524,13 +521,6 @@ fn read_manifest(path: &Path) -> Option<serde_json::Value> {
 
 /// How long a failed build waits before `--if-stale` retries it on its own.
 const RETRY_AFTER_SECS: u64 = 24 * 3600;
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
 
 /// True when the manifest records a build that did not fully embed and a
 /// retry is due: the engine changed since (a repair), or a day has passed (a
@@ -622,16 +612,8 @@ fn scan_ways_dir(
     // Track which (directory, lang) pairs have external .lang.md overrides
     let mut locale_overrides: std::collections::HashSet<(PathBuf, String)> = std::collections::HashSet::new();
 
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
+    for path in crate::scanner::files(dir) {
+        let path = path.as_path();
         let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         // Collect .locales.jsonl files
@@ -645,7 +627,7 @@ fn scan_ways_dir(
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
-        if fname.contains(".check.") {
+        if crate::scanner::is_check(path) {
             continue;
         }
         if crate::util::is_excluded_path(path, excluded) {
@@ -797,20 +779,6 @@ fn scan_ways_dir(
     Ok(count)
 }
 
-/// Resolve the `way-embed` binary: prefer the engine dir, then the projected
-/// `~/.claude/bin`. `auto_embed` and `fit_calibration` both need it and must
-/// resolve it identically — on a projection install the binary lives in
-/// `~/.claude/bin`, not the engine/cache dir, so a resolver that only checks the
-/// engine dir silently no-ops (this is how per-model calibration went missing).
-fn resolve_embed_bin(engine_dir: &Path) -> Option<PathBuf> {
-    [
-        engine_dir.join("way-embed"),
-        home_dir().join(".claude/bin/way-embed"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file())
-}
-
 /// One `way-embed generate` pass: (binary, corpus, model, pass name) to the
 /// elapsed time, or the reason it failed.
 type GeneratePass<'a> = dyn Fn(&Path, &Path, &Path, &str) -> std::result::Result<Instant, String> + 'a;
@@ -839,8 +807,8 @@ fn auto_embed(
     };
     vlog(&format!("way-embed: {}", bin.display()));
 
-    let en_model = engine_dir.join("minilm-l6-v2.gguf");
-    let multi_model = engine_dir.join("multilingual-minilm-l12-v2-q8.gguf");
+    let en_model = engine_dir.join(crate::paths::EN_MODEL);
+    let multi_model = engine_dir.join(crate::paths::MULTI_MODEL);
     vlog(&format!(
         "en model:    {} ({})",
         en_model.display(),
@@ -966,32 +934,46 @@ fn find_ways_dir(project_path: &str) -> Option<PathBuf> {
     None
 }
 
-/// Content hash of a directory (sorted file list + sizes).
+/// Content hash of a directory: FNV-1a over the sorted file list (relative
+/// paths joined with `/`) and sizes, stable across Rust releases and
+/// platforms, so a manifest written by one build or OS matches another's hash
+/// of the same tree.
 fn content_hash(dir: &Path) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    let mut entries: Vec<(String, u64)> = Vec::new();
-
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if entry.path().is_file() {
-            let rel = entry.path().strip_prefix(dir).unwrap_or(entry.path());
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            entries.push((rel.display().to_string(), size));
-        }
-    }
+    let mut entries: Vec<(String, u64)> = crate::scanner::files(dir)
+        .map(|path| {
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            // `/`-joined on every OS: `display()` gives `\` on Windows, and the
+            // same tree must hash the same everywhere.
+            let rel = crate::util::path_to_id(path.strip_prefix(dir).unwrap_or(&path));
+            (rel, size)
+        })
+        .collect();
     entries.sort();
-    entries.hash(&mut hasher);
+    format!("{:016x}", agent_identity::identity::fnv1a_64(&content_hash_input(&entries)))
+}
 
-    format!("{:016x}", hasher.finish())
+/// The bytes [`content_hash`] hashes: each path, a NUL, its size as 8
+/// little-endian bytes. The NUL keeps `a` + size from colliding with `a1`.
+fn content_hash_input(entries: &[(String, u64)]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (rel, size) in entries {
+        bytes.extend_from_slice(rel.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&size.to_le_bytes());
+    }
+    bytes
 }
 
 use crate::util::home_dir;
+
+/// True if a way or locale file (`.md`, `.jsonl`) under `root` is newer than
+/// the manifest.
+fn any_way_file_newer(root: &Path, manifest: &Path) -> bool {
+    crate::scanner::files(root).any(|path| {
+        let ext = path.extension().and_then(|e| e.to_str());
+        (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(&path, manifest)
+    })
+}
 
 /// Check if any way file is newer than the manifest.
 fn is_stale(manifest: &Path, global_dir: &Path, project_dir: &str) -> bool {
@@ -1000,38 +982,16 @@ fn is_stale(manifest: &Path, global_dir: &Path, project_dir: &str) -> bool {
         if !root.is_dir() {
             continue;
         }
-        for entry in WalkDir::new(&root)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if path.is_file() {
-                let ext = path.extension().and_then(|e| e.to_str());
-                if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
-                    return true;
-                }
-            }
+        if any_way_file_newer(&root, manifest) {
+            return true;
         }
     }
 
     // Check project ways
     if !project_dir.is_empty() {
         let project_ways = Path::new(project_dir).join(".claude/ways");
-        if project_ways.is_dir() {
-            for entry in WalkDir::new(&project_ways)
-                .follow_links(true)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                let path = entry.path();
-                if path.is_file() {
-                    let ext = path.extension().and_then(|e| e.to_str());
-                    if (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(path, manifest) {
-                        return true;
-                    }
-                }
-            }
+        if project_ways.is_dir() && any_way_file_newer(&project_ways, manifest) {
+            return true;
         }
     }
 
@@ -1066,7 +1026,7 @@ fn fit_calibration(
 
     vlog("fitting calibration (ADR-156)");
 
-    let bin = match resolve_embed_bin(engine_dir) {
+    let bin = match crate::paths::way_embed_in(engine_dir) {
         Some(b) => b,
         None => {
             vlog("  no way-embed — left uncalibrated");
@@ -1159,12 +1119,12 @@ fn fit_calibration(
         Some(cal)
     };
 
-    let en = fit_lane("minilm-l6-v2.gguf", "en");
+    let en = fit_lane(crate::paths::EN_MODEL, "en");
     // The multi lane is fit from the ENGLISH probe corpus and aliases. That is
     // correct for the English target; in localized mode the multi model scores
     // translated text, so this calibration is approximate until a localized
     // probe corpus ships (ADR-156 names multilingual calibration a follow-on).
-    let multi = fit_lane("multilingual-minilm-l12-v2-q8.gguf", "multi");
+    let multi = fit_lane(crate::paths::MULTI_MODEL, "multi");
     Calibration { en, multi }
 }
 
@@ -1227,6 +1187,22 @@ fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hash is a fixed function of the tree, not of the Rust release: a
+    /// known input pins its value. DefaultHasher made no such promise. The
+    /// nested fixture also pins the `/` separator: Windows hashed `a\a.md`.
+    #[test]
+    fn content_hash_is_pinned_fnv1a() {
+        let input = content_hash_input(&[("a/a.md".to_string(), 3)]);
+        assert_eq!(input, b"a/a.md\0\x03\0\0\0\0\0\0\0".to_vec());
+        let dir = std::env::temp_dir().join(format!("ways-content-hash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/a.md"), "abc").unwrap();
+        let want = format!("{:016x}", agent_identity::identity::fnv1a_64(&input));
+        assert_eq!(content_hash(&dir), want);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use std::cell::RefCell;
 
     fn scratch(name: &str) -> PathBuf {
@@ -1329,10 +1305,10 @@ mod tests {
         let engine = dir.join("engine");
         std::fs::create_dir_all(&engine).unwrap();
         if en_model {
-            std::fs::write(engine.join("minilm-l6-v2.gguf"), "m").unwrap();
+            std::fs::write(engine.join(crate::paths::EN_MODEL), "m").unwrap();
         }
         if multi_model {
-            std::fs::write(engine.join("multilingual-minilm-l12-v2-q8.gguf"), "m").unwrap();
+            std::fs::write(engine.join(crate::paths::MULTI_MODEL), "m").unwrap();
         }
         let staged = Staged::new(&dir);
         std::fs::write(

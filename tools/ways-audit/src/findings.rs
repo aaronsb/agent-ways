@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::io::Write;
 
 use ways_core::finding::{assemble as assemble_findings, Finding};
-use ways_core::{firing, paths, util};
+use ways_core::{firing, paths};
 use agent_theme::{paint, Role, Style};
 
 /// Assemble finding rows from the claim manifest + firing events, print them, and
@@ -21,7 +21,7 @@ use agent_theme::{paint, Role, Style};
 /// `(way, control)` to the latest `assembled_at` (ADR-201).
 pub fn assemble(manifest: &Value, way: Option<&str>, write: bool, json_out: bool) -> Result<()> {
     let events = firing::load_events();
-    let mut findings = assemble_findings(manifest, &events, &util::now_utc());
+    let mut findings = assemble_findings(manifest, &events, &agent_fmt::when::now_utc_iso());
     if let Some(w) = way {
         findings.retain(|f| f.way == w);
     }

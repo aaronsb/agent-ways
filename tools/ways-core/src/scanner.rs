@@ -2,6 +2,47 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Every regular file under `root`, following symlinks: a projected or linked
+/// way tree is walked through its links. Entries that cannot be read are
+/// skipped. Walk order, not sorted.
+pub fn files(root: &Path) -> impl Iterator<Item = PathBuf> {
+    WalkDir::new(root)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+}
+
+/// Which `.md` files a way walk yields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MdKind {
+    /// `{way}.md`: every `.md` file but the checks.
+    Ways,
+    /// `{way}.check.md`.
+    Checks,
+    /// Both.
+    All,
+}
+
+/// True for a check file (`{way}.check.md`), by name.
+pub fn is_check(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".check."))
+}
+
+/// The `.md` files of `kind` under `root`: the one way-file walk every reader
+/// of a way tree goes through ([`files`], filtered by extension and kind).
+pub fn md_files(root: &Path, kind: MdKind) -> impl Iterator<Item = PathBuf> {
+    files(root).filter(move |p| {
+        p.extension().and_then(|e| e.to_str()) == Some("md")
+            && match kind {
+                MdKind::Ways => !is_check(p),
+                MdKind::Checks => is_check(p),
+                MdKind::All => true,
+            }
+    })
+}
+
 /// A discovered way file with its derived identity.
 #[derive(Debug)]
 pub struct WayFile {
@@ -17,27 +58,9 @@ pub struct WayFile {
 pub fn scan_ways(root: &Path) -> Result<Vec<WayFile>> {
     let mut ways = Vec::new();
 
-    for entry in WalkDir::new(root)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-
-        // Skip check files
-        if path.file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.contains(".check."))
-        {
-            continue;
-        }
-
-        if has_way_frontmatter(path) {
-            if let Some(way) = way_from_path(path, root) {
+    for path in md_files(root, MdKind::Ways) {
+        if has_way_frontmatter(&path) {
+            if let Some(way) = way_from_path(&path, root) {
                 ways.push(way);
             }
         }
@@ -54,22 +77,8 @@ fn has_way_frontmatter(path: &Path) -> bool {
         Err(_) => return false,
     };
 
-    let mut in_frontmatter = false;
-    for (i, line) in content.lines().enumerate() {
-        if i == 0 && line == "---" {
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            if line == "---" {
-                return false; // closed without description
-            }
-            if line.starts_with("description:") {
-                return true;
-            }
-        }
-    }
-    false
+    crate::frontmatter::split(&content)
+        .is_some_and(|(fm, _)| fm.lines().any(|l| l.starts_with("description:")))
 }
 
 /// Derive WayFile identity from filesystem path relative to the ways root.
@@ -154,6 +163,51 @@ mod tests {
 
         assert!(scan_ways(&root).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An unclosed block is not frontmatter: the old scanner accepted a
+    /// `description:` line anywhere after the opening fence.
+    #[test]
+    fn unclosed_frontmatter_is_not_a_way() {
+        let root = scratch("unclosed");
+        write_way(&root, "d/w/w.md", "---\ndescription: a way\nguidance\n");
+        assert!(scan_ways(&root).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn md_files_sorts_ways_from_checks() {
+        let root = scratch("mdkinds");
+        write_way(&root, "d/w/w.md", WAY);
+        write_way(&root, "d/w/w.check.md", WAY);
+        write_way(&root, "d/w/notes.txt", WAY);
+        let names = |kind| {
+            let mut v: Vec<String> = md_files(&root, kind)
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(names(MdKind::Ways), vec!["w.md"]);
+        assert_eq!(names(MdKind::Checks), vec!["w.check.md"]);
+        assert_eq!(names(MdKind::All), vec!["w.check.md", "w.md"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The walk follows a linked way directory. The attend-signal lookup in
+    /// `ways show` walked without following links and missed such a way.
+    #[cfg(unix)]
+    #[test]
+    fn md_files_follows_a_linked_way_dir() {
+        let root = scratch("linked");
+        let elsewhere = scratch("linked-target");
+        write_way(&elsewhere, "w/w.md", WAY);
+        std::fs::create_dir_all(root.join("d")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("w"), root.join("d/w")).unwrap();
+        let found: Vec<PathBuf> = md_files(&root, MdKind::Ways).collect();
+        assert_eq!(found, vec![root.join("d/w/w.md")]);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&elsewhere);
     }
 
     #[test]

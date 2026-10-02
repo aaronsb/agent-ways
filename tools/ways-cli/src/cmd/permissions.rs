@@ -3,21 +3,17 @@
 use agent_fmt::permissions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
-use crate::util::home_dir;
 
 /// Run `ways permissions audit`.
 pub fn audit(global: bool) -> Result<()> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
-    let settings_path = home_dir().join(".claude/settings.json");
+    let ways_dir = crate::paths::projected_ways_root();
+    let settings_path = crate::paths::settings_json();
 
     // Determine scan dirs (same logic as lint)
     let mut scan_dirs = vec![ways_dir.clone()];
     if !global {
-        let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .or_else(crate::util::detect_project_dir);
+        let project_dir = crate::util::project_root();
         if let Some(ref pd) = project_dir {
             let project_ways = PathBuf::from(pd).join(".claude/ways");
             if project_ways.is_dir() {
@@ -43,7 +39,7 @@ pub fn audit(global: bool) -> Result<()> {
     let results = permissions::audit(&requirements, &grants);
 
     // Check for trusted-project-macros deprecation
-    let tpm_path = home_dir().join(".claude/trusted-project-macros");
+    let tpm_path = crate::paths::trusted_project_macros();
     let has_tpm = tpm_path.is_file();
 
     // Display results
@@ -58,28 +54,16 @@ fn collect_way_requirements(
     ways_dir: &Path,
     out: &mut Vec<(String, Vec<String>)>,
 ) -> Result<()> {
-    for entry in WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        // Skip check files
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".check.")) {
-            continue;
-        }
+    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+        let path = path.as_path();
 
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue,
         };
 
-        let fm = match extract_frontmatter(&content) {
-            Some(f) => f,
-            None => continue,
+        let Some((fm, _)) = crate::frontmatter::split(&content) else {
+            continue;
         };
 
         if let Some(reqs) = extract_requires(&fm) {
@@ -95,22 +79,6 @@ fn collect_way_requirements(
         }
     }
     Ok(())
-}
-
-/// Extract YAML frontmatter from a way file.
-fn extract_frontmatter(content: &str) -> Option<String> {
-    let mut lines = content.lines();
-    if lines.next()? != "---" {
-        return None;
-    }
-    let mut fm_lines = Vec::new();
-    for line in lines {
-        if line == "---" {
-            return Some(fm_lines.join("\n"));
-        }
-        fm_lines.push(line);
-    }
-    None
 }
 
 /// Parse requires: field from frontmatter.

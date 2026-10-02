@@ -10,7 +10,7 @@ use serde_json::Value;
 
 /// A timestamped sibling copy, `<name>.bak-relocate-<UTC stamp>[.n]`.
 pub(super) fn backup_file(path: &Path) -> std::io::Result<PathBuf> {
-    let stamp = utc_stamp(super::epoch_now());
+    let stamp = utc_stamp(agent_fmt::when::now_secs());
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut dest = path.with_file_name(format!("{name}.bak-relocate-{stamp}"));
     let mut n = 0;
@@ -75,7 +75,7 @@ pub(super) fn read_json(path: &Path) -> Option<Value> {
 /// A fresh `projects/.trash-<UTC stamp>[.n]/` to move removed entries into.
 /// Dot-named, so project listings skip it.
 pub(super) fn trash_dir(projects: &Path) -> PathBuf {
-    let stamp = utc_stamp(super::epoch_now());
+    let stamp = utc_stamp(agent_fmt::when::now_secs());
     let mut dir = projects.join(format!(".trash-{stamp}"));
     let mut n = 0;
     while dir.exists() {
@@ -97,7 +97,7 @@ pub(super) fn move_to_trash(path: &Path, trash: &Path, rel: &Path) -> std::io::R
 
 /// `YYYYMMDD-HHMMSS` in UTC.
 pub(super) fn utc_stamp(secs: u64) -> String {
-    let (y, m, d) = ways_core::util::days_to_ymd(secs / 86_400);
+    let (y, m, d) = agent_fmt::when::civil_from_days((secs / 86_400) as i64);
     let t = secs % 86_400;
     format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}", t / 3600, t / 60 % 60, t % 60)
 }

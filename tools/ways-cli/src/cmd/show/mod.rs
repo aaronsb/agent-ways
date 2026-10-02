@@ -11,7 +11,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::{frontmatter, session};
-use helpers::{extract_field, extract_attend_signals, home_dir, is_project_trusted, body_text, check_sections_text, run_macro};
+use helpers::{extract_attend_signals, is_project_trusted, check_sections_text, run_macro};
+use crate::frontmatter::body_text;
 use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_text, update_status_text};
 
 // ── ways show way ───────────────────────────────────────────────
@@ -330,8 +331,7 @@ struct Fireable {
 /// Resolves a way for firing: the disable switches, its file, its scope and
 /// its refire curve. `None` when it is disabled, missing or out of scope.
 fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
     let domain = id.split('/').next().unwrap_or(id).to_string();
@@ -347,7 +347,7 @@ fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
 
     // Read frontmatter for scope field
     let content = std::fs::read_to_string(&way_file)?;
-    let scope_field = extract_field(&content, "scope").unwrap_or_default();
+    let scope_field = crate::frontmatter::field_in(&content, "scope").unwrap_or_default();
     if !session::scope_matches(&scope_field, &scope) {
         return Ok(None);
     }
@@ -402,7 +402,7 @@ fn render_way(
     project_dir: &str,
     session_id: &str,
 ) -> String {
-    let macro_pos = extract_field(content, "macro");
+    let macro_pos = crate::frontmatter::field_in(content, "macro");
     let way_dir = way_file.parent().unwrap_or(Path::new("."));
     let macro_file = way_dir.join("macro.sh");
     let macro_out = if macro_pos.is_some() && macro_file.is_file() {
@@ -445,8 +445,7 @@ fn render_way(
 /// subagent's scope, and the subagent starts with fresh context whatever the
 /// parent session has already been shown. Empty when disabled or missing.
 pub fn subagent_way(id: &str, session_id: &str) -> Result<String> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     let domain = id.split('/').next().unwrap_or(id);
     if session::domain_disabled(domain) || session::way_disabled(id) {
         return Ok(String::new());
@@ -684,8 +683,7 @@ pub fn check_within(
     match_score: f64,
     mut budget: Option<&mut ContextBudget>,
 ) -> Result<String> {
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
     let domain = id.split('/').next().unwrap_or(id);
@@ -702,7 +700,7 @@ pub fn check_within(
     };
 
     let check_content = std::fs::read_to_string(&check_file)?;
-    let scope_field = extract_field(&check_content, "scope").unwrap_or_default();
+    let scope_field = crate::frontmatter::field_in(&check_content, "scope").unwrap_or_default();
     if !scope_field.is_empty() && !session::scope_matches(&scope_field, &scope) {
         return Ok(String::new());
     }
@@ -725,7 +723,7 @@ pub fn check_within(
     let effective_score = match_score * distance_factor * decay_factor;
 
     // Threshold
-    let threshold: f64 = extract_field(&check_content, "threshold")
+    let threshold: f64 = crate::frontmatter::field_in(&check_content, "threshold")
         .and_then(|s| s.parse().ok())
         .unwrap_or(2.0);
 
@@ -812,7 +810,7 @@ pub fn check_within(
 // ── ways show core ──────────────────────────────────────────────
 
 pub fn core(session_id: &str) -> Result<String> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
     let mut output = String::new();
 
     // Run the macro for the dynamic ways table
@@ -843,7 +841,7 @@ pub fn core(session_id: &str) -> Result<String> {
     }
 
     // Version info
-    let claude_dir = home_dir().join(".claude");
+    let claude_dir = crate::paths::projection_root();
     let version = git_version(&claude_dir);
     output.push_str(&format!("\n---\n_Ways version: {version}_"));
 
@@ -862,11 +860,10 @@ pub fn core(session_id: &str) -> Result<String> {
 // ── ways show attend/<signal> ──────────────────────────────────
 
 pub fn attend(signal: &str, session_id: &str) -> Result<String> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
 
     // Also check project-local ways
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
+    let project_dir = crate::util::project_dir();
     let project_ways = std::path::PathBuf::from(&project_dir).join(".claude/ways");
 
     let dirs: Vec<&std::path::Path> = if project_ways.is_dir() {
@@ -879,16 +876,8 @@ pub fn attend(signal: &str, session_id: &str) -> Result<String> {
     let mut matched_ids: Vec<String> = Vec::new();
 
     for dir in &dirs {
-        for entry in walkdir::WalkDir::new(dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if !path.is_file() { continue; }
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.ends_with(".md") || name.contains(".check.") { continue; }
-
-            if let Ok(content) = std::fs::read_to_string(path) {
+        for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
                 let signals = extract_attend_signals(&content);
                 if signals.iter().any(|s| s == signal) {
                     // Derive way ID from path relative to ways dir

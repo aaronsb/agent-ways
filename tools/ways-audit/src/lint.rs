@@ -72,9 +72,8 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
             for p in policies {
                 if let Some(uri) = p["uri"].as_str() {
                     if !uri.starts_with("github://") && !uri.starts_with("http") {
-                        let home = std::env::var("HOME").unwrap_or_default();
-                        let full = format!("{home}/.claude/{uri}");
-                        if !std::path::Path::new(&full).exists() {
+                        let full = ways_core::paths::projection_root().join(uri);
+                        if !full.exists() {
                             errors.push((
                                 way_id.clone(),
                                 format!("policy URI not found: {uri}"),

@@ -7,21 +7,6 @@
 //! (`per_file.rs`) can stay focused on the lint rules rather than the
 //! shape of the frontmatter format.
 
-pub(super) fn extract_frontmatter_raw(content: &str) -> Option<String> {
-    let mut lines = content.lines();
-    if lines.next()? != "---" {
-        return None;
-    }
-    let mut fm_lines = Vec::new();
-    for line in lines {
-        if line == "---" {
-            return Some(fm_lines.join("\n"));
-        }
-        fm_lines.push(line);
-    }
-    None
-}
-
 pub(super) fn extract_field_name(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
     // Only top-level fields (no leading whitespace for frontmatter fields)
@@ -98,23 +83,14 @@ pub(super) fn count_multiline_yaml(fm: &str) -> usize {
 
 /// Collapse multi-line YAML values (> or |) in frontmatter to single lines.
 pub(super) fn fix_multiline_yaml(content: &str) -> Option<String> {
-    let mut lines = content.lines().peekable();
-    let mut result = Vec::new();
-
-    // Find frontmatter boundaries
-    let first = lines.next()?;
-    if first != "---" {
-        return None;
-    }
-    result.push("---".to_string());
-
+    let close_idx = ways_core::frontmatter::closing_fence_line(content)?;
+    let mut lines = content.lines().enumerate().skip(1).peekable();
+    let mut result = vec!["---".to_string()];
     let mut in_frontmatter = true;
-    let mut found_end = false;
 
-    while let Some(line) = lines.next() {
-        if in_frontmatter && line == "---" {
+    while let Some((i, line)) = lines.next() {
+        if i == close_idx {
             in_frontmatter = false;
-            found_end = true;
             result.push("---".to_string());
             continue;
         }
@@ -123,7 +99,7 @@ pub(super) fn fix_multiline_yaml(content: &str) -> Option<String> {
             if line.ends_with(": >") || line.ends_with(": |") {
                 let field_prefix = &line[..line.len() - 3]; // strip ": >" or ": |", keep "field"
                 let mut parts = Vec::new();
-                while let Some(next) = lines.peek() {
+                while let Some(&(_, next)) = lines.peek() {
                     if next.starts_with("  ") || next.is_empty() {
                         let trimmed = next.trim();
                         if !trimmed.is_empty() {
@@ -144,10 +120,6 @@ pub(super) fn fix_multiline_yaml(content: &str) -> Option<String> {
         }
     }
 
-    if !found_end {
-        return None;
-    }
-
     let mut out = result.join("\n");
     if content.ends_with('\n') {
         out.push('\n');
@@ -164,10 +136,7 @@ pub(super) fn remove_top_level_field(content: &str, field_name: &str) -> Option<
     let lines: Vec<&str> = content.lines().collect();
 
     // Find frontmatter bounds.
-    if lines.first() != Some(&"---") {
-        return None;
-    }
-    let close_idx = lines.iter().skip(1).position(|l| *l == "---")? + 1;
+    let close_idx = ways_core::frontmatter::closing_fence_line(content)?;
 
     // Find the target field line.
     let mut target_idx = None;
@@ -212,10 +181,7 @@ pub(super) fn remove_top_level_field(content: &str, field_name: &str) -> Option<
 /// when-sub-field in the current schema). Returns `None` if not found.
 pub(super) fn remove_when_subfield(content: &str, field_name: &str) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
-    if lines.first() != Some(&"---") {
-        return None;
-    }
-    let close_idx = lines.iter().skip(1).position(|l| *l == "---")? + 1;
+    let close_idx = ways_core::frontmatter::closing_fence_line(content)?;
 
     let mut in_when = false;
     let mut target_idx = None;

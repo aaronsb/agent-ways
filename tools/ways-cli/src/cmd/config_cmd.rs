@@ -16,11 +16,6 @@ use std::path::PathBuf;
 /// owns (ADR-185 item 5): distinguishable from a failure.
 pub const EXIT_BLOCKED: i32 = 3;
 
-fn project_dir() -> String {
-    std::env::var("CLAUDE_PROJECT_DIR")
-        .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()))
-}
-
 /// The stored user config as JSON, or an empty object when the file is absent.
 fn stored_json() -> Result<serde_json::Value> {
     let path = paths::user_config();
@@ -57,7 +52,7 @@ fn effective_json(cfg: &Config) -> serde_json::Value {
 pub fn show(json: bool, effective: bool) -> Result<()> {
     // Loads fresh from disk rather than config::global(): a diagnostic verb
     // reflects the files as they are now.
-    let cfg = Config::load(&project_dir());
+    let cfg = Config::load(&crate::util::project_dir());
     if json {
         let doc = if effective { effective_json(&cfg) } else { stored_json()? };
         println!("{}", serde_json::to_string_pretty(&doc)?);
@@ -142,7 +137,7 @@ pub fn target_state(t: &Target) -> String {
 }
 
 pub fn targets(json: bool) -> Result<()> {
-    let cfg = Config::load(&project_dir());
+    let cfg = Config::load(&crate::util::project_dir());
     let list = cfg.targets();
     if json {
         let rows: Vec<serde_json::Value> = list
@@ -289,7 +284,7 @@ pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<(
         std::process::exit(EXIT_BLOCKED);
     }
     let _ = canonical;
-    let implicit = Config::load(&project_dir()).targets();
+    let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut chosen: Option<Target> = None;
     let (path, _) = Config::edit_user_targets(|current| {
         // A file with no key starts from the implicit list, so the default
@@ -325,7 +320,7 @@ pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<(
 }
 
 fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
-    let implicit = Config::load(&project_dir()).targets();
+    let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut chosen: Option<Target> = None;
     let mut missing = false;
     Config::edit_user_targets(|current| {
@@ -357,7 +352,7 @@ pub fn target_disable(dir: &str) -> Result<()> {
 }
 
 pub fn target_remove(dir: &str) -> Result<()> {
-    let implicit = Config::load(&project_dir()).targets();
+    let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut removed: Option<Target> = None;
     // Withdraw first, then forget: a removed target is a withdrawn one. The
     // record is dropped under the lock only after the withdrawal succeeded.
