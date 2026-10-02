@@ -152,6 +152,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-503](./platform/ADR-503-settings-are-files-described-by-one-typed-registry-the-cli-and-the-tui-are-two-ways-in.md) | Settings are files described by one typed registry; the CLI and the TUI are two ways in | accepted |
 | [ADR-504](./platform/ADR-504-one-tui-engine-on-ratatui-and-one-theme-for-every-interactive-surface.md) | One TUI engine on ratatui and one theme for every interactive surface | accepted |
 | [ADR-505](./platform/ADR-505-duplicated-implementations-across-ways-attend-and-the-hooks-audited-2026-10-01.md) | Duplicated implementations across ways, attend and the hooks, audited 2026-10-01 | proposed |
+| [ADR-506](./platform/ADR-506-the-consolidation-ends-with-no-legacy-compatibility.md) | The consolidation ends with no legacy compatibility | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
