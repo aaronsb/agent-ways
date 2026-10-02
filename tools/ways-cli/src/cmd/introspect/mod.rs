@@ -148,10 +148,10 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
         r
     };
     let shown = scope.clone().unwrap_or_else(|| "every project".into());
-    let spend = report::Spend::new(ways_agent_core::spend::load(), scope.as_deref(), shown.clone());
+    let reports = report::Reports::new(&content, scope.as_deref(), shown.clone());
     let screen = match session {
         Some(id) => match Replay::load(&content, id, None, false) {
-            Ok(r) => Introspect::showing(with_speed(r), spend, palette, shape),
+            Ok(r) => Introspect::showing(with_speed(r), reports, palette, shape),
             Err(e) => {
                 println!("{e}");
                 return Ok(());
@@ -165,7 +165,7 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
             }
             sessions::find_transcripts(&mut found, &ways_core::paths::claude_dir());
             let opener: screen::Opener = Box::new(move |id| Replay::load(&content, id, None, false).map(with_speed));
-            Introspect::picking(Picker::new(found, shown), opener, spend, palette, shape)
+            Introspect::picking(Picker::new(found, shown), opener, reports, palette, shape)
         }
     };
     show(screen, open)
@@ -221,8 +221,8 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
             // The spend is scoped to the project's root, as judge calls record
             // it, though the monitor may have been launched in a subdirectory.
             let root = project.map(str::to_string).or_else(ways_core::util::project_root).unwrap_or_else(|| launch_project.clone());
-            let spend = report::Spend::new(ways_agent_core::spend::load(), Some(&root), root.clone());
-            show(Introspect::showing(r, spend, palette, shape), open)
+            let reports = report::Reports::new(&content, Some(&root), root.clone());
+            show(Introspect::showing(r, reports, palette, shape), open)
         }
         Err(_) => {
             println!("No events for the current session yet.");

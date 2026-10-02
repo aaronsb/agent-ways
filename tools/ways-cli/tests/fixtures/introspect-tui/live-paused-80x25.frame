@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| introspect    1 timeline    2 fires    3 spend                                 |
+| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                    |
 |epoch 3 · 200K ctx · 3 ways · window 1/2  ◇ injected  ● LIVE paused             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────┼ 3/4|
@@ -25,10 +25,12 @@ agent-tui frame 80x25
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | paused   ↑↓ select  ⏎ why  ←→ frame  space follow  f matched  q quit           |
 styles
-  0   0-11  White Blue -
-  0  14-25  Black Cyan BOLD
-  0  28-36  White DarkGray DIM
-  0  39-47  White DarkGray DIM
+  0   0-8   White Blue -
+  0  10-21  Black Cyan BOLD
+  0  23-31  White DarkGray DIM
+  0  33-41  White DarkGray DIM
+  0  43-51  White DarkGray DIM
+  0  53-65  White DarkGray DIM
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-39  - - DIM

@@ -1,0 +1,116 @@
+agent-tui frame 80x25
+| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
+|Usage · 2 sessions · 3 fires · 0 re-disclosures · 2026-07-03 → 2026-07-03       |
+|┌ 2 ways fired in /home/dev/proj ──────────────┐┌ how they fired ──────────────┐|
+|│ Way                                     Fires││Channel                       │|
+|│▌softwaredev/code/testing                    2││       2  semantic:embedding:e│|
+|│ softwaredev/delivery/commits                1││       1  bash                │|
+|│                                              ││                              │|
+|│                                              ││Scope                         │|
+|│                                              ││       3  agent               │|
+|│                                              ││                              │|
+|│                                              ││Checks                        │|
+|│                                              ││       0  fired, 0 anchored, m│|
+|│                                              ││                              │|
+|│                                              ││Ways per invocation (1 · 2 · 3│|
+|│                                              ││  prompt: 2 · 0 · 0 · 0, max 1│|
+|│                                              ││  bash: 1 · 0 · 0 · 0, max 1  │|
+|│                                              ││                              │|
+|│                                              ││softwaredev/code/testing by mo│|
+|│                                              ││       2  (unstamped)         │|
+|│                                              ││                              │|
+|│                                              ││                              │|
+|│                                              ││                              │|
+|│                                              ││                              │|
+|└────────────────────── ways tune stats --json ┘└──────────────────────────────┘|
+| stats   ↑↓ select  q quit                                                      |
+styles
+  0   0-8   White Blue -
+  0  10-21  White DarkGray DIM
+  0  23-31  White DarkGray DIM
+  0  33-41  White DarkGray DIM
+  0  43-51  Black Cyan BOLD
+  0  53-65  White DarkGray DIM
+  1   0-4   - - BOLD
+  1   5-72  - - DIM
+  2   0-0   - - DIM
+  2   1-32  Blue - BOLD|DIM
+  2  33-48  - - DIM
+  2  49-64  Blue - BOLD|DIM
+  2  65-79  - - DIM
+  3   0-0   - - DIM
+  3   1-46  - - BOLD
+  3  47-48  - - DIM
+  3  49-55  - - BOLD
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-46  - - BOLD|REVERSED
+  4  47-48  - - DIM
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5  47-48  - - DIM
+  5  79-79  - - DIM
+  6   0-0   - - DIM
+  6  47-48  - - DIM
+  6  79-79  - - DIM
+  7   0-0   - - DIM
+  7  47-48  - - DIM
+  7  49-53  - - BOLD
+  7  79-79  - - DIM
+  8   0-0   - - DIM
+  8  47-48  - - DIM
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  47-48  - - DIM
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10  47-48  - - DIM
+ 10  49-54  - - BOLD
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  47-48  - - DIM
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12  47-48  - - DIM
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  47-48  - - DIM
+ 13  49-78  - - BOLD
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  47-48  - - DIM
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  47-48  - - DIM
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  47-48  - - DIM
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17  47-48  - - DIM
+ 17  49-78  - - BOLD
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18  47-48  - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  47-48  - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  47-48  - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  47-48  - - DIM
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  47-48  - - DIM
+ 22  79-79  - - DIM
+ 23   0-22  - - DIM
+ 23  23-46  Blue - BOLD|DIM
+ 23  47-79  - - DIM
+ 24   0-6   Black Cyan BOLD
+ 24   9-10  Cyan - BOLD
+ 24  11-17  - - DIM|ITALIC
+ 24  20-20  Cyan - BOLD
+ 24  21-25  - - DIM|ITALIC

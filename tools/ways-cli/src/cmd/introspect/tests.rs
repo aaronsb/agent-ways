@@ -20,7 +20,7 @@ use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, Join
 
 use super::frames::{build_frames, has_verdicts};
 use super::model::WayEvent;
-use super::report::Spend;
+use super::report::{Precision, Reports, Spend, Stats};
 use super::picker::Picker;
 use super::screen::{reselect_by_anchor, session_spend, Introspect, Replay};
 use super::sessions::{gather_sessions, SessionInfo};
@@ -152,9 +152,14 @@ fn picker(palette: Palette) -> Introspect {
     Introspect::picking(Picker::new(sessions(), PROJECT.into()), open, no_spend(), palette, Shape::PLAIN)
 }
 
-/// A spend tab with no judge calls.
-fn no_spend() -> Spend {
-    Spend::new(Vec::new(), None, PROJECT.into())
+/// Report tabs with no events.
+fn no_spend() -> Reports {
+    with_spend(Spend::new(Vec::new(), None, PROJECT.into()))
+}
+
+/// Reports with `spend` and empty usage and precision.
+fn with_spend(spend: Spend) -> Reports {
+    Reports { spend, stats: Stats::new("", None, PROJECT.into()), precision: Precision::new("", None, PROJECT.into()) }
 }
 
 /// The screen opened on one session, as `--session` and `live` open it.
@@ -677,7 +682,7 @@ fn the_fires_tab_lists_the_sessions_semantic_fires() {
 #[test]
 fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
     let spend = Spend::new(spend_calls(), Some(PROJECT), PROJECT.into());
-    let mut s = Introspect::showing(replay(false), spend, terminal(), Shape::PLAIN);
+    let mut s = Introspect::showing(replay(false), with_spend(spend), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('3')]);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("3 judge calls in /home/dev/proj") && t.contains("the log holds calls from 2026-06-30"), "{t}");
@@ -687,7 +692,7 @@ fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
     assert!(t.contains("$0.0220 + 1 unknown") && t.contains("$0.0330 + 1 unknown") && t.matches("2026-06-30").count() == 1, "another project's day is left out: {t}");
     // A scope written with a trailing slash matches as the sessions do.
     let slashed = Spend::new(spend_calls(), Some("/home/dev/proj/"), PROJECT.into());
-    let mut d = Introspect::showing(replay(false), slashed, terminal(), Shape::PLAIN);
+    let mut d = Introspect::showing(replay(false), with_spend(slashed), terminal(), Shape::PLAIN);
     press(&mut d, &[KeyCode::Char('3')]);
     assert!(text(&render(&mut d, 120, 40)).contains("3 judge calls"));
     press(&mut s, &[KeyCode::Char('m')]);
@@ -705,9 +710,14 @@ fn tab_golden_frames() {
     ]);
     press(&mut f, &[KeyCode::Char('2'), KeyCode::Down]);
     check(&mut g, "fires", &mut f);
-    let mut s = Introspect::showing(replay(false), Spend::new(spend_calls(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
+    let mut s = Introspect::showing(replay(false), with_spend(Spend::new(spend_calls(), Some(PROJECT), PROJECT.into())), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('3')]);
     check(&mut g, "spend", &mut s);
+    let mut u = Introspect::showing(replay(false), Reports::new(&usage_log(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
+    press(&mut u, &[KeyCode::Char('4')]);
+    check(&mut g, "stats", &mut u);
+    press(&mut u, &[KeyCode::Char('5')]);
+    check(&mut g, "precision", &mut u);
     g.finish();
 }
 
@@ -727,8 +737,52 @@ fn a_heavy_spend_row_fits_at_80_columns() {
     };
     let mut calls = vec![call(Some(12.3456))];
     calls.extend((0..12).map(|_| call(None)));
-    let mut s = Introspect::showing(replay(false), Spend::new(calls, None, "every project".into()), terminal(), Shape::PLAIN);
+    let mut s = Introspect::showing(replay(false), with_spend(Spend::new(calls, None, "every project".into())), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('3')]);
     let t = text(&render(&mut s, 80, 25));
     assert!(t.contains("$12.3456 + 12 unknown"), "{t}");
+}
+
+/// A small log for the usage and precision tabs: two sessions in this
+/// project and one elsewhere.
+fn usage_log() -> String {
+    let fired = |session: &str, project: &str, way: &str, trigger: &str| {
+        serde_json::json!({"event": "way_fired", "ts": "2026-07-03T16:52:01Z", "session": session, "project": project, "way": way, "trigger": trigger, "scope": "agent"})
+    };
+    [
+        serde_json::json!({"event": "session_start", "ts": "2026-07-03T16:52:00Z", "session": "s1", "project": PROJECT}),
+        fired("s1", PROJECT, "softwaredev/code/testing", "semantic:embedding:en"),
+        fired("s1", PROJECT, "softwaredev/delivery/commits", "bash"),
+        serde_json::json!({"event": "session_start", "ts": "2026-07-04T09:00:00Z", "session": "s2", "project": PROJECT}),
+        fired("s2", PROJECT, "softwaredev/code/testing", "semantic:embedding:en"),
+        fired("s3", "/elsewhere", "itops/incident", "keyword"),
+    ]
+    .map(|v| v.to_string())
+    .join("\n")
+}
+
+/// The usage tab ranks the scope's ways by fires and says how they came;
+/// the precision tab lists each way with its flag, and the remedy of the
+/// selected one. Both name the command an agent runs for the same data.
+#[test]
+fn the_stats_and_precision_tabs_report_the_scope() {
+    let mut s = Introspect::showing(replay(false), Reports::new(&usage_log(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('4')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("2 sessions · 3 fires") && t.contains("2026-07-03 → 2026-07-03") && t.contains("ways tune stats --json"), "{t}");
+    let testing = t.find("softwaredev/code/testing").expect("the most-fired way");
+    let commits = t.find("softwaredev/delivery/commits").expect("the other way");
+    assert!(testing < commits && !t.contains("itops/incident"), "ranked by fires, scope kept: {t}");
+    press(&mut s, &[KeyCode::Char('5')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("Fire precision") && t.contains("2 ways fired in /home/dev/proj") && t.contains("ways tune precision --json"), "{t}");
+    assert!(t.contains("low-n") && t.contains("insufficient sample"), "under five sessions every way is low-n: {t}");
+}
+
+/// Six tabs fit the tab line at 80 columns.
+#[test]
+fn the_tab_line_fits_at_80_columns() {
+    let mut p = picker(terminal());
+    let t = text(&render(&mut p, 80, 25));
+    assert!(t.lines().next().unwrap().contains("6 precision"), "{t}");
 }

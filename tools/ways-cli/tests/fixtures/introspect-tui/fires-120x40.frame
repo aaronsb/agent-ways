@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| introspect    1 timeline    2 fires    3 spend                                                                         |
+| session   1 timeline   2 fires   3 spend   4 stats   5 precision                                                       |
 |Session 8f3a2c1d-5e6  lowest score first · ↻ a re-disclosure                                                            |
 |┌ 2 semantic fires ────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Score   Way                                             Surface                                                      │|
@@ -37,13 +37,15 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
-|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+|└─────────────────────────────────────────────────────────────────────────────────────────── ways session fires --json ┘|
 | fires   ↑↓ select  q quit                                                                                           2/2|
 styles
-  0   0-11  White Blue -
-  0  14-25  White DarkGray DIM
-  0  28-36  Black Cyan BOLD
-  0  39-47  White DarkGray DIM
+  0   0-8   White Blue -
+  0  10-21  White DarkGray DIM
+  0  23-31  Black Cyan BOLD
+  0  33-41  White DarkGray DIM
+  0  43-51  White DarkGray DIM
+  0  53-65  White DarkGray DIM
   1   0-7   - - BOLD
   1  20-59  - - DIM
   2   0-0   - - DIM
@@ -125,7 +127,9 @@ styles
  36 119-119 - - DIM
  37   0-0   - - DIM
  37 119-119 - - DIM
- 38   0-119 - - DIM
+ 38   0-91  - - DIM
+ 38  92-118 Blue - BOLD|DIM
+ 38 119-119 - - DIM
  39   0-6   Black Cyan BOLD
  39   9-10  Cyan - BOLD
  39  11-17  - - DIM|ITALIC

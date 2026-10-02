@@ -22,7 +22,7 @@ use ways_agent_core::spend::{self, Group};
 use ways_core::introspection::SessionIntrospection;
 
 use super::model::{ActiveWay, Frame, Outcome};
-use super::report::Spend;
+use super::report::Reports;
 use super::table;
 use super::why::{self, WhyIndex};
 use super::fires_tab::Fires;
@@ -394,6 +394,8 @@ pub(crate) enum Tab {
     Timeline,
     Fires,
     Spend,
+    Stats,
+    Precision,
 }
 
 impl Tab {
@@ -403,6 +405,8 @@ impl Tab {
             Tab::Timeline => "timeline",
             Tab::Fires => "fires",
             Tab::Spend => "spend",
+            Tab::Stats => "stats",
+            Tab::Precision => "precision",
         }
     }
 }
@@ -415,24 +419,24 @@ pub(crate) struct Introspect {
     pub(crate) tab: Tab,
     picker: Option<Picker>,
     pub(crate) replay: Option<Replay>,
-    pub(crate) spend: Spend,
+    pub(crate) reports: Reports,
     open: Opener,
     msg: String,
 }
 
 impl Introspect {
-    pub(crate) fn picking(picker: Picker, open: Opener, spend: Spend, palette: Palette, shape: Shape) -> Introspect {
-        Introspect { palette, shape, tab: Tab::Sessions, picker: Some(picker), replay: None, spend, open, msg: String::new() }
+    pub(crate) fn picking(picker: Picker, open: Opener, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
+        Introspect { palette, shape, tab: Tab::Sessions, picker: Some(picker), replay: None, reports, open, msg: String::new() }
     }
 
-    pub(crate) fn showing(replay: Replay, spend: Spend, palette: Palette, shape: Shape) -> Introspect {
+    pub(crate) fn showing(replay: Replay, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
         let open = Box::new(|_: &str| Err("no picker".into()));
-        Introspect { palette, shape, tab: Tab::Timeline, picker: None, replay: Some(replay), spend, open, msg: String::new() }
+        Introspect { palette, shape, tab: Tab::Timeline, picker: None, replay: Some(replay), reports, open, msg: String::new() }
     }
 
     /// The tabs shown: the sessions tab only with a picker.
     fn tabs(&self) -> Vec<Tab> {
-        let all = [Tab::Sessions, Tab::Timeline, Tab::Fires, Tab::Spend];
+        let all = [Tab::Sessions, Tab::Timeline, Tab::Fires, Tab::Spend, Tab::Stats, Tab::Precision];
         all.into_iter().filter(|t| *t != Tab::Sessions || self.picker.is_some()).collect()
     }
 
@@ -464,16 +468,23 @@ impl Screen for Introspect {
             (Tab::Sessions, _, Some(p)) => draw_picker(f, p, bar, shape, &self.msg),
             (Tab::Timeline, Some(r), _) => draw_replay(f, r, bar, shape),
             (Tab::Fires, Some(r), _) => r.fires.draw(f, &r.session_id, bar, shape, back),
-            (Tab::Spend, ..) => {
+            (tab @ (Tab::Spend | Tab::Stats | Tab::Precision), ..) => {
                 let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
                 f.render_widget(Paragraph::new(bar), top);
-                self.spend.draw(f, body);
-                let mut keys = self.spend.keys();
+                let mut keys = vec![("↑↓", "select")];
+                match tab {
+                    Tab::Spend => {
+                        self.reports.spend.draw(f, body);
+                        keys = self.reports.spend.keys();
+                    }
+                    Tab::Stats => self.reports.stats.draw(f, body),
+                    _ => self.reports.precision.draw(f, body),
+                }
                 if back {
                     keys.push(("esc", "sessions"));
                 }
                 keys.push(("q", "quit"));
-                f.render_widget(Paragraph::new(key_bar(shape, "spend", Ground::Accent, &keys, Vec::new(), status.width)), status);
+                f.render_widget(Paragraph::new(key_bar(shape, tab.name(), Ground::Accent, &keys, Vec::new(), status.width)), status);
             }
             // A session tab before a session is open.
             (tab, ..) => {
@@ -532,7 +543,9 @@ impl Screen for Introspect {
                 KeyCode::Esc => self.back(),
                 c => {
                     match (tab, replay) {
-                        (Tab::Spend, _) => self.spend.key(c),
+                        (Tab::Spend, _) => self.reports.spend.key(c),
+                        (Tab::Stats, _) => self.reports.stats.key(c),
+                        (Tab::Precision, _) => self.reports.precision.key(c),
                         (Tab::Fires, Some(r)) => r.fires.key(c),
                         _ => {}
                     }
@@ -551,7 +564,7 @@ impl Screen for Introspect {
     fn tick(&mut self) {
         if let Some(r) = &mut self.replay {
             if let Some(content) = r.tick() {
-                self.spend.reload(&content);
+                self.reports.reload(&content);
             }
         }
     }
@@ -562,11 +575,11 @@ pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
 }
 
-/// The tab line: the application, then each view, the shown one in the accent.
+/// The tab line: the screen, then each tab, the shown one in the accent.
 fn tabs(shape: Shape, views: &[(String, bool)]) -> Line<'static> {
-    let mut spans = shape.lozenge(&[Seg::on(" introspect ", Ground::AccentDim)]);
+    let mut spans = shape.lozenge(&[Seg::on(" session ", Ground::AccentDim)]);
     for (name, on) in views {
-        spans.push(Span::raw("  "));
+        spans.push(Span::raw(" "));
         let seg = if *on { Seg::on(format!(" {name} "), Ground::Accent).bold() } else { Seg::faded(format!(" {name} ")) };
         spans.extend(shape.lozenge(&[seg]));
     }

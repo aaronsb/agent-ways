@@ -13,7 +13,41 @@ use agent_tui::theme;
 use ways_agent_core::spend::{self, By, Call, Group};
 
 use super::screen::pane;
+use crate::cmd::stats::{self, StatsReport};
 use crate::cmd::tune_precision::{self, Flag, WayPrecision};
+
+/// The command that prints a tab's data for an agent (ADR-507 note of
+/// 2026-10-02), on the tab's bottom border.
+pub(super) fn agent_hint(command: &str) -> Line<'static> {
+    Line::styled(format!(" {command} "), theme::muted()).right_aligned()
+}
+
+/// The report tabs over one scope: the judge's spend, usage and fire
+/// precision. Each reads the event log's text it is given, so a live
+/// screen reads the log once per change for all of them.
+pub(crate) struct Reports {
+    pub(crate) spend: Spend,
+    pub(crate) stats: Stats,
+    pub(crate) precision: Precision,
+}
+
+impl Reports {
+    /// The reports of the event log's `content` for `project`, or every
+    /// project with `None`; `scope` names it in the tables' titles.
+    pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Reports {
+        Reports {
+            spend: Spend::new(spend::parse_log(content), project, scope.clone()),
+            stats: Stats::new(content, project, scope.clone()),
+            precision: Precision::new(content, project, scope),
+        }
+    }
+
+    pub(crate) fn reload(&mut self, content: &str) {
+        self.spend.reload(content);
+        self.stats.reload(content);
+        self.precision.reload(content);
+    }
+}
 
 /// The judge's spend over the sessions in scope, by day or by month,
 /// newest first, in the shape of `npx ccusage`.
@@ -135,7 +169,7 @@ impl Spend {
         let t = Table::new(rows, widths)
             .header(header)
             .column_spacing(1)
-            .block(pane(title))
+            .block(pane(title).title_bottom(agent_hint("ways agent cost --json")))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
@@ -186,7 +220,7 @@ impl Precision {
             Span::styled("Fire precision", Style::new().add_modifier(Modifier::BOLD)),
             Span::styled(
                 format!(
-                    " · {flagged} flagged · off-class ≥ {:.0}% over ≥ {} sessions · `ways tune precision --json` for an agent",
+                    " · {flagged} flagged · off-class ≥ {:.0}% over ≥ {} sessions",
                     tune_precision::FLAG_THRESHOLD * 100.0,
                     tune_precision::MIN_SESSIONS
                 ),
@@ -203,11 +237,11 @@ impl Precision {
         let header = Row::new(vec![
             Cell::from("Way"),
             Cell::from("Flag"),
-            right("Sessions".into()),
+            right("Sess".into()),
             right("Off".into()),
             right("Irrel".into()),
             right("Spread".into()),
-            Cell::from("Top off trigger"),
+            Cell::from("Off trigger"),
         ])
         .style(Style::new().add_modifier(Modifier::BOLD));
         let rows: Vec<Row> = self
@@ -232,22 +266,125 @@ impl Precision {
         let widths = [
             Constraint::Min(20),
             Constraint::Length(13),
-            Constraint::Length(8),
             Constraint::Length(4),
+            Constraint::Length(3),
             Constraint::Length(5),
             Constraint::Length(6),
-            Constraint::Length(15),
+            Constraint::Length(11),
         ];
         self.sel = self.sel.min(self.rows.len() - 1);
         self.table.select(Some(self.sel));
         let t = Table::new(rows, widths)
             .header(header)
             .column_spacing(1)
-            .block(pane(title))
+            .block(pane(title).title_bottom(agent_hint("ways tune precision --json")))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
         let r = &self.rows[self.sel];
         f.render_widget(Paragraph::new(Line::from(vec![Span::styled(format!("{}: ", r.way), theme::muted()), Span::raw(r.flag.remedy())])), remedy);
+    }
+}
+
+/// Usage over the scope, as `ways tune stats` reports it: the ways ranked
+/// by fires, and beside them how the fires came (channel, scope, checks,
+/// ways per hook invocation).
+pub(crate) struct Stats {
+    report: StatsReport,
+    project: Option<String>,
+    scope: String,
+    sel: usize,
+    table: TableState,
+}
+
+impl Stats {
+    /// The stats of the event log's `content` for `project`, or every
+    /// project with `None`.
+    pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Stats {
+        let mut s = Stats { report: StatsReport::default(), project: project.map(str::to_string), scope, sel: 0, table: TableState::default() };
+        s.reload(content);
+        s
+    }
+
+    pub(crate) fn reload(&mut self, content: &str) {
+        self.report = stats::report(content, None, self.project.as_deref());
+    }
+
+    pub(crate) fn key(&mut self, k: KeyCode) {
+        let last = self.report.by_way.len().saturating_sub(1);
+        self.sel = match k {
+            KeyCode::Up | KeyCode::Char('k') => self.sel.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => (self.sel + 1).min(last),
+            KeyCode::PageUp => self.sel.saturating_sub(10),
+            KeyCode::PageDown => (self.sel + 10).min(last),
+            KeyCode::Home | KeyCode::Char('g') => 0,
+            KeyCode::End | KeyCode::Char('G') => last,
+            _ => self.sel,
+        };
+    }
+
+    pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
+        let r = &self.report;
+        let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(area);
+        let day = |t: &Option<String>| t.as_deref().and_then(|t| t.get(..10)).unwrap_or("?").to_string();
+        let line = vec![
+            Span::styled("Usage", Style::new().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(
+                    " · {} sessions · {} fires · {} re-disclosures · {} → {}",
+                    r.sessions,
+                    r.fires,
+                    r.redisclosures,
+                    day(&r.first_ts),
+                    day(&r.last_ts)
+                ),
+                theme::muted(),
+            ),
+        ];
+        f.render_widget(Paragraph::new(Line::from(line)), head);
+        let [left, right] = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(body);
+
+        let title = format!(" {} ways fired in {} ", r.by_way.len(), self.scope);
+        if r.by_way.is_empty() {
+            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title)), left);
+        } else {
+            let rows: Vec<Row> =
+                r.by_way.iter().map(|(way, n)| Row::new(vec![Cell::from(way.clone()), Cell::from(Line::from(n.to_string()).alignment(Alignment::Right))])).collect();
+            let header = Row::new(vec![Cell::from("Way"), Cell::from(Line::from("Fires").alignment(Alignment::Right))]).style(Style::new().add_modifier(Modifier::BOLD));
+            self.sel = self.sel.min(r.by_way.len() - 1);
+            self.table.select(Some(self.sel));
+            let t = Table::new(rows, [Constraint::Min(10), Constraint::Length(6)])
+                .header(header)
+                .column_spacing(1)
+                .block(pane(title).title_bottom(agent_hint("ways tune stats --json")))
+                .row_highlight_style(theme::selected())
+                .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
+            f.render_stateful_widget(t, left, &mut self.table);
+        }
+
+        let mut lines: Vec<Line> = Vec::new();
+        let section = |lines: &mut Vec<Line>, name: &str, rows: &[(String, u32)]| {
+            lines.push(Line::styled(name.to_string(), Style::new().add_modifier(Modifier::BOLD)));
+            lines.extend(rows.iter().map(|(k, n)| Line::from(format!("  {n:>6}  {k}"))));
+            lines.push(Line::default());
+        };
+        section(&mut lines, "Channel", &r.by_trigger);
+        section(&mut lines, "Scope", &r.by_scope);
+        lines.push(Line::styled("Checks", Style::new().add_modifier(Modifier::BOLD)));
+        lines.push(Line::from(format!("  {:>6}  fired, {} anchored, mean distance {:.1}", r.check_fires, r.check_anchored, r.check_avg_distance)));
+        lines.push(Line::default());
+        lines.push(Line::styled("Ways per invocation (1 · 2 · 3 · 4+)", Style::new().add_modifier(Modifier::BOLD)));
+        for (channel, l) in &r.ways_per_invocation {
+            let b = l.buckets.iter().map(u32::to_string).collect::<Vec<_>>().join(" · ");
+            lines.push(Line::from(format!("  {channel}: {b}, max {}", l.max)));
+        }
+        if let Some((way, _)) = r.by_way.get(self.sel) {
+            if let Some(split) = r.by_way_model.get(way) {
+                lines.push(Line::default());
+                lines.push(Line::styled(format!("{way} by model"), Style::new().add_modifier(Modifier::BOLD)));
+                lines.extend(split.iter().map(|(m, n)| Line::from(format!("  {n:>6}  {m}"))));
+            }
+        }
+        f.render_widget(Paragraph::new(lines).block(pane(" how they fired ")), right);
     }
 }

@@ -1,10 +1,10 @@
 agent-tui frame 80x25
 | session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
-|Session 8f3a2c1d-5e6  lowest score first · ↻ a re-disclosure                    |
-|┌ 2 semantic fires ────────────────────────────────────────────────────────────┐|
-|│ Score   Way                             Surface                              │|
-|│ 0.405 ↻ softwaredev/docs/adr            record the decision                  │|
-|│▌0.612   softwaredev/code/testing        add a unit test for the parser       │|
+|Fire precision · 0 flagged · off-class ≥ 50% over ≥ 5 sessions                  |
+|┌ 2 ways fired in /home/dev/proj ──────────────────────────────────────────────┐|
+|│ Way                           Flag          Sess Off Irrel Spread Off trigger│|
+|│▌softwaredev/code/testing      low-n            2   0  0.00      0 -          │|
+|│ softwaredev/delivery/commits  low-n            1   0  0.00      0 -          │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -21,32 +21,32 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
-|│                                                                              │|
-|└─────────────────────────────────────────────────── ways session fires --json ┘|
-| fires   ↑↓ select  q quit                                                   2/2|
+|└────────────────────────────────────────────────── ways tune precision --json ┘|
+|softwaredev/code/testing: insufficient sample                                   |
+| precision   ↑↓ select  q quit                                                  |
 styles
   0   0-8   White Blue -
   0  10-21  White DarkGray DIM
-  0  23-31  Black Cyan BOLD
+  0  23-31  White DarkGray DIM
   0  33-41  White DarkGray DIM
   0  43-51  White DarkGray DIM
-  0  53-65  White DarkGray DIM
-  1   0-7   - - BOLD
-  1  20-59  - - DIM
+  0  53-65  Black Cyan BOLD
+  1   0-13  - - BOLD
+  1  14-61  - - DIM
   2   0-0   - - DIM
-  2   1-18  Blue - BOLD|DIM
-  2  19-79  - - DIM
+  2   1-32  Blue - BOLD|DIM
+  2  33-79  - - DIM
   3   0-0   - - DIM
   3   1-78  - - BOLD
   3  79-79  - - DIM
   4   0-0   - - DIM
-  4  42-60  - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-31  - - BOLD|REVERSED
+  4  32-36  - - BOLD|DIM|REVERSED
+  4  37-78  - - BOLD|REVERSED
   4  79-79  - - DIM
   5   0-0   - - DIM
-  5   1-1   Cyan - BOLD|REVERSED
-  5   2-41  - - BOLD|REVERSED
-  5  42-71  - - BOLD|DIM|REVERSED
-  5  72-78  - - BOLD|REVERSED
+  5  32-36  - - DIM
   5  79-79  - - DIM
   6   0-0   - - DIM
   6  79-79  - - DIM
@@ -80,14 +80,12 @@ styles
  20  79-79  - - DIM
  21   0-0   - - DIM
  21  79-79  - - DIM
- 22   0-0   - - DIM
+ 22   0-50  - - DIM
+ 22  51-78  Blue - BOLD|DIM
  22  79-79  - - DIM
- 23   0-51  - - DIM
- 23  52-78  Blue - BOLD|DIM
- 23  79-79  - - DIM
- 24   0-6   Black Cyan BOLD
- 24   9-10  Cyan - BOLD
- 24  11-17  - - DIM|ITALIC
- 24  20-20  Cyan - BOLD
- 24  21-25  - - DIM|ITALIC
- 24  77-79  - - DIM
+ 23   0-25  - - DIM
+ 24   0-10  Black Cyan BOLD
+ 24  13-14  Cyan - BOLD
+ 24  15-21  - - DIM|ITALIC
+ 24  24-24  Cyan - BOLD
+ 24  25-29  - - DIM|ITALIC

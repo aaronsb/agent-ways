@@ -11,6 +11,7 @@ use agent_tui::ratatui::Frame as Draw;
 use agent_tui::theme::{self, Ground, Shape};
 use agent_tui::timeline::key_bar;
 
+use super::report::agent_hint;
 use super::screen::pane;
 use super::SemanticFire;
 
@@ -82,7 +83,7 @@ impl Fires {
             let t = Table::new(rows, widths)
                 .header(header)
                 .column_spacing(1)
-                .block(pane(title))
+                .block(pane(title).title_bottom(agent_hint("ways session fires --json")))
                 .row_highlight_style(theme::selected())
                 .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
                 .highlight_spacing(HighlightSpacing::Always);
