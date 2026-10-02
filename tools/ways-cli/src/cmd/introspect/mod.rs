@@ -125,9 +125,9 @@ fn need_terminal(open: &Open, mode: &str) -> Result<()> {
 /// `ways session replay` — a session's way firings frame by frame. With
 /// no `--session`, the picker lists the sessions in scope. `--json` prints
 /// the timeline instead.
-pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Option<u64>, json: bool, open: &Open) -> Result<()> {
+pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Option<u64>, json: bool, matched: bool, open: &Open) -> Result<()> {
     if json {
-        return dump::replay_json(session, project, all);
+        return dump::replay_json(session, project, all, matched);
     }
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
@@ -242,7 +242,7 @@ pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
 /// Scoping mirrors `replay`: default the current project, `--project` for a
 /// specific one, `--all` across every project (which only affects session
 /// picking). With no `--session`, the most recent session in scope is dumped.
-pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
+pub fn dump(session: Option<&str>, project: Option<&str>, all: bool, matched: bool) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
@@ -285,6 +285,8 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
         &project_path,
         window_k,
     );
+    // What reached the session, unless asked for every matched candidate.
+    let model = if matched { model } else { model.injected_only() };
     println!("{}", serde_json::to_string_pretty(&model)?);
     Ok(())
 }
@@ -302,6 +304,7 @@ pub fn fires(
     all: bool,
     max_score: Option<f64>,
     limit: Option<usize>,
+    matched: bool,
 ) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
@@ -321,13 +324,22 @@ pub fn fires(
         }
     };
 
+    print!("{}", fires_report(&content, &session_id, max_score, limit, matched));
+    Ok(())
+}
+
+/// The `fires` listing of `session_id` from the event log `content`, and
+/// with `matched` the ways the relevance judge kept out.
+fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: Option<usize>, matched: bool) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
     // Pull semantic fires for this session. A fire is semantic when its trigger
     // begins `semantic:` (`semantic:embedding:en|multi`); keyword/state fires have
     // no score or surface to eyeball, so they are out of scope for this view.
     let mut rows: Vec<(f64, String, String, bool)> = Vec::new();
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-        if v.get("session").and_then(|s| s.as_str()) != Some(session_id.as_str()) {
+        if v.get("session").and_then(|s| s.as_str()) != Some(session_id) {
             continue;
         }
         let event = v.get("event").and_then(|e| e.as_str()).unwrap_or("");
@@ -362,11 +374,15 @@ pub fn fires(
     }
 
     if rows.is_empty() {
-        println!(
+        let _ = writeln!(
+            out,
             "No semantic fires for session {} (keyword/state fires carry no score/surface).",
-            short_id(&session_id)
+            short_id(session_id)
         );
-        return Ok(());
+        if matched {
+            out.push_str(&judge_blocks_text(&ways_core::introspection::judge_blocks(content, session_id)));
+        }
+        return out;
     }
 
     // Borderline first: the lowest-scoring fires are the ones whose relevance is
@@ -375,19 +391,65 @@ pub fn fires(
     let total = rows.len();
     let shown = limit.unwrap_or(total).min(total);
 
-    println!(
+    let _ = writeln!(
+        out,
         "{} semantic fire{} · session {} · lowest score first{}",
         total,
         if total == 1 { "" } else { "s" },
-        short_id(&session_id),
+        short_id(session_id),
         max_score.map(|c| format!(" · ≤ {c:.2}")).unwrap_or_default(),
     );
     for (score, way, surface, redisclosed) in rows.into_iter().take(shown) {
         let mark = if redisclosed { "↻" } else { " " };
-        println!("  {score:.3} {mark} {way:<44}  {surface}");
+        let _ = writeln!(out, "  {score:.3} {mark} {way:<44}  {surface}");
     }
     if shown < total {
-        println!("  … {} more (raise --limit)", total - shown);
+        let _ = writeln!(out, "  … {} more (raise --limit)", total - shown);
     }
-    Ok(())
+    if matched {
+        out.push_str(&judge_blocks_text(&ways_core::introspection::judge_blocks(content, session_id)));
+    }
+    out
+}
+
+/// The ways the relevance judge kept out, each with its P(yes) against the
+/// threshold: `--matched` adds them to a listing of what fired.
+pub(crate) fn print_judge_blocks(blocks: &[ways_core::introspection::JudgeBlock]) {
+    print!("{}", judge_blocks_text(blocks));
+}
+
+fn judge_blocks_text(blocks: &[ways_core::introspection::JudgeBlock]) -> String {
+    if blocks.is_empty() {
+        return "No way was kept out by the relevance judge in this session.\n".into();
+    }
+    let mut out = format!("{} kept out by the relevance judge in this session:\n", blocks.len());
+    for b in blocks {
+        let with = b.verdict.ancestor.as_deref().map(|a| format!(" (with {a})")).unwrap_or_default();
+        out.push_str(&format!("  P(yes) {:.2} < {:.2}  {}{with}\n", b.verdict.p_yes, b.verdict.threshold, b.way));
+    }
+    out
+}
+
+#[cfg(test)]
+mod fires_tests {
+    use super::fires_report;
+
+    const LOG: &str = concat!(
+        r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","p_yes":"0.900","threshold":"0.30","verdict":"pass"}"#, "\n",
+        r#"{"event":"way_fired","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"semantic:embedding:en","fire_score":"0.410","surface":"prompt"}"#, "\n",
+        r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b","p_yes":"0.050","threshold":"0.30","verdict":"block"}"#, "\n",
+        r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b/c","p_yes":"0.050","threshold":"0.30","verdict":"block","reason":"ancestor","ancestor":"d/b"}"#, "\n",
+    );
+
+    /// `fires` lists what fired; `--matched` adds what the judge kept out.
+    #[test]
+    fn fires_matched_adds_the_judges_blocks() {
+        let plain = fires_report(LOG, "s", None, None, false);
+        assert!(plain.contains("0.410") && plain.contains("d/a") && !plain.contains("kept out"), "{plain}");
+        let matched = fires_report(LOG, "s", None, None, true);
+        assert!(matched.starts_with(&plain), "{matched}");
+        assert!(matched.contains("2 kept out by the relevance judge in this session:\n  P(yes) 0.05 < 0.30  d/b\n  P(yes) 0.05 < 0.30  d/b/c (with d/b)\n"), "{matched}");
+        let none = fires_report(LOG, "other", None, None, true);
+        assert!(none.contains("No semantic fires") && none.contains("No way was kept out"), "{none}");
+    }
 }

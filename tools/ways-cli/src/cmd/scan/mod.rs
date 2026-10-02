@@ -413,23 +413,28 @@ fn scan_prompt_surface(
         .filter(|way| crate::cmd::show::would_fire(&way.id, session_id))
         .map(|way| gate::Pending { id: &way.id, description: &way.description, pattern_strict: way.pattern_strict })
         .collect();
-    let blocked = gate::apply(
-        &pending,
-        query,
-        response_context,
-        &gate::LogContext {
-            session_id,
-            project_dir: &project_dir,
-            scope: &scope,
-            hook_event,
-            sink: &session::log_event,
-        },
-    );
+    let gate_log = gate::LogContext {
+        session_id,
+        project_dir: &project_dir,
+        scope: &scope,
+        hook_event,
+        sink: &session::log_event,
+    };
+    let mut blocked = gate::apply(&pending, query, response_context, &gate_log);
 
     let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
         let (channel, matched_span, needs_parent) = &hit.payload;
-        if blocked.contains(&hit.id) || (*needs_parent && !has_shown_ancestor(&hit.id, &shown)) {
+        if blocked.contains(&hit.id) {
+            continue;
+        }
+        if *needs_parent && !has_shown_ancestor(&hit.id, &shown) {
+            // Without its parent this way would not have fired; when the
+            // judge blocked that parent, the block is logged for this way
+            // too, so the session's record counts it as kept out.
+            if pending.iter().any(|p| p.id == hit.id) {
+                blocked.with_ancestor(&hit.id, &gate_log);
+            }
             continue;
         }
         let out = capture_show_way(

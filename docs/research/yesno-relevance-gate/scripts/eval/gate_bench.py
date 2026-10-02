@@ -108,7 +108,8 @@ def main():
     tally = {"on": [0, 0], "off": [0, 0]}  # [passed, blocked]
     for i, lbl, p, s, wall, shown, rc in rows:
         es = ev[s]
-        j = [e for e in es if e["event"] == "way_judged"]
+        # The judge's own verdicts: an ancestor block was never judged.
+        j = [e for e in es if e["event"] == "way_judged" and e.get("reason") != "ancestor"]
         fb = [e for e in es if e["event"] == "gate_fallback"]
         g = int(j[0]["gate_ms"]) if j else (int(fb[0].get("gate_ms", 0)) if fb else None)
         jm = int(j[0]["judge_ms"]) if j else None

@@ -1,7 +1,7 @@
 agent-tui frame 120x40
 | introspect    timeline    why fired                                                                                    |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ● LIVE paused                                              |
+|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out  ● LIVE paused                   |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
@@ -36,9 +36,9 @@ agent-tui frame 120x40
 |│██████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 66% (132K / 200K)│|
 |│● 1 re-disclose now  ◐ 1 approaching  ○ 1 distant  │ 30–80K intervals                                                 │|
 |│························◆·························································■·············· forecast 132K → 179K│|
-|│+ ↻ softwaredev/code/testing, ⊘ itops/incident (gate 0.050)                                                           │|
+|│+ ↻ softwaredev/code/testing                                                                                          │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| paused   ↑↓ select  ⏎ why  ←→ frame  space follow  tab why  q quit                                                     |
+| paused   ↑↓ select  ⏎ why  ←→ frame  space follow  f matched  q quit                                                   |
 styles
   0   0-11  White Blue -
   0  14-23  Black Cyan BOLD
@@ -46,7 +46,9 @@ styles
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
-  2  59-73  Yellow - BOLD
+  2  59-70  Cyan - -
+  2  71-85  - - DIM
+  2  86-100 Yellow - BOLD
   3   0-75  Cyan - -
   3  76-76  Cyan - BOLD
   3  77-115 - - DIM
@@ -148,7 +150,7 @@ styles
  36  83-83  #ff6b6b - -
  36  84-119 - - DIM
  37   0-0   - - DIM
- 37   1-59  Green - BOLD
+ 37   1-28  Green - BOLD
  37 119-119 - - DIM
  38   0-119 - - DIM
  39   0-7   Black Yellow BOLD
@@ -160,7 +162,7 @@ styles
  39  30-35  - - DIM|ITALIC
  39  38-42  Cyan - BOLD
  39  43-49  - - DIM|ITALIC
- 39  52-54  Cyan - BOLD
- 39  55-58  - - DIM|ITALIC
- 39  61-61  Cyan - BOLD
- 39  62-66  - - DIM|ITALIC
+ 39  52-52  Cyan - BOLD
+ 39  53-60  - - DIM|ITALIC
+ 39  63-63  Cyan - BOLD
+ 39  64-68  - - DIM|ITALIC

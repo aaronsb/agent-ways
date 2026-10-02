@@ -8,12 +8,13 @@
 //! judged. A request carries at most the profile's `max_candidates`, in the
 //! matcher's order: judge latency grows with each candidate, and past the cap
 //! the rest pass unjudged, except a way whose ancestor the judge blocked, which
-//! is blocked with it. Every verdict, cap and fallback is logged to
+//! is blocked with it and logged as a `block` with `reason: ancestor`, the
+//! ancestor's id and its verdict's fields. Every verdict, cap and fallback is logged to
 //! `events.jsonl`, and any failure fails open: the matcher's decision stands.
 //! Each provider call is logged once more as `judge_call`, with its tokens
 //! and cost, so spend is counted per call, not per way (#741).
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ways_agent_core::cost::JudgeCall;
@@ -45,14 +46,66 @@ pub(super) struct LogContext<'a> {
     pub sink: EventSink<'a>,
 }
 
-/// The ids the gate blocks. Empty when the gate is off, in shadow mode, or
+/// The ways the gate blocked, each with the fields of its `way_judged` line.
+#[derive(Default)]
+pub(super) struct Blocked(HashMap<String, Vec<(String, String)>>);
+
+impl Blocked {
+    pub(super) fn contains(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+
+    #[cfg(test)]
+    fn ids(&self) -> std::collections::HashSet<String> {
+        self.0.keys().cloned().collect()
+    }
+
+    /// Block `id` with its nearest blocked ancestor, logging a `way_judged`
+    /// block that carries the ancestor's verdict, `reason: ancestor` and the
+    /// ancestor the judge judged. The judge never saw `id`, so the line holds
+    /// no per-call figures (`judge_ms`, `gate_ms`, `candidates`), and a reader
+    /// counting the judge's own verdicts skips `reason: ancestor`. `false`
+    /// when no ancestor of `id` is blocked, or `id` already is.
+    pub(super) fn with_ancestor(&mut self, id: &str, log: &LogContext<'_>) -> bool {
+        if self.contains(id) {
+            return false;
+        }
+        let Some(fields) = self
+            .0
+            .iter()
+            .filter(|(b, _)| super::order::is_proper_ancestor(b, id))
+            .max_by_key(|(b, _)| b.len())
+            .map(|(b, f)| {
+                let mut f: Vec<(String, String)> =
+                    f.iter().filter(|(k, _)| !matches!(k.as_str(), "judge_ms" | "gate_ms" | "candidates")).cloned().collect();
+                if !f.iter().any(|(k, _)| k == "reason") {
+                    f.push(("reason".into(), "ancestor".into()));
+                    f.push(("ancestor".into(), b.clone()));
+                }
+                for (k, v) in &mut f {
+                    if k == "way" {
+                        *v = id.to_string();
+                    }
+                }
+                f
+            })
+        else {
+            return false;
+        };
+        (log.sink)(&fields.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+        self.0.insert(id.to_string(), fields);
+        true
+    }
+}
+
+/// The ways the gate blocks. Empty when the gate is off, in shadow mode, or
 /// failed.
 pub(super) fn apply(
     pending: &[Pending<'_>],
     prompt: &str,
     response_context: Option<&str>,
     log: &LogContext<'_>,
-) -> HashSet<String> {
+) -> Blocked {
     use ways_agent_core::keys;
     // The agent reads the key file, never a hook's environment, so only a key
     // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
@@ -72,8 +125,8 @@ fn apply_from(
     response_context: Option<&str>,
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
-) -> HashSet<String> {
-    let Some(settings) = settings(path, has_key, log) else { return HashSet::new() };
+) -> Blocked {
+    let Some(settings) = settings(path, has_key, log) else { return Blocked::default() };
     run(pending, prompt, response_context, &settings, log, call)
 }
 
@@ -106,10 +159,10 @@ fn run(
     settings: &Settings,
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
-) -> HashSet<String> {
+) -> Blocked {
     let mut judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
     if judged.is_empty() {
-        return HashSet::new();
+        return Blocked::default();
     }
     let cap = settings.profile.max_candidates;
     let mut unjudged: Vec<&str> = Vec::new();
@@ -146,12 +199,9 @@ fn run(
             let mut blocked = decide(&j, log, &elapsed_ms);
             // A way's guidance presumes its parent's: an unjudged way under a
             // blocked ancestor goes with it.
-            let orphaned: Vec<String> = unjudged
-                .iter()
-                .filter(|id| blocked.iter().any(|b| super::order::is_proper_ancestor(b, id)))
-                .map(|id| id.to_string())
-                .collect();
-            blocked.extend(orphaned);
+            for id in unjudged {
+                blocked.with_ancestor(id, log);
+            }
             blocked
         }
         Ok(Reply::Fallback { reason, call, .. }) => {
@@ -193,9 +243,9 @@ fn turns(prompt: &str, response_context: Option<&str>) -> Vec<Turn> {
     turns
 }
 
-/// Logs each verdict and returns the ids to block.
-fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> HashSet<String> {
-    let mut blocked = HashSet::new();
+/// Logs each verdict and returns the ways to block.
+fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
+    let mut blocked = Blocked::default();
     let threshold = format!("{:.2}", j.threshold);
     for v in &j.verdicts {
         let pass = v.p_yes >= j.threshold;
@@ -204,10 +254,7 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> HashSet<String>
             (false, Mode::Enforce) => "block",
             (false, _) => "would_block",
         };
-        if verdict == "block" {
-            blocked.insert(v.id.clone());
-        }
-        (log.sink)(&[
+        let fields: Vec<(String, String)> = [
             ("event", "way_judged"),
             ("way", &v.id),
             ("p_yes", &format!("{:.3}", v.p_yes)),
@@ -223,7 +270,14 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> HashSet<String>
             ("scope", log.scope),
             ("project", log.project_dir),
             ("session", log.session_id),
-        ]);
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        (log.sink)(&fields.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+        if verdict == "block" {
+            blocked.0.insert(v.id.clone(), fields);
+        }
     }
     blocked
 }
@@ -261,7 +315,7 @@ fn log_call(call: &JudgeCall, fallback_reason: Option<&str>, log: &LogContext<'_
 }
 
 /// Logs a fallback; nothing is blocked.
-fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &str) -> HashSet<String> {
+fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
     (log.sink)(&[
         ("event", "gate_fallback"),
         ("reason", reason),
@@ -272,7 +326,7 @@ fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &
         ("project", log.project_dir),
         ("session", log.session_id),
     ]);
-    HashSet::new()
+    Blocked::default()
 }
 
 #[cfg(test)]
@@ -280,6 +334,7 @@ mod tests {
     use super::*;
     use ways_agent_core::profile::{Provider, UserLayer};
     use ways_agent_core::protocol::Verdict;
+    use std::collections::HashSet;
 
     fn settings(mode: Mode) -> Settings {
         let user = UserLayer { mode: Some(mode), ..Default::default() };
@@ -335,7 +390,7 @@ mod tests {
             Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.92), ("data/migrations", 0.05)]))
         });
         assert_eq!(seen, vec!["softwaredev/code/security/secrets", "data/migrations"]);
-        assert_eq!(blocked, HashSet::from(["data/migrations".to_string()]));
+        assert_eq!(blocked.ids(), HashSet::from(["data/migrations".to_string()]));
         let events = events.borrow();
         let verdicts: Vec<_> = events.iter().filter(|e| field(e, "event") == "way_judged").collect();
         assert_eq!(verdicts.len(), 2);
@@ -416,7 +471,7 @@ mod tests {
         let blocked = run(&pending(), "q", None, &settings(Mode::Shadow), &log(&sink), |_, _| {
             Ok(judged(Mode::Shadow, &[("softwaredev/code/security/secrets", 0.1), ("data/migrations", 0.05)]))
         });
-        assert!(blocked.is_empty());
+        assert!(blocked.ids().is_empty());
         let events = events.borrow();
         assert!(events.iter().filter(|e| field(e, "event") == "way_judged").all(|e| field(e, "verdict") == "would_block"));
     }
@@ -434,7 +489,7 @@ mod tests {
             let events = Events::default();
             let sink = recorder(&events);
             let blocked = run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
-            assert!(blocked.is_empty());
+            assert!(blocked.ids().is_empty());
             let events = events.borrow();
             let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").unwrap();
             assert_eq!(field(fallback, "reason"), reason);
@@ -457,7 +512,7 @@ mod tests {
             let low: Vec<(&str, f64)> = sent.iter().map(|id| (*id, 0.05)).collect();
             Ok(judged(Mode::Enforce, &low))
         });
-        assert_eq!(blocked, ids[..8].iter().cloned().collect::<HashSet<_>>());
+        assert_eq!(blocked.ids(), ids[..8].iter().cloned().collect::<HashSet<_>>());
         let events = events.borrow();
         assert_eq!(field(&events[0], "event"), "gate_capped");
         assert_eq!(field(&events[0], "unjudged"), "2");
@@ -476,12 +531,44 @@ mod tests {
     fn an_unjudged_way_under_a_blocked_ancestor_is_blocked_with_it() {
         let mut ids: Vec<String> = (0..7).map(|i| format!("w/{i}")).collect();
         ids.extend(["p".to_string(), "p/c".to_string(), "q/c".to_string()]);
-        let blocked = run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&|_| {}), |req, _| {
+        let events = Events::default();
+        let sink = recorder(&events);
+        let blocked = run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |req, _| {
             let v: Vec<(&str, f64)> =
                 req.candidates.iter().map(|c| (c.id.as_str(), if c.id == "p" { 0.05 } else { 0.9 })).collect();
             Ok(judged(Mode::Enforce, &v))
         });
-        assert_eq!(blocked, HashSet::from(["p".to_string(), "p/c".to_string()]));
+        assert_eq!(blocked.ids(), HashSet::from(["p".to_string(), "p/c".to_string()]));
+        // The child's block is logged with its ancestor's verdict, so a
+        // reader of the log counts it among what the judge kept out.
+        let events = events.borrow();
+        let child = events.iter().find(|e| field(e, "event") == "way_judged" && field(e, "way") == "p/c").expect("p/c logged");
+        let got: Vec<&str> = ["verdict", "p_yes", "threshold", "mode", "engine", "model", "reason", "ancestor"].iter().map(|k| field(child, k)).collect();
+        assert_eq!(got, ["block", "0.050", "0.30", "enforce", "anthropic", "claude-haiku-4-5", "ancestor", "p"]);
+        assert!(events.iter().all(|e| field(e, "way") != "q/c"), "q/c passes unjudged and unlogged");
+    }
+
+    /// A way blocked with an ancestor that was itself blocked with one names
+    /// the ancestor the judge judged; a way already blocked, or with no
+    /// blocked ancestor, is left alone.
+    #[test]
+    fn with_ancestor_names_the_judged_ancestor_and_logs_once() {
+        let events = Events::default();
+        let sink = recorder(&events);
+        let lc = log(&sink);
+        let mut blocked = decide(
+            &match judged(Mode::Enforce, &[("p", 0.05)]) { Reply::Judged(j) => j, _ => unreachable!() },
+            &lc,
+            "5",
+        );
+        assert!(blocked.with_ancestor("p/c", &lc));
+        assert!(blocked.with_ancestor("p/c/d", &lc));
+        assert!(!blocked.with_ancestor("p/c", &lc), "already blocked");
+        assert!(!blocked.with_ancestor("q", &lc), "no blocked ancestor");
+        let events = events.borrow();
+        assert_eq!(events.len(), 3);
+        assert_eq!((field(&events[2], "way"), field(&events[2], "ancestor"), field(&events[2], "reason")), ("p/c/d", "p", "ancestor"));
+        assert!(events[1..].iter().all(|e| field(e, "judge_ms").is_empty() && field(e, "candidates").is_empty()), "no per-call figures on an ancestor block");
     }
 
     #[test]
@@ -503,7 +590,7 @@ mod tests {
         let sink = recorder(&events);
         let blocked =
             run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| Err("deadline".into()));
-        assert!(blocked.is_empty());
+        assert!(blocked.ids().is_empty());
         let events = events.borrow();
         let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").unwrap();
         assert_eq!(field(fallback, "candidates"), "8");
@@ -516,7 +603,7 @@ mod tests {
         let sink = recorder(&events);
         let strict = vec![Pending { id: "a", description: "d", pattern_strict: true }];
         let blocked = run(&strict, "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| panic!("no call expected"));
-        assert!(blocked.is_empty());
+        assert!(blocked.ids().is_empty());
         assert!(events.borrow().is_empty());
     }
 

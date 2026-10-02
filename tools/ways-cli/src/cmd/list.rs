@@ -42,7 +42,7 @@ impl WayRow for FiredWay {
     fn refire_threshold_k(&self) -> u64 { self.refire_threshold_k }
 }
 
-pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
+pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> Result<()> {
     // Auto-detect session if not provided
     let session_id = match session {
         Some(s) => s.to_string(),
@@ -50,6 +50,9 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
             Ok(s) => s,
             Err(NoSession::NoMarkers) => {
                 println!("No session markers found. Ways will appear after the first hook fires.");
+                if matched {
+                    println!("{NO_SESSION_BLOCKS}");
+                }
                 return Ok(());
             }
             Err(NoSession::AllOrphaned) => {
@@ -57,6 +60,9 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
                     "Session markers found, but no matching transcript. List candidates with \
                      `ways session list`, then pass --session <id> to inspect one directly."
                 );
+                if matched {
+                    println!("{NO_SESSION_BLOCKS}");
+                }
                 return Ok(());
             }
         },
@@ -95,8 +101,16 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
         context_window,
     );
 
+    let blocks = matched.then(|| ways_core::introspection::judge_blocks(&ways_core::firing::load_events_text(), &session_id));
     if ways.is_empty() {
+        if json_out && matched {
+            print_json(&ways, current_epoch, current_tokens_k, context_window_k, blocks.as_deref());
+            return Ok(());
+        }
         println!("No ways triggered yet this session.");
+        if let Some(b) = &blocks {
+            crate::cmd::introspect::print_judge_blocks(b);
+        }
         return Ok(());
     }
 
@@ -112,7 +126,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
     }
 
     if json_out {
-        print_json(&ways, current_epoch, current_tokens_k, context_window_k);
+        print_json(&ways, current_epoch, current_tokens_k, context_window_k, blocks.as_deref());
         return Ok(());
     }
 
@@ -158,6 +172,9 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
 
     let _ = writeln!(out);
     print!("{out}");
+    if let Some(b) = &blocks {
+        crate::cmd::introspect::print_judge_blocks(b);
+    }
     Ok(())
 }
 
@@ -344,7 +361,17 @@ fn latest_session_for_project(project: &str) -> Option<String> {
 }
 
 
-fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64) {
+/// `--matched` without a session to read the judge's blocks from.
+const NO_SESSION_BLOCKS: &str = "The relevance judge's blocks are listed per session: pass --session <id>.";
+
+fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64, blocks: Option<&[ways_core::introspection::JudgeBlock]>) {
+    let output = json_output(ways, current_epoch, current_tokens_k, context_window_k, blocks);
+    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+}
+
+/// `blocks` is set with `--matched`: the ways the relevance judge kept out,
+/// as `judge_blocks`.
+fn json_output(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64, blocks: Option<&[ways_core::introspection::JudgeBlock]>) -> serde_json::Value {
     let entries: Vec<serde_json::Value> = ways
         .iter()
         .map(|w| {
@@ -376,14 +403,41 @@ fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, cont
         "ways_fired": entries.len(),
         "ways": entries,
     });
-
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    let mut output = output;
+    if let Some(b) = blocks {
+        output["judge_blocks"] = serde_json::to_value(b).unwrap_or_default();
+    }
+    output
 }
 
 #[cfg(test)]
 mod tests {
-    use super::session_is_live_in;
+    use super::{json_output, session_is_live_in, FiredWay};
     use std::path::PathBuf;
+
+    /// `--matched` adds `judge_blocks`, each block's verdict fields flat
+    /// beside its way and time; without it the key is absent.
+    #[test]
+    fn json_output_carries_the_judge_blocks_with_matched_only() {
+        let text = r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b","p_yes":"0.050","threshold":"0.30","verdict":"block","mode":"enforce","engine":"e","model":"m","judge_ms":"9"}"#;
+        let blocks = ways_core::introspection::judge_blocks(text, "s");
+        let way = FiredWay {
+            id: "d/a".into(),
+            epoch_at_fire: 1,
+            token_pos: 0,
+            trigger: "keyword".into(),
+            depth: 0,
+            check_fires: 0,
+            parent: "none".into(),
+            agent_id: "main".into(),
+            refire_threshold_k: 50,
+        };
+        let out = json_output(std::slice::from_ref(&way), 2, 10, 200, Some(&blocks));
+        let b = &out["judge_blocks"][0];
+        assert_eq!((b["way"].as_str(), b["verdict"].as_str(), b["p_yes"].as_f64(), b["threshold"].as_f64()), (Some("d/b"), Some("block"), Some(0.05), Some(0.3)));
+        assert_eq!(out["ways"][0]["id"], "d/a");
+        assert!(json_output(&[way], 2, 10, 200, None).get("judge_blocks").is_none());
+    }
 
     /// Build a sessions root holding a state dir per id, and a projects root
     /// holding a transcript per (slug, id). Passing an id to one and not the

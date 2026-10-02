@@ -81,6 +81,14 @@ struct DumpWay {
     is_new: bool,
     is_redisclosed: bool,
     refire_threshold_k: u64,
+    /// `injected`, `blocked` (the judge kept it out) or `would_block`
+    /// (shadow: injected, the judge would have kept it out).
+    outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    p_yes: Option<String>,
+    /// On a way blocked with its ancestor, the ancestor whose P(yes) it shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ancestor: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -98,7 +106,7 @@ struct NearMiss {
 
 /// Emit a session's reconstructed timeline as a single pretty-printed JSON
 /// document. With no `session`, dumps the most recent session in scope.
-pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
+pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool, matched: bool) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
@@ -126,7 +134,7 @@ pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool) -> R
         }
     };
 
-    match build_dump(&content, &session_id) {
+    match build_dump(&content, &session_id, matched) {
         Some(dump) => println!("{}", serde_json::to_string_pretty(&dump)?),
         None => println!("{{\"error\":\"no events for session\",\"session\":\"{session_id}\"}}"),
     }
@@ -158,7 +166,9 @@ pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {
 
 // ── Assembly ──────────────────────────────────────────────────
 
-fn build_dump(content: &str, session_id: &str) -> Option<SessionDump> {
+/// `matched` keeps the ways the relevance judge blocked; without it a
+/// frame lists what reached the session.
+fn build_dump(content: &str, session_id: &str, matched: bool) -> Option<SessionDump> {
     let project =
         frames::find_session_project(content, session_id).unwrap_or_else(|| "unknown".to_string());
     let events = frames::load_session_events(content, session_id);
@@ -167,7 +177,7 @@ fn build_dump(content: &str, session_id: &str) -> Option<SessionDump> {
     }
 
     let context_window = session::detect_context_window_for(&project, session_id);
-    let frames = frames::reconstruct_frames(&events, &project, session_id, context_window);
+    let frames = frames::reconstruct_frames(&events, &project, session_id, context_window, matched);
 
     let near_misses = build_near_misses(content, session_id, &frames);
     let summary = build_summary(content, session_id, &frames, near_misses.len());
@@ -196,6 +206,9 @@ fn to_dump_frame(f: &Frame) -> DumpFrame {
             is_new: w.is_new,
             is_redisclosed: w.is_redisclosed,
             refire_threshold_k: w.refire_threshold_k,
+            outcome: w.outcome.as_str(),
+            p_yes: Some(w.p_yes.clone()).filter(|p| !p.is_empty()),
+            ancestor: Some(w.ancestor.clone()).filter(|a| !a.is_empty()),
         })
         .collect();
     DumpFrame {
@@ -404,4 +417,40 @@ fn field_f64(v: &serde_json::Value, key: &str) -> f64 {
         .and_then(|s| s.parse().ok())
         .or_else(|| v[key].as_f64())
         .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_dump;
+
+    const LOG: &str = concat!(
+        r#"{"event":"way_judged","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/a","p_yes":"0.100","threshold":"0.30","verdict":"would_block"}"#, "\n",
+        r#"{"event":"way_fired","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword"}"#, "\n",
+        r#"{"event":"way_judged","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/b","p_yes":"0.050","threshold":"0.30","verdict":"block"}"#, "\n",
+        r#"{"event":"way_judged","session":"dump-test","ts":"2026-01-01T00:00:00Z","way":"d/b/c","p_yes":"0.050","threshold":"0.30","verdict":"block","reason":"ancestor","ancestor":"d/b"}"#, "\n",
+    );
+
+    /// The rows of the first frame as (id, outcome, p_yes, ancestor).
+    fn rows(matched: bool) -> Vec<(String, String, String, String)> {
+        let dump = serde_json::to_value(build_dump(LOG, "dump-test", matched).unwrap()).unwrap();
+        let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+        dump["frames"][0]["active_ways"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| (s(&w["id"]), s(&w["outcome"]), s(&w["p_yes"]), s(&w["ancestor"])))
+            .collect()
+    }
+
+    /// `replay --json` marks each way with its outcome and P(yes);
+    /// `--matched` adds the ways the judge blocked.
+    #[test]
+    fn replay_json_carries_outcomes_and_matched_adds_the_blocked() {
+        let row = |id: &str, o: &str, p: &str, a: &str| (id.to_string(), o.to_string(), p.to_string(), a.to_string());
+        assert_eq!(rows(false), [row("d/a", "would_block", "0.100", "")]);
+        assert_eq!(
+            rows(true),
+            [row("d/a", "would_block", "0.100", ""), row("d/b", "blocked", "0.050", ""), row("d/b/c", "blocked", "0.050", "d/b")]
+        );
+    }
 }

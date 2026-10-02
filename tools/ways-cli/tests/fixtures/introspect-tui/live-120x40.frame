@@ -1,7 +1,7 @@
 agent-tui frame 120x40
 | introspect    timeline    why fired                                                                                    |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ● LIVE · 6s ago                                            |
+|epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│··································································································● forecast 31K → 61K│|
 |│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                                                           │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| live   ↑↓ select  ⏎ why  ←→ frame  space pause  tab why  q quit                                                        |
+| live   ↑↓ select  ⏎ why  ←→ frame  space pause  f matched  q quit                                                      |
 styles
   0   0-11  White Blue -
   0  14-23  Black Cyan BOLD
@@ -46,8 +46,9 @@ styles
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
-  2  59-66  Green - BOLD
-  2  67-75  - - DIM
+  2  59-70  Cyan - -
+  2  71-78  Green - BOLD
+  2  79-87  - - DIM
   3   0-114 Cyan - -
   3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
@@ -141,7 +142,7 @@ styles
  39  28-33  - - DIM|ITALIC
  39  36-40  Cyan - BOLD
  39  41-46  - - DIM|ITALIC
- 39  49-51  Cyan - BOLD
- 39  52-55  - - DIM|ITALIC
- 39  58-58  Cyan - BOLD
- 39  59-63  - - DIM|ITALIC
+ 39  49-49  Cyan - BOLD
+ 39  50-57  - - DIM|ITALIC
+ 39  60-60  Cyan - BOLD
+ 39  61-65  - - DIM|ITALIC
