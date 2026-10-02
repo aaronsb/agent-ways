@@ -27,7 +27,7 @@ Claude Code hook events drive the system. Each fires shell scripts that scan for
 - **`clear-markers.sh`** - Clears session markers from `{SESSIONS_ROOT}/{session_id}/`. Resets session state so ways can fire fresh. Scoped to the current session only.
 - **`ways init`** - If the project has a `.claude/` or `.git/` directory, writes `$PROJECT/.claude/.gitignore` and `$PROJECT/.claude/ways/_template.md` when they are missing, then seeds `MEMORY.md` (ADR-128). A fresh repo therefore gets these two files as untracked files. `.claude/.gitignore` keeps developer-local files (`settings.local.json`, `memory/`, `plans/` and similar) out of git, and `_template.md` is a starting point for writing a project way; its empty frontmatter means it never fires. Projects may commit or ignore either file. `ways init` does not overwrite them once they exist.
 - **`ways corpus --if-stale --quiet`** - Regenerates the embedding corpus if way files have changed since last build.
-- **`check-config-updates.sh`** - Checks if the config is behind upstream. Detects four install scenarios: direct clones, GitHub forks, renamed clones (via `.claude-upstream` marker file), and plugin installs. Network calls (`git fetch`, `gh api`, `git ls-remote`) are rate-limited to once per hour; update notices fire every session when behind. See the [Updating](#updating) section of the README for scenario details and how to control this behavior.
+- **`check-config-updates.sh`** - Checks if the config is behind upstream. Checks the app source in `$XDG_DATA_HOME/agent-ways` against `aaronsb/agent-ways`; legacy layouts are not checked. The network call (`git fetch`) is rate-limited to once per hour; update notices fire every session when behind. See the [Updating](#updating) section of the README for scenario details and how to control this behavior.
 
 ### Trigger Evaluation
 
@@ -155,7 +155,7 @@ flowchart TD
 
     subgraph SM ["Semantic lane"]
         S[Embedding Scorer]:::semantic
-        S --> BM["ways embed → cosine s<br/>g(s)=σ(a·s+b) → probability"]:::semantic
+        S --> BM["way-embed → cosine s<br/>g(s)=σ(a·s+b) → probability"]:::semantic
     end
 
     RP --> GATE{"g(s) ≥ τ_k ?<br/>floor gate<br/>(fails open / pattern_strict bypasses)"}:::decision
@@ -230,7 +230,7 @@ The authoritative statement of all of the above, with source line citations, is
 
 ```bash
 # Install the ways binary and set up corpus + embedding model
-make install    # builds ways, downloads model, generates corpus
+make setup      # builds ways, downloads model, generates corpus
 make test       # smoke tests (lint, match, graph)
 make test-sim   # 8 integration scenarios
 

@@ -127,7 +127,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         // self-heals a missing or broken PATH symlink.
         if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
             eprintln!(
-                "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
+                "  ⚠ could not relink binaries ({e}); run `make link` in {} to fix PATH links.",
                 app.display()
             );
         }
@@ -197,7 +197,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         eprintln!("==> relink suite binaries onto PATH");
         if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
             eprintln!(
-                "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
+                "  ⚠ could not relink binaries ({e}); run `make link` in {} to fix PATH links.",
                 app.display()
             );
         }
@@ -214,7 +214,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     } else {
         println!("\nSource updated and reprojected, but the ways binary refresh failed (no pre-built");
         println!("available and no build toolchain?). Your install still runs the previous binary —");
-        println!("retry `ways update`, or `make update` with a toolchain, then restart Claude Code.");
+        println!("retry `ways update`, or `make update-binaries` with a toolchain, then restart Claude Code.");
     }
     if no_agent_key() {
         println!("\nOptional: turn on the relevance gate (Claude Haiku judges each matched way) with `ways agent key add --provider anthropic`");
@@ -443,7 +443,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     eprintln!("==> relink suite binaries onto PATH");
     if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(app), "relink") {
         eprintln!(
-            "  ⚠ could not relink binaries ({e}); run `make install` in {} to fix PATH links.",
+            "  ⚠ could not relink binaries ({e}); run `make link` in {} to fix PATH links.",
             app.display()
         );
     }

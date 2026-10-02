@@ -21,7 +21,7 @@ The move is performed by one gated, backup-first command — `ways migrate`.
 | Location | Holds | Durability |
 |---|---|---|
 | `$XDG_DATA_HOME/agent-ways/` | **The application** — exactly what's on GitHub: ways, skills, hooks, `bin/`, docs. | Replaced wholesale on update. Losing it is a re-install, not data loss. |
-| `$XDG_CONFIG_HOME/agent-ways/` | **Your own** ways and macros, plus `ways.json`. | Durable; never touched by update. |
+| `$XDG_CONFIG_HOME/agent-ways/` | **Your own** ways and macros, plus your config. | Durable; never touched by update. |
 | `$XDG_STATE_HOME/agent-ways/` | **Session substrate** — ledger, memory, focus. | Durable; survives a `~/.claude` wipe. |
 | `$XDG_CACHE_HOME/agent-ways/` | **Derived** — corpus, embeddings, model (renamed from `claude-ways/`). | Regenerable; safe to delete. |
 | `~/.claude/` | **The projection** — a merged `settings.json` plus symlinks to the projected tree, and the files Claude Code owns (`projects/`, credentials). | The Claude-Code-owned floor; regenerable from the manifest. |

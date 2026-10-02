@@ -1,6 +1,6 @@
 ---
 description: How agent-ways itself deploys into the home config dir — ~/.claude as a thin projection of an XDG application (source in $XDG_DATA_HOME/agent-ways), how the agent-ways installer/update/`ways reconcile` work under it, how to spot a legacy pre-1.0 in-place agent-ways clone that must `ways migrate` instead of pull, and where the migrator lives now that 1.9.0 removed it from the binary — surfaced only when installing, updating, migrating, or reconciling agent-ways itself, or resolving an existing ~/.claude conflict during agent-ways setup
-vocabulary: agent-ways ~/.claude thin projection XDG application $XDG_DATA_HOME/agent-ways ways reconcile ways migrate reproject legacy in-place clone pre-1.0 agent-ways projected roots settings.json merge curl bash agent-ways installer existing .claude clobber sync-to-home topology ADR-142
+vocabulary: agent-ways ~/.claude thin projection XDG application $XDG_DATA_HOME/agent-ways ways reconcile ways migrate reproject legacy in-place clone pre-1.0 agent-ways projected roots settings.json merge curl bash agent-ways installer existing .claude clobber subdirectory topology ADR-142
 pattern: agent-ways|~/\.claude|existing \.?claude|ways (reconcile|migrate)|make update|in-place clone|thin projection|xdg.?data
 refire: 0.15
 scope: agent, subagent
@@ -10,7 +10,7 @@ scope: agent, subagent
 
 In 1.0, `~/.claude` is a **thin projection** of an XDG application, not the app itself (ADR-142). The source lives in `$XDG_DATA_HOME/agent-ways`; `~/.claude` gets symlinks to the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) plus a three-way merge into `settings.json`. Everything else the app ships — `scripts/`, `tools/`, `docs/`, `governance/` — **stays in `$XDG_DATA`** and is deliberately *not* projected. So `~/.claude` remains the user's own directory (their sessions, credentials, and settings survive); agent-ways adds its links, and it refuses to replace a real directory or file it finds at a projected root.
 
-This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "in-place" topology (and the `sync-to-home` subdirectory variant, ADR-140) is now
+This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "in-place" topology (and the subdirectory variant, ADR-140) is now
 **legacy**: an install still on it needs to **migrate**, not update in place.
 
 ## How install and update work now

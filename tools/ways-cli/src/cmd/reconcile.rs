@@ -90,7 +90,7 @@ pub fn run(
 
     if mode == Mode::Copy {
         // Copy materialization + per-file orphan prune is the fallback path
-        // (ADR-142 §2); not yet ported from sync-to-home.sh.
+        // (ADR-142 §2); not ported from the removed sync-to-home.sh.
         bail!("copy mode not yet implemented; symlink mode is the default");
     }
 

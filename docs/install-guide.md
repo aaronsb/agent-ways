@@ -48,10 +48,10 @@ If `~/.claude/` is your **own** git repo (you version-control your config), that
 **A 1.0 projection install** (the app is in `$XDG_DATA_HOME/agent-ways`, `~/.claude` is not a repo) — update in place:
 
 ```bash
-cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile
+ways update
 ```
 
-`make update` pulls, **force-rebuilds** the binaries, regenerates the corpus, and relinks — use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
+`ways update` pulls, refreshes the binaries (pre-built first, source build as fallback), regenerates the corpus, relinks, and reprojects `~/.claude` — use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
 
 **A legacy pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo — it has its own `.git/` and ships `~/.claude/tools/`, `~/.claude/docs/`) — do **not** `git pull` it. Migrate it to the 1.0 model with the gated, backup-first migrator:
 
@@ -94,7 +94,7 @@ If you're actively *developing* agent-ways (not just carrying a few custom ways)
 
 ## Legacy: the subdirectory topology
 
-Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project with `make sync-to-home`. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, the migrator at the `ways-v1.8.3` tag moves you to the native projection ([guide](migration-1.0.md)). (The conceptual history lives in [docs/explanation/install-topologies/](explanation/install-topologies/), kept as a record of how the model evolved.)
+Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project it with a copy script that has since been removed. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, the migrator at the `ways-v1.8.3` tag moves you to the native projection ([guide](migration-1.0.md)). (The conceptual history lives in [docs/explanation/install-topologies/](explanation/install-topologies/), kept as a record of how the model evolved.)
 
 ## After installing
 

@@ -7,7 +7,7 @@ controls:
   - id: ISO/IEC 27001:2022 5.2 (Policy)
     justifications:
       - Domain organization (global vs project-local) establishes policy hierarchy
-      - Enable/disable mechanism via ways.json provides controlled policy application
+      - Enable/disable mechanism via config.yaml provides controlled policy application
     satisfied_when: >
       In a session that acted on way placement or activation, the agent respected
       the global-vs-project-local hierarchy — authoring or overriding a way at the

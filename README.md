@@ -181,7 +181,7 @@ ways lint --global
 # Vocabulary gap analysis
 ways suggest ~/.claude/hooks/ways/softwaredev/code/security/security.md
 
-# How a prompt matches under the live matcher (ADR-160); --cosine for the single-vector view
+# How a prompt matches under the live matcher (ADR-160)
 ways match "pin lockfile versions"
 
 # Sibling vocabulary overlap (Jaccard)
@@ -288,32 +288,23 @@ For the attention mechanics: [context-decay.md](docs/hooks-and-ways/context-deca
 
 ## Updating
 
-In 1.0 the app source lives in `$XDG_DATA_HOME/agent-ways` (not `~/.claude`). Update by refreshing that checkout, then rebuilding and reprojecting — or just re-run the installer one-liner, which is idempotent:
+In 1.0 the app source lives in `$XDG_DATA_HOME/agent-ways` (not `~/.claude`). Update it with the binary, or re-run the installer one-liner, which is idempotent:
 
 ```bash
-cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile
+ways update
 ```
 
-`make update` pulls (robustly — it autostashes around machine-local settings drift), **force-rebuilds** the binaries, regenerates the corpus, and relinks; `ways reconcile` then refreshes the `~/.claude` projection. Use `make update`, not `make setup` — `setup` skips binaries that already exist, so on an update it would leave you on the *old* binary. A fork fetches and merges upstream in the app dir first (`git fetch upstream && git merge upstream/main`), then `make update-binaries && ways reconcile` (force-rebuild without re-pulling origin; the corpus self-heals via the `SessionStart` hook).
+`ways update` pulls the app source, prefers pre-built binaries over a source build, regenerates the corpus, relinks, and reprojects `~/.claude` (`ways reconcile`). Use it rather than `make setup`, which skips binaries that already exist and would leave you on the *old* binary. A fork fetches and merges upstream in the app dir first (`git fetch upstream && git merge upstream/main`), then `make update-binaries && ways reconcile` (force-rebuild without re-pulling origin; the corpus self-heals via the `SessionStart` hook).
 
-At session start, `check-config-updates.sh` flags when you're behind upstream (`aaronsb/agent-ways`), rate-limited to once per hour. It currently recognizes **legacy** git-based layouts — an in-place clone at `~/.claude`, and the ADR-140 subdirectory (`.claude-source` marker). Native-projection update detection is being wired (it reads the app source in `$XDG_DATA`); until then, use the manual command above.
+At session start, `check-config-updates.sh` flags when you're behind upstream (`aaronsb/agent-ways`), rate-limited to once per hour. It reads the app source in `$XDG_DATA_HOME/agent-ways`; a fork or a non-GitHub origin gets no nudge. The in-place clone, ADR-140 subdirectory and plugin layouts are no longer checked.
 
 | Scenario | How detected | Sync command |
 |----------|-------------|--------------|
-| **Native projection (1.0)** | app source at `$XDG_DATA_HOME/agent-ways` | `cd "$XDG_DATA_HOME/agent-ways" && make update && ways reconcile` |
-| **Fork** | GitHub API reports `parent` is `aaronsb/agent-ways` | fetch/merge upstream in the app dir, then `make update-binaries && ways reconcile` |
+| **Native projection (1.0)** | app source at `$XDG_DATA_HOME/agent-ways` | `ways update` |
+| **Fork** | origin is not `aaronsb/agent-ways` | fetch/merge upstream in the app dir, then `make update-binaries && ways reconcile` |
 | **Legacy in-place clone** | `~/.claude` is itself the git repo | migrate first — the migrator lives at the `ways-v1.8.3` tag ([guide](docs/migration-1.0.md)) |
-| **Plugin** | `CLAUDE_PLUGIN_ROOT` set with `plugin.json` | `/plugin update disciplined-methodology` |
 
-### Renamed clones (org-internal copies)
-
-If your organization clones this repo under a different name without forking on GitHub, update notifications still work via the `.claude-upstream` marker file. It uses `git ls-remote` against the public upstream — no `gh` CLI required.
-
-| Goal | Action |
-|------|--------|
-| **Opt out entirely** | Delete `.claude-upstream` and point `origin` to your internal repo. |
-| **Track a different upstream** | Edit `.claude-upstream` to contain your internal canonical repo. |
-| **Disable for all users** | Remove `check-config-updates.sh` from `hooks/` or delete the SessionStart hook entry in `settings.json`. |
+To turn the check off, remove `check-config-updates.sh` from `hooks/` or delete the SessionStart hook entry in `settings.json`.
 
 ## Documentation
 

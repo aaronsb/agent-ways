@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Robust `make update` front-half: pull + prune, surviving the machine-local
+# Robust update front-half (run by `ways update`): pull + prune, surviving the machine-local
 # edge cases that make a bare `git pull --ff-only` abort.
 #
 # Two recurring causes:
@@ -13,7 +13,7 @@
 # tell the operator exactly how to resolve. Build artifacts are safe to discard
 # (the rebuild step regenerates them); settings.json is not, so it's surfaced.
 #
-# `make update` runs `update-binaries` + `install` after this script returns.
+# The caller rebuilds the binaries and relinks after this script returns.
 
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
