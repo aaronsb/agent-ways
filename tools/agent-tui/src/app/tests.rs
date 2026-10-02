@@ -321,7 +321,7 @@ fn mouse_during_secret_entry_neither_reveals_nor_queues() {
 
 #[test]
 fn the_look_follows_the_statusline_palette() {
-    let mut app = themed(App::new("t", tabbed()));
+    let mut app = themed(App::new("t", tabbed()).shape(theme::Shape::ROUND));
     keys(&mut app, &[KeyCode::Down, KeyCode::Enter]);
     let mut term = Terminal::new(TestBackend::new(80, 25)).unwrap();
     term.draw(|f| app.draw(f)).unwrap();

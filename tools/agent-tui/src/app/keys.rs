@@ -142,7 +142,12 @@ impl App {
                     self.mode = Mode::Secret { path, action, buf };
                 }
                 KeyCode::Char(c) => {
-                    buf.push(c);
+                    if !buf.push(c) {
+                        self.msg = format!(
+                            "rejected: the entry holds at most {} bytes; what was typed past that is not kept. Esc and enter a shorter key",
+                            SecretBuf::CAP
+                        );
+                    }
                     self.mode = Mode::Secret { path, action, buf };
                 }
                 _ => self.mode = Mode::Secret { path, action, buf },

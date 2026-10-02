@@ -246,7 +246,8 @@ impl App {
             closed: BTreeSet::new(),
             failure: None,
             mouse: true,
-            shape: theme::Shape::ROUND,
+            // Plain needs no Nerd Font; an application that wants caps asks.
+            shape: theme::Shape::PLAIN,
             hits: Hits::default(),
             adapter: Box::new(Unwired),
             stamp: None,
@@ -508,6 +509,10 @@ impl App {
     /// The tab's rows, or with a filter the matches of every tab.
     fn rows(&self) -> Vec<Row> {
         if self.filter.is_empty() {
+            // The theme tab holds no tree: it is the tab past the roots.
+            if self.tab >= self.roots.len() {
+                return Vec::new();
+            }
             tree::tab_rows(&self.roots, self.tab)
         } else {
             tree::rows(&self.roots, &self.filter)

@@ -328,18 +328,20 @@ impl Shape {
 
     pub fn named(name: &str) -> Shape {
         match name {
+            "round" => Shape::ROUND,
             "plain" => Shape::PLAIN,
             "flame" => Shape { cap: "\u{e0c2}", join: "\u{e0c0}" },
             "arrow" => Shape { cap: "", join: "\u{e0b0}" },
             "slant" => Shape { cap: "\u{e0ba}", join: "\u{e0bc}" },
             "pixel" => Shape { cap: "", join: "\u{e0c6}" },
-            _ => Shape::ROUND,
+            // An unknown name gets the shape every terminal font can draw.
+            _ => Shape::PLAIN,
         }
     }
 
     /// The name [`Shape::named`] takes for this shape.
     pub fn name(&self) -> &'static str {
-        Shape::NAMES.iter().copied().find(|n| Shape::named(n) == *self).unwrap_or("round")
+        Shape::NAMES.iter().copied().find(|n| Shape::named(n) == *self).unwrap_or("plain")
     }
 
     /// The shape after this one in [`Shape::NAMES`], wrapping round.
@@ -401,7 +403,8 @@ mod tests {
         assert_eq!((s[4].style.fg, s[4].style.bg), (Some(Ground::AccentDim.bg()), None));
         let plain: String = Shape::PLAIN.lozenge(&[Seg::on(" a ", Ground::Accent)]).iter().map(|x| x.content.as_ref()).collect();
         assert_eq!(plain, " a ");
-        assert_eq!(Shape::named("anything"), Shape::ROUND);
+        assert_eq!(Shape::named("anything"), Shape::PLAIN, "an unknown shape draws no Nerd Font glyphs");
+        assert!(Shape::NAMES.iter().all(|n| Shape::named(n).name() == *n), "every name maps to its own shape");
         set(Palette::default());
     }
 

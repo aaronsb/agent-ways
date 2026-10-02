@@ -285,6 +285,45 @@ fn a_signal_stops_a_command_in_flight() {
 }
 
 #[test]
+fn a_reload_with_the_theme_tab_open_keeps_the_app_alive() {
+    let (app, p) = probe();
+    let mut app = app.themes(Themes::new(None, agent_theme::ColorDepth::TrueColor, None));
+    // Tab 2 is the theme tab: the one past the single settings tab.
+    press(&mut app, &[KeyCode::Char('2')]);
+    assert_eq!(app.tab(), 1);
+    // Choose a theme, then let the watch see a file change, as the write
+    // of the choice makes.
+    press(&mut app, &[KeyCode::Down]);
+    *p.fresh.borrow_mut() = Some(tree());
+    p.stamp.set(9);
+    app.watch();
+    assert_eq!(p.reloads.get(), 1);
+    app.reload();
+    let _ = render(&mut app, 100, 20);
+    assert_eq!(app.tab(), 1, "the theme tab is still shown");
+}
+
+#[test]
+fn a_secret_past_the_cap_is_refused_out_loud() {
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    for _ in 0..crate::tree::SecretBuf::CAP {
+        press(&mut app, &[KeyCode::Char('k')]);
+    }
+    assert!(!app.message().starts_with("rejected"));
+    press(&mut app, &[KeyCode::Char('x')]);
+    assert!(app.message().contains("holds at most 512 bytes"), "{}", app.message());
+    assert!(app.masked(), "the entry stays open");
+}
+
+#[test]
+fn a_new_app_draws_plain_lozenges() {
+    let mut app = App::new("t", tree());
+    let f = text(&render(&mut app, 100, 20));
+    assert!(!f.contains('\u{e0b6}') && !f.contains('\u{e0b4}'), "no Nerd Font glyphs by default:\n{f}");
+}
+
+#[test]
 fn the_watch_reloads_when_the_stamp_moves() {
     let (mut app, p) = probe();
     *p.fresh.borrow_mut() = Some(tree());

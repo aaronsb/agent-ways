@@ -65,6 +65,7 @@ name = "agent-tui"
 version = "0.1.0"
 dependencies = [
  "agent-theme",
+ "libc",
  "ratatui",
  "signal-hook",
 ]

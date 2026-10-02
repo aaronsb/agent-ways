@@ -17,3 +17,8 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm",
 agent-theme = { path = "../agent-theme", features = ["ratatui"] }
 # The termination signals the run loop restores the terminal on.
 signal-hook = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+# killpg, for the process group of a command in flight, and tcgetattr, to
+# see a terminal that hung up.
+libc = "0.2"

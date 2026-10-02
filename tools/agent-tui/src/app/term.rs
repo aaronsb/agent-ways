@@ -3,7 +3,7 @@
 //! every way out: a quit, an error, a panic, or a signal (SIGTERM, SIGHUP,
 //! SIGINT), which the loop sees between polls.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -19,7 +19,9 @@ const POLL: Duration = Duration::from_millis(100);
 /// mode off, the main screen back, the cursor shown. Safe to call twice.
 pub fn restore() {
     let _ = execute!(io::stdout(), DisableMouseCapture);
-    ratatui::restore();
+    // try_restore: restore() prints its error, and a print to a terminal
+    // that hung up panics, which in a drop aborts.
+    let _ = ratatui::try_restore();
     let _ = execute!(io::stdout(), Show);
 }
 
@@ -49,32 +51,140 @@ impl Drop for TermGuard {
     }
 }
 
+/// The process group of the command in flight, which a forced exit and the
+/// panic hook end with it. 0 when there is none.
+static JOB_GROUP: AtomicI32 = AtomicI32::new(0);
+
+/// Note the process group of a command now running, so that whatever way
+/// the screens end, the command and every process it started end too.
+pub fn register_job_group(pgid: u32) {
+    JOB_GROUP.store(pgid as i32, Ordering::SeqCst);
+}
+
+/// The command in group `pgid` has ended.
+pub fn clear_job_group(pgid: u32) {
+    let _ = JOB_GROUP.compare_exchange(pgid as i32, 0, Ordering::SeqCst, Ordering::SeqCst);
+}
+
+/// End the command in flight and every process in its group.
+pub fn kill_job_group() {
+    let pg = JOB_GROUP.swap(0, Ordering::SeqCst);
+    if pg > 0 {
+        kill_group(pg as u32);
+    }
+}
+
+/// Send SIGKILL to every process in group `pgid` (Unix; elsewhere nothing).
+pub fn kill_group(pgid: u32) {
+    #[cfg(unix)]
+    // SAFETY: killpg only sends a signal; a group already gone is ESRCH.
+    unsafe {
+        libc::killpg(pgid as i32, libc::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    let _ = pgid;
+}
+
+/// The signal a hung-up terminal stands for.
+#[cfg(unix)]
+const HANGUP: i32 = libc::SIGHUP;
+#[cfg(not(unix))]
+const HANGUP: i32 = 1;
+
+/// How long the loop has to act on a signal before the watch thread ends
+/// the process itself, and how long once the loop has taken it up.
+const UNSEEN: Duration = Duration::from_millis(500);
+const SEEN: Duration = Duration::from_secs(3);
+
 /// The termination signals, caught into a flag the loop reads, so it can
 /// stop a running command and restore the terminal before the process ends.
+///
+/// The loop can be kept from reading it: on a terminal that hung up,
+/// crossterm's read returns nothing over and over inside one poll. So a
+/// watch thread gives the loop [`UNSEEN`] to take the signal up, then ends
+/// the command's process group, restores what it can and exits with 128
+/// plus the signal; a hung-up terminal, seen as `tcgetattr` failing on a
+/// stdin that was a terminal, counts as SIGHUP. A second signal exits at
+/// once, whatever state the process is in.
 #[derive(Clone, Default)]
-pub struct Signals(Arc<AtomicUsize>);
+pub struct Signals {
+    caught: Arc<AtomicUsize>,
+    /// Set by the loop when it acts on the signal.
+    seen: Arc<AtomicBool>,
+}
 
 impl Signals {
-    /// Catch SIGTERM, SIGINT and (on Unix) SIGHUP.
+    /// Catch SIGTERM, SIGINT and (on Unix) SIGHUP, and start the watch.
     pub fn install() -> io::Result<Signals> {
         let s = Signals::default();
         #[cfg(unix)]
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT, signal_hook::consts::SIGHUP];
         #[cfg(not(unix))]
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT];
+        let again = Arc::new(AtomicBool::new(false));
         for sig in caught {
-            signal_hook::flag::register_usize(sig, s.0.clone(), sig as usize)?;
+            // Registered first, so it runs before the flag below is set: the
+            // first signal arms it, the second exits.
+            signal_hook::flag::register_conditional_shutdown(sig, 128 + sig, again.clone())?;
+            signal_hook::flag::register(sig, again.clone())?;
+            signal_hook::flag::register_usize(sig, s.caught.clone(), sig as usize)?;
         }
+        let w = s.clone();
+        std::thread::Builder::new().name("agent-tui-signals".into()).spawn(move || w.watch())?;
         Ok(s)
     }
 
     /// The signal caught, if one was.
     pub fn caught(&self) -> Option<i32> {
-        match self.0.load(Ordering::SeqCst) {
+        match self.caught.load(Ordering::SeqCst) {
             0 => None,
             n => Some(n as i32),
         }
     }
+
+    /// The loop is acting on the signal.
+    pub fn take_up(&self) {
+        self.seen.store(true, Ordering::SeqCst);
+    }
+
+    fn watch(&self) {
+        let tty = stdin_is_tty();
+        let mut since: Option<Instant> = None;
+        loop {
+            std::thread::sleep(Duration::from_millis(50));
+            if self.caught().is_none() && tty && hung_up() {
+                #[cfg(unix)]
+                self.caught.store(libc::SIGHUP as usize, Ordering::SeqCst);
+            }
+            let Some(sig) = self.caught() else { continue };
+            let start = *since.get_or_insert_with(Instant::now);
+            let limit = if self.seen.load(Ordering::SeqCst) { SEEN } else { UNSEEN };
+            if start.elapsed() >= limit {
+                kill_job_group();
+                restore();
+                std::process::exit(128 + sig);
+            }
+        }
+    }
+}
+
+fn stdin_is_tty() -> bool {
+    use std::io::IsTerminal;
+    io::stdin().is_terminal()
+}
+
+/// Whether the terminal on stdin has gone: its attributes can no longer be
+/// read, as after a hangup.
+fn hung_up() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: termios is plain data the call fills.
+        let mut t: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: fd 0 is ours to query.
+        unsafe { libc::tcgetattr(0, &mut t) != 0 }
+    }
+    #[cfg(not(unix))]
+    false
 }
 
 impl App {
@@ -85,6 +195,7 @@ impl App {
         let (mut last_tick, mut last_watch) = (Instant::now(), Instant::now());
         loop {
             if let Some(sig) = signals.caught() {
+                signals.take_up();
                 self.stop_run("stopped by a signal");
                 return Ok(self.session(Some(sig)));
             }
@@ -96,13 +207,21 @@ impl App {
                 }
                 captured = self.mouse;
             }
-            term.draw(|f| self.draw(f))?;
-            if event::poll(POLL)? {
-                match event::read()? {
-                    Event::Key(k) if k.kind == KeyEventKind::Press && !self.key(k) => return Ok(self.session(None)),
-                    Event::Mouse(m) => self.mouse(m),
-                    _ => {}
+            // A terminal that can no longer be drawn on or read from has hung
+            // up: end as on SIGHUP.
+            let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(POLL)) {
+                Ok(true) => event::read().map(Some),
+                Ok(false) => Ok(None),
+                Err(e) => Err(e),
+            };
+            match event {
+                Err(_) => {
+                    self.stop_run("stopped: the terminal hung up");
+                    return Ok(self.session(Some(HANGUP)));
                 }
+                Ok(Some(Event::Key(k))) if k.kind == KeyEventKind::Press && !self.key(k) => return Ok(self.session(None)),
+                Ok(Some(Event::Mouse(m))) => self.mouse(m),
+                Ok(_) => {}
             }
             // Timed, not on an idle poll: a moving mouse sends events all the
             // time and would otherwise starve both.

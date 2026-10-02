@@ -318,15 +318,22 @@ impl Default for SecretBuf {
 }
 
 impl SecretBuf {
-    pub fn push(&mut self, c: char) {
+    /// Add a character; false, keeping nothing of it, when the buffer is
+    /// full ([`SecretBuf::CAP`] bytes).
+    pub fn push(&mut self, c: char) -> bool {
         let mut b = [0u8; 4];
         let e = c.encode_utf8(&mut b).as_bytes();
-        if self.0.len() + e.len() <= SECRET_CAP {
+        let fits = self.0.len() + e.len() <= SECRET_CAP;
+        if fits {
             self.0.extend_from_slice(e);
         }
         b.fill(0);
         std::hint::black_box(&b);
+        fits
     }
+
+    /// The most a secret holds, in bytes.
+    pub const CAP: usize = SECRET_CAP;
     /// Remove the last character and zero its bytes.
     pub fn pop(&mut self) {
         let n = self.reveal().chars().next_back().map_or(0, char::len_utf8);
@@ -607,9 +614,19 @@ mod tests {
     }
 
     #[test]
+    fn a_full_buffer_refuses_more_and_says_so() {
+        let mut b = SecretBuf::default();
+        for _ in 0..SecretBuf::CAP {
+            assert!(b.push('k'));
+        }
+        assert!(!b.push('x'), "a character past the cap is refused, not kept or cut");
+        assert_eq!(b.reveal().len(), SecretBuf::CAP);
+    }
+
+    #[test]
     fn backspace_zeroes_the_bytes_it_removes() {
         let mut b = SecretBuf::default();
-        "ab€".chars().for_each(|c| b.push(c));
+        "ab€".chars().for_each(|c| assert!(b.push(c)));
         b.pop();
         assert_eq!(b.reveal(), "ab");
         assert_eq!(b.residue(3), [0, 0, 0], "the removed character's bytes are wiped");
@@ -620,7 +637,7 @@ mod tests {
     #[test]
     fn secret_buf_debug_redacts() {
         let mut b = SecretBuf::default();
-        "hunter2".chars().for_each(|c| b.push(c));
+        "hunter2".chars().for_each(|c| assert!(b.push(c)));
         assert!(!format!("{b:?}").contains("hunter"));
         assert_eq!(b.len(), 7);
         let a = Action::new("set", "ways k add").arg(Arg::Secret);
