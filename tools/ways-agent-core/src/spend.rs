@@ -104,15 +104,10 @@ pub fn filter(calls: Vec<Call>, since: Option<&str>, session: Option<&str>) -> V
         .collect()
 }
 
-/// Whether a call's recorded `project` is `scope`: the same path, a
-/// trailing slash aside. Exact, so a worktree under the project is its own.
-pub fn same_project(project: &str, scope: &str) -> bool {
-    project.trim_end_matches('/') == scope.trim_end_matches('/')
-}
-
-/// Keep the calls of one project, matched by [`same_project`].
+/// Keep the calls of one project, matched by
+/// [`ways_core::util::same_project`].
 pub fn filter_project(calls: Vec<Call>, project: Option<&str>) -> Vec<Call> {
-    calls.into_iter().filter(|c| project.is_none_or(|p| same_project(&c.project, p))).collect()
+    calls.into_iter().filter(|c| project.is_none_or(|p| ways_core::util::same_project(&c.project, p))).collect()
 }
 
 fn key_of(c: &Call, by: By) -> String {

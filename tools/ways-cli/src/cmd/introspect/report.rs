@@ -45,6 +45,7 @@ impl Reports {
     /// sessions tab matches it.
     pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Reports {
         let project = project.map(|p| p.trim_end_matches('/'));
+        let scope = scope.trim_end_matches('/').to_string();
         Reports {
             content: content.to_string(),
             stale: [true; 3],
@@ -79,6 +80,12 @@ impl Reports {
             self.precision.reload(&self.content);
         }
         &mut self.precision
+    }
+
+    /// Which of spend, stats and precision wait to read the log.
+    #[cfg(test)]
+    pub(crate) fn stale(&self) -> [bool; 3] {
+        self.stale
     }
 
     /// These reports with `spend` in place of the log's, for a test.
@@ -230,6 +237,25 @@ impl Spend {
     }
 }
 
+/// A trigger in at most 13 columns, its kind kept: `semantic:bash:en` is
+/// `sem:bash`, `semantic:embedding:en` is `sem:emb`, and a `bash` pattern
+/// stays `bash`. Which kind fired a way off its domain decides the remedy:
+/// narrow the pattern, or the vocabulary.
+pub(super) fn short_trigger(trigger: &str) -> String {
+    match trigger.strip_prefix("semantic:") {
+        Some(rest) => {
+            let lane = rest.split(':').next().unwrap_or(rest);
+            let lane = match lane {
+                "embedding" => "emb",
+                "late-interaction" => "late",
+                other => other,
+            };
+            format!("sem:{lane}")
+        }
+        None => trigger.to_string(),
+    }
+}
+
 /// A list's cursor moved by a key: one row, a page, or an end.
 fn moved(sel: usize, len: usize, k: KeyCode) -> usize {
     let last = len.saturating_sub(1);
@@ -299,8 +325,8 @@ impl Precision {
             f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
             return;
         }
-        // Below 100 columns the trigger is named by its channel and the
-        // spread is left out, so the way keeps its room.
+        // Below 100 columns the trigger is shortened and the spread is left
+        // out, so the way keeps its room.
         let wide = area.width >= 100;
         let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
         let mut header = vec![Cell::from("Way"), Cell::from("Flag"), right("Sess".into()), right("Off".into()), right("Irrel".into())];
@@ -320,8 +346,7 @@ impl Precision {
                 if wide {
                     cells.push(right(r.spread.to_string()));
                 }
-                let trigger = if wide { r.top_off_trigger.as_str() } else { stats::trigger_channel(&r.top_off_trigger) };
-                cells.push(Cell::from(trigger.to_string()));
+                cells.push(Cell::from(if wide { r.top_off_trigger.clone() } else { short_trigger(&r.top_off_trigger) }));
                 Row::new(cells)
             })
             .collect();
@@ -389,8 +414,10 @@ impl Stats {
             ),
         ];
         f.render_widget(Paragraph::new(Line::from(line)), head);
-        // The side pane is as wide as its longest channel name needs.
-        let [left, side] = Layout::horizontal([Constraint::Min(30), Constraint::Length(40)]).areas(body);
+        // The side pane fits the longest channel name from 100 columns;
+        // below, the way column keeps the room and that one name is cut.
+        let side_width = if area.width >= 100 { 40 } else { 32 };
+        let [left, side] = Layout::horizontal([Constraint::Min(30), Constraint::Length(side_width)]).areas(body);
 
         let title = format!(" {} ways in {} ", r.by_way.len(), self.scope);
         if r.by_way.is_empty() {
@@ -401,7 +428,7 @@ impl Stats {
             let header = Row::new(vec![Cell::from("Way"), Cell::from(Line::from("Fires").alignment(Alignment::Right))]).style(Style::new().add_modifier(Modifier::BOLD));
             self.sel = self.sel.min(r.by_way.len() - 1);
             self.table.select(Some(self.sel));
-            let t = Table::new(rows, [Constraint::Min(10), Constraint::Length(6)])
+            let t = Table::new(rows, [Constraint::Min(10), Constraint::Length(5)])
                 .header(header)
                 .column_spacing(1)
                 .block(pane(title).title_bottom(agent_hint(&self.hint)))

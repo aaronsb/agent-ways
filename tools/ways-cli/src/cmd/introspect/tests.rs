@@ -816,18 +816,31 @@ fn a_report_reload_keeps_the_cursor_on_its_way() {
         .collect::<Vec<_>>()
         .join("\n");
     s.reports.reload(&format!("{}\n{more}", usage_log()));
+    assert_eq!(s.reports.stale(), [true; 3], "nothing read until a tab is drawn");
     let t = selected(&mut s);
+    assert_eq!(s.reports.stale(), [true, false, true], "drawing stats read only stats");
     assert!(t.contains("softwaredev/delivery/commits") && t.contains(" 4"), "now first, still selected: {t}");
 }
 
-/// Below 100 columns the precision table names the trigger by channel and
-/// leaves out the spread, so the way keeps its room.
+/// Below 100 columns the precision table leaves out the spread, so the way
+/// keeps its room.
 #[test]
-fn precision_narrows_to_the_trigger_channel_below_100_columns() {
+fn precision_drops_the_spread_below_100_columns() {
     let mut s = Introspect::showing(replay(false), Reports::new(&usage_log(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('5')]);
     let wide = text(&render(&mut s, 120, 40));
     assert!(wide.contains("Spread"), "{wide}");
     let narrow = text(&render(&mut s, 80, 25));
     assert!(!narrow.contains("Spread") && narrow.contains("softwaredev/delivery/commits"), "{narrow}");
+}
+
+/// A short trigger keeps its kind: a semantic lane is told from a pattern.
+#[test]
+fn a_short_trigger_keeps_semantic_apart_from_pattern() {
+    use super::report::short_trigger;
+    assert_eq!(short_trigger("semantic:bash:en"), "sem:bash");
+    assert_eq!(short_trigger("semantic:embedding:en"), "sem:emb");
+    assert_eq!(short_trigger("semantic:late-interaction:en"), "sem:late");
+    assert_eq!(short_trigger("bash"), "bash");
+    assert_eq!(short_trigger("keyword"), "keyword");
 }

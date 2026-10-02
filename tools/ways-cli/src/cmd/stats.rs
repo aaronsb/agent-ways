@@ -166,7 +166,7 @@ fn way_model_split(events: &[Event]) -> HashMap<&str, HashMap<&str, u32>> {
 /// `semantic:bash:*`. Everything else is its own lane, named by the segment
 /// before the first colon: `bash`, `file`, `state`, `attend:*`, and the one
 /// legacy `bash:semantic:en` spelling in early history all resolve that way.
-pub(crate) fn trigger_channel(trigger: &str) -> &str {
+fn trigger_channel(trigger: &str) -> &str {
     match trigger {
         "keyword" => "prompt",
         t if t.starts_with("semantic:embedding") || t.starts_with("semantic:late-interaction") => {

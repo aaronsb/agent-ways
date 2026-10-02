@@ -123,6 +123,12 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 /// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
 /// project enclosing the current directory ([`detect_project_dir`]). `None`
 /// outside any project.
+/// Whether a recorded project path is `scope`: the same path, a trailing
+/// slash aside. Exact, so a worktree under a project is its own project.
+pub fn same_project(project: &str, scope: &str) -> bool {
+    project.trim_end_matches('/') == scope.trim_end_matches('/')
+}
+
 pub fn project_root() -> Option<String> {
     env_project_dir().or_else(detect_project_dir)
 }

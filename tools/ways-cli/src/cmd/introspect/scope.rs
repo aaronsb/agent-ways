@@ -36,7 +36,7 @@ pub(crate) fn resolve_project_scope(project: Option<&str>, all: bool) -> Result<
 /// symlinked path — or a subdirectory `$PWD` — won't match and is simply absent
 /// from the list (not an error). Pass `--all` or an explicit `--project` to see it.
 pub(crate) fn project_matches(stored: &str, scope: &str) -> bool {
-    ways_agent_core::spend::same_project(stored, scope)
+    ways_core::util::same_project(stored, scope)
 }
 
 #[cfg(test)]
