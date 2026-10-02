@@ -189,12 +189,13 @@ fn a_reload_that_cannot_keep_an_edit_says_it_was_dropped_and_why() {
 
 #[test]
 fn a_reload_finds_the_cursor_closed_groups_and_failure_by_key() {
-    // The fresh tree orders the tab's rows the other way round.
+    // The fresh tree has rows the old one did not, above the cursor.
     let (mut app, p) = probe();
     press(&mut app, &[KeyCode::Down]);
     assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "matching.floor");
     let mut fresh = tree();
-    fresh[0].children.reverse();
+    // A findings group now heads the tab, as one does when a file gains a finding.
+    fresh[0].children.insert(0, Node::group("findings", "", vec![Node::leaf("#1", "", Setting::new(Kind::ReadOnly, "x", "user"))]).opened());
     *p.fresh.borrow_mut() = Some(fresh);
     app.reload();
     assert_eq!(tree::key(&app.roots, &app.rows()[app.cursor].path), "matching.floor", "the cursor stays on its key");
