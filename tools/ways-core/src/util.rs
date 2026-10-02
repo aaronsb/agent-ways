@@ -142,7 +142,14 @@ pub fn project_arg(path: &str) -> String {
     if p.is_absolute() {
         return path.to_string();
     }
-    std::fs::canonicalize(p).or_else(|_| std::path::absolute(p)).map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string())
+    // On Windows `absolute` normalizes `..` and gives the `C:\...` form events
+    // record, where `canonicalize` would give a `\\?\` verbatim path; on Unix
+    // `absolute` keeps `..`, so the real path is taken.
+    #[cfg(windows)]
+    let resolved = std::path::absolute(p);
+    #[cfg(not(windows))]
+    let resolved = std::fs::canonicalize(p).or_else(|_| std::path::absolute(p));
+    resolved.map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string())
 }
 
 /// The project a command scopes to: `CLAUDE_PROJECT_DIR` when set, else the
@@ -377,5 +384,14 @@ mod tests {
         assert!(!in_project(r"C:\a\proj-2", r"C:\a\proj"));
         assert!(in_project("/a/proj", "/"), "the root holds every path");
         assert!(!in_project("/a/proj", ""), "an empty scope holds nothing");
+    }
+
+    #[test]
+    fn a_relative_project_resolves_to_the_working_directory() {
+        let cwd = std::env::current_dir().unwrap();
+        let resolved = super::project_arg(".");
+        assert!(!resolved.starts_with(r"\\?\"), "no verbatim prefix: {resolved}");
+        assert!(in_project(&cwd.to_string_lossy(), &resolved) || in_project(&std::fs::canonicalize(&cwd).unwrap().to_string_lossy(), &resolved), "{resolved}");
+        assert_eq!(super::project_arg("/abs/p"), "/abs/p");
     }
 }
