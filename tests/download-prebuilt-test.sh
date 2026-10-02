@@ -70,13 +70,24 @@ check "a way-embed without match --batch is refused" "1" "$?"
 check "and removed" "no:no" "$(yn test -e "$cache/way-embed"):$(yn test -e "$cache/way-embed-$platform")"
 check "and the refusal names the gate" "yes" "$(yn grep -q "predates the required 'match --batch'" <<< "$err")"
 
-# A way-embed already installed and running is kept, gate or not, without a download.
+# A way-embed running at the latest release's version is kept without a download.
 mkdir -p "$cache"
-cp "$FAKE/files/way-embed-v1.0.0/way-embed-$platform" "$cache/way-embed"
+cp "$FAKE/files/way-embed-v2.0.0/way-embed-$platform" "$cache/way-embed"
 chmod +x "$cache/way-embed"
 : > "$FAKE/calls"
 bash "$DL" way-embed >/dev/null 2>&1
-check "an installed, running way-embed is kept" "0:way-embed 1.0.0" "$?:$("$cache/way-embed" --version 2>/dev/null)"
-check "without calling gh" "" "$(cat "$FAKE/calls")"
+check "a way-embed at the latest version is kept" "0:way-embed 2.0.0" "$?:$("$cache/way-embed" --version 2>/dev/null)"
+check "without downloading" "no" "$(yn grep -q '^gh release' "$FAKE/calls")"
+
+# One at an older version is replaced, and the replacement passes the gate (#772).
+cp "$FAKE/files/way-embed-v1.0.0/way-embed-$platform" "$cache/way-embed"
+got=$(bash "$DL" way-embed 2>/dev/null)
+check "an older way-embed is replaced by the latest release" "0:way-embed 2.0.0" "$?:$("$got" --version 2>/dev/null)"
+
+# A replacement that fails the gate is refused, and the working binary stays.
+cp "$FAKE/files/way-embed-v2.0.0/way-embed-$platform" "$cache/way-embed"
+WAY_EMBED_RELEASE=way-embed-v1.0.0 bash "$DL" way-embed >/dev/null 2>&1
+check "a replacement without match --batch is refused, keeping the working binary" "1:way-embed 2.0.0" \
+  "$?:$("$cache/way-embed" --version 2>/dev/null)"
 
 exit $fail

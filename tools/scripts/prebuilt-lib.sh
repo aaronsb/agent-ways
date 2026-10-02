@@ -85,11 +85,39 @@ sha256_of() {
   fi
 }
 
+# Echo the version a binary reports: the second word of `BIN --version`, as
+# in `attend 0.15.1 (47d7a97)`. Empty when it prints no second word.
+binary_version() {
+  "$1" --version 2>/dev/null | awk 'NR == 1 { print $2 }'
+}
+
+# Whether version A is at or ahead of B: numeric X.Y.Z cores compared in
+# order, and at an equal core a pre-release (1.2.0-rc1) is behind the release
+# while two pre-releases are level.
+# A version that does not parse is at least B only when it equals B. The same
+# order as `version_older` in tools/ways-cli/src/cmd/update.rs.
+version_at_least() {
+  local a="$1" b="$2" ac bc
+  [[ "$a" == "$b" ]] && return 0
+  ac="${a%%-*}" bc="${b%%-*}"
+  [[ "$ac" =~ ^[0-9]+(\.[0-9]+)*$ && "$bc" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
+  if [[ "$ac" == "$bc" ]]; then
+    [[ "$a" != *-* || "$b" == *-* ]]  # equal cores: A is behind only as a pre-release of a release
+    return
+  fi
+  [[ "$(printf '%s\n%s\n' "$ac" "$bc" | sort -V | tail -1)" == "$ac" ]]
+}
+
 # Install the pre-built binary of COMPONENT from a GitHub Release.
 #
-#   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT
+#   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT [CHECK]
 #
 # RELEASE_TAG is a tag, or `latest` for the newest `<COMPONENT>-v*` release.
+# A running binary already at OUTPUT_DIR/<COMPONENT> is kept when it is at the
+# named tag's version, when it is at or ahead of the latest release's, or when
+# the release cannot be resolved. Otherwise it is replaced (#772).
+# CHECK, when given, is a command run on the downloaded binary before it is
+# installed; a failure refuses the install and leaves the old binary in place.
 # The release carries `<COMPONENT>-<platform>` and, usually, `checksums.txt`.
 # The binary lands at OUTPUT_DIR/<COMPONENT>, beside its platform-named copy.
 # BUILD_HINT is the build-from-source command printed when the download fails.
@@ -111,42 +139,57 @@ sha256_of() {
 #
 # The body runs in a subshell so the cleanup trap stays local to the call.
 prebuilt_install() (
-  comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5"
+  comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5" check="${6:-}"
   platform="$(detect_platform)"
   bin_name="${comp}-${platform}"
   out_file="${out_dir}/${comp}"
 
+  installed=""
   if [[ -x "$out_file" ]] && "$out_file" --version >/dev/null 2>&1; then
+    installed=$(binary_version "$out_file")
+    [[ -n "$installed" ]] || installed="unknown"
+  fi
+  keep_installed() {
     echo "${comp} already installed and working: $out_file" >&2
     "$out_file" --version >&2
     echo "$out_file"
     exit 0
+  }
+  if [[ -n "$installed" && "$tag" != "latest" && "$installed" == "${tag#"${comp}-v"}" ]]; then
+    keep_installed
   fi
 
   if ! command -v gh >/dev/null 2>&1; then
+    [[ -n "$installed" ]] && echo "gh CLI not found; cannot check for a newer ${comp}." >&2 && keep_installed
     echo "error: gh CLI not found — build from source instead:" >&2
     echo "  ${hint}" >&2
     exit 1
   fi
 
-  mkdir -p "$out_dir" || exit 1
-  stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX") || exit 1
-  trap 'rm -rf "$stage"' EXIT
-
   if [[ "$tag" == "latest" ]]; then
     # A failed API call (retries exhausted) is an honest error; an empty
     # answer means the API was reached and no release matches.
     if ! tag=$(latest_tag_for_prefix "$repo" "${comp}-v"); then
+      [[ -n "$installed" ]] && echo "Could not reach GitHub Releases; cannot check for a newer ${comp}." >&2 && keep_installed
       echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
       echo "  Falling back to build-from-source: ${hint}" >&2
       exit 1
     fi
     if [[ -z "$tag" ]]; then
+      [[ -n "$installed" ]] && keep_installed
       echo "No ${comp} release found. Build from source:" >&2
       echo "  ${hint}" >&2
       exit 1
     fi
+    # At or ahead of the latest release: a newer binary is never replaced by
+    # an older release.
+    [[ -n "$installed" ]] && version_at_least "$installed" "${tag#"${comp}-v"}" && keep_installed
   fi
+  [[ -n "$installed" ]] && echo "Replacing ${comp} ${installed} with ${tag}" >&2
+
+  mkdir -p "$out_dir" || exit 1
+  stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX") || exit 1
+  trap 'rm -rf "$stage"' EXIT
 
   echo "Platform: ${platform}" >&2
   echo "Release:  ${tag}" >&2
@@ -206,6 +249,11 @@ prebuilt_install() (
     echo "WARNING: binary downloaded but won't execute on this platform" >&2
     echo "Build from source instead:" >&2
     echo "  ${hint}" >&2
+    exit 1
+  fi
+
+  if [[ -n "$check" ]] && ! "$check" "$stage/$bin_name"; then
+    echo "  Build from source instead: ${hint}" >&2
     exit 1
   fi
 

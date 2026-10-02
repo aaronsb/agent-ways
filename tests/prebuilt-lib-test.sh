@@ -89,8 +89,38 @@ JSON
     "$(yn test -e "$out/checksums.txt"):$(yn compgen -G "$out/.ways.*")"
 
   : > "$FAKE/calls"
-  prebuilt_install ways latest "$out" "$REPO" "make ways" >/dev/null 2>&1
-  check "a working installed binary short-circuits without calling gh" "" "$(cat "$FAKE/calls")"
+  prebuilt_install ways ways-v1.10.0 "$out" "$REPO" "make ways" >/dev/null 2>&1
+  check "a binary at the named tag's version short-circuits without calling gh" "" "$(cat "$FAKE/calls")"
+  : > "$FAKE/calls"
+  got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
+  check "a binary at the latest release's version is kept" "$out/ways" "$got"
+  check "and nothing is downloaded" "no" "$(yn grep -q '^gh release' "$FAKE/calls")"
+
+  # A working binary at another version is replaced (#772).
+  out="$FAKE/out-stale"
+  mkdir -p "$out"
+  printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
+  chmod +x "$out/ways"
+  got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>"$FAKE/err")
+  check "a working binary at an older version is replaced by the latest release" "$out/ways:ways 1.10.0" \
+    "$got:$("$out/ways" --version 2>/dev/null)"
+  check "and the replacement is named" "yes" "$(yn grep -q 'Replacing ways 1.2.0 with ways-v1.10.0' "$FAKE/err")"
+  printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
+  got=$(FAKE_GH_FAIL=api prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
+  check "an unreachable API keeps the working binary" "0:ways 1.2.0 (old)" "$?:$("$out/ways" --version)"
+  # A binary ahead of the latest release is kept; a named tag is installed as named.
+  printf '#!/bin/sh\necho "ways 1.11.0 (dev)"\n' > "$out/ways"
+  got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
+  check "a binary ahead of the latest release is kept" "ways 1.11.0 (dev)" "$("$out/ways" --version)"
+  got=$(prebuilt_install ways ways-v1.10.0 "$out" "$REPO" "make ways" 2>/dev/null)
+  check "a named tag replaces a binary at another version" "ways 1.10.0" "$("$out/ways" --version)"
+
+  # CHECK runs on the download before install; a failure keeps the old binary.
+  printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
+  refuse() { [[ -x "$1" ]] && return 1; }
+  prebuilt_install ways latest "$out" "$REPO" "make ways" refuse >/dev/null 2>&1
+  check "a failed CHECK refuses the install and keeps the old binary" "1:ways 1.2.0 (old)" "$?:$("$out/ways" --version)"
+  check "and leaves no staging dir" "no" "$(yn compgen -G "$out/.ways.*")"
 
   # Mismatch: the binary changes after its checksum was published.
   release_of ways-v1.9.0 ways "ways 1.9.0"
@@ -155,6 +185,12 @@ JSON
   check "and names the build-from-source fallback" "yes" "$(yn grep -q 'make ways' "$FAKE/err")"
   FAKE_GH_FAIL=api prebuilt_install ways latest "$FAKE/out-noapi" "$REPO" "make ways" >/dev/null 2>"$FAKE/err"
   check "an unreachable API fails the install" "1" "$?"
+
+  ge() { if version_at_least "$1" "$2"; then echo yes; else echo no; fi; }
+  check "version_at_least orders numeric cores" "yes:no:yes" "$(ge 0.10.0 0.9.0):$(ge 0.9.0 0.10.0):$(ge 1.2.0 1.2.0)"
+  check "a pre-release is behind its release" "no:yes" "$(ge 1.2.0-rc1 1.2.0):$(ge 1.2.0 1.2.0-rc1)"
+  check "two pre-releases of one core are level" "yes:yes" "$(ge 1.2.0-rc2 1.2.0-rc1):$(ge 1.2.0-rc1 1.2.0-rc2)"
+  check "an unparseable version is behind any other" "no:yes" "$(ge unknown 1.0.0):$(ge unknown unknown)"
 
   check "curl is never called" "no" "$(yn grep -q '^curl' "$FAKE/calls")"
   exit "$fails"

@@ -241,9 +241,8 @@ _attend_state_hint:
 	@echo "        \`make purge-attend-state\` to reset cached runtime"
 	@echo "        state for consistency. Skip it on a fresh install."
 
-# Force re-fetch (or rebuild) of the way-embed binary. Delegates to the
-# way-embed sub-Makefile's rebuild-binary target, which clears the
-# cached install before download-prebuilt.sh would short-circuit.
+# Refresh the way-embed binary through the way-embed sub-Makefile's
+# rebuild-binary target (download-first, source build as the fallback).
 way-embed-rebuild:
 	$(MAKE) -C tools/way-embed rebuild-binary
 

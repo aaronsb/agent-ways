@@ -101,14 +101,14 @@ setup-binary:
 		echo "Pre-built binary installed."; \
 	else \
 		echo "No pre-built binary available, building from source..."; \
-		$(MAKE) $(BIN); \
+		$(MAKE) $(BIN) && rm -f "$(MODEL_DIR)/way-embed"; \
 	fi
 
-# Force re-download (or rebuild) of the platform binary. Removes the
-# cached install so download-prebuilt.sh's "already installed" early-
-# return does not skip a refresh after an upstream update.
+# Refresh the platform binary: download-prebuilt.sh replaces a cached
+# install older than the latest release and keeps the working one when the
+# download is refused, so nothing is removed first. A source build removes
+# the cached copy, which the engine would otherwise run in its place.
 rebuild-binary:
-	@rm -f "$(MODEL_DIR)/way-embed"
 	@$(MAKE) setup-binary
 
 # Run basic smoke test
