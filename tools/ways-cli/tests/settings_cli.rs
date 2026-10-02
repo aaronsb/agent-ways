@@ -203,7 +203,7 @@ fn set_exit_codes() {
     std::fs::create_dir_all(f.root.join("xdg/config/agent-ways/config.yaml.lock/x")).unwrap();
     let (_, err, code) = f.run(&["settings", "set", "matching.near_miss_margin", "0.1"]);
     assert_eq!(code, 5, "{err}");
-    assert!(err.contains("nothing written"), "{err}");
+    assert_eq!(err.matches("nothing written").count(), 1, "{err}");
     assert_eq!(std::fs::read_to_string(f.user()).unwrap(), before);
 }
 
@@ -348,13 +348,22 @@ fn help_prints_the_schema_text() {
 
 #[test]
 fn hook_commands_load_only_their_sections() {
+    // The hooks share `config::global()` with reconcile, so they read every
+    // ways section; what they must not do is take a file whole
+    // (`load-all`), build the settings tree, lint, or probe the key store.
+    // Each load names its sections (`load-sections`), and the names are
+    // exactly the lists the hook code passes.
     let f = Fx::new();
-    // Files for every section the hooks read, and a broken attend config that
-    // would show on stderr if the hook path touched it.
     f.write(&f.user(), "language: en\n");
     f.write(&f.overlay(), "ways: {}\n");
     f.write(&f.root.join("xdg/config/agent-ways/agent.yaml"), "mode: shadow\n");
+    // Guard for #698: attend's settings move into ways then, and hooks must
+    // still not read them. Today ways has no attend loader, so this cannot
+    // fail yet.
     f.write(&f.root.join("xdg/config/attend/config.yaml"), "engagement: [\n");
+    let ways_line =
+        "settings-trace: load-sections ways:config [ways,ways.switch,ways.domains,matching,install.targets,install.secret_path_deny,ways.project]";
+    let agent_line = "settings-trace: load-sections ways-agent:agent [gate,gate.mode,gate.profiles]";
     for args in [
         vec!["scan", "prompt", "--query=write a unit test", "--session=s1"],
         vec!["scan", "command", "--command=git status", "--session=s1"],
@@ -366,21 +375,99 @@ fn hook_commands_load_only_their_sections() {
         let out = c.output().unwrap();
         let err = String::from_utf8_lossy(&out.stderr);
         let trace: Vec<&str> = err.lines().filter(|l| l.starts_with("settings-trace:")).collect();
-        assert!(trace.iter().any(|l| l.contains("load ways:config")), "{args:?} loaded no settings: {err}");
+        assert!(trace.contains(&ways_line), "{args:?} loaded no ways settings by section: {err}");
         if args[1] == "prompt" {
-            assert!(trace.iter().any(|l| l.contains("load ways-agent:agent")), "the gate reads agent.yaml: {err}");
+            assert!(trace.contains(&agent_line), "the gate reads agent.yaml by section: {err}");
         }
         for line in &trace {
-            assert!(
-                *line == "settings-trace: load ways:config [ways,matching,install,ways.project]"
-                    || *line == "settings-trace: load ways-agent:agent [gate,gate.profiles]",
-                "{args:?} loaded more than its sections: {line}"
-            );
+            assert!(*line == ways_line || *line == agent_line, "{args:?} loaded more than its sections: {line}");
         }
         assert!(!err.contains("attend"), "{args:?} read attend's settings: {err}");
     }
-    // The full tree is built only by the settings verbs.
+    // The settings verbs take files whole and build the tree; the trace shows it.
     let mut c = f.cmd(&["settings", "list"]);
     c.env("WAYS_SETTINGS_TRACE", "1");
-    assert!(String::from_utf8_lossy(&c.output().unwrap().stderr).contains("settings-trace: tree"));
+    let err = String::from_utf8_lossy(&c.output().unwrap().stderr).to_string();
+    assert!(err.contains("settings-trace: tree") && err.contains("settings-trace: load-all ways:config"), "{err}");
+}
+
+// ── review findings (#713) ─────────────────────────────────────
+
+#[test]
+fn fix_never_drops_the_targets_list() {
+    let f = Fx::new();
+    f.write(&f.user(), "secret_path_deny: \"false\"\ntargets:\n  - path: /a\n    enabled: false\n  - path: /b\n");
+    let (_, err, code) = f.run(&["settings", "fix", "install"]);
+    assert_eq!(code, 0, "{err}");
+    let text = std::fs::read_to_string(f.user()).unwrap();
+    assert!(text.contains("targets:\n  - path: /a\n    enabled: false\n  - path: /b\n"), "{text}");
+    assert!(text.contains("secret_path_deny: true"), "{text}");
+    assert!(err.contains("fix leaves install.targets"), "{err}");
+    // A section holding only a key fix cannot rebuild is refused, untouched.
+    let (_, _, code) = f.run(&["settings", "fix", "install.targets"]);
+    assert_eq!(code, 3);
+    assert!(std::fs::read_to_string(f.user()).unwrap().contains("- path: /b"));
+}
+
+#[test]
+fn a_bad_value_never_switches_back_on_what_was_turned_off() {
+    let f = Fx::new();
+    // A bad domain list keeps the project switched off.
+    f.write(&f.overlay(), "disabled_domains: ea,itops\nenabled: false\n");
+    assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n");
+    // One bad toggle keeps the other disabled ways disabled.
+    f.write(&f.overlay(), "ways:\n  itops/incident: false\n  meta/introspection: no\n  ea/x: false\n");
+    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\nea/x\n");
+    // fix drops only the bad toggle.
+    assert_eq!(f.run(&["settings", "fix", "ways.project", "--project", f.root.join("proj").to_str().unwrap()]).2, 0);
+    assert_eq!(std::fs::read_to_string(f.overlay()).unwrap(), "ways:\n  itops/incident: false\n  ea/x: false\n");
+    // A bad secret_path_deny keeps the recorded targets.
+    f.write(&f.user(), "secret_path_deny: \"false\"\ntargets:\n  - path: /srv/work/.claude\n");
+    assert!(f.run(&["settings", "get", "install.targets"]).0.contains("/srv/work/.claude"));
+    // A bad engine keeps the gate off.
+    f.write(&f.root.join("xdg/config/agent-ways/agent.yaml"), "engine: 5\nmode: off\n");
+    assert_eq!(f.run(&["settings", "get", "gate.mode"]).0, "off\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn set_through_a_symlinked_0600_config_keeps_the_link_and_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fx::new();
+    let real = f.root.join("dotfiles/config.yaml");
+    f.write(&real, "# mine\nlanguage: es\n");
+    std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::create_dir_all(f.user().parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real, f.user()).unwrap();
+    assert_eq!(f.run(&["settings", "set", "matching.semantic_fire_probability", "0.4"]).2, 0);
+    assert!(std::fs::symlink_metadata(f.user()).unwrap().file_type().is_symlink());
+    assert_eq!(std::fs::read_to_string(&real).unwrap(), "# mine\nlanguage: es\nsemantic_fire_probability: 0.4\n");
+    assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn get_reports_a_fallback_on_stderr_and_keeps_stdout_the_value() {
+    let f = Fx::new();
+    f.write(&f.user(), "semantic_fire_probability: 0.35\nparent_boost_floor: 9\n");
+    let (out, err, code) = f.run(&["settings", "get", "matching.semantic_fire_probability"]);
+    assert_eq!((out.as_str(), code), ("0.5\n", 0));
+    assert!(err.contains("config.yaml:2: [matching] parent_boost_floor") && err.contains("resolve from the layers beneath"), "{err}");
+}
+
+#[test]
+fn an_unknown_top_level_key_is_reported_at_load() {
+    let f = Fx::new();
+    f.write(&f.user(), "langauge: es\n");
+    let (_, err, _) = f.run(&["config", "show"]);
+    assert_eq!(err.lines().filter(|l| l.contains("langauge")).count(), 1, "{err}");
+    assert!(err.contains("unknown key"), "{err}");
+}
+
+#[test]
+fn a_refire_preset_above_one_keeps_the_matching_section() {
+    let f = Fx::new();
+    f.write(&f.user(), "semantic_fire_probability: 0.35\nrefire_presets:\n  never: 5\n");
+    let (out, err, _) = f.run(&["settings", "get", "matching.semantic_fire_probability"]);
+    assert_eq!(out, "0.35\n", "{err}");
+    assert_eq!(f.run(&["settings", "lint"]).2, 0);
 }

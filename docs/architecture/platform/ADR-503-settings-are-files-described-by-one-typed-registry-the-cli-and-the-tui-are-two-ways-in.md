@@ -188,3 +188,10 @@ Open, and left to that record or a later one: whether domain switches (user scop
 - **All schemas in `agent-settings`.** One crate would define every component's keys, so `attend` or the daemon could not change or ship a key without a release of the shared crate, and neither could leave the workspace on its own.
 - **`ways-cli` depends on the `attend` crate for its schema.** It pulls a binary crate and its dependencies into `ways` for a set of types.
 - **Folding the command regrouping into this record.** Rejected for the reason in §14.
+
+## Addendum, 2026-10-01: fallback units, as built (§2, §4)
+
+Appended after acceptance; nothing above is changed. The first build (PR #713, issue #695) settles two points of §2 and §4, on the operator's decision in that PR's review.
+
+- **A unit that fails falls through, not to canonical.** A section that fails the schema is left out of that file's layer only. Its keys then resolve from the layers beneath, which end at canonical, so a broken section in a project's `.claude/ways.yaml` takes the user's values, not the shipped ones. For a key set in one file only, the result is canonical, as §4 says. The diagnostic says the keys resolve from the layers beneath.
+- **The fallback unit is narrower than a section of related keys.** A switch that turns something off is a section of its own: `enabled`, `disabled_domains`, `targets`, `secret_path_deny` and the gate's `mode`. A bad value in a neighbouring key cannot switch it back on. In a section that is a collection of switches or profiles (`ways:` per-way toggles, `profiles:`), each entry is its own unit: a bad entry is dropped, and the others load. A value outside its range is a lint finding, and its unit falls back; it is not clamped.
