@@ -65,6 +65,9 @@ impl Ctx {
     }
 }
 
+/// How long an apply waits for another writer to let go of a file.
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The adapter between the registry and the shell.
 pub struct Ways {
     pub ctx: Ctx,
@@ -208,7 +211,9 @@ impl Adapter for Ways {
             }
             edits.push((b.path(), v));
         }
-        match write_file_checked(file, &edits, |doc| self.unchanged(file, doc, values)) {
+        // The wait for the lock is bounded: a writer that hangs holding it
+        // must not freeze the screen's keys and signals.
+        match write_file_checked(file, &edits, Some(LOCK_WAIT), |doc| self.unchanged(file, doc, values)) {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(conflict)) => Err(self.short(&conflict)),
             Err(f) => Err(self.short(&f.message)),
@@ -244,34 +249,44 @@ impl Adapter for Ways {
             Ok(e) => e,
             Err(e) => return ended(Err(e)),
         };
-        let mut child = match Command::new(exe)
-            .args(args)
+        let mut cmd = Command::new(exe);
+        cmd.args(args)
             .env("NO_COLOR", "1")
             .stdin(if q.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+            .stderr(Stdio::piped());
+        // A group of its own, so a stop ends every process it starts, not
+        // only the first.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ended(Err(format!("{line}: {e}"))),
         };
-        if let (Some(secret), Some(mut pipe)) = (&q.stdin, child.stdin.take()) {
-            if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
-                // Never leave the child behind unwaited.
-                let _ = child.kill();
-                let _ = child.wait();
-                return ended(Err(format!("{line}: writing its stdin: {e}")));
+        agent_tui::register_job_group(child.id());
+        let read = |p: Option<Box<dyn Read + Send>>| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            if let Some(mut r) = p {
+                std::thread::spawn(move || {
+                    let mut b = Vec::new();
+                    let _ = r.read_to_end(&mut b);
+                    let _ = tx.send(b);
+                });
             }
-        }
-        let read = |p: Option<Box<dyn Read + Send>>| p.map(|mut r| std::thread::spawn(move || {
-            let mut b = Vec::new();
-            let _ = r.read_to_end(&mut b);
-            b
-        }));
+            rx
+        };
         let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let home = self.ctx.home.display().to_string();
-        Box::new(Proc { child, out, err, home })
+        let mut proc = Proc { child, out, err, home };
+        if let (Some(secret), Some(mut pipe)) = (&q.stdin, proc.child.stdin.take()) {
+            if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
+                // Never leave the command, or anything it started, behind.
+                proc.stop();
+                return ended(Err(format!("{line}: writing its stdin: {e}")));
+            }
+        }
+        Box::new(proc)
     }
 
     fn reload(&mut self) -> Option<Vec<Node>> {
@@ -326,18 +341,22 @@ impl Adapter for Ways {
 /// so a full pipe never stalls it.
 struct Proc {
     child: std::process::Child,
-    out: Option<std::thread::JoinHandle<Vec<u8>>>,
-    err: Option<std::thread::JoinHandle<Vec<u8>>>,
+    out: std::sync::mpsc::Receiver<Vec<u8>>,
+    err: std::sync::mpsc::Receiver<Vec<u8>>,
     /// Shown as `~` in the messages.
     home: String,
 }
+
+/// How long the output of an ended command is waited for. A process it
+/// started may still hold its pipes; its output is then not waited for.
+const OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Proc {
     /// The last line a failed command printed: on stderr, else on stdout,
     /// since some commands (`ways agent key add`) report a refusal there.
     fn reason(&mut self) -> String {
-        let take = |h: Option<std::thread::JoinHandle<Vec<u8>>>| h.and_then(|h| h.join().ok()).unwrap_or_default();
-        let (out, err) = (take(self.out.take()), take(self.err.take()));
+        let take = |r: &std::sync::mpsc::Receiver<Vec<u8>>| r.recv_timeout(OUTPUT_WAIT).unwrap_or_default();
+        let (out, err) = (take(&self.out), take(&self.err));
         let last = |b: &[u8]| String::from_utf8_lossy(b).lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());
         let line = last(&err).or_else(|| last(&out)).unwrap_or_else(|| "it printed nothing".into());
         if self.home.len() > 1 { line.replace(&self.home, "~") } else { line }
@@ -363,9 +382,12 @@ impl Job for Proc {
         }
     }
 
+    /// End the command and every process in its group, then reap it.
     fn stop(&mut self) {
+        agent_tui::kill_group(self.child.id());
         let _ = self.child.kill();
         let _ = self.child.wait();
+        agent_tui::clear_job_group(self.child.id());
     }
 }
 
@@ -375,6 +397,10 @@ impl Drop for Proc {
         // left behind.
         if matches!(self.child.try_wait(), Ok(None)) {
             self.stop();
+        } else {
+            // Ended on its own; whatever it started in its group ends too.
+            agent_tui::kill_group(self.child.id());
+            agent_tui::clear_job_group(self.child.id());
         }
     }
 }
@@ -485,9 +511,11 @@ pub fn open(o: &Open) -> Out {
     let mut app = app(ways, o.tab.as_deref(), depth)?;
     if !headless {
         let session = agent_tui::run(app).map_err(|e| fail(exit::WRITE_FAILED, format!("terminal: {e}")))?;
+        // The terminal may be gone (a hangup): a write that fails is let go,
+        // where print! would panic.
         let left = session.summary();
         if left != "nothing pending\n" {
-            print!("{left}");
+            let _ = std::io::stdout().write_all(left.as_bytes());
         }
         // The terminal is restored by now; a signal ends the process as it
         // would have, with 128 plus the signal.

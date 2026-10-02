@@ -1,16 +1,19 @@
-//! The settings screens on a real terminal: a pty, the real binary, and a
-//! termination signal while an apply waits on a slow command. The terminal
-//! must come back as the shell left it (main screen, cursor shown, mouse
-//! reporting off, line mode and echo on), the command must be ended, and
-//! the process must exit with 128 plus the signal.
+//! The settings screens on a real terminal: a pty, the real binary, and an
+//! apply that waits on a slow command whose stand-in starts a process of
+//! its own and waits on it, as `ways agent key check` waits on a provider.
+//! Then the session ends the two hard ways: a termination signal, and the
+//! terminal going away. Each time the process must exit within seconds,
+//! the command and the process it started must be gone, and after a signal
+//! the terminal must be as the shell left it (main screen, cursor shown,
+//! mouse reporting off, line mode and echo on).
 
 #![cfg(target_os = "linux")]
 
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,126 +24,246 @@ fn openpty(cols: u16, rows: u16) -> (OwnedFd, OwnedFd) {
     // SAFETY: openpty fills two descriptors we then own.
     let r = unsafe { libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null(), &ws) };
     assert_eq!(r, 0, "openpty: {}", std::io::Error::last_os_error());
+    // The screens must not inherit the master, or closing ours would not
+    // hang the terminal up.
+    // SAFETY: setting a flag on a descriptor we own.
+    unsafe { libc::fcntl(m, libc::F_SETFD, libc::FD_CLOEXEC) };
     // SAFETY: both are fresh descriptors from openpty.
     unsafe { (OwnedFd::from_raw_fd(m), OwnedFd::from_raw_fd(s)) }
-}
-
-/// Wait until `buf` holds `needle`, or fail after `secs` naming what it holds.
-fn wait_for(buf: &Arc<Mutex<Vec<u8>>>, needle: &str, secs: u64) {
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(secs) {
-        if String::from_utf8_lossy(&buf.lock().unwrap()).contains(needle) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    panic!("`{needle}` never appeared:\n{}", String::from_utf8_lossy(&buf.lock().unwrap()));
 }
 
 fn esc(seq: &str) -> String {
     format!("{}{seq}", '\u{1b}')
 }
 
-#[test]
-fn a_signal_during_an_apply_restores_the_terminal_and_ends_the_command() {
-    let root = std::env::temp_dir().join(format!("ways-settings-pty-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let home = root.join("home");
-    for d in [".config", "proj", ".claude", ".local/share", ".local/state", ".cache"] {
-        std::fs::create_dir_all(home.join(d)).unwrap();
+fn alive(pid: i32) -> bool {
+    // A zombie still answers signal 0; read its state to tell.
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => !stat.split_whitespace().nth(2).is_some_and(|s| s == "Z"),
+        Err(_) => false,
     }
-    // A stand-in for the binary the queued command runs: it notes its pid,
-    // then waits far longer than the test does.
-    let runner = root.join("runner.sh");
-    let pidfile = root.join("runner.pid");
-    std::fs::write(&runner, format!("#!/bin/sh\necho $$ > {}\nexec sleep 60\n", pidfile.display())).unwrap();
-    std::fs::set_permissions(&runner, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+}
 
-    let (master, slave) = openpty(100, 30);
-    let bin: PathBuf = env!("CARGO_BIN_EXE_ways").into();
-    let mut cmd = Command::new(bin);
-    cmd.args(["settings", "install"])
-        .current_dir(home.join("proj"))
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("TERM", "xterm-256color")
-        .env("HOME", &home)
-        .env("XDG_CONFIG_HOME", home.join(".config"))
-        .env("XDG_DATA_HOME", home.join(".local/share"))
-        .env("XDG_STATE_HOME", home.join(".local/state"))
-        .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env("CLAUDE_PROJECT_DIR", home.join("proj"))
-        .env("WAYS_SETTINGS_RUNNER", &runner)
-        .stdin(Stdio::from(slave.try_clone().unwrap()))
-        .stdout(Stdio::from(slave.try_clone().unwrap()))
-        .stderr(Stdio::from(slave.try_clone().unwrap()));
-    // SAFETY: setsid and TIOCSCTTY are async-signal-safe; the pty becomes
-    // the child's controlling terminal, as a shell's would be.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            libc::ioctl(0, libc::TIOCSCTTY, 0);
-            Ok(())
-        });
-    }
-    let mut child = cmd.spawn().unwrap();
+/// `ways settings install` on a pty, an apply started that waits on the
+/// stand-in, and the pid of the process the stand-in started.
+struct Screens {
+    root: PathBuf,
+    master: Option<OwnedFd>,
+    slave: OwnedFd,
+    child: Child,
+    out: Arc<Mutex<Vec<u8>>>,
+    /// Tells the reader to let go of its handle on the master.
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    reader: Option<std::thread::JoinHandle<()>>,
+    grandchild: i32,
+    runner: i32,
+}
 
-    let out = Arc::new(Mutex::new(Vec::new()));
-    let mut reader = std::fs::File::from(master.try_clone().unwrap());
-    let sink = out.clone();
-    std::thread::spawn(move || {
-        let mut b = [0u8; 4096];
-        while let Ok(n) = reader.read(&mut b) {
-            if n == 0 {
-                break;
+impl Screens {
+    fn start(tag: &str) -> Screens {
+        let root = std::env::temp_dir().join(format!("ways-settings-pty-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let home = root.join("home");
+        for d in [".config", "proj", ".claude", ".local/share", ".local/state", ".cache"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        // The stand-in does not exec: it starts a process and waits on it.
+        let runner = root.join("runner.sh");
+        let script = format!(
+            "#!/bin/sh\necho $$ > {r}\nsleep 45 &\necho $! > {g}\nwait\n",
+            r = root.join("runner.pid").display(),
+            g = root.join("sleep.pid").display()
+        );
+        std::fs::write(&runner, script).unwrap();
+        std::fs::set_permissions(&runner, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+        let (master, slave) = openpty(100, 30);
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ways"));
+        cmd.args(["settings", "install"])
+            .current_dir(home.join("proj"))
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("TERM", "xterm-256color")
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("XDG_STATE_HOME", home.join(".local/state"))
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("CLAUDE_PROJECT_DIR", home.join("proj"))
+            .env("WAYS_SETTINGS_RUNNER", &runner)
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stdout(Stdio::from(slave.try_clone().unwrap()))
+            .stderr(Stdio::from(slave.try_clone().unwrap()));
+        // SAFETY: setsid and TIOCSCTTY are async-signal-safe; the pty becomes
+        // the child's controlling terminal, as a shell's would be.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                libc::ioctl(0, libc::TIOCSCTTY, 0);
+                Ok(())
+            });
+        }
+        let child = cmd.spawn().unwrap();
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut file = std::fs::File::from(master.try_clone().unwrap());
+        let (sink, halt) = (out.clone(), stop.clone());
+        // Polled, so the reader can be told to close its handle: a hangup
+        // needs every handle on the master closed.
+        let reader = std::thread::spawn(move || {
+            let mut b = [0u8; 4096];
+            while !halt.load(std::sync::atomic::Ordering::SeqCst) {
+                let mut pfd = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                // SAFETY: one pollfd we own.
+                if unsafe { libc::poll(&mut pfd, 1, 50) } <= 0 {
+                    continue;
+                }
+                match file.read(&mut b) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => sink.lock().unwrap().extend_from_slice(&b[..n]),
+                }
             }
-            sink.lock().unwrap().extend_from_slice(&b[..n]);
+        });
+        let mut s = Screens { root, master: Some(master), slave, child, out, stop, reader: Some(reader), grandchild: 0, runner: 0 };
+        s.wait_for("targets");
+        // The targets row's menu, plan, a directory, then review and apply.
+        for k in ["a", "j", "j", "\r", "/tmp/x", "\r", "w", "a"] {
+            s.press(k);
         }
-    });
-    let mut keys = std::fs::File::from(master.try_clone().unwrap());
-    let mut press = |k: &str| {
-        keys.write_all(k.as_bytes()).unwrap();
+        s.wait_for("applying");
+        s.grandchild = s.pid("sleep.pid");
+        s.runner = s.pid("runner.pid");
+        assert!(alive(s.grandchild) && alive(s.runner));
+        s
+    }
+
+    fn press(&self, k: &str) {
+        let mut f = std::fs::File::from(self.master.as_ref().unwrap().try_clone().unwrap());
+        f.write_all(k.as_bytes()).unwrap();
         std::thread::sleep(Duration::from_millis(150));
-    };
-
-    wait_for(&out, "targets", 10);
-    // The targets row's menu, plan, a directory, then review and apply.
-    for k in ["a", "j", "j", "\r", "/tmp/x", "\r", "w", "a"] {
-        press(k);
     }
-    wait_for(&out, "applying", 10);
-    let start = Instant::now();
-    while !pidfile.exists() && start.elapsed() < Duration::from_secs(10) {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let runner_pid: i32 = std::fs::read_to_string(&pidfile).expect("the command started").trim().parse().unwrap();
 
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.out.lock().unwrap()).into_owned()
+    }
+
+    fn wait_for(&self, needle: &str) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            if self.text().contains(needle) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("`{needle}` never appeared:\n{}", self.text());
+    }
+
+    fn pid(&self, file: &str) -> i32 {
+        let p: &Path = &self.root.join(file);
+        let start = Instant::now();
+        while !p.exists() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::fs::read_to_string(p).unwrap_or_default().trim().parse().unwrap_or_else(|_| panic!("{file} was not written"))
+    }
+
+    /// Wait for the screens to exit, at most `secs`.
+    fn exit_within(&mut self, secs: u64) -> (ExitStatus, Duration) {
+        let start = Instant::now();
+        loop {
+            if let Some(s) = self.child.try_wait().unwrap() {
+                return (s, start.elapsed());
+            }
+            if start.elapsed() > Duration::from_secs(secs) {
+                let pid = self.child.id();
+                let threads: Vec<String> = std::fs::read_dir(format!("/proc/{pid}/task"))
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|t| {
+                        let stat = std::fs::read_to_string(t.path().join("stat")).unwrap_or_default();
+                        let wchan = std::fs::read_to_string(t.path().join("wchan")).unwrap_or_default();
+                        format!("{} {wchan}", stat.split(") ").nth(1).unwrap_or("").split_whitespace().take(1).collect::<String>())
+                    })
+                    .collect();
+                let _ = self.child.kill();
+                panic!("the screens did not exit within {secs} s; threads {threads:?}; signal mask {}", std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default().lines().filter(|l| l.starts_with("Sig")).collect::<Vec<_>>().join(" | "));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The command and the process it started are both gone.
+    fn assert_jobs_gone(&self) {
+        let start = Instant::now();
+        while (alive(self.runner) || alive(self.grandchild)) && start.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(self.runner), "the command was left running");
+        assert!(!alive(self.grandchild), "the process the command started was left running");
+    }
+}
+
+impl Drop for Screens {
+    fn drop(&mut self) {
+        for pid in [self.grandchild, self.runner] {
+            if pid > 0 {
+                // SAFETY: cleanup of our own test processes.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+        let _ = self.child.kill();
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn a_signal_during_an_apply_restores_the_terminal_and_ends_the_command_and_its_children() {
+    let mut s = Screens::start("term");
     // SAFETY: a signal to our own child.
-    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
-    let start = Instant::now();
-    let status = loop {
-        if let Some(s) = child.try_wait().unwrap() {
-            break s;
-        }
-        if start.elapsed() > Duration::from_secs(10) {
-            let _ = child.kill();
-            panic!("the screens did not end on SIGTERM:\n{}", String::from_utf8_lossy(&out.lock().unwrap()));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    std::thread::sleep(Duration::from_millis(200));
+    unsafe { libc::kill(s.child.id() as i32, libc::SIGTERM) };
+    let (status, took) = s.exit_within(5);
     assert_eq!(status.code(), Some(128 + libc::SIGTERM), "exit is 128 plus the signal");
-
-    let text = String::from_utf8_lossy(&out.lock().unwrap()).into_owned();
+    assert!(took < Duration::from_secs(2), "the stop waited on the command's children: {took:?}");
+    std::thread::sleep(Duration::from_millis(200));
+    let text = s.text();
     let after = &text[text.rfind(&esc("[?1049h")).expect("the screens took the alternate screen")..];
     for (seq, what) in [("[?1049l", "the main screen"), ("[?25h", "the cursor"), ("[?1000l", "mouse reporting off"), ("[?1003l", "motion reporting off")] {
         assert!(after.contains(&esc(seq)), "{what} is not restored after the signal: {after:?}");
     }
     // SAFETY: termios is plain data the call fills.
     let mut t: libc::termios = unsafe { std::mem::zeroed() };
-    assert_eq!(unsafe { libc::tcgetattr(slave.as_raw_fd(), &mut t) }, 0);
+    assert_eq!(unsafe { libc::tcgetattr(s.slave.as_raw_fd(), &mut t) }, 0);
     assert!(t.c_lflag & libc::ICANON != 0 && t.c_lflag & libc::ECHO != 0 && t.c_lflag & libc::ISIG != 0, "the pty is left in raw mode");
-    // SAFETY: signal 0 only asks whether the process exists.
-    assert_ne!(unsafe { libc::kill(runner_pid, 0) }, 0, "the command in flight was ended, not left running");
-    let _ = std::fs::remove_dir_all(&root);
+    s.assert_jobs_gone();
+}
+
+#[test]
+fn a_second_ctrl_c_stops_a_command_that_started_its_own_process_at_once() {
+    let mut s = Screens::start("ctrlc");
+    s.press("\u{3}");
+    let start = Instant::now();
+    s.press("\u{3}");
+    s.wait_for("stopped by ^C");
+    assert!(start.elapsed() < Duration::from_millis(1500), "the stop waited on the command's children: {:?}", start.elapsed());
+    s.assert_jobs_gone();
+    s.press("\u{1b}");
+    s.press("X");
+    s.press("y");
+    s.press("q");
+    let (status, _) = s.exit_within(5);
+    assert!(status.success(), "{status:?}");
+}
+
+#[test]
+fn closing_the_terminal_ends_the_screens_and_the_command() {
+    let mut s = Screens::start("hangup");
+    // The terminal goes away: every handle on its master is closed.
+    s.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = s.reader.take().map(|r| r.join());
+    drop(s.master.take());
+    let (status, took) = s.exit_within(5);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert_eq!(status.code(), Some(128 + libc::SIGHUP), "a hangup ends as SIGHUP does: {:?}", std::os::unix::process::ExitStatusExt::signal(&status));
+    s.assert_jobs_gone();
 }

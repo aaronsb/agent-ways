@@ -158,18 +158,20 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
 /// screens' apply, so both leave the same bytes. Returns whether the file
 /// changed.
 pub(super) fn write_file(path: &Path, values: &[(Vec<String>, Value)]) -> Result<bool, Failure> {
-    write_file_checked(path, values, |_| Ok(())).map(|r| r.unwrap_or(false))
+    write_file_checked(path, values, None, |_| Ok(())).map(|r| r.unwrap_or(false))
 }
 
 /// [`write_file`], with `check` run on the file's text under the writer's
-/// lock before anything is set. When `check` refuses, nothing is written
-/// and its reason comes back as the inner error.
+/// lock before anything is set, and the wait for the lock bounded by `wait`
+/// when given. When `check` refuses, nothing is written and its reason
+/// comes back as the inner error.
 pub(super) fn write_file_checked(
     path: &Path,
     values: &[(Vec<String>, Value)],
+    wait: Option<std::time::Duration>,
     check: impl FnOnce(&agent_settings::yaml_edit::Doc) -> Result<(), String>,
 ) -> Result<Result<bool, String>, Failure> {
-    agent_settings::writer::edit_file(path, header_for(path), |d| {
+    agent_settings::writer::edit_file_within(path, header_for(path), wait, |d| {
         if let Err(e) = check(d) {
             return Ok(Err(e));
         }

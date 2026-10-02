@@ -351,6 +351,8 @@ fn in_fixture(test: &str) -> PathBuf {
         .env("XDG_DATA_HOME", root.join("home/.local/share"))
         .env("XDG_STATE_HOME", root.join("home/.local/state"))
         .env("XDG_CACHE_HOME", root.join("home/.cache"))
+        .env("WAYS_TUI_FIXTURE", &root)
+        .env("WAYS_SETTINGS_RUNNER", root.join("runner.sh"))
         .env("CLAUDE_PROJECT_DIR", root.join("home/proj"))
         .env("WAYS_TUI_ADAPTER_CHILD", "1")
         .output()
@@ -405,4 +407,56 @@ fn child_refuses_a_changed_value() {
 #[test]
 fn a_write_never_overwrites_an_outside_change() {
     let _ = std::fs::remove_dir_all(in_fixture("child_refuses_a_changed_value"));
+}
+
+#[test]
+#[ignore = "run by a_write_waits_a_bounded_time_for_a_held_lock"]
+fn child_gives_up_on_a_held_lock() {
+    let Some((mut ways, user)) = child() else { return };
+    std::fs::write(&user, "near_miss_margin: 0.05\n").unwrap();
+    let held = agent_settings::writer::Lock::acquire(&user).unwrap();
+    let st = store("matching.near_miss_margin", &user);
+    let start = std::time::Instant::now();
+    let e = ways.write(&user, &[Write { store: &st, value: "0.1", loaded: "0.05" }]).expect_err("a held lock is not waited on forever");
+    assert!(start.elapsed() < std::time::Duration::from_secs(4), "{:?}", start.elapsed());
+    assert!(e.contains("another writer holds it"), "{e}");
+    drop(held);
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), "near_miss_margin: 0.05\n");
+}
+
+#[test]
+fn a_write_waits_a_bounded_time_for_a_held_lock() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_gives_up_on_a_held_lock"));
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "run by stopping_a_command_ends_what_it_started_at_once"]
+fn child_stops_a_command_and_its_children() {
+    let Some((mut ways, _)) = child() else { return };
+    let root = PathBuf::from(std::env::var_os("WAYS_TUI_FIXTURE").unwrap());
+    let pidfile = root.join("sleep.pid");
+    // A stand-in that does not exec: it starts a process and waits on it.
+    std::fs::write(root.join("runner.sh"), format!("#!/bin/sh\nsleep 45 &\necho $! > {}\nwait\n", pidfile.display())).unwrap();
+    std::fs::set_permissions(root.join("runner.sh"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut job = ways.start(&Queued::new("gate", "check", "ways agent key check", false));
+    let start = std::time::Instant::now();
+    while !pidfile.exists() && start.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let sleep: u32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+    assert!(job.poll().is_none(), "still running");
+    let start = std::time::Instant::now();
+    job.stop();
+    let ended = job.poll();
+    assert!(start.elapsed() < std::time::Duration::from_secs(1), "the stop waited on the command's child: {:?}", start.elapsed());
+    assert!(matches!(ended, Some(Err(_))), "{ended:?}");
+    let stat = std::fs::read_to_string(format!("/proc/{sleep}/stat")).unwrap_or_default();
+    assert!(stat.is_empty() || stat.split_whitespace().nth(2) == Some("Z"), "the process the command started is still running: {stat}");
+}
+
+#[cfg(unix)]
+#[test]
+fn stopping_a_command_ends_what_it_started_at_once() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_stops_a_command_and_its_children"));
 }
