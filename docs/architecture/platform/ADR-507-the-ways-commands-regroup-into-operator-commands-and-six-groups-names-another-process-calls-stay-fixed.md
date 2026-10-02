@@ -9,8 +9,8 @@ basis:
   - evidence: 'outside tests and prose, 22 top-level commands have callers at e9a5ba8a (hooks, the settings.json hook table, scripts, skills, commands, Makefile, CI and other binaries); 9 of them run on a hook path. The issue''s figure of 25 predates #730'
   - evidence: 'the updater that runs is the installed release: tools/ways-cli/src/cmd/update.rs:315,319,442,446 spawn the newly installed bin/ways with `corpus --quiet` and `reconcile`'
   - evidence: 'long-running callers outside the ways binary: tools/attend/src/sensors/context.rs:42 and disclosure.rs:86 and tools/sensor-keepwarm/src/lib.rs:240 spawn `ways context --json`; tools/attend/src/sensors/context.rs:182 and tools/sensor-processes/src/lib.rs:93-101 tell the agent to run `ways show attend <signal>`'
-  - evidence: 'settings.json:154,158,209 run `ways init` and `ways corpus --if-stale --quiet` on SessionStart; a running Claude Code session keeps the hook table it loaded until restart (update.rs:196-197 tells the operator so)'
-  - evidence: 'in symlink mode the projected hooks are the pulled checkout, live before the binary refresh; a failed refresh keeps the previous binary (update.rs:125-130, 199-201)'
+  - evidence: 'settings.json:154,158,209 run `ways init` and `ways corpus --if-stale --quiet` on SessionStart; a running Claude Code session keeps the hook table it loaded until restart (update.rs:197-198 tells the operator so)'
+  - evidence: 'in symlink mode the projected hooks are the pulled checkout, live before the binary refresh; a failed refresh keeps the previous binary (update.rs:125-130, 200-202)'
   - precedent: ADR-503
   - precedent: ADR-506
   - precedent: ADR-504
@@ -26,7 +26,7 @@ observable:
   - 'see: ways --help lists 14 commands, one line each, none wider than 80 columns, and no banner'
   - 'see: ways hook, show, scan, manifest, project-slug, sessions-root and events-log-path run but are absent from ways --help and from shell completion'
   - 'run: a test parses every `ways …` call site in hooks/, settings.json, scripts/, skills/, commands/, the Makefiles, .github/ and the Rust spawns against the CLI, and fails on one the CLI rejects'
-  - 'run: after the change, grep finds no caller, skill, way or doc naming an old command name from the mapping table'
+  - 'run: after the change, grep finds no caller, skill, way, doc or user-facing string in the repository naming an old command name from the mapping table'
   - 'run: hook latency for ways hook prompt, command and file stays within the budget of ADR-504 §11 against the commit before the change'
 status: accepted
 date: 2026-10-02
@@ -71,7 +71,7 @@ ADR-503 §14 left the rest of the command surface to its own record, with old na
 | `manifest` | Debugging `reconcile` | tests only |
 | `status` | Operator; installer | `scripts/install.sh:242`; skills ways-tests, ways-update |
 | `update`, `uninstall` | Operator | `Makefile:169` (`update`) |
-| `settings`, `projects`, `agent` | Operator; landed this round | none outside their own crates |
+| `settings`, `projects`, `agent` | Operator; landed this round | none outside their own crates; `ways-agent-core` names `agent use` and `agent config` in the header it writes to `agent.yaml` (`profile.rs:216-217`) and in a setting's help (`settings.rs:52`) |
 | `config show\|path\|init\|targets\|target` | Operator | skill ways-localize (`config path`); the settings-tui spike, which #697 deletes |
 | `disable`, `enable` | Operator | none |
 | `lint` | Author; CI | `.github/workflows/build-ways.yml:53`; `Makefile:263`; skills ways-tests; commands/ways.md, project-audit.md |
@@ -87,7 +87,7 @@ Outside tests and the ways corpus, 22 top-level commands have callers: hooks, th
 
 Installed hooks, skills and ways are projected from the same checkout as the binary, so after a successful `ways update` they agree. They differ in five cases:
 
-1. **A running Claude Code session** keeps the hook table it loaded. It runs `ways init` and `ways corpus --if-stale --quiet` on SessionStart, which fires on `/clear` and compaction, against the new binary until the session restarts.
+1. **A running Claude Code session** keeps the hook table it loaded. On `/clear` it runs `ways init` against the new binary until the session restarts. `ways corpus --if-stale --quiet` runs only at startup, when the session loads the new hook table, and compaction runs no `ways` subcommand.
 2. **The previous release's updater** runs the update. After installing the new binary, it spawns `corpus --quiet` and `reconcile` on it. A failed `reconcile` stops the update.
 3. **A running `attend` process** and the keepwarm sensor spawn `ways context --json` from code built with the previous release. Attend sensors also tell the agent to run `ways show attend <signal>`. A failed attend refresh keeps the old attend.
 4. **In symlink mode**, the projected hooks are the pulled checkout. They are live from the pull until the binary refresh finishes, which can take minutes on a source build.
@@ -118,7 +118,7 @@ A second target adds no case. Every target ADR-184 records links to the same che
    | `reconcile` | Repair the projection into `~/.claude` |
    | `uninstall` | Remove agent-ways |
 
-2. **Fixed names.** A command keeps its name and place when something that does not reload with the binary calls it. These are the cases in Context: a running session's hook table, the previous release's updater, a running `attend`, and a projected script. That fixes `hook`, `init`, `corpus`, `reconcile`, `context`, `show`, `project-slug` and `sessions-root`. `events-log-path` stays with them, since it exists for scripts. A fixed name is a contract. Changing one needs its own decision and a release in which nothing calls it.
+2. **Fixed names.** A command keeps its name and place when something that does not reload with the binary calls it. These are the cases in Context: a running session's hook table, the previous release's updater, a running `attend`, and a projected script that fails hard on an unknown command. That fixes `hook`, `init`, `corpus`, `reconcile`, `context`, `show`, `project-slug` and `sessions-root`. `events-log-path` stays with them, since it exists for scripts. A projected script that degrades quietly on an unknown command does not fix the name it calls: `match`, `suggest` and `reflow` move, and item 6 says how each of their callers fails. A fixed name is a contract. Changing one needs its own decision and a release in which nothing calls it.
 
 3. **Hidden commands.** `hook`, `show`, `scan`, `manifest`, `project-slug`, `sessions-root` and `events-log-path` are hidden. They are absent from `ways --help` and from shell completion, and they still run and still answer `--help`. They keep their top-level names, and there is no `internal` group: moving a hook-facing command under a group renames it, and case 4 then stops every way from firing between the pull and the binary refresh. `ways hook <event>` stays the one interface the hook adapters call (ADR-504 §11 and its note of 2026-10-02). Its event names are part of the contract.
 
@@ -177,6 +177,8 @@ A second target adds no case. Every target ADR-184 records links to the same che
 
    `ways-agent`'s `use`, `mode` and `config` are removed with the old output ADR-506 §1 already retires, so `ways agent` keeps only the actions of ADR-503 §11.
 
+   The same change rewrites the header `ways-agent-core` writes to a new `agent.yaml` and the setting help that names `agent use`. An `agent.yaml` already written keeps its old header. The header is a comment that nothing reads, so it is left in place rather than rewritten on the user's machine.
+
 5. **No aliases (option (a)).** No old name is kept, hidden or otherwise. The change migrates every caller in the repository, and the release notes list each old name beside its new one. Option (b), aliases removed by #717, would cover cases 1 to 3 for the part of the round between this change and #717. Item 2 already covers those cases, because every command they call keeps its name. Aliases would then serve only operators typing old names, which is the habit the release notes address. They would also add one more compatibility path for #717 to find and remove.
 
 6. **What still breaks, and how it fails.** Cases 4 and 5 still reach the moved commands that projected scripts call: `author match` in `check-setup.sh`, `author suggest` in the optimization macro, and `author reflow` in the reflow postcheck. The reflow postcheck already reads exit 2 as no finding. The optimization macro shows zero counts in its table. `check-setup.sh` treats an unknown-command exit (2) from its probe as no answer, not as a broken engine, because the updater has already reported a stale binary. A test parses every call site against the CLI, so a missed caller fails `make test`.
@@ -203,6 +205,7 @@ This amends ADR-503's Decision at §14: the groups are the ones above, and old n
 - `ways disable <id>` becomes a longer command, and a way id inside a dotted key reads less plainly.
 - Four commands stay at the top level for stability, so the top level is not purely what an operator types: `corpus` is mostly the hook and the updater's.
 - Between a pull and the binary refresh, or after a failed refresh, the moved commands that projected scripts call fail quietly: the reflow postcheck reports nothing, and the optimization table shows zero counts that are wrong.
+- An `agent.yaml` written before the change keeps a comment naming `ways agent config` and `ways agent use`, which no longer exist.
 - One PR migrates the skills, commands, Makefiles, CI and scripts that name a moved command, the ways corpus prose and the ways-cli tests, which makes it a large review.
 
 ### Neutral
@@ -216,7 +219,7 @@ This amends ADR-503's Decision at §14: the groups are the ones above, and old n
 
 - **(b) Hidden aliases for the old names, removed by #717.** Not chosen. The callers an alias would protect already reach fixed names under item 2. An alias does not help when the binary is older than the scripts. It would add a compatibility path that #717 has to find and remove.
 - **Aliases for one release, as ADR-503 §14 first said.** Rejected by ADR-506 §2: an alias that outlives the round is the compatibility the round removes.
-- **A hidden `internal` group for the plumbing.** Rejected. It renames `hook`, `project-slug` and `sessions-root`, which projected scripts call, and in symlink mode every way stops firing from the pull until the binary refresh finishes.
+- **A hidden `internal` group for the plumbing.** Rejected. It renames `hook`, `project-slug` and `sessions-root`, whose projected callers fail hard on an unknown command, and in symlink mode every way stops firing from the pull until the binary refresh finishes.
 - **Every operator command in a group, `context` under `session` and `init`, `corpus` and `reconcile` under an `install` group.** Rejected. Each is called by a running session's hook table, the previous updater or a running `attend`, so moving it needs an alias or breaks those callers.
 - **Keep `disable` and `enable` as permanent top-level verbs over the settings writer.** This was a real option: they would be designed verbs, not compatibility. Not chosen, because ADR-503 §11 makes a one-file change a setting and gives settings one front end. It is the second probe.
 - **Leave the surface flat and only shorten the help lines.** Rejected. It fixes the width and leaves 37 entries mixing hook plumbing with operator commands, which is the problem ADR-503's basis names.
