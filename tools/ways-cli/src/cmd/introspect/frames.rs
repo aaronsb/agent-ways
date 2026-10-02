@@ -7,7 +7,7 @@ use crate::cmd::render;
 use crate::session;
 use agent_fmt::when::parse_utc_iso;
 
-use super::model::{ActiveWay, Frame, WayEvent};
+use super::model::{ActiveWay, Frame, Outcome, WayEvent};
 
 // ── Frame construction ────────────────────────────────────────
 
@@ -19,6 +19,35 @@ use super::model::{ActiveWay, Frame, WayEvent};
 /// so a curve edited since the recorded session shows today's value. That's the
 /// best we can do without snapshotting frontmatter into events.jsonl.
 pub(crate) fn reconstruct_frames(
+    events: &[WayEvent],
+    project_name: &str,
+    session_id: &str,
+    context_window: u64,
+) -> Vec<Frame> {
+    reconstruct_frames_for(events, project_name, session_id, context_window, false)
+}
+
+/// [`reconstruct_frames`] in one view: the injected ways only, or with
+/// `matched` the judge-blocked candidates too (#742). Each way carries its
+/// [`Outcome`] either way.
+pub(crate) fn reconstruct_frames_for(
+    events: &[WayEvent],
+    project_name: &str,
+    session_id: &str,
+    context_window: u64,
+    matched: bool,
+) -> Vec<Frame> {
+    let frames = reconstruct_all(events, project_name, session_id, context_window);
+    if matched {
+        frames
+    } else {
+        frames.iter().map(|f| f.shown(false)).collect()
+    }
+}
+
+/// Every frame with every matched candidate, for the screens, which toggle
+/// the view without reading the log again.
+pub(crate) fn reconstruct_all(
     events: &[WayEvent],
     project_name: &str,
     session_id: &str,
@@ -107,10 +136,16 @@ pub(super) fn build_frames(
             w.is_redisclosed = false;
         }
 
+        // Ways fired or re-disclosed in this frame, and the judge's verdicts
+        // against its threshold, read once the frame's fires are in.
+        let mut fired_now: Vec<&str> = Vec::new();
+        let mut judged: Vec<&WayEvent> = Vec::new();
+
         for ev in cluster {
             match ev.event.as_str() {
                 "way_fired" => {
                     if !ev.way.is_empty() {
+                        fired_now.push(&ev.way);
                         let existing = active_ways.get(&ev.way);
                         if existing.is_none() {
                             new_events.push(format!(
@@ -128,6 +163,8 @@ pub(super) fn build_frames(
                             is_new: existing.is_none(),
                             is_redisclosed: false,
                             refire_threshold_k: refire_for(&ev.way),
+                            outcome: Outcome::Injected,
+                            p_yes: String::new(),
                         });
                     }
                 }
@@ -143,6 +180,7 @@ pub(super) fn build_frames(
                 }
                 "way_redisclosed" if !ev.way.is_empty() => {
                     new_events.push(format!("↻ {}", ev.way));
+                    fired_now.push(&ev.way);
                     // A redisclosure means the way is active (re-injected). Update it
                     // if present; otherwise ADD it — after a compaction-window reset a
                     // still-active way first reappears via redisclosure, not a fresh
@@ -164,21 +202,53 @@ pub(super) fn build_frames(
                             is_new: false,
                             is_redisclosed: true,
                             refire_threshold_k: refire_for(&ev.way),
+                            outcome: Outcome::Injected,
+                            p_yes: String::new(),
                         });
                 }
-                // ADR-196: a way the relevance gate kept out never fires, so
-                // without this line a rejection leaves no trace in the replay.
-                "way_judged" if !ev.way.is_empty() => match ev.verdict.as_str() {
-                    "block" => new_events.push(format!("⊘ {} (gate {})", ev.way, ev.p_yes)),
-                    "would_block" => new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes)),
-                    _ => {}
-                },
+                "way_judged" if !ev.way.is_empty() && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
                 _ => {}
             }
         }
 
+        // ADR-196, #742: the judge's verdict is a mark on the way's row. A
+        // shadow would-block marks the fire it judged; a block is a row of
+        // its own in this frame, which injected nothing. A verdict with no
+        // row to mark (a shadow verdict on no fire, a block on a way already
+        // active) stays an event note, so each fact is said once.
+        let mut blocked: Vec<ActiveWay> = Vec::new();
+        for ev in judged {
+            if ev.verdict == "would_block" {
+                match active_ways.get_mut(&ev.way) {
+                    Some(w) if fired_now.contains(&ev.way.as_str()) => {
+                        w.outcome = Outcome::WouldBlock;
+                        w.p_yes = ev.p_yes.clone();
+                    }
+                    _ => new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes)),
+                }
+            } else if active_ways.contains_key(&ev.way) {
+                new_events.push(format!("⊘ {} (gate {})", ev.way, ev.p_yes));
+            } else if !blocked.iter().any(|b| b.id == ev.way) {
+                blocked.push(ActiveWay {
+                    id: ev.way.clone(),
+                    // The channel the why index files a judge-blocked way under.
+                    trigger: "judge".into(),
+                    epoch_fired: epoch,
+                    token_pos: token_k * 1000,
+                    check_fires: 0,
+                    is_new: false,
+                    is_redisclosed: false,
+                    refire_threshold_k: 0,
+                    outcome: Outcome::Blocked,
+                    p_yes: ev.p_yes.clone(),
+                });
+            }
+        }
+        blocked.sort_by(|a, b| a.id.cmp(&b.id));
+
         let mut ways: Vec<ActiveWay> = active_ways.values().cloned().collect();
         ways.sort_by(|a, b| (a.epoch_fired, &a.id).cmp(&(b.epoch_fired, &b.id)));
+        ways.extend(blocked);
 
         frames.push(Frame {
             epoch,
@@ -394,22 +464,83 @@ mod tests {
         assert_eq!(got, ids.iter().map(String::as_str).collect::<Vec<_>>());
     }
 
-    #[test]
-    fn gate_rejections_appear_in_their_epoch() {
-        let judged = |verdict: &str, way: &str| WayEvent {
-            ts: "2026-01-01T00:00:02Z".into(),
-            event: "way_judged".into(),
+    fn at(ts: &str, event: &str, way: &str, verdict: &str) -> WayEvent {
+        WayEvent {
+            ts: ts.into(),
+            event: event.into(),
             way: way.into(),
-            trigger: String::new(),
+            trigger: if event == "way_judged" { String::new() } else { "keyword".into() },
             check: String::new(),
-            p_yes: "0.050".into(),
+            p_yes: if event == "way_judged" { "0.050".into() } else { String::new() },
             verdict: verdict.into(),
-        };
-        let events = vec![judged("block", "d/a"), judged("would_block", "d/b"), judged("pass", "d/c")];
-        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        }
+    }
+
+    /// The judge's verdicts as the gate logs them: each candidate judged,
+    /// then the ones it let through fired.
+    fn judged_session() -> Vec<WayEvent> {
+        let t = "2026-01-01T00:00:02Z";
+        vec![
+            at(t, "way_judged", "d/a", "block"),
+            at(t, "way_judged", "d/b", "would_block"),
+            at(t, "way_judged", "d/c", "pass"),
+            at(t, "way_fired", "d/b", ""),
+            at(t, "way_fired", "d/c", ""),
+        ]
+    }
+
+    fn outcomes(f: &Frame) -> Vec<(&str, Outcome)> {
+        f.ways.iter().map(|w| (w.id.as_str(), w.outcome)).collect()
+    }
+
+    /// Each row carries its outcome: the pass injected, the shadow verdict
+    /// marked on its fire, the block a row of its own that injected nothing.
+    #[test]
+    fn the_judges_verdicts_mark_the_rows_of_their_frame() {
+        let frames = build_frames(&judged_session(), &[], &HashMap::new(), 50);
         assert_eq!(frames.len(), 1);
-        assert_eq!(frames[0].new_events, vec!["⊘ d/a (gate 0.050)", "◌ d/b (gate 0.050, shadow)"]);
-        assert!(frames[0].ways.is_empty());
+        let f = &frames[0];
+        assert_eq!(outcomes(f), [("d/b", Outcome::WouldBlock), ("d/c", Outcome::Injected), ("d/a", Outcome::Blocked)]);
+        let a = &f.ways[2];
+        assert_eq!((a.trigger.as_str(), a.epoch_fired, a.p_yes.as_str()), ("judge", f.epoch, "0.050"));
+        assert_eq!(a.refire_threshold_k, 0, "a blocked way has nothing to re-disclose");
+        // The marks say it; the notes keep only the fires.
+        assert_eq!(f.new_events, ["d/b (keyword)", "d/c (keyword)"]);
+    }
+
+    /// Injected by default; the matched view adds the judge-blocked rows.
+    #[test]
+    fn the_default_view_is_injected_and_matched_adds_the_blocked() {
+        let f = &build_frames(&judged_session(), &[], &HashMap::new(), 50)[0];
+        assert_eq!(outcomes(&f.shown(false)), [("d/b", Outcome::WouldBlock), ("d/c", Outcome::Injected)]);
+        assert_eq!(outcomes(&f.shown(true)).len(), 3);
+        assert_eq!(f.blocked(), 1);
+    }
+
+    /// A blocked row lives in the frame it was judged in only: it never
+    /// joined the active set.
+    #[test]
+    fn a_blocked_row_does_not_carry_into_the_next_frame() {
+        let mut events = judged_session();
+        events.push(at("2026-01-01T00:01:00Z", "way_fired", "d/e", ""));
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        assert_eq!(frames.len(), 2);
+        assert!(frames[1].ways.iter().all(|w| w.id != "d/a"));
+        assert_eq!(frames[1].ways.iter().find(|w| w.id == "d/b").map(|w| w.outcome), Some(Outcome::WouldBlock), "the shadow mark stays with its fire");
+    }
+
+    /// A verdict with no row to mark stays an event note.
+    #[test]
+    fn a_verdict_with_no_row_stays_a_note() {
+        let t = "2026-01-01T00:00:02Z";
+        let events = vec![
+            at("2026-01-01T00:00:00Z", "way_fired", "d/a", ""),
+            at(t, "way_judged", "d/a", "block"),
+            at(t, "way_judged", "d/b", "would_block"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        assert_eq!(frames[0].new_events, ["d/a (keyword)", "⊘ d/a (gate 0.050)", "◌ d/b (gate 0.050, shadow)"]);
+        assert_eq!(outcomes(&frames[0]), [("d/a", Outcome::Injected)]);
     }
 
     #[test]
