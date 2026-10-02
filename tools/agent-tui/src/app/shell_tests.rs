@@ -288,9 +288,18 @@ fn the_masked_entry_shows_dots_while_a_secret_is_typed() {
     for (i, c) in SECRET.chars().enumerate() {
         press(&mut app, &[KeyCode::Char(c)]);
         let f = text(&render(&mut app, 100, 20));
-        assert!(f.contains("secret") && f.contains("••••••••"), "after {} characters:\n{f}", i + 1);
+        let dots = "•".repeat(i + 1);
+        assert!(f.contains("secret") && f.contains(&format!(" {dots}▏")), "one dot per character after {} characters:\n{f}", i + 1);
+        assert!(!f.contains(&format!("{dots}•")), "no more dots than characters:\n{f}");
         assert!(!f.chars().any(|x| SECRET.contains(x)), "a typed character reached the frame:\n{f}");
     }
+}
+
+#[test]
+fn a_long_secret_shows_its_dots_up_to_a_cap_then_its_length() {
+    assert_eq!(super::render::mask(0), "");
+    assert_eq!(super::render::mask(3), "•••");
+    assert_eq!(super::render::mask(100), format!("{}… 100", "•".repeat(48)));
 }
 
 /// A job that runs until stopped.

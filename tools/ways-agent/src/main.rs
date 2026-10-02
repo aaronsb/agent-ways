@@ -314,7 +314,8 @@ fn warn_exposure(source: &keys::Source) {
     }
 }
 
-/// The key, from a file, from piped stdin, or from a prompt that does not echo.
+/// The key, from a file, from piped stdin, or from a prompt that shows a dot
+/// for each character typed.
 fn read_secret(provider: Provider, from_file: Option<PathBuf>) -> Result<String> {
     if let Some(path) = from_file {
         return std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()));
@@ -325,7 +326,7 @@ fn read_secret(provider: Provider, from_file: Option<PathBuf>) -> Result<String>
         stdin.lock().read_to_string(&mut s).context("reading the key from stdin")?;
         return Ok(s);
     }
-    eprint!("Paste your {provider} API key (input hidden): ");
+    eprint!("Paste your {provider} API key (shown as dots): ");
     read_hidden_line()
 }
 
@@ -345,8 +346,52 @@ extern "C" fn restore_and_exit(_signal: libc::c_int) {
     }
 }
 
+/// What one byte typed at the key prompt does to the key read so far.
+#[derive(Debug, PartialEq)]
+enum Typed {
+    /// The key is complete.
+    Done,
+    /// A character was added: draw one dot. A byte that continues a
+    /// multi-byte character adds nothing to draw.
+    Dot,
+    Continue,
+    /// This many dots to erase.
+    Erase(usize),
+}
+
+/// Apply one byte typed at the key prompt to `key`.
+fn type_byte(key: &mut Vec<u8>, b: u8) -> Typed {
+    // The start of a UTF-8 character: not a continuation byte.
+    let starts = |b: u8| b & 0xC0 != 0x80;
+    match b {
+        b'\r' | b'\n' => Typed::Done,
+        // Ctrl-D on an empty line ends it as Enter would; otherwise ignored.
+        0x04 if key.is_empty() => Typed::Done,
+        0x7f | 0x08 => {
+            while let Some(last) = key.pop() {
+                if starts(last) {
+                    return Typed::Erase(1);
+                }
+            }
+            Typed::Erase(0)
+        }
+        // Ctrl-U clears the line.
+        0x15 => {
+            let n = key.iter().filter(|&&b| starts(b)).count();
+            key.clear();
+            Typed::Erase(n)
+        }
+        b if b < 0x20 => Typed::Continue,
+        b => {
+            key.push(b);
+            if starts(b) { Typed::Dot } else { Typed::Continue }
+        }
+    }
+}
+
 #[cfg(unix)]
 fn read_hidden_line() -> Result<String> {
+    use std::io::Write;
     // SAFETY: termios calls on stdin with a struct tcgetattr fills; the
     // original settings are restored on every path, including Ctrl-C through
     // the handler above. Echo is never left on: a failed switch reads nothing.
@@ -357,19 +402,37 @@ fn read_hidden_line() -> Result<String> {
         }
         *std::ptr::addr_of_mut!(SAVED_TERMIOS) = Some(original);
         let previous = libc::signal(libc::SIGINT, restore_and_exit as *const () as libc::sighandler_t);
-        let mut hidden = original;
-        hidden.c_lflag &= !libc::ECHO;
-        hidden.c_lflag |= libc::ECHONL;
-        if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &hidden) != 0 {
+        // Byte at a time, no echo: each character draws its own dot.
+        let mut raw = original;
+        raw.c_lflag &= !(libc::ECHO | libc::ICANON);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        if libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw) != 0 {
             libc::signal(libc::SIGINT, previous);
             bail!("cannot turn off terminal echo; pipe the key on stdin or use --from-file");
         }
-        let mut line = String::new();
-        let read = std::io::stdin().read_line(&mut line);
+        let mut key = Vec::new();
+        let mut err = std::io::stderr();
+        let result = loop {
+            let mut b = 0u8;
+            match libc::read(libc::STDIN_FILENO, (&mut b as *mut u8).cast(), 1) {
+                1 => {}
+                0 => break Ok(()),
+                _ => break Err(std::io::Error::last_os_error()),
+            }
+            match type_byte(&mut key, b) {
+                Typed::Done => break Ok(()),
+                Typed::Dot => drop(write!(err, "•")),
+                Typed::Erase(n) => drop(write!(err, "{}", "\x08 \x08".repeat(n))),
+                Typed::Continue => {}
+            }
+            let _ = err.flush();
+        };
         libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &original);
         libc::signal(libc::SIGINT, previous);
-        read.context("reading the key")?;
-        Ok(line)
+        eprintln!();
+        result.context("reading the key")?;
+        String::from_utf8(key).context("the key is not UTF-8 text")
     }
 }
 
@@ -441,6 +504,26 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Each character typed draws one dot, a multi-byte one included;
+    /// Backspace erases a whole character, Ctrl-U the line, Enter ends it.
+    #[test]
+    fn the_key_prompt_draws_a_dot_per_character() {
+        let mut key = Vec::new();
+        let typed: Vec<Typed> = "sk-é".bytes().map(|b| type_byte(&mut key, b)).collect();
+        assert_eq!(typed, [Typed::Dot, Typed::Dot, Typed::Dot, Typed::Dot, Typed::Continue]);
+        assert_eq!(type_byte(&mut key, 0x7f), Typed::Erase(1));
+        assert_eq!(key, b"sk-");
+        assert_eq!(type_byte(&mut key, 0x1b), Typed::Continue, "a control byte adds nothing");
+        assert_eq!(type_byte(&mut key, 0x15), Typed::Erase(3));
+        assert!(key.is_empty());
+        assert_eq!(type_byte(&mut key, 0x7f), Typed::Erase(0), "nothing left to erase");
+        assert_eq!(type_byte(&mut key, b'k'), Typed::Dot);
+        assert_eq!(type_byte(&mut key, b'\r'), Typed::Done);
+        assert_eq!(key, b"k");
+    }
+
+
     use super::*;
 
     #[test]

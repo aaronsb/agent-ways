@@ -65,7 +65,7 @@ pub fn help_footer() -> Option<String> {
 
 /// Checks the engine's key file at no cost, then says whether the judge gates.
 /// When it does not, and stdin and stdout are terminals, offers to add a key
-/// with `ways-agent key add`, which prompts for it hidden, checks and stores it.
+/// with `ways-agent key add`, which prompts for it with a dot per character, checks and stores it.
 pub fn setup() -> Result<()> {
     let agent = super::agent::resolve();
     let mut state = keys::judge_ready();
