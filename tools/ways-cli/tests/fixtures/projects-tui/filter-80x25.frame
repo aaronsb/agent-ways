@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│    › port the parser to rust                                                 │|
 |│    › set up the repo                                                         │|
 |│                                                                              │|
-|└──────────────────────────────────────────────────────────────────────────────┘|
+|└────────────────────────────────────────────────────────────────────── more ↓ ┘|
 | filter   ↑↓ select  ⏎ keep  esc clear                                       1/1|
 styles
   0   0-9   White Blue -
@@ -77,7 +77,9 @@ styles
  21  79-79  - - DIM
  22   0-0   - - DIM
  22  79-79  - - DIM
- 23   0-79  - - DIM
+ 23   0-70  - - DIM
+ 23  71-78  Blue - BOLD|DIM
+ 23  79-79  - - DIM
  24   0-7   Black Cyan BOLD
  24  10-11  Cyan - BOLD
  24  12-18  - - DIM|ITALIC

@@ -557,7 +557,7 @@ fn screen_golden_frames() {
             g.check(&format!("{name}-{w}x{h}"), &render_screen(s, w, h));
         }
     };
-    // The project with an index selected: its sessions in the detail.
+    // The project with an index selected: the head of its detail (the rest scrolls).
     let mut s = screen(&f);
     press(&mut s, &[KeyCode::Down]);
     check(&mut g, "list", &mut s);
@@ -643,7 +643,7 @@ fn show_takes_an_exact_path_before_a_newer_one_containing_it() {
         serde_json::from_str::<serde_json::Value>(&out).unwrap()["path"].as_str().map(str::to_string)
     };
     assert_eq!(path("/srv/app").as_deref(), Some("/srv/app"), "exact, though /srv/app_one is newer");
-    assert_eq!(path("legacy").as_deref(), Some("/srv/legacy"), "by name");
+    assert_eq!(path("app").as_deref(), Some("/srv/app"), "by name, though /srv/app_one is newer and contains it");
     assert_eq!(path("app_o").as_deref(), Some("/srv/app_one"), "by containment");
     assert_eq!(path("nothing-here"), None);
     let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into(), json: true });
@@ -661,4 +661,51 @@ fn search_json_lists_the_matches_with_their_scores() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v[0]["path"], "/srv/legacy", "{out}");
     assert!(v[0]["score"].as_u64().unwrap() > 0 && !v[0]["snippets"].as_array().unwrap().is_empty(), "{out}");
+}
+
+/// A project under the home directory is shown as `~/…`; the path a shell
+/// expands from that, or one typed in full, finds it. `--json` gives the
+/// absolute path beside the shown one, full timestamps, and `null` for a
+/// value the project lacks.
+#[test]
+fn show_finds_a_home_project_by_its_expanded_path() {
+    let f = populated("show-home");
+    let abs = format!("{}/work/app", f.env.home);
+    f.transcript(&abs, "h1", &abs, NOW - 600);
+    let (_, out) = f.run(ProjectsCommand::Show { project: abs.clone(), json: true });
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["path"], "~/work/app", "{out}");
+    assert_eq!(v["absolute_path"], abs.as_str());
+    assert_eq!(v["last_branch"], serde_json::Value::Null, "absent is null, not \"\"");
+    assert!(v["last_active"].as_str().is_some_and(|t| t.ends_with('Z') && t.contains('T')), "a full timestamp: {}", v["last_active"]);
+    let (_, text) = f.run(ProjectsCommand::Show { project: "~/work/app".into(), json: false });
+    assert!(text.contains("/work/app"), "{text}");
+}
+
+/// With no projects at all the screen says so, and the detail names no
+/// command it cannot run.
+#[test]
+fn an_empty_projects_screen_says_there_are_none() {
+    let f = Fixture::new("screen-empty");
+    let mut s = screen(&f);
+    let out = shows(&mut s);
+    assert!(out.contains("No projects found.") && !out.contains("No matching"), "{out}");
+    assert!(out.contains(" show ") && !out.contains("show --json"), "{out}");
+}
+
+/// J and K scroll a detail longer than its pane; a new selection starts it
+/// from the top.
+#[test]
+fn the_detail_scrolls_and_a_new_selection_starts_at_its_top() {
+    let f = populated("screen-scroll");
+    let mut s = screen(&f);
+    press(&mut s, &[KeyCode::Down]);
+    let small = |s: &mut Projects| text(&agent_tui::testkit::render_screen(s, 80, 25));
+    let top = small(&mut s);
+    assert!(top.contains("more ↓") && !top.contains("Initial setup"), "{top}");
+    press(&mut s, &[KeyCode::Char('J'); 40].as_slice());
+    let end = small(&mut s);
+    assert!(end.contains("Initial setup") && !end.contains("more ↓"), "{end}");
+    press(&mut s, &[KeyCode::Up, KeyCode::Down]);
+    assert_eq!(small(&mut s), top, "back at the top");
 }
