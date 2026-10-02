@@ -139,7 +139,9 @@ pub fn in_project(project: &str, scope: &str) -> bool {
 /// resolved against the working directory.
 pub fn project_arg(path: &str) -> String {
     let p = Path::new(path);
-    if p.is_absolute() {
+    // A rooted path stands as given: `/x` has no drive on Windows, yet names
+    // no working directory either.
+    if p.is_absolute() || p.has_root() {
         return path.to_string();
     }
     // On Windows `absolute` normalizes `..` and gives the `C:\...` form events
