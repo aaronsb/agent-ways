@@ -28,7 +28,7 @@
 //! `crate::app::keys` executes it. That keeps this module's parse +
 //! validate logic unit-testable without a filesystem.
 
-use iocraft::prelude::*;
+use agent_tui::strip::prefix_match;
 
 use crate::grammar::{self, SubCommand, Token};
 
@@ -548,109 +548,41 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
     }
 }
 
-/// Does `name` prefix-match the partial being typed? The shared
-/// highlight rule for every command-chip level: non-empty partial,
-/// case-insensitive.
-fn chip_matches(name: &str, lc_partial: Option<&String>) -> bool {
-    lc_partial
-        .map(|p| !p.is_empty() && name.to_ascii_lowercase().starts_with(p.as_str()))
-        .unwrap_or(false)
+/// One chip of a command legend: its label, whether it is ready (a
+/// planned command dims), and whether Tab would complete to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegendChip {
+    pub label: String,
+    pub ready: bool,
+    pub target: bool,
 }
 
-/// One-row chip strip shared by every command level (#405): the
-/// top-level slash list and each subcommand level render through the
-/// same function, so descending a level cannot drift visually.
-/// `chips` is `(label, color, matches)` — matching chips bold +
-/// underline (the Tab-target affordance the legends use).
-fn command_chip_row(chips: Vec<(String, Color, bool)>) -> Vec<AnyElement<'static>> {
-    let chips: Vec<AnyElement<'static>> = chips
-        .into_iter()
-        .map(|(content, color, matches)| {
-            let weight = if matches { Weight::Bold } else { Weight::Normal };
-            let decoration = if matches {
-                TextDecoration::Underline
-            } else {
-                TextDecoration::None
-            };
-            element! {
-                Text(color, weight, decoration, content, wrap: TextWrap::NoWrap)
-            }
-            .into_any()
+/// The slash-command legend — one chip per registered command.
+/// Implemented entries are ready; planned entries dim so the roadmap
+/// is visible without looking equally available. Matching names are
+/// Tab targets (same idiom as the agent / group legends). The top
+/// level and each subcommand level share the chip shape, so
+/// descending a level cannot drift visually (#405).
+pub fn legend(partial: Option<&str>) -> Vec<LegendChip> {
+    REGISTRY
+        .iter()
+        .map(|cmd| LegendChip {
+            label: format!("/{}", cmd.name),
+            ready: cmd.status == Status::Implemented,
+            target: prefix_match(cmd.name, partial),
         })
-        .collect();
-    vec![element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            padding_left: 1,
-            padding_right: 1,
-            height: 1u32,
-            flex_shrink: 0.0,
-            overflow: Overflow::Hidden,
-        ) {
-            #(chips)
-        }
-    }
-    .into_any()]
+        .collect()
 }
 
-/// Render the slash-command legend row — one chip per registered
-/// command. Implemented entries render in a full-weight foreground
-/// color; planned entries dim so the roadmap is visible without
-/// looking equally available. Matching names underline when the
-/// caller passes the current partial (Tab-target affordance, same
-/// idiom as the agent / group legends).
-pub fn slash_legend_row(current_partial: Option<&str>) -> Vec<AnyElement<'static>> {
-    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
-    command_chip_row(
-        REGISTRY
-            .iter()
-            .map(|cmd| {
-                // Slash commands aren't identities, so they don't carry
-                // palette hashing — a uniform Cyan for ready, DarkGrey
-                // for planned keeps the bar readable without adding new
-                // visual dimensions the user has to learn.
-                let color = match cmd.status {
-                    Status::Implemented => Color::Cyan,
-                    Status::Planned => Color::DarkGrey,
-                };
-                (
-                    format!("/{} ", cmd.name),
-                    color,
-                    chip_matches(cmd.name, lc_partial.as_ref()),
-                )
-            })
-            .collect(),
-    )
-}
-
-/// Subcommand-level legend row (#405): the current choice level's
+/// Subcommand-level legend (#405): the current choice level's
 /// candidates, prefix-narrowed exactly like the top-level slash list
 /// — same chips, one level down, no leading slash (they're not
 /// commands, they steer one).
-pub fn subcommand_legend_row(
-    choices: &'static [SubCommand],
-    current_partial: Option<&str>,
-) -> Vec<AnyElement<'static>> {
-    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
-    command_chip_row(
-        choices
-            .iter()
-            .map(|sub| {
-                (
-                    format!("{} ", sub.name),
-                    Color::Cyan,
-                    chip_matches(sub.name, lc_partial.as_ref()),
-                )
-            })
-            .collect(),
-    )
-}
-
-/// Free-token hint row (#405): the grammar has descended to a token
-/// no legend can offer (`<name>`, `[description…]`) — show the hint
-/// dimmed where the candidates would be.
-pub fn hint_row(hint: &str) -> Vec<AnyElement<'static>> {
-    command_chip_row(vec![(hint.to_string(), Color::DarkGrey, false)])
+pub fn sub_legend(choices: &'static [SubCommand], partial: Option<&str>) -> Vec<LegendChip> {
+    choices
+        .iter()
+        .map(|sub| LegendChip { label: sub.name.to_string(), ready: true, target: prefix_match(sub.name, partial) })
+        .collect()
 }
 
 /// Tab completion one level down (#405): when the caret sits at a

@@ -19,16 +19,16 @@
 //! TUI started, which is the common case (another agent runs
 //! `attend join deploy` during the session).
 //!
-//! `notify`'s callback is synchronous, so we bridge to the async
-//! channel with [`async_channel::Sender::send_blocking`]. Keeping the
-//! watcher off smol means a slow renderer can't back-pressure the
-//! filesystem listener into dropping events.
+//! `notify`'s callback runs on its own thread and sends into an
+//! unbounded [`std::sync::mpsc`] channel, which the screen drains
+//! between frames. Unbounded means a slow renderer can't back-pressure
+//! the filesystem listener into dropping events.
 
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
-use async_channel::Sender;
+use std::sync::mpsc::Sender;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -108,7 +108,7 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
     backfill.sort_by_key(|(t, _)| *t);
     for (_, path) in backfill {
         if let Some(sig) = parse_file(&path) {
-            let _ = tx.send_blocking(sig);
+            let _ = tx.send(sig);
         }
     }
 
@@ -136,7 +136,7 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
                     continue;
                 }
                 if let Some(sig) = parse_file(&path) {
-                    let _ = tx_cb.send_blocking(sig);
+                    let _ = tx_cb.send(sig);
                 }
             }
         },

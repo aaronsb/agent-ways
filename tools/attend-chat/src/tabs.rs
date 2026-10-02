@@ -7,14 +7,11 @@
 //! to the foreground tab — the `/part`-in-the-current-window
 //! convention — while explicit arguments work from anywhere.
 //!
-//! Everything except the strip render is a pure function of the tab +
-//! the ordered channel-name list, so cycling, dissolve-advance, and
-//! scope resolution are testable without an iocraft `App`.
+//! Everything here is a pure function of the tab + the ordered
+//! channel-name list, so cycling, dissolve-advance, and scope
+//! resolution are testable without a terminal. The strip is drawn in
+//! `crate::view`.
 
-use agent_theme::ColorDepth;
-use iocraft::prelude::*;
-
-use crate::chip::color_for;
 use crate::groups::{KnownGroup, BASE_CHANNEL_NAME};
 use crate::signal::Channel;
 
@@ -128,121 +125,6 @@ pub fn visible_in(channel: &Channel, tab: &Tab) -> bool {
             Channel::Direct => false,
         },
     }
-}
-
-/// Render the tab strip: `[merged] [#open] [#g] …`. The foreground
-/// tab renders inverse — its own channel color as background, black
-/// text — so the active tab reads at a glance; merged wears a neutral
-/// grey (it is a view, not a channel, and carries no hashed
-/// identity). Underline-on-partial keeps the `#partial` completion
-/// affordance the channel bar had.
-pub fn tab_strip_row(
-    known: &[KnownGroup],
-    foreground: &Tab,
-    current_partial: Option<&str>,
-) -> Vec<AnyElement<'static>> {
-    let caps = ColorDepth::detect();
-    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
-    let mut chips: Vec<AnyElement<'static>> = Vec::with_capacity(known.len() + 1);
-
-    if matches!(foreground, Tab::Merged) {
-        chips.push(
-            element! {
-                View(background_color: Color::Grey) {
-                    Text(color: Color::Black, content: " merged ", wrap: TextWrap::NoWrap)
-                }
-            }
-            .into_any(),
-        );
-    } else {
-        chips.push(
-            element! {
-                Text(color: Color::Grey, content: " merged ", wrap: TextWrap::NoWrap)
-            }
-            .into_any(),
-        );
-    }
-
-    for k in known {
-        let active = matches!(foreground, Tab::Channel(g) if *g == k.group.name);
-        let matches = lc_partial
-            .as_ref()
-            .map(|p| !p.is_empty() && k.group.name.to_ascii_lowercase().starts_with(p))
-            .unwrap_or(false);
-        let color = color_for(k.group.palette, caps);
-        // Base channel keeps its always-bold commons affordance
-        // (ADR-124 §4); partial-match underline overlays either way.
-        let weight = if k.is_base || k.group.style.bold || matches {
-            Weight::Bold
-        } else {
-            Weight::Normal
-        };
-        let decoration = if matches {
-            TextDecoration::Underline
-        } else {
-            TextDecoration::None
-        };
-        let content = format!(" {} #{} ", k.group.glyph, k.group.name);
-        chips.push(if active {
-            element! {
-                View(background_color: color) {
-                    Text(color: Color::Black, weight, decoration, content, wrap: TextWrap::NoWrap)
-                }
-            }
-            .into_any()
-        } else {
-            element! {
-                Text(
-                    color,
-                    weight,
-                    italic: k.group.style.italic,
-                    decoration,
-                    content,
-                    wrap: TextWrap::NoWrap,
-                )
-            }
-            .into_any()
-        });
-    }
-
-    // Foreground channel's description, dimmed after the strip
-    // (#404): the one-line "what is this channel for" sits where the
-    // eye already is when a tab is focused. Merged has no channel and
-    // `#open` carries no stored description, so the strip stays bare
-    // for both; overflow: Hidden on the row truncates gracefully on
-    // narrow terminals.
-    if let Tab::Channel(g) = foreground {
-        if let Some(desc) = known
-            .iter()
-            .find(|k| k.group.name == *g)
-            .and_then(|k| k.membership.description.as_deref())
-        {
-            chips.push(
-                element! {
-                    Text(
-                        color: Color::DarkGrey,
-                        content: format!(" — {desc}"),
-                        wrap: TextWrap::NoWrap,
-                    )
-                }
-                .into_any(),
-            );
-        }
-    }
-
-    vec![element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            padding_left: 1,
-            padding_right: 1,
-            height: 1u32,
-            flex_shrink: 0.0,
-            overflow: Overflow::Hidden,
-        ) {
-            #(chips)
-        }
-    }
-    .into_any()]
 }
 
 #[cfg(test)]

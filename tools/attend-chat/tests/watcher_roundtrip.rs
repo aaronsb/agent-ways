@@ -26,20 +26,20 @@ fn tmp_home() -> PathBuf {
 }
 
 fn recv_with_timeout(
-    rx: &async_channel::Receiver<signal::Signal>,
+    rx: &std::sync::mpsc::Receiver<signal::Signal>,
     timeout: Duration,
 ) -> Option<signal::Signal> {
     let deadline = Instant::now() + timeout;
     loop {
         match rx.try_recv() {
             Ok(sig) => return Some(sig),
-            Err(async_channel::TryRecvError::Empty) => {
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
                 if Instant::now() >= deadline {
                     return None;
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(async_channel::TryRecvError::Closed) => return None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return None,
         }
     }
 }
@@ -50,8 +50,11 @@ fn write_broadcast_arrives_through_watcher() {
     // Using `set_var` is !Send on some platforms; cargo runs
     // integration tests per file, and we only flip `HOME` here.
     std::env::set_var("HOME", &home);
+    // The attend cache follows XDG_CACHE_HOME first: point it into the
+    // temp home too, so a runner's own setting never reaches here.
+    std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
 
-    let (tx, rx) = async_channel::unbounded::<signal::Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<signal::Signal>();
     // PR 3 made the watcher recursive over the whole signals base so
     // it picks up focus-group dirs + the directed-send inbox. The
     // integration path stays the same for broadcast, but we now pass

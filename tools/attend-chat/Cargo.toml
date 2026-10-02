@@ -14,15 +14,22 @@ name = "attend-chat"
 path = "src/main.rs"
 
 [dependencies]
-iocraft = "0.8"
 notify = "6"
-async-channel = "2"
-smol = "2"
 agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
-agent-theme = { path = "../agent-theme" }
+# The screen's engine and look (ADR-504 §1, §3): terminal handling and
+# signals, the shared widgets, and the test kit.
+agent-tui = { path = "../agent-tui" }
+agent-theme = { path = "../agent-theme", features = ["ratatui"] }
+# Reads the user's theme choice (`theme.active`, `theme.shape`), read only.
+agent-settings = { path = "../agent-settings" }
+serde_yaml = "0.9"
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
 attend-state = { path = "../attend-state" }
 claude-sessions = { path = "../claude-sessions" }
+
+[target.'cfg(unix)'.dev-dependencies]
+# openpty and kill, for the lifecycle test of the binary on a terminal.
+libc = "0.2"
