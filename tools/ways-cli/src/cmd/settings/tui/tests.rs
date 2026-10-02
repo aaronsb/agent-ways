@@ -509,7 +509,7 @@ fn the_view_action_switches_between_this_project_and_every_known_one() {
     assert_eq!(hint[0].setting.as_ref().unwrap().value, format!("3 ways · {k} shows them"), "this project's own ways are not counted");
     assert!(hint[0].doc.contains(&format!("3 more ways in 2 other projects. The projects: all action ({k})")), "{}", hint[0].doc);
 
-    assert_eq!(ways.view("projects", &[]), Ok(Some("showing every known project's ways".into())));
+    assert_eq!(ways.view("projects", &[]), Ok(Some("all projects shown".into())));
     let r = ways.build(&[]);
     let names: Vec<&str> = others(&r).children.iter().map(|n| n.name.as_str()).collect();
     assert_eq!(names, ["other", "third"], "a group per other project, by name");
@@ -523,7 +523,7 @@ fn the_view_action_switches_between_this_project_and_every_known_one() {
     let keys: Vec<String> = agent_tui::tree::keyed(&r).into_iter().map(|(_, k)| k).collect();
     assert!(keys.contains(&"ways.project.other.api.dual.deep".to_string()), "{keys:?}");
 
-    assert_eq!(ways.view("projects", &[]), Ok(Some("showing this project's ways".into())));
+    assert_eq!(ways.view("projects", &[]), Ok(Some("this project shown".into())));
     assert_eq!(others(&ways.build(&[])).children[0].name, "(hidden)");
 }
 

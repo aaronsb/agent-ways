@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  showing every known project's ways │ s set up · p proj|
+| browse  0 changed │ 0 queued │ mouse on (m)  all projects shown │ s set up · p projects: this one  |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -151,8 +151,8 @@ styles
  29  21-28  - - DIM|ITALIC
  29  29-31  - - DIM
  29  32-43  - - DIM|ITALIC
- 29  80-82  - - DIM
- 29  83-84  Cyan - -
- 29  85-93  - - DIM|ITALIC
- 29  94-95  Cyan - -
- 29  96-99  - - DIM|ITALIC
+ 29  64-66  - - DIM
+ 29  67-68  Cyan - -
+ 29  69-77  - - DIM|ITALIC
+ 29  78-79  Cyan - -
+ 29  80-97  - - DIM|ITALIC

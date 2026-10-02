@@ -379,12 +379,12 @@ impl Adapter for Ways {
         }
         self.forget_others();
         self.all_projects.set(all);
-        Ok(Some(if all { "showing every known project's ways" } else { "showing this project's ways" }.into()))
+        Ok(Some(if all { "all projects shown" } else { "this project shown" }.into()))
     }
 
     /// The ways tab names the view it shows.
     fn title(&self, tab: &str) -> Option<String> {
-        (tab == "ways").then(|| format!(" ways settings — {} · {} ", tilde(&self.ctx.project, &self.ctx.home), if self.all_projects.get() { "all projects" } else { "this project" }))
+        (tab == "ways").then(|| title(&self.ctx, Some(if self.all_projects.get() { "all projects" } else { "this project" })))
     }
 
     fn help(&self, tab: &str) -> Option<String> {
@@ -547,13 +547,19 @@ fn depth_of(s: Option<&str>) -> Result<ColorDepth, Failure> {
 }
 
 /// The app over the live files, opened on `tab`.
+/// The tree pane's title: the project, and the view a tab names.
+fn title(ctx: &Ctx, view: Option<&str>) -> String {
+    let view = view.map(|v| format!(" · {v}")).unwrap_or_default();
+    format!(" ways settings — {}{view} ", tilde(&ctx.project, &ctx.home))
+}
+
 pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Failure> {
     let layers = ways.layers();
     let roots = ways.build(&layers);
     let active = ways.value("theme.active", &layers).and_then(|v| v.as_str().map(str::to_string));
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone());
-    let title = format!(" ways settings — {} ", tilde(&ways.ctx.project, &ways.ctx.home));
+    let title = title(&ways.ctx, None);
     let mut names: Vec<&str> = TABS.iter().map(|t| t.name).collect();
     names.push("theme");
     let at = match tab {
