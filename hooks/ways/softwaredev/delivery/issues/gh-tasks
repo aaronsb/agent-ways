@@ -459,15 +459,30 @@ elapsed_seconds() {
   printf '%s' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$sec ))
 }
 
+# Name and parent pid of `pid`, tab-separated. /proc where it exists (read
+# with builtins, no fork), ps elsewhere.
+proc_comm_ppid() {
+  local stat comm rest
+  if [[ -r "/proc/$1/stat" ]]; then
+    read -r stat <"/proc/$1/stat" 2>/dev/null || return 0
+    comm="${stat#*(}"; comm="${comm%)*}"; rest="${stat##*) }"
+    read -r _ rest _ <<<"$rest"
+    printf '%s\t%s\n' "$comm" "$rest"
+    return 0
+  fi
+  comm="$(ps -o comm= -p "$1" 2>/dev/null | tr -d ' ')"
+  [[ -n "$comm" ]] || return 0
+  printf '%s\t%s\n' "${comm##*/}" "$(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ')"   # macOS prints the full path
+}
+
 # Pid of the nearest ancestor named claude, or nothing.
 claude_pid() {
-  local pid=$$ comm i
+  local pid=$$ comm ppid i
   for ((i = 0; i < 12; i++)); do
-    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')"
+    IFS=$'\t' read -r comm ppid < <(proc_comm_ppid "$pid") || return 0
     [[ -n "$comm" ]] || return 0
-    comm="${comm##*/}"   # macOS prints the full path
     [[ "$comm" == claude* ]] && { printf '%s' "$pid"; return 0; }
-    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    pid="$ppid"
     [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 0
   done
   return 0
@@ -488,9 +503,16 @@ process_start_ms() {
 # GH_TASKS_PROCESS overrides it for tests.
 process_key() {
   if [[ -n "${GH_TASKS_PROCESS:-}" ]]; then printf '%s' "$GH_TASKS_PROCESS"; return 0; fi
-  local pid start
+  local pid stat start
   pid="$(claude_pid)"; [[ -n "$pid" ]] || return 0
-  start="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ')"
+  if [[ -r "/proc/$pid/stat" ]]; then
+    # Field 22, starttime in clock ticks since boot.
+    read -r stat <"/proc/$pid/stat" 2>/dev/null || return 0
+    read -r -a f <<<"${stat##*) }"
+    start="${f[19]:-}"
+  else
+    start="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ')"
+  fi
   [[ -n "$start" ]] && printf '%s %s' "$pid" "$start"
   return 0
 }
