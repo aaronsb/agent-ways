@@ -37,7 +37,7 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
-|└─────────────────────────────────────────────────────────────────────────────────────────── ways session fires --json ┘|
+|└ ways session fires --json ───────────────────────────────────────────────────────────────────────────────────────────┘|
 | fires   ↑↓ select  q quit                                                                                           2/2|
 styles
   0   0-8   White Blue -
@@ -127,9 +127,9 @@ styles
  36 119-119 - - DIM
  37   0-0   - - DIM
  37 119-119 - - DIM
- 38   0-91  - - DIM
- 38  92-118 Blue - BOLD|DIM
- 38 119-119 - - DIM
+ 38   0-0   - - DIM
+ 38   1-27  Blue - BOLD|DIM
+ 38  28-119 - - DIM
  39   0-6   Black Cyan BOLD
  39   9-10  Cyan - BOLD
  39  11-17  - - DIM|ITALIC

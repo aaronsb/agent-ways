@@ -104,6 +104,17 @@ pub fn filter(calls: Vec<Call>, since: Option<&str>, session: Option<&str>) -> V
         .collect()
 }
 
+/// Whether a call's recorded `project` is `scope`: the same path, a
+/// trailing slash aside. Exact, so a worktree under the project is its own.
+pub fn same_project(project: &str, scope: &str) -> bool {
+    project.trim_end_matches('/') == scope.trim_end_matches('/')
+}
+
+/// Keep the calls of one project, matched by [`same_project`].
+pub fn filter_project(calls: Vec<Call>, project: Option<&str>) -> Vec<Call> {
+    calls.into_iter().filter(|c| project.is_none_or(|p| same_project(&c.project, p))).collect()
+}
+
 fn key_of(c: &Call, by: By) -> String {
     match by {
         By::Session => c.session.clone(),
@@ -262,6 +273,15 @@ not json
         assert_eq!(g(0, None, 3).cost_short(), "cost unknown");
         let all = Group { input_tokens: 1, output_tokens: 2, cache_read_tokens: 3, cache_write_tokens: 4, ..Group::default() };
         assert_eq!(all.tokens(), 10);
+    }
+
+    #[test]
+    fn a_project_matches_exactly_a_trailing_slash_aside() {
+        let kept = |p: &str| filter_project(calls(), Some(p)).into_iter().map(|c| c.session).collect::<Vec<_>>();
+        assert_eq!(kept("/p/a"), ["s1", "s1", "s3"]);
+        assert_eq!(kept("/p/a/"), ["s1", "s1", "s3"]);
+        assert!(kept("/p").is_empty(), "a parent path is not the project");
+        assert_eq!(filter_project(calls(), None).len(), 4);
     }
 
     #[test]

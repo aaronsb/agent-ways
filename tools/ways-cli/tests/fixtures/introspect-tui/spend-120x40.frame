@@ -37,7 +37,7 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
-|└────────────────────────────────────────────────────────────────────────────────────────────── ways agent cost --json ┘|
+|└ ways agent cost --json --project /home/dev/proj ─────────────────────────────────────────────────────────────────────┘|
 | spend   ↑↓ select  m by month  q quit                                                                                  |
 styles
   0   0-8   White Blue -
@@ -125,9 +125,9 @@ styles
  36 119-119 - - DIM
  37   0-0   - - DIM
  37 119-119 - - DIM
- 38   0-94  - - DIM
- 38  95-118 Blue - BOLD|DIM
- 38 119-119 - - DIM
+ 38   0-0   - - DIM
+ 38   1-49  Blue - BOLD|DIM
+ 38  50-119 - - DIM
  39   0-6   Black Cyan BOLD
  39   9-10  Cyan - BOLD
  39  11-17  - - DIM|ITALIC

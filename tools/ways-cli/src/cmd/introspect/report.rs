@@ -17,35 +17,87 @@ use crate::cmd::stats::{self, StatsReport};
 use crate::cmd::tune_precision::{self, Flag, WayPrecision};
 
 /// The command that prints a tab's data for an agent (ADR-507 note of
-/// 2026-10-02), on the tab's bottom border.
+/// 2026-10-02), on the tab's bottom border. It starts at the left, so a
+/// narrow pane cuts the end of a long path and keeps the command whole.
 pub(super) fn agent_hint(command: &str) -> Line<'static> {
-    Line::styled(format!(" {command} "), theme::muted()).right_aligned()
+    Line::styled(format!(" {command} "), theme::muted())
 }
 
 /// The report tabs over one scope: the judge's spend, usage and fire
 /// precision. Each reads the event log's text it is given, so a live
 /// screen reads the log once per change for all of them.
 pub(crate) struct Reports {
-    pub(crate) spend: Spend,
-    pub(crate) stats: Stats,
-    pub(crate) precision: Precision,
+    /// The event log's text the views read, kept so each recomputes only
+    /// when its tab is drawn after a change: stats and precision take a
+    /// fifth of a second each over a large log.
+    content: String,
+    /// Which of spend, stats and precision have not read `content` yet.
+    stale: [bool; 3],
+    spend: Spend,
+    stats: Stats,
+    precision: Precision,
 }
 
 impl Reports {
     /// The reports of the event log's `content` for `project`, or every
-    /// project with `None`; `scope` names it in the tables' titles.
+    /// project with `None`; `scope` names it in the tables' titles. The
+    /// project is matched with its trailing slash trimmed, as the
+    /// sessions tab matches it.
     pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Reports {
+        let project = project.map(|p| p.trim_end_matches('/'));
         Reports {
-            spend: Spend::new(spend::parse_log(content), project, scope.clone()),
-            stats: Stats::new(content, project, scope.clone()),
-            precision: Precision::new(content, project, scope),
+            content: content.to_string(),
+            stale: [true; 3],
+            spend: Spend::new(Vec::new(), project, scope.clone()),
+            stats: Stats::new("", project, scope.clone()),
+            precision: Precision::new("", project, scope),
         }
     }
 
+    /// The log read again: every view reads it when next shown.
     pub(crate) fn reload(&mut self, content: &str) {
-        self.spend.reload(content);
-        self.stats.reload(content);
-        self.precision.reload(content);
+        self.content = content.to_string();
+        self.stale = [true; 3];
+    }
+
+    pub(crate) fn spend(&mut self) -> &mut Spend {
+        if std::mem::take(&mut self.stale[0]) {
+            self.spend.reload(&self.content);
+        }
+        &mut self.spend
+    }
+
+    pub(crate) fn stats(&mut self) -> &mut Stats {
+        if std::mem::take(&mut self.stale[1]) {
+            self.stats.reload(&self.content);
+        }
+        &mut self.stats
+    }
+
+    pub(crate) fn precision(&mut self) -> &mut Precision {
+        if std::mem::take(&mut self.stale[2]) {
+            self.precision.reload(&self.content);
+        }
+        &mut self.precision
+    }
+
+    /// These reports with `spend` in place of the log's, for a test.
+    #[cfg(test)]
+    pub(crate) fn with_spend(mut self, spend: Spend) -> Reports {
+        self.spend = spend;
+        self.stale[0] = false;
+        self
+    }
+}
+
+/// `command`, scoped as a report tab is: with `--project` when the tab
+/// shows one project, else with `unscoped`, the flag that widens the
+/// command to every project (empty when that is its default).
+fn scoped(command: &str, project: Option<&str>, unscoped: &str) -> String {
+    match project {
+        Some(p) => format!("{command} --project {}", agent_tui::tree::quote(p)),
+        None if unscoped.is_empty() => command.to_string(),
+        None => format!("{command} {unscoped}"),
     }
 }
 
@@ -60,6 +112,8 @@ pub(crate) struct Spend {
     project: Option<String>,
     /// The scope the calls were taken from, as the sessions tab names it.
     scope: String,
+    /// The command that prints these calls for an agent.
+    hint: String,
     pub(crate) by: By,
     sel: usize,
     table: TableState,
@@ -70,7 +124,8 @@ impl Spend {
     /// `covers_since` is taken from all of `calls`, before the project
     /// filter: the log's start bounds every scope alike.
     pub(crate) fn new(calls: Vec<Call>, project: Option<&str>, scope: String) -> Spend {
-        let mut s = Spend { calls: Vec::new(), covers_since: None, project: project.map(str::to_string), scope, by: By::Day, sel: 0, table: TableState::default() };
+        let hint = scoped("ways agent cost --json", project, "");
+        let mut s = Spend { calls: Vec::new(), covers_since: None, project: project.map(str::to_string), scope, hint, by: By::Day, sel: 0, table: TableState::default() };
         s.take(calls);
         s
     }
@@ -79,8 +134,7 @@ impl Spend {
     /// matches a session's.
     fn take(&mut self, calls: Vec<Call>) {
         self.covers_since = spend::covers_since(&calls);
-        let project = self.project.as_deref();
-        self.calls = calls.into_iter().filter(|c| project.is_none_or(|p| super::scope::project_matches(&c.project, p))).collect();
+        self.calls = spend::filter_project(calls, self.project.as_deref());
     }
 
     /// Take the calls in the event log's `content`, read again by a live
@@ -125,7 +179,7 @@ impl Spend {
         let title = format!(" {} judge calls in {} ", self.calls.len(), self.scope);
         let groups = self.groups();
         if groups.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("no judge calls recorded", theme::muted())).block(pane(title)), body);
+            f.render_widget(Paragraph::new(Line::styled("no judge calls recorded", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
             return;
         }
         let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
@@ -169,11 +223,31 @@ impl Spend {
         let t = Table::new(rows, widths)
             .header(header)
             .column_spacing(1)
-            .block(pane(title).title_bottom(agent_hint("ways agent cost --json")))
+            .block(pane(title).title_bottom(agent_hint(&self.hint)))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
     }
+}
+
+/// A list's cursor moved by a key: one row, a page, or an end.
+fn moved(sel: usize, len: usize, k: KeyCode) -> usize {
+    let last = len.saturating_sub(1);
+    match k {
+        KeyCode::Up | KeyCode::Char('k') => sel.saturating_sub(1),
+        KeyCode::Down | KeyCode::Char('j') => (sel + 1).min(last),
+        KeyCode::PageUp => sel.saturating_sub(10),
+        KeyCode::PageDown => (sel + 10).min(last),
+        KeyCode::Home | KeyCode::Char('g') => 0,
+        KeyCode::End | KeyCode::Char('G') => last,
+        _ => sel,
+    }
+}
+
+/// The row of `way` in `ways` after a reload re-ranked them, else the
+/// old row, so a live screen keeps the cursor on its way.
+fn reselect<'a>(was: Option<String>, mut ways: impl Iterator<Item = &'a str>, sel: usize) -> usize {
+    was.and_then(|w| ways.position(|x| x == w)).unwrap_or(sel)
 }
 
 /// How precisely each way fires over the scope, as `ways tune precision`
@@ -183,6 +257,8 @@ pub(crate) struct Precision {
     rows: Vec<WayPrecision>,
     project: Option<String>,
     scope: String,
+    /// The command that prints this audit for an agent.
+    hint: String,
     sel: usize,
     table: TableState,
 }
@@ -191,26 +267,20 @@ impl Precision {
     /// The audit of the event log's `content` for `project`, or every
     /// project with `None`, at the CLI's default gates.
     pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Precision {
-        let mut p = Precision { rows: Vec::new(), project: project.map(str::to_string), scope, sel: 0, table: TableState::default() };
+        let hint = scoped("ways tune precision --json", project, "");
+        let mut p = Precision { rows: Vec::new(), project: project.map(str::to_string), scope, hint, sel: 0, table: TableState::default() };
         p.reload(content);
         p
     }
 
     pub(crate) fn reload(&mut self, content: &str) {
+        let was = self.rows.get(self.sel).map(|r| r.way.clone());
         self.rows = tune_precision::report(content, tune_precision::MIN_SESSIONS, tune_precision::FLAG_THRESHOLD, self.project.as_deref(), None);
+        self.sel = reselect(was, self.rows.iter().map(|r| r.way.as_str()), self.sel);
     }
 
     pub(crate) fn key(&mut self, k: KeyCode) {
-        let last = self.rows.len().saturating_sub(1);
-        self.sel = match k {
-            KeyCode::Up | KeyCode::Char('k') => self.sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => (self.sel + 1).min(last),
-            KeyCode::PageUp => self.sel.saturating_sub(10),
-            KeyCode::PageDown => (self.sel + 10).min(last),
-            KeyCode::Home | KeyCode::Char('g') => 0,
-            KeyCode::End | KeyCode::Char('G') => last,
-            _ => self.sel,
-        };
+        self.sel = moved(self.sel, self.rows.len(), k);
     }
 
     pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
@@ -219,31 +289,25 @@ impl Precision {
         let line = vec![
             Span::styled("Fire precision", Style::new().add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!(
-                    " · {flagged} flagged · off-class ≥ {:.0}% over ≥ {} sessions",
-                    tune_precision::FLAG_THRESHOLD * 100.0,
-                    tune_precision::MIN_SESSIONS
-                ),
+                format!(" · {flagged} flagged · off-class ≥ {:.0}% over ≥ {} sessions", tune_precision::FLAG_THRESHOLD * 100.0, tune_precision::MIN_SESSIONS),
                 theme::muted(),
             ),
         ];
         f.render_widget(Paragraph::new(Line::from(line)), head);
         let title = format!(" {} ways fired in {} ", self.rows.len(), self.scope);
         if self.rows.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title)), body);
+            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
             return;
         }
+        // Below 100 columns the trigger is named by its channel and the
+        // spread is left out, so the way keeps its room.
+        let wide = area.width >= 100;
         let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
-        let header = Row::new(vec![
-            Cell::from("Way"),
-            Cell::from("Flag"),
-            right("Sess".into()),
-            right("Off".into()),
-            right("Irrel".into()),
-            right("Spread".into()),
-            Cell::from("Off trigger"),
-        ])
-        .style(Style::new().add_modifier(Modifier::BOLD));
+        let mut header = vec![Cell::from("Way"), Cell::from("Flag"), right("Sess".into()), right("Off".into()), right("Irrel".into())];
+        if wide {
+            header.push(right("Spread".into()));
+        }
+        header.push(Cell::from("Off trigger"));
         let rows: Vec<Row> = self
             .rows
             .iter()
@@ -252,47 +316,43 @@ impl Precision {
                     Flag::MisTargeted | Flag::CrossCutting => Span::styled(r.flag.label(), theme::warn()),
                     _ => Span::styled(r.flag.label(), theme::muted()),
                 };
-                Row::new(vec![
-                    Cell::from(r.way.clone()),
-                    Cell::from(flag),
-                    right(r.sessions.to_string()),
-                    right(r.off_class.to_string()),
-                    right(format!("{:.2}", r.irrelevance)),
-                    right(r.spread.to_string()),
-                    Cell::from(r.top_off_trigger.clone()),
-                ])
+                let mut cells = vec![Cell::from(r.way.clone()), Cell::from(flag), right(r.sessions.to_string()), right(r.off_class.to_string()), right(format!("{:.2}", r.irrelevance))];
+                if wide {
+                    cells.push(right(r.spread.to_string()));
+                }
+                let trigger = if wide { r.top_off_trigger.as_str() } else { stats::trigger_channel(&r.top_off_trigger) };
+                cells.push(Cell::from(trigger.to_string()));
+                Row::new(cells)
             })
             .collect();
-        let widths = [
-            Constraint::Min(20),
-            Constraint::Length(13),
-            Constraint::Length(4),
-            Constraint::Length(3),
-            Constraint::Length(5),
-            Constraint::Length(6),
-            Constraint::Length(11),
-        ];
+        let mut widths = vec![Constraint::Min(20), Constraint::Length(13), Constraint::Length(4), Constraint::Length(3), Constraint::Length(5)];
+        if wide {
+            widths.push(Constraint::Length(6));
+        }
+        widths.push(Constraint::Length(if wide { 24 } else { 13 }));
         self.sel = self.sel.min(self.rows.len() - 1);
         self.table.select(Some(self.sel));
         let t = Table::new(rows, widths)
-            .header(header)
+            .header(Row::new(header).style(Style::new().add_modifier(Modifier::BOLD)))
             .column_spacing(1)
-            .block(pane(title).title_bottom(agent_hint("ways tune precision --json")))
+            .block(pane(title).title_bottom(agent_hint(&self.hint)))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
-        let r = &self.rows[self.sel];
-        f.render_widget(Paragraph::new(Line::from(vec![Span::styled(format!("{}: ", r.way), theme::muted()), Span::raw(r.flag.remedy())])), remedy);
+        let remedy_text = Line::from(vec![Span::styled("remedy ", theme::muted()), Span::raw(self.rows[self.sel].flag.remedy())]);
+        f.render_widget(Paragraph::new(remedy_text), remedy);
     }
 }
 
 /// Usage over the scope, as `ways tune stats` reports it: the ways ranked
 /// by fires, and beside them how the fires came (channel, scope, checks,
-/// ways per hook invocation).
+/// ways per hook invocation) and the selected way's split by model.
 pub(crate) struct Stats {
     report: StatsReport,
     project: Option<String>,
     scope: String,
+    /// The command that prints these stats for an agent.
+    hint: String,
     sel: usize,
     table: TableState,
 }
@@ -301,26 +361,20 @@ impl Stats {
     /// The stats of the event log's `content` for `project`, or every
     /// project with `None`.
     pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Stats {
-        let mut s = Stats { report: StatsReport::default(), project: project.map(str::to_string), scope, sel: 0, table: TableState::default() };
+        let hint = scoped("ways tune stats --json", project, "--global");
+        let mut s = Stats { report: StatsReport::default(), project: project.map(str::to_string), scope, hint, sel: 0, table: TableState::default() };
         s.reload(content);
         s
     }
 
     pub(crate) fn reload(&mut self, content: &str) {
+        let was = self.report.by_way.get(self.sel).map(|(w, _)| w.clone());
         self.report = stats::report(content, None, self.project.as_deref());
+        self.sel = reselect(was, self.report.by_way.iter().map(|(w, _)| w.as_str()), self.sel);
     }
 
     pub(crate) fn key(&mut self, k: KeyCode) {
-        let last = self.report.by_way.len().saturating_sub(1);
-        self.sel = match k {
-            KeyCode::Up | KeyCode::Char('k') => self.sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => (self.sel + 1).min(last),
-            KeyCode::PageUp => self.sel.saturating_sub(10),
-            KeyCode::PageDown => (self.sel + 10).min(last),
-            KeyCode::Home | KeyCode::Char('g') => 0,
-            KeyCode::End | KeyCode::Char('G') => last,
-            _ => self.sel,
-        };
+        self.sel = moved(self.sel, self.report.by_way.len(), k);
     }
 
     pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
@@ -330,23 +384,17 @@ impl Stats {
         let line = vec![
             Span::styled("Usage", Style::new().add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!(
-                    " · {} sessions · {} fires · {} re-disclosures · {} → {}",
-                    r.sessions,
-                    r.fires,
-                    r.redisclosures,
-                    day(&r.first_ts),
-                    day(&r.last_ts)
-                ),
+                format!(" · {} sessions · {} fires · {} re-disclosures · {} → {}", r.sessions, r.fires, r.redisclosures, day(&r.first_ts), day(&r.last_ts)),
                 theme::muted(),
             ),
         ];
         f.render_widget(Paragraph::new(Line::from(line)), head);
-        let [left, right] = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(body);
+        // The side pane is as wide as its longest channel name needs.
+        let [left, side] = Layout::horizontal([Constraint::Min(30), Constraint::Length(40)]).areas(body);
 
-        let title = format!(" {} ways fired in {} ", r.by_way.len(), self.scope);
+        let title = format!(" {} ways in {} ", r.by_way.len(), self.scope);
         if r.by_way.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title)), left);
+            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), left);
         } else {
             let rows: Vec<Row> =
                 r.by_way.iter().map(|(way, n)| Row::new(vec![Cell::from(way.clone()), Cell::from(Line::from(n.to_string()).alignment(Alignment::Right))])).collect();
@@ -356,35 +404,30 @@ impl Stats {
             let t = Table::new(rows, [Constraint::Min(10), Constraint::Length(6)])
                 .header(header)
                 .column_spacing(1)
-                .block(pane(title).title_bottom(agent_hint("ways tune stats --json")))
+                .block(pane(title).title_bottom(agent_hint(&self.hint)))
                 .row_highlight_style(theme::selected())
                 .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
             f.render_stateful_widget(t, left, &mut self.table);
         }
 
-        let mut lines: Vec<Line> = Vec::new();
-        let section = |lines: &mut Vec<Line>, name: &str, rows: &[(String, u32)]| {
-            lines.push(Line::styled(name.to_string(), Style::new().add_modifier(Modifier::BOLD)));
-            lines.extend(rows.iter().map(|(k, n)| Line::from(format!("  {n:>6}  {k}"))));
-            lines.push(Line::default());
-        };
-        section(&mut lines, "Channel", &r.by_trigger);
-        section(&mut lines, "Scope", &r.by_scope);
-        lines.push(Line::styled("Checks", Style::new().add_modifier(Modifier::BOLD)));
-        lines.push(Line::from(format!("  {:>6}  fired, {} anchored, mean distance {:.1}", r.check_fires, r.check_anchored, r.check_avg_distance)));
-        lines.push(Line::default());
-        lines.push(Line::styled("Ways per invocation (1 · 2 · 3 · 4+)", Style::new().add_modifier(Modifier::BOLD)));
+        let bold = |t: &str| Line::styled(t.to_string(), Style::new().add_modifier(Modifier::BOLD));
+        let count = |n: u32, k: &str| Line::from(format!("{n:>7}  {k}"));
+        let mut lines: Vec<Line> = vec![bold("Channel")];
+        lines.extend(r.by_trigger.iter().map(|(k, n)| count(*n, k)));
+        lines.push(bold("Scope"));
+        lines.extend(r.by_scope.iter().map(|(k, n)| count(*n, k)));
+        lines.push(bold("Checks"));
+        lines.push(count(r.check_fires, &format!("fired, {} anchored", r.check_anchored)));
+        lines.push(Line::from(format!("         mean distance {:.1}", r.check_avg_distance)));
+        lines.push(bold("Ways per invocation 1·2·3·4+"));
         for (channel, l) in &r.ways_per_invocation {
-            let b = l.buckets.iter().map(u32::to_string).collect::<Vec<_>>().join(" · ");
-            lines.push(Line::from(format!("  {channel}: {b}, max {}", l.max)));
+            let b = l.buckets.iter().map(u32::to_string).collect::<Vec<_>>().join("·");
+            lines.push(Line::from(format!("  {channel} {b}, max {}", l.max)));
         }
-        if let Some((way, _)) = r.by_way.get(self.sel) {
-            if let Some(split) = r.by_way_model.get(way) {
-                lines.push(Line::default());
-                lines.push(Line::styled(format!("{way} by model"), Style::new().add_modifier(Modifier::BOLD)));
-                lines.extend(split.iter().map(|(m, n)| Line::from(format!("  {n:>6}  {m}"))));
-            }
+        if let Some(split) = r.by_way.get(self.sel).and_then(|(way, _)| r.by_way_model.get(way)) {
+            lines.push(bold("Selected way by model"));
+            lines.extend(split.iter().map(|(m, n)| count(*n, m)));
         }
-        f.render_widget(Paragraph::new(lines).block(pane(" how they fired ")), right);
+        f.render_widget(Paragraph::new(lines).block(pane(" how they fired ")), side);
     }
 }

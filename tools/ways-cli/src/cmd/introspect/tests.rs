@@ -20,7 +20,7 @@ use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, Join
 
 use super::frames::{build_frames, has_verdicts};
 use super::model::WayEvent;
-use super::report::{Precision, Reports, Spend, Stats};
+use super::report::{Reports, Spend};
 use super::picker::Picker;
 use super::screen::{reselect_by_anchor, session_spend, Introspect, Replay};
 use super::sessions::{gather_sessions, SessionInfo};
@@ -159,7 +159,7 @@ fn no_spend() -> Reports {
 
 /// Reports with `spend` and empty usage and precision.
 fn with_spend(spend: Spend) -> Reports {
-    Reports { spend, stats: Stats::new("", None, PROJECT.into()), precision: Precision::new("", None, PROJECT.into()) }
+    Reports::new("", None, PROJECT.into()).with_spend(spend)
 }
 
 /// The screen opened on one session, as `--session` and `live` open it.
@@ -785,4 +785,49 @@ fn the_tab_line_fits_at_80_columns() {
     let mut p = picker(terminal());
     let t = text(&render(&mut p, 80, 25));
     assert!(t.lines().next().unwrap().contains("6 precision"), "{t}");
+}
+
+/// The report tabs match the scope with its trailing slash trimmed, as the
+/// sessions tab does, and each border names its command at that scope.
+#[test]
+fn the_report_tabs_trim_the_scope_and_name_their_scoped_commands() {
+    let mut s = Introspect::showing(replay(false), Reports::new(&usage_log(), Some("/home/dev/proj/"), PROJECT.into()), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('4')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("2 sessions · 3 fires") && t.contains("ways tune stats --json --project /home/dev/proj "), "{t}");
+    press(&mut s, &[KeyCode::Char('5')]);
+    assert!(text(&render(&mut s, 120, 40)).contains("ways tune precision --json --project /home/dev/proj "));
+    press(&mut s, &[KeyCode::Char('3')]);
+    assert!(text(&render(&mut s, 120, 40)).contains("ways agent cost --json --project /home/dev/proj "));
+    let mut all = Introspect::showing(replay(false), Reports::new(&usage_log(), None, "every project".into()), terminal(), Shape::PLAIN);
+    press(&mut all, &[KeyCode::Char('4')]);
+    assert!(text(&render(&mut all, 120, 40)).contains("ways tune stats --json --global"), "every project is --global for stats");
+}
+
+/// A live reload re-ranks the ways; the cursor stays on its way, and a
+/// report reads the new log only when its tab is drawn.
+#[test]
+fn a_report_reload_keeps_the_cursor_on_its_way() {
+    let mut s = Introspect::showing(replay(false), Reports::new(&usage_log(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('4'), KeyCode::Down]);
+    assert!(selected(&mut s).contains("softwaredev/delivery/commits"));
+    let more = (0..3)
+        .map(|i| serde_json::json!({"event": "way_fired", "ts": "2026-07-05T00:00:00Z", "session": format!("n{i}"), "project": PROJECT, "way": "softwaredev/delivery/commits", "trigger": "bash", "scope": "agent"}).to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    s.reports.reload(&format!("{}\n{more}", usage_log()));
+    let t = selected(&mut s);
+    assert!(t.contains("softwaredev/delivery/commits") && t.contains(" 4"), "now first, still selected: {t}");
+}
+
+/// Below 100 columns the precision table names the trigger by channel and
+/// leaves out the spread, so the way keeps its room.
+#[test]
+fn precision_narrows_to_the_trigger_channel_below_100_columns() {
+    let mut s = Introspect::showing(replay(false), Reports::new(&usage_log(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('5')]);
+    let wide = text(&render(&mut s, 120, 40));
+    assert!(wide.contains("Spread"), "{wide}");
+    let narrow = text(&render(&mut s, 80, 25));
+    assert!(!narrow.contains("Spread") && narrow.contains("softwaredev/delivery/commits"), "{narrow}");
 }

@@ -321,7 +321,7 @@ pub fn fires(
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         if json {
-            println!("{}", serde_json::json!({"session": null, "fires": []}));
+            println!("{}", empty_fires_json(matched));
         } else {
             println!("No events recorded yet.");
         }
@@ -335,7 +335,7 @@ pub fn fires(
             Some(s) => s,
             None => {
                 if json {
-                    println!("{}", serde_json::json!({"session": null, "fires": []}));
+                    println!("{}", empty_fires_json(matched));
                 } else {
                     println!("No sessions found in scope.");
                 }
@@ -394,6 +394,15 @@ pub(crate) fn semantic_fires(content: &str, session_id: &str) -> Vec<SemanticFir
     }
     rows.sort_by(|a, b| a.score.total_cmp(&b.score));
     rows
+}
+
+/// The `fires` JSON when there is no session to list: the same keys, empty.
+fn empty_fires_json(matched: bool) -> serde_json::Value {
+    let mut out = serde_json::json!({"session": null, "total": 0, "fires": []});
+    if matched {
+        out["judge_blocks"] = serde_json::json!([]);
+    }
+    out
 }
 
 /// The `fires` listing as JSON: the session, its semantic fires lowest
@@ -480,6 +489,7 @@ mod fires_tests {
     const LOG: &str = concat!(
         r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","p_yes":"0.900","threshold":"0.30","verdict":"pass"}"#, "\n",
         r#"{"event":"way_fired","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"semantic:embedding:en","fire_score":"0.410","surface":"prompt"}"#, "\n",
+        r#"{"event":"way_fired","session":"s","ts":"2026-01-01T00:00:01Z","way":"d/e","trigger":"semantic:embedding:en","fire_score":"0.700","surface":"later"}"#, "\n",
         r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b","p_yes":"0.050","threshold":"0.30","verdict":"block"}"#, "\n",
         r#"{"event":"way_judged","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/b/c","p_yes":"0.050","threshold":"0.30","verdict":"block","reason":"ancestor","ancestor":"d/b"}"#, "\n",
     );
@@ -504,12 +514,17 @@ mod fires_tests {
         let j = fires_json(LOG, "s", None, Some(1), true);
         assert_eq!(j["session"], "s");
         let fires = j["fires"].as_array().unwrap();
-        assert_eq!(fires.len(), 1, "{j}");
-        assert_eq!(j["total"], 1);
+        assert_eq!(fires.len(), 1, "--limit cuts the list: {j}");
+        assert_eq!(j["total"], 2, "the count is taken before the limit");
         assert_eq!(fires[0]["way"], "d/a");
         assert_eq!(fires[0]["score"], 0.41);
         let blocks = j["judge_blocks"].as_array().unwrap();
         assert_eq!(blocks.iter().map(|b| b["way"].as_str().unwrap()).collect::<Vec<_>>(), ["d/b", "d/b/c"]);
         assert!(fires_json(LOG, "s", None, None, false).get("judge_blocks").is_none());
+        let capped = fires_json(LOG, "s", Some(0.5), None, false);
+        assert_eq!(capped["total"], 1, "--max-score drops the 0.700 fire: {capped}");
+        assert_eq!(capped["fires"][0]["way"], "d/a");
+        // No session: the same keys, empty.
+        assert_eq!(super::empty_fires_json(true), serde_json::json!({"session": null, "total": 0, "fires": [], "judge_blocks": []}));
     }
 }

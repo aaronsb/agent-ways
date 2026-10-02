@@ -166,7 +166,7 @@ fn way_model_split(events: &[Event]) -> HashMap<&str, HashMap<&str, u32>> {
 /// `semantic:bash:*`. Everything else is its own lane, named by the segment
 /// before the first colon: `bash`, `file`, `state`, `attend:*`, and the one
 /// legacy `bash:semantic:en` spelling in early history all resolve that way.
-fn trigger_channel(trigger: &str) -> &str {
+pub(crate) fn trigger_channel(trigger: &str) -> &str {
     match trigger {
         "keyword" => "prompt",
         t if t.starts_with("semantic:embedding") || t.starts_with("semantic:late-interaction") => {
@@ -342,7 +342,8 @@ fn counts_json(rows: &[(String, u32)]) -> serde_json::Map<String, serde_json::Va
     rows.iter().map(|(k, n)| (k.clone(), json!(n))).collect()
 }
 
-fn print_json(r: &StatsReport) {
+/// The `--json` form of the report.
+fn json_value(r: &StatsReport) -> serde_json::Value {
     let by_model: serde_json::Map<String, serde_json::Value> = r
         .by_model
         .iter()
@@ -388,8 +389,11 @@ fn print_json(r: &StatsReport) {
         "redisclosures": r.redisclosures,
         "redisclose_avg_token_distance": r.redisclose_avg_token_distance,
     });
+    output
+}
 
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+fn print_json(r: &StatsReport) {
+    println!("{}", serde_json::to_string_pretty(&json_value(r)).unwrap_or_default());
 }
 
 fn print_human(r: &StatsReport, days: Option<u32>, project_filter: Option<&str>) {
@@ -676,5 +680,23 @@ mod tests {
         // One invocation each, so alphabetical; the prompt one fired two ways.
         assert_eq!(r.ways_per_invocation[1].0, "prompt");
         assert_eq!(r.ways_per_invocation[1].1.max, 2);
+    }
+
+    /// Equal counts sort by name, in the report and in the JSON, so two runs
+    /// over one log print the same bytes: `--json` is an agent's tuning input.
+    #[test]
+    fn ties_sort_by_name_and_the_json_keeps_that_order() {
+        let fired = |way: &str, trigger: &str| json!({"ts":"2026-09-01T10:00:00Z","event":"way_fired","way":way,"trigger":trigger,"scope":"agent","session":"s1"});
+        let rows = [fired("d/zeta", "keyword"), fired("d/alpha", "bash"), fired("d/mid", "keyword"), fired("d/mid", "file")];
+        let text: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+        let r = report(&text.join("\n"), None, None);
+        let names = |v: &[(String, u32)]| v.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&r.by_way), ["d/mid", "d/alpha", "d/zeta"]);
+        assert_eq!(names(&r.by_trigger), ["keyword", "bash", "file"]);
+        let j = json_value(&r);
+        let keys = |k: &str| j[k].as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        assert_eq!(keys("by_way"), ["d/mid", "d/alpha", "d/zeta"]);
+        assert_eq!(keys("by_trigger"), ["keyword", "bash", "file"]);
+        assert_eq!(serde_json::to_string(&json_value(&report(&text.join("\n"), None, None))).unwrap(), serde_json::to_string(&j).unwrap());
     }
 }

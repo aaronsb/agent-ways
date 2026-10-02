@@ -2,9 +2,9 @@ agent-tui frame 80x25
 | session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
 |Fire precision · 0 flagged · off-class ≥ 50% over ≥ 5 sessions                  |
 |┌ 2 ways fired in /home/dev/proj ──────────────────────────────────────────────┐|
-|│ Way                           Flag          Sess Off Irrel Spread Off trigger│|
-|│▌softwaredev/code/testing      low-n            2   0  0.00      0 -          │|
-|│ softwaredev/delivery/commits  low-n            1   0  0.00      0 -          │|
+|│ Way                                Flag          Sess Off Irrel Off trigger  │|
+|│▌softwaredev/code/testing           low-n            2   0  0.00 -            │|
+|│ softwaredev/delivery/commits       low-n            1   0  0.00 -            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -21,8 +21,8 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
-|└────────────────────────────────────────────────── ways tune precision --json ┘|
-|softwaredev/code/testing: insufficient sample                                   |
+|└ ways tune precision --json --project /home/dev/proj ─────────────────────────┘|
+|remedy insufficient sample                                                      |
 | precision   ↑↓ select  q quit                                                  |
 styles
   0   0-8   White Blue -
@@ -41,12 +41,12 @@ styles
   3  79-79  - - DIM
   4   0-0   - - DIM
   4   1-1   Cyan - BOLD|REVERSED
-  4   2-31  - - BOLD|REVERSED
-  4  32-36  - - BOLD|DIM|REVERSED
-  4  37-78  - - BOLD|REVERSED
+  4   2-36  - - BOLD|REVERSED
+  4  37-41  - - BOLD|DIM|REVERSED
+  4  42-78  - - BOLD|REVERSED
   4  79-79  - - DIM
   5   0-0   - - DIM
-  5  32-36  - - DIM
+  5  37-41  - - DIM
   5  79-79  - - DIM
   6   0-0   - - DIM
   6  79-79  - - DIM
@@ -80,10 +80,10 @@ styles
  20  79-79  - - DIM
  21   0-0   - - DIM
  21  79-79  - - DIM
- 22   0-50  - - DIM
- 22  51-78  Blue - BOLD|DIM
- 22  79-79  - - DIM
- 23   0-25  - - DIM
+ 22   0-0   - - DIM
+ 22   1-53  Blue - BOLD|DIM
+ 22  54-79  - - DIM
+ 23   0-6   - - DIM
  24   0-10  Black Cyan BOLD
  24  13-14  Cyan - BOLD
  24  15-21  - - DIM|ITALIC

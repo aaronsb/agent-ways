@@ -2,13 +2,13 @@
 //! aggregation in [`ways_agent_core::spend`].
 
 use anyhow::Result;
-use ways_agent_core::spend::{covers_since, filter, load, parse_date, render_text, report, By};
+use ways_agent_core::spend::{covers_since, filter, filter_project, load, parse_date, render_text, report, By};
 
-pub fn run(since: Option<&str>, session: Option<&str>, by: By, json: bool) -> Result<()> {
+pub fn run(since: Option<&str>, session: Option<&str>, project: Option<&str>, by: By, json: bool) -> Result<()> {
     let since = since.map(parse_date).transpose()?;
     let all = load();
     let covers = covers_since(&all);
-    let calls = filter(all, since.as_deref(), session);
+    let calls = filter_project(filter(all, since.as_deref(), session), project);
     if json {
         println!("{}", serde_json::to_string_pretty(&report(&calls, covers))?);
     } else {

@@ -474,11 +474,11 @@ impl Screen for Introspect {
                 let mut keys = vec![("↑↓", "select")];
                 match tab {
                     Tab::Spend => {
-                        self.reports.spend.draw(f, body);
-                        keys = self.reports.spend.keys();
+                        self.reports.spend().draw(f, body);
+                        keys = self.reports.spend().keys();
                     }
-                    Tab::Stats => self.reports.stats.draw(f, body),
-                    _ => self.reports.precision.draw(f, body),
+                    Tab::Stats => self.reports.stats().draw(f, body),
+                    _ => self.reports.precision().draw(f, body),
                 }
                 if back {
                     keys.push(("esc", "sessions"));
@@ -543,9 +543,9 @@ impl Screen for Introspect {
                 KeyCode::Esc => self.back(),
                 c => {
                     match (tab, replay) {
-                        (Tab::Spend, _) => self.reports.spend.key(c),
-                        (Tab::Stats, _) => self.reports.stats.key(c),
-                        (Tab::Precision, _) => self.reports.precision.key(c),
+                        (Tab::Spend, _) => self.reports.spend().key(c),
+                        (Tab::Stats, _) => self.reports.stats().key(c),
+                        (Tab::Precision, _) => self.reports.precision().key(c),
                         (Tab::Fires, Some(r)) => r.fires.key(c),
                         _ => {}
                     }

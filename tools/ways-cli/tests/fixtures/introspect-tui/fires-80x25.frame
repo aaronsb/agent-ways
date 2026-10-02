@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
-|└─────────────────────────────────────────────────── ways session fires --json ┘|
+|└ ways session fires --json ───────────────────────────────────────────────────┘|
 | fires   ↑↓ select  q quit                                                   2/2|
 styles
   0   0-8   White Blue -
@@ -82,9 +82,9 @@ styles
  21  79-79  - - DIM
  22   0-0   - - DIM
  22  79-79  - - DIM
- 23   0-51  - - DIM
- 23  52-78  Blue - BOLD|DIM
- 23  79-79  - - DIM
+ 23   0-0   - - DIM
+ 23   1-27  Blue - BOLD|DIM
+ 23  28-79  - - DIM
  24   0-6   Black Cyan BOLD
  24   9-10  Cyan - BOLD
  24  11-17  - - DIM|ITALIC
