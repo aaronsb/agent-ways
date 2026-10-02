@@ -62,7 +62,7 @@ pub(crate) fn run_macro(macro_file: &Path, session_id: &str) -> Option<String> {
 
 /// Check whether a project directory is in the trusted-project-macros list.
 pub(crate) fn is_project_trusted(project_dir: &str) -> bool {
-    let trust_file = crate::paths::projection_root().join("trusted-project-macros");
+    let trust_file = crate::paths::trusted_project_macros();
     if let Ok(content) = std::fs::read_to_string(&trust_file) {
         content.lines().any(|line| line.trim() == project_dir)
     } else {

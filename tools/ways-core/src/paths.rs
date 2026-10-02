@@ -198,6 +198,13 @@ pub fn projected_ways_root() -> PathBuf {
     projection_root().join("hooks").join("ways")
 }
 
+/// The trusted-project-macros list: `~/.claude/trusted-project-macros`. The
+/// projects whose own macros may run; `ways show` reads it and `ways
+/// permissions audit` reports it.
+pub fn trusted_project_macros() -> PathBuf {
+    projection_root().join("trusted-project-macros")
+}
+
 /// The projected binaries: `~/.claude/bin`.
 pub fn projected_bin_root() -> PathBuf {
     projection_root().join("bin")
@@ -243,6 +250,12 @@ pub fn way_embed() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trusted_project_macros_lives_in_the_projection() {
+        let p = trusted_project_macros();
+        assert!(p.ends_with(".claude/trusted-project-macros"), "{}", p.display());
+    }
 
     #[test]
     fn projected_ways_root_is_the_claude_hooks_ways_projection() {

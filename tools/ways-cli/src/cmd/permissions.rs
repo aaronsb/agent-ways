@@ -4,7 +4,6 @@ use agent_fmt::permissions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-use crate::util::home_dir;
 
 /// Run `ways permissions audit`.
 pub fn audit(global: bool) -> Result<()> {
@@ -40,7 +39,7 @@ pub fn audit(global: bool) -> Result<()> {
     let results = permissions::audit(&requirements, &grants);
 
     // Check for trusted-project-macros deprecation
-    let tpm_path = home_dir().join(".claude/trusted-project-macros");
+    let tpm_path = crate::paths::trusted_project_macros();
     let has_tpm = tpm_path.is_file();
 
     // Display results
