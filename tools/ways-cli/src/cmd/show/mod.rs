@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::{frontmatter, session};
-use helpers::{extract_attend_signals, home_dir, is_project_trusted, check_sections_text, run_macro};
+use helpers::{extract_attend_signals, is_project_trusted, check_sections_text, run_macro};
 use crate::frontmatter::body_text;
 use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_text, update_status_text};
 
@@ -813,7 +813,7 @@ pub fn check_within(
 // ── ways show core ──────────────────────────────────────────────
 
 pub fn core(session_id: &str) -> Result<String> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
     let mut output = String::new();
 
     // Run the macro for the dynamic ways table
@@ -844,7 +844,7 @@ pub fn core(session_id: &str) -> Result<String> {
     }
 
     // Version info
-    let claude_dir = home_dir().join(".claude");
+    let claude_dir = crate::paths::projection_root();
     let version = git_version(&claude_dir);
     output.push_str(&format!("\n---\n_Ways version: {version}_"));
 
@@ -863,7 +863,7 @@ pub fn core(session_id: &str) -> Result<String> {
 // ── ways show attend/<signal> ──────────────────────────────────
 
 pub fn attend(signal: &str, session_id: &str) -> Result<String> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
 
     // Also check project-local ways
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")

@@ -187,6 +187,19 @@ pub fn settings_json() -> PathBuf {
     projection_root().join("settings.json")
 }
 
+/// The core ways as a session reads them: `~/.claude/hooks/ways`, the
+/// projection of [`core_ways_root`] (a link into the app, or into a dev
+/// checkout after `ways reconcile`). Every runtime reader of the core ways
+/// resolves them here; [`core_ways_root`] is the app copy behind it.
+pub fn projected_ways_root() -> PathBuf {
+    projection_root().join("hooks").join("ways")
+}
+
+/// The projected binaries: `~/.claude/bin`.
+pub fn projected_bin_root() -> PathBuf {
+    projection_root().join("bin")
+}
+
 /// Claude Code's config directory as agent-ways sees it: `~/.claude`, the
 /// projection root. Owned by Claude Code; [`claude_sessions`] locates its
 /// projects, transcripts and session records.
@@ -201,9 +214,48 @@ pub fn transcripts_root() -> PathBuf {
     claude_dir().projects_dir()
 }
 
+// --- the embedding engine ---
+
+/// The English embedding model's file name in the engine dir ([`corpus_dir`]).
+pub const EN_MODEL: &str = "minilm-l6-v2.gguf";
+
+/// The multilingual embedding model's file name in the engine dir.
+pub const MULTI_MODEL: &str = "multilingual-minilm-l12-v2-q8.gguf";
+
+/// The `way-embed` binary for the engine dir `engine_dir`: its own copy, else
+/// the projected `~/.claude/bin` one. On a projection install the binary lives
+/// only in `~/.claude/bin`, so a lookup that checks the engine dir alone
+/// silently disables semantic matching.
+pub fn way_embed_in(engine_dir: &Path) -> Option<PathBuf> {
+    [engine_dir.join("way-embed"), projected_bin_root().join("way-embed")]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// The `way-embed` binary for the canonical engine dir ([`corpus_dir`]).
+pub fn way_embed() -> Option<PathBuf> {
+    way_embed_in(&corpus_dir())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projected_ways_root_is_the_claude_hooks_ways_projection() {
+        let p = projected_ways_root();
+        assert!(p.ends_with(".claude/hooks/ways"), "{}", p.display());
+        assert!(p.starts_with(projection_root()));
+    }
+
+    #[test]
+    fn way_embed_prefers_the_engine_dir_copy() {
+        let dir = std::env::temp_dir().join(format!("ways-embed-loc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("way-embed"), "bin").unwrap();
+        assert_eq!(way_embed_in(&dir), Some(dir.join("way-embed")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // Structural assertions only — no `$XDG_*` mutation, which would race across
     // Rust's parallel test threads (env is process-global). Suffix checks prove

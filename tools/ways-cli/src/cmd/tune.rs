@@ -25,7 +25,6 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use crate::frontmatter;
-use crate::util::home_dir;
 
 #[derive(Clone)]
 struct FidelityResult {
@@ -74,11 +73,11 @@ pub fn run(
 
     let global_dir = ways_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
+        .unwrap_or_else(crate::paths::projected_ways_root);
     let xdg_way = crate::paths::corpus_dir();
 
     let multi_corpus = xdg_way.join("ways-corpus-multi.jsonl");
-    let multi_model = xdg_way.join("multilingual-minilm-l12-v2-q8.gguf");
+    let multi_model = xdg_way.join(crate::paths::MULTI_MODEL);
 
     if !multi_corpus.is_file() {
         eprintln!("No multilingual corpus to audit — run `ways corpus` (localized mode) first.");
@@ -89,7 +88,7 @@ pub fn run(
         return Ok(());
     }
 
-    let embed_bin = find_way_embed()
+    let embed_bin = crate::paths::way_embed()
         .context("way-embed binary not found. Run `make setup` to install.")?;
 
     let excluded = crate::util::load_excluded_segments();
@@ -411,14 +410,3 @@ fn nan_to_null(x: f64) -> serde_json::Value {
     }
 }
 
-fn find_way_embed() -> Option<PathBuf> {
-    let xdg = crate::paths::corpus_dir().join("way-embed");
-    if xdg.is_file() {
-        return Some(xdg);
-    }
-    let bin = home_dir().join(".claude/bin/way-embed");
-    if bin.is_file() {
-        return Some(bin);
-    }
-    None
-}

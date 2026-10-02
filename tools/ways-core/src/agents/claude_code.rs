@@ -6,7 +6,6 @@
 //!   - ~/.claude.json (global app config)
 
 use super::AgentConfig;
-use crate::util::home_dir;
 
 pub struct ClaudeCode;
 
@@ -25,7 +24,7 @@ impl AgentConfig for ClaudeCode {
 
 /// Read language from ~/.claude/settings.json
 fn read_user_settings_language() -> Option<String> {
-    let path = home_dir().join(".claude/settings.json");
+    let path = crate::paths::settings_json();
     read_language_from_json(&path)
 }
 

@@ -39,7 +39,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::reduce::split_sentences;
-use super::scoring::find_way_embed;
 
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
@@ -130,10 +129,10 @@ pub(crate) fn run_diagnostic(
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
 ) -> Option<Vec<DiagRow>> {
-    let bin = find_way_embed()?;
+    let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
-    let model = xdg.join("minilm-l6-v2.gguf");
+    let model = xdg.join(crate::paths::EN_MODEL);
     if !corpus.is_file() || !model.is_file() {
         return None;
     }
@@ -169,10 +168,10 @@ pub(crate) fn run_diagnostic(
 /// caller then falls back to the single-vector semantic gate.
 pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Verdicts> {
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
-    let bin = find_way_embed()?;
+    let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
     let corpus = xdg.join("ways-corpus-en.jsonl");
-    let model = xdg.join("minilm-l6-v2.gguf");
+    let model = xdg.join(crate::paths::EN_MODEL);
     if !corpus.is_file() || !model.is_file() {
         if dbg { eprintln!("LI: corpus/model missing → fallback"); }
         return None;

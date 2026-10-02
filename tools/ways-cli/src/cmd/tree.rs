@@ -6,7 +6,7 @@ use walkdir::WalkDir;
 use agent_fmt::{Table, Align};
 
 pub fn run(path: String, jaccard: bool) -> Result<()> {
-    let ways_root = home_dir().join(".claude/hooks/ways");
+    let ways_root = crate::paths::projected_ways_root();
     let tree_path = resolve_path(&path, &ways_root)?;
     let rel_root = tree_path
         .strip_prefix(&ways_root)
@@ -220,4 +220,3 @@ fn extract_threshold_from_content(content: &str) -> Option<f64> {
     crate::frontmatter::field_in(content, "threshold")?.parse().ok()
 }
 
-use crate::util::home_dir;

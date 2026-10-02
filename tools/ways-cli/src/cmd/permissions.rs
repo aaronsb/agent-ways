@@ -8,8 +8,8 @@ use crate::util::home_dir;
 
 /// Run `ways permissions audit`.
 pub fn audit(global: bool) -> Result<()> {
-    let ways_dir = home_dir().join(".claude/hooks/ways");
-    let settings_path = home_dir().join(".claude/settings.json");
+    let ways_dir = crate::paths::projected_ways_root();
+    let settings_path = crate::paths::settings_json();
 
     // Determine scan dirs (same logic as lint)
     let mut scan_dirs = vec![ways_dir.clone()];

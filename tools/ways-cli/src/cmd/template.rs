@@ -7,7 +7,6 @@
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
-use crate::util::home_dir;
 
 pub fn run(
     path: String,
@@ -18,12 +17,12 @@ pub fn run(
 ) -> Result<()> {
     // Resolve the ways root
     let ways_root = if global {
-        home_dir().join(".claude/hooks/ways")
+        crate::paths::projected_ways_root()
     } else {
         // Try project-local first
         match crate::util::detect_project_dir() {
             Some(proj) => PathBuf::from(proj).join(".claude/ways"),
-            None => home_dir().join(".claude/hooks/ways"),
+            None => crate::paths::projected_ways_root(),
         }
     };
 

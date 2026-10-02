@@ -32,7 +32,7 @@ pub fn run(
 
     // The shipped ways: the projection the scanner reads, or the app itself
     // before the projection exists (a fresh install builds the corpus first).
-    let projected = home_dir().join(".claude/hooks/ways");
+    let projected = crate::paths::projected_ways_root();
     let default_core = if projected.is_dir() { projected } else { crate::paths::core_ways_root() };
     let global_dir = ways_dir.as_ref().map(PathBuf::from).unwrap_or_else(|| default_core.clone());
 
@@ -71,7 +71,7 @@ pub fn run(
         if manifest.is_file() && corpus.is_file() {
             let project_dir = std::env::var("CLAUDE_PROJECT_DIR").unwrap_or_default();
             vlog("staleness check (walks core + user + project ways)");
-            let bin = resolve_embed_bin(&engine_dir);
+            let bin = crate::paths::way_embed_in(&engine_dir);
             let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
             if !is_stale(&manifest, &global_dir, &project_dir)
                 && !retry_due(&manifest, &engine, unix_now())
@@ -231,7 +231,7 @@ pub fn run(
     drop(w);
 
     // A failed pass never replaces an embedded corpus (#645).
-    let bin = resolve_embed_bin(&engine_dir);
+    let bin = crate::paths::way_embed_in(&engine_dir);
     let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
     let generate = |bin: &Path, corpus: &Path, model: &Path, what: &str| {
         run_generate(bin, corpus, model, what, verbose, &vlog)
@@ -510,8 +510,8 @@ fn engine_fingerprint(bin: Option<&Path>, engine_dir: &Path) -> String {
     };
     [
         bin.map(describe).unwrap_or_else(|| "way-embed:absent".to_string()),
-        describe(&engine_dir.join("minilm-l6-v2.gguf")),
-        describe(&engine_dir.join("multilingual-minilm-l12-v2-q8.gguf")),
+        describe(&engine_dir.join(crate::paths::EN_MODEL)),
+        describe(&engine_dir.join(crate::paths::MULTI_MODEL)),
     ]
     .join("|")
 }
@@ -789,20 +789,6 @@ fn scan_ways_dir(
     Ok(count)
 }
 
-/// Resolve the `way-embed` binary: prefer the engine dir, then the projected
-/// `~/.claude/bin`. `auto_embed` and `fit_calibration` both need it and must
-/// resolve it identically — on a projection install the binary lives in
-/// `~/.claude/bin`, not the engine/cache dir, so a resolver that only checks the
-/// engine dir silently no-ops (this is how per-model calibration went missing).
-fn resolve_embed_bin(engine_dir: &Path) -> Option<PathBuf> {
-    [
-        engine_dir.join("way-embed"),
-        home_dir().join(".claude/bin/way-embed"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file())
-}
-
 /// One `way-embed generate` pass: (binary, corpus, model, pass name) to the
 /// elapsed time, or the reason it failed.
 type GeneratePass<'a> = dyn Fn(&Path, &Path, &Path, &str) -> std::result::Result<Instant, String> + 'a;
@@ -831,8 +817,8 @@ fn auto_embed(
     };
     vlog(&format!("way-embed: {}", bin.display()));
 
-    let en_model = engine_dir.join("minilm-l6-v2.gguf");
-    let multi_model = engine_dir.join("multilingual-minilm-l12-v2-q8.gguf");
+    let en_model = engine_dir.join(crate::paths::EN_MODEL);
+    let multi_model = engine_dir.join(crate::paths::MULTI_MODEL);
     vlog(&format!(
         "en model:    {} ({})",
         en_model.display(),
@@ -1045,7 +1031,7 @@ fn fit_calibration(
 
     vlog("fitting calibration (ADR-156)");
 
-    let bin = match resolve_embed_bin(engine_dir) {
+    let bin = match crate::paths::way_embed_in(engine_dir) {
         Some(b) => b,
         None => {
             vlog("  no way-embed — left uncalibrated");
@@ -1138,12 +1124,12 @@ fn fit_calibration(
         Some(cal)
     };
 
-    let en = fit_lane("minilm-l6-v2.gguf", "en");
+    let en = fit_lane(crate::paths::EN_MODEL, "en");
     // The multi lane is fit from the ENGLISH probe corpus and aliases. That is
     // correct for the English target; in localized mode the multi model scores
     // translated text, so this calibration is approximate until a localized
     // probe corpus ships (ADR-156 names multilingual calibration a follow-on).
-    let multi = fit_lane("multilingual-minilm-l12-v2-q8.gguf", "multi");
+    let multi = fit_lane(crate::paths::MULTI_MODEL, "multi");
     Calibration { en, multi }
 }
 
@@ -1308,10 +1294,10 @@ mod tests {
         let engine = dir.join("engine");
         std::fs::create_dir_all(&engine).unwrap();
         if en_model {
-            std::fs::write(engine.join("minilm-l6-v2.gguf"), "m").unwrap();
+            std::fs::write(engine.join(crate::paths::EN_MODEL), "m").unwrap();
         }
         if multi_model {
-            std::fs::write(engine.join("multilingual-minilm-l12-v2-q8.gguf"), "m").unwrap();
+            std::fs::write(engine.join(crate::paths::MULTI_MODEL), "m").unwrap();
         }
         let staged = Staged::new(&dir);
         std::fs::write(

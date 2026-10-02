@@ -3,14 +3,14 @@
 
 use anyhow::Result;
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn run(json_output: bool) -> Result<()> {
     let xdg_cache = crate::paths::corpus_dir();
-    let ways_dir = home_dir().join(".claude/hooks/ways");
+    let ways_dir = crate::paths::projected_ways_root();
     // Engine detection
-    let way_embed = find_way_embed(&xdg_cache);
-    let model_path = xdg_cache.join("minilm-l6-v2.gguf");
+    let way_embed = crate::paths::way_embed_in(&xdg_cache);
+    let model_path = xdg_cache.join(crate::paths::EN_MODEL);
     let corpus_path = xdg_cache.join("ways-corpus.jsonl");
     let manifest_path = xdg_cache.join("embed-manifest.json");
 
@@ -210,7 +210,7 @@ pub fn run(json_output: bool) -> Result<()> {
         // Dual corpus status
         let en_corpus = xdg_cache.join("ways-corpus-en.jsonl");
         let multi_corpus = xdg_cache.join("ways-corpus-multi.jsonl");
-        let multi_model_path = xdg_cache.join("multilingual-minilm-l12-v2-q8.gguf");
+        let multi_model_path = xdg_cache.join(crate::paths::MULTI_MODEL);
         let en_count = if en_corpus.is_file() { count_lines(&en_corpus) } else { 0 };
         let multi_count = if multi_corpus.is_file() { count_lines(&multi_corpus) } else { 0 };
         if en_count > 0 || multi_count > 0 {
@@ -273,18 +273,6 @@ pub fn run(json_output: bool) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn find_way_embed(xdg_cache: &Path) -> Option<PathBuf> {
-    let cache = xdg_cache.join("way-embed");
-    if cache.is_file() {
-        return Some(cache);
-    }
-    let bin = home_dir().join(".claude/bin/way-embed");
-    if bin.is_file() {
-        return Some(bin);
-    }
-    None
 }
 
 fn count_ways(dir: &Path) -> (usize, usize) {

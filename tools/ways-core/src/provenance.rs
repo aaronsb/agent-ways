@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::frontmatter::opens_with_fence;
-use crate::util::home_dir;
 
 /// The typed compliance-claim schema stored in a `provenance.yaml` sidecar
 /// (ADR-110, ADR-151 §3). The manifest builder above stays `Value`-based for the
@@ -122,7 +121,7 @@ impl Claim {
 pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
     let root = ways_dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude/hooks/ways"));
+        .unwrap_or_else(crate::paths::projected_ways_root);
 
     let (ways, with_prov, without_prov) = scan_provenance(&root)?;
 

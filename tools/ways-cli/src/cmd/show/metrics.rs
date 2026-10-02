@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::session;
-use super::helpers::home_dir;
 
 /// Walk up the way ID path to compute tree depth, parent, and epoch distance.
 pub(crate) fn compute_tree_metrics(
@@ -46,7 +45,7 @@ pub(crate) fn count_siblings(way_id: &str, project_dir: &str, session_id: &str) 
 
     let bases = [
         PathBuf::from(project_dir).join(".claude/ways"),
-        home_dir().join(".claude/hooks/ways"),
+        crate::paths::projected_ways_root(),
     ];
 
     for base in &bases {

@@ -586,7 +586,7 @@ pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, boo
         return Some((f, false));
     }
 
-    let global_dir = home_dir().join(format!(".claude/hooks/ways/{way_id}"));
+    let global_dir = crate::paths::projected_ways_root().join(way_id);
     if let Some(f) = find_way_in_dir(&global_dir) {
         return Some((f, false));
     }
@@ -606,7 +606,7 @@ pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, b
         return Some((f, false));
     }
 
-    let global_dir = home_dir().join(format!(".claude/hooks/ways/{way_id}"));
+    let global_dir = crate::paths::projected_ways_root().join(way_id);
     if let Some(f) = find_check_in_dir(&global_dir) {
         return Some((f, false));
     }
@@ -747,7 +747,6 @@ fn read_u64_path(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-use crate::util::home_dir;
 
 // Tests for the ADR-123 engagement cluster (classify_outcome,
 // load_engagement_for_tick, FirstFire → ReFire → Suppressed) live in

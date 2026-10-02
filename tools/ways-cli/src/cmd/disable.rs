@@ -112,7 +112,7 @@ fn way_exists(name: &str) -> bool {
     if project.is_dir() {
         return true;
     }
-    let global = crate::util::home_dir().join(".claude/hooks/ways").join(name);
+    let global = crate::paths::projected_ways_root().join(name);
     global.is_dir()
 }
 

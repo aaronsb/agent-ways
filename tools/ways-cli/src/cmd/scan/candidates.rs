@@ -73,7 +73,7 @@ impl WayRoots {
         Self {
             project: PathBuf::from(project_dir).join(".claude/ways"),
             user: crate::paths::user_ways_root(),
-            core: super::scoring::home_dir().join(".claude/hooks/ways"),
+            core: crate::paths::projected_ways_root(),
         }
     }
 
