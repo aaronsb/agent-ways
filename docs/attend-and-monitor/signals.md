@@ -136,17 +136,17 @@ A second conduit delivers the same messages at the turn boundary. A Stop hook ru
 Enrollment is durable. A stale heartbeat does not undo it, and neither does `cleanup_stale` pruning a channel membership after a long turn. Only an explicit opt-out ends it:
 
 - Leaving the last channel, or activating a scene that leaves none, withdraws the join. A session that also ran `attend run` stays enrolled.
-- `attend scene private` withdraws the join and, once no `attend run` holds the session, the run as well.
+- `attend scene private` withdraws the join and the run. When an `attend run` holds the session at the time, the record notes the opt-out, and the run's enrollment ends once no run holds the session. Enrolling again (`attend run`, `attend join`) clears the note.
 
 For a session that is not enrolled the drain is a silent no-op. It delivers nothing, including a message sent to its project with `--to`, and writes nothing, not even the heartbeat, so the session does not look alive to peers or to `/purge`. Its messages stay on disk.
 
-**Cold start.** The first scan after enrollment has no seen-set. The drain and the peers sensor apply one rule, `attend_state::cold_start`:
+**Cold start.** A session is cold until a conduit has applied the cold-start rule for it, which it records as `baselined: true` in the session's state file. A state file without that field is still cold: the peers sensor checkpoints on its first poll, before its first message scan, and a drain in that window must still apply the rule. The drain and the peers sensor apply one rule, `attend_state::cold_start`:
 
 - A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
 - An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
 - Anything else is marked seen without being shown. The first delivery carries one line counting it, `N earlier messages not shown; attend inbox`. The drain sends that line alone when there is nothing else to deliver.
 
-**Session id changes.** Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick and moves the session's state to the new id: the enrollment record, the seen-set, the registry slot with its instance name, and channel memberships. It then restarts itself under the new id.
+**Session id changes.** Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick. It first shows any message line its disclosure cooldown still holds, then checkpoints and restarts itself. The restarted process moves the session's state to the new id before it reads any of it: the enrollment record, the seen-set, the registry slot with its instance name, channel memberships and the last-inbound record. A session enrolled only by a join has no run to do this. The enrollment record names the Claude Code process (its pid and start time), so the drain under the new id finds the record left under the old id for the same process and moves the state itself.
 
 **Instance registry.** The registry slot that gives a session its instance name (`-alpha`, `-beta`) is not enrollment, and it is sticky. A slot outlives `attend run`, and is removed only when another session registers in the same project after the slot has been idle for 7 days. A session resumed after that gap gets a new name; one that never stopped keeps its name.
 

@@ -246,3 +246,10 @@ Appended after acceptance; nothing above is changed. #720 and the review of PR #
   - `#open` and channel messages older than the 120-second window are baselined as before.
   - Whatever is held back is announced with the first delivery, as `N earlier messages not shown; attend inbox`. A cold start no longer consumes a message with nothing shown.
 - **A session id that changes under a running `attend run`** (`/clear`) is followed. The run moves the seen-set, the enrollment record, the registry slot and channel memberships to the new id, then restarts under it.
+
+## Addendum, 2026-10-02: warm means baselined
+
+Appended after acceptance; nothing above is changed. The re-review of PR #725 found that the peers sensor checkpoints on its first poll, before it scans messages, so a drain in that window treated the session as warm and skipped the cold-start rule.
+
+- **A session is warm only once a conduit applied the rule.** The state file now carries `baselined: true`, written by the drain's baseline or by the sensor's checkpoint after its first message scan. A file without it is cold.
+- **Deliver-then-record holds across an exec.** Before `attend run` re-executes, for a binary reload or a session-id change, it shows every message line its disclosure cooldown still holds. Nothing it has marked seen goes unshown.
