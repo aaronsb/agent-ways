@@ -6,7 +6,7 @@
 #   ways update | ways reconcile | ways uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: setup link relink update-binaries clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild ways-agent ways-agent-rebuild attend attend-rebuild attend-chat attend-chat-rebuild way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: setup link relink install update sync-to-home update-binaries clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild ways-agent ways-agent-rebuild attend attend-rebuild attend-chat attend-chat-rebuild way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -149,6 +149,23 @@ relink:
 			|| echo "  ⚠ $$b not installed; run 'make $$b' in $(CURDIR) to retry."; \
 	done
 	@$(MAKE) -s --no-print-directory link
+
+# transition: removed by #717 (ADR-506)
+# Retired targets, kept so an in-flight pre-#715 `make update` finishes: make has
+# already parsed the old Makefile, so its recipe still runs `$(MAKE) install`
+# against this file after `scripts/update.sh` pulls it.
+install: link
+	@echo "note: 'make install' is retired; use 'ways update'."
+
+# transition: removed by #717 (ADR-506)
+update:
+	@echo "note: 'make update' is retired; running 'ways update'."
+	@./bin/ways update
+
+# transition: removed by #717 (ADR-506)
+sync-to-home:
+	@echo "'make sync-to-home' was removed; see docs/migration-1.0.md." >&2
+	@exit 1
 
 # Force-rebuild every binary `ways update` is responsible for refreshing.
 update-binaries: ways-rebuild ways-audit-rebuild ways-mcp-rebuild ways-agent-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
@@ -413,11 +430,9 @@ test-hooks:
 
 test-unit:
 	@echo "Running Rust unit tests..."
-	@cargo test --manifest-path tools/ways-cli/Cargo.toml --bin ways --quiet
-	@# The theme engine, and the raw-colour lint over every workspace source (ADR-504 §6).
-	@cargo test --manifest-path tools/Cargo.toml -p agent-theme --quiet
-	@# Piped output carries no escapes; hooks inject `ways context` into model context.
-	@cargo test --manifest-path tools/ways-cli/Cargo.toml --test piped_output --quiet
+	@# Every crate, including agent-theme (and its raw-colour lint over the workspace, ADR-504 §6)
+	@# and ways-cli's piped_output test.
+	@cargo test --manifest-path tools/Cargo.toml --workspace --quiet
 	@echo "Unit tests passed."
 
 test-sim: ways

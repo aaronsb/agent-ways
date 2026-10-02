@@ -1,0 +1,27 @@
+name: Test
+
+# One job that runs every crate's tests. The per-binary build-*.yml workflows
+# test only their own crate, so a change confined to a library crate
+# (attend-groups, agent-fmt, sensor-peers) ran no tests at all.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    paths:
+      - 'tools/**'
+      - '.github/workflows/test.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: cargo test --workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: test
+        run: cargo test --manifest-path tools/Cargo.toml --workspace
