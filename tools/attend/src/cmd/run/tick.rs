@@ -169,27 +169,25 @@ pub(super) fn maybe_self_reload(
         env!("CARGO_PKG_VERSION"),
         env!("ATTEND_COMMIT")
     );
+    reexec("ATTEND_RELOADED_FROM", &prev_version);
+}
 
-    // exec self: replace process on Unix, spawn+exit on Windows
+/// Re-execute this `attend run` with `var=value` set, so the new process
+/// can say why it started. Replaces the process on Unix; spawns and exits
+/// on Windows. Returns only on failure, which is logged.
+pub(super) fn reexec(var: &str, value: &str) {
     let args: Vec<String> = std::env::args().collect();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&args[0])
-            .args(&args[1..])
-            .env("ATTEND_RELOADED_FROM", &prev_version)
-            .exec();
+        let err = std::process::Command::new(&args[0]).args(&args[1..]).env(var, value).exec();
         // exec() only returns on failure
-        emit::log(&format!("self-reload failed: {}", err));
+        emit::log(&format!("re-exec failed: {}", err));
     }
     #[cfg(not(unix))]
-    match std::process::Command::new(&args[0])
-        .args(&args[1..])
-        .env("ATTEND_RELOADED_FROM", &prev_version)
-        .spawn()
-    {
+    match std::process::Command::new(&args[0]).args(&args[1..]).env(var, value).spawn() {
         Ok(_) => std::process::exit(0),
-        Err(err) => emit::log(&format!("self-reload failed: {}", err)),
+        Err(err) => emit::log(&format!("re-exec failed: {}", err)),
     }
 }
 

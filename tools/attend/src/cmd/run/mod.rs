@@ -13,6 +13,7 @@
 //! the outer loop that calls `tick::tick_iteration` once per beat.
 
 mod governor;
+mod rekey;
 mod tick;
 
 use std::collections::BinaryHeap;
@@ -263,6 +264,15 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     let heartbeat_id = session_id.clone();
 
     loop {
+        // `/clear` gives this session a new id under us. Checked every
+        // tick, not at the registry interval, so the drain under the new
+        // id finds it enrolled before the next turn ends.
+        if ident.resolved() {
+            if let Some(new_id) = rekey::changed_id(&heartbeat_id) {
+                rekey::follow(&heartbeat_id, &new_id, &focus.working_dir, &slots, &state_store);
+            }
+        }
+
         // Heartbeat — touched at the top of every tick so a single
         // skipped poll cannot evict this session from peer liveness
         // checks (attend_groups::member_alive, attend-chat known_identities
@@ -332,6 +342,11 @@ fn print_startup_banner(enabled_names: &[String], focus_desc: &str) {
     // subprocesses attend itself spawns.
     let reloaded_from = std::env::var("ATTEND_RELOADED_FROM").ok();
     std::env::remove_var("ATTEND_RELOADED_FROM");
+    if let Ok(moved) = std::env::var(rekey::MOVED_FROM) {
+        std::env::remove_var(rekey::MOVED_FROM);
+        println!("[attend] session id changed ({moved}): registry slot, enrollment and seen-set carried over");
+        return;
+    }
     let stamp_path = signals_base().join("_last_banner");
     let prev_fingerprint = std::fs::read_to_string(&stamp_path).unwrap_or_default();
     if let Some(prev_version) = reloaded_from {

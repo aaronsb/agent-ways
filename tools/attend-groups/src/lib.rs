@@ -219,6 +219,23 @@ impl Groups {
         Ok(())
     }
 
+    /// Move every membership of `old` to `new`, for a member whose id
+    /// changed under it (Claude Code's `/clear` gives a session a new id).
+    pub fn rename_member(&self, old: &str, new: &str) {
+        let mut state = self.load_state();
+        let mut changed = false;
+        for entry in state.values_mut() {
+            if entry.members.iter().any(|m| m == old) {
+                entry.members.retain(|m| m != old && m != new);
+                entry.members.push(new.to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_state(&state);
+        }
+    }
+
     /// Leave a named group.
     pub fn leave(&self, name: &str) -> Result<(), String> {
         let mut state = self.load_state();
@@ -840,6 +857,18 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
         g.cleanup_stale_with(|_| true, std::time::Duration::ZERO);
         assert!(base.join("@deploy").is_dir());
+    }
+
+    #[test]
+    fn rename_member_moves_every_membership() {
+        let base = tempdir_like();
+        Groups::new(&base, "old").join("a", false).unwrap();
+        Groups::new(&base, "old").join("b", false).unwrap();
+        Groups::new(&base, "other").join("b", false).unwrap();
+        Groups::new(&base, "x").rename_member("old", "new");
+        assert_eq!(Groups::new(&base, "new").joined_group_names().len(), 2);
+        assert!(Groups::new(&base, "old").joined_group_names().is_empty());
+        assert_eq!(Groups::new(&base, "x").members("b").unwrap().len(), 2);
     }
 
     #[test]
