@@ -141,7 +141,7 @@ fn render_why_detail(way_id: &str, entry: Option<&WhyEntry>, width: usize) -> St
         let _ = writeln!(out);
         let _ = writeln!(out, "{}", paint(Role::Muted, "── way ─────────────"));
         // Render the authored markdown to ANSI rather than dumping raw `#`/`**`/`` ` ``
-        // symbols; the compositor's visible_len ignores the added SGR (super::markdown).
+        // symbols; agent_fmt::visible_len ignores the added SGR (super::markdown).
         for line in super::markdown::render_markdown(&body, width) {
             let _ = writeln!(out, "{line}");
         }
@@ -211,7 +211,7 @@ pub(super) fn render_why(player: &mut Player) -> String {
                 let raw = format!("{bullet} e{:>ew$} {}", w.epoch_fired, w.id, ew = epoch_w);
                 left_lines.push(format!(
                     "  {}",
-                    paint(Role::Selection, compositor::fit_visible(&raw, left_w.saturating_sub(2)))
+                    paint(Role::Selection, agent_fmt::fit_visible(&raw, left_w.saturating_sub(2)))
                 ));
             } else {
                 // Dim the epoch tag so the way id stays prominent.
@@ -259,7 +259,7 @@ pub(super) fn render_why(player: &mut Player) -> String {
     // panels are named the way the Timeline's columns are.
     let labels = format!(
         "{}{}{}",
-        paint(BOLD, compositor::pad_visible("  Way · epoch", left_w)),
+        paint(BOLD, agent_fmt::pad_visible("  Way · epoch", left_w)),
         " ".repeat(gap),
         paint(BOLD, "Why it fired"),
     );

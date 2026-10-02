@@ -145,8 +145,8 @@ pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
         } else {
             "< confirm"
         };
-        let id = truncate_col(&r.id, 34);
-        let chunk = truncate_col(&r.won_chunk, 46);
+        let id = agent_fmt::truncate_visible(&r.id, 34);
+        let chunk = agent_fmt::truncate_visible(&r.won_chunk, 46);
         println!(
             "  {id:<34}  {:>5.3}  {:>5.3}  {confirm:>7}  {outcome:<8}  {chunk}",
             r.peak, r.share
@@ -158,15 +158,6 @@ pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
     println!("(ranked by share, the share-gate quantity; peak is the way's strongest single-chunk cosine)");
     println!();
     Ok(())
-}
-
-/// Truncate a display column on a char boundary, appending `…` when cut.
-fn truncate_col(s: &str, width: usize) -> String {
-    if s.chars().count() <= width {
-        return s.to_string();
-    }
-    let head: String = s.chars().take(width.saturating_sub(1)).collect();
-    format!("{head}…")
 }
 
 fn load_descriptions(corpus_path: &str) -> HashMap<String, String> {

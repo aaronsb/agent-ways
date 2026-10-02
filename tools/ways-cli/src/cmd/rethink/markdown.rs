@@ -127,7 +127,7 @@ fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
 /// become several lines, but the grid stays within `width` and the dividers stay
 /// aligned. When the table already fits, columns keep their natural widths.
 fn render_table(lines: &mut Vec<String>, rows: &[(bool, Vec<String>)], width: usize) {
-    use crate::cmd::compositor::{pad_visible, visible_len};
+    use agent_fmt::{pad_visible, visible_len};
 
     const MIN_COL: usize = 4;
     let ncols = rows.iter().map(|(_, r)| r.len()).max().unwrap_or(0);
@@ -374,7 +374,7 @@ pub(super) fn render_markdown(body: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::compositor::visible_len;
+    use agent_fmt::visible_len;
 
     /// Render at a generous width so non-table content is unaffected, with
     /// the terminal palette pinned so the run's environment cannot strip SGR.
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn styled_width_matches_plain_text() {
-        // The compositor measures with visible_len; styling must not change width.
+        // The compositor measures with agent_fmt::visible_len; styling must not change width.
         let out = render("**bold** text");
         assert_eq!(visible_len(&out[0]), "bold text".len());
     }

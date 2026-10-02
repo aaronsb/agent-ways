@@ -222,7 +222,7 @@ fn key(cap: &str, label: &str) -> String {
 /// back to a single-space join when the content is already wider than `width`.
 #[cfg(feature = "tui")]
 fn justify(segments: &[String], width: usize) -> String {
-    let content: usize = segments.iter().map(|s| compositor::visible_len(s)).sum();
+    let content: usize = segments.iter().map(|s| agent_fmt::visible_len(s)).sum();
     let gaps = segments.len().saturating_sub(1);
     if gaps == 0 || content + gaps >= width {
         return segments.join(" ");
@@ -317,7 +317,7 @@ pub(super) fn fit_to_terminal(output: &str, width: usize, height: usize) -> Stri
         if line_count >= max_lines {
             break;
         }
-        result.push_str(&crate::cmd::compositor::truncate_visible(line, width));
+        result.push_str(&agent_fmt::clip_visible(line, width));
         result.push_str("\r\n");
     }
     result
@@ -331,7 +331,7 @@ mod tests {
     fn justify_spreads_segments_to_full_width() {
         let segs = vec!["a".to_string(), "bb".to_string(), "c".to_string()];
         let line = justify(&segs, 20);
-        assert_eq!(compositor::visible_len(&line), 20, "fills the full width");
+        assert_eq!(agent_fmt::visible_len(&line), 20, "fills the full width");
         assert!(line.starts_with('a'), "first segment hugs the left");
         assert!(line.ends_with('c'), "last segment hugs the right");
         // Content wider than the width → single-space join, no panic.

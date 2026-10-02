@@ -10,87 +10,8 @@
 //! need text selection or resizable/mouse panes, the ADR's escape hatch to ratatui
 //! applies; short of that, this stays.
 //!
-//! It owns the canonical ANSI-visible-width primitives ([`visible_len`],
-//! [`truncate_visible`], [`pad_visible`]): `render.rs`'s row padding and
-//! `rethink.rs`'s `fit_to_terminal` both call these instead of the local copies
-//! they used to keep. Width is measured in `char`s, ignoring SGR escapes — the same
-//! grain those callers already use; East-Asian double-width and combining marks are
-//! not accounted for (that would need a new dependency the lean binary declines).
-
-// ── ANSI-visible-width primitives ─────────────────────────────
-
-/// Visible length of `s` in `char`s, ignoring ANSI escape sequences (`\x1b[…X`,
-/// terminated by an ASCII letter — covers the SGR color codes our panels use).
-pub fn visible_len(s: &str) -> usize {
-    let mut len = 0;
-    let mut in_escape = false;
-    for c in s.chars() {
-        if in_escape {
-            if c.is_ascii_alphabetic() {
-                in_escape = false;
-            }
-        } else if c == '\x1b' {
-            in_escape = true;
-        } else {
-            len += 1;
-        }
-    }
-    len
-}
-
-/// Truncate `s` to at most `max` **visible** chars, preserving ANSI escapes
-/// (escape bytes don't count toward the budget). If truncation cuts the string
-/// mid-style, a reset (`\x1b[0m`) is appended so styling can't bleed past the cut.
-#[cfg(feature = "tui")]
-pub fn truncate_visible(s: &str, max: usize) -> String {
-    let mut result = String::new();
-    let mut visible = 0;
-    let mut in_escape = false;
-    let mut truncated = false;
-
-    for c in s.chars() {
-        if in_escape {
-            result.push(c);
-            if c.is_ascii_alphabetic() {
-                in_escape = false;
-            }
-            continue;
-        }
-        if c == '\x1b' {
-            in_escape = true;
-            result.push(c);
-            continue;
-        }
-        if visible >= max {
-            truncated = true;
-            break;
-        }
-        result.push(c);
-        visible += 1;
-    }
-    if truncated && result.contains('\x1b') {
-        result.push_str(agent_theme::RESET);
-    }
-    result
-}
-
-/// Right-pad `s` with spaces to a fixed visible `width`. Never truncates — a line
-/// already wider than `width` is returned unchanged (use [`truncate_visible`]
-/// first if a hard cap is needed).
-pub fn pad_visible(s: &str, width: usize) -> String {
-    let vis = visible_len(s);
-    if vis >= width {
-        s.to_string()
-    } else {
-        format!("{s}{}", " ".repeat(width - vis))
-    }
-}
-
-/// Fit `s` to exactly `width` visible chars: truncate if longer, pad if shorter.
-#[cfg(feature = "tui")]
-pub fn fit_visible(s: &str, width: usize) -> String {
-    pad_visible(&truncate_visible(s, width), width)
-}
+//! Widths are measured by the ANSI-visible-width primitives in `agent_fmt`
+//! (`visible_len`, `clip_visible`, `pad_visible`, `fit_visible`).
 
 // ── Panel ─────────────────────────────────────────────────────
 
@@ -108,7 +29,7 @@ pub struct Panel {
 impl Panel {
     /// A panel from raw lines; `width` is the widest line's visible length.
     pub fn from_lines(lines: Vec<String>) -> Self {
-        let width = lines.iter().map(|l| visible_len(l)).max().unwrap_or(0);
+        let width = lines.iter().map(|l| agent_fmt::visible_len(l)).max().unwrap_or(0);
         Panel { lines, width }
     }
 
@@ -175,7 +96,7 @@ pub fn hjoin(panels: &[Panel], gap: usize) -> Vec<String> {
                 .iter()
                 .map(|p| {
                     let line = p.lines.get(r).map(String::as_str).unwrap_or("");
-                    fit_visible(line, p.width)
+                    agent_fmt::fit_visible(line, p.width)
                 })
                 .collect::<Vec<_>>()
                 .join(&spacer)
@@ -213,7 +134,7 @@ pub fn tab_bar(tabs: &[&str], active: usize) -> String {
 mod tests {
     use super::*;
 
-    use agent_theme::{Color, ColorDepth, Painter, Role, RESET as RST};
+    use agent_theme::{ColorDepth, Painter, Role};
 
     fn pinned() -> Painter {
         Painter::terminal(ColorDepth::TrueColor)
@@ -221,38 +142,6 @@ mod tests {
 
     fn red(s: &str) -> String {
         pinned().paint(Role::Err, s)
-    }
-
-    #[test]
-    fn visible_len_ignores_ansi() {
-        assert_eq!(visible_len("abc"), 3);
-        assert_eq!(visible_len(&red("abc")), 3);
-        assert_eq!(visible_len(""), 0);
-        // Truecolor SGR (ends in 'm') is fully skipped.
-        assert_eq!(visible_len(&pinned().paint(Color::rgb(99, 179, 237), "●")), 1);
-    }
-
-    #[test]
-    fn truncate_visible_counts_only_visible_and_seals_style() {
-        assert_eq!(truncate_visible("abcdef", 3), "abc");
-        assert_eq!(truncate_visible("abc", 10), "abc"); // shorter → unchanged
-        // Styled content truncated mid-style gets a reset appended.
-        let t = truncate_visible(&red("abcdef"), 3);
-        assert_eq!(visible_len(&t), 3);
-        assert!(t.ends_with(RST), "truncation must seal the style: {t:?}");
-        // Not truncated → no extra reset beyond the original.
-        let whole = truncate_visible(&red("ab"), 5);
-        assert_eq!(whole, red("ab"));
-    }
-
-    #[test]
-    fn pad_and_fit_reach_exact_visible_width() {
-        assert_eq!(pad_visible("ab", 5), "ab   ");
-        assert_eq!(visible_len(&pad_visible(&red("ab"), 5)), 5);
-        assert_eq!(pad_visible("abcde", 3), "abcde"); // wider → unchanged
-        // fit both truncates and pads to land exactly on width.
-        assert_eq!(visible_len(&fit_visible("abcdef", 4)), 4);
-        assert_eq!(visible_len(&fit_visible("ab", 4)), 4);
     }
 
     #[test]
@@ -326,7 +215,7 @@ mod tests {
         let right = Panel::from_lines(vec!["z".into()]);
         let rows = hjoin(&[left, right], 2);
         // Visible width: 2 (left) + 2 (gap) + 1 (right) = 5.
-        assert_eq!(visible_len(&rows[0]), 5);
+        assert_eq!(agent_fmt::visible_len(&rows[0]), 5);
     }
 
     #[test]

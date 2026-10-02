@@ -12,7 +12,8 @@
 //! from pieces gets past it: `"\x1b"` followed by `"["`, a `'\x1b'` char with
 //! `[` pushed after it, `char::from(27)`, or the 8-bit CSI `\u{9b}`. The
 //! `'\x1b'` chars in the tree today are ANSI parsers that measure or strip
-//! escapes (compositor, table, markdown), which is legitimate.
+//! escapes (agent-fmt's width module, markdown) and a width test's erase-line
+//! fixture, which is legitimate.
 
 use std::path::{Path, PathBuf};
 
