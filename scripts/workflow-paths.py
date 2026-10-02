@@ -2,11 +2,12 @@
 """Print or check the `paths:` filter of each Rust build-<component>.yml.
 
 A component's workflow must run when the component's crate changes, when any
-workspace crate it depends on changes (directly or transitively, any
-dependency kind, since the workflow also runs the crate's tests), when the
-workspace manifest or lock changes, and when its workflow or the shared
-reusable-build.yml changes. The crate set comes from `cargo metadata`, so the
-filter follows the Cargo.toml files instead of being kept by hand.
+crate it depends on by path changes (directly or transitively, any dependency
+kind, since the workflow also runs the crate's tests), when the workspace
+manifest or lock changes, and when its workflow or the shared
+reusable-build.yml changes. The crate set comes from the `path` dependencies
+that `cargo metadata --no-deps` reports, so the filter follows the Cargo.toml
+files instead of being kept by hand, and the walk needs no registry access.
 
 Usage:
   scripts/workflow-paths.py            print the expected paths per component
@@ -30,27 +31,24 @@ def suite_bins():
 def metadata():
     out = subprocess.run(
         ["cargo", "metadata", "--manifest-path", os.path.join(TOOLS, "Cargo.toml"),
-         "--format-version", "1", "--offline"],
+         "--format-version", "1", "--no-deps"],
         check=True, capture_output=True, text=True).stdout
     return json.loads(out)
 
 
 def expected_paths(meta, component):
-    members = set(meta["workspace_members"])
-    by_id = {p["id"]: p for p in meta["packages"]}
-    by_name = {by_id[m]["name"]: m for m in members}
-    deps = {n["id"]: [d["pkg"] for d in n["deps"] if d["pkg"] in members]
-            for n in meta["resolve"]["nodes"] if n["id"] in members}
-    seen, todo = set(), [by_name[component]]
+    by_dir = {os.path.dirname(p["manifest_path"]): p for p in meta["packages"]}
+    by_name = {p["name"]: p for p in meta["packages"]}
+    root_dir = os.path.dirname(by_name[component]["manifest_path"])
+    seen, todo = set(), [root_dir]
     while todo:
-        pid = todo.pop()
-        if pid in seen:
+        d = todo.pop()
+        if d in seen:
             continue
-        seen.add(pid)
-        todo.extend(deps.get(pid, []))
-    root_dir = os.path.dirname(by_id[by_name[component]]["manifest_path"])
-    dirs = sorted(os.path.relpath(os.path.dirname(by_id[p]["manifest_path"]), ROOT)
-                  for p in seen if os.path.dirname(by_id[p]["manifest_path"]) != root_dir)
+        seen.add(d)
+        todo.extend(os.path.realpath(dep["path"]) for dep in by_dir[d]["dependencies"]
+                    if dep.get("path"))
+    dirs = sorted(os.path.relpath(d, ROOT) for d in seen if d != root_dir)
     own = os.path.relpath(root_dir, ROOT)
     return ([f"{own}/**"] + [f"{d}/**" for d in dirs]
             + ["tools/Cargo.toml", "tools/Cargo.lock",

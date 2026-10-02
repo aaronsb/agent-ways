@@ -46,8 +46,9 @@ check "update-binaries rebuilds every suite binary and way-embed" "$expected_reb
 check "relink installs from the same list" "$(echo $bins)" "$(sed -n 's/^SUITE_BINS := //p' <<< "$db")"
 
 # Each caller's paths: filter lists its crate's workspace dependencies.
-check "build-*.yml paths match cargo metadata" "0" \
-    "$(python3 "$ROOT/scripts/workflow-paths.py" --check >/dev/null 2>&1; echo $?)"
+paths_out=$(python3 "$ROOT/scripts/workflow-paths.py" --check 2>&1)
+check "build-*.yml paths match cargo metadata" "0" "$?"
+[[ -z $paths_out ]] || echo "$paths_out" | sed 's/^/    /'
 
 # test.yml runs this test, so it must run when a build workflow changes.
 for w in "build-*.yml" "reusable-build.yml"; do
