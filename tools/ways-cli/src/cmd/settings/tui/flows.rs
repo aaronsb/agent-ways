@@ -349,7 +349,13 @@ pub mod testkit {
         /// Claude directory under `.config`.
         pub fn home() -> Fixture {
             static N: AtomicUsize = AtomicUsize::new(0);
-            let root = std::env::temp_dir().join(format!("ways-flow-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+            // A short root, so paths in a frame are not cut short: under
+            // /tmp on Unix (macOS's temp dir is long), the temp dir elsewhere.
+            let name = format!("wf-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst));
+            #[cfg(unix)]
+            let root = PathBuf::from("/tmp").join(name);
+            #[cfg(not(unix))]
+            let root = std::env::temp_dir().join(name);
             let f = Fixture { root };
             f.dir(".claude/projects");
             f.dir(".claude-work");
@@ -450,7 +456,7 @@ mod tests {
         env.targets = vec![(off.display().to_string(), false), (format!("{}/.claude-work", fx.root.display()), true)];
         env.claude_config_dir = Some(from_env);
         let cs = claude_dirs(&env);
-        let got: Vec<_> = cs.iter().map(|c| (c.label.rsplit('/').next().unwrap(), c.badge.as_str(), c.pickable)).collect();
+        let got: Vec<_> = cs.iter().map(|c| (c.label.rsplit(['/', '\\']).next().unwrap(), c.badge.as_str(), c.pickable)).collect();
         assert_eq!(
             got,
             [("claude-off", "disabled", true), (".claude-work", "active", false), (".claude", "available", true), ("custom", "available", true), ("claude-alt", "available", true)]
@@ -525,11 +531,11 @@ mod tests {
         let bare = fx.dir("work/bare");
         for (i, p) in [&cur, &yaml, &dirs, &bare].into_iter().enumerate() {
             let slug = claude_sessions::project_slug(&p.display().to_string());
-            fx.file(&format!(".claude/projects/{slug}/s{i}.jsonl"), &format!("{{\"cwd\":\"{}\"}}\n", p.display()));
+            fx.file(&format!(".claude/projects/{slug}/s{i}.jsonl"), &format!("{}\n", serde_json::json!({ "cwd": p.display().to_string() })));
         }
         fx.file(".claude/projects/-gone-away-nowhere/s.jsonl", "{}");
         let cs = projects(&fx.env());
-        let got: Vec<_> = cs.iter().map(|c| (c.id.rsplit('/').next().unwrap(), c.badge.as_str())).collect();
+        let got: Vec<_> = cs.iter().map(|c| (c.id.rsplit(['/', '\\']).next().unwrap(), c.badge.as_str())).collect();
         assert_eq!(got[0], ("current", "none"), "the current directory leads and is not repeated");
         assert_eq!(got.len(), 4, "a project whose path is gone is dropped: {got:?}");
         for want in [("has-yaml", "ways.yaml"), ("has-dir", "ways/"), ("bare", "none")] {

@@ -176,9 +176,15 @@ fn multi_select_by_key_and_other_by_typed_path() {
     press(&mut app, &[KeyCode::Enter]);
     assert_eq!(flow(&app).picked_ids().len(), 3);
     assert!(text(&mut app).contains("extra/.claude-x"));
-    press(&mut app, &[KeyCode::Right, KeyCode::Right]);
-    let t = text(&mut app);
-    assert_eq!(t.matches("ways config target add").count(), 3, "{t}");
+    press(&mut app, &[KeyCode::Right, KeyCode::Right, KeyCode::Enter]);
+    let q = queue(&app);
+    assert_eq!(q.len(), 3, "{q:?}");
+    assert!(q.iter().all(|c| c.starts_with("ways config target add ")), "{q:?}");
+}
+
+/// A path as a queued command line carries it.
+fn arg(p: &Path) -> String {
+    agent_tui::tree::quote(&p.display().to_string())
 }
 
 #[test]
@@ -190,7 +196,7 @@ fn a_finished_flow_queues_on_its_tab_and_the_review_applies_it() {
     assert!(app.flow().is_none());
     let q = app.queued();
     assert_eq!(q.len(), 1);
-    assert_eq!(q[0].command, format!("ways config target add {}/.claude-work", fx.root.display()));
+    assert_eq!(q[0].command, format!("ways config target add {}", arg(&fx.root.join(".claude-work"))));
     assert!(q[0].confirm && q[0].key == "install.targets");
     assert_eq!((app.pending_in(3), app.pending_in(0)), (1, 0), "it counts on the install tab only");
     press(&mut app, &[KeyCode::Char('w')]);
@@ -201,7 +207,7 @@ fn a_finished_flow_queues_on_its_tab_and_the_review_applies_it() {
     assert!(t.contains("asks") && t.contains("yes: it is"), "{t}");
     press(&mut app, &[KeyCode::Char('a')]);
     agent_tui::testkit::finish_apply(&mut app);
-    assert_eq!(*ran.borrow(), [format!("ways config target add {}/.claude-work", fx.root.display())]);
+    assert_eq!(*ran.borrow(), [format!("ways config target add {}", arg(&fx.root.join(".claude-work")))]);
     assert_eq!(app.pending(), 0);
 }
 
@@ -215,7 +221,7 @@ fn a_disabled_recorded_target_is_enabled_not_added() {
     press(&mut app, &[KeyCode::Char('4'), KeyCode::Char('a'), KeyCode::Enter]);
     assert!(text(&mut app).contains("disabled"));
     press(&mut app, &[KeyCode::Char(' '), KeyCode::Right, KeyCode::Right, KeyCode::Enter]);
-    assert_eq!(queue(&app)[0], format!("ways config target enable {}", off.display()));
+    assert_eq!(queue(&app)[0], format!("ways config target enable {}", arg(&off)));
 }
 
 #[test]
@@ -269,7 +275,8 @@ fn the_project_flow_queues_init_and_the_checkbox_adds_enable() {
     assert_eq!(flow(&app).key, "ways");
     press(&mut app, &[KeyCode::Char(' '), KeyCode::Right]);
     let t = text(&mut app);
-    for want in ["ways init --project", ".claude/ways/", ".claude/.gitignore", "_template.md", "MEMORY.md"] {
+    // The MEMORY.md line names a long path; init_preview's own test checks it.
+    for want in ["ways init --project", ".claude/ways/", ".claude/.gitignore", "_template.md"] {
         assert!(t.contains(want), "{want}:\n{t}");
     }
     press(&mut app, &[KeyCode::Right]);
@@ -278,7 +285,7 @@ fn the_project_flow_queues_init_and_the_checkbox_adds_enable() {
     assert!(text(&mut app).contains("[x] also set ways.enabled"));
     press(&mut app, &[KeyCode::Enter]);
     let dir = fx.root.join("work/current");
-    assert_eq!(queue(&app), [format!("ways init --project {}", dir.display()), format!("ways settings set ways.enabled true --project {}", dir.display())]);
+    assert_eq!(queue(&app), [format!("ways init --project {}", arg(&dir)), format!("ways settings set ways.enabled true --project {}", arg(&dir))]);
     assert_eq!(app.pending_in(0), 2);
 }
 

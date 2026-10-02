@@ -11,6 +11,10 @@
 //! checks them. `SETTINGS_TUI_BIN` runs the suite against another build,
 //! such as the parent commit's, to see which tests fail before the change.
 
+// Unix only: the fixture runs the binary with a minimal Unix environment
+// and a shell-script stand-in, and the golden frames are Unix paths.
+#![cfg(unix)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
