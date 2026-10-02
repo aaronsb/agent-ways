@@ -205,20 +205,40 @@ pub fn parse_if_present(path: &Path) -> Result<Option<Frontmatter>> {
 
 /// Extract the raw YAML string between `---` delimiters.
 fn extract_frontmatter_str(content: &str) -> Option<String> {
-    let mut lines = content.lines();
+    split(content).map(|(yaml, _)| yaml)
+}
 
-    if lines.next()? != "---" {
+/// Split a way file into its frontmatter YAML and its body. The file must open
+/// with a `---` line; the YAML runs to the next `---` line and the body is
+/// everything after it, so a `---` in the body (a horizontal rule) stays in the
+/// body. Line ends may be `\n` or `\r\n`; the YAML comes back `\n`-joined.
+/// `None` when the file has no closed frontmatter block.
+pub fn split(content: &str) -> Option<(String, &str)> {
+    let mut lines = content.split_inclusive('\n');
+    let first = lines.next()?;
+    if strip_eol(first) != "---" {
         return None;
     }
-
+    let mut offset = first.len();
     let mut yaml_lines = Vec::new();
     for line in lines {
+        offset += line.len();
+        let line = strip_eol(line);
         if line == "---" {
-            return Some(yaml_lines.join("\n"));
+            return Some((yaml_lines.join("\n"), &content[offset..]));
         }
         yaml_lines.push(line);
     }
     None
+}
+
+/// A line from `split_inclusive('\n')` without its `\n` or `\r\n`, as
+/// `str::lines` would yield it.
+fn strip_eol(line: &str) -> &str {
+    match line.strip_suffix('\n') {
+        Some(l) => l.strip_suffix('\r').unwrap_or(l),
+        None => line,
+    }
 }
 
 /// Scan raw frontmatter YAML for a top-level `redisclose:` field.

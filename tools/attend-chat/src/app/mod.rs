@@ -497,7 +497,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         }
                     }
                     View(
-                        flex_grow: 1.0,
+                        flex_grow: 1.0_f32,
                         padding_left: 1,
                         padding_right: 1,
                         padding_top: 1,
@@ -568,7 +568,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             // long scrollback pushes the input box past the bottom of
             // the terminal.
             View(
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 min_height: 0,
                 overflow: Overflow::Hidden,
                 border_style: BorderStyle::Round,
@@ -591,11 +591,11 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
             ) {
-                View(flex_direction: FlexDirection::Row, flex_grow: 1.0) {
+                View(flex_direction: FlexDirection::Row, flex_grow: 1.0_f32) {
                     View(width: 2, flex_shrink: 0.0) {
                         Text(color: Color::Blue, content: "> ")
                     }
-                    View(flex_grow: 1.0) {
+                    View(flex_grow: 1.0_f32) {
                         Text(
                             content: display_with_cursor,
                             wrap: TextWrap::Wrap,

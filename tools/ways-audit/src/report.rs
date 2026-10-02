@@ -20,7 +20,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
             "total_ways": total,
             "with_provenance": with,
             "without_provenance": without,
-            "coverage_pct": if total > 0 { with * 100 / total } else { 0 },
+            "coverage_pct": (with * 100).checked_div(total).unwrap_or(0),
             "policy_sources": policies,
             "control_references": controls,
             "stale_ways": stale_ways,
@@ -34,8 +34,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     println!("\x1b[1mClaim Coverage Report\x1b[0m");
     println!();
 
-    if total > 0 {
-        let pct = with * 100 / total;
+    if let Some(pct) = (with * 100).checked_div(total) {
         let color = if pct >= 75 {
             "\x1b[0;32m"
         } else if pct >= 40 {

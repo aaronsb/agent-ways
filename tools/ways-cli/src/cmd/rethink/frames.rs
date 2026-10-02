@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::cmd::render;
 use crate::session;
-use crate::util::{home_dir, parse_ts_secs};
+use crate::util::parse_ts_secs;
 
 use super::model::{ActiveWay, Frame, WayEvent};
 
@@ -195,9 +195,9 @@ fn build_frames(
 }
 
 fn build_token_timeline(project: &str, session_id: &str) -> Vec<(String, u64)> {
-    let project_slug = project.replace(['/', '.'], "-");
-    let transcript_path = home_dir()
-        .join(format!(".claude/projects/{project_slug}/{session_id}.jsonl"));
+    let transcript_path = ways_core::paths::transcripts_root()
+        .join(ways_core::paths::project_slug(project))
+        .join(format!("{session_id}.jsonl"));
 
     let content = match std::fs::read_to_string(&transcript_path) {
         Ok(c) => c,

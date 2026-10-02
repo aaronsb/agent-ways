@@ -14,8 +14,14 @@ if command -v ways &>/dev/null; then
   fi
 fi
 
-# MEMORY.md state
-NORMALIZED=$(echo "$PROJECT_DIR" | sed 's|[/.]|-|g')
+# MEMORY.md state, under the dir Claude Code names the project by
+# (`ways project-slug` is the one copy of that rule).
+WAYS_BIN=$(command -v ways || echo "$HOME/.claude/bin/ways")
+NORMALIZED=$("$WAYS_BIN" project-slug "$PROJECT_DIR" 2>/dev/null)
+if [[ -z "$NORMALIZED" ]]; then
+    echo "**MEMORY.md state unknown: \`ways project-slug\` is unavailable.**"
+    exit 0
+fi
 MEMORY_DIR="$HOME/.claude/projects/${NORMALIZED}/memory"
 MEMORY_FILE="$MEMORY_DIR/MEMORY.md"
 

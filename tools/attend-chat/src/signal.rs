@@ -1,10 +1,9 @@
 //! Signal wire format, paths, and I/O for `attend-chat`.
 //!
 //! The TUI is a first-class endpoint on the signal bus — it reads and
-//! writes the same `.signal` files the CLI does. Duplicating the
-//! handful of lines it takes to do that is cheaper than extracting a
-//! shared crate for a single new caller; if a third writer shows up
-//! later we lift this into a common place.
+//! writes the same `.signal` files the CLI does. The line parser and the
+//! filename are shared through agent-identity; the paths and I/O around
+//! them are duplicated here.
 
 use std::fs;
 use std::io;
@@ -71,29 +70,16 @@ pub fn cwd_dir(cwd: &str) -> PathBuf {
     signals_base().join(encode_cwd(cwd))
 }
 
-/// Parse a `.signal` file. Supports both the legacy
-/// `from|project|cwd|message` format and the threaded
-/// `from|project|cwd|re:signal-id|message` extension. Returns `None`
-/// for anything that doesn't look like a signal we can render.
+/// Parse a `.signal` file through the shared ADR-120 parser
+/// (`agent_identity::parse_signal`), so a `re:` prefix that is not a signal
+/// id reads as legacy prose here exactly as it does in the attend CLI.
+/// Returns `None` for anything that doesn't look like a signal we can render.
 pub fn parse_file(path: &Path) -> Option<Signal> {
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return None;
     }
     let raw = fs::read_to_string(path).ok()?;
-    let line = raw.trim_end_matches('\n');
-    // splitn(5, '|') so message can contain pipes.
-    let parts: Vec<&str> = line.splitn(5, '|').collect();
-    if parts.len() < 4 {
-        return None;
-    }
-    let (reply_to, message) = if parts.len() == 5 && parts[3].starts_with("re:") {
-        (Some(parts[3][3..].to_string()), parts[4].to_string())
-    } else if parts.len() == 5 {
-        // Unexpected 5-field form without re: — treat as legacy body with a pipe.
-        (None, format!("{}|{}", parts[3], parts[4]))
-    } else {
-        (None, parts[3].to_string())
-    };
+    let parsed = agent_identity::parse_signal(raw.trim_end_matches('\n'))?;
 
     let id = path
         .file_stem()
@@ -110,11 +96,11 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
 
     Some(Signal {
         id,
-        from: parts[0].to_string(),
-        project: parts[1].to_string(),
-        cwd: parts[2].to_string(),
-        reply_to,
-        message,
+        from: parsed.from.to_string(),
+        project: parsed.project.to_string(),
+        cwd: parsed.cwd.to_string(),
+        reply_to: parsed.reply_to.map(str::to_string),
+        message: parsed.message.to_string(),
         ts,
         channel: channel_for_path(path),
     })
@@ -353,6 +339,17 @@ mod tests {
         let s = parse_file(&p).unwrap();
         assert_eq!(s.message, "a | b");
         assert!(s.reply_to.is_none());
+    }
+
+    #[test]
+    fn prose_starting_re_with_a_pipe_stays_legacy() {
+        // `re: prose` is not a signal id (it has a space), so the attend CLI
+        // reads this as a legacy message; the TUI must read it the same way.
+        let d = tempdir_like();
+        let p = tmp_signal(&d, "sig-4", "claude:abc|proj|/home/x|re: prose|x");
+        let s = parse_file(&p).unwrap();
+        assert!(s.reply_to.is_none());
+        assert_eq!(s.message, "re: prose|x");
     }
 
     #[test]

@@ -251,8 +251,7 @@ pub fn write_way_row_with<W: WayRow>(
     let agent_display = if w.agent_id() == "main" {
         "\x1b[2mmain\x1b[0m".to_string()
     } else {
-        let aid = w.agent_id();
-        if aid.len() > 12 { format!("{}…", &aid[..11]) } else { aid.to_string() }
+        agent_fmt::truncate_visible(w.agent_id(), 12)
     };
 
     // Pad re-disclosure to fixed visible width (ANSI-aware)
@@ -262,7 +261,7 @@ pub fn write_way_row_with<W: WayRow>(
     let _ = writeln!(
         out,
         "  {row_prefix}{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}\x1b[0m{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}{row_suffix}",
-        way = truncate(&display_id, layout.way_col),
+        way = agent_fmt::truncate_visible(&display_id, layout.way_col),
         ep = w.epoch_fired(),
         dc = dist_color,
         di = distance,
@@ -554,14 +553,6 @@ pub fn fmt_epoch(n: u64) -> String {
     }
 }
 
-pub fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max - 1])
-    }
-}
-
 // ANSI-visible-width helpers (`pad_visible`/`visible_len`) live in `cmd::compositor`
 // — the canonical home — so `render`, `rethink`, and the compositor share one copy.
 
@@ -660,6 +651,22 @@ mod tests {
         // The way names occupy the same left span, floored/padded to way_col.
         assert_eq!(visible_substr(header_line, 2, 3), "Way");
         assert_eq!(visible_substr(row_line, 2, 17), "documentation/adr");
+    }
+
+    #[test]
+    fn a_long_multibyte_way_id_truncates_on_a_char_boundary() {
+        // Two-byte chars, offset by one byte in the second id, so whatever the
+        // column width, one of the two cuts lands inside a char if counted in bytes.
+        let layout = Layout::for_id_width_in(0, 40);
+        let ids = ["é".repeat(60), format!("a{}", "é".repeat(60))];
+        for id in &ids {
+            let way = MockWay { id: Box::leak(id.clone().into_boxed_str()), depth: 0 };
+            let mut row = String::new();
+            write_way_row_with(&mut row, &way, 2, 0, &[None], &[], 0, "", "", &layout);
+            let cell = visible_substr(row.lines().next().unwrap(), 2, layout.way_col);
+            assert_eq!(cell.chars().count(), layout.way_col);
+            assert!(cell.ends_with('…'), "{cell}");
+        }
     }
 
     /// The plain (ANSI-stripped) visible characters of `s` in `[start, start+len)`.

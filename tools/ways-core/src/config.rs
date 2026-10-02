@@ -329,14 +329,6 @@ impl Config {
         self.targets.is_some()
     }
 
-    /// Rewrite only the `targets` key of the user config, keeping every other
-    /// key and comment-free content as it was. Creates the file when absent.
-    pub fn write_user_targets(list: &[Target]) -> std::io::Result<PathBuf> {
-        let path = crate::paths::user_config();
-        Self::write_targets_to(&path, list)?;
-        Ok(path)
-    }
-
     /// Read the targets as the user file has them right now, apply `edit`, and
     /// write the result, all under a lock file beside the config. Every writer
     /// of the key goes through here, so a hook's migration write and an
@@ -363,8 +355,10 @@ impl Config {
         }
     }
 
-    /// The writer behind [`Config::write_user_targets`], on an explicit path so
-    /// tests never touch the real config.
+    /// The writer behind [`Config::edit_user_targets`]: rewrites only the
+    /// `targets` key of the file at `path`, keeping every other key as it was,
+    /// and creates the file when absent. On an explicit path so tests never
+    /// touch the real config.
     pub fn write_targets_to(path: &Path, list: &[Target]) -> std::io::Result<()> {
         let existing = std::fs::read_to_string(path).unwrap_or_default();
         // The file is edited textually so its comments survive: the template

@@ -147,7 +147,7 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
                 }
             })
             .collect();
-        ungov_fires.sort_by(|a, b| b.1.cmp(&a.1));
+        ungov_fires.sort_by_key(|e| std::cmp::Reverse(e.1));
 
         if ungov_fires.is_empty() {
             println!("  (no firing data for ways without a claim)");

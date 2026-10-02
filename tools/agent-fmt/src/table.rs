@@ -236,7 +236,7 @@ fn visible_len(s: &str) -> usize {
 
 /// Truncate a string to a visible width, adding ellipsis if needed.
 /// Preserves ANSI codes (doesn't count them toward width).
-fn truncate_visible(s: &str, max: usize) -> String {
+pub fn truncate_visible(s: &str, max: usize) -> String {
     let vlen = visible_len(s);
     if vlen <= max {
         return s.to_string();
