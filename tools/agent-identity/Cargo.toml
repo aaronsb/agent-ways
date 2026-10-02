@@ -2,9 +2,14 @@
 name = "agent-identity"
 version = "0.1.0"
 edition = "2021"
-description = "Display-layer identity for agent-ways tools: stable nicknames, color palette, and terminal capability detection"
+description = "Display-layer identity for agent-ways tools: stable nicknames and the categorical color palette"
 license = "AGPL-3.0-or-later"
 
 [lib]
 name = "agent_identity"
 path = "src/lib.rs"
+
+[dependencies]
+# Terminal colour depth and the ANSI output (ADR-504 §6). agent-theme never
+# depends on this crate.
+agent-theme = { path = "../agent-theme" }

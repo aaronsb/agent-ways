@@ -7,7 +7,8 @@
 //! this from the top-level `crate::legend` (which renders the legend
 //! UI strip); this module only builds the data the UI consumes.
 
-use agent_identity::{Identity, PaletteEntry, Style, TermCaps};
+use agent_identity::{Identity, PaletteEntry, Style};
+use agent_theme::ColorDepth;
 use attend_instances::SnapshotCache;
 
 use super::render::with_instance;
@@ -47,7 +48,7 @@ pub struct KnownIdentity {
 pub fn known_identities(
     signals: &[Signal],
     seeds: &[DiscoveredSession],
-    caps: TermCaps,
+    caps: ColorDepth,
     instances: &SnapshotCache,
 ) -> Vec<KnownIdentity> {
     // Production wrapper: gate on heartbeat freshness (ADR-129).
@@ -62,7 +63,7 @@ pub fn known_identities(
 pub fn known_identities_with_liveness<F>(
     signals: &[Signal],
     seeds: &[DiscoveredSession],
-    caps: TermCaps,
+    caps: ColorDepth,
     is_live: F,
     instances: &SnapshotCache,
 ) -> Vec<KnownIdentity>
@@ -187,7 +188,7 @@ mod tests {
             sig("claude:a", "/home/x"), // same cwd, should dedup
             sig("claude:b", "/home/y"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2, "expected 2 unique identities, got {}", reg.len());
     }
 
@@ -197,17 +198,17 @@ mod tests {
             sig("claude:a", "/home/x"),
             sig("claude:b", "/home/y"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         // Buffer order is oldest→newest; registry should surface the
         // most-recent cwd first so active peers lead the legend.
-        let y_id = Identity::for_cwd("/home/y", TermCaps::Rich);
+        let y_id = Identity::for_cwd("/home/y", ColorDepth::TrueColor);
         assert_eq!(reg[0].nickname, y_id.nickname);
     }
 
     #[test]
     fn registry_includes_humans() {
         let buf = vec![sig("external:aaron@kitty", "/home/aaron/Projects")];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 1);
         assert_eq!(reg[0].nickname, "aaron");
         assert!(!reg[0].is_claude);
@@ -223,7 +224,7 @@ mod tests {
             sig("external:aaron@kitty", "/home/aaron/Projects"),
             sig("external:aaron@kitty", "/home/aaron/.claude"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         let aarons: Vec<_> = reg.iter().filter(|k| k.nickname == "aaron").collect();
         assert_eq!(aarons.len(), 1, "expected a single aaron entry, got {}", aarons.len());
     }
@@ -236,14 +237,14 @@ mod tests {
             sig("claude:a", "/home/me/proj-a"),
             sig("claude:b", "/home/me/proj-b"),
         ];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2);
     }
 
     #[test]
     fn registry_skips_unknown_prefix() {
         let buf = vec![sig("mystery:abc", "/tmp")];
-        let reg = known_identities_with_liveness(&buf, &[], TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, |_| true, &empty_cache());
         assert!(reg.is_empty(), "unknown prefix should be ignored, got {reg:?}");
     }
 
@@ -255,7 +256,7 @@ mod tests {
             DiscoveredSession { cwd: "/home/x".to_string(), session_id: "sx".into() },
             DiscoveredSession { cwd: "/home/y".to_string(), session_id: "sy".into() },
         ];
-        let reg = known_identities_with_liveness(&[], &seeds, TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&[], &seeds, ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2);
         assert!(reg.iter().all(|k| k.is_claude));
     }
@@ -272,7 +273,7 @@ mod tests {
             cwd: "/Y".to_string(),
             session_id: "sy".into(),
         }];
-        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &seeds, ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 2);
         assert_eq!(reg[0].cwd, "/X", "signal-derived entry must lead");
         assert_eq!(reg[1].cwd, "/Y", "seed-only entry falls in after");
@@ -287,7 +288,7 @@ mod tests {
             cwd: "/home/x".to_string(),
             session_id: "sx".into(),
         }];
-        let reg = known_identities_with_liveness(&buf, &seeds, TermCaps::Rich, |_| true, &empty_cache());
+        let reg = known_identities_with_liveness(&buf, &seeds, ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 1);
     }
 }

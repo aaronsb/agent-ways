@@ -18,7 +18,7 @@
 
 mod keys;
 
-use agent_identity::TermCaps;
+use agent_theme::ColorDepth;
 use async_channel::Receiver;
 use iocraft::prelude::*;
 
@@ -172,7 +172,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     // flag rather than erroring on the ghost channel.
                     let fg = tabs::normalize(
                         foreground.read().clone(),
-                        &tabs::strip_names(&channels(TermCaps::detect())),
+                        &tabs::strip_names(&channels(ColorDepth::detect())),
                     );
                     let action = {
                         let sigs_guard = signals.read();
@@ -236,7 +236,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                         // stays completion — the keybinding-collision
                         // resolution from the issue thread.
                         let names =
-                            tabs::strip_names(&channels(TermCaps::detect()));
+                            tabs::strip_names(&channels(ColorDepth::detect()));
                         let cur =
                             tabs::normalize(foreground.read().clone(), &names);
                         foreground.set(tabs::cycle_next(&cur, &names));
@@ -294,7 +294,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
                     // strip order. Empty slots are no-ops.
                     if let Some(slot) = c.to_digit(10) {
                         let names =
-                            tabs::strip_names(&channels(TermCaps::detect()));
+                            tabs::strip_names(&channels(ColorDepth::detect()));
                         if let Some(tab) = tabs::jump(slot, &names) {
                             foreground.set(tab);
                         }
@@ -322,7 +322,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
     // Detect terminal capability once per render pass and reuse for
     // every chip. Cheap env reads, but doing it in the per-signal map
     // would still be pointless repetition.
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     // Subscribe to the wall-clock refresh tick so iocraft re-renders
     // when the timer future bumps it. The value itself is not used —
     // we only need the read to register the dependency in the

@@ -11,7 +11,8 @@
 //! identity we need determinism, not cryptographic strength.
 
 use crate::names;
-use crate::palette::{resolve, PaletteEntry, Resolved, Style, TermCaps};
+use crate::palette::{resolve, PaletteEntry, Resolved, Style};
+use agent_theme::ColorDepth;
 
 /// Everything a consumer needs to render an agent's identity chip.
 #[derive(Clone, Debug)]
@@ -39,14 +40,14 @@ impl Identity {
     /// Pass `user` if the sender is a human (from the `external:<user>`
     /// form) — users get an identity too, keyed on their username, so
     /// the human's avatar is consistent with how peers address them.
-    pub fn for_cwd(cwd_path: &str, caps: TermCaps) -> Self {
+    pub fn for_cwd(cwd_path: &str, caps: ColorDepth) -> Self {
         Self::for_key(cwd_path, cwd_basename(cwd_path), caps)
     }
 
     /// Derive identity for a human user, keyed on username. Basename
     /// for display is the passed-in `label` (typically a cwd basename
     /// so the human's chip reads "<user> / <projdir>").
-    pub fn for_user(user: &str, label: &str, caps: TermCaps) -> Self {
+    pub fn for_user(user: &str, label: &str, caps: ColorDepth) -> Self {
         // Prefix the hash domain so a user named "Monet" and a cwd
         // hashing to "Monet" don't collide on the same nickname. Same
         // principle as namespacing HMAC inputs.
@@ -54,7 +55,7 @@ impl Identity {
         Self::for_key(&key, label.to_string(), caps)
     }
 
-    fn for_key(hash_input: &str, label: String, caps: TermCaps) -> Self {
+    fn for_key(hash_input: &str, label: String, caps: ColorDepth) -> Self {
         let seed = fnv1a_64(hash_input.as_bytes());
         let nickname = names::pick(seed);
         // Stir the seed before asking for palette + style so nickname
@@ -199,8 +200,8 @@ mod tests {
 
     #[test]
     fn same_cwd_same_identity() {
-        let a = Identity::for_cwd("/home/aaron/.claude", TermCaps::Rich);
-        let b = Identity::for_cwd("/home/aaron/.claude", TermCaps::Rich);
+        let a = Identity::for_cwd("/home/aaron/.claude", ColorDepth::TrueColor);
+        let b = Identity::for_cwd("/home/aaron/.claude", ColorDepth::TrueColor);
         assert_eq!(a.nickname, b.nickname);
         assert_eq!(a.cwd_basename, b.cwd_basename);
         assert_eq!(a.palette, b.palette);
@@ -214,16 +215,16 @@ mod tests {
         // assert different nicknames — the pool is finite and
         // collisions are allowed — but the seed itself must differ or
         // all downstream derivations collapse.
-        let a = Identity::for_cwd("/home/a", TermCaps::Rich);
-        let b = Identity::for_cwd("/home/b", TermCaps::Rich);
+        let a = Identity::for_cwd("/home/a", ColorDepth::TrueColor);
+        let b = Identity::for_cwd("/home/b", ColorDepth::TrueColor);
         assert_ne!(a.seed, b.seed);
     }
 
     #[test]
     fn same_basename_different_paths_differ() {
         // Two repos both named "src" must not share an identity.
-        let a = Identity::for_cwd("/home/me/proj-a/src", TermCaps::Rich);
-        let b = Identity::for_cwd("/home/me/proj-b/src", TermCaps::Rich);
+        let a = Identity::for_cwd("/home/me/proj-a/src", ColorDepth::TrueColor);
+        let b = Identity::for_cwd("/home/me/proj-b/src", ColorDepth::TrueColor);
         assert_ne!(a.seed, b.seed);
         assert_eq!(a.cwd_basename, b.cwd_basename); // basename matches
     }
@@ -232,8 +233,8 @@ mod tests {
     fn user_namespace_separate_from_cwd() {
         // A username happening to equal a cwd path must not collide —
         // the `user:` prefix in the hash key enforces this.
-        let a = Identity::for_user("aaron", "Projects", TermCaps::Rich);
-        let b = Identity::for_cwd("aaron", TermCaps::Rich);
+        let a = Identity::for_user("aaron", "Projects", ColorDepth::TrueColor);
+        let b = Identity::for_cwd("aaron", ColorDepth::TrueColor);
         assert_ne!(a.seed, b.seed);
     }
 
@@ -259,15 +260,15 @@ mod tests {
         // Same cwd rendered under two different caps must keep the
         // nickname — it's the stable part of identity — but may pick
         // a different entry from a differently-sized palette.
-        let rich = Identity::for_cwd("/x/y/z", TermCaps::Rich);
-        let basic = Identity::for_cwd("/x/y/z", TermCaps::Basic);
+        let rich = Identity::for_cwd("/x/y/z", ColorDepth::TrueColor);
+        let basic = Identity::for_cwd("/x/y/z", ColorDepth::Ansi16);
         assert_eq!(rich.nickname, basic.nickname);
         assert_eq!(rich.cwd_basename, basic.cwd_basename);
     }
 
     #[test]
     fn mono_caps_produces_mono_entry() {
-        let id = Identity::for_cwd("/x/y/z", TermCaps::Mono);
+        let id = Identity::for_cwd("/x/y/z", ColorDepth::NoColor);
         assert_eq!(id.palette.name, "mono");
     }
 
@@ -281,7 +282,7 @@ mod tests {
             "/tmp/x",
             "/home/me/code/rust/project-42",
         ] {
-            let id = Identity::for_cwd(path, TermCaps::Rich);
+            let id = Identity::for_cwd(path, ColorDepth::TrueColor);
             assert!(id.nickname.is_ascii(), "{:?} derived non-ASCII nickname {:?}", path, id.nickname);
         }
     }
@@ -305,7 +306,7 @@ mod tests {
         let mut counts: HashMap<&str, usize> = HashMap::new();
         for i in 0..1000 {
             let path = format!("/home/user/project-{i:04}/src");
-            let id = Identity::for_cwd(&path, TermCaps::Rich);
+            let id = Identity::for_cwd(&path, ColorDepth::TrueColor);
             *counts.entry(id.nickname).or_insert(0) += 1;
         }
         let unique = counts.len();

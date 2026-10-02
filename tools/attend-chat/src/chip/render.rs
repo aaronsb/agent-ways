@@ -6,7 +6,8 @@
 //! suffix). The chip the renderer ultimately draws is a function of
 //! `ChipInfo`.
 
-use agent_identity::{Identity, PaletteEntry, Style, TermCaps};
+use agent_identity::{Identity, PaletteEntry, Style};
+use agent_theme::ColorDepth;
 use attend_instances::SnapshotCache;
 use iocraft::prelude::Color;
 
@@ -50,7 +51,7 @@ pub fn chip_for(
     from: &str,
     project: &str,
     cwd: &str,
-    caps: TermCaps,
+    caps: ColorDepth,
     instances: &SnapshotCache,
 ) -> ChipInfo {
     let interior = (CHIP_WIDTH as usize).saturating_sub(4);
@@ -106,10 +107,11 @@ pub fn chip_for(
 /// Map a palette entry to an iocraft `Color`. Rich terminals get
 /// RGB; basic ones get a named ANSI bright to avoid truecolor on
 /// terminals that would approximate it poorly.
-pub fn color_for(p: PaletteEntry, caps: TermCaps) -> Color {
-    match caps {
-        TermCaps::Rich => Color::Rgb { r: p.rgb.0, g: p.rgb.1, b: p.rgb.2 },
-        TermCaps::Basic | TermCaps::Mono => Color::AnsiValue(p.ansi16),
+pub fn color_for(p: PaletteEntry, caps: ColorDepth) -> Color {
+    if agent_identity::is_rich(caps) {
+        Color::Rgb { r: p.rgb.0, g: p.rgb.1, b: p.rgb.2 }
+    } else {
+        Color::AnsiValue(p.ansi16)
     }
 }
 
@@ -152,10 +154,10 @@ mod tests {
             "claude:e74a4a4b-7e3b-49bc-8404-216162e54ba8",
             "claude",
             "/home/aaron/.claude",
-            TermCaps::Rich,
+            ColorDepth::TrueColor,
             &empty_cache(),
         );
-        let expected = Identity::for_cwd("/home/aaron/.claude", TermCaps::Rich);
+        let expected = Identity::for_cwd("/home/aaron/.claude", ColorDepth::TrueColor);
         assert_eq!(chip.primary, expected.nickname);
         assert_eq!(chip.secondary, ".claude");
     }
@@ -165,20 +167,20 @@ mod tests {
         // Two sequential claudes in the same cwd should show the same
         // name — the session UUID changes but identity is keyed on
         // cwd, not session.
-        let a = chip_for("claude:aaaa-1", "p", "/home/x", TermCaps::Rich, &empty_cache());
-        let b = chip_for("claude:bbbb-2", "p", "/home/x", TermCaps::Rich, &empty_cache());
+        let a = chip_for("claude:aaaa-1", "p", "/home/x", ColorDepth::TrueColor, &empty_cache());
+        let b = chip_for("claude:bbbb-2", "p", "/home/x", ColorDepth::TrueColor, &empty_cache());
         assert_eq!(a.primary, b.primary);
     }
 
     #[test]
     fn scope_prefers_cwd_basename_over_project() {
-        let chip = chip_for("external:aaron", "ignored", "/home/aaron/temp", TermCaps::Rich, &empty_cache());
+        let chip = chip_for("external:aaron", "ignored", "/home/aaron/temp", ColorDepth::TrueColor, &empty_cache());
         assert_eq!(chip.secondary, "temp");
     }
 
     #[test]
     fn external_strips_terminal_suffix() {
-        let chip = chip_for("external:aaron@kitty", "proj", "/home/aaron", TermCaps::Rich, &empty_cache());
+        let chip = chip_for("external:aaron@kitty", "proj", "/home/aaron", ColorDepth::TrueColor, &empty_cache());
         assert_eq!(chip.primary, "aaron");
     }
 
@@ -189,7 +191,7 @@ mod tests {
             "external:aaron",
             "x",
             "/tmp/some-very-long-directory-name",
-            TermCaps::Rich,
+            ColorDepth::TrueColor,
             &empty_cache(),
         );
         assert!(chip.secondary.chars().count() <= 16);
@@ -200,8 +202,8 @@ mod tests {
     fn unknown_sender_still_colored() {
         // Something that isn't claude: or external: — we don't crash,
         // we show the raw value and pick a color off it.
-        let a = chip_for("mystery:abc", "", "/tmp", TermCaps::Rich, &empty_cache());
-        let b = chip_for("mystery:xyz", "", "/tmp", TermCaps::Rich, &empty_cache());
+        let a = chip_for("mystery:abc", "", "/tmp", ColorDepth::TrueColor, &empty_cache());
+        let b = chip_for("mystery:xyz", "", "/tmp", ColorDepth::TrueColor, &empty_cache());
         // Different senders → different colors most of the time. We
         // don't assert inequality (palette is finite), just that the
         // code path doesn't panic and produces valid output.
@@ -212,7 +214,7 @@ mod tests {
     #[test]
     fn color_for_rich_is_rgb() {
         let p = PaletteEntry { rgb: (10, 20, 30), ansi16: 3, name: "test" };
-        match color_for(p, TermCaps::Rich) {
+        match color_for(p, ColorDepth::TrueColor) {
             Color::Rgb { r, g, b } => assert_eq!((r, g, b), (10, 20, 30)),
             other => panic!("expected Rgb, got {other:?}"),
         }
@@ -221,7 +223,7 @@ mod tests {
     #[test]
     fn color_for_basic_is_ansi() {
         let p = PaletteEntry { rgb: (10, 20, 30), ansi16: 9, name: "test" };
-        match color_for(p, TermCaps::Basic) {
+        match color_for(p, ColorDepth::Ansi16) {
             Color::AnsiValue(v) => assert_eq!(v, 9),
             other => panic!("expected AnsiValue, got {other:?}"),
         }

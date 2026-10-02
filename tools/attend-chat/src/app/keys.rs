@@ -6,7 +6,7 @@
 //! the closure short and lets the handlers be unit-tested without
 //! standing up an iocraft `App` instance.
 
-use agent_identity::TermCaps;
+use agent_theme::ColorDepth;
 
 use crate::chip::{known_identities, resolve_nickname, KnownIdentity};
 use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir, BASE_CHANNEL_NAME};
@@ -109,7 +109,7 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> 
             }
         };
     }
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let seeds = discover_sessions();
     // Local instance cache for this Enter-handler invocation.
     // Distinct from the per-render cache because key handlers are
@@ -252,7 +252,7 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
             "#open is the base channel — you can't dissolve it".into(),
         );
     }
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let names_before = tabs::strip_names(&channels(caps));
     match dissolve_group_in(&signals_base(), &name, attend_groups::member_alive) {
         EnterAction::ClearWithStatus(status) => {
@@ -351,7 +351,7 @@ fn channels_status_in<F: Fn(&str) -> bool>(
     base: &std::path::Path,
     is_live: F,
 ) -> EnterAction {
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let parts: Vec<String> = channels_in(base, caps)
         .iter()
         .map(|kg| {
@@ -383,7 +383,7 @@ fn channels_status_in<F: Fn(&str) -> bool>(
 /// Roster enumeration is keyed by session id (issue #394), so one
 /// session record renders exactly one row whatever its cwd history.
 fn run_peers() -> EnterAction {
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let instance_cache = attend_instances::SnapshotCache::new();
     let roster = crate::peers::roster(caps, &instance_cache);
     if roster.is_empty() {
@@ -409,7 +409,7 @@ fn run_peers() -> EnterAction {
 /// root. Exact-match only (see `peers::resolve_peer`); the send
 /// path's fuzzy fallback stays out of identity queries.
 fn run_whois(name: &str) -> EnterAction {
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let instance_cache = attend_instances::SnapshotCache::new();
     let roster = crate::peers::roster(caps, &instance_cache);
     match crate::peers::resolve_peer(name, &roster) {
@@ -439,7 +439,7 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
     if resolve_group_dir(&g).is_none() {
         return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
     }
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let instance_cache = attend_instances::SnapshotCache::new();
     let roster = crate::peers::roster(caps, &instance_cache);
     let peer = match crate::peers::resolve_peer(member, &roster) {
@@ -478,7 +478,7 @@ fn run_kick(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAct
             "#open is the base channel — you can't kick from it".into(),
         );
     }
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let instance_cache = attend_instances::SnapshotCache::new();
     let roster = crate::peers::roster(caps, &instance_cache);
     let peer = match crate::peers::resolve_peer(member, &roster) {
@@ -799,7 +799,7 @@ pub fn handle_tab(
     let Some(mention) = find_trailing_mention(buf) else {
         return unchanged;
     };
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let candidates: Vec<String> = match mention.sigil {
         Sigil::Agent => {
             let seeds = discover_sessions();

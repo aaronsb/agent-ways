@@ -11,7 +11,7 @@
 //! navigation. Keeps the surface small and keeps the visible color
 //! table doing double duty as the autocomplete cue.
 
-use agent_identity::TermCaps;
+use agent_theme::ColorDepth;
 use iocraft::prelude::*;
 
 use crate::chip::{color_for, KnownIdentity};
@@ -238,7 +238,7 @@ pub fn legend_row(
     known: &[KnownIdentity],
     current_partial: Option<&str>,
 ) -> Vec<AnyElement<'static>> {
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
     let chips: Vec<AnyElement<'static>> = known
         .iter()
@@ -291,7 +291,7 @@ pub fn group_legend_row(
     known: &[KnownGroup],
     current_partial: Option<&str>,
 ) -> Vec<AnyElement<'static>> {
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
     let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
     let chips: Vec<AnyElement<'static>> = known
         .iter()
@@ -500,7 +500,7 @@ mod tests {
         use agent_identity::Group;
         use crate::groups::KnownGroup;
         let mk = |name: &str| KnownGroup {
-            group: Group::for_name(name, TermCaps::Rich),
+            group: Group::for_name(name, ColorDepth::TrueColor),
             membership: attend_groups::GroupEntry::default(),
             is_base: false,
         };

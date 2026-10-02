@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use agent_identity::TermCaps;
+use agent_theme::ColorDepth;
 use iocraft::prelude::*;
 
 /// Tokenize `text` shell-paste style and keep the absolute-path
@@ -86,11 +86,8 @@ pub fn existing_attachments(text: &str) -> Vec<String> {
 /// existing files reach here (the caller filters), which is the
 /// never-error degradation: a vanished file loses its chip, nothing
 /// more.
-pub fn attachment_chips(paths: &[String], caps: TermCaps) -> Vec<AnyElement<'static>> {
-    let glyph = match caps {
-        TermCaps::Rich => "⎘ ",
-        TermCaps::Basic | TermCaps::Mono => "file: ",
-    };
+pub fn attachment_chips(paths: &[String], caps: ColorDepth) -> Vec<AnyElement<'static>> {
+    let glyph = if agent_identity::is_rich(caps) { "⎘ " } else { "file: " };
     paths
         .iter()
         .map(|p| {

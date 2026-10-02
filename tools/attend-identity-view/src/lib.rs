@@ -22,7 +22,8 @@
 //! chat render). Build it fresh per pass and never share across passes
 //! — the registry can change between them.
 
-use agent_identity::{ansi, Identity, TermCaps};
+use agent_identity::{ansi, Identity};
+use agent_theme::ColorDepth;
 /// Re-exported so a renderer's crate needs only this dependency to
 /// build the per-pass cache every function here takes.
 pub use attend_instances::SnapshotCache;
@@ -43,7 +44,7 @@ pub use attend_instances::SnapshotCache;
 /// keep the code simple and ignore `project`. Production signals
 /// populate `cwd` either way — the divergence only manifests on
 /// hand-crafted signals, which shouldn't be a hot path.
-pub fn render_sender_label(from: &str, cwd: &str, caps: TermCaps, instances: &SnapshotCache) -> String {
+pub fn render_sender_label(from: &str, cwd: &str, caps: ColorDepth, instances: &SnapshotCache) -> String {
     if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, caps);
         // Instance suffix (ADR-129). Always rendered when present so
@@ -66,12 +67,12 @@ pub fn render_sender_label(from: &str, cwd: &str, caps: TermCaps, instances: &Sn
 /// Escape-free sender label for machine-carried text — the Monitor
 /// event line, the ADR-172 drain injection, and piped (non-TTY)
 /// output. Same derivation as [`render_sender_label`], zero ANSI:
-/// `TermCaps::Mono` is NOT enough for these paths because Mono still
+/// `ColorDepth::NoColor` is NOT enough for these paths because Mono still
 /// emits style bits (dim/reset) by design — that leak is issue #388.
 pub fn render_sender_label_plain(from: &str, cwd: &str, instances: &SnapshotCache) -> String {
     // Caps only steer styling, which this path discards; Mono keeps
     // the identity derivation on its cheapest branch.
-    let caps = TermCaps::Mono;
+    let caps = ColorDepth::NoColor;
     if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, caps);
         let primary = with_instance(id.nickname, cwd, sid, instances);
@@ -105,9 +106,9 @@ pub fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &Sn
     }
 }
 
-fn compose(primary: &str, secondary: &str, id: &Identity, caps: TermCaps) -> String {
+fn compose(primary: &str, secondary: &str, id: &Identity, caps: ColorDepth) -> String {
     let coloured = ansi::wrap(primary, &id.palette, id.style, caps);
-    format!("{coloured} \x1b[2m({})\x1b[0m", secondary)
+    format!("{coloured} {}", agent_theme::paint(agent_theme::Role::Muted, format!("({secondary})")))
 }
 
 #[cfg(test)]
@@ -128,8 +129,8 @@ mod tests {
 
     #[test]
     fn claude_label_uses_nickname() {
-        let label = render_sender_label("claude:abc", "/home/me/repo", TermCaps::Rich, &empty_cache());
-        let expected = Identity::for_cwd("/home/me/repo", TermCaps::Rich);
+        let label = render_sender_label("claude:abc", "/home/me/repo", ColorDepth::TrueColor, &empty_cache());
+        let expected = Identity::for_cwd("/home/me/repo", ColorDepth::TrueColor);
         assert!(
             label.contains(expected.nickname),
             "label {label:?} should carry nickname {:?}",
@@ -140,22 +141,22 @@ mod tests {
 
     #[test]
     fn external_label_keeps_username() {
-        let label = render_sender_label("external:aaron@kitty", "/home/aaron/Projects", TermCaps::Rich, &empty_cache());
+        let label = render_sender_label("external:aaron@kitty", "/home/aaron/Projects", ColorDepth::TrueColor, &empty_cache());
         assert!(label.contains("aaron"));
         assert!(label.contains("(Projects)"));
     }
 
     #[test]
     fn unknown_sender_renders_without_panic() {
-        let label = render_sender_label("weird-prefix:xyz", "/tmp", TermCaps::Rich, &empty_cache());
+        let label = render_sender_label("weird-prefix:xyz", "/tmp", ColorDepth::TrueColor, &empty_cache());
         assert!(label.contains("weird-prefix:xyz"));
     }
 
     #[test]
     fn mono_caps_produces_label_without_color() {
-        let label = render_sender_label("claude:abc", "/home/me/repo", TermCaps::Mono, &empty_cache());
+        let label = render_sender_label("claude:abc", "/home/me/repo", ColorDepth::NoColor, &empty_cache());
         // Mono path: no truecolor SGR, but style + reset still present.
-        assert!(!label.contains("\x1b[38;2;"), "mono leaked color: {label:?}");
+        assert!(!label.contains("38;2;"), "mono leaked color: {label:?}");
     }
 
     #[test]
@@ -175,7 +176,7 @@ mod tests {
         let cache = empty_cache();
         let plain = render_sender_label_plain("claude:abc", "/home/me/repo", &cache);
         assert!(!plain.contains('\x1b'), "plain leaked ANSI: {plain:?}");
-        let expected = Identity::for_cwd("/home/me/repo", TermCaps::Mono);
+        let expected = Identity::for_cwd("/home/me/repo", ColorDepth::NoColor);
         assert_eq!(plain, format!("{} (repo)", expected.nickname));
     }
 }

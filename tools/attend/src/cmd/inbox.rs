@@ -7,7 +7,7 @@
 use attend_identity_view::{render_sender_label, render_sender_label_plain};
 use attend_instances::SnapshotCache;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
-use agent_identity::TermCaps;
+use agent_theme::ColorDepth;
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
@@ -53,7 +53,7 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
         use std::io::IsTerminal;
         let instances = SnapshotCache::new();
         let sender = if std::io::stdout().is_terminal() {
-            render_sender_label(sig.from, sig.cwd, TermCaps::detect(), &instances)
+            render_sender_label(sig.from, sig.cwd, ColorDepth::detect(), &instances)
         } else {
             render_sender_label_plain(sig.from, sig.cwd, &instances)
         };
@@ -153,7 +153,7 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
             // would style a pipe. TTY keeps the identity colors.
             use std::io::IsTerminal;
             let sender = if std::io::stdout().is_terminal() {
-                render_sender_label(sig.from, sig.cwd, TermCaps::detect(), &instances)
+                render_sender_label(sig.from, sig.cwd, ColorDepth::detect(), &instances)
             } else {
                 render_sender_label_plain(sig.from, sig.cwd, &instances)
             };

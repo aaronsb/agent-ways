@@ -1,11 +1,12 @@
 //! `attend peers` — list active Claude Code sessions and their channels.
 
 use crate::util::{get_groups, own_session_id};
-use agent_identity::{ansi, Identity, TermCaps};
+use agent_identity::{ansi, Identity};
+use agent_theme::ColorDepth;
 
 pub(crate) fn cmd_peers() {
     let r = get_groups();
-    let caps = TermCaps::detect();
+    let caps = ColorDepth::detect();
 
     #[cfg(feature = "sensor-peers")]
     let peers = {
@@ -105,12 +106,12 @@ pub(crate) fn cmd_peers() {
 /// `Tamsin-alpha` token shares the identity color — keeps the visual
 /// scan tight and matches the wire identity (a single addressable
 /// name, not a colored stem with a plain tail).
-fn render_agent_label(id: &Identity, instance: Option<&str>, caps: TermCaps) -> String {
+fn render_agent_label(id: &Identity, instance: Option<&str>, caps: ColorDepth) -> String {
     let display = match instance {
         Some(inst) => format!("{}-{}", id.nickname, inst),
         None => id.nickname.to_string(),
     };
     let nick = ansi::wrap(&display, &id.palette, id.style, caps);
-    let dim_basename = format!("\x1b[2m({})\x1b[0m", id.cwd_basename);
+    let dim_basename = agent_theme::paint(agent_theme::Role::Muted, format!("({})", id.cwd_basename));
     format!("{nick} {dim_basename}")
 }
