@@ -841,6 +841,7 @@ fn a_short_trigger_keeps_semantic_apart_from_pattern() {
     assert_eq!(short_trigger("semantic:bash:en"), "sem:bash");
     assert_eq!(short_trigger("semantic:embedding:en"), "sem:emb");
     assert_eq!(short_trigger("semantic:late-interaction:en"), "sem:late");
+    assert_eq!(short_trigger("bash:semantic:en"), "sem:bash", "the early spelling");
     assert_eq!(short_trigger("bash"), "bash");
     assert_eq!(short_trigger("keyword"), "keyword");
 }

@@ -242,6 +242,10 @@ impl Spend {
 /// stays `bash`. Which kind fired a way off its domain decides the remedy:
 /// narrow the pattern, or the vocabulary.
 pub(super) fn short_trigger(trigger: &str) -> String {
+    // Early history spells a semantic bash fire `bash:semantic:en`.
+    if trigger.starts_with("bash:semantic") {
+        return "sem:bash".into();
+    }
     match trigger.strip_prefix("semantic:") {
         Some(rest) => {
             let lane = rest.split(':').next().unwrap_or(rest);
