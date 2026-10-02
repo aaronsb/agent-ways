@@ -1,0 +1,131 @@
+agent-tui frame 120x40
+| projects                                                                                                               |
+|┌ ways projects list ──────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|│ Project                                                                                Sessions   Size    Last Memory│|
+|│ /srv/app_one                                                                                 2t   212B   today      ●│|
+|│▌/srv/legacy                                                                                   2   104B     1mo      ·│|
+|│ -srv-gone                                                                                     –      –       –      ·│|
+|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+|┌ ways projects show /srv/legacy ──────────────────────────────────────────────────────────────────────────────────────┐|
+|│file:///srv/legacy                                                                                                    │|
+|│  Dir: -srv-legacy                                                                                                    │|
+|│                                                                                                                      │|
+|│  First session: 2026-07-01                                                                                           │|
+|│  Last active:  2026-08-20 (1mo)                                                                                      │|
+|│  Last branch:  feat/parser                                                                                           │|
+|│                                                                                                                      │|
+|│  Sessions:     2                                                                                                     │|
+|│  Transcripts:  1  (104B)                                                                                             │|
+|│  Memory:       no                                                                                                    │|
+|│                                                                                                                      │|
+|│  Last summary: Port the parser                                                                                       │|
+|│                                                                                                                      │|
+|│  Recent first prompts:                                                                                               │|
+|│    › port the parser to rust                                                                                         │|
+|│    › set up the repo                                                                                                 │|
+|│                                                                                                                      │|
+|│  Sessions:                                                                                                           │|
+|│    2026-08-20   12 msgs  feat/parser                                                                                 │|
+|│      Port the parser                                                                                                 │|
+|│    2026-07-02    3 msgs  main                 ⑂                                                                      │|
+|│      Initial setup                                                                                                   │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+| projects   ↑↓ select  / filter  q quit                                                                              2/3|
+styles
+  0   0-9   White Blue -
+  1   0-0   - - DIM
+  1   1-20  Blue - BOLD|DIM
+  1  21-119 - - DIM
+  2   0-0   - - DIM
+  2   1-118 - - BOLD
+  2 119-119 - - DIM
+  3   0-0   - - DIM
+  3 119-119 - - DIM
+  4   0-0   - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-118 - - BOLD|REVERSED
+  4 119-119 - - DIM
+  5   0-0   - - DIM
+  5 119-119 - - DIM
+  6   0-119 - - DIM
+  7   0-0   - - DIM
+  7   1-32  Blue - BOLD|DIM
+  7  33-119 - - DIM
+  8   0-0   - - DIM
+  8   1-18  Cyan - -
+  8 119-119 - - DIM
+  9   0-0   - - DIM
+  9 119-119 - - DIM
+ 10   0-0   - - DIM
+ 10 119-119 - - DIM
+ 11   0-0   - - DIM
+ 11 119-119 - - DIM
+ 12   0-0   - - DIM
+ 12 119-119 - - DIM
+ 13   0-0   - - DIM
+ 13 119-119 - - DIM
+ 14   0-0   - - DIM
+ 14 119-119 - - DIM
+ 15   0-0   - - DIM
+ 15 119-119 - - DIM
+ 16   0-0   - - DIM
+ 16 119-119 - - DIM
+ 17   0-0   - - DIM
+ 17 119-119 - - DIM
+ 18   0-0   - - DIM
+ 18 119-119 - - DIM
+ 19   0-0   - - DIM
+ 19 119-119 - - DIM
+ 20   0-0   - - DIM
+ 20 119-119 - - DIM
+ 21   0-0   - - DIM
+ 21 119-119 - - DIM
+ 22   0-0   - - DIM
+ 22 119-119 - - DIM
+ 23   0-0   - - DIM
+ 23 119-119 - - DIM
+ 24   0-0   - - DIM
+ 24 119-119 - - DIM
+ 25   0-0   - - DIM
+ 25 119-119 - - DIM
+ 26   0-0   - - DIM
+ 26 119-119 - - DIM
+ 27   0-0   - - DIM
+ 27 119-119 - - DIM
+ 28   0-0   - - DIM
+ 28 119-119 - - DIM
+ 29   0-0   - - DIM
+ 29 119-119 - - DIM
+ 30   0-0   - - DIM
+ 30 119-119 - - DIM
+ 31   0-0   - - DIM
+ 31 119-119 - - DIM
+ 32   0-0   - - DIM
+ 32 119-119 - - DIM
+ 33   0-0   - - DIM
+ 33 119-119 - - DIM
+ 34   0-0   - - DIM
+ 34 119-119 - - DIM
+ 35   0-0   - - DIM
+ 35 119-119 - - DIM
+ 36   0-0   - - DIM
+ 36 119-119 - - DIM
+ 37   0-0   - - DIM
+ 37 119-119 - - DIM
+ 38   0-119 - - DIM
+ 39   0-9   Black Cyan BOLD
+ 39  12-13  Cyan - BOLD
+ 39  14-20  - - DIM|ITALIC
+ 39  23-23  Cyan - BOLD
+ 39  24-30  - - DIM|ITALIC
+ 39  33-33  Cyan - BOLD
+ 39  34-38  - - DIM|ITALIC
+ 39 117-119 - - DIM

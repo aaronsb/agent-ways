@@ -8,10 +8,12 @@
 //! given `--execute`.
 //!
 //! Output is plain text. Colour waits for agent-theme's ANSI output (#694).
+//! [`screen`] shows `list` and `show` together on a terminal (#748).
 
 mod fsio;
 mod relocate;
 mod rewrite;
+pub(crate) mod screen;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -173,6 +175,8 @@ struct Project {
     recent_prompts: Vec<String>,
     /// The index entries, newest first.
     entries: Vec<Value>,
+    /// Whether the project has a `sessions-index.json`.
+    indexed: bool,
 }
 
 impl Project {
@@ -236,6 +240,7 @@ fn scan_project(env: &Env, dir: &Path) -> Project {
         last_branch: String::new(),
         recent_prompts: Vec::new(),
         entries: Vec::new(),
+        indexed: dir.join("sessions-index.json").exists(),
     };
 
     if let (Some(latest), Some(oldest)) = (entries.first(), entries.last()) {
@@ -332,6 +337,27 @@ fn pad_left(s: &str, w: usize) -> String {
     format!("{s:>w$}")
 }
 
+/// `path` cut from the left to `w` characters, `…` marking the cut.
+fn ellipsize_left(path: &str, w: usize) -> String {
+    let n = path.chars().count();
+    if n > w {
+        format!("…{}", path.chars().skip(n - (w - 1)).collect::<String>())
+    } else {
+        path.to_string()
+    }
+}
+
+/// The `list` cells after the path: sessions, size, last active, memory.
+fn list_cells(env: &Env, p: &Project) -> [String; 4] {
+    let size = if p.transcript_bytes > 0 { fmt_bytes(p.transcript_bytes) } else { "–".to_string() };
+    let last = match age(env.now, p.last_active) {
+        a if a.is_empty() => "–".to_string(),
+        a => a,
+    };
+    let mem = if p.memory_files > 0 { "●" } else { "·" };
+    [session_cell(p), size, last, mem.to_string()]
+}
+
 /// The session column: index sessions, else transcripts as `Nt`, else `–`.
 fn session_cell(p: &Project) -> String {
     if p.sessions > 0 {
@@ -371,29 +397,13 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     writeln!(out, "  {} {} {} {} {}", "─".repeat(path_w), "─".repeat(8), "─".repeat(6), "─".repeat(7), "─".repeat(6))?;
 
     for p in &projects {
-        let size = if p.transcript_bytes > 0 { fmt_bytes(p.transcript_bytes) } else { "–".to_string() };
-        let last = match age(env.now, p.last_active) {
-            a if a.is_empty() => "–".to_string(),
-            a => a,
-        };
-        let mem = if p.memory_files > 0 { "●" } else { "·" };
-        let cells = format!(
-            "{} {} {} {}",
-            pad_left(&session_cell(p), 8),
-            pad_left(&size, 6),
-            pad_left(&last, 7),
-            pad_left(mem, 6)
-        );
+        let [sess, size, last, mem] = list_cells(env, p);
+        let cells = format!("{} {} {} {}", pad_left(&sess, 8), pad_left(&size, 6), pad_left(&last, 7), pad_left(&mem, 6));
         if args.urls {
             writeln!(out, "  {}", file_url(env, &p.path))?;
             writeln!(out, "    {cells}")?;
         } else {
-            let n = p.path.chars().count();
-            let path = if n > path_w {
-                format!("…{}", p.path.chars().skip(n - (path_w - 1)).collect::<String>())
-            } else {
-                p.path.clone()
-            };
+            let path = ellipsize_left(&p.path, path_w);
             let pad = path_w.saturating_sub(path.chars().count());
             writeln!(out, "  {path}{} {cells}", " ".repeat(pad))?;
         }
@@ -407,38 +417,9 @@ fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()>
     let mut matches: Vec<(u32, Project, Vec<String>)> = Vec::new();
 
     for p in scan_all(env) {
-        let mut score = 0u32;
-        let mut snippets: Vec<String> = Vec::new();
-        let path_l = p.path.to_lowercase();
-        if path_l.contains(&q) || p.dirname.to_lowercase().contains(&q) {
-            score += 10;
-        }
-        for word in q.split_whitespace() {
-            if path_l.contains(word) {
-                score += 5;
-            }
-        }
-
-        let dir = env.projects().join(&p.dirname);
-        if dir.join("sessions-index.json").exists() {
-            for e in &p.entries {
-                let summary = str_field(e, "summary");
-                let first = str_field(e, "firstPrompt");
-                if summary.to_lowercase().contains(&q) {
-                    score += 5;
-                    snippets.push(take_chars(summary, 80));
-                } else if first.to_lowercase().contains(&q) {
-                    score += 3;
-                    snippets.push(take_chars(first, 80));
-                }
-            }
-        } else if let Some(prompt) = p.recent_prompts.iter().find(|pr| pr.to_lowercase().contains(&q)) {
-            score += 2;
-            snippets.push(take_chars(prompt, 80));
-        }
-
+        let (mut score, mut snippets) = shallow_match(&p, &q);
         if deep && score == 0 {
-            let (hits, snippet) = deep_search(&dir, &q);
+            let (hits, snippet) = deep_search(&env.projects().join(&p.dirname), &q);
             score += hits.min(5);
             snippets.extend(snippet);
         }
@@ -471,6 +452,39 @@ fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()>
     }
     writeln!(out)?;
     Ok(())
+}
+
+/// How well `p` matches `q` (lowercased) on its path, session summaries
+/// and first prompts, and the snippets that matched. Zero is no match.
+fn shallow_match(p: &Project, q: &str) -> (u32, Vec<String>) {
+    let mut score = 0u32;
+    let mut snippets: Vec<String> = Vec::new();
+    let path_l = p.path.to_lowercase();
+    if path_l.contains(q) || p.dirname.to_lowercase().contains(q) {
+        score += 10;
+    }
+    for word in q.split_whitespace() {
+        if path_l.contains(word) {
+            score += 5;
+        }
+    }
+    if p.indexed {
+        for e in &p.entries {
+            let summary = str_field(e, "summary");
+            let first = str_field(e, "firstPrompt");
+            if summary.to_lowercase().contains(q) {
+                score += 5;
+                snippets.push(take_chars(summary, 80));
+            } else if first.to_lowercase().contains(q) {
+                score += 3;
+                snippets.push(take_chars(first, 80));
+            }
+        }
+    } else if let Some(prompt) = p.recent_prompts.iter().find(|pr| pr.to_lowercase().contains(q)) {
+        score += 2;
+        snippets.push(take_chars(prompt, 80));
+    }
+    (score, snippets)
 }
 
 /// Case-insensitive search of every file under a project directory: the
@@ -518,8 +532,13 @@ fn show(env: &Env, query: &str, out: &mut dyn Write) -> Result<()> {
         writeln!(out, "No project matching '{query}'")?;
         return Ok(());
     };
+    out.write_all(b"\n")?;
+    show_project(env, &p, out)
+}
 
-    writeln!(out, "\n{}", file_url(env, &p.path))?;
+/// What `show` prints for one project, after its leading blank line.
+fn show_project(env: &Env, p: &Project, out: &mut dyn Write) -> Result<()> {
+    writeln!(out, "{}", file_url(env, &p.path))?;
     writeln!(out, "  Dir: {}\n", p.dirname)?;
     if let Some(first) = p.first_active {
         writeln!(out, "  First session: {}", fmt_date(first))?;
