@@ -164,6 +164,10 @@ impl Checked {
 /// Parse a settings file's text. A parse failure is one finding on the line
 /// the parser names; the whole file then fails closed ([`closed_file`]).
 pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Box<Finding>> {
+    // One leading byte-order mark is not content. Stripped here, a valid file
+    // parses, and a broken one reports its real cause and line rather than
+    // the parser's "more than one document".
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     yaml_edit::parse(text).map_err(|e| {
         let (line, message) = match e {
             yaml_edit::EditError::Parse { line, message } => (line, format!("does not parse: {message}")),
@@ -677,5 +681,19 @@ mod tests {
                 let _ = f.diagnostic("t");
             }
         }
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_content() {
+        let l = layer("p", LayerScope::Project, "\u{feff}prob: 0.2\n");
+        assert!(l.findings.is_empty(), "{:?}", l.findings);
+        assert_eq!(l.get(&["prob".into()]), Some(&serde_yaml::from_str::<Value>("0.2").unwrap()));
+        // With a real syntax error the file still fails closed, and the finding
+        // names the error's line and cause, not "more than one document".
+        let l = layer("p", LayerScope::Project, "\u{feff}prob: 0.2\nx: [\n");
+        let f = &l.findings[0];
+        assert!(f.is_parse_failure());
+        assert!(f.line.is_some(), "{f}");
+        assert!(!f.message.contains("more than one document"), "{f}");
     }
 }
