@@ -5,7 +5,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│ ╭──────────────────╮                                                         │|
 |│ │ aaron            │ the shell this ran under: /bin/sh                       │|
-|│ │ aaron            │  file: sh                                               │|
+|│ │ aaron            │  file: sh                                               │|
 |│ │ 13:58            │                                                         │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
@@ -19,7 +19,7 @@ agent-tui frame 80x25
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ > first line                                                                 │|
 |│   second line, then a path: /bin/sh                                          │|
-|│  file: sh                                                                    │|
+|│  file: sh                                                                    │|
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                          |

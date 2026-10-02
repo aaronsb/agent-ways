@@ -7,7 +7,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│ ╭──────────────────╮                                                         │|
 |│ │ aaron            │ the shell this ran under: /bin/sh                       │|
-|│ │ aaron            │  file: sh                                               │|
+|│ │ aaron            │  file: sh                                               │|
 |│ │ 13:58            │                                                         │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|

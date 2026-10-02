@@ -1,8 +1,14 @@
-//! Wrapping styled text to a width in terminal columns: words move whole
-//! to the next row, a word longer than a row is broken, and an explicit
-//! newline starts a row. The unit is the grapheme cluster, so a combining
-//! mark or a joined emoji is never split, and widths are display widths, so
-//! a wide character takes two columns.
+//! The one width measure and the one wrap of agent-tui. Text wraps to a
+//! width in terminal columns: words move whole to the next row, a word
+//! longer than a row is broken, an explicit newline starts a row, the
+//! spaces that open a line are kept as its indent, and spaces at a break
+//! are dropped. The unit is the grapheme cluster, so a combining mark or a
+//! joined emoji is never split, and widths are display widths, so a wide
+//! character takes two columns. The feed, the markdown renderer and the
+//! text entry all wrap through here.
+//!
+//! `agent_fmt::width` is another measure, for plain ANSI output: it skips
+//! escape sequences and counts no East Asian width. Screens use this one.
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -89,11 +95,13 @@ pub fn wrap_line(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
             }
         }
     }
-    logical.iter().flat_map(|cells| wrap_cells(cells, width)).map(|r| line_of(&r, line.style)).collect()
+    logical.iter().flat_map(|cells| wrap_cells(cells, width, true)).map(|r| line_of(&r, line.style)).collect()
 }
 
-/// Wrap a run of cells with no newline in it.
-pub(crate) fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
+/// Wrap a run of cells with no newline in it. With `trim`, as prose wraps,
+/// spaces at the end of a row go too; without, as the text entry wraps,
+/// every typed space keeps its column.
+pub(crate) fn wrap_cells(cells: &[Cell], width: usize, trim: bool) -> Vec<Vec<Cell>> {
     let width = width.max(1);
     let mut rows: Vec<Vec<Cell>> = Vec::new();
     let mut row: Vec<Cell> = Vec::new();
@@ -119,6 +127,10 @@ pub(crate) fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
             i += 1;
         }
         let word = &cells[wstart..i];
+        if trim && word.is_empty() && !row.is_empty() {
+            // Spaces that end the text: nothing follows them.
+            break;
+        }
         let sw: usize = spaces.iter().map(Cell::width).sum();
         let ww: usize = word.iter().map(Cell::width).sum();
         if used + sw + ww <= width {
@@ -155,6 +167,13 @@ pub(crate) fn wrap_cells(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
         }
     }
     rows.push(row);
+    if trim {
+        for r in &mut rows {
+            while r.last().is_some_and(Cell::is_break) {
+                r.pop();
+            }
+        }
+    }
     rows
 }
 
@@ -199,6 +218,12 @@ mod tests {
         assert_eq!(texts(&wrap_line(&Line::from("日本語"), 4)), ["日本", "語"]);
         assert_eq!(truncate("abcdef", 4), "abc…");
         assert_eq!(truncate("abc", 4), "abc");
+    }
+
+    #[test]
+    fn an_opening_indent_is_kept_and_spaces_at_a_break_go() {
+        let rows = texts(&wrap_line(&Line::from("  one two three   "), 9));
+        assert_eq!(rows, ["  one two", "three"]);
     }
 
     #[test]

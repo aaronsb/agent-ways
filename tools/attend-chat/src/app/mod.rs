@@ -51,6 +51,9 @@ const MAX_SIGNALS: usize = 5000;
 /// chat is a turn-blind surface, so wall-clock time is the right axis.
 const REFRESH: Duration = Duration::from_secs(5);
 
+/// How often the watcher's channel is drained.
+const TICK: Duration = Duration::from_millis(100);
+
 /// The time a frame shows timestamps against.
 #[derive(Debug, Clone, Copy)]
 enum Clock {
@@ -358,6 +361,16 @@ impl Chat {
 }
 
 impl Screen for Chat {
+    fn palette(&self) -> Palette {
+        self.palette
+    }
+
+    /// The watcher is drained, and the world refreshed when due, ten times
+    /// a second.
+    fn tick_every(&self) -> Option<Duration> {
+        Some(TICK)
+    }
+
     fn draw(&mut self, f: &mut Frame) {
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
         if !self.dirty && fresh == self.drawn_fresh {

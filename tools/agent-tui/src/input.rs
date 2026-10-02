@@ -169,7 +169,7 @@ impl Input {
         if self.cursor >= at {
             logical.last_mut().expect("one row at least").push(cursor_cell());
         }
-        logical.iter().flat_map(|cells| wrap_cells(cells, width as usize)).map(|r| line_of(&r, Style::new())).collect()
+        logical.iter().flat_map(|cells| wrap_cells(cells, width as usize, false)).map(|r| line_of(&r, Style::new())).collect()
     }
 }
 

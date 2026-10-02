@@ -29,10 +29,12 @@ use crate::tabs::{self, Tab};
 /// The most rows the compose box grows to before it scrolls.
 const INPUT_ROWS: usize = 10;
 
+/// One frame. The screen runner has set the palette ([`Screen::palette`])
+/// and fills the theme's ground after.
+///
+/// [`Screen::palette`]: agent_tui::screen::Screen::palette
 pub(super) fn draw(chat: &mut Chat, f: &mut Frame) {
-    theme::set(chat.palette);
     draw_frame(chat, f);
-    theme::fill(f.buffer_mut());
 }
 
 fn draw_frame(chat: &mut Chat, f: &mut Frame) {
@@ -147,10 +149,12 @@ fn entry(chat: &Chat, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>)
 /// A chip per attached file: its name on the rule's ground, so a file
 /// reads as an object rather than text.
 fn attachment_line(chat: &Chat, files: &[String]) -> Line<'static> {
-    let glyph = if agent_identity::is_rich(chat.palette.depth()) { "⎘ " } else { "file: " };
+    // No-break spaces inside a chip: wrapping moves a chip whole and keeps
+    // its padding at the end of a row.
+    let glyph = if agent_identity::is_rich(chat.palette.depth()) { "⎘\u{a0}" } else { "file:\u{a0}" };
     let mut spans = Vec::new();
     for p in files {
-        spans.push(Span::styled(format!(" {glyph}{} ", attach::attachment_name(p)), theme::badge(Ground::Rule)));
+        spans.push(Span::styled(format!("\u{a0}{glyph}{}\u{a0}", attach::attachment_name(p).replace(' ', "\u{a0}")), theme::badge(Ground::Rule)));
         spans.push(Span::raw(" "));
     }
     Line::from(spans)
