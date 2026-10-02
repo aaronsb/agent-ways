@@ -7,7 +7,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use super::helpers::{
-    count_multiline_yaml, extract_field_name, extract_frontmatter_raw, extract_indented_field_name,
+    count_multiline_yaml, extract_field_name, extract_indented_field_name,
     extract_when_block, fix_multiline_yaml, get_field_value, has_field, remove_top_level_field,
     remove_when_subfield,
 };
@@ -48,8 +48,8 @@ pub(super) fn lint_file(
     let relpath = path.strip_prefix(ways_dir).unwrap_or(path);
     let rel = relpath.display();
 
-    let fm_str = match extract_frontmatter_raw(&content) {
-        Some(s) => s,
+    let fm_str = match crate::frontmatter::split(&content) {
+        Some((s, _)) => s,
         None => {
             eprintln!("  ERROR: {rel} — no YAML frontmatter");
             *errors += 1;
@@ -88,7 +88,7 @@ pub(super) fn lint_file(
 
     // Re-extract frontmatter after the multi-line fix so the rest of the
     // rules see the collapsed form.
-    let fm_str = extract_frontmatter_raw(&content).unwrap_or_default();
+    let fm_str = crate::frontmatter::split(&content).map(|(fm, _)| fm).unwrap_or_default();
 
     // Strict YAML parse gate (ways only). The matching pipeline (corpus, scan)
     // loads frontmatter via serde_yaml, so a value that isn't valid YAML drops the
@@ -135,7 +135,7 @@ pub(super) fn lint_file(
 
     // Re-extract frontmatter if we just removed fields, so downstream
     // rules operate on the cleaned form.
-    let fm_str = extract_frontmatter_raw(&content).unwrap_or_default();
+    let fm_str = crate::frontmatter::split(&content).map(|(fm, _)| fm).unwrap_or_default();
 
     // Attend signal handlers are matched by signal name, not semantic matching
     let is_attend = fm_str.lines().any(|l| l.trim() == "type: attend");
@@ -354,7 +354,7 @@ pub(super) fn lint_file(
     }
 
     // when.project path existence
-    let fm_str = extract_frontmatter_raw(&content).unwrap_or_default();
+    let fm_str = crate::frontmatter::split(&content).map(|(fm, _)| fm).unwrap_or_default();
     let when_block = extract_when_block(&fm_str);
     for line in when_block.lines() {
         if let Some(val) = line

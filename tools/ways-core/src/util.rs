@@ -12,17 +12,6 @@ pub fn normalize_path_sep(path: &Path) -> PathBuf {
     path.components().collect()
 }
 
-/// True if `content` opens with a `---` YAML frontmatter delimiter.
-///
-/// Uses `lines()` (which strips a trailing `\r`) so a way authored on Windows
-/// with CRLF endings is recognized. A hard `content.starts_with("---\n")` check
-/// fails on `---\r\n` and silently drops the file — on the scan/resolve path
-/// that means the way never matches or renders. Every frontmatter gate routes
-/// through here so the behavior is uniform across platforms.
-pub fn has_frontmatter(content: &str) -> bool {
-    content.lines().next() == Some("---")
-}
-
 /// Join a path's components with '/' regardless of OS separator.
 ///
 /// Way IDs are a stable, cross-platform namespace: a way at
@@ -313,14 +302,6 @@ mod tests {
     fn handles_deeply_dotted_names() {
         // Last segment is the locale candidate
         assert_eq!(extract_locale_from_filename("some.way.name.ja.md"), Some("ja".to_string()));
-    }
-
-    #[test]
-    fn has_frontmatter_tolerates_crlf() {
-        assert!(has_frontmatter("---\ndescription: x\n---\n"));
-        assert!(has_frontmatter("---\r\ndescription: x\r\n---\r\n"));
-        assert!(!has_frontmatter("no frontmatter\n"));
-        assert!(!has_frontmatter(""));
     }
 
     #[test]

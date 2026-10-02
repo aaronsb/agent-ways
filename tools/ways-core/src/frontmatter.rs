@@ -173,7 +173,7 @@ pub fn parse(path: &Path) -> Result<Frontmatter> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
 
-    let yaml_str = extract_frontmatter_str(&content)
+    let (yaml_str, _) = split(&content)
         .with_context(|| format!("no frontmatter in {}", path.display()))?;
 
     parse_str(&yaml_str)
@@ -197,15 +197,22 @@ pub fn parse_str(yaml_str: &str) -> Result<Frontmatter> {
 pub fn parse_if_present(path: &Path) -> Result<Option<Frontmatter>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
-    match extract_frontmatter_str(&content) {
+    match split(&content) {
         None => Ok(None),
-        Some(yaml_str) => parse_str(&yaml_str).map(Some),
+        Some((yaml_str, _)) => parse_str(&yaml_str).map(Some),
     }
 }
 
-/// Extract the raw YAML string between `---` delimiters.
-fn extract_frontmatter_str(content: &str) -> Option<String> {
-    split(content).map(|(yaml, _)| yaml)
+/// True if `content` opens with a `---` YAML frontmatter delimiter: the cheap
+/// gate a walker applies before it reads a file as a way.
+///
+/// Uses `lines()` (which strips a trailing `\r`) so a way authored on Windows
+/// with CRLF endings is recognized. A hard `content.starts_with("---\n")` check
+/// fails on `---\r\n` and silently drops the file — on the scan/resolve path
+/// that means the way never matches or renders. Every frontmatter gate routes
+/// through here so the behavior is uniform across platforms.
+pub fn opens_with_fence(content: &str) -> bool {
+    content.lines().next() == Some("---")
 }
 
 /// Split a way file into its frontmatter YAML and its body. The file must open
@@ -230,6 +237,40 @@ pub fn split(content: &str) -> Option<(String, &str)> {
         yaml_lines.push(line);
     }
     None
+}
+
+/// The markdown body after the frontmatter ([`split`]), `\n`-joined without a
+/// trailing newline. Empty when there is no closed frontmatter block.
+pub fn body_text(content: &str) -> String {
+    split(content).map_or_else(String::new, |(_, body)| body.lines().collect::<Vec<_>>().join("\n"))
+}
+
+/// The index, in `content.lines()`, of the line that closes the frontmatter
+/// block: the fence rule of [`split`] for the rewriters that edit a way file
+/// line by line (`ways lint --fix`). `None` when there is no closed block.
+pub fn closing_fence_line(content: &str) -> Option<usize> {
+    let mut lines = content.lines();
+    if lines.next()? != "---" {
+        return None;
+    }
+    lines.position(|l| l == "---").map(|i| i + 1)
+}
+
+/// The value of a top-level `name:` line in frontmatter YAML, trimmed: the
+/// first such line with a non-empty value. A line scan, not a YAML parse, so it
+/// reads partially-valid frontmatter (lint) and costs nothing on the hook path.
+pub fn field(yaml: &str, name: &str) -> Option<String> {
+    let prefix = format!("{name}:");
+    yaml.lines().find_map(|line| {
+        let val = line.strip_prefix(&prefix)?.trim();
+        (!val.is_empty()).then(|| val.to_string())
+    })
+}
+
+/// [`field`] over a whole way file: looks only inside its closed frontmatter
+/// block ([`split`]), so a body line never answers for a field.
+pub fn field_in(content: &str, name: &str) -> Option<String> {
+    split(content).and_then(|(yaml, _)| field(&yaml, name))
 }
 
 /// A line from `split_inclusive('\n')` without its `\n` or `\r\n`, as
@@ -344,6 +385,55 @@ fn parse_see_also_line(line: &str) -> Option<(String, String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opens_with_fence_tolerates_crlf() {
+        assert!(opens_with_fence("---\ndescription: x\n---\n"));
+        assert!(opens_with_fence("---\r\ndescription: x\r\n---\r\n"));
+        assert!(!opens_with_fence("no frontmatter\n"));
+        assert!(!opens_with_fence(""));
+    }
+
+    #[test]
+    fn body_text_keeps_horizontal_rules() {
+        let content = "---\ndescription: d\n---\n# Way\n\nabove\n\n---\n\nbelow\n";
+        assert_eq!(body_text(content), "# Way\n\nabove\n\n---\n\nbelow");
+    }
+
+    #[test]
+    fn body_text_reads_crlf_frontmatter() {
+        assert_eq!(body_text("---\r\ndescription: d\r\n---\r\n# Way\r\n"), "# Way");
+    }
+
+    /// An unclosed block is not frontmatter (the parser rejects it), so no
+    /// field is read from it. The show and tree scanners used to read on to
+    /// the end of the file and found `scope:` here.
+    #[test]
+    fn field_in_reads_nothing_from_an_unclosed_block() {
+        assert_eq!(field_in("---\nscope: agent\n# body\n", "scope"), None);
+        assert_eq!(field_in("---\nscope: agent\n---\n# body\n", "scope").as_deref(), Some("agent"));
+    }
+
+    #[test]
+    fn field_in_never_reads_the_body() {
+        let content = "---\ndescription: d\n---\nscope: agent\n";
+        assert_eq!(field_in(content, "scope"), None);
+    }
+
+    #[test]
+    fn field_skips_empty_values_and_trims() {
+        assert_eq!(field("a:\na:  x  \n", "a").as_deref(), Some("x"));
+        assert_eq!(field("ab: x\n", "a"), None);
+    }
+
+    #[test]
+    fn closing_fence_line_follows_split() {
+        assert_eq!(closing_fence_line("---\na: 1\n---\nbody\n---\n"), Some(2));
+        assert_eq!(closing_fence_line("---\r\na: 1\r\n---\r\n"), Some(2));
+        assert_eq!(closing_fence_line("---\n---\n"), Some(1));
+        assert_eq!(closing_fence_line("---\na: 1\n"), None);
+        assert_eq!(closing_fence_line("a: 1\n---\n"), None);
+    }
 
     fn parse_yaml(yaml: &str) -> Frontmatter {
         serde_yaml::from_str(yaml).expect("frontmatter parse failed")

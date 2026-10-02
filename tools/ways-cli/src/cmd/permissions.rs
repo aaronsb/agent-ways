@@ -77,9 +77,8 @@ fn collect_way_requirements(
             Err(_) => continue,
         };
 
-        let fm = match extract_frontmatter(&content) {
-            Some(f) => f,
-            None => continue,
+        let Some((fm, _)) = crate::frontmatter::split(&content) else {
+            continue;
         };
 
         if let Some(reqs) = extract_requires(&fm) {
@@ -95,22 +94,6 @@ fn collect_way_requirements(
         }
     }
     Ok(())
-}
-
-/// Extract YAML frontmatter from a way file.
-fn extract_frontmatter(content: &str) -> Option<String> {
-    let mut lines = content.lines();
-    if lines.next()? != "---" {
-        return None;
-    }
-    let mut fm_lines = Vec::new();
-    for line in lines {
-        if line == "---" {
-            return Some(fm_lines.join("\n"));
-        }
-        fm_lines.push(line);
-    }
-    None
 }
 
 /// Parse requires: field from frontmatter.

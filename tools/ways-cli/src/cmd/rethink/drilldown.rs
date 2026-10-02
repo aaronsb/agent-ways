@@ -71,27 +71,10 @@ fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
 #[cfg(feature = "tui")]
 fn read_way_body(path: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    let mut lines = content.lines();
-    if lines.next() != Some("---") {
-        return Some(content); // no opening fence — treat all as body
+    match ways_core::frontmatter::split(&content) {
+        Some((_, body)) => Some(body.to_string()),
+        None => Some(content),
     }
-    let mut in_frontmatter = true;
-    let mut body = String::new();
-    for line in lines {
-        if in_frontmatter {
-            if line == "---" {
-                in_frontmatter = false; // consume the closing fence line
-            }
-            continue;
-        }
-        body.push_str(line);
-        body.push('\n');
-    }
-    // Unterminated frontmatter (no closing fence) → don't drop the whole file.
-    if in_frontmatter {
-        return Some(content);
-    }
-    Some(body)
 }
 
 /// Render the detail panel for one way: its trigger, resolved `MatchCriteria`, the

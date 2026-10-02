@@ -116,18 +116,8 @@ struct ParsedSeededMemory {
 }
 
 fn parse_seeded_memory(content: &str) -> Option<ParsedSeededMemory> {
-    let mut lines = content.lines();
-    if lines.next()? != "---" {
-        return None;
-    }
-
-    let mut frontmatter = Vec::new();
-    for line in &mut lines {
-        if line == "---" {
-            break;
-        }
-        frontmatter.push(line);
-    }
+    let (frontmatter, rest) = crate::frontmatter::split(content)?;
+    let lines = rest.lines();
 
     let mut body_lines: Vec<&str> = Vec::new();
     let mut user_context_lines: Vec<&str> = Vec::new();
@@ -148,19 +138,11 @@ fn parse_seeded_memory(content: &str) -> Option<ParsedSeededMemory> {
     let body_bytes = body_joined.trim_matches('\n').to_string();
 
     Some(ParsedSeededMemory {
-        frontmatter_seed: frontmatter_value(&frontmatter, "seed"),
-        frontmatter_version: frontmatter_value(&frontmatter, "seed-version")
+        frontmatter_seed: crate::frontmatter::field(&frontmatter, "seed"),
+        frontmatter_version: crate::frontmatter::field(&frontmatter, "seed-version")
             .and_then(|v| v.parse().ok()),
         body_bytes,
         user_context: user_context_lines.join("\n"),
-    })
-}
-
-fn frontmatter_value(frontmatter: &[&str], key: &str) -> Option<String> {
-    let prefix = format!("{key}:");
-    frontmatter.iter().find_map(|line| {
-        line.strip_prefix(&prefix)
-            .map(|rest| rest.trim().to_string())
     })
 }
 

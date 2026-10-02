@@ -3,36 +3,6 @@
 use std::path::Path;
 use std::process::Command;
 
-/// Extract a YAML frontmatter field value by name.
-pub(crate) fn extract_field(content: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name}:");
-    let mut in_fm = false;
-    for (i, line) in content.lines().enumerate() {
-        if i == 0 && line == "---" {
-            in_fm = true;
-            continue;
-        }
-        if in_fm {
-            if line == "---" {
-                return None;
-            }
-            if let Some(val) = line.strip_prefix(&prefix) {
-                let val = val.trim();
-                if !val.is_empty() {
-                    return Some(val.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-/// The markdown body after the frontmatter (`ways_core::frontmatter::split`),
-/// `\n`-joined without a trailing newline. Empty when there is no frontmatter.
-pub(crate) fn body_text(content: &str) -> String {
-    body_lines(content).join("\n")
-}
-
 fn body_lines(content: &str) -> Vec<&str> {
     ways_core::frontmatter::split(content).map_or_else(Vec::new, |(_, body)| body.lines().collect())
 }
@@ -103,23 +73,14 @@ pub(crate) fn is_project_trusted(project_dir: &str) -> bool {
 /// Extract attend signal types from frontmatter.
 /// Looks for `type: attend` and collects `signals:` list items.
 pub(crate) fn extract_attend_signals(content: &str) -> Vec<String> {
-    let mut in_fm = false;
+    let Some((fm, _)) = ways_core::frontmatter::split(content) else {
+        return Vec::new();
+    };
     let mut has_attend_type = false;
     let mut in_signals = false;
     let mut signals = Vec::new();
 
-    for (i, line) in content.lines().enumerate() {
-        if i == 0 && line == "---" {
-            in_fm = true;
-            continue;
-        }
-        if in_fm && line == "---" {
-            break;
-        }
-        if !in_fm {
-            continue;
-        }
-
+    for line in fm.lines() {
         let trimmed = line.trim();
 
         if trimmed == "type: attend" {
@@ -175,17 +136,6 @@ mod tests {
         let content = "---\ntrigger:\n  type: attend\n---\nBody.";
         let signals = extract_attend_signals(content);
         assert!(signals.is_empty());
-    }
-
-    #[test]
-    fn body_text_keeps_horizontal_rules() {
-        let content = "---\ndescription: d\n---\n# Way\n\nabove\n\n---\n\nbelow\n";
-        assert_eq!(body_text(content), "# Way\n\nabove\n\n---\n\nbelow");
-    }
-
-    #[test]
-    fn body_text_reads_crlf_frontmatter() {
-        assert_eq!(body_text("---\r\ndescription: d\r\n---\r\n# Way\r\n"), "# Way");
     }
 
     #[test]

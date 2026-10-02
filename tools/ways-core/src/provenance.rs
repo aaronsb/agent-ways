@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::util::{has_frontmatter, home_dir};
+use crate::frontmatter::opens_with_fence;
+use crate::util::home_dir;
 
 /// The typed compliance-claim schema stored in a `provenance.yaml` sidecar
 /// (ADR-110, ADR-151 §3). The manifest builder above stays `Value`-based for the
@@ -203,7 +204,7 @@ fn scan_provenance(
             Ok(c) => c,
             Err(_) => continue,
         };
-        if !has_frontmatter(&content) {
+        if !opens_with_fence(&content) {
             continue;
         }
 

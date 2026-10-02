@@ -141,7 +141,7 @@ fn analyze_file(file: &Path, tree_path: &Path, _ways_root: &Path) -> Result<WayI
     };
 
     // Token estimate: body bytes / 4
-    let body = strip_frontmatter(&content);
+    let body = crate::frontmatter::body_text(&content);
     let tokens = body.len() / 4;
 
     Ok(WayInfo {
@@ -178,7 +178,7 @@ fn find_way_files(dir: &Path) -> Result<Vec<PathBuf>> {
         }
         // Check frontmatter
         if let Ok(content) = std::fs::read_to_string(path) {
-            if crate::util::has_frontmatter(&content) {
+            if crate::frontmatter::opens_with_fence(&content) {
                 files.push(path.to_path_buf());
             }
         }
@@ -227,50 +227,11 @@ fn resolve_path(input: &str, ways_root: &Path) -> Result<PathBuf> {
 }
 
 fn extract_vocab_from_content(content: &str) -> String {
-    extract_field(content, "vocabulary").unwrap_or_default()
+    crate::frontmatter::field_in(content, "vocabulary").unwrap_or_default()
 }
 
 fn extract_threshold_from_content(content: &str) -> Option<f64> {
-    extract_field(content, "threshold")?.parse().ok()
-}
-
-fn extract_field(content: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name}:");
-    let mut in_fm = false;
-    for (i, line) in content.lines().enumerate() {
-        if i == 0 && line == "---" {
-            in_fm = true;
-            continue;
-        }
-        if in_fm {
-            if line == "---" {
-                return None;
-            }
-            if let Some(val) = line.strip_prefix(&prefix) {
-                return Some(val.trim().to_string());
-            }
-        }
-    }
-    None
-}
-
-fn strip_frontmatter(content: &str) -> String {
-    let mut lines = content.lines();
-    if lines.next() != Some("---") {
-        return content.to_string();
-    }
-    let mut past_fm = false;
-    let mut body = Vec::new();
-    for line in lines {
-        if !past_fm && line == "---" {
-            past_fm = true;
-            continue;
-        }
-        if past_fm {
-            body.push(line);
-        }
-    }
-    body.join("\n")
+    crate::frontmatter::field_in(content, "threshold")?.parse().ok()
 }
 
 use crate::util::home_dir;

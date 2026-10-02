@@ -629,7 +629,7 @@ fn find_way_in_dir(dir: &Path) -> Option<PathBuf> {
             continue;
         }
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if crate::util::has_frontmatter(&content) {
+            if crate::frontmatter::opens_with_fence(&content) {
                 return Some(path);
             }
         }

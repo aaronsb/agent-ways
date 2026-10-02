@@ -31,12 +31,9 @@ pub(super) fn scan_and_lint(
         }
 
         // Check if it has frontmatter
-        let first_line = match std::fs::read_to_string(path) {
-            Ok(c) => c.lines().next().unwrap_or("").to_string(),
-            Err(_) => continue,
-        };
-        if first_line != "---" {
-            continue;
+        match std::fs::read_to_string(path) {
+            Ok(c) if crate::frontmatter::opens_with_fence(&c) => {}
+            _ => continue,
         }
 
         // Excluded paths — backup/sync tool artifacts that pollute the corpus

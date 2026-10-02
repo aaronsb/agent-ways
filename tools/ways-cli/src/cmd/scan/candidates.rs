@@ -136,7 +136,7 @@ pub(crate) fn way_ids(root: &Path) -> HashSet<String> {
             continue;
         }
         match std::fs::read_to_string(path) {
-            Ok(c) if crate::util::has_frontmatter(&c) => {}
+            Ok(c) if crate::frontmatter::opens_with_fence(&c) => {}
             _ => continue,
         }
         let id = way_id_from_path(path, root);
@@ -218,7 +218,7 @@ fn collect_from_dir(
             Ok(c) => c,
             Err(_) => continue,
         };
-        if !crate::util::has_frontmatter(&content) {
+        if !crate::frontmatter::opens_with_fence(&content) {
             continue;
         }
 
@@ -264,7 +264,7 @@ fn way_identity(
 // ── Parsing ────────────────────────────────────────────────────
 
 fn parse_candidate(id: &str, corpus_prefix: &str, path: &Path, content: &str) -> Option<WayCandidate> {
-    let fm = extract_frontmatter(content)?;
+    let (fm, _) = crate::frontmatter::split(content)?;
 
     Some(WayCandidate {
         id: id.to_string(),
@@ -272,61 +272,33 @@ fn parse_candidate(id: &str, corpus_prefix: &str, path: &Path, content: &str) ->
         // corpus_id (prefixed for project ways) is used only for embedding lookup.
         corpus_id: format!("{corpus_prefix}{id}"),
         path: path.to_path_buf(),
-        pattern: get_fm_field(&fm, "pattern"),
+        pattern: crate::frontmatter::field(&fm, "pattern"),
         // Lenient boolean: authors write `true`/`True`, and a quoted "true"
-        // also survives get_fm_field's trim. Anything else is false.
-        pattern_strict: get_fm_field(&fm, "pattern_strict")
+        // also survives the field scan's trim. Anything else is false.
+        pattern_strict: crate::frontmatter::field(&fm, "pattern_strict")
             .is_some_and(|v| v.trim_matches('"').eq_ignore_ascii_case("true")),
-        commands: get_fm_field(&fm, "commands"),
-        files: get_fm_field(&fm, "files"),
-        description: get_fm_field(&fm, "description").unwrap_or_default(),
-        vocabulary: get_fm_field(&fm, "vocabulary").unwrap_or_default(),
+        commands: crate::frontmatter::field(&fm, "commands"),
+        files: crate::frontmatter::field(&fm, "files"),
+        description: crate::frontmatter::field(&fm, "description").unwrap_or_default(),
+        vocabulary: crate::frontmatter::field(&fm, "vocabulary").unwrap_or_default(),
         // threshold: only read for ways with trigger: context-threshold (percentage).
         // Post-ADR-125, no semantic/BM25 meaning; default 0.0 is never compared for other triggers.
-        threshold: get_fm_field(&fm, "threshold")
+        threshold: crate::frontmatter::field(&fm, "threshold")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0),
         // config::global() — future migration: ctx.config.default_scope
-        scope: get_fm_field(&fm, "scope")
+        scope: crate::frontmatter::field(&fm, "scope")
             .unwrap_or_else(|| crate::config::global().default_scope.clone()),
         when_project: get_when_field(&fm, "project"),
         when_file_exists: get_when_field(&fm, "file_exists"),
-        trigger: get_fm_field(&fm, "trigger"),
-        trigger_path: get_fm_field(&fm, "path"),
+        trigger: crate::frontmatter::field(&fm, "trigger"),
+        trigger_path: crate::frontmatter::field(&fm, "path"),
     })
 }
 
 pub(crate) fn way_id_from_path(path: &Path, base: &Path) -> String {
     let parent = path.parent().unwrap_or(path);
     crate::util::path_to_id(parent.strip_prefix(base).unwrap_or(parent))
-}
-
-pub(crate) fn extract_frontmatter(content: &str) -> Option<String> {
-    let mut lines = content.lines();
-    if lines.next()? != "---" {
-        return None;
-    }
-    let mut fm_lines = Vec::new();
-    for line in lines {
-        if line == "---" {
-            return Some(fm_lines.join("\n"));
-        }
-        fm_lines.push(line);
-    }
-    None
-}
-
-pub(crate) fn get_fm_field(fm: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name}:");
-    for line in fm.lines() {
-        if let Some(val) = line.strip_prefix(&prefix) {
-            let val = val.trim();
-            if !val.is_empty() {
-                return Some(val.to_string());
-            }
-        }
-    }
-    None
 }
 
 pub(crate) fn get_when_field(fm: &str, name: &str) -> Option<String> {
@@ -465,11 +437,11 @@ mod tests {
 
     #[test]
     fn fields_parse_identically_across_line_endings() {
-        let lf = extract_frontmatter(LF).expect("LF frontmatter");
-        let crlf = extract_frontmatter(CRLF).expect("CRLF frontmatter");
-        assert_eq!(get_fm_field(&lf, "pattern").as_deref(), Some("foo"));
-        assert_eq!(get_fm_field(&crlf, "pattern").as_deref(), Some("foo"));
-        assert_eq!(get_fm_field(&crlf, "description").as_deref(), Some("hello"));
+        let (lf, _) = crate::frontmatter::split(LF).expect("LF frontmatter");
+        let (crlf, _) = crate::frontmatter::split(CRLF).expect("CRLF frontmatter");
+        assert_eq!(crate::frontmatter::field(&lf, "pattern").as_deref(), Some("foo"));
+        assert_eq!(crate::frontmatter::field(&crlf, "pattern").as_deref(), Some("foo"));
+        assert_eq!(crate::frontmatter::field(&crlf, "description").as_deref(), Some("hello"));
     }
 
     fn write_way(root: &Path, id: &str) {

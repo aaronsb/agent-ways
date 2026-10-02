@@ -54,22 +54,8 @@ fn has_way_frontmatter(path: &Path) -> bool {
         Err(_) => return false,
     };
 
-    let mut in_frontmatter = false;
-    for (i, line) in content.lines().enumerate() {
-        if i == 0 && line == "---" {
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            if line == "---" {
-                return false; // closed without description
-            }
-            if line.starts_with("description:") {
-                return true;
-            }
-        }
-    }
-    false
+    crate::frontmatter::split(&content)
+        .is_some_and(|(fm, _)| fm.lines().any(|l| l.starts_with("description:")))
 }
 
 /// Derive WayFile identity from filesystem path relative to the ways root.
@@ -152,6 +138,16 @@ mod tests {
         // No frontmatter at all → not a way.
         write_way(&root, "d/x/x.md", "# just prose\n");
 
+        assert!(scan_ways(&root).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An unclosed block is not frontmatter: the old scanner accepted a
+    /// `description:` line anywhere after the opening fence.
+    #[test]
+    fn unclosed_frontmatter_is_not_a_way() {
+        let root = scratch("unclosed");
+        write_way(&root, "d/w/w.md", "---\ndescription: a way\nguidance\n");
         assert!(scan_ways(&root).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }

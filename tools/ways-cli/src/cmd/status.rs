@@ -310,17 +310,19 @@ fn count_ways(dir: &Path) -> (usize, usize) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        if !crate::util::has_frontmatter(&content) {
+        if !crate::frontmatter::opens_with_fence(&content) {
             continue;
         }
 
         total += 1;
 
-        // Check for description + vocabulary (semantic way)
-        let has_desc = content.lines().any(|l| l.starts_with("description:"));
-        let has_vocab = content.lines().any(|l| l.starts_with("vocabulary:"));
-        if has_desc && has_vocab {
-            semantic += 1;
+        // Semantic way: description + vocabulary in its frontmatter (a body
+        // line never counts).
+        if let Some((fm, _)) = crate::frontmatter::split(&content) {
+            let has = |f: &str| fm.lines().any(|l| l.starts_with(f));
+            if has("description:") && has("vocabulary:") {
+                semantic += 1;
+            }
         }
     }
 

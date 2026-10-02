@@ -521,7 +521,7 @@ pub fn build_criteria_map(roots: &[PathBuf]) -> CriteriaMap {
             let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
             };
-            if !crate::util::has_frontmatter(&content) {
+            if !crate::frontmatter::opens_with_fence(&content) {
                 continue;
             }
             let Some(rel) = path.parent().and_then(|p| p.strip_prefix(root).ok()) else {

@@ -378,22 +378,11 @@ fn body_confirm(bin: &Path, model: &Path, surface: &[String], body_path: &Path) 
 /// Chunk a way's `.md` body for confirmation: drop YAML frontmatter and fenced
 /// code, then sentence-split the prose and cap the count.
 fn chunk_body(content: &str) -> Vec<String> {
+    let body = crate::frontmatter::split(content).map_or(content, |(_, body)| body);
     let mut prose = String::new();
-    let mut in_frontmatter = false;
     let mut in_fence = false;
-    for (i, line) in content.lines().enumerate() {
+    for line in body.lines() {
         let t = line.trim_start();
-        // A leading `---` on line 0 opens a frontmatter block.
-        if i == 0 && t == "---" {
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            if t == "---" {
-                in_frontmatter = false;
-            }
-            continue;
-        }
         if t.starts_with("```") {
             in_fence = !in_fence;
             continue;
@@ -464,6 +453,17 @@ mod tests {
         assert!(chunks.iter().all(|c| !c.contains("code not prose")), "{chunks:?}");
         assert!(chunks.iter().any(|c| c.contains("real guidance")));
         assert!(chunks.iter().any(|c| c.contains("genuine sentence")));
+    }
+
+    /// The frontmatter closes only on a bare `---` line ([`crate::frontmatter::split`]).
+    /// The old chunker trimmed the line first, so an indented `  ---` inside the
+    /// YAML closed the block early and the rest of the YAML was read as prose.
+    #[test]
+    fn chunk_body_closes_frontmatter_only_on_a_bare_fence() {
+        let body = "---\nvocabulary: a\n  ---\nleaked: yaml value that is long enough\n---\nThis is the real guidance sentence.\n";
+        let chunks = chunk_body(body);
+        assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
+        assert!(chunks.iter().any(|c| c.contains("real guidance")));
     }
 
     #[test]

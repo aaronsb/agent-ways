@@ -198,20 +198,7 @@ pub(super) fn format_requires_yaml(reqs: &[String]) -> String {
 /// Insert a requires: field into frontmatter, before the closing ---.
 pub(super) fn insert_requires_field(content: &str, requires_line: &str) -> String {
     let mut lines: Vec<&str> = content.lines().collect();
-    let mut close_idx = None;
-    let mut in_fm = false;
-    for (i, line) in lines.iter().enumerate() {
-        if i == 0 && *line == "---" {
-            in_fm = true;
-            continue;
-        }
-        if in_fm && *line == "---" {
-            close_idx = Some(i);
-            break;
-        }
-    }
-
-    if let Some(idx) = close_idx {
+    if let Some(idx) = ways_core::frontmatter::closing_fence_line(content) {
         lines.insert(idx, requires_line);
     }
 

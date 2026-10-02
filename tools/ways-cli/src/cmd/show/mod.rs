@@ -11,7 +11,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::{frontmatter, session};
-use helpers::{extract_field, extract_attend_signals, home_dir, is_project_trusted, body_text, check_sections_text, run_macro};
+use helpers::{extract_attend_signals, home_dir, is_project_trusted, check_sections_text, run_macro};
+use crate::frontmatter::body_text;
 use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_text, update_status_text};
 
 // ── ways show way ───────────────────────────────────────────────
@@ -347,7 +348,7 @@ fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
 
     // Read frontmatter for scope field
     let content = std::fs::read_to_string(&way_file)?;
-    let scope_field = extract_field(&content, "scope").unwrap_or_default();
+    let scope_field = crate::frontmatter::field_in(&content, "scope").unwrap_or_default();
     if !session::scope_matches(&scope_field, &scope) {
         return Ok(None);
     }
@@ -402,7 +403,7 @@ fn render_way(
     project_dir: &str,
     session_id: &str,
 ) -> String {
-    let macro_pos = extract_field(content, "macro");
+    let macro_pos = crate::frontmatter::field_in(content, "macro");
     let way_dir = way_file.parent().unwrap_or(Path::new("."));
     let macro_file = way_dir.join("macro.sh");
     let macro_out = if macro_pos.is_some() && macro_file.is_file() {
@@ -702,7 +703,7 @@ pub fn check_within(
     };
 
     let check_content = std::fs::read_to_string(&check_file)?;
-    let scope_field = extract_field(&check_content, "scope").unwrap_or_default();
+    let scope_field = crate::frontmatter::field_in(&check_content, "scope").unwrap_or_default();
     if !scope_field.is_empty() && !session::scope_matches(&scope_field, &scope) {
         return Ok(String::new());
     }
@@ -725,7 +726,7 @@ pub fn check_within(
     let effective_score = match_score * distance_factor * decay_factor;
 
     // Threshold
-    let threshold: f64 = extract_field(&check_content, "threshold")
+    let threshold: f64 = crate::frontmatter::field_in(&check_content, "threshold")
         .and_then(|s| s.parse().ok())
         .unwrap_or(2.0);
 
