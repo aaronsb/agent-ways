@@ -296,6 +296,19 @@ check "post-tool finds postchecks under a symlinked core root" "yes" "$(grep -q 
 rm "$CORE" && mv "$WORK/core-real" "$CORE"
 rm -rf "$CORE/postdom" "$PROJ/.claude/ways/postdom"
 
+# A project-local postcheck is project code, gated like a project macro: it
+# runs only for a project listed in ~/.claude/trusted-project-macros.
+way "$PROJ/.claude/ways" projdom/local agent "# Project local body"
+postcheck "$PROJ/.claude/ways/projdom/local" "touch \"$WORK/project-postcheck-ran\"; exit 0"
+rm -f "$WORK/project-postcheck-ran" "$HOME/.claude/trusted-project-macros"
+out=$(post sess-post-3 PostToolUse)
+check "an untrusted project's postcheck does not run" "absent" "$([[ -e $WORK/project-postcheck-ran ]] && echo present || echo absent)"
+echo "$PROJ" > "$HOME/.claude/trusted-project-macros"
+out=$(post sess-post-4 PostToolUse)
+check "a trusted project's postcheck runs" "present" "$([[ -e $WORK/project-postcheck-ran ]] && echo present || echo absent)"
+check "a trusted project's postcheck fires its way" "yes" "$(grep -q 'Project local body' <<< "$out" && echo yes || echo no)"
+rm -rf "$PROJ/.claude/ways/projdom" "$HOME/.claude/trusted-project-macros" "$WORK/project-postcheck-ran"
+
 # #689: a macro run for a subagent gets the parent's session id, its own
 # agent id, the scope it runs for and the sessions root, and the markdown
 # queue macros leave the parent's queue for the parent.

@@ -18,23 +18,35 @@ use crate::session;
 pub struct Postcheck {
     pub way_id: String,
     pub script: PathBuf,
+    /// Whether it may run. A project-local postcheck is project code, so it
+    /// runs only for a trusted project, as a project-local macro does; an
+    /// untrusted one still shadows the same id in later roots.
+    pub runs: bool,
 }
 
-/// The ways roots in precedence order (ADR-143): project, user, core.
-pub fn roots(project_dir: &str) -> Vec<PathBuf> {
+/// A ways root and whether its postchecks may run.
+pub struct Root {
+    pub dir: PathBuf,
+    pub runs: bool,
+}
+
+/// The ways roots in precedence order (ADR-143): project, user, core. The
+/// project root's postchecks run only when the project is listed in
+/// `paths::trusted_project_macros()`, the gate project macros pass.
+pub fn roots(project_dir: &str) -> Vec<Root> {
     vec![
-        Path::new(project_dir).join(".claude/ways"),
-        crate::paths::user_ways_root(),
-        crate::paths::projected_ways_root(),
+        Root { dir: Path::new(project_dir).join(".claude/ways"), runs: show::is_project_trusted(project_dir) },
+        Root { dir: crate::paths::user_ways_root(), runs: true },
+        Root { dir: crate::paths::projected_ways_root(), runs: true },
     ]
 }
 
 /// Every executable `postcheck.sh` under `roots`, one per way id: a way in an
 /// earlier root shadows the same id in a later one, as it does for the way
 /// itself. Sorted by way id, so the fire order does not follow walk order.
-pub fn find(roots: &[PathBuf]) -> Vec<Postcheck> {
-    let mut found: std::collections::BTreeMap<String, PathBuf> = Default::default();
-    for root in roots.iter().filter(|r| r.is_dir()) {
+pub fn find(roots: &[Root]) -> Vec<Postcheck> {
+    let mut found: std::collections::BTreeMap<String, (PathBuf, bool)> = Default::default();
+    for Root { dir: root, runs } in roots.iter().filter(|r| r.dir.is_dir()) {
         let mut here: Vec<(String, PathBuf)> = ways_core::scanner::files(root)
             .filter(|p| p.file_name().is_some_and(|n| n == "postcheck.sh"))
             .filter(|p| show::is_executable(p))
@@ -46,25 +58,26 @@ pub fn find(roots: &[PathBuf]) -> Vec<Postcheck> {
             .collect();
         here.sort();
         for (id, script) in here {
-            found.entry(id).or_insert(script);
+            found.entry(id).or_insert((script, *runs));
         }
     }
-    found.into_iter().map(|(way_id, script)| Postcheck { way_id, script }).collect()
+    found.into_iter().map(|(way_id, (script, runs))| Postcheck { way_id, script, runs }).collect()
 }
 
-/// Run every postcheck at once with the payload on stdin; the ids of those
-/// that exit 0, in the order given. A postcheck sees `CLAUDE_SESSION_ID` and
+/// Run every postcheck that may run, at once, with the payload on stdin; the
+/// ids of those that exit 0, in the order given. A postcheck sees `CLAUDE_SESSION_ID` and
 /// `WAYS_SESSIONS_ROOT`; its output is discarded.
 pub fn requests(checks: &[Postcheck], payload: &str, session_id: &str) -> Vec<String> {
     let root = session::sessions_root();
+    let runnable: Vec<&Postcheck> = checks.iter().filter(|c| c.runs).collect();
     let fired: Vec<bool> = std::thread::scope(|s| {
-        let handles: Vec<_> = checks
+        let handles: Vec<_> = runnable
             .iter()
             .map(|c| s.spawn(|| run_one(&c.script, payload, session_id, &root)))
             .collect();
         handles.into_iter().map(|h| h.join().unwrap_or(false)).collect()
     });
-    checks.iter().zip(fired).filter(|(_, f)| *f).map(|(c, _)| c.way_id.clone()).collect()
+    runnable.iter().zip(fired).filter(|(_, f)| *f).map(|(c, _)| c.way_id.clone()).collect()
 }
 
 fn run_one(script: &Path, payload: &str, session_id: &str, root: &str) -> bool {
@@ -131,12 +144,14 @@ mod tests {
         script(&core, "dom/shared", "exit 0", 0o755);
         let only_core = script(&core, "dom/b/deep", "exit 0", 0o755);
         script(&core, "dom/plain", "exit 0", 0o644); // not executable
-        let got = find(&[project, base.join("absent"), core]);
+        let root = |dir: PathBuf, runs| Root { dir, runs };
+        let got = find(&[root(project, false), root(base.join("absent"), true), root(core, true)]);
         assert_eq!(
             got,
             vec![
-                Postcheck { way_id: "dom/b/deep".into(), script: only_core },
-                Postcheck { way_id: "dom/shared".into(), script: shadow },
+                Postcheck { way_id: "dom/b/deep".into(), script: only_core, runs: true },
+                // An untrusted project's postcheck shadows, and does not run.
+                Postcheck { way_id: "dom/shared".into(), script: shadow, runs: false },
             ]
         );
         std::fs::remove_dir_all(&base).ok();
@@ -147,16 +162,19 @@ mod tests {
         let base = std::env::temp_dir().join(format!("ways-postcheck-run-{}", std::process::id()));
         let log = base.join("seen");
         let checks = vec![
-            Postcheck { way_id: "a".into(), script: script(&base, "a", "grep -q Edit", 0o755) },
-            Postcheck { way_id: "b".into(), script: script(&base, "b", "exit 1", 0o755) },
+            Postcheck { way_id: "a".into(), script: script(&base, "a", "grep -q Edit", 0o755), runs: true },
+            Postcheck { way_id: "b".into(), script: script(&base, "b", "exit 1", 0o755), runs: true },
+            Postcheck { way_id: "d".into(), script: script(&base, "d", &format!("touch {}", base.join("d-ran").display()), 0o755), runs: false },
             // Reads no stdin and records what it was given.
             Postcheck {
                 way_id: "c".into(),
                 script: script(&base, "c", &format!("echo \"$CLAUDE_SESSION_ID $WAYS_SESSIONS_ROOT\" > {}", log.display()), 0o755),
+                runs: true,
             },
         ];
         let got = requests(&checks, r#"{"tool_name":"Edit"}"#, "sess-x");
         assert_eq!(got, vec!["a".to_string(), "c".to_string()]);
+        assert!(!base.join("d-ran").exists(), "a postcheck that may not run is never spawned");
         assert_eq!(
             std::fs::read_to_string(&log).unwrap().trim(),
             format!("sess-x {}", session::sessions_root())

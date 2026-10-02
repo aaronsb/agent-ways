@@ -11,8 +11,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::{frontmatter, session};
-use helpers::{extract_attend_signals, is_project_trusted, check_sections_text, run_macro, MacroRun};
-pub(crate) use helpers::is_executable;
+use helpers::{extract_attend_signals, check_sections_text, run_macro, MacroRun};
+pub(crate) use helpers::{is_executable, is_project_trusted};
 use crate::frontmatter::body_text;
 use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_text, update_status_text};
 
