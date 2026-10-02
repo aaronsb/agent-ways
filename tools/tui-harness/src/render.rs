@@ -3,9 +3,13 @@
 //! Fonts come from the system through `fc-match`, never bundled. Each glyph
 //! is drawn with the primary family when that family maps the character, and
 //! with the fallback family (a Nerd Font, for Braille and icons) otherwise.
+//! A glyph neither has (Chinese, Japanese, Korean) comes from a CJK font
+//! found through fontconfig, when one is installed; else it is the fallback
+//! font's missing-glyph box.
 //! Metrics follow render.py (PIL on FreeType) so the two produce images of
 //! the same geometry from the same capture.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,6 +27,11 @@ pub const DEFAULT_FONT: &str = "JetBrains Mono";
 pub const DEFAULT_SIZE: u32 = 14;
 /// The family used for glyphs the primary font lacks.
 pub const FALLBACK_FONT: &str = "CaskaydiaMono Nerd Font Mono";
+/// Families tried, in order, for glyphs missing from both fonts above. After
+/// these, any font fontconfig lists for `:lang=zh`.
+pub const CJK_FONTS: [&str; 2] = ["Noto Sans Mono CJK SC", "Noto Sans CJK SC"];
+/// The character a CJK candidate must map to be used.
+const CJK_PROBE: char = '\u{4e2d}';
 
 /// A loaded face plus the metrics needed to place its glyphs.
 struct Face {
@@ -76,12 +85,54 @@ pub fn fc_match(family: &str, bold: bool, italic: bool) -> Option<(PathBuf, u32)
     Some((PathBuf::from(file), index))
 }
 
+/// Whether fontconfig resolves `family` to that family itself rather than
+/// to a substitute. `fc-match` always answers with something, so a caller
+/// that needs the real font (a golden-image test) checks this first.
+pub fn fc_has_family(family: &str) -> bool {
+    Command::new("fc-match")
+        .args(["-f", "%{family}", family])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .split(',')
+                .any(|f| f.trim().eq_ignore_ascii_case(family))
+        })
+        .unwrap_or(false)
+}
+
+/// Every font fontconfig lists as covering `lang`, as `(file, index)`,
+/// sorted so the choice is stable.
+fn fc_list_lang(lang: &str) -> Vec<(PathBuf, u32)> {
+    let Ok(out) = Command::new("fc-list")
+        .args(["-f", "%{file}\t%{index}\n", &format!(":lang={lang}")])
+        .output()
+    else {
+        return Vec::new();
+    };
+    let mut found: Vec<(PathBuf, u32)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let (file, index) = l.split_once('\t')?;
+            Some((PathBuf::from(file), index.trim().parse().unwrap_or(0)))
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
 /// Renders grids at one font and size. Build it once and reuse it: font
 /// lookup and loading happen in [`Renderer::new`].
 pub struct Renderer {
     /// Indexed by `bold as usize | (italic as usize) << 1`.
     primary: [Option<Rc<Face>>; 4],
     fallback: [Option<Rc<Face>>; 4],
+    /// Loaded on first use: CJK fonts are large and most screens need none.
+    cjk: OnceCell<Option<Face>>,
+    /// Pixels per em; 0 when the renderer draws no glyphs.
+    ppem: f32,
     cell_w: u32,
     cell_h: u32,
 }
@@ -110,6 +161,8 @@ impl Renderer {
         Renderer {
             primary,
             fallback,
+            cjk: OnceCell::new(),
+            ppem,
             cell_w,
             cell_h,
         }
@@ -121,6 +174,8 @@ impl Renderer {
         Renderer {
             primary: Default::default(),
             fallback: Default::default(),
+            cjk: OnceCell::new(),
+            ppem: 0.0,
             cell_w: cell_w.max(1),
             cell_h: cell_h.max(1),
         }
@@ -129,6 +184,45 @@ impl Renderer {
     /// Whether the primary family resolved to a loadable font.
     pub fn has_primary_font(&self) -> bool {
         self.primary[0].is_some()
+    }
+
+    /// Whether a CJK font was found (this loads it on first call).
+    pub fn has_cjk_font(&self) -> bool {
+        self.cjk_face().is_some()
+    }
+
+    /// The CJK face, found and loaded on first call.
+    fn cjk_face(&self) -> Option<&Face> {
+        self.cjk
+            .get_or_init(|| {
+                if self.ppem <= 0.0 {
+                    return None;
+                }
+                let matched = CJK_FONTS.iter().filter_map(|f| fc_match(f, false, false));
+                matched.chain(fc_list_lang("zh")).find_map(|(path, index)| {
+                    Face::load(&path, index, self.ppem).filter(|f| f.has(CJK_PROBE))
+                })
+            })
+            .as_ref()
+    }
+
+    /// The face to draw `c` with: the primary font, then the fallback, then
+    /// the CJK font, then the fallback's missing-glyph box.
+    fn face_for(&self, c: char, key: usize) -> Option<&Face> {
+        let primary = self.primary[key].as_deref();
+        let fallback = self.fallback[key].as_deref();
+        if let Some(p) = primary.filter(|p| p.has(c)) {
+            return Some(p);
+        }
+        if let Some(f) = fallback.filter(|f| f.has(c)) {
+            return Some(f);
+        }
+        if primary.is_some() || fallback.is_some() {
+            if let Some(k) = self.cjk_face().filter(|k| k.has(c)) {
+                return Some(k);
+            }
+        }
+        fallback.or(primary)
     }
 
     /// Cell size in pixels, `(width, height)`.
@@ -163,11 +257,7 @@ impl Renderer {
                 }
                 if let Some(c) = cell.ch.filter(|c| *c != ' ') {
                     let key = st.bold as usize | (st.italic as usize) << 1;
-                    let face = match (&self.primary[key], &self.fallback[key]) {
-                        (Some(p), _) if p.has(c) => Some(p),
-                        (p, f) => f.as_ref().or(p.as_ref()),
-                    };
-                    if let Some(face) = face {
+                    if let Some(face) = self.face_for(c, key) {
                         draw_glyph(&mut img, face, c, x, y, fg);
                     }
                 }
@@ -293,6 +383,20 @@ mod tests {
         let r = Renderer::without_fonts(8, 16);
         let img = r.render(&parse("ab\n"), Some(10), Some(4));
         assert_eq!(img.dimensions(), (80, 64));
+    }
+
+    #[test]
+    fn cjk_glyph_comes_from_the_cjk_font_when_one_exists() {
+        let r = Renderer::new(DEFAULT_FONT, DEFAULT_SIZE);
+        let Some(cjk) = r.cjk_face() else {
+            eprintln!("skipping CJK check: no CJK font installed");
+            return;
+        };
+        let face = r.face_for('\u{4e2d}', 0).expect("a face");
+        assert!(std::ptr::eq(face, cjk));
+        // Latin text never reaches the CJK font.
+        let m = r.face_for('M', 0).expect("a face");
+        assert!(!std::ptr::eq(m, cjk));
     }
 
     #[test]

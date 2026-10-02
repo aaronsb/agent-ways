@@ -9,10 +9,15 @@ use tui_harness::{sgr::BASIC, tmux_available, Harness, LaunchOptions, Renderer};
 #[test]
 fn drives_fixture_through_tmux() {
     if !tmux_available() {
+        // CI sets this after installing tmux, so a broken install fails
+        // instead of passing as a skip.
+        if std::env::var_os("TUI_HARNESS_REQUIRE_TMUX").is_some() {
+            panic!("TUI_HARNESS_REQUIRE_TMUX is set but tmux is not installed");
+        }
         eprintln!("SKIPPED drives_fixture_through_tmux: tmux is not installed");
         return;
     }
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixture.sh");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drive.sh");
     let root = std::env::temp_dir().join(format!("tui-harness-test-{}", std::process::id()));
     let harness = Harness::new(&root);
     let name = format!("it-{}", std::process::id());

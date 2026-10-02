@@ -63,6 +63,8 @@ enum Cmd {
         #[arg(long)]
         ansi: bool,
     },
+    /// Attach this terminal to the session, to look in (detach with C-b d)
+    Attach { name: String },
     /// Kill the session and remove its state
     Down { name: String },
     /// List sessions
@@ -116,7 +118,12 @@ fn run(cli: Cli) -> Result<()> {
                 "launched '{}' ({} x {}, {} @ {}pt)",
                 s.name, s.cols, s.rows, s.font, s.size
             );
-            println!("  tmux:   {}", s.tmux_name);
+            println!(
+                "  tmux:   {} (socket {})",
+                s.tmux_name,
+                tui_harness::session::TMUX_SOCKET
+            );
+            println!("  attach: tui-harness attach {}", s.name);
             println!("  cmd:    {}", s.cmd);
             println!(
                 "  shots:  {}",
@@ -129,6 +136,22 @@ fn run(cli: Cli) -> Result<()> {
             println!("{}", path.display());
         }
         Cmd::Text { name, ansi } => print!("{}", harness.session(&name)?.text(ansi)?),
+        Cmd::Attach { name } => {
+            let mut cmd = harness.session(&name)?.attach_command();
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                let err = cmd.exec();
+                return Err(err).context("exec tmux attach");
+            }
+            #[cfg(not(unix))]
+            {
+                let status = cmd.status().context("running tmux attach")?;
+                if !status.success() {
+                    anyhow::bail!("tmux attach exited with {status}");
+                }
+            }
+        }
         Cmd::Down { name } => {
             harness.session(&name)?.down()?;
             println!("down: {name}");

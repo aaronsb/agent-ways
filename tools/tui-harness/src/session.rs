@@ -2,6 +2,10 @@
 //!
 //! tmux owns the PTY, the input, and a clean screen buffer. Each session has
 //! a state directory holding an `env` file of its geometry, font and command.
+//!
+//! Every session runs on a private tmux server (socket [`TMUX_SOCKET`])
+//! started without the user's tmux config, with its options set explicitly,
+//! so a personal `~/.tmux.conf` never changes what a test sees.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,6 +18,52 @@ use crate::sgr;
 
 pub const DEFAULT_COLS: u32 = 200;
 pub const DEFAULT_ROWS: u32 = 50;
+
+/// The socket name (`tmux -L`) of the harness's private tmux server.
+pub const TMUX_SOCKET: &str = "agent-ways-tui";
+
+/// Server-wide options, applied in the same command list that creates a
+/// session, so they hold before the first pane exists (`history-limit` only
+/// affects panes created after it is set).
+const SERVER_OPTIONS: [[&str; 2]; 4] = [
+    ["status", "off"],
+    ["pane-border-status", "off"],
+    ["history-limit", "50000"],
+    ["default-terminal", "tmux-256color"],
+];
+
+/// A `tmux` command aimed at the private server.
+fn tmux_command() -> Command {
+    let mut c = Command::new("tmux");
+    c.args(["-L", TMUX_SOCKET]);
+    c
+}
+
+/// The arguments after `tmux` that create a detached session on the private
+/// server: no user config, then the options, then `new-session`.
+fn new_session_args(tmux_name: &str, cols: u32, rows: u32, cmd: &[String]) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-L".into(),
+        TMUX_SOCKET.into(),
+        "-f".into(),
+        "/dev/null".into(),
+    ];
+    for [opt, value] in SERVER_OPTIONS {
+        args.extend([
+            "set-option".into(),
+            "-g".into(),
+            opt.into(),
+            value.into(),
+            ";".into(),
+        ]);
+    }
+    // Colour depth for the apps inside, independent of who started the server.
+    args.extend(["set-environment", "-g", "COLORTERM", "truecolor", ";"].map(String::from));
+    args.extend(["new-session", "-d", "-s", tmux_name].map(String::from));
+    args.extend(["-x".into(), cols.to_string(), "-y".into(), rows.to_string()]);
+    args.extend(cmd.iter().cloned());
+    args
+}
 
 /// Whether a `tmux` binary can be run.
 pub fn tmux_available() -> bool {
@@ -105,17 +155,7 @@ impl Harness {
         }
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 
-        let mut tmux_args: Vec<String> = vec![
-            "new-session".into(),
-            "-d".into(),
-            "-s".into(),
-            tmux_name.clone(),
-            "-x".into(),
-            opts.cols.to_string(),
-            "-y".into(),
-            opts.rows.to_string(),
-        ];
-        tmux_args.extend(cmd.iter().cloned());
+        let tmux_args = new_session_args(&tmux_name, opts.cols, opts.rows, cmd);
 
         // setsid -f so the tmux server survives the caller reaping our
         // descendants: a tmux server first started from a harness shell is
@@ -163,22 +203,6 @@ impl Harness {
             }
             std::thread::sleep(Duration::from_millis(25));
         }
-        // A pane border status line (set in some tmux configs) takes a row
-        // from the pane. Turn it off for this window so the pane is the
-        // geometry that was asked for.
-        let _ = Command::new("tmux")
-            .args([
-                "set-option",
-                "-w",
-                "-t",
-                &format!("={tmux_name}:"),
-                "pane-border-status",
-                "off",
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-
         let session = Session {
             name: name.to_string(),
             tmux_name,
@@ -343,9 +367,19 @@ impl Session {
         Ok(path)
     }
 
+    /// The command that attaches a terminal to this session, for a person
+    /// who wants to look in: `tmux -L agent-ways-tui attach -t =tui-<name>`.
+    /// `TMUX` is cleared so it also works from inside another tmux.
+    pub fn attach_command(&self) -> Command {
+        let mut c = tmux_command();
+        c.args(["attach-session", "-t", &format!("={}", self.tmux_name)]);
+        c.env_remove("TMUX");
+        c
+    }
+
     /// Kill the tmux session and remove the state directory.
     pub fn down(self) -> Result<()> {
-        let _ = Command::new("tmux")
+        let _ = tmux_command()
             .args(["kill-session", "-t", &format!("={}", self.tmux_name)])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -356,10 +390,7 @@ impl Session {
 }
 
 fn tmux(args: &[String]) -> Result<String> {
-    let out = Command::new("tmux")
-        .args(args)
-        .output()
-        .context("running tmux")?;
+    let out = tmux_command().args(args).output().context("running tmux")?;
     if !out.status.success() {
         bail!(
             "tmux {} failed: {}",
@@ -371,7 +402,7 @@ fn tmux(args: &[String]) -> Result<String> {
 }
 
 fn has_session(tmux_name: &str) -> bool {
-    Command::new("tmux")
+    tmux_command()
         .args(["has-session", "-t", &format!("={tmux_name}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
