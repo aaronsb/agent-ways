@@ -1,0 +1,209 @@
+//! What the shell adds over the spike's screens: the adapter does the real
+//! work of an apply, a typed secret reaches only its command's stdin, a
+//! locked value and a finding show and refuse, the tree reloads from the
+//! adapter keeping what is pending, and the help overlay carries the
+//! adapter's text.
+
+use std::cell::{Cell, RefCell};
+use std::path::Path;
+use std::rc::Rc;
+
+use super::*;
+use crate::adapter::Write;
+use crate::testkit::{finish_apply, press, render, text, type_str};
+use crate::tree::{Action, Setting, Store};
+
+/// An adapter whose every hook a test can see and steer.
+#[derive(Default, Clone)]
+struct Probe {
+    written: Rc<RefCell<Vec<String>>>,
+    stdin: Rc<RefCell<Vec<String>>>,
+    fresh: Rc<RefCell<Option<Vec<Node>>>>,
+    reloads: Rc<Cell<usize>>,
+    stamp: Rc<Cell<u64>>,
+}
+
+impl Adapter for Probe {
+    fn validate(&self, _: &Store, text: &str) -> Option<Result<String, String>> {
+        Some(match text.trim().parse::<f64>() {
+            Ok(v) if (0.0..=1.0).contains(&v) => Ok(format!("{v}")),
+            _ => Err(format!("`{text}` is not a probability")),
+        })
+    }
+    fn write(&mut self, file: &Path, values: &[Write]) -> Result<(), String> {
+        let kv: Vec<String> = values.iter().map(|w| format!("{}={}", w.store.key, w.value)).collect();
+        self.written.borrow_mut().push(format!("{} {}", file.display(), kv.join(" ")));
+        Ok(())
+    }
+    fn run(&mut self, q: &Queued) -> Result<(), String> {
+        if let Some(s) = &q.stdin {
+            self.stdin.borrow_mut().push(s.reveal().to_string());
+        }
+        Ok(())
+    }
+    fn reload(&mut self) -> Option<Vec<Node>> {
+        self.reloads.set(self.reloads.get() + 1);
+        self.fresh.borrow().clone()
+    }
+    fn stamp(&self) -> Option<u64> {
+        Some(self.stamp.get())
+    }
+    fn help(&self, tab: &str) -> Option<String> {
+        Some(format!("{tab}: what this tab holds\n  a line of {tab} help\n"))
+    }
+}
+
+fn prob(v: &str, file: &str, key: &str) -> Setting {
+    Setting::new(Kind::Float { min: 0.0, max: 1.0 }, v, "user").default("0.5").store("user", file.into(), key)
+}
+
+/// One tab: two probabilities in one file, a key with a secret action.
+fn tree() -> Vec<Node> {
+    let key = Node::leaf("anthropic", "", Setting::new(Kind::Secret, "absent", "keys/"))
+        .with_actions(vec![Action::new("set", "ways agent key add --provider anthropic").arg(Arg::Secret)]);
+    vec![Node::group("matching", "", vec![Node::leaf("tau", "", prob("0.5", "/c/a.yaml", "matching.tau")), Node::leaf("floor", "", prob("0.2", "/c/a.yaml", "matching.floor")), key]).opened()]
+}
+
+fn probe() -> (App, Probe) {
+    let p = Probe::default();
+    (App::new("t", tree()).adapter(p.clone()), p)
+}
+
+#[test]
+fn an_apply_writes_through_the_adapter_and_reloads_after() {
+    let (mut app, p) = probe();
+    press(&mut app, &[KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.40");
+    press(&mut app, &[KeyCode::Enter, KeyCode::Down, KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.3");
+    press(&mut app, &[KeyCode::Enter, KeyCode::Char('w'), KeyCode::Char('a')]);
+    finish_apply(&mut app);
+    assert_eq!(*p.written.borrow(), ["/c/a.yaml matching.tau=0.4 matching.floor=0.3"], "one write per file, the adapter's normal form");
+    assert_eq!(p.reloads.get(), 1, "a write that landed reloads the tree");
+    assert_eq!(app.pending(), 0);
+}
+
+#[test]
+fn the_adapter_check_rejects_text_and_keeps_the_entry() {
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "lots");
+    press(&mut app, &[KeyCode::Enter]);
+    assert!(app.message().contains("rejected: `lots` is not a probability"), "{}", app.message());
+    assert!(matches!(app.mode, Mode::Edit(_)), "the entry stays open");
+    assert_eq!(app.pending(), 0);
+}
+
+#[test]
+fn a_typed_secret_reaches_only_its_commands_stdin() {
+    const SECRET: &str = "sk-Q#Z9@X!";
+    let (mut app, p) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    type_str(&mut app, SECRET);
+    press(&mut app, &[KeyCode::Enter]);
+    assert!(!format!("{:?}", app.queued()).contains(SECRET), "the queue's Debug redacts it");
+    press(&mut app, &[KeyCode::Char('w')]);
+    assert!(!text(&render(&mut app, 100, 30)).contains(SECRET));
+    press(&mut app, &[KeyCode::Char('a')]);
+    finish_apply(&mut app);
+    assert_eq!(*p.stdin.borrow(), [SECRET], "the command got it on stdin");
+    assert!(app.queued().is_empty() && !app.summary().contains(SECRET));
+}
+
+#[test]
+fn a_locked_value_refuses_every_edit_and_says_why() {
+    let mut roots = tree();
+    let s = roots[0].children[0].setting.take().unwrap().lock("the file fails closed");
+    roots[0].children[0].setting = Some(s);
+    roots[0].children[0].finding = Some("a.yaml:3: does not parse".into());
+    let mut app = App::new("t", roots).adapter(Probe::default());
+    for k in [KeyCode::Enter, KeyCode::Char('e'), KeyCode::Char('d'), KeyCode::Char(' ')] {
+        press(&mut app, &[k]);
+        assert!(app.message().starts_with("locked: the file fails closed"), "{k:?}: {}", app.message());
+        assert!(matches!(app.mode, Mode::Browse) && app.pending() == 0);
+    }
+    let f = text(&render(&mut app, 100, 20));
+    assert!(f.lines().any(|l| l.contains("tau") && l.contains(" !")), "the row is marked:\n{f}");
+    assert!(f.contains("finding  a.yaml:3: does not parse") && f.contains("locked   the file fails closed"), "{f}");
+}
+
+#[test]
+fn a_reload_keeps_pending_values_and_open_groups_and_names_a_moved_one() {
+    let (mut app, p) = probe();
+    // tau edited to 0.4; floor's file changes under no edit.
+    press(&mut app, &[KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.4");
+    press(&mut app, &[KeyCode::Enter]);
+    let mut fresh = tree();
+    fresh[0].open = false;
+    fresh[0].children[1].setting.as_mut().unwrap().loaded = "0.25".into();
+    fresh[0].children[1].setting.as_mut().unwrap().value = "0.25".into();
+    *p.fresh.borrow_mut() = Some(fresh.clone());
+    app.reload();
+    let s = |app: &App, i: usize| app.roots[0].children[i].setting.clone().unwrap();
+    assert_eq!((s(&app, 0).loaded.as_str(), s(&app, 0).value.as_str()), ("0.5", "0.4"), "the pending edit is kept");
+    assert_eq!(s(&app, 1).value, "0.25", "an outside change shows");
+    assert!(app.roots[0].open, "what was open stays open");
+    assert!(!app.message().contains("changed on disk"));
+    // tau's own file moves under its pending edit: the edit stays, and the message says so.
+    fresh[0].children[0].setting.as_mut().unwrap().loaded = "0.6".into();
+    fresh[0].children[0].setting.as_mut().unwrap().value = "0.6".into();
+    *p.fresh.borrow_mut() = Some(fresh);
+    app.reload();
+    assert_eq!((s(&app, 0).loaded.as_str(), s(&app, 0).value.as_str()), ("0.6", "0.4"));
+    assert!(app.message().contains("matching.tau changed on disk under a pending edit"), "{}", app.message());
+}
+
+#[test]
+fn the_watch_reloads_when_the_stamp_moves() {
+    let (mut app, p) = probe();
+    *p.fresh.borrow_mut() = Some(tree());
+    app.watch();
+    assert_eq!(p.reloads.get(), 0, "an unmoved stamp reads nothing");
+    p.stamp.set(7);
+    app.watch();
+    assert_eq!(p.reloads.get(), 1);
+    assert!(app.message().contains("reloaded"));
+    app.watch();
+    assert_eq!(p.reloads.get(), 1, "once per change");
+}
+
+#[test]
+fn the_help_overlay_lists_the_keys_then_the_tabs_help_and_scrolls() {
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Char('?')]);
+    let f = text(&render(&mut app, 100, 40));
+    assert!(f.contains("help: matching") && f.contains("matching: what this tab holds") && f.contains("a line of matching help"), "{f}");
+    assert!(f.contains("Tab S-Tab 1-9"), "the keys come first");
+    press(&mut app, &[KeyCode::Down, KeyCode::Down]);
+    let small = text(&render(&mut app, 100, 12));
+    assert!(!small.contains("Tab S-Tab 1-9"), "scrolled past the first lines:\n{small}");
+    press(&mut app, &[KeyCode::Char('x')]);
+    assert!(matches!(app.mode, Mode::Browse), "any other key closes it");
+}
+
+#[test]
+fn with_no_adapter_an_apply_writes_nothing_and_stops() {
+    let mut app = App::new("t", tree());
+    press(&mut app, &[KeyCode::Char('e')]);
+    type_str(&mut app, "");
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.4");
+    press(&mut app, &[KeyCode::Enter, KeyCode::Char('w'), KeyCode::Char('a')]);
+    finish_apply(&mut app);
+    assert!(app.message().contains("stopped at step 1 of 1"), "{}", app.message());
+    assert_eq!(app.pending(), 1);
+    let f = text(&render(&mut app, 110, 24));
+    assert!(f.contains("no adapter: /c/a.yaml was not written"), "{f}");
+}
+
+#[test]
+fn tabs_open_where_asked_and_name_themselves() {
+    let app = App::new("t", tree()).on_tab(1);
+    assert_eq!((app.tab(), app.tab_names()), (1, vec!["matching".to_string(), "theme".to_string()]));
+    assert_eq!(App::new("t", tree()).on_tab(9).tab(), 0, "a tab past the last is ignored");
+}
