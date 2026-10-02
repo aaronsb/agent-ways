@@ -13,9 +13,10 @@ use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
-use agent_tui::ratatui::widgets::{Block, Borders, Cell, HighlightSpacing, List, ListItem, ListState, Paragraph, Row, Table, TableState};
+use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, List, ListItem, ListState, Paragraph, Row, Table, TableState};
 use agent_tui::ratatui::Frame as Draw;
 use agent_tui::screen::Screen;
+use crate::cmd::screen_host::pane;
 use agent_tui::theme::{self, Ground, Palette, Seg, Shape};
 use agent_tui::timeline::{key_bar, Playback, Scrubber};
 use ways_agent_core::spend::{self, Group};
@@ -570,10 +571,6 @@ impl Screen for Introspect {
     }
 }
 
-/// A bordered pane in the theme, as the settings screens draw theirs.
-pub(crate) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
-    Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
-}
 
 /// The tab line: the screen, then each tab, the shown one in the accent.
 fn tabs(shape: Shape, views: &[(String, bool)]) -> Line<'static> {

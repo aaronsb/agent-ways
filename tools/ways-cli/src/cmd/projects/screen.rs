@@ -16,12 +16,12 @@ use agent_tui::timeline::key_bar;
 use anyhow::Result;
 
 use super::{ellipsize_left, list_cells, scan_all, shallow_match, show_project, Env, Project};
-use crate::cmd::introspect::{self, pane, Open};
+use crate::cmd::screen_host::{self, pane, Open};
 
 /// Open the screen on the terminal, or headless as `open` asks.
 pub(crate) fn open(open: &Open) -> Result<()> {
-    let (palette, shape) = introspect::look(introspect::depth_of(open.depth.as_deref())?);
-    introspect::show(Projects::new(&Env::user(), palette, shape), open)
+    let (palette, shape) = screen_host::look(screen_host::depth_of(open.depth.as_deref())?);
+    screen_host::show(Projects::new(&Env::user(), palette, shape), open)
 }
 
 /// One project: what the table and the detail show of it.
@@ -42,6 +42,8 @@ pub(crate) struct Projects {
     filter: Input,
     /// Whether keys go to the filter.
     editing: bool,
+    /// The detail pane's first line shown; back to the top on a new selection.
+    scroll: u16,
     table: TableState,
 }
 
@@ -62,7 +64,7 @@ impl Projects {
             })
             .collect();
         let shown = (0..entries.len()).collect();
-        Projects { palette, shape, entries, shown, sel: 0, filter: Input::new(), editing: false, table: TableState::default() }
+        Projects { palette, shape, entries, shown, sel: 0, filter: Input::new(), editing: false, scroll: 0, table: TableState::default() }
     }
 
     fn selected(&self) -> Option<&Entry> {
@@ -75,7 +77,16 @@ impl Projects {
         let was = self.shown.get(self.sel).copied();
         let q = self.filter.text().to_lowercase();
         self.shown = (0..self.entries.len()).filter(|&i| shallow_match(&self.entries[i].project, &q).0 > 0).collect();
-        self.sel = was.and_then(|w| self.shown.iter().position(|&i| i == w)).unwrap_or(0);
+        let sel = was.and_then(|w| self.shown.iter().position(|&i| i == w)).unwrap_or(0);
+        self.select(sel);
+    }
+
+    /// Select row `sel`, the detail shown from its top when the row changes.
+    fn select(&mut self, sel: usize) {
+        if sel != self.sel {
+            self.scroll = 0;
+        }
+        self.sel = sel;
     }
 
     fn clear_filter(&mut self) {
@@ -87,7 +98,7 @@ impl Projects {
     /// Move the selection by `k`, if it is a move.
     fn travel(&mut self, k: KeyCode) {
         let last = self.shown.len().saturating_sub(1);
-        self.sel = match k {
+        let sel = match k {
             KeyCode::Up => self.sel.saturating_sub(1),
             KeyCode::Down => (self.sel + 1).min(last),
             KeyCode::PageUp => self.sel.saturating_sub(10),
@@ -96,6 +107,7 @@ impl Projects {
             KeyCode::End => last,
             _ => self.sel,
         };
+        self.select(sel);
     }
 
     /// The command that prints the table's data.
@@ -134,7 +146,8 @@ impl Screen for Projects {
 
         let title = self.list_command();
         if self.shown.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("No matching projects found.", theme::muted())).block(pane(title)), list);
+            let none = if self.filter.is_empty() { "No projects found." } else { "No matching projects found." };
+            f.render_widget(Paragraph::new(Line::styled(none, theme::muted())).block(pane(title)), list);
         } else {
             let right = |t: &str| Cell::from(Line::from(t.to_string()).alignment(Alignment::Right));
             let header = Row::new(vec![Cell::from("Project"), right("Sessions"), right("Size"), right("Last"), right("Memory")])
@@ -163,6 +176,7 @@ impl Screen for Projects {
             f.render_stateful_widget(t, list, &mut self.table);
         }
 
+        // With no project selected there is nothing for `show` to print.
         let (title, lines) = match self.selected() {
             Some(e) => {
                 let mut lines: Vec<Line> = e.detail.iter().map(|l| Line::raw(l.clone())).collect();
@@ -171,17 +185,26 @@ impl Screen for Projects {
                 }
                 (format!(" ways projects show {} --json ", agent_tui::tree::quote(&e.project.path)), lines)
             }
-            None => (" ways projects show --json ".to_string(), Vec::new()),
+            None => (" show ".to_string(), Vec::new()),
         };
-        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title)), detail);
+        // The lines the detail wraps to, so the scroll stops at its end.
+        let inner = detail.width.saturating_sub(2).max(1) as usize;
+        let rows: usize = lines.iter().map(|l| l.width().max(1).div_ceil(inner)).sum();
+        let visible = detail.height.saturating_sub(2) as usize;
+        self.scroll = self.scroll.min(rows.saturating_sub(visible) as u16);
+        let mut block = pane(title);
+        if rows > visible + self.scroll as usize {
+            block = block.title_bottom(Line::styled(" more ↓ ", theme::muted()).right_aligned());
+        }
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((self.scroll, 0)).block(block), detail);
 
         let count = vec![Span::styled(format!("{}/{}", (self.sel + 1).min(self.shown.len()), self.shown.len()), theme::muted())];
         let (mode, keys): (&str, Vec<(&str, &str)>) = if self.editing {
             ("filter", vec![("↑↓", "select"), ("⏎", "keep"), ("esc", "clear")])
         } else if self.filter.is_empty() {
-            ("projects", vec![("↑↓", "select"), ("/", "filter"), ("q", "quit")])
+            ("projects", vec![("↑↓", "select"), ("J/K", "detail"), ("/", "filter"), ("q", "quit")])
         } else {
-            ("projects", vec![("↑↓", "select"), ("/", "filter"), ("esc", "clear"), ("q", "quit")])
+            ("projects", vec![("↑↓", "select"), ("J/K", "detail"), ("/", "filter"), ("esc", "clear"), ("q", "quit")])
         };
         f.render_widget(Paragraph::new(key_bar(self.shape, mode, Ground::Accent, &keys, count, status.width)), status);
     }
@@ -213,6 +236,15 @@ impl Screen for Projects {
             }
             KeyCode::Char('/') => {
                 self.editing = true;
+                true
+            }
+            // Shift scrolls the detail; the draw keeps it in range.
+            KeyCode::Char('J') => {
+                self.scroll = self.scroll.saturating_add(1);
+                true
+            }
+            KeyCode::Char('K') => {
+                self.scroll = self.scroll.saturating_sub(1);
                 true
             }
             c => {

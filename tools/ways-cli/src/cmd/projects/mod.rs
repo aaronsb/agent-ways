@@ -86,7 +86,7 @@ pub struct ListArgs {
     #[arg(long)]
     urls: bool,
     /// Machine-readable JSON output
-    #[arg(long)]
+    #[arg(long, conflicts_with = "urls")]
     json: bool,
 }
 
@@ -112,6 +112,14 @@ impl Env {
 
     fn projects(&self) -> PathBuf {
         self.claude.projects_dir()
+    }
+
+    /// `path` with a leading `~` spelled out as the home directory.
+    fn untilde(&self, path: &str) -> String {
+        match path.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{}{rest}", self.home),
+            _ => path.to_string(),
+        }
     }
 
     /// `path` with the home directory shown as `~`.
@@ -194,20 +202,22 @@ impl Project {
     }
 
     /// The project as `list --json` gives it; `show --json` adds its
-    /// sessions with `sessions` set.
-    fn json(&self, sessions: bool) -> Value {
-        let date = |e: Option<u64>| e.map(fmt_date);
+    /// sessions with `sessions` set. A value the project lacks is `null`.
+    fn json(&self, env: &Env, sessions: bool) -> Value {
+        let time = |e: Option<u64>| e.map(agent_fmt::when::utc_iso);
+        let text = |s: &str| (!s.is_empty()).then(|| s.to_string());
         let mut v = serde_json::json!({
             "path": self.path,
+            "absolute_path": env.untilde(&self.path),
             "dir": self.dirname,
             "sessions": self.sessions,
             "transcripts": self.transcripts,
             "transcript_bytes": self.transcript_bytes,
             "memory_files": self.memory_files,
-            "first_active": date(self.first_active),
-            "last_active": date(self.last_active),
-            "last_branch": self.last_branch,
-            "last_summary": self.last_summary,
+            "first_active": time(self.first_active),
+            "last_active": time(self.last_active),
+            "last_branch": text(&self.last_branch),
+            "last_summary": text(&self.last_summary),
             "recent_prompts": self.recent_prompts,
         });
         if sessions {
@@ -216,11 +226,11 @@ impl Project {
                 .iter()
                 .map(|e| {
                     serde_json::json!({
-                        "modified": str_field(e, "modified"),
+                        "modified": text(str_field(e, "modified")),
                         "messages": e.get("messageCount"),
-                        "branch": str_field(e, "gitBranch"),
+                        "branch": text(str_field(e, "gitBranch")),
                         "sidechain": e.get("isSidechain").and_then(Value::as_bool).unwrap_or(false),
-                        "summary": str_field(e, "summary"),
+                        "summary": text(str_field(e, "summary")),
                     })
                 })
                 .collect();
@@ -431,7 +441,7 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
         })
         .collect();
     if args.json {
-        let all: Vec<Value> = projects.iter().map(|p| p.json(false)).collect();
+        let all: Vec<Value> = projects.iter().map(|p| p.json(env, false)).collect();
         writeln!(out, "{}", serde_json::to_string_pretty(&all)?)?;
         return Ok(());
     }
@@ -483,7 +493,7 @@ fn search(env: &Env, query: &str, deep: bool, json: bool, out: &mut dyn Write) -
         let all: Vec<Value> = matches
             .iter()
             .map(|(score, p, snippets)| {
-                let mut v = p.json(false);
+                let mut v = p.json(env, false);
                 v["score"] = (*score).into();
                 v["snippets"] = snippets.clone().into();
                 v
@@ -588,8 +598,10 @@ fn deep_search(dir: &Path, q: &str) -> (u32, Option<String>) {
 fn show(env: &Env, query: &str, json: bool, out: &mut dyn Write) -> Result<()> {
     // The query's best match, most recently active first at each step: the
     // project whose path or directory is the query, then the one it names
-    // (its last path component), then the first whose path contains it.
-    let q = query.to_lowercase();
+    // (its last path component), then the first whose path contains it. A
+    // path under the home directory is compared in the `~` form projects
+    // are shown in, so the one a shell expanded matches.
+    let q = env.tilde(query).to_lowercase();
     let all = scan_all(env);
     let name = |p: &Project| p.path.rsplit(['/', '\\']).next().unwrap_or("").to_lowercase();
     let found = all
@@ -598,7 +610,7 @@ fn show(env: &Env, query: &str, json: bool, out: &mut dyn Write) -> Result<()> {
         .or_else(|| all.iter().find(|p| name(p) == q))
         .or_else(|| all.iter().find(|p| p.path.to_lowercase().contains(&q) || p.dirname.to_lowercase().contains(&q)));
     if json {
-        writeln!(out, "{}", serde_json::to_string_pretty(&found.map(|p| p.json(true)))?)?;
+        writeln!(out, "{}", serde_json::to_string_pretty(&found.map(|p| p.json(env, true)))?)?;
         return Ok(());
     }
     let Some(p) = found else {
