@@ -80,14 +80,9 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: true, entry: None, repair: None,
         doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
     },
-    // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11).
-    SectionSpec {
-        name: "theme",
-        file: FILE,
-        top: &["theme"],
-        per_entry: false, entry: None, repair: None,
-        doc: "The look of the interactive screens: the active theme and the lozenge shape (ADR-504).",
-    },
+    // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11). Declared
+    // in agent-theme, so attend reads the same keys (one source).
+    agent_theme::settings::SECTION,
 ];
 
 const RETIRED: &[(&str, &str)] = &[
@@ -239,28 +234,8 @@ const KEYS: &[KeySpec] = &[
         long: "Changed by actions, since each change reconciles: `ways config target add|enable|disable|remove <dir>` (ADR-184). Absent means the default ~/.claude, enabled.",
         ..BASE
     },
-    KeySpec {
-        name: "theme.active",
-        section: "theme",
-        path: &["theme", "active"],
-        default: DefaultValue::Yaml("terminal"),
-        scope: Scope::User,
-        check: Some(check_theme_name),
-        doc: "The theme the interactive screens draw with.",
-        long: "A bundled theme or one in $XDG_CONFIG_HOME/agent-ways/themes (ADR-504 §5). terminal is the terminal's own 16 colours; another theme is used where the terminal shows 256 colours or more, and terminal in its place below that. The theme tab of `ways settings` previews and sets it.",
-        ..BASE
-    },
-    KeySpec {
-        name: "theme.shape",
-        section: "theme",
-        path: &["theme", "shape"],
-        kind: Kind::Choice(&["round", "plain", "flame", "arrow", "slant", "pixel"]),
-        default: DefaultValue::Yaml("plain"),
-        scope: Scope::User,
-        doc: "The lozenge caps of tabs and the bottom bar.",
-        long: "plain, the default, lets the coloured segments abut and works on any terminal font. Every other shape draws Nerd Font glyphs.",
-        ..BASE
-    },
+    agent_theme::settings::ACTIVE,
+    agent_theme::settings::SHAPE,
     KeySpec {
         name: "install.secret_path_deny",
         section: "install.secret_path_deny",
@@ -351,13 +326,6 @@ fn closed_targets(v: &Value) -> Option<Value> {
 }
 
 /// A theme name as a theme file names itself: `[a-z0-9-]+`.
-fn check_theme_name(v: &Value) -> Result<(), String> {
-    match v.as_str() {
-        Some(n) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') => Ok(()),
-        _ => Err("a theme name is lowercase letters, digits and -".into()),
-    }
-}
-
 fn check_targets(v: &Value) -> Result<(), String> {
     serde_yaml::from_value::<Vec<crate::config::Target>>(v.clone()).map(|_| ()).map_err(|e| e.to_string())
 }

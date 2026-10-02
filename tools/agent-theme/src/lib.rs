@@ -18,7 +18,9 @@
 //! test in this crate.
 //!
 //! Dependency direction: `agent-identity` depends on this crate for colour
-//! depth; this crate depends on nothing of agent-ways.
+//! depth; this crate depends on nothing of agent-ways, except that the
+//! `settings` feature declares the `theme` settings section against
+//! `agent-settings`' schema types.
 
 mod bundled;
 mod color;
@@ -29,6 +31,8 @@ mod oklab;
 mod paint;
 #[cfg(feature = "ratatui")]
 pub mod ratatui;
+#[cfg(feature = "settings")]
+pub mod settings;
 mod text;
 
 #[cfg(test)]

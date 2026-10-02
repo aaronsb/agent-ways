@@ -157,6 +157,20 @@ fn emit_prints_attend_s_canonical_fragment_and_apply_takes_it_back() {
 }
 
 #[test]
+fn attend_reads_the_one_theme_choice_ways_writes() {
+    let fx = Fx::new();
+    for (k, v) in [("theme.active", "nord"), ("theme.shape", "flame")] {
+        let (_, err, code) = fx.run(&["settings", "set", k, v]);
+        assert_eq!(code, 0, "{err}");
+    }
+    let choice = attend_config::theme::choice_in(&fx.root.join("xdg/config/agent-ways"));
+    assert_eq!((choice.active.as_deref(), choice.shape.as_deref()), (Some("nord"), Some("flame")));
+    // attend has no theme key of its own: the registry knows only ways'.
+    let (_, _, code) = fx.run(&["settings", "get", "attend.theme.active"]);
+    assert_eq!(code, 2);
+}
+
+#[test]
 fn help_describes_an_attend_key_and_the_sensors_tab() {
     let fx = Fx::new();
     let (out, _, code) = fx.run(&["settings", "help", "attend.sensors.*.script"]);

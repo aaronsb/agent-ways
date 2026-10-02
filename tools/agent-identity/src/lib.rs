@@ -4,8 +4,8 @@
 //! human), produces a stable nickname, color, and style. Pure
 //! derivation — no network, no state; the one filesystem write is
 //! [`signal::write_signal_file`], the wire file both writers share. Callers render
-//! with whatever stack they have (iocraft, crossterm, raw ANSI); this
-//! crate does not pick one.
+//! with whatever stack they have (ratatui, raw ANSI); this crate does not
+//! pick one.
 //!
 //! Why a separate crate: attend and attend-chat both need the same
 //! mapping so a claude sees the same nickname in its own banner that

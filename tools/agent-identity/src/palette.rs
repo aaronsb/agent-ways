@@ -21,9 +21,9 @@ use agent_theme::{Color, ColorDepth};
 
 /// One palette entry: an RGB triple *and* the nearest ANSI bright code.
 ///
-/// Callers pick the right form for their renderer: iocraft accepts
-/// `Color::Rgb { r, g, b }` on rich terminals; on basic terminals the
-/// ANSI bright index maps to its `Color::AnsiValue` or a named variant.
+/// Callers pick the right form for their renderer: an RGB colour on rich
+/// terminals; on basic terminals the ANSI bright index maps to an indexed
+/// or named colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaletteEntry {
     pub rgb: (u8, u8, u8),

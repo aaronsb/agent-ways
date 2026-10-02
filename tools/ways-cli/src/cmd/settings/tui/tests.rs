@@ -333,6 +333,8 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
     assert!(PathBuf::from(&s.store.as_ref().unwrap().file).ends_with("work/current/.claude/ways.yaml"), "a toggle writes the project file");
     assert!(r[3].children.iter().any(|n| n.name == "targets" && !n.actions.is_empty()));
     assert!(r.iter().all(|t| t.children.iter().all(|n| n.name != "theme")), "the theme keys belong to the theme tab");
+    // The theme section is declared once, in agent-theme, and its shapes are the screens' own.
+    assert_eq!(agent_theme::settings::SHAPES, agent_tui::theme::Shape::NAMES);
 }
 
 // ── the adapter's write, under the real paths ──────────────────

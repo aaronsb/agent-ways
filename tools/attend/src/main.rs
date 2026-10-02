@@ -126,9 +126,9 @@ fn print_banner() {
 
 fn exec_chat(passthrough: Vec<String>) -> ! {
     // `attend chat` is a thin shim that execs the standalone `attend-chat`
-    // binary. Keeping the iocraft dependency (and its async runtime) out of
-    // the attend crate means `attend status`, `attend send`, and the sensor
-    // loop stay cheap to cold-start from hooks. See ADR-120.
+    // binary. Keeping the chat's terminal UI out of the attend crate means
+    // `attend status`, `attend send`, and the sensor loop stay cheap to
+    // cold-start from hooks. See ADR-120 and ADR-504 §1.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

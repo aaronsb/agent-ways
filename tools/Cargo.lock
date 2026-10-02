@@ -54,9 +54,11 @@ dependencies = [
 name = "agent-theme"
 version = "0.1.0"
 dependencies = [
+ "agent-settings",
  "agent-theme",
  "ratatui-core",
  "serde",
+ "serde_yaml",
  "toml",
 ]
 
@@ -328,6 +330,7 @@ name = "attend-config"
 version = "0.1.0"
 dependencies = [
  "agent-settings",
+ "agent-theme",
  "claude-sessions",
  "serde_yaml",
 ]
@@ -2684,6 +2687,7 @@ version = "1.0.0"
 dependencies = [
  "agent-fmt",
  "agent-settings",
+ "agent-theme",
  "anyhow",
  "claude-sessions",
  "pulldown-cmark",
