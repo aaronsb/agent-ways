@@ -220,7 +220,16 @@ pub struct KeySpec {
     pub check: Option<Check>,
     /// A value computed outside the files, such as whether a key file exists.
     pub computed: Option<fn(&[String]) -> Value>,
+    /// The closed reading of a value, for a key that switches something off
+    /// (ADR-503 addendum): what the key takes when its unit fails the schema,
+    /// or when its file does not parse and the value is salvaged from the
+    /// text. `None` from the function means no opinion: the key falls through
+    /// to the layers beneath. Keys without one fall through.
+    pub fail_closed: Option<FailClosed>,
 }
+
+/// The fail-closed reading of a raw value.
+pub type FailClosed = fn(&Value) -> Option<Value>;
 
 impl KeySpec {
     /// Whether the name holds a `*`.
@@ -340,6 +349,9 @@ pub struct SectionSpec {
     /// collection of switches, where losing all of them would turn back on
     /// everything the operator turned off.
     pub per_entry: bool,
+    /// The command that repairs this section, when `ways settings fix` cannot
+    /// (an action command owns it). The diagnostic names it.
+    pub repair: Option<&'static str>,
     pub doc: &'static str,
 }
 
@@ -397,6 +409,7 @@ mod tests {
         long: "",
         check: None,
         computed: None,
+        fail_closed: None,
     };
 
     #[test]

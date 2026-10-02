@@ -2,30 +2,38 @@
 //!
 //! A file is parsed once. Each top-level key belongs to a section, and the
 //! section is the fallback unit, except in a per-entry section, where each
-//! entry of its mapping is. A unit any of whose values fails the schema is
-//! dropped from that file's layer, so its keys resolve from the layers
-//! beneath, which end at canonical. Every other unit loads as written. A
-//! diagnostic names the file, line and section, and is built only when
-//! something fails. A top-level key no section owns is reported and changes
-//! nothing else.
+//! entry of its mapping or item of its list is. A unit any of whose values
+//! fails the schema is dropped from that file's layer, so its keys resolve
+//! from the layers beneath, which end at canonical. Every other unit loads as
+//! written. A diagnostic names the file, line and section, and is built only
+//! when something fails. A top-level key no section owns is reported and
+//! changes nothing else.
+//!
+//! Switches that turn something off fail closed (the ADR-503 addendum): a key
+//! with a fail-closed reading takes it when its unit fails, and when its file
+//! does not parse the reading is taken from what can be salvaged of the text.
 
-use crate::schema::{KeySpec, LayerScope, Schema};
+use crate::schema::{KeySpec, LayerScope, Schema, SectionSpec};
 use crate::yaml_edit::{self, Doc};
 use serde_yaml::{Mapping, Value};
 use std::path::{Path, PathBuf};
 
 /// One problem in one file. `fallback` is set when it dropped a unit (a
-/// section, or one entry of a per-entry section) from the file's layer.
+/// section, or one entry of a per-entry section) from the file's layer, or,
+/// with no unit, when the whole file did not parse.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Finding {
     pub file: Option<PathBuf>,
     pub line: Option<usize>,
     pub section: Option<String>,
-    /// The unit that fell back: the section, or `<section>.<entry>`.
+    /// The unit that fell back: the section, `<section>.<entry>`, or
+    /// `<section>[<index>]`.
     pub unit: Option<String>,
     pub key: Option<String>,
     pub message: String,
     pub fallback: bool,
+    /// The command that repairs the section when `fix` cannot.
+    pub repair: Option<String>,
 }
 
 impl std::fmt::Display for Finding {
@@ -35,28 +43,42 @@ impl std::fmt::Display for Finding {
         if let Some(l) = self.line {
             write!(f, ":{l}")?;
         }
+        write!(f, ":")?;
         if let Some(s) = &self.section {
-            write!(f, ": [{s}]")?;
+            write!(f, " [{s}]")?;
         }
         if let Some(k) = &self.key {
             write!(f, " {k}")?;
         }
-        write!(f, ": {}", self.message)
+        if self.section.is_some() || self.key.is_some() {
+            write!(f, ":")?;
+        }
+        write!(f, " {}", self.message)
     }
 }
 
 impl Finding {
+    /// Whether the whole file failed to parse.
+    pub fn is_parse_failure(&self) -> bool {
+        self.fallback && self.unit.is_none()
+    }
+
     /// The one-line stderr form: the finding, what it dropped, and the repair.
     pub fn diagnostic(&self, tool: &str) -> String {
+        let fix = |s: &str| match &self.repair {
+            Some(r) => format!("{r} repairs it"),
+            None => format!("`ways settings fix {s}` repairs it"),
+        };
         match (&self.section, &self.unit, self.fallback) {
             (Some(s), Some(u), true) if u != s => format!(
-                "[{tool}] settings: {self}; entry {u} is ignored, so it resolves from the layers beneath. \
-                 `ways settings lint` lists the findings, `ways settings fix {s}` drops the bad entries"
+                "[{tool}] settings: {self}; entry {u} is ignored, so it resolves from the layers beneath \
+                 (a switch stays off). `ways settings lint` lists the findings, {}",
+                fix(s)
             ),
             (Some(s), _, true) => format!(
                 "[{tool}] settings: {self}; section {s} is ignored in this file, so its keys resolve from the \
-                 layers beneath, ending at canonical. `ways settings lint` lists the findings, \
-                 `ways settings fix {s}` rewrites it"
+                 layers beneath, ending at canonical (a switch stays off). `ways settings lint` lists the findings, {}",
+                fix(s)
             ),
             _ => format!("[{tool}] settings: {self}"),
         }
@@ -68,6 +90,7 @@ impl Finding {
 #[derive(Debug, Clone)]
 struct Failure {
     section: Option<&'static str>,
+    repair: Option<&'static str>,
     unit: Option<String>,
     path: Vec<String>,
     message: String,
@@ -76,9 +99,11 @@ struct Failure {
 /// The outcome of checking one parsed file.
 #[derive(Debug, Clone, Default)]
 pub struct Checked {
-    /// The top-level keys of every unit that passed.
+    /// The top-level keys of every unit that passed, plus the fail-closed
+    /// readings of the switches in units that failed.
     pub accepted: Mapping,
-    /// Units that fell back: section names, or `<section>.<entry>`.
+    /// Units that fell back: section names, `<section>.<entry>`, or
+    /// `<section>[<index>]`.
     pub failed: Vec<String>,
     failures: Vec<Failure>,
 }
@@ -86,6 +111,11 @@ pub struct Checked {
 impl Checked {
     pub fn is_clean(&self) -> bool {
         self.failures.is_empty()
+    }
+
+    /// The key paths that failed, with their section's name; for `fix`.
+    pub fn failing(&self) -> Vec<(Option<&'static str>, Vec<String>)> {
+        self.failures.iter().map(|f| (f.section, f.path.clone())).collect()
     }
 
     /// The findings, with line numbers looked up in `text`.
@@ -108,14 +138,29 @@ impl Checked {
                     key: (!f.path.is_empty()).then(|| f.path.join(".")),
                     message,
                     fallback: f.unit.as_ref().is_some_and(|u| self.failed.contains(u)),
+                    repair: f.repair.map(str::to_string),
                 }
             })
             .collect()
     }
+
+    fn fail(&mut self, section: &SectionSpec, unit: String, errs: Vec<(Vec<String>, String)>) {
+        if !self.failed.contains(&unit) {
+            self.failed.push(unit.clone());
+        }
+        self.failures.extend(errs.into_iter().map(|(path, message)| Failure {
+            section: Some(section.name),
+            repair: section.repair,
+            unit: Some(unit.clone()),
+            path,
+            message,
+        }));
+    }
 }
 
 /// Parse a settings file's text. A parse failure is one finding on the line
-/// the parser names; every section of the file then falls back.
+/// the parser names; the file's sections then resolve from the layers
+/// beneath, except the switches salvaged by [`closed_from_salvage`].
 pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Box<Finding>> {
     yaml_edit::parse(text).map_err(|e| {
         let (line, message) = match e {
@@ -128,10 +173,27 @@ pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Box<Finding>
             section: None,
             unit: None,
             key: None,
-            message: format!("{message}; every section of the file resolves from the layers beneath"),
+            message: format!(
+                "{message}; its sections resolve from the layers beneath, and any switch it turns off stays off"
+            ),
             fallback: true,
+            repair: None,
         })
     })
+}
+
+/// The specs a schema checks in one file kind.
+fn file_keys<'a>(schema: &'a Schema, file: &str) -> Vec<&'a KeySpec> {
+    schema.keys.iter().filter(|k| k.file == file && k.computed.is_none()).collect()
+}
+
+/// The fail-closed reading of the raw value at `path`, if its key has one.
+fn closed(keys: &[&KeySpec], scope: LayerScope, path: &[String], raw: &Value) -> Option<Value> {
+    let k = keys.iter().find(|k| k.match_path(path).is_some())?;
+    if !scope.admits(k.scope) {
+        return None;
+    }
+    (k.fail_closed?)(raw)
 }
 
 /// Check a parsed file of kind `file` at `scope` against `schema`. With
@@ -141,11 +203,18 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
     trace_sections(schema, file, only);
     let mut out = Checked::default();
     let Some(root) = doc.as_mapping() else { return out };
-    let keys: Vec<&KeySpec> = schema.keys.iter().filter(|k| k.file == file && k.computed.is_none()).collect();
+    let keys = file_keys(schema, file);
     let retired = schema.file(file).map(|f| f.retired).unwrap_or(&[]);
+    let mut closed_tops: Vec<(Value, Value)> = Vec::new();
     for (k, v) in root {
         let Some(top) = k.as_str() else {
-            out.failures.push(Failure { section: None, unit: None, path: vec![], message: format!("a top-level key is not text: {}", crate::schema::show(k)) });
+            out.failures.push(Failure {
+                section: None,
+                repair: None,
+                unit: None,
+                path: vec![crate::schema::show(k)],
+                message: "a top-level key is not text; it is ignored".to_string(),
+            });
             continue;
         };
         let Some(sec) = schema.section_of_top(file, top) else {
@@ -153,7 +222,7 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                 Some((_, m)) => (*m).to_string(),
                 None => "unknown key; it is ignored".to_string(),
             };
-            out.failures.push(Failure { section: None, unit: None, path: vec![top.to_string()], message });
+            out.failures.push(Failure { section: None, repair: None, unit: None, path: vec![top.to_string()], message });
             continue;
         };
         if only.is_some_and(|o| !o.contains(&sec.name)) {
@@ -165,46 +234,71 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                 let kept = accepted.as_mapping_mut().expect("a mapping");
                 for (ek, ev) in m {
                     let mut errs = Vec::new();
-                    let Some(entry) = ek.as_str() else {
-                        errs.push((vec![top.to_string()], format!("a key is not text: {}", crate::schema::show(ek))));
-                        out.fail(sec.name, Some(format!("{}.{}", sec.name, crate::schema::show(ek))), errs);
-                        kept.remove(ek);
-                        continue;
+                    let entry = match ek.as_str() {
+                        Some(e) => e.to_string(),
+                        None => {
+                            let e = crate::schema::show(ek);
+                            errs.push((vec![top.to_string(), e.clone()], "a key is not text".to_string()));
+                            e
+                        }
                     };
-                    check_tree(&keys, scope, &mut vec![top.to_string(), entry.to_string()], ev, &mut errs);
+                    let path = vec![top.to_string(), entry.clone()];
+                    if errs.is_empty() {
+                        check_tree(&keys, scope, &mut path.clone(), ev, &mut errs);
+                    }
                     if !errs.is_empty() {
-                        out.fail(sec.name, Some(format!("{}.{entry}", sec.name)), errs);
-                        kept.remove(ek);
+                        out.fail(sec, format!("{}.{entry}", sec.name), errs);
+                        match (ek.is_string(), closed(&keys, scope, &path, ev)) {
+                            (true, Some(c)) => {
+                                kept.insert(ek.clone(), c);
+                            }
+                            _ => {
+                                kept.remove(ek);
+                            }
+                        }
                     }
                 }
+            }
+            (true, Value::Sequence(items)) => {
+                let path = vec![top.to_string()];
+                let mut kept = Vec::new();
+                for (i, item) in items.iter().enumerate() {
+                    let mut errs = Vec::new();
+                    check_tree(&keys, scope, &mut path.clone(), &Value::Sequence(vec![item.clone()]), &mut errs);
+                    if errs.is_empty() {
+                        kept.push(item.clone());
+                        continue;
+                    }
+                    out.fail(sec, format!("{}[{i}]", sec.name), errs);
+                    if let Some(Value::Sequence(c)) = closed(&keys, scope, &path, &Value::Sequence(vec![item.clone()])) {
+                        kept.extend(c);
+                    }
+                }
+                accepted = Value::Sequence(kept);
             }
             _ => {
                 let mut errs = Vec::new();
                 check_tree(&keys, scope, &mut vec![top.to_string()], v, &mut errs);
                 if !errs.is_empty() {
-                    out.fail(sec.name, Some(sec.name.to_string()), errs);
+                    out.fail(sec, sec.name.to_string(), errs);
+                    if let Some(c) = closed(&keys, scope, &[top.to_string()], v) {
+                        closed_tops.push((k.clone(), c));
+                    }
                 }
             }
         }
         out.accepted.insert(k.clone(), accepted);
     }
-    // A whole-section failure drops every top-level key the section owns.
+    // A whole-section failure drops every top-level key the section owns;
+    // a switch among them keeps its fail-closed reading.
     let failed = out.failed.clone();
     out.accepted.retain(|k, _| {
         k.as_str().and_then(|t| schema.section_of_top(file, t)).is_none_or(|sec| !failed.iter().any(|u| u == sec.name))
     });
-    out
-}
-
-impl Checked {
-    fn fail(&mut self, section: &'static str, unit: Option<String>, errs: Vec<(Vec<String>, String)>) {
-        if let Some(u) = &unit {
-            if !self.failed.contains(u) {
-                self.failed.push(u.clone());
-            }
-        }
-        self.failures.extend(errs.into_iter().map(|(path, message)| Failure { section: Some(section), unit: unit.clone(), path, message }));
+    for (k, c) in closed_tops {
+        out.accepted.insert(k, c);
     }
+    out
 }
 
 fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &Value, errs: &mut Vec<(Vec<String>, String)>) {
@@ -228,7 +322,9 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
         Value::Mapping(m) => {
             for (kk, vv) in m {
                 let Some(s) = kk.as_str() else {
-                    errs.push((path.clone(), format!("a key is not text: {}", crate::schema::show(kk))));
+                    let mut at = path.clone();
+                    at.push(crate::schema::show(kk));
+                    errs.push((at, "a key is not text".to_string()));
                     continue;
                 };
                 path.push(s.to_string());
@@ -238,6 +334,90 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
         }
         other => errs.push((path.clone(), format!("expected a mapping, found {}", crate::schema::show(other)))),
     }
+}
+
+// ── salvage ────────────────────────────────────────────────────
+
+/// What can be read from text that does not parse as a whole: each
+/// top-level entry parsed on its own, and an entry that does not parse
+/// salvaged entry by entry beneath it. Best effort; used only to keep a
+/// switch that the file turns off.
+pub fn salvage(text: &str) -> Mapping {
+    if let Ok(Value::Mapping(m)) = yaml_edit::parse(text) {
+        return m;
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let indent = |l: &str| l.len() - l.trim_start_matches(' ').len();
+    let content = |l: &str| !l.trim().is_empty() && !l.trim_start().starts_with('#');
+    let base = lines.iter().find(|l| content(l)).map(|l| indent(l)).unwrap_or(0);
+    let starts: Vec<usize> = (0..lines.len())
+        .filter(|&i| content(lines[i]) && indent(lines[i]) == base && !lines[i].trim_start().starts_with('-'))
+        .collect();
+    let mut out = Mapping::new();
+    for (n, &s) in starts.iter().enumerate() {
+        let e = starts.get(n + 1).copied().unwrap_or(lines.len());
+        let block: Vec<&str> = lines[s..e].iter().map(|l| if l.len() >= base { &l[base..] } else { l.trim_start() }).collect();
+        let block_text = block.join("\n");
+        if let Ok(Value::Mapping(m)) = serde_yaml::from_str::<Value>(&block_text) {
+            out.extend(m);
+            continue;
+        }
+        // The entry itself is broken: salvage what is under its key.
+        let head = block[0].trim_end();
+        if let Some(key) = head.strip_suffix(':').filter(|k| !k.contains(": ")) {
+            let inner = salvage(&block[1..].join("\n"));
+            if !inner.is_empty() {
+                out.insert(Value::String(key.trim().to_string()), Value::Mapping(inner));
+            }
+        }
+    }
+    out
+}
+
+/// The fail-closed readings of every switch salvaged from text that does
+/// not parse: what such a file still contributes to its layer.
+pub fn closed_from_salvage(schema: &Schema, file: &str, scope: LayerScope, text: &str, only: Option<&[&str]>) -> Mapping {
+    let keys = file_keys(schema, file);
+    let mut out = Mapping::new();
+    for (k, v) in salvage(text) {
+        let Some(top) = k.as_str() else { continue };
+        let Some(sec) = schema.section_of_top(file, top) else { continue };
+        if only.is_some_and(|o| !o.contains(&sec.name)) {
+            continue;
+        }
+        let path = vec![top.to_string()];
+        match (sec.per_entry, &v) {
+            (true, Value::Mapping(m)) => {
+                let mut kept = Mapping::new();
+                for (ek, ev) in m {
+                    let Some(e) = ek.as_str() else { continue };
+                    if let Some(c) = closed(&keys, scope, &[top.to_string(), e.to_string()], ev) {
+                        kept.insert(ek.clone(), c);
+                    }
+                }
+                if !kept.is_empty() {
+                    out.insert(k.clone(), Value::Mapping(kept));
+                }
+            }
+            (true, Value::Sequence(items)) => {
+                let mut kept = Vec::new();
+                for item in items {
+                    if let Some(Value::Sequence(c)) = closed(&keys, scope, &path, &Value::Sequence(vec![item.clone()])) {
+                        kept.extend(c);
+                    }
+                }
+                if !kept.is_empty() {
+                    out.insert(k.clone(), Value::Sequence(kept));
+                }
+            }
+            _ => {
+                if let Some(c) = closed(&keys, scope, &path, &v) {
+                    out.insert(k.clone(), c);
+                }
+            }
+        }
+    }
+    out
 }
 
 // ── trace ──────────────────────────────────────────────────────
@@ -302,7 +482,7 @@ impl Layer {
                 let f = if c.is_clean() { Vec::new() } else { c.findings(None, path, text) };
                 (c.accepted, f)
             }
-            Err(f) => (Mapping::new(), vec![*f]),
+            Err(f) => (closed_from_salvage(schema, file, scope, text, None), vec![*f]),
         };
         Layer { name: name.into(), file, scope, path: path.map(Path::to_path_buf), accepted, findings, present: true }
     }
@@ -393,9 +573,9 @@ mod tests {
     use crate::schema::*;
 
     const SECTIONS: &[SectionSpec] = &[
-        SectionSpec { per_entry: false, name: "general", file: "cfg", top: &["language"], doc: "" },
-        SectionSpec { per_entry: false, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
-        SectionSpec { per_entry: true, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
+        SectionSpec { per_entry: false, repair: None, name: "general", file: "cfg", top: &["language"], doc: "" },
+        SectionSpec { per_entry: false, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
+        SectionSpec { per_entry: true, repair: None, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
     ];
     const BASE: KeySpec = KeySpec {
         name: "general.language",
@@ -410,6 +590,7 @@ mod tests {
         long: "",
         check: None,
         computed: None,
+        fail_closed: None,
     };
     const KEYS: &[KeySpec] = &[
         BASE,
@@ -515,5 +696,16 @@ mod tests {
         let d = l.findings[0].diagnostic("t");
         assert!(d.contains("resolve from the layers beneath, ending at canonical"), "{d}");
         assert!(!d.contains("falls back to canonical"), "{d}");
+    }
+
+    #[test]
+    fn salvage_reads_the_entries_that_parse() {
+        let m = salvage("enabled: false\nlanguage: [\nways:\n  a/b: false\n  c/d: [\n  e/f: false\n");
+        assert_eq!(m.get("enabled"), Some(&Value::Bool(false)));
+        assert!(m.get("language").is_none());
+        let ways = m.get("ways").and_then(|w| w.as_mapping()).unwrap();
+        assert_eq!(ways.get("a/b"), Some(&Value::Bool(false)));
+        assert_eq!(ways.get("e/f"), Some(&Value::Bool(false)));
+        assert!(ways.get("c/d").is_none());
     }
 }

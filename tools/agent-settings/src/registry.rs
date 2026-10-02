@@ -151,13 +151,14 @@ mod tests {
         long: "",
         check: None,
         computed: None,
+        fail_closed: None,
     };
     static SCHEMA: Schema = Schema {
         component: "t",
         files: &[FileSpec { id: "cfg", retired: &[] }, FileSpec { id: "agent", retired: &[] }],
         sections: &[
-            SectionSpec { per_entry: false, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
-            SectionSpec { per_entry: false, name: "gate", file: "agent", top: &["mode"], doc: "" },
+            SectionSpec { per_entry: false, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
+            SectionSpec { per_entry: false, repair: None, name: "gate", file: "agent", top: &["mode"], doc: "" },
         ],
         keys: &[
             BASE,

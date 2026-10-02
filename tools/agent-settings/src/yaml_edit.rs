@@ -490,10 +490,20 @@ fn key_string(k: &Value) -> Result<String, EditError> {
 
 // ── value helpers ───────────────────────────────────────────────
 
+/// The key of `m` a path segment names: the text key, or else a scalar key
+/// written the same way (`123:` is named by `"123"`).
+fn key_of(m: &Mapping, seg: &str) -> Option<Value> {
+    if m.contains_key(seg) {
+        return Some(Value::String(seg.to_string()));
+    }
+    m.keys().find(|k| !k.is_string() && key_string(k).is_ok_and(|t| t == seg)).cloned()
+}
+
 pub fn value_at<'a>(v: &'a Value, path: &[String]) -> Option<&'a Value> {
     let mut cur = v;
     for seg in path {
-        cur = cur.as_mapping()?.get(seg.as_str())?;
+        let m = cur.as_mapping()?;
+        cur = m.get(key_of(m, seg)?)?;
     }
     Some(cur)
 }
@@ -505,26 +515,30 @@ fn v_set(root: &mut Value, path: &[String], v: Value) {
             *cur = Value::Mapping(Mapping::new());
         }
         let m = cur.as_mapping_mut().expect("just made a mapping");
-        if !m.get(seg.as_str()).is_some_and(|x| x.is_mapping()) {
-            m.insert(Value::String(seg.clone()), Value::Mapping(Mapping::new()));
+        let k = key_of(m, seg).unwrap_or_else(|| Value::String(seg.clone()));
+        if !m.get(&k).is_some_and(|x| x.is_mapping()) {
+            m.insert(k.clone(), Value::Mapping(Mapping::new()));
         }
-        cur = m.get_mut(seg.as_str()).expect("just inserted");
+        cur = m.get_mut(&k).expect("just inserted");
     }
     if !cur.is_mapping() {
         *cur = Value::Mapping(Mapping::new());
     }
-    cur.as_mapping_mut().expect("mapping").insert(Value::String(path[path.len() - 1].clone()), v);
+    let m = cur.as_mapping_mut().expect("mapping");
+    let k = key_of(m, &path[path.len() - 1]).unwrap_or_else(|| Value::String(path[path.len() - 1].clone()));
+    m.insert(k, v);
 }
 
 /// Remove `path`, then every ancestor mapping the removal left empty.
 fn v_remove(root: &mut Value, path: &[String]) {
     fn go(cur: &mut Value, path: &[String]) -> bool {
         let Some(m) = cur.as_mapping_mut() else { return false };
+        let Some(k) = key_of(m, &path[0]) else { return m.is_empty() };
         if path.len() == 1 {
-            m.remove(path[0].as_str());
-        } else if let Some(child) = m.get_mut(path[0].as_str()) {
+            m.remove(&k);
+        } else if let Some(child) = m.get_mut(&k) {
             if go(child, &path[1..]) {
-                m.remove(path[0].as_str());
+                m.remove(&k);
             }
         }
         m.is_empty()
@@ -732,5 +746,11 @@ mod tests {
         assert_eq!(Doc::parse("- a\n").unwrap_err(), EditError::NotMapping);
         assert_eq!(Doc::parse("# only\n").unwrap().line_of(&p("a")), None);
         assert_eq!(Doc::parse("a:\n  b: 1\n").unwrap().line_of(&p("a.b")), Some(2));
+    }
+
+    #[test]
+    fn a_scalar_key_is_named_by_its_text() {
+        let out = edit("ways:\n  123: false\n  a/b: false\n", |d| assert!(d.unset(&p("ways.123")).unwrap()));
+        assert_eq!(out, "ways:\n  a/b: false\n");
     }
 }
