@@ -286,27 +286,27 @@ impl Replay {
         }
     }
 
-    /// Play a frame on, or read a live session again. True when the event
-    /// log changed and was read.
-    fn tick(&mut self) -> bool {
+    /// Play a frame on, or read a live session again. The event log's
+    /// text when it changed and was read.
+    fn tick(&mut self) -> Option<String> {
         if self.play.is_live() {
             self.now = agent_fmt::when::now_secs();
-            self.from_log && self.refresh()
+            self.from_log.then(|| self.refresh()).flatten()
         } else {
             self.travel(|p| {
                 p.tick();
             });
-            false
+            None
         }
     }
 
     /// Read the live session again when the event log changed: new frames,
     /// the newest shown while following, and the why index read afresh.
-    /// True when the log changed.
-    fn refresh(&mut self) -> bool {
+    /// The log's text when it changed.
+    fn refresh(&mut self) -> Option<String> {
         let sig = events_signature();
         if sig == self.sig {
-            return false;
+            return None;
         }
         self.sig = sig;
         // At launch the transcript may hold no model turn yet, so the window
@@ -323,7 +323,7 @@ impl Replay {
             self.judged = super::frames::has_verdicts(&events);
             self.take_frames(frames);
         }
-        true
+        Some(content)
     }
 
     /// The frames read again: the newest shown while following, the
@@ -550,8 +550,8 @@ impl Screen for Introspect {
 
     fn tick(&mut self) {
         if let Some(r) = &mut self.replay {
-            if r.tick() {
-                self.spend.reload();
+            if let Some(content) = r.tick() {
+                self.spend.reload(&content);
             }
         }
     }

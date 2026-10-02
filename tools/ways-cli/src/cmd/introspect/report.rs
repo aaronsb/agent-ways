@@ -48,9 +48,10 @@ impl Spend {
         self.calls = calls.into_iter().filter(|c| project.is_none_or(|p| super::scope::project_matches(&c.project, p))).collect();
     }
 
-    /// Read the event log again, as a live screen does when it changed.
-    pub(crate) fn reload(&mut self) {
-        self.take(spend::load());
+    /// Take the calls in the event log's `content`, read again by a live
+    /// screen when it changed.
+    pub(crate) fn reload(&mut self, content: &str) {
+        self.take(spend::parse_log(content));
     }
 
     fn groups(&self) -> Vec<Group> {
