@@ -232,8 +232,27 @@ impl Painter {
     }
 
     /// The built-in default at the environment's depth. Reads no file.
+    ///
+    /// Output that is not going to a terminal is plain, with no colour and
+    /// no attributes: a pipe may be machine-carried text (a hook injection,
+    /// a Monitor event), and escapes there are noise. `CLICOLOR_FORCE` or
+    /// `FORCE_COLOR`, set to anything but empty or `0`, keeps a pipe styled.
     pub fn detect() -> Painter {
+        if !styled_output() {
+            return Painter::plain();
+        }
         Painter::terminal(ColorDepth::detect())
+    }
+
+    /// The painter for a chosen theme at `depth` (ADR-504, note of
+    /// 2026-10-01): the theme where the terminal shows 256 colours or more,
+    /// else the 16-colour terminal palette whole, not the theme reduced to
+    /// 16. With no theme chosen, the terminal palette.
+    pub fn select(theme: Option<&Theme>, depth: ColorDepth) -> Painter {
+        match (theme, depth) {
+            (Some(t), ColorDepth::TrueColor | ColorDepth::Ansi256) => Painter::themed(t, depth),
+            _ => Painter::terminal(depth),
+        }
     }
 
     /// No colour and no attributes: every style renders as plain text.
@@ -246,17 +265,43 @@ impl Painter {
         Painter { depth, roles: Some(Roles::derive(theme)), fill: theme.background == Background::Fill, plain: false }
     }
 
-    /// The user's active theme (ADR-504 §5) at the environment's depth, or
-    /// the terminal palette when none is chosen or it does not load. This
-    /// reads the theme directory, so hook paths never call it (§11).
+    /// The user's active theme (ADR-504 §5) at the environment's depth,
+    /// chosen by [`Painter::select`]; plain when output is not a terminal,
+    /// as [`Painter::detect`]. A warning from [`Painter::active_in`] goes to
+    /// stderr. This reads the theme directory, so hook paths never call it
+    /// (§11).
     pub fn active() -> Painter {
+        if !styled_output() {
+            return Painter::plain();
+        }
         let depth = ColorDepth::detect();
         let Some(dir) = crate::bundled::user_dir() else { return Painter::terminal(depth) };
-        let Some(name) = crate::bundled::active_name(&dir) else { return Painter::terminal(depth) };
-        match crate::bundled::ThemeSet::load(Some(&dir)).get(&name) {
-            Some(t) => Painter::themed(t, depth),
-            None => Painter::terminal(depth),
+        let (p, warning) = Painter::active_in(&dir, depth);
+        if let Some(w) = warning {
+            eprintln!("agent-ways theme: {w}");
         }
+        p
+    }
+
+    /// The active theme named in `dir` at `depth`, and a warning when the
+    /// choice could not be honoured as written: the named theme does not
+    /// exist, or a user file meant to override it failed to load.
+    pub fn active_in(dir: &std::path::Path, depth: ColorDepth) -> (Painter, Option<String>) {
+        let Some(name) = crate::bundled::active_name(dir) else { return (Painter::terminal(depth), None) };
+        let set = crate::bundled::ThemeSet::load(Some(dir));
+        let rejected = set.rejected.iter().find(|(file, _)| {
+            std::path::Path::new(file).file_stem().and_then(|s| s.to_str()) == Some(name.as_str())
+        });
+        let warning = match (set.get(&name), rejected) {
+            (None, None) => Some(format!("theme `{name}` not found; using the default")),
+            (found, Some((file, errs))) => {
+                let first = errs.first().map(|e| e.to_string()).unwrap_or_default();
+                let using = if found.is_some() { "the bundled theme of that name" } else { "the default" };
+                Some(format!("{file} did not load ({first}); using {using}"))
+            }
+            (Some(_), None) => None,
+        };
+        (Painter::select(set.get(&name), depth), warning)
     }
 
     pub fn depth(&self) -> ColorDepth {
@@ -376,9 +421,18 @@ impl Painter {
         }
     }
 
-    fn is_plain(&self) -> bool {
+    /// Whether this painter writes no escapes at all.
+    pub fn is_plain(&self) -> bool {
         self.plain
     }
+}
+
+/// Whether output should be styled: stdout is a terminal, or a caller
+/// forces colour with `CLICOLOR_FORCE` or `FORCE_COLOR`.
+fn styled_output() -> bool {
+    use std::io::IsTerminal;
+    let forced = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty() && v != "0");
+    forced("CLICOLOR_FORCE") || forced("FORCE_COLOR") || std::io::stdout().is_terminal()
 }
 
 static GLOBAL: OnceLock<Painter> = OnceLock::new();

@@ -132,6 +132,9 @@ pub const MIN_MUTED: f64 = 3.0;
 /// discrimination is several times worse, so the floor is four JNDs.
 pub const MIN_DISTINCT: f64 = 0.08;
 
+/// OKLCH chroma below which a colour reads as grey.
+const GREY_CHROMA: f64 = 0.02;
+
 /// `c` moved the least it can, in OKLCH, to sit `MIN_DISTINCT` from every
 /// colour in `settled` while still reading at `min` on `grounds`: hue turned
 /// up to 60°, lightness pushed away from the ground, chroma raised. Returns
@@ -143,10 +146,14 @@ fn separate(c: Rgb, settled: &[Rgb], grounds: &[Rgb], min: f64) -> Rgb {
     }
     let p = lch(c);
     let away = if p.l >= grounds.first().map_or(0.0, |g| lch(*g).l) { 1.0 } else { -1.0 };
+    // A grey's hue is rounding noise; turning it or adding chroma would
+    // tint it an arbitrary colour, so a grey moves in lightness only.
+    let grey = p.c < GREY_CHROMA;
+    let (hues, chromas) = if grey { (0..=0, 0..=0) } else { (-20..=20, 0..=5) };
     let mut best: Option<(f64, Rgb)> = None;
-    for dh in (-60..=60).step_by(3) {
+    for dh in hues.map(|h| h * 3) {
         for dl in 0..=10 {
-            for dc in 0..=5 {
+            for dc in chromas.clone() {
                 let q = Lch { l: (p.l + away * 0.015 * dl as f64).clamp(0.0, 1.0), c: p.c + 0.02 * dc as f64, h: p.h + (dh as f64).to_radians() };
                 let x = clip_chroma(q);
                 let d = delta_e(x, c);

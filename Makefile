@@ -481,6 +481,8 @@ test-unit:
 	@cargo test --manifest-path tools/ways-cli/Cargo.toml --bin ways --quiet
 	@# The theme engine, and the raw-colour lint over every workspace source (ADR-504 §6).
 	@cargo test --manifest-path tools/Cargo.toml -p agent-theme --quiet
+	@# Piped output carries no escapes; hooks inject `ways context` into model context.
+	@cargo test --manifest-path tools/ways-cli/Cargo.toml --test piped_output --quiet
 	@echo "Unit tests passed."
 
 test-sim: ways

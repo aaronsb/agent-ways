@@ -8,7 +8,8 @@ impl Rgb {
     /// `#rrggbb` only; no short form, no alpha.
     pub fn from_hex(s: &str) -> Option<Rgb> {
         let h = s.strip_prefix('#')?;
-        if h.len() != 6 || !h.is_ascii() {
+        // from_str_radix accepts a sign, so check the digits first.
+        if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
         let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();

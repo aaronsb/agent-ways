@@ -4,10 +4,9 @@
 //! here; `cmd::send` consults `is_valid_signal_id` when validating `--re`
 //! ids, so the parser owns what a valid id looks like.
 
-use attend_identity_view::{render_sender_label, render_sender_label_plain};
+use attend_identity_view::render_sender_label;
 use attend_instances::SnapshotCache;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
-use agent_theme::ColorDepth;
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
@@ -49,14 +48,9 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
                 return;
             }
         };
-        // Piped output must be escape-free (#388).
-        use std::io::IsTerminal;
+        // The process painter is plain on a pipe (#388).
         let instances = SnapshotCache::new();
-        let sender = if std::io::stdout().is_terminal() {
-            render_sender_label(sig.from, sig.cwd, ColorDepth::detect(), &instances)
-        } else {
-            render_sender_label_plain(sig.from, sig.cwd, &instances)
-        };
+        let sender = render_sender_label(sig.from, sig.cwd, &agent_theme::painter(), &instances);
         println!("From: {sender}");
         println!("ID:   {msg_id}");
         if let Some(re_id) = sig.reply_to {
@@ -149,14 +143,9 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
                 }
             }
 
-            // Piped output must be escape-free (#388): env-probed caps
-            // would style a pipe. TTY keeps the identity colors.
-            use std::io::IsTerminal;
-            let sender = if std::io::stdout().is_terminal() {
-                render_sender_label(sig.from, sig.cwd, ColorDepth::detect(), &instances)
-            } else {
-                render_sender_label_plain(sig.from, sig.cwd, &instances)
-            };
+            // The process painter is plain on a pipe (#388); a TTY keeps
+            // the identity colors.
+            let sender = render_sender_label(sig.from, sig.cwd, &agent_theme::painter(), &instances);
 
             let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
 
@@ -386,14 +375,14 @@ fn scan_pending(
                 }
             }
             // Escape-free by construction: the drain's output is
-            // hook-injection text (or a pipe), never a styled terminal.
-            // Mono was not enough — it still emits style bits (#388).
+            // hook-injection text (or a pipe), never a styled terminal,
+            // so it is drawn plain whatever the environment says (#388).
             // The label is the same form the peers sensor shows under
             // Monitor (#534); the wire `from` rides along as the id.
             delivered.push(Drained {
                 when: agent_fmt::compact_time(mtime, std::time::SystemTime::now()),
                 mtime,
-                sender: render_sender_label_plain(sig.from, sig.cwd, &instances),
+                sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
                 sender_id: sig.from.to_string(),
                 scope: scope.clone(),
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),

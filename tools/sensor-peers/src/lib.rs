@@ -431,7 +431,7 @@ impl PeerSensor {
             let instances = attend_identity_view::SnapshotCache::new();
             for m in &pending {
                 let sender =
-                    attend_identity_view::render_sender_label_plain(&m.from, &m.cwd, &instances);
+                    attend_identity_view::render_sender_label(&m.from, &m.cwd, &attend_identity_view::Painter::plain(), &instances);
                 let include_reply_hint = !self.reply_hint_shown;
                 // Chunk long messages at word boundaries so each event stays
                 // under Monitor's ~400-char stdout line ceiling; chunks ride

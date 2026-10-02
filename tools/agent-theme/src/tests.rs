@@ -311,3 +311,94 @@ fn ratatui_output_maps_roles_and_attributes() {
     assert_eq!(base.bg, Some(RC::Rgb(paper.slots.bg.0, paper.slots.bg.1, paper.slots.bg.2)));
     assert_eq!(Painter::themed(&nord, ColorDepth::TrueColor).ratatui_base(), ratatui_core::style::Style::new());
 }
+
+// ── Theme selection (ADR-504, note of 2026-10-01) ──────────────
+
+#[test]
+fn a_chosen_theme_is_used_at_truecolor_and_256() {
+    let nord = bundled().remove(1);
+    let r = Roles::derive(&nord);
+    for depth in [ColorDepth::TrueColor, ColorDepth::Ansi256] {
+        let p = Painter::select(Some(&nord), depth);
+        assert_eq!(p.roles(), Some(&r), "{depth:?}");
+        assert_eq!(p, Painter::themed(&nord, depth));
+    }
+    assert_eq!(Painter::select(Some(&nord), ColorDepth::Ansi256).sgr(Role::Ok), format!("\x1b[38;5;{}m", nearest_256(r.ok)));
+}
+
+#[test]
+fn a_chosen_theme_falls_back_to_the_16_colour_default_whole() {
+    let nord = bundled().remove(1);
+    let p = Painter::select(Some(&nord), ColorDepth::Ansi16);
+    assert_eq!(p, Painter::terminal(ColorDepth::Ansi16), "the default theme, not nord reduced to 16");
+    assert!(p.roles().is_none());
+    assert_eq!(p.sgr(Role::Ok), "\x1b[32m");
+    assert_eq!(p.sgr(Role::Muted), "\x1b[2m");
+}
+
+#[test]
+fn no_colour_ignores_the_chosen_theme() {
+    let nord = bundled().remove(1);
+    let p = Painter::select(Some(&nord), ColorDepth::NoColor);
+    assert_eq!(p, Painter::terminal(ColorDepth::NoColor));
+    assert_eq!(p.sgr(Role::Err), "");
+    assert_eq!(p.sgr(Role::Selection), "\x1b[7m");
+}
+
+#[test]
+fn no_choice_is_the_terminal_palette_at_every_depth() {
+    for depth in [ColorDepth::TrueColor, ColorDepth::Ansi256, ColorDepth::Ansi16, ColorDepth::NoColor] {
+        assert_eq!(Painter::select(None, depth), Painter::terminal(depth));
+    }
+}
+
+#[test]
+fn active_in_reads_the_choice_and_warns_when_it_cannot_be_honoured() {
+    let dir = scratch_dir("active");
+    let tc = ColorDepth::TrueColor;
+    // No choice: the default, silently.
+    assert_eq!(Painter::active_in(&dir, tc), (Painter::terminal(tc), None));
+    // A bundled theme by name, and its 16-colour fallback.
+    std::fs::write(active_file(&dir), "dracula\n").unwrap();
+    let dracula = ThemeSet::bundled().get("dracula").unwrap().clone();
+    assert_eq!(Painter::active_in(&dir, tc), (Painter::themed(&dracula, tc), None));
+    assert_eq!(Painter::active_in(&dir, ColorDepth::Ansi16).0, Painter::terminal(ColorDepth::Ansi16));
+    // A name that does not exist.
+    std::fs::write(active_file(&dir), "nope\n").unwrap();
+    let (p, w) = Painter::active_in(&dir, tc);
+    assert_eq!(p, Painter::terminal(tc));
+    assert!(w.unwrap().contains("`nope` not found"));
+    // A broken user override of a bundled name: the bundled one, with a warning.
+    std::fs::write(active_file(&dir), "nord\n").unwrap();
+    std::fs::write(dir.join("nord.theme"), "THEME_NAME=\"nord\"\n").unwrap();
+    let nord = ThemeSet::bundled().get("nord").unwrap().clone();
+    let (p, w) = Painter::active_in(&dir, tc);
+    assert_eq!(p, Painter::themed(&nord, tc));
+    let w = w.unwrap();
+    assert!(w.contains("nord.theme did not load") && w.contains("bundled"), "{w}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hex_must_be_six_hex_digits() {
+    assert_eq!(Rgb::from_hex("#0aFf10"), Some(Rgb(0x0a, 0xff, 0x10)));
+    for bad in ["#+f+f+f", "#-1-1-1", "#12345g", "#12345", "1234567", "#ｆｆｆ", "# 12345"] {
+        assert_eq!(Rgb::from_hex(bad), None, "{bad}");
+    }
+    let src = nord_src().replace("THEME_BG=\"#2e3440\"", "THEME_BG=\"#+f+f+f\"");
+    assert!(validate(&src).iter().any(|e| e.to_string().contains("`#+f+f+f` is not a #rrggbb colour")));
+}
+
+#[test]
+fn a_grey_status_slot_stays_grey() {
+    // Every status slot black: the hue of black is rounding noise, so the
+    // roles that must move apart may move only in lightness.
+    let mut t = parse(nord_src()).unwrap();
+    for n in ["accent", "info", "ok", "warn", "err", "alt"] {
+        t.slots.set(n, Rgb(0, 0, 0));
+    }
+    let r = Roles::derive(&t);
+    for (name, c) in r.status() {
+        assert!(lch(c).c < 0.02, "{name} was tinted: {}", c.hex());
+    }
+}

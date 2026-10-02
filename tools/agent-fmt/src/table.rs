@@ -268,8 +268,11 @@ pub fn truncate_visible(s: &str, max: usize) -> String {
         }
     }
     result.push('…');
-    // Close any open ANSI sequence
-    result.push_str(agent_theme::RESET);
+    // Close any open ANSI sequence. Text with none gets no reset, so plain
+    // output stays free of escapes.
+    if result.contains('\x1b') {
+        result.push_str(agent_theme::RESET);
+    }
     result
 }
 
@@ -283,5 +286,25 @@ fn pad_cell(s: &str, width: usize, align: Align) -> String {
     match align {
         Align::Left => format!("{s}{}", " ".repeat(padding)),
         Align::Right => format!("{}{s}", " ".repeat(padding)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_visible;
+    use agent_theme::{ColorDepth, Painter, Role, RESET};
+
+    #[test]
+    fn plain_text_truncates_without_escapes() {
+        let t = truncate_visible("softwaredev/freshness", 6);
+        assert_eq!(t, "softw…");
+        assert!(!t.contains('\x1b'));
+    }
+
+    #[test]
+    fn styled_text_truncated_mid_style_is_sealed() {
+        let red = Painter::terminal(ColorDepth::TrueColor).paint(Role::Err, "abcdef");
+        let t = truncate_visible(&red, 4);
+        assert!(t.ends_with(&format!("…{RESET}")), "{t:?}");
     }
 }

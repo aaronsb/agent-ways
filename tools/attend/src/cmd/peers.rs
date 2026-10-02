@@ -2,11 +2,12 @@
 
 use crate::util::{get_groups, own_session_id};
 use agent_identity::{ansi, Identity};
-use agent_theme::ColorDepth;
+use agent_theme::Painter;
 
 pub(crate) fn cmd_peers() {
     let r = get_groups();
-    let caps = ColorDepth::detect();
+    let painter = agent_theme::painter();
+    let caps = painter.depth();
 
     #[cfg(feature = "sensor-peers")]
     let peers = {
@@ -35,7 +36,7 @@ pub(crate) fn cmd_peers() {
     let self_instance = self_sid
         .as_deref()
         .and_then(|sid| registry.lookup(&cwd, sid));
-    let self_label = render_agent_label(&self_id, self_instance.as_deref(), caps);
+    let self_label = render_agent_label(&self_id, self_instance.as_deref(), &painter);
     // Self-row Focus cell: "(self)" identifies which row IS the runner of
     // `attend peers`, without using the literal string "project" — that
     // priming caused agents to reach for `attend send --focus project`
@@ -71,7 +72,7 @@ pub(crate) fn cmd_peers() {
             };
             let peer_id = Identity::for_cwd(peer_cwd, caps);
             let peer_instance = registry.lookup(peer_cwd, peer_sid);
-            let label = render_agent_label(&peer_id, peer_instance.as_deref(), caps);
+            let label = render_agent_label(&peer_id, peer_instance.as_deref(), &painter);
             t.add_owned(vec![
                 focus_label,
                 label,
@@ -106,12 +107,12 @@ pub(crate) fn cmd_peers() {
 /// `Tamsin-alpha` token shares the identity color — keeps the visual
 /// scan tight and matches the wire identity (a single addressable
 /// name, not a colored stem with a plain tail).
-fn render_agent_label(id: &Identity, instance: Option<&str>, caps: ColorDepth) -> String {
+fn render_agent_label(id: &Identity, instance: Option<&str>, painter: &Painter) -> String {
     let display = match instance {
         Some(inst) => format!("{}-{}", id.nickname, inst),
         None => id.nickname.to_string(),
     };
-    let nick = ansi::wrap(&display, &id.palette, id.style, caps);
-    let dim_basename = agent_theme::paint(agent_theme::Role::Muted, format!("({})", id.cwd_basename));
+    let nick = ansi::wrap(&display, &id.palette, id.style, painter);
+    let dim_basename = painter.paint(agent_theme::Role::Muted, format!("({})", id.cwd_basename));
     format!("{nick} {dim_basename}")
 }
