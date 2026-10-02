@@ -412,7 +412,8 @@ fn tabs(shape: Shape, views: &[(&str, bool)]) -> Line<'static> {
 fn draw_picker(f: &mut Draw, p: &mut Picker, shape: Shape, msg: &str) {
     let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
     f.render_widget(Paragraph::new(tabs(shape, &[("sessions", true)])), bar);
-    let title = format!(" sessions in {} ({}) ", p.scope, p.sessions.len());
+    // The count first: a long scope is cut at its end, never the count.
+    let title = format!(" {} sessions in {} ", p.sessions.len(), p.scope);
     if p.sessions.is_empty() {
         f.render_widget(Paragraph::new(Line::styled("no sessions recorded", theme::muted())).block(pane(title)), main);
     } else {

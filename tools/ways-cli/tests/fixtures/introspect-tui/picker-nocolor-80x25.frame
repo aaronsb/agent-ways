@@ -1,6 +1,6 @@
 agent-tui frame 80x25
 | introspect    sessions                                                         |
-|┌ sessions in /home/dev/proj (3) ──────────────────────────────────────────────┐|
+|┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────┐|
 |│ Session      Date             Project        Events  Ways Duration Transcript│|
 |│▌8f3a2c1d-5e6 2026-07-03 16:52 proj               10     9      18s yes       │|
 |│ 1b2c3d4e-000 2026-07-01 09:10 proj                4     3      12s yes       │|
@@ -28,8 +28,8 @@ styles
   0   0-11  - - REVERSED
   0  14-23  - - BOLD|REVERSED
   1   0-0   - - DIM
-  1   1-32  - - BOLD|DIM
-  1  33-79  - - DIM
+  1   1-30  - - BOLD|DIM
+  1  31-79  - - DIM
   2   0-0   - - DIM
   2   1-78  - - BOLD
   2  79-79  - - DIM

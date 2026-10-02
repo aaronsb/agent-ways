@@ -197,7 +197,7 @@ fn enter_opens_a_session_esc_comes_back_and_q_quits() {
     assert!(press(&mut s, &[KeyCode::Enter]));
     assert!(text(&render(&mut s, 120, 40)).contains(&format!("Session {SESSION}")), "the replay of the chosen session");
     assert!(press(&mut s, &[KeyCode::Esc]));
-    assert!(text(&render(&mut s, 120, 40)).contains("sessions in /home/dev/proj (3)"), "back on the picker");
+    assert!(text(&render(&mut s, 120, 40)).contains("3 sessions in /home/dev/proj"), "back on the picker");
     // A session that cannot open says why and stays on the picker.
     assert!(press(&mut s, &[KeyCode::Down, KeyCode::Enter]));
     assert!(text(&render(&mut s, 120, 40)).contains("no events for session 1b2c3d4e-000"));
@@ -208,6 +208,15 @@ fn enter_opens_a_session_esc_comes_back_and_q_quits() {
     // A replay opened directly ends on Esc: there is no picker to go back to.
     let mut d = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
     assert!(!press(&mut d, &[KeyCode::Esc]));
+}
+
+/// A scope too long for the pane's title loses its end, not the count.
+#[test]
+fn a_long_scope_keeps_the_session_count_in_view() {
+    let open = Box::new(|_: &str| Err("none".to_string()));
+    let scope = format!("/var/folders/{}/proj", "x".repeat(120));
+    let mut s = Introspect::picking(Picker::new(sessions(), scope), open, terminal(), Shape::PLAIN);
+    assert!(text(&render(&mut s, 80, 10)).contains("3 sessions in /var/folders/"));
 }
 
 #[test]

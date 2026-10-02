@@ -90,7 +90,7 @@ impl Drop for Fx {
 fn the_picker_lists_the_project_s_sessions_and_opens_one() {
     let fx = Fx::new();
     let picker = fx.snap(&["introspect", "replay", "--depth", "none", "--snap", "100x12"]);
-    assert!(picker.contains("sessions in") && picker.contains("(2)"), "{picker}");
+    assert!(picker.contains("2 sessions in"), "{picker}");
     let newest = picker.find("bbbbbbbb-000").expect("the newer session");
     let older = picker.find("aaaaaaaa-000").expect("the older session");
     assert!(newest < older, "newest first: {picker}");
