@@ -10,7 +10,7 @@ use sensor_keepwarm::{
 };
 
 pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
         std::process::exit(1);
@@ -66,7 +66,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
 
 /// The one-line form `attend status` shows.
 pub(crate) fn status_line() -> String {
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
     if !ident.session_resolved {
         return "no session".to_string();
     }

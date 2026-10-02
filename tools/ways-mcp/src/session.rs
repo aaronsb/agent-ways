@@ -2,7 +2,6 @@
 //! call (ADR-187 item 5).
 
 use serde_json::{json, Value};
-use std::process::Command;
 
 /// The launch flag that loads development channels, and the value naming this
 /// server (ADR-402). The flag takes one or more values, space-separated.
@@ -30,27 +29,15 @@ pub fn has_channel_flag(argv: &[String]) -> bool {
     values.iter().flat_map(|v| v.split(',')).any(|n| n.trim() == CHANNEL_NAME)
 }
 
-/// The command line of `pid`. Linux reads `/proc` exactly; elsewhere `ps -ww`
-/// prints it untruncated, split on whitespace, which the flag check tolerates.
-fn argv_of(pid: u32) -> Option<Vec<String>> {
-    if let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) {
-        return Some(
-            raw.split(|&b| b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect(),
-        );
-    }
-    let out = Command::new("ps").args(["-ww", "-o", "args=", "-p", &pid.to_string()]).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect())
-}
-
 /// The session this server belongs to, and whether it was launched with this
 /// server as a development channel.
 pub fn describe() -> Value {
-    match attend_session::find_own_session(std::process::id()) {
+    match attend_presence::session::find_own_session(std::process::id()) {
         Some((sid, pid)) => json!({
-            "origin_path": attend_session::origin_path(&sid),
+            "origin_path": attend_presence::session::origin_path(&sid),
             "session_id": sid,
             "claude_pid": pid,
-            "channel_flag": argv_of(pid).map(|argv| has_channel_flag(&argv)),
+            "channel_flag": attend_presence::process::argv(pid).map(|argv| has_channel_flag(&argv)),
         }),
         None => json!({ "session_id": null, "claude_pid": null, "channel_flag": null, "origin_path": null }),
     }

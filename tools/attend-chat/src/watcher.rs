@@ -60,7 +60,7 @@ pub fn accept_path(base: &Path, own_tray: &str, path: &Path) -> bool {
         return false;
     };
     let name = first.as_os_str().to_string_lossy();
-    if name == "_broadcast" {
+    if name == attend_groups::BROADCAST_DIR {
         return true;
     }
     if name.starts_with('@') {
@@ -81,7 +81,7 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
     // rare, and any missed "first signal in a new group" is
     // indistinguishable from backlog a later signal will force the
     // UI to re-scan for.
-    std::fs::create_dir_all(base.join("_broadcast")).ok();
+    std::fs::create_dir_all(base.join(attend_groups::BROADCAST_DIR)).ok();
     if !own_tray.is_empty() {
         std::fs::create_dir_all(base.join(&own_tray)).ok();
     }
@@ -161,7 +161,7 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
 /// backfill on startup. Kept separate from the event filter because
 /// backfill walks the fs once up front — the filter runs per event.
 fn scan_targets(base: &Path, own_tray: &str) -> Vec<PathBuf> {
-    let mut dirs = vec![base.join("_broadcast")];
+    let mut dirs = vec![base.join(attend_groups::BROADCAST_DIR)];
     // Mirror the guard in `spawn_watcher`: when `env::current_dir()`
     // fails, the tray name is empty and `base.join("")` degenerates
     // to `base` — we'd then walk the whole top level for no good

@@ -33,7 +33,7 @@ Fields are pipe-delimited with no escaping. If your message contains a literal `
 
 ## Storage layout
 
-Signal files live under `~/.cache/attend/signals/` in a flat two-level hierarchy:
+Signal files live under attend's cache, `$XDG_CACHE_HOME/attend/signals/` (`~/.cache/attend/signals/` when `XDG_CACHE_HOME` is unset), in a flat two-level hierarchy:
 
 ```
 ~/.cache/attend/signals/

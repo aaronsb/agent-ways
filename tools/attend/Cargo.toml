@@ -10,12 +10,9 @@ name = "attend"
 path = "src/main.rs"
 
 [features]
-default = ["sensor-git", "sensor-context", "sensor-peers", "sensor-processes", "sensor-disclosure", "sensor-keepwarm"]
-sensor-git = ["dep:sensor-git"]
-sensor-context = ["dep:sensor-context"]
+default = ["sensor-peers", "sensor-processes", "sensor-keepwarm"]
 sensor-peers = ["dep:sensor-peers"]
 sensor-processes = ["dep:sensor-processes"]
-sensor-disclosure = ["dep:sensor-disclosure"]
 sensor-keepwarm = ["dep:sensor-keepwarm"]
 
 [dependencies]
@@ -23,10 +20,8 @@ agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
 agent-theme = { path = "../agent-theme" }
 attend-groups = { path = "../attend-groups" }
-attend-heartbeat = { path = "../attend-heartbeat" }
-attend-identity-view = { path = "../attend-identity-view" }
+attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
-attend-session = { path = "../attend-session" }
 claude-sessions = { path = "../claude-sessions" }
 attend-state = { path = "../attend-state" }
 sensor-trait = { path = "../sensor-trait" }
@@ -35,11 +30,8 @@ sensor-trait = { path = "../sensor-trait" }
 # for runtime help and the markdown reference (see `bin/gen-docs.rs`).
 clap = { version = "4", features = ["derive"] }
 clap-markdown = "0.1"
-sensor-git = { path = "../sensor-git", optional = true }
-sensor-context = { path = "../sensor-context", optional = true }
 sensor-peers = { path = "../sensor-peers", optional = true }
 sensor-processes = { path = "../sensor-processes", optional = true }
-sensor-disclosure = { path = "../sensor-disclosure", optional = true }
 sensor-keepwarm = { path = "../sensor-keepwarm", optional = true }
 
 [dev-dependencies]

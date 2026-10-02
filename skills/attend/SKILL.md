@@ -13,7 +13,7 @@ callout, the CLI-is-the-contract note, or the keepwarm contract, update
 all three:
 
   - skills/attend/SKILL.md                                   (this file — read at /attend invocation)
-  - tools/sensor-disclosure/src/disclosures/messaging.md     (runtime reheat fired by sensor-disclosure)
+  - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat fired by the disclosure sensor)
   - hooks/ways/softwaredev/environment/attend/attend.md      (just-in-time way via commands: attend)
 
 Drift between the three causes agents to receive inconsistent guidance

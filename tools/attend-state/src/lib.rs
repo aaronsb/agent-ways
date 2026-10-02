@@ -168,11 +168,7 @@ const LOCK_STALE: Duration = Duration::from_secs(5);
 
 impl StateStore {
     pub fn new(session_id: Option<String>) -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        Self::new_in(
-            PathBuf::from(home).join(".cache").join("attend").join("state"),
-            session_id,
-        )
+        Self::new_in(attend_presence::cache::state_dir(), session_id)
     }
 
     /// Test seam: a store rooted at an explicit directory. Signals are
@@ -331,11 +327,7 @@ impl StateStore {
 /// drain per ADR-172 Decision 5): a live session's unconsumed message
 /// must survive a purge.
 pub fn seen_keys_for(session_id: &str) -> Option<HashSet<String>> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    seen_keys_for_in(
-        &PathBuf::from(home).join(".cache").join("attend").join("state"),
-        session_id,
-    )
+    seen_keys_for_in(&attend_presence::cache::state_dir(), session_id)
 }
 
 /// Test seam for [`seen_keys_for`].

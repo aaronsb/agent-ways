@@ -1,29 +1,29 @@
-//! Sensor module — re-exports from sensor crates and local ScriptSensor.
+//! Sensor module — the always-on sensors, re-exports from the optional
+//! sensor crates, and the local ScriptSensor.
 //!
-//! Sensor crates are wired in via feature flags. Each sensor is compiled only
-//! when its feature is enabled (default: all). Config controls runtime
-//! activation/deactivation independent of compilation.
+//! `context`, `git` and `disclosure` are modules here: they are always
+//! compiled. The other sensor crates are wired in via feature flags (default:
+//! all). Config controls runtime activation/deactivation independent of
+//! compilation.
 
+mod context;
+mod disclosure;
+mod git;
 mod script;
+
+pub use context::ContextSensor;
+pub use disclosure::DisclosureSensor;
+pub use git::GitSensor;
 
 // Re-export from sensor-trait (always available)
 pub use sensor_trait::{Focus, Sensor, SensorSlot};
 
 // Re-export from sensor crates (feature-gated)
-#[cfg(feature = "sensor-git")]
-pub use sensor_git::GitSensor;
-
-#[cfg(feature = "sensor-context")]
-pub use sensor_context::ContextSensor;
-
 #[cfg(feature = "sensor-peers")]
 pub use sensor_peers::PeerSensor;
 
 #[cfg(feature = "sensor-processes")]
 pub use sensor_processes::ProcessSensor;
-
-#[cfg(feature = "sensor-disclosure")]
-pub use sensor_disclosure::DisclosureSensor;
 
 #[cfg(feature = "sensor-keepwarm")]
 pub use sensor_keepwarm::KeepwarmSensor;
@@ -77,7 +77,6 @@ pub fn register_sensors(
 
     // ── Built-in crate sensors (feature-gated) ──────────────────
 
-    #[cfg(feature = "sensor-context")]
     register_builtin!("context", ContextSensor::new(), 60, 20, 3);
 
     #[cfg(feature = "sensor-processes")]
@@ -92,10 +91,8 @@ pub fn register_sensors(
         register_builtin!("processes", processes_sensor, 30, 5, 5);
     }
 
-    #[cfg(feature = "sensor-git")]
     register_builtin!("git", GitSensor::new(), 30, 10, 4);
 
-    #[cfg(feature = "sensor-disclosure")]
     register_builtin!("disclosure", DisclosureSensor::new(), 60, 20, 3);
 
     // Keepwarm (ADR-182) is pinned to this session's transcript, so a
@@ -104,7 +101,7 @@ pub fn register_sensors(
     // sensor is skipped rather than registered against a `pid-` id.
     #[cfg(feature = "sensor-keepwarm")]
     {
-        let ident = attend_session::identity();
+        let ident = attend_presence::session::identity();
         if ident.session_resolved {
             register_builtin!(
                 "keepwarm",
@@ -124,12 +121,8 @@ pub fn register_sensors(
             // poll, so mid-session focus-group join/leave is reflected
             // without restarting the sensor loop (ADR-118 + issue #15).
             let groups_for_scan = groups.clone();
-            peer_sensor.set_extra_scan_dirs_provider(std::sync::Arc::new(move || {
-                groups_for_scan
-                    .joined_group_names()
-                    .into_iter()
-                    .map(|name| groups_for_scan.group_dir(&name))
-                    .collect()
+            peer_sensor.set_receive_dirs_provider(std::sync::Arc::new(move |origin: &str| {
+                groups_for_scan.receive_dirs(origin)
             }));
             // Align per-peer engagement window with global engagement config.
             peer_sensor.set_peer_activity_window(cfg.engagement.peer_activity_window);
@@ -242,8 +235,22 @@ impl SensorState {
 /// `$sensor` is only parsed lexically as an expression — when its feature
 /// is off, the entire block (and the substituted expression with it) is
 /// stripped before name resolution, so it's fine if the type doesn't exist
-/// in that build.
+/// in that build. `always` in place of the feature names a sensor that is
+/// a module of attend and so always compiled.
 macro_rules! enumerate_builtin {
+    ($entries:ident, $cfg:expr, always, $name:literal, $base:expr, $min:expr, $sensor:expr) => {{
+        let s = $sensor;
+        let (state, interval, min_interval) = builtin_state_for($cfg, $name, $base, $min);
+        $entries.push(SensorEntry {
+            name: s.name().to_string(),
+            kind: SensorKind::Builtin,
+            state,
+            description: s.description().to_string(),
+            source: s.source(),
+            interval,
+            min_interval,
+        });
+    }};
     ($entries:ident, $cfg:expr, $feature:literal, $name:literal, $base:expr, $min:expr, $sensor:expr) => {{
         #[cfg(feature = $feature)]
         {
@@ -284,10 +291,10 @@ pub fn enumerate_sensors(cfg: &Config, focus: &Focus) -> Vec<SensorEntry> {
     // Built-in sensors. Defaults here mirror the macro defaults in
     // `register_sensors` and the seeds in `Config::default()` — keep them
     // in sync if you change either source.
-    enumerate_builtin!(entries, cfg, "sensor-context", "context",
+    enumerate_builtin!(entries, cfg, always, "context",
         Duration::from_secs(60), Duration::from_secs(20),
         ContextSensor::new());
-    enumerate_builtin!(entries, cfg, "sensor-git", "git",
+    enumerate_builtin!(entries, cfg, always, "git",
         Duration::from_secs(30), Duration::from_secs(10),
         GitSensor::new());
     enumerate_builtin!(entries, cfg, "sensor-peers", "peers",
@@ -299,7 +306,7 @@ pub fn enumerate_sensors(cfg: &Config, focus: &Focus) -> Vec<SensorEntry> {
             Some(list) => ProcessSensor::with_watch(list),
             None => ProcessSensor::new(),
         });
-    enumerate_builtin!(entries, cfg, "sensor-disclosure", "disclosure",
+    enumerate_builtin!(entries, cfg, always, "disclosure",
         Duration::from_secs(60), Duration::from_secs(20),
         DisclosureSensor::new());
     enumerate_builtin!(entries, cfg, "sensor-keepwarm", "keepwarm",

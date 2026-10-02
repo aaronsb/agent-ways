@@ -42,7 +42,7 @@ This is why **external sensors are a first-class design surface** — they're th
 
 Attend is extensible through two sensor implementations, both first-class:
 
-**1. Compiled crate sensors.** A Rust crate implementing the `Sensor` trait from `sensor-trait`. Gets linked into the attend binary at build time, runs at full native speed, shares process memory with the loop. Used for the built-in sensors: `sensor-context`, `sensor-git`, `sensor-peers`, `sensor-processes`. The right choice when performance matters or when the sensor needs fine-grained control over its own state.
+**1. Compiled crate sensors.** A Rust crate implementing the `Sensor` trait from `sensor-trait`. Gets linked into the attend binary at build time, runs at full native speed, shares process memory with the loop. Used for the built-in sensors: `context`, `git` and `disclosure` (modules of attend itself, always compiled), and the `sensor-peers`, `sensor-processes` and `sensor-keepwarm` crates. The right choice when performance matters or when the sensor needs fine-grained control over its own state.
 
 **2. External script sensors.** A shell script (or any executable) declared in the attend config under a `+sensor-name:` block. Attend runs it as a subprocess on the configured interval, parses its stdout as events, and feeds those into the same engagement/threshold/disclosure machinery. No Rust required. No recompile. The right choice for integrations with CLI tools (`gh`, `kubectl`, custom ops scripts) or for per-project sensors that don't belong in the main codebase.
 
@@ -101,7 +101,7 @@ Files marked **planned** are part of the ongoing documentation pass.
 
 - `tools/attend/` — orchestrator, config, groups, state, CLI (`run`, `chat`, `send`, `inbox`, `focus`, `cleanup`, `tune`, `status`)
 - `tools/sensor-trait/` — base `Sensor` trait, `SensorSlot`, engagement state
-- `tools/sensor-context/`, `sensor-git/`, `sensor-peers/`, `sensor-processes/` — the built-in crate sensors
+- `tools/attend/src/sensors/` (`context`, `git`, `disclosure`), `tools/sensor-peers/`, `sensor-processes/`, `sensor-keepwarm/` — the built-in sensors
 - `tools/agent-fmt/` — shared terminal formatting (banners, tables, commands)
 - `skills/attend/SKILL.md` — the invocation skill the agent reads when the user asks for awareness
 - `hooks/ways/softwaredev/environment/attend/` — the way that surfaces live attend state in the steering layer

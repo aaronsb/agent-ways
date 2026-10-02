@@ -1,24 +1,22 @@
 pub mod last_inbound;
-mod signal_id;
 
-use signal_id::signal_id_from_filename;
+use attend_groups::{ReceiveDir, Room};
 use sensor_trait::{Focus, Sensor};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Callback that returns the current set of extra signal directories
-/// (typically focus-group dirs). Called on every scan so mid-session
-/// group join/leave is reflected without restarting the sensor loop.
-pub type ExtraScanDirsFn = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
+/// Callback that returns the directories this session receives from, given
+/// its origin path: `attend_groups::Groups::receive_dirs`. Called on every
+/// scan so mid-session channel join/leave is reflected without restarting
+/// the sensor loop.
+pub type ReceiveDirsFn = Arc<dyn Fn(&str) -> Vec<ReceiveDir> + Send + Sync>;
 
 /// Discovers peer Claude Code sessions by reading ~/.claude/sessions/*.json
 /// and their transcript files. Same discovery pattern as abtop.
 ///
-/// Also reads signal files from ~/.cache/attend/signals/ for peer messages.
+/// Also reads signal files from attend's signals base for peer messages.
 ///
 /// Reports deltas when peers appear, disappear, or change state.
 /// Filters through focus: only surfaces peers in the same working directory
@@ -38,12 +36,12 @@ pub struct PeerSensor {
     own_session_id: Option<String>,
     /// First poll establishes baseline
     baseline_established: bool,
-    /// Provider that returns additional signal directories to scan on each
-    /// poll (e.g., focus-group dirs from ADR-118). A closure lets the sensor
-    /// pick up focus-group joins and leaves that happen after startup
-    /// without the orchestrator having to push updates. Set via
-    /// `set_extra_scan_dirs_provider()`.
-    extra_scan_dirs_fn: Option<ExtraScanDirsFn>,
+    /// Provider of the receive set scanned on each poll. A closure lets the
+    /// sensor pick up channel joins and leaves that happen after startup
+    /// without the orchestrator having to push updates. Without one the
+    /// sensor reads the project tray and `#open`. Set via
+    /// `set_receive_dirs_provider()`.
+    receive_dirs_fn: Option<ReceiveDirsFn>,
     /// Per-peer message timestamps for engagement-based magnitude boosting.
     /// Keyed by "from" field (e.g., "claude:<session_id>").
     /// When the same peer sends multiple messages in a window, their
@@ -131,7 +129,7 @@ struct PendingMsg {
 impl PeerSensor {
     pub fn new() -> Self {
         let own_pid = std::process::id();
-        let own_session_id = find_own_session_id(own_pid);
+        let own_session_id = attend_presence::session::find_own_session_id(own_pid);
         Self {
             own_pid,
             claude: claude_sessions::ClaudeDir::user(),
@@ -140,7 +138,7 @@ impl PeerSensor {
             reply_hint_shown: false,
             own_session_id,
             baseline_established: false,
-            extra_scan_dirs_fn: None,
+            receive_dirs_fn: None,
             peer_activity: HashMap::new(),
             peer_activity_window: Duration::from_secs(900),
             checkpoint_loaded: false,
@@ -190,18 +188,18 @@ impl PeerSensor {
         }
     }
 
-    /// Register a provider for additional signal directories. The closure
-    /// is invoked on every scan, so mid-session focus-group join/leave
-    /// propagates without restarting the sensor loop.
-    pub fn set_extra_scan_dirs_provider(&mut self, f: ExtraScanDirsFn) {
-        self.extra_scan_dirs_fn = Some(f);
+    /// Register the provider of the receive set. The closure is invoked on
+    /// every scan, so mid-session channel join/leave propagates without
+    /// restarting the sensor loop.
+    pub fn set_receive_dirs_provider(&mut self, f: ReceiveDirsFn) {
+        self.receive_dirs_fn = Some(f);
     }
 
-    /// Current snapshot of extra scan dirs. Empty if no provider is set.
-    fn current_extra_scan_dirs(&self) -> Vec<PathBuf> {
-        match &self.extra_scan_dirs_fn {
-            Some(f) => f(),
-            None => Vec::new(),
+    /// The directories to scan for `origin` this poll.
+    fn receive_dirs(&self, origin: &str) -> Vec<ReceiveDir> {
+        match &self.receive_dirs_fn {
+            Some(f) => f(origin),
+            None => attend_groups::Groups::new(&attend_presence::cache::signals_dir(), "").receive_dirs(origin),
         }
     }
 
@@ -245,14 +243,8 @@ impl PeerSensor {
         // a warm rejoin after a down-gap, or a burst from a hyperactive
         // peer. Nothing is dropped; detail is always in `attend inbox`.
         let mut pending: Vec<PendingMsg> = Vec::new();
-        let base = signals_base();
-
-        // Directories to scan: own project + broadcast + joined channels.
-        let own_tray = claude_sessions::attend_key(&focus.working_dir);
-        let mut scan_dirs: Vec<PathBuf> = vec![base.join(&own_tray), base.join("_broadcast")];
-
-        // Focus group directories (ADR-118 — named signal namespaces)
-        scan_dirs.extend(self.current_extra_scan_dirs());
+        // Directories to scan: own project + `#open` + joined channels.
+        let scan_dirs = self.receive_dirs(&focus.working_dir);
 
         let own_session_id: String = self.own_session_id
             .clone()
@@ -269,7 +261,7 @@ impl PeerSensor {
         self.message_baseline_done = true;
 
         for dir in &scan_dirs {
-            let entries = match fs::read_dir(dir) {
+            let entries = match fs::read_dir(&dir.path) {
                 Ok(e) => e,
                 Err(_) => continue,
             };
@@ -311,9 +303,13 @@ impl PeerSensor {
                 // only deduped (the seen-set) and, on a cold start, baselined
                 // (see below). Decay stays where it belongs: the event lane
                 // (git / process / peer-presence).
-                let signal_id = signal_id_from_filename(&filename).to_string();
+                // The signal's id is its filename stem, the value `re:<id>`
+                // replies reference (ADR-120).
+                let signal_id = filename.strip_suffix(".signal").unwrap_or(&filename).to_string();
 
-                if let Some((from, _project, source_cwd, message)) = parse_signal(content) {
+                if let Some(agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. }) =
+                    agent_identity::parse_signal(content)
+                {
                     // Skip our own signals — check the from field, not filename.
                     // from is "claude:session-id" or "external:user@terminal"
                     if let Some((_kind, identity)) = from.split_once(':') {
@@ -325,15 +321,10 @@ impl PeerSensor {
 
                     // Directed messages (in own project dir) get highest priority.
                     // Broadcast and focus group messages are important but less urgent.
-                    let dir_name = dir.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("");
-                    let base_magnitude: f64 = if dir_name == own_tray {
-                        7.0 // directed to us — someone used --to
-                    } else if dir_name == "_broadcast" {
-                        4.0 // broadcast — important but not targeted
-                    } else {
-                        5.0 // focus group — relevant peer
+                    let (base_magnitude, kind): (f64, MsgKind) = match dir.room {
+                        Room::Project => (7.0, MsgKind::Directed), // someone used --to
+                        Room::Open => (4.0, MsgKind::Open),        // important but not targeted
+                        Room::Channel(_) => (5.0, MsgKind::Group), // relevant peer
                     };
 
                     // Boost by peer engagement: repeated messages from the
@@ -347,13 +338,6 @@ impl PeerSensor {
                     let boost = self.peer_engagement_boost(&from_owned);
                     let magnitude = base_magnitude * boost;
 
-                    let kind = if dir_name == own_tray {
-                        MsgKind::Directed
-                    } else if dir_name == "_broadcast" {
-                        MsgKind::Open
-                    } else {
-                        MsgKind::Group
-                    };
                     let age_secs = fs::metadata(&path)
                         .ok()
                         .and_then(|m| m.modified().ok())
@@ -421,10 +405,10 @@ impl PeerSensor {
             // later drain row by name. One registry snapshot per cwd
             // for this pass; built here, after the digest branch is
             // ruled out, because a digest never shows a sender.
-            let instances = attend_identity_view::SnapshotCache::new();
+            let instances = attend_instances::view::SnapshotCache::new();
             for m in &pending {
                 let sender =
-                    attend_identity_view::render_sender_label(&m.from, &m.cwd, &attend_identity_view::Painter::plain(), &instances);
+                    attend_instances::view::render_sender_label(&m.from, &m.cwd, &attend_instances::view::Painter::plain(), &instances);
                 let include_reply_hint = !self.reply_hint_shown;
                 // Chunk long messages at word boundaries so each event stays
                 // under Monitor's ~400-char stdout line ceiling; chunks ride
@@ -457,12 +441,12 @@ impl PeerSensor {
 
             // Skip our own parent claude process.
             // attend's parent is claude, so check the ancestry.
-            if is_own_session(sf.pid, self.own_pid) {
+            if attend_presence::process::has_ancestor(self.own_pid, sf.pid) {
                 continue;
             }
 
             // Check if PID is alive and is a claude process
-            if !pid_is_claude(sf.pid) {
+            if !attend_presence::process::is_claude(sf.pid) {
                 continue;
             }
 
@@ -745,103 +729,12 @@ impl Sensor for PeerSensor {
 
 // --- Helpers ---
 
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            if cfg!(windows) {
-                PathBuf::from("C:\\Users\\Public")
-            } else {
-                PathBuf::from("/tmp")
-            }
-        })
-}
-
-fn signals_base() -> PathBuf {
-    home_dir().join(".cache").join("attend").join("signals")
-}
-
 /// The fields this sensor keeps from a session record. Records without a
 /// cwd are skipped. The cwd is the identity root, not the live cwd (#394), so
 /// peer-presence labels agree with the normalized identity everywhere else.
 fn session_file(record: claude_sessions::SessionRecord) -> Option<SessionFile> {
-    let cwd = attend_session::normalize_origin(&record.cwd?);
+    let cwd = attend_presence::session::normalize_origin(&record.cwd?);
     Some(SessionFile { pid: record.pid, cwd, session_id: record.session_id })
-}
-
-/// Check if a PID is alive and running a claude process.
-///
-/// Inspects the full command line / executable path. On Windows, queries the
-/// executable path via PowerShell; on Unix, reads the full argv via `ps`.
-/// The `comm` field is intentionally avoided: background sessions exec the
-/// versioned binary directly, so `comm` shows the version string rather than
-/// `claude`.
-#[cfg(not(windows))]
-fn pid_is_claude(pid: u32) -> bool {
-    let output = Command::new("ps")
-        .args(["-ww", "-p", &pid.to_string(), "-o", "args="])
-        .output()
-        .ok();
-
-    match output {
-        Some(out) if out.status.success() => {
-            let args = String::from_utf8_lossy(&out.stdout);
-            args.contains("claude")
-        }
-        _ => false,
-    }
-}
-
-#[cfg(windows)]
-fn pid_is_claude(pid: u32) -> bool {
-    let script = format!(
-        "(Get-Process -Id {} -ErrorAction SilentlyContinue).Path",
-        pid
-    );
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .ok();
-    match output {
-        Some(out) if out.status.success() => {
-            let path = String::from_utf8_lossy(&out.stdout);
-            path.to_lowercase().contains("claude")
-        }
-        _ => false,
-    }
-}
-
-/// Check if a session PID is an ancestor of our own PID (i.e., our
-/// session). Delegates to the canonical ancestry walk in
-/// attend-session (issue #378) so hop limits and parent-pid
-/// resolution cannot drift between the identity derivation and this
-/// sensor's own-session filter.
-fn is_own_session(session_pid: u32, own_pid: u32) -> bool {
-    attend_session::pid_has_ancestor(own_pid, session_pid)
-}
-
-/// Find the Claude session ID for the current process.
-///
-/// Walks up the process tree and matches each ancestor pid against the pids
-/// recorded in `~/.claude/sessions/*.json`. The first ancestor that matches a
-/// session file wins, and its `sessionId` is returned.
-///
-/// We deliberately do not rely on the process `comm` string. Foreground
-/// sessions show `comm=claude` because they run the user-launched
-/// `~/.local/bin/claude` wrapper, but background sessions are forked directly
-/// from the versioned binary at `~/.local/share/claude/versions/<ver>` and
-/// show `comm=<ver>` (e.g. `2.1.139`). Filtering on the comm string skips
-/// past bg-session inner pids and lands on the daemon, which is not in
-/// `sessions/*.json`, so resolution silently falls back to `pid-<self>` for
-/// every subcommand invocation. Probing the pid index directly avoids that
-/// trap and works for both kinds of session.
-pub fn find_own_session_id(own_pid: u32) -> Option<String> {
-    // Canonicalized in the attend-session crate (issue #378) — one
-    // resolution shared by attend, this sensor, and any future
-    // consumer, so "who am I" can never drift between them. This
-    // wrapper survives for API stability.
-    attend_session::find_own_session_id(own_pid)
 }
 
 // ── Event header ────────────────────────────────────────────────
@@ -1019,48 +912,10 @@ fn chunk_message(message: &str, chunk_size: usize, max_chunks: usize) -> Vec<Str
     chunks
 }
 
-/// Signal IDs are filename stems in the form `<sender-id>-<timestamp>`,
-/// always `[A-Za-z0-9_-]+`. Used as the discriminator fence for the `re:`
-/// prefix so legacy prose like "re: the thing we discussed" doesn't get
-/// misparsed as threaded. Must stay in lockstep with the equivalent
-/// helper in `attend::main::is_valid_signal_id`.
-fn is_valid_signal_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-/// Parsed signal tuple: `(from, project, cwd, message)`.
-///
-/// Accepts both the legacy 4-field format (`from|project|cwd|message`) and
-/// the 5-field threaded format (`from|project|cwd|re:signal-id|message`,
-/// ADR-120). The discriminator is a `re:<id>|` prefix on the field
-/// following `cwd` where `<id>` matches `is_valid_signal_id`. A malformed
-/// or ambiguous `re:` prefix degrades to legacy interpretation so real
-/// prose round-trips cleanly.
-///
-/// The threading id itself is dropped at parse time — the peer sensor
-/// doesn't currently render thread context. If that changes (e.g., a
-/// "replying to …" notification header), widen the return type instead
-/// of re-parsing downstream.
-pub(crate) fn parse_signal(content: &str) -> Option<(&str, &str, &str, &str)> {
-    let parts: Vec<&str> = content.splitn(4, '|').collect();
-    if parts.len() < 4 {
-        return None;
-    }
-    let tail = parts[3];
-    let message = match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
-        Some((id, msg)) if is_valid_signal_id(id) => msg,
-        // Either not threaded or the `re:` prefix is followed by text
-        // that doesn't look like a signal id — render the raw tail so
-        // legacy prose stays intact.
-        _ => tail,
-    };
-    Some((parts[0], parts[1], parts[2], message))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn temp_claude(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("sensor-peers-{tag}-{}", std::process::id()));
@@ -1248,94 +1103,5 @@ mod tests {
         let msg = "café rouge";
         assert_eq!(chunk_message(msg, 10, 3), vec!["café rouge"]);
         assert_eq!(chunk_message(msg, 4, 3), vec!["café", "rouge"]);
-    }
-
-    // ── parse_signal ────────────────────────────────────────────────
-    //
-    // The parse rule: `re:` prefix on the field after `cwd` switches
-    // into threaded form and shifts the message forward by one field.
-    // Everything else stays legacy.
-
-    #[test]
-    fn parse_legacy_four_field_signal() {
-        let (from, project, cwd, message) =
-            parse_signal("claude:abc|proj|/home/a|hello there").unwrap();
-        assert_eq!(from, "claude:abc");
-        assert_eq!(project, "proj");
-        assert_eq!(cwd, "/home/a");
-        assert_eq!(message, "hello there");
-    }
-
-    #[test]
-    fn parse_threaded_five_field_signal_drops_re_id() {
-        // sensor-peers doesn't currently use the re: id — the parse helper
-        // strips it so the sensor's notification text stays clean.
-        let (_, _, _, message) = parse_signal(
-            "claude:abc|proj|/home/a|re:claude-abc-1743280000|reply body"
-        ).unwrap();
-        assert_eq!(message, "reply body");
-    }
-
-    #[test]
-    fn parse_preserves_pipes_in_legacy_message_tail() {
-        // The tail is splitn(4)-captured, so any pipes inside `message`
-        // stay intact — important when users paste markdown tables etc.
-        let (_, _, _, message) =
-            parse_signal("claude:abc|proj|/home/a|col1 | col2 | col3").unwrap();
-        assert_eq!(message, "col1 | col2 | col3");
-    }
-
-    #[test]
-    fn parse_preserves_pipes_in_threaded_message_tail() {
-        let (_, _, _, message) =
-            parse_signal("claude:abc|proj|/home/a|re:id-42|col1 | col2").unwrap();
-        assert_eq!(message, "col1 | col2");
-    }
-
-    #[test]
-    fn parse_rejects_fewer_than_four_fields() {
-        assert!(parse_signal("only|three|fields").is_none());
-        assert!(parse_signal("").is_none());
-    }
-
-    #[test]
-    fn parse_malformed_re_prefix_without_pipe_falls_back_to_raw_tail() {
-        // A `re:` prefix with no `|message` following is malformed —
-        // degrade to rendering the whole tail so the signal still shows
-        // up instead of vanishing.
-        let (_, _, _, message) =
-            parse_signal("claude:abc|proj|/home/a|re:alone").unwrap();
-        assert_eq!(message, "re:alone");
-    }
-
-    #[test]
-    fn parse_rejects_empty_reply_id() {
-        // Empty `re:` ID fails the is_valid_signal_id fence — the tail
-        // is rendered raw so the recipient still sees something instead
-        // of getting a silent drop.
-        let (_, _, _, message) =
-            parse_signal("claude:abc|proj|/home/a|re:|body").unwrap();
-        assert_eq!(message, "re:|body");
-    }
-
-    #[test]
-    fn parse_legacy_re_prose_falls_back_to_message() {
-        // Regression fence: a legacy sender writing prose that happens
-        // to start with "re:" must not be mistaken for a threaded reply.
-        // The id candidate "the thing we discussed" has a space, which
-        // fails is_valid_signal_id, so we render the whole tail.
-        let (_, _, _, message) = parse_signal(
-            "claude:abc|proj|/home/a|re: the thing we discussed|still open"
-        ).unwrap();
-        assert_eq!(message, "re: the thing we discussed|still open");
-    }
-
-    #[test]
-    fn parse_rejects_id_with_non_word_chars() {
-        // A re: prefix with what looks like a real id except it contains
-        // whitespace or punctuation other than `-`/`_` also falls back.
-        let (_, _, _, message) =
-            parse_signal("claude:abc|proj|/home/a|re:has spaces|body").unwrap();
-        assert_eq!(message, "re:has spaces|body");
     }
 }

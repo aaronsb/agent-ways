@@ -7,9 +7,8 @@
 //!
 //! ## Storage
 //!
-//! `~/.cache/attend/instances/<encoded-cwd>.yaml` — one file per cwd.
-//! `<encoded-cwd>` mirrors the existing `signals/<encoded-cwd>/`
-//! encoding (`/`, `_`, `.` → `-`). Schema:
+//! `<attend cache>/instances/<attend-key>.yaml` — one file per cwd, named
+//! by `claude_sessions::attend_key` like the cwd's signal tray. Schema:
 //!
 //! ```yaml
 //! <session-uuid>:
@@ -58,6 +57,8 @@
 //! deliberately rather than mechanically splitting tests into a
 //! sibling file.
 
+
+pub mod view;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -97,14 +98,9 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// Standard registry rooted at `~/.cache/attend/instances/`.
+    /// Standard registry rooted at `<attend cache>/instances/`.
     pub fn new() -> Self {
-        Self {
-            base_dir: home_dir()
-                .join(".cache")
-                .join("attend")
-                .join("instances"),
-        }
+        Self { base_dir: attend_presence::cache::dir().join("instances") }
     }
 
     /// Test / sandbox constructor — point at any directory.
@@ -412,12 +408,6 @@ fn next_free_instance(taken: &std::collections::HashSet<&str>) -> String {
         }
         n += 1;
     }
-}
-
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
 }
 
 fn now_secs() -> u64 {

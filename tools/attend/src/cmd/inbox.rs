@@ -4,26 +4,21 @@
 //! here; `cmd::send` consults `is_valid_signal_id` when validating `--re`
 //! ids, so the parser owns what a valid id looks like.
 
-use attend_identity_view::render_sender_label;
+use attend_groups::Room;
+use attend_instances::view::render_sender_label;
 use attend_instances::SnapshotCache;
 use crate::util::{get_groups, own_session_id, signals_base};
-use claude_sessions::attend_key;
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
 pub(crate) fn cmd_inbox_read(msg_id: &str) {
-    let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
-    let r = get_groups();
-    let mut scan_dirs = vec![base.join(attend_key(&cwd)), base.join("_broadcast")];
-    for name in r.joined_group_names() {
-        scan_dirs.push(r.group_dir(&name));
-    }
+    let scan_dirs = get_groups().receive_dirs(&cwd);
 
     // Search for the signal file by ID
     let target = format!("{msg_id}.signal");
     for dir in &scan_dirs {
-        let path = dir.join(&target);
+        let path = dir.path.join(&target);
         if !path.is_file() {
             continue;
         }
@@ -63,18 +58,11 @@ pub(crate) fn cmd_inbox_read(msg_id: &str) {
 }
 
 pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
-    let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
     let own_session_id = own_session_id().unwrap_or_default();
 
-    // Scan same dirs as the peer sensor: own project + broadcast + focus group
-    let own_tray = attend_key(&cwd);
-    let r = get_groups();
-    let mut scan_dirs = vec![base.join(&own_tray), base.join("_broadcast")];
-    // Add focus group dirs
-    for name in r.joined_group_names() {
-        scan_dirs.push(r.group_dir(&name));
-    }
+    // The same receive set as the peer sensor and the drain.
+    let scan_dirs = get_groups().receive_dirs(&cwd);
 
     // Collect all messages with mtime for chronological ordering
     struct InboxEntry {
@@ -91,22 +79,15 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     let instances = SnapshotCache::new();
 
     for dir in &scan_dirs {
-        let dir_entries = match std::fs::read_dir(dir) {
+        let dir_entries = match std::fs::read_dir(&dir.path) {
             Ok(e) => e,
             Err(_) => continue,
         };
 
-        let dir_name = dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?")
-            .to_string();
-        let scope = if dir_name == "_broadcast" {
-            "#open"
-        } else if dir_name == own_tray {
-            "project"
-        } else {
-            "channel"
+        let scope = match dir.room {
+            Room::Open => "#open",
+            Room::Project => "project",
+            Room::Channel(_) => "channel",
         };
 
         for entry in dir_entries.flatten() {
@@ -409,7 +390,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // Resolved-gate (ADR-172 Decision 4): marking consumption under a
     // pid-fallback identity would alias sessions and corrupt the shared
     // seen-set. Under unresolved identity, Monitor remains the conduit.
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
     if !ident.resolved() {
         if !hook_mode {
             eprintln!("(identity unresolved — drain is a no-op; the Monitor poller still delivers)");
@@ -431,7 +412,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // look alive to /purge's consumer consult, or the Decision 5
     // protection this PR co-ships would skip exactly the sessions that
     // depend on it (PR #385 review, finding 4).
-    attend_heartbeat::touch(&session_id).ok();
+    attend_presence::heartbeat::touch(&session_id).ok();
 
     // Re-entry guard (Decision 6). Only the hook path carries the
     // harness's stop_hook_active signal on stdin; a manual plain-mode
@@ -454,15 +435,19 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let mut scan_dirs = vec![
-        (base.join(attend_key(&cwd)), "project".to_string()),
-        (base.join("_broadcast"), "#open".to_string()),
-    ];
-    for name in r.joined_group_names() {
-        // "@group" reads naturally as the channel name.
-        let label = format!("@{name}");
-        scan_dirs.push((r.group_dir(&name), label));
-    }
+    let scan_dirs: Vec<_> = r
+        .receive_dirs(&cwd)
+        .into_iter()
+        .map(|d| {
+            let label = match d.room {
+                Room::Project => "project".to_string(),
+                Room::Open => "#open".to_string(),
+                // "@group" reads naturally as the channel name.
+                Room::Channel(name) => format!("@{name}"),
+            };
+            (d.path, label)
+        })
+        .collect();
 
     let (mut delivered, mark) =
         scan_pending(&scan_dirs, &seen, &session_id, baselining, BASELINE_FRESH_WINDOW);
@@ -628,12 +613,7 @@ fn parse_stop_hook_active(payload: &str) -> bool {
 /// each hook-forced continuation increments. The file is tiny and
 /// self-healing — an unreadable count is treated as a fresh boundary.
 fn drain_rounds_path(session_id: &str) -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(home)
-        .join(".cache")
-        .join("attend")
-        .join("state")
-        .join(format!("{session_id}.drain-rounds"))
+    attend_presence::cache::state_dir().join(format!("{session_id}.drain-rounds"))
 }
 
 fn bump_drain_rounds(session_id: &str, stop_active: bool) -> u32 {
@@ -874,24 +854,16 @@ mod drain_tests {
         assert_eq!(delivered.len(), 1);
         let drained = &delivered[0];
 
-        // Monitor path: the sensor scans its standard trays plus the
-        // fixture. Import the host's durable `#open` backlog as already
-        // seen — exactly what a warm restart restores — so it neither
-        // floods the poll into a digest nor leaks into the assertion;
-        // a non-empty import also skips the cold-start baseline that
-        // would otherwise swallow the fixture, and `reply_hint_shown`
-        // keeps the hint off the body.
+        // Monitor path: the sensor scans only the fixture, as its project
+        // tray. A non-empty state import skips the cold-start baseline
+        // that would otherwise swallow the fixture, and
+        // `reply_hint_shown` keeps the hint off the body.
         let mut sensor = sensor_peers::PeerSensor::new();
-        let extra = dir.clone();
-        sensor.set_extra_scan_dirs_provider(std::sync::Arc::new(move || vec![extra.clone()]));
-        let broadcast = signals_base().join("_broadcast");
-        let mut state = vec![("reply_hint_shown".to_string(), "true".to_string())];
-        if let Ok(entries) = std::fs::read_dir(&broadcast) {
-            for name in entries.flatten().filter_map(|e| e.file_name().into_string().ok()) {
-                state.push(("seen_signal".to_string(), attend_state::seen_key(&name)));
-            }
-        }
-        sensor.import_state(&state);
+        let fixture = dir.clone();
+        sensor.set_receive_dirs_provider(std::sync::Arc::new(move |_: &str| {
+            vec![attend_groups::ReceiveDir { path: fixture.clone(), room: attend_groups::Room::Project }]
+        }));
+        sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
         // The fixture's cwd doubles as the focus so the sensor's
         // `attend reply` bookkeeping (keyed on the host session) sees
         // an own-project message and records nothing.

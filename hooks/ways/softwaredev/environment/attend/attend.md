@@ -17,7 +17,7 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
   point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)
-    - tools/sensor-disclosure/src/disclosures/messaging.md     (runtime reheat)
+    - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat)
     - hooks/ways/softwaredev/environment/attend/attend.md      (this file — just-in-time via `commands: attend`)
 -->
 # Attend

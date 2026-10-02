@@ -26,7 +26,7 @@ pub fn live_consumer_seen_sets(base: &Path, channel: Option<&str>) -> Vec<HashSe
     });
 
     let mut out = Vec::new();
-    let entries = match std::fs::read_dir(attend_heartbeat::heartbeat_dir()) {
+    let entries = match std::fs::read_dir(attend_presence::heartbeat::heartbeat_dir()) {
         Ok(e) => e,
         Err(_) => return out,
     };
@@ -34,7 +34,7 @@ pub fn live_consumer_seen_sets(base: &Path, channel: Option<&str>) -> Vec<HashSe
         let Some(sid) = e.file_name().to_str().map(String::from) else {
             continue;
         };
-        if !attend_heartbeat::is_fresh(&sid, attend_heartbeat::DEFAULT_GRACE) {
+        if !attend_presence::alive(&sid, &Default::default()) {
             continue;
         }
         if let Some(ref m) = members {

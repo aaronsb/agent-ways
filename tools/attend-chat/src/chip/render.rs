@@ -116,12 +116,12 @@ pub fn color_for(p: PaletteEntry, caps: ColorDepth) -> Color {
 }
 
 /// `<nickname>-<instance>` composition (ADR-129) is the shared
-/// derivation in `attend-identity-view`: the peers sensor, the drain,
+/// derivation in `attend_instances::view`: the peers sensor, the drain,
 /// and this chip all call the same function, so a session wears one
 /// persona on every surface (#534). Re-exported here so the sibling
 /// `registry` submodule keeps building the legend's display strings
 /// through the chip's own path.
-pub(super) use attend_identity_view::with_instance;
+pub(super) use attend_instances::view::with_instance;
 
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {

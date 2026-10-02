@@ -14,7 +14,7 @@
 //! **Member identity.** A member id is either a Claude Code session
 //! UUID (claude sessions, via attend) or a sanitized username (humans,
 //! via attend-chat). Both kinds are judged for liveness the same way:
-//! against the heartbeat sidecar (`attend-heartbeat`, ADR-129). The
+//! against the heartbeat sidecar (`attend_presence::heartbeat`, ADR-129). The
 //! yaml does not distinguish them — liveness was always
 //! heartbeat-shaped, not UUID-shaped.
 
@@ -44,6 +44,28 @@ pub struct Groups {
 }
 
 const GROUP_PREFIX: &str = "@";
+
+/// The directory under the signals base that backs `#open`, the base
+/// channel every enrolled member receives (ADR-124).
+pub const BROADCAST_DIR: &str = "_broadcast";
+
+/// Which room a receive directory is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Room {
+    /// The member's project tray: messages sent to its project with `--to`.
+    Project,
+    /// `#open`, under [`BROADCAST_DIR`].
+    Open,
+    /// A joined channel, by name.
+    Channel(String),
+}
+
+/// One directory a member reads signals from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiveDir {
+    pub path: PathBuf,
+    pub room: Room,
+}
 
 /// The single-line description contract, shared by every write path
 /// (create, set_description). Control characters — newlines above
@@ -90,6 +112,23 @@ impl Groups {
             base: signals_base.to_path_buf(),
             member_id: member_id.to_string(),
         }
+    }
+
+    /// Every directory this member receives from, in a fixed order: the
+    /// project tray of `origin` (named by `claude_sessions::attend_key`),
+    /// `#open`, then each joined channel. The one receive set the drain,
+    /// `attend inbox`, `attend status` and the peers sensor all read.
+    pub fn receive_dirs(&self, origin: &str) -> Vec<ReceiveDir> {
+        let mut dirs = vec![
+            ReceiveDir { path: self.base.join(claude_sessions::attend_key(origin)), room: Room::Project },
+            ReceiveDir { path: self.base.join(BROADCAST_DIR), room: Room::Open },
+        ];
+        dirs.extend(
+            self.joined_group_names()
+                .into_iter()
+                .map(|name| ReceiveDir { path: self.group_dir(&name), room: Room::Channel(name) }),
+        );
+        dirs
     }
 
     /// Path to a named group's signal directory.
@@ -289,7 +328,7 @@ impl Groups {
     /// List member ids in a named group, or None if the group does not
     /// exist. Returns raw `_groups.yaml` membership — callers that need
     /// a liveness-checked view should filter with
-    /// `attend_heartbeat::is_fresh` (see attend's `cmd_send` for the
+    /// `attend_presence::alive` (see attend's `cmd_send` for the
     /// routing-validation shape).
     pub fn members(&self, name: &str) -> Option<Vec<String>> {
         self.load_state().get(name).map(|e| e.members.clone())
@@ -332,7 +371,7 @@ impl Groups {
     /// `_broadcast/`), and sweeping it here would silently destroy
     /// what that migration exists to preserve.
     pub fn cleanup_stale(&self) {
-        self.cleanup_stale_with(member_alive, attend_heartbeat::DEFAULT_GRACE);
+        self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE);
     }
 
     /// [`Groups::cleanup_stale`] with an injectable liveness predicate
@@ -489,17 +528,17 @@ pub fn validate_group_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check whether a member is still alive, using attend's heartbeat
-/// sidecar (ADR-129). A claude session's attend touches its heartbeat
-/// on every tick; a human's attend-chat touches the username heartbeat
-/// on its refresh tick (ADR-170). Anything without a fresh heartbeat —
-/// claude exited, attend never started, chat closed — is stale.
+/// Whether a member is still alive for cleanup: [`attend_presence::alive`]
+/// with no process scan, so only a fresh heartbeat counts (ADR-129). A
+/// claude session's attend touches its heartbeat on every tick, and an
+/// enrolled session's drain at every turn end; a human's attend-chat
+/// touches the username heartbeat on its refresh tick (ADR-170).
 ///
-/// PID-aliveness is intentionally not checked: a claude with no running
+/// Running Claude processes are not consulted: a claude with no running
 /// attend cannot participate in the focus-group mesh, so for cleanup
 /// purposes it is functionally identical to a dead claude.
 pub fn member_alive(member_id: &str) -> bool {
-    attend_heartbeat::is_fresh(member_id, attend_heartbeat::DEFAULT_GRACE)
+    attend_presence::alive(member_id, &std::collections::HashSet::new())
 }
 
 // ── Minimal YAML parser/serializer ─────────────────────────────
@@ -764,7 +803,7 @@ mod tests {
         g.join("temp", false).unwrap();
         // Everyone is stale → member removed, empty unpinned group
         // dissolved, dir gone.
-        g.cleanup_stale_with(|_| false, attend_heartbeat::DEFAULT_GRACE);
+        g.cleanup_stale_with(|_| false, attend_presence::heartbeat::DEFAULT_GRACE);
         assert!(g.members("temp").is_none());
         assert!(!base.join("@temp").exists());
     }
@@ -774,7 +813,7 @@ mod tests {
         let base = tempdir_like();
         let g = Groups::new(&base, "live-sess");
         g.join("deploy", false).unwrap();
-        g.cleanup_stale_with(|_| true, attend_heartbeat::DEFAULT_GRACE);
+        g.cleanup_stale_with(|_| true, attend_presence::heartbeat::DEFAULT_GRACE);
         assert_eq!(g.members("deploy").unwrap(), vec!["live-sess"]);
         assert!(base.join("@deploy").is_dir());
     }
@@ -796,7 +835,7 @@ mod tests {
         // sweep under the real grace window.
         let base = tempdir_like();
         fs::create_dir_all(base.join("@fresh")).unwrap();
-        Groups::new(&base, "x").cleanup_stale_with(|_| true, attend_heartbeat::DEFAULT_GRACE);
+        Groups::new(&base, "x").cleanup_stale_with(|_| true, attend_presence::heartbeat::DEFAULT_GRACE);
         assert!(base.join("@fresh").is_dir());
     }
 

@@ -13,4 +13,7 @@ path = "src/lib.rs"
 libc = "0.2"
 
 [dependencies]
+agent-identity = { path = "../agent-identity" }
+agent-theme = { path = "../agent-theme" }
+attend-presence = { path = "../attend-presence" }
 claude-sessions = { path = "../claude-sessions" }

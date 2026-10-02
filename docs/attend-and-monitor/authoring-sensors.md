@@ -10,7 +10,7 @@ This page is for people building sensors, in either of attend's two implementati
 
 Sensors in attend refuse to editorialize. Each sensor reports a **fact the framework can verify** rather than a guess the sensor produced. The token ledger is authoritative; the signal file is authoritative; the working tree is authoritative. The sensor surfaces state transitions; the consuming agent does whatever synthesis it wants on top.
 
-The discipline was crystallized during a live peer-agent validation of the `sensor-disclosure` crate, when a second Claude instance observing the same mechanism wrote:
+The discipline was crystallized during a live peer-agent validation of the disclosure sensor (then the `sensor-disclosure` crate), when a second Claude instance observing the same mechanism wrote:
 
 > "The discipline is refusing to editorialize at the sensor layer and letting the consuming agent do whatever synthesis it wants on top. Word-boundary chunking preserves that contract across the transport boundary, which is the only place prose fidelity actually matters."
 >
@@ -30,7 +30,7 @@ This constraint is what makes the rest of the document tractable. Magnitudes, th
 | **Startup cost** | Free (already in memory) | Process spawn per poll — ~5–30 ms |
 | **Timeout** | None (sensor owns its poll duration) | 10 seconds, enforced by attend |
 | **Good for** | Built-in system sensors, high-frequency polling, complex state | Integrations with CLI tools, per-project sensors, quick experiments |
-| **Example** | `sensor-context`, `sensor-git`, `sensor-peers`, `sensor-processes` | `gh`-cli GitHub Project watcher, `kubectl` pod status, `docker events` tail |
+| **Example** | `context`, `git`, `sensor-peers`, `sensor-processes` | `gh`-cli GitHub Project watcher, `kubectl` pod status, `docker events` tail |
 
 Both implementations land at the same place in the loop — attend calls `poll()` on a schedule, reads back a `Vec<(f64, String)>` of observations, and feeds them into the accumulator. The only difference is *how the code gets loaded and run*. Design-wise they're identical; pick the one that matches your integration and performance needs.
 

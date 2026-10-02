@@ -42,12 +42,11 @@ pub enum Channel {
 }
 
 pub fn signals_base() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".cache").join("attend").join("signals")
+    attend_presence::cache::signals_dir()
 }
 
 pub fn broadcast_dir() -> PathBuf {
-    signals_base().join("_broadcast")
+    signals_base().join(attend_groups::BROADCAST_DIR)
 }
 
 /// Encode a cwd path into the signal directory name the peer sensor
@@ -109,7 +108,7 @@ fn channel_for_path(path: &Path) -> Channel {
         .and_then(|d| d.file_name())
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    if dir == "_broadcast" {
+    if dir == attend_groups::BROADCAST_DIR {
         Channel::Open
     } else if let Some(g) = dir.strip_prefix('@') {
         Channel::Group(g.to_string())
@@ -118,17 +117,10 @@ fn channel_for_path(path: &Path) -> Channel {
     }
 }
 
-/// Write a broadcast signal to `_broadcast/` using the atomic
-/// tmp+rename pattern `cmd_send` uses, so readers (including our own
-/// watcher) never see a half-written file.
-///
-/// **Wire-format mirror.** The line format here must stay byte-
-/// identical to the legacy branch of `cmd_send` in
-/// `tools/attend/src/cmd/send.rs`. If you change one, change both —
-/// we intentionally didn't extract a shared crate while there are
-/// only two writers, so drift is a per-PR review concern rather than
-/// a compile error. Threaded replies (`re:<id>`) are produced by
-/// `cmd_send` only; the TUI does not originate threaded sends yet.
+/// Write a broadcast signal to `_broadcast/`. The line, the sender
+/// identity and the atomic write are `agent_identity::signal`'s, shared
+/// with `attend send`. Threaded replies (`re:<id>`) are produced by
+/// `attend send` only; the TUI does not originate threaded sends yet.
 pub fn write_broadcast(message: &str) -> io::Result<String> {
     write_signal(&broadcast_dir(), message)
 }
@@ -137,8 +129,6 @@ pub fn write_broadcast(message: &str) -> io::Result<String> {
 /// broadcast and directed (`@Nickname`) paths both ride this — same
 /// wire format, same atomic tmp+rename, only the target differs.
 pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
-    fs::create_dir_all(dest)?;
-
     let (sender_id, from, project, cwd) = sender_identity();
 
     // Build the filename stem (== signal id that `re:<id>` replies
@@ -148,12 +138,8 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
     // (issue #368) — and makes the name collision-proof. `from` keeps the
     // raw id.
     let filename = agent_identity::signal_filename(&sender_id);
-    let content = format!("{}|{}|{}|{}\n", from, project, cwd, message);
-
-    let tmp = dest.join(format!("{}.tmp", filename));
-    let final_path = dest.join(&filename);
-    fs::write(&tmp, content)?;
-    fs::rename(&tmp, &final_path)?;
+    let content = agent_identity::signal::format_signal(&from, &project, &cwd, None, message);
+    agent_identity::signal::write_signal_file(dest, &filename, &content)?;
     Ok(filename)
 }
 
@@ -220,21 +206,16 @@ pub fn compose_status_block(kind: &str, body: &str) -> Signal {
 /// always derived identically to the delivered signal's — if this logic
 /// changes, both move together instead of drifting.
 ///
-/// `project` is the last non-empty cwd segment, or `"?"` when the cwd is
-/// empty (e.g. `current_dir()` failed). Note `"".rsplit('/').next()`
-/// yields `Some("")`, not `None`, so a naive `.next().unwrap_or("?")`
-/// would render a blank chip — `find(non-empty)` is deliberate.
+/// The sender is `agent_identity::signal::identify_sender` with no
+/// session: attend-chat is the human's coordination surface, so it is
+/// `$USER@<terminal>`. `project` is `agent_identity::signal::project_label`.
 fn sender_identity() -> (String, String, String, String) {
-    let (sender_id, kind) = identify_sender();
+    let (sender_id, kind) = agent_identity::signal::identify_sender(None);
     let from = format!("{}:{}", kind, sender_id);
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let project = cwd
-        .rsplit('/')
-        .find(|seg| !seg.is_empty())
-        .unwrap_or("?")
-        .to_string();
+    let project = agent_identity::signal::project_label(&cwd);
     (sender_id, from, project, cwd)
 }
 
@@ -245,52 +226,7 @@ fn sender_identity() -> (String, String, String, String) {
 /// member id written into `_groups.yaml` by `/join` and the heartbeat
 /// key the TUI touches while running.
 pub fn human_member_id() -> String {
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
-    agent_identity::sanitize_id_component(&user)
-}
-
-/// Identify the human at the keyboard. attend-chat is almost always
-/// running outside a Claude session (it's the human's coordination
-/// surface), so we skip the Claude-session detection the CLI does and
-/// go straight to `$USER@<terminal>`.
-fn identify_sender() -> (String, &'static str) {
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
-    let term = detect_terminal();
-    let id = if term.is_empty() {
-        user
-    } else {
-        format!("{}@{}", user, term)
-    };
-    (id, "external")
-}
-
-fn detect_terminal() -> String {
-    if std::env::var("KITTY_PID").is_ok() {
-        return "kitty".into();
-    }
-    if std::env::var("ALACRITTY_SOCKET").is_ok() {
-        return "alacritty".into();
-    }
-    if std::env::var("WEZTERM_PANE").is_ok() {
-        return "wezterm".into();
-    }
-    if std::env::var("TMUX").is_ok() {
-        return "tmux".into();
-    }
-    if std::env::var("STY").is_ok() {
-        return "screen".into();
-    }
-    if let Ok(tp) = std::env::var("TERM_PROGRAM") {
-        return tp.to_lowercase();
-    }
-    if std::env::var("SSH_CONNECTION").is_ok() {
-        return "ssh".into();
-    }
-    String::new()
+    agent_identity::sanitize_id_component(&agent_identity::signal::user_name())
 }
 
 #[cfg(test)]
@@ -399,88 +335,6 @@ mod tests {
         );
         assert!(echo.reply_to.is_none());
         assert!(echo.id.starts_with("local-echo-"), "echo id marks it non-bus");
-    }
-
-    #[test]
-    fn sender_id_env_precedence() {
-        // Several pieces of state here are process-global (env vars),
-        // so we run the whole precedence lattice inside one test and
-        // reset between cases instead of relying on cargo's parallel
-        // runner to serialise us.
-        let original: Vec<(&str, Option<String>)> = [
-            "USER",
-            "LOGNAME",
-            "KITTY_PID",
-            "ALACRITTY_SOCKET",
-            "WEZTERM_PANE",
-            "TMUX",
-            "STY",
-            "TERM_PROGRAM",
-            "SSH_CONNECTION",
-            "TERMINAL",
-        ]
-        .iter()
-        .map(|k| (*k, std::env::var(*k).ok()))
-        .collect();
-
-        let clear_all = || {
-            for (k, _) in &original {
-                std::env::remove_var(k);
-            }
-        };
-
-        // Kitty wins over TERM_PROGRAM when both are set.
-        clear_all();
-        std::env::set_var("USER", "tester");
-        std::env::set_var("KITTY_PID", "123");
-        std::env::set_var("TERM_PROGRAM", "Apple_Terminal");
-        let (id, kind) = identify_sender();
-        assert_eq!(kind, "external");
-        assert_eq!(id, "tester@kitty");
-
-        // TERM_PROGRAM is the fallback when no specific-terminal env
-        // is set, and it's lowercased.
-        clear_all();
-        std::env::set_var("USER", "tester");
-        std::env::set_var("TERM_PROGRAM", "iTerm.app");
-        let (id, _) = identify_sender();
-        assert_eq!(id, "tester@iterm.app");
-
-        // TMUX beats TERM_PROGRAM (multiplexer wins over host
-        // terminal emulator).
-        clear_all();
-        std::env::set_var("USER", "tester");
-        std::env::set_var("TMUX", "/tmp/tmux-0/default,123,0");
-        std::env::set_var("TERM_PROGRAM", "Apple_Terminal");
-        let (id, _) = identify_sender();
-        assert_eq!(id, "tester@tmux");
-
-        // SSH is the final fallback before TERMINAL / bare user.
-        clear_all();
-        std::env::set_var("USER", "tester");
-        std::env::set_var("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22");
-        let (id, _) = identify_sender();
-        assert_eq!(id, "tester@ssh");
-
-        // No terminal identifiers → bare user.
-        clear_all();
-        std::env::set_var("USER", "tester");
-        let (id, _) = identify_sender();
-        assert_eq!(id, "tester");
-
-        // LOGNAME fills in when USER is missing.
-        clear_all();
-        std::env::set_var("LOGNAME", "backup_name");
-        let (id, _) = identify_sender();
-        assert_eq!(id, "backup_name");
-
-        // Restore prior environment so we don't pollute sibling tests.
-        clear_all();
-        for (k, v) in original {
-            if let Some(v) = v {
-                std::env::set_var(k, v);
-            }
-        }
     }
 
     #[test]

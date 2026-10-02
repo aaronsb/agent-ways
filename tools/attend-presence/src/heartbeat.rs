@@ -1,6 +1,7 @@
 //! Per-session liveness heartbeat (ADR-129).
 //!
-//! Each running attend touches `~/.cache/attend/heartbeat/<session-id>`
+//! Each running attend touches `<cache>/attend/heartbeat/<session-id>`
+//! (see [`crate::cache`])
 //! on every tick. The file's mtime is the last_seen timestamp — there
 //! is no body, no parsing, no schema. Consumers read mtime and compare
 //! against a grace window:
@@ -36,10 +37,7 @@ pub const DEFAULT_GRACE: Duration = Duration::from_secs(90);
 
 /// Directory holding all heartbeat files for the current user.
 pub fn heartbeat_dir() -> PathBuf {
-    home_dir()
-        .join(".cache")
-        .join("attend")
-        .join("heartbeat")
+    crate::cache::dir().join("heartbeat")
 }
 
 /// Path to the heartbeat file for a given session id.
@@ -196,34 +194,16 @@ pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLo
     }
 }
 
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            if cfg!(windows) {
-                PathBuf::from("C:\\Users\\Public")
-            } else {
-                PathBuf::from("/tmp")
-            }
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use std::time::Duration;
 
-    // `$HOME` is process-global. cargo runs tests in parallel by
-    // default, so without serialization one test's tempdir overrides
-    // another's mid-run. The mutex makes `with_home` the only writer
-    // at a time. Held across the whole closure body so every read
-    // and write inside sees a consistent `$HOME`.
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
+    // `HOME` and `XDG_CACHE_HOME` are process-global, and cargo runs
+    // tests in parallel, so every test that points them somewhere holds
+    // the crate's one env lock for its whole body.
     fn with_home<F: FnOnce(&PathBuf)>(f: F) {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!(
             "attend-hb-test-{}-{}",
             std::process::id(),
@@ -233,12 +213,16 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&home).unwrap();
-        let prev = std::env::var("HOME").ok();
+        let prev = (std::env::var_os("HOME"), std::env::var_os("XDG_CACHE_HOME"));
         std::env::set_var("HOME", &home);
+        std::env::remove_var("XDG_CACHE_HOME");
         f(&home);
-        match prev {
+        match prev.0 {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
+        }
+        if let Some(v) = prev.1 {
+            std::env::set_var("XDG_CACHE_HOME", v);
         }
         fs::remove_dir_all(&home).ok();
     }

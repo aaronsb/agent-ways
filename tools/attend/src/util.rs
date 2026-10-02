@@ -10,21 +10,13 @@
 use crate::groups;
 
 pub(crate) fn signals_base() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(home)
-        .join(".cache")
-        .join("attend")
-        .join("signals")
+    attend_presence::cache::signals_dir()
 }
 
 /// Where keepwarm's per-session arm file and ledger live (ADR-182).
 /// Attend-owned state: the CLI verbs are the only sanctioned readers.
 pub(crate) fn keepwarm_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(home)
-        .join(".cache")
-        .join("attend")
-        .join("keepwarm")
+    attend_presence::cache::dir().join("keepwarm")
 }
 
 /// Claude Code's per-project data dir. A project is "live" iff its
@@ -47,7 +39,7 @@ pub(crate) fn encode_project(path: &str) -> String {
 /// used to degrade own-identity to `pid-<pid>`, which polluted
 /// `_groups.yaml` member ids.
 pub(crate) fn own_session_id() -> Option<String> {
-    attend_session::find_own_session_id(std::process::id())
+    attend_presence::session::find_own_session_id(std::process::id())
 }
 
 /// The cwd this session is *about* — the session record's origin path
@@ -57,14 +49,14 @@ pub(crate) fn own_session_id() -> Option<String> {
 /// through here, so a stray shell `cd` can no longer put the session
 /// on the bus as a different persona.
 pub(crate) fn own_origin_cwd() -> String {
-    attend_session::identity().origin_path
+    attend_presence::session::identity().origin_path
 }
 
 /// Whether the session enrolled in attend (#720): it ran `attend run`,
 /// which gives it a slot in its project's instance registry, or it joined
 /// a channel. Enrollment is what the Stop-hook drain delivers to; it covers
 /// `#open` and the project tray as well as the joined channels.
-pub(crate) fn enrolled(ident: &attend_session::SessionIdentity, groups: &groups::Groups) -> bool {
+pub(crate) fn enrolled(ident: &attend_presence::session::SessionIdentity, groups: &groups::Groups) -> bool {
     attend_instances::Registry::new()
         .lookup(&ident.origin_path, &ident.session_id)
         .is_some()

@@ -37,7 +37,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // process cwd here is what keeps a stray shell `cd` at launch
     // (e.g. a Monitor inheriting a build directory) from putting this
     // session on the bus as a different persona.
-    let ident = attend_session::identity();
+    let ident = attend_presence::session::identity();
     let mut focus = Focus::default_focus();
     if ident.resolved() {
         focus.working_dir = ident.origin_path.clone();
@@ -70,7 +70,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // sensor loop never returns under normal operation, so the lock
     // effectively lives for the life of the process.
     let reloaded = std::env::var("ATTEND_RELOADED_FROM").is_ok();
-    let _session_lock = match attend_heartbeat::try_acquire_session_lock(&session_id) {
+    let _session_lock = match attend_presence::heartbeat::try_acquire_session_lock(&session_id) {
         Ok(Some(lock)) => Some(lock),
         Ok(None) if reloaded => {
             // The old binary's lock is still held through the inherited
@@ -263,7 +263,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         // checks (attend_groups::member_alive, attend-chat known_identities
         // filter). Best-effort: a missing write is recoverable on the
         // next iteration.
-        attend_heartbeat::touch(&heartbeat_id).ok();
+        attend_presence::heartbeat::touch(&heartbeat_id).ok();
 
         if last_reload_check.elapsed() >= RELOAD_CHECK_INTERVAL {
             maybe_self_reload(

@@ -46,7 +46,7 @@ pub fn discover_in(dir: &std::path::Path) -> Vec<DiscoveredSession> {
             // Identity root, not live cwd (#394): a session mid-worktree
             // must seed the chip registry at the tray it actually scans,
             // or @-completion routes a DM to a tray nobody reads.
-            let cwd = attend_session::normalize_origin(&r.cwd?);
+            let cwd = attend_presence::session::normalize_origin(&r.cwd?);
             Some(DiscoveredSession { cwd, session_id: r.session_id })
         })
         .collect()
