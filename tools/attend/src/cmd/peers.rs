@@ -39,7 +39,7 @@ pub(crate) fn cmd_peers() {
     let self_label = render_agent_label(&self_id, self_instance.as_deref(), &painter);
     // Self-row Focus cell: "(self)" identifies which row IS the runner of
     // `attend peers`, without using the literal string "project" — that
-    // priming caused agents to reach for `attend send --focus project`
+    // priming caused agents to reach for `attend send --channel project`
     // and silently land signals in an empty `@project/` room.
     t.add_owned(vec![
         "(self)".to_string(),
@@ -61,7 +61,7 @@ pub(crate) fn cmd_peers() {
         for (peer_sid, peer_cwd, _project, status, ctx) in &peers {
             // Same-cwd peers previously rendered "(project)" in the
             // Focus column — a string that primed agents into running
-            // `attend send --focus project`, a group nobody had
+            // `attend send --channel project`, a group nobody had
             // joined. "(here)" pairs with the self row's "(self)"
             // marker, preserves the same-cwd visual scan, and uses
             // parentheses to make clear it is not a focus group name.

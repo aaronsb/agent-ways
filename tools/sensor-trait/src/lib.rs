@@ -172,23 +172,6 @@ impl DeltaAccumulator {
         self.events.clear();
     }
 
-    /// Single-line summary (legacy, for non-paged contexts).
-    pub fn summary(&self) -> String {
-        if self.events.is_empty() {
-            return String::new();
-        }
-        let unique = self.unique_events();
-        if unique.len() == 1 {
-            unique[0].clone()
-        } else {
-            format!(
-                "{} observations: {}",
-                unique.len(),
-                unique.join("; ")
-            )
-        }
-    }
-
     /// Drain events as individual lines for paged emission.
     /// Each event becomes its own notification line via Monitor.
     pub fn drain_events(&self) -> Vec<String> {

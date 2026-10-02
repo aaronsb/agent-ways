@@ -82,7 +82,6 @@ After editing any `description`/`vocabulary`, regenerate so scores reflect it:
 
 ```bash
 ways match "$prompt"            # live matcher (ADR-160): peak · share · confirm · outcome per way
-ways match --cosine "$prompt"   # legacy single-vector EN/multi cosine view (embed-score mode)
                                 # QUERY is positional. There is no --threshold flag. The keyword
                                 # lane is the way's pattern: field, not a CLI option.
 ```
@@ -91,8 +90,7 @@ ways match --cosine "$prompt"   # legacy single-vector EN/multi cosine view (emb
 directory). Its outcome column reads `fired ✓`, `< gate` (admitted by neither share
 nor peak) or `< confirm` (admitted, but the way's body did not corroborate the chunk
 it won). For a single way, grep its id (path relative to the ways root, e.g.
-`softwaredev/security`) from the batch output. `ways embed` is an alias of
-`ways match --cosine`.
+`softwaredev/security`) from the batch output.
 
 **Always include cross-way context.** When scoring one way, also show the top 5–8
 ranking, so you can see whether it *wins*, *defers* to a more specific way, or

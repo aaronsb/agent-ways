@@ -81,9 +81,9 @@ impl Groups {
     /// caller is attend-chat (ADR-170).
     ///
     /// Only the member-scoped operations (`join`, `leave`,
-    /// `my_groups`, `joined_group_names`, `receive_dirs`) read it;
+    /// `my_groups`, `joined_group_names`) read it;
     /// the collection operations (`dissolve`, `cleanup_stale`,
-    /// `all_groups`, `has_group`, `members`, `pin`/`unpin`) act on
+    /// `all_groups`, `members`, `pin`/`unpin`) act on
     /// the group state as a whole and ignore it.
     pub fn new(signals_base: &Path, member_id: &str) -> Self {
         Self {
@@ -276,7 +276,7 @@ impl Groups {
         members
     }
 
-    /// List rooms this member has joined.
+    /// List channels this member has joined.
     pub fn my_groups(&self) -> Vec<(String, bool)> {
         let state = self.load_state();
         state
@@ -284,15 +284,6 @@ impl Groups {
             .filter(|(_, entry)| entry.members.contains(&self.member_id))
             .map(|(name, entry)| (name.clone(), entry.pinned))
             .collect()
-    }
-
-    /// Whether `_groups.yaml` currently has an entry for `name`.
-    /// Exists so callers (notably the ADR-124 migration) can avoid
-    /// triggering a full `save_state` rewrite when the work is
-    /// already done — narrows the read-modify-write window against
-    /// peer sessions editing the same file.
-    pub fn has_group(&self, name: &str) -> bool {
-        self.load_state().contains_key(name)
     }
 
     /// List member ids in a named group, or None if the group does not
@@ -304,7 +295,7 @@ impl Groups {
         self.load_state().get(name).map(|e| e.members.clone())
     }
 
-    /// List all active rooms with member counts and pin state.
+    /// List all active channels with member counts and pin state.
     pub fn all_groups(&self) -> Vec<(String, usize, bool)> {
         let state = self.load_state();
         let mut rooms: Vec<(String, usize, bool)> = state
@@ -318,25 +309,6 @@ impl Groups {
     /// Get group names this member is focused on (for signal routing).
     pub fn joined_group_names(&self) -> Vec<String> {
         self.my_groups().into_iter().map(|(name, _)| name).collect()
-    }
-
-    /// Get signal directories for all rooms this member should receive from.
-    /// Includes: project scope, joined focus groups, broadcast.
-    pub fn receive_dirs(&self, project_dir: &str) -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
-
-        // Project scope (always)
-        dirs.push(self.base.join(encode_project(project_dir)));
-
-        // Named rooms
-        for name in self.joined_group_names() {
-            dirs.push(self.group_dir(&name));
-        }
-
-        // Broadcast (always)
-        dirs.push(self.base.join("_broadcast"));
-
-        dirs
     }
 
     /// Clean up stale members (sessions or humans whose heartbeat has
@@ -386,7 +358,7 @@ impl Groups {
             self.save_state(&state);
         }
 
-        // Clean up empty unpinned rooms
+        // Clean up empty unpinned channels
         let to_remove: Vec<String> = state
             .iter()
             .filter(|(_, e)| e.members.is_empty() && !e.pinned)
@@ -530,16 +502,6 @@ pub fn member_alive(member_id: &str) -> bool {
     attend_heartbeat::is_fresh(member_id, attend_heartbeat::DEFAULT_GRACE)
 }
 
-/// Encode a project path: '/', '_', '.' → '-'
-fn encode_project(path: &str) -> String {
-    path.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' => '-',
-            _ => c,
-        })
-        .collect()
-}
-
 // ── Minimal YAML parser/serializer ─────────────────────────────
 // Keeps the crate dependency-free on serde.
 
@@ -642,14 +604,15 @@ mod tests {
     use super::*;
 
     fn tempdir_like() -> PathBuf {
+        // A counter, not the clock: two tests starting in the same clock tick
+        // shared a directory and raced on it.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let p = std::env::temp_dir().join(format!(
             "attend-groups-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
+        let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -858,11 +821,6 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
         Groups::new(&base, "x").cleanup_stale_with(|_| true, std::time::Duration::ZERO);
         assert!(base.join("@open").join("a.signal").exists());
-    }
-
-    #[test]
-    fn test_encode_project() {
-        assert_eq!(encode_project("/home/aaron/.claude"), "-home-aaron--claude");
     }
 }
 

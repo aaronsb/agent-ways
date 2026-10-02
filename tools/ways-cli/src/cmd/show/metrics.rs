@@ -174,66 +174,20 @@ pub(crate) fn render_update_status(content: &str) -> String {
 
     let cached_type = get("type").unwrap_or_default();
     let behind: u32 = get("behind").and_then(|s| s.parse().ok()).unwrap_or(0);
-    let has_upstream = get("has_upstream").unwrap_or_default() == "true";
-    let upstream_repo = "aaronsb/agent-ways";
 
-    // Subdirectory topology (ADR-140) has two independent nudge conditions: behind
-    // upstream, and "pulled but not synced" (repo HEAD moved past the last
-    // projection). It is the one type that can need a nudge while behind == 0.
-    if cached_type == "subdirectory" {
-        let unsynced = get("unsynced").unwrap_or_default() == "true";
-        if behind == 0 && !unsynced {
-            return String::new();
-        }
-        let repo = get("repo").unwrap_or_default();
-        let repo_disp = if repo.is_empty() { "<repo>" } else { &repo };
-        let mut out = String::from("\n");
-        if behind > 0 {
-            out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream (subdirectory install).** Pull, then project into ~/.claude:\n"));
-            out.push_str(&format!("`cd \"{repo_disp}\" && git pull && make sync-to-home`\n"));
-        } else {
-            out.push_str("**⚠ agent-ways was pulled but not synced into ~/.claude.** Re-project the latest commit:\n");
-            out.push_str(&format!("`cd \"{repo_disp}\" && make sync-to-home`\n"));
-        }
-        return out;
-    }
-
-    if behind == 0 {
+    // Only the native XDG projection (ADR-142) is nudged. The in-place clone,
+    // ADR-140 subdirectory, fork and plugin layouts are legacy; an old cache
+    // entry of those types renders nothing.
+    if cached_type != "native" || behind == 0 {
         return String::new();
     }
 
+    let repo = get("repo").unwrap_or_default();
+    let repo_disp = if repo.is_empty() { "$XDG_DATA_HOME/agent-ways" } else { &repo };
     let mut out = String::from("\n");
-    match cached_type.as_str() {
-        "clone" => {
-            out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind — run `cd ~/.claude && make update`.**\n"));
-            out.push_str("`make update` pulls, rebuilds the binaries, and reinstalls. Don't use a bare `git pull`: it leaves stale binaries and aborts on machine-local config edits (settings.json) — `make update` handles both.\n");
-        }
-        "fork" | "renamed_clone" => {
-            if has_upstream {
-                out.push_str(&format!("**⚠ agent-ways is behind {upstream_repo}.** Sync upstream, then rebuild:\n"));
-                out.push_str("`cd ~/.claude && git fetch upstream && git merge upstream/main && make update-binaries && make install`\n");
-            } else {
-                out.push_str(&format!("**⚠ agent-ways is behind {upstream_repo}.** Add upstream, then sync + rebuild:\n"));
-                out.push_str(&format!("`git -C ~/.claude remote add upstream https://github.com/{upstream_repo}`\n"));
-                out.push_str("`cd ~/.claude && git fetch upstream && git merge upstream/main && make update-binaries && make install`\n");
-            }
-        }
-        "native" => {
-            // 1.0 XDG projection: the app source lives in $XDG_DATA/agent-ways and
-            // ~/.claude is a projection of it. Update the source, then reproject.
-            let repo = get("repo").unwrap_or_default();
-            let repo_disp = if repo.is_empty() { "$XDG_DATA_HOME/agent-ways" } else { &repo };
-            out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
-            out.push_str(&format!("`cd \"{repo_disp}\" && make update && ways reconcile`\n"));
-            out.push_str("`make update` pulls, force-rebuilds the binaries, and relinks; `ways reconcile` reprojects. Don't use `git pull && make setup`: `setup` skips existing binaries (leaving them stale) and a bare `git pull` aborts on machine-local settings.json edits.\n");
-        }
-        "plugin" => {
-            let installed = get("installed").unwrap_or_default();
-            let latest = get("latest").unwrap_or_default();
-            out.push_str(&format!("**Plugin update available (v{installed} -> v{latest}).** Run: `/plugin update disciplined-methodology`\n"));
-        }
-        _ => {}
-    }
+    out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
+    out.push_str("`ways update`\n");
+    out.push_str(&format!("`ways update` pulls `{repo_disp}`, refreshes the binaries, and reprojects `~/.claude`. A bare pull plus `make setup` skips existing binaries and leaves them stale.\n"));
     out
 }
 
@@ -303,67 +257,25 @@ mod tests {
     use super::render_update_status;
 
     #[test]
-    fn subdirectory_behind_nudges_pull_then_sync() {
-        let out = render_update_status(
-            "type=subdirectory\nbehind=3\nrepo=/home/u/.claude/directory\nunsynced=false\n",
-        );
-        assert!(out.contains("3 commit(s) behind"));
-        assert!(out.contains("cd \"/home/u/.claude/directory\" && git pull && make sync-to-home"));
-    }
-
-    #[test]
-    fn subdirectory_unsynced_nudges_sync_even_when_not_behind() {
-        let out = render_update_status(
-            "type=subdirectory\nbehind=0\nrepo=/home/u/.claude/directory\nunsynced=true\n",
-        );
-        assert!(out.contains("pulled but not synced"));
-        assert!(out.contains("cd \"/home/u/.claude/directory\" && make sync-to-home"));
-        // not the behind message
-        assert!(!out.contains("git pull"));
-    }
-
-    #[test]
-    fn subdirectory_behind_and_unsynced_prefers_the_pull_then_sync_nudge() {
-        // Both flags live: `git pull && make sync-to-home` resolves both, so the
-        // behind message (which includes the pull) takes precedence.
-        let out = render_update_status(
-            "type=subdirectory\nbehind=2\nrepo=/home/u/.claude/directory\nunsynced=true\n",
-        );
+    fn native_behind_advises_ways_update() {
+        let out = render_update_status("type=native\nbehind=2\nrepo=/home/u/.local/share/agent-ways\n");
         assert!(out.contains("2 commit(s) behind"));
-        assert!(out.contains("git pull && make sync-to-home"));
-        assert!(!out.contains("pulled but not synced"));
+        assert!(out.contains("`ways update`"));
+        assert!(!out.contains("make update"));
+        assert!(!out.contains("sync-to-home"));
     }
 
     #[test]
-    fn subdirectory_repo_path_with_spaces_is_quoted() {
-        let out = render_update_status(
-            "type=subdirectory\nbehind=1\nrepo=/home/My User/.claude/dir\nunsynced=false\n",
-        );
-        assert!(out.contains("cd \"/home/My User/.claude/dir\" && git pull && make sync-to-home"));
-    }
-
-    #[test]
-    fn subdirectory_clean_is_silent() {
-        let out = render_update_status("type=subdirectory\nbehind=0\nrepo=/x\nunsynced=false\n");
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn subdirectory_missing_repo_falls_back_to_placeholder() {
-        let out = render_update_status("type=subdirectory\nbehind=1\nunsynced=false\n");
-        assert!(out.contains("cd \"<repo>\" && git pull && make sync-to-home"));
-    }
-
-    #[test]
-    fn clone_behind_still_advises_make_update() {
-        let out = render_update_status("type=clone\nbehind=2\n");
-        assert!(out.contains("2 commit(s) behind"));
-        assert!(out.contains("make update"));
-    }
-
-    #[test]
-    fn non_subdirectory_zero_behind_is_silent() {
-        assert!(render_update_status("type=clone\nbehind=0\n").is_empty());
+    fn native_zero_behind_is_silent() {
+        assert!(render_update_status("type=native\nbehind=0\nrepo=/x\n").is_empty());
         assert!(render_update_status("").is_empty());
+    }
+
+    #[test]
+    fn legacy_topologies_are_silent() {
+        for t in ["subdirectory", "clone", "fork", "renamed_clone", "plugin"] {
+            let c = format!("type={t}\nbehind=3\nunsynced=true\nrepo=/x\n");
+            assert!(render_update_status(&c).is_empty(), "{t} should render nothing");
+        }
     }
 }

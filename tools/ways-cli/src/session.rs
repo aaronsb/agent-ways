@@ -153,53 +153,6 @@ pub fn stamp_way_marker(way_id: &str, session_id: &str, token_position: u64) {
     let _ = std::fs::write(&path, format!("{token_position}\t{scope}\t{agent_id}"));
 }
 
-/// Read the scope that fired a way (for display in ways list).
-/// Returns (scope, agent_id).
-pub fn way_fired_scope(way_id: &str, session_id: &str) -> Option<(String, String)> {
-    // Try scoped marker first
-    let path = way_marker_path(way_id, session_id);
-    if path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            let parts: Vec<&str> = content.split('\t').collect();
-            let scope = parts.get(1).unwrap_or(&"agent").to_string();
-            let agent_id = parts.get(2).unwrap_or(&"main").to_string();
-            return Some((scope, agent_id));
-        }
-    }
-    // Backward compat: old-style unscoped marker
-    let old = session_dir(session_id).join("ways").join(way_id).join(".marker");
-    if old.exists() {
-        return Some(("agent".to_string(), "main".to_string()));
-    }
-    None
-}
-
-/// List all scopes that fired a way (for display — shows all agents that got it).
-pub fn way_fired_scopes(way_id: &str, session_id: &str) -> Vec<(String, String)> {
-    let base = session_dir(session_id).join("ways").join(way_id);
-    let mut results = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&base) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with(".marker") {
-                if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                    let parts: Vec<&str> = content.split('\t').collect();
-                    let scope = parts.get(1).unwrap_or(&"agent").to_string();
-                    let agent_id = parts.get(2).unwrap_or(&"main").to_string();
-                    results.push((scope, agent_id));
-                }
-            }
-        }
-    }
-    if results.is_empty() {
-        // Backward compat
-        if base.join(".marker").exists() {
-            results.push(("agent".to_string(), "main".to_string()));
-        }
-    }
-    results
-}
-
 fn way_marker_path(way_id: &str, session_id: &str) -> PathBuf {
     let agent_id = current_agent_id().unwrap_or_else(|| "main".to_string());
     session_dir(session_id)
@@ -524,8 +477,7 @@ const MAX_EVENTS_BYTES: u64 = 32 * 1024 * 1024;
 /// compactions, so the rewrite is rare, not per-append.
 const KEEP_EVENTS_BYTES: u64 = 24 * 1024 * 1024;
 
-/// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl, with a
-/// legacy ~/.claude/stats fallback for un-migrated installs — see paths::events_log).
+/// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
     let events_file = crate::paths::events_log();
     if let Some(stats_dir) = events_file.parent() {

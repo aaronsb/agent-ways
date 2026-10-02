@@ -2,10 +2,8 @@
 //!
 //! Resolution order (later overrides earlier):
 //!   1. Built-in defaults
-//!   2. ~/.claude/ways.json (legacy JSON, pre-1.0 backward compat)
-//!   3. $XDG_CONFIG_HOME/ways/config.yaml (legacy XDG path)
-//!   4. $XDG_CONFIG_HOME/agent-ways/config.yaml (canonical user scope)
-//!   5. $PROJECT/.claude/ways.yaml (project scope)
+//!   2. $XDG_CONFIG_HOME/agent-ways/config.yaml (user scope)
+//!   3. $PROJECT/.claude/ways.yaml (project scope)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -206,7 +204,7 @@ pub struct Config {
     pub default_scope: String,
     /// Output language (e.g., "en", "ja", "auto")
     pub language: String,
-    /// Disabled domains (e.g., ["ea", "itops"]) — user scope (legacy ways.json).
+    /// Disabled domains (e.g., ["ea", "itops"]) — user scope.
     pub disabled_domains: Vec<String>,
     /// Disabled ways (e.g., ["itops/incident", "meta/introspection"]) — project scope only.
     /// Populated exclusively from `{project}/.claude/ways.yaml`. Default-enabled
@@ -420,32 +418,16 @@ impl Config {
     pub fn load(project_dir: &str) -> Self {
         let mut cfg = Config::default();
 
-        // Layer 1: legacy ways.json
-        let ways_json = home_dir().join(".claude/ways.json");
-        if let Ok(content) = std::fs::read_to_string(&ways_json) {
-            cfg.apply_ways_json(&content);
-        }
-
-        // Layer 2: legacy XDG user config ($XDG_CONFIG_HOME/ways/config.yaml).
-        // Kept as a fallback for installs written before the app-namespaced path.
-        let legacy_xdg = xdg_config_dir().join("ways/config.yaml");
-        if let Ok(content) = std::fs::read_to_string(&legacy_xdg) {
-            cfg.apply_yaml(&content);
-        }
-
-        // Layer 3: canonical user config ($XDG_CONFIG_HOME/agent-ways/config.yaml) —
-        // the app-namespaced location, matching user_ways_root's parent. This is the
-        // single source of truth for the path (paths::user_config); it overrides
-        // the legacy `ways/config.yaml` above when both exist.
+        // User config ($XDG_CONFIG_HOME/agent-ways/config.yaml) — the
+        // app-namespaced location, matching user_ways_root's parent. This is the
+        // single source of truth for the path (paths::user_config).
         let user_config = crate::paths::user_config();
-        if user_config != legacy_xdg {
-            if let Ok(content) = std::fs::read_to_string(&user_config) {
-                cfg.apply_yaml(&content);
-                // Targets are user scope only (ADR-184): a project cannot
-                // redirect where the install lands.
-                if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                    cfg.targets = Self::read_targets(&doc);
-                }
+        if let Ok(content) = std::fs::read_to_string(&user_config) {
+            cfg.apply_yaml(&content);
+            // Targets are user scope only (ADR-184): a project cannot
+            // redirect where the install lands.
+            if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                cfg.targets = Self::read_targets(&doc);
             }
         }
 
@@ -470,25 +452,6 @@ impl Config {
         }
 
         cfg
-    }
-
-    /// Apply values from legacy ways.json.
-    fn apply_ways_json(&mut self, content: &str) {
-        let v: serde_json::Value = match serde_json::from_str(content) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-
-        if let Some(lang) = v.get("output_language").and_then(|v| v.as_str()) {
-            self.language = lang.to_string();
-        }
-
-        if let Some(disabled) = v.get("disabled").and_then(|v| v.as_array()) {
-            self.disabled_domains = disabled
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-        }
     }
 
     /// Read a probability-valued config key, clamped to `[0, 1]`, warning on an
@@ -660,25 +623,17 @@ impl Config {
         path
     }
 
-    /// Show the config file paths (canonical first, then honored legacy fallbacks).
+    /// Show the config file paths.
     pub fn config_path() -> String {
         format!(
-            "user:    {}\nlegacy:  {}\nlegacy:  {}\nproject: $PROJECT/.claude/ways.yaml",
+            "user:    {}\nproject: $PROJECT/.claude/ways.yaml",
             crate::paths::user_config().display(),
-            xdg_config_dir().join("ways/config.yaml").display(),
-            home_dir().join(".claude/ways.json").display()
         )
     }
 }
 
 fn home_dir() -> PathBuf {
     crate::util::home_dir()
-}
-
-fn xdg_config_dir() -> PathBuf {
-    std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().join(".config"))
 }
 
 #[cfg(test)]
@@ -753,22 +708,6 @@ mod tests {
         cfg.apply_yaml("semantic_fire_probability: 1.5\nkeyword_floor_probability: -0.2");
         assert_eq!(cfg.semantic_fire_probability, 1.0);
         assert_eq!(cfg.keyword_floor_probability, 0.0);
-    }
-
-    #[test]
-    fn apply_ways_json() {
-        let mut cfg = Config::default();
-        cfg.apply_ways_json(r#"{"output_language":"de","disabled":["ea"]}"#);
-        assert_eq!(cfg.language, "de");
-        assert_eq!(cfg.disabled_domains, vec!["ea"]);
-    }
-
-    #[test]
-    fn yaml_overrides_json() {
-        let mut cfg = Config::default();
-        cfg.apply_ways_json(r#"{"output_language":"de"}"#);
-        cfg.apply_yaml("language: ja");
-        assert_eq!(cfg.language, "ja");
     }
 
     // ── ADR-131: project-scope per-way disable ─────────────────────

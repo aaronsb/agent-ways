@@ -17,7 +17,7 @@
 //! sibling directories under the base. A non-recursive watcher would
 //! miss both — and would also miss *new* groups created after the
 //! TUI started, which is the common case (another agent runs
-//! `attend focus on deploy` during the session).
+//! `attend join deploy` during the session).
 //!
 //! `notify`'s callback is synchronous, so we bridge to the async
 //! channel with [`async_channel::Sender::send_blocking`]. Keeping the

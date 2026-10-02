@@ -1,7 +1,5 @@
 //! `attend join` / `leave` / `channels` / `dissolve` — channel
-//! membership, the chat-idiom primary verbs (ADR-173). `attend focus …`
-//! survives as a deprecated alias dispatching onto these handlers
-//! (CLI-is-contract, ADR-124): same behavior, one extra stderr note.
+//! membership, the chat-idiom verbs (ADR-173).
 //!
 //! Storage is untouched by the vocabulary: channels are still `@name/`
 //! signal namespaces with membership in `_groups.yaml` (attend-groups).
@@ -34,32 +32,10 @@ pub(crate) fn cmd_leave(name: &str) {
     println!("[attend] left #{name}");
 }
 
-pub(crate) fn cmd_leave_all() {
-    let r = get_groups();
-    for (name, _) in r.my_groups() {
-        r.leave(&name).ok();
-    }
-    println!("[attend] left all channels (project only)");
-}
-
-pub(crate) fn cmd_pin(name: &str) {
-    let name = name.trim_start_matches('#');
-    let r = get_groups();
-    r.pin(name);
-    println!("[attend] pinned #{name}");
-}
-
-pub(crate) fn cmd_unpin(name: &str) {
-    let name = name.trim_start_matches('#');
-    let r = get_groups();
-    r.unpin(name);
-    println!("[attend] unpinned #{name}");
-}
-
 pub(crate) fn cmd_dissolve(name: &str) {
     let name = name.trim_start_matches('#');
     // Mirror the TUI's guard (PR #395 finding 2): the base channel is
-    // structural — dissolving it would rip out the reserved `@open/`
+    // structural — dissolving it would rip out the reserved
     // migration dir and report false success.
     if name == "open" {
         eprintln!("[attend] dissolve: #open is the base channel — it cannot be dissolved");
@@ -112,10 +88,36 @@ pub(crate) fn cmd_describe(name: &str, description: &str) {
     }
 }
 
+pub(crate) fn cmd_pin(name: &str) {
+    let name = name.trim_start_matches('#');
+    get_groups().pin(name);
+    println!("[attend] pinned #{name}");
+}
+
+pub(crate) fn cmd_unpin(name: &str) {
+    let name = name.trim_start_matches('#');
+    get_groups().unpin(name);
+    println!("[attend] unpinned #{name}");
+}
+
+/// Joined channels only. Read-only, so a hook macro can call it on every fire
+/// without `cmd_channels`'s `cleanup_stale` rewriting shared state.
+pub(crate) fn cmd_joined() {
+    let my = get_groups().my_groups();
+    if my.is_empty() {
+        println!("channels: project only");
+    } else {
+        let mut t = agent_fmt::Table::new(&["Channel", "Pinned"]);
+        for (name, pinned) in &my {
+            let label = format!("#{name}");
+            t.add(vec![&label, if *pinned { "yes" } else { "no" }]);
+        }
+        t.print();
+    }
+}
+
 /// All channels with membership marks — the agent-side mirror of the
-/// TUI's `/channels`. Supersedes the old joined/all split (`focus
-/// list` / `focus all`), which stays reachable via the deprecated
-/// alias.
+/// TUI's `/channels`.
 pub(crate) fn cmd_channels() {
     let r = get_groups();
     r.cleanup_stale();
@@ -147,21 +149,4 @@ pub(crate) fn cmd_channels() {
         ]);
     }
     t.print();
-}
-
-/// Joined channels only — the old `focus list` view, kept for the
-/// deprecated alias path.
-pub(crate) fn cmd_joined() {
-    let r = get_groups();
-    let my = r.my_groups();
-    if my.is_empty() {
-        println!("channels: project only");
-    } else {
-        let mut t = agent_fmt::Table::new(&["Channel", "Pinned"]);
-        for (name, pinned) in &my {
-            let label = format!("#{name}");
-            t.add(vec![&label, if *pinned { "yes" } else { "no" }]);
-        }
-        t.print();
-    }
 }

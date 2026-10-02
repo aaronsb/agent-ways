@@ -5,7 +5,6 @@ pub mod config_cmd;
 pub mod context;
 pub mod corpus;
 pub mod disable;
-pub mod embed;
 pub mod graph;
 pub mod init;
 pub mod introspect;

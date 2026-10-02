@@ -15,14 +15,14 @@ pub trait AgentConfig {
 }
 
 /// Resolve output language with cascade:
-///   1. Config language field (from ways.json / XDG config / project overlay)
+///   1. Config language field (from the user config / project overlay)
 ///   2. Active agent's language setting
 ///   3. System locale ($LANG)
 ///   4. "en" fallback
 ///
 /// config::global() — future migration: ctx.config.language
 pub fn resolve_language() -> String {
-    // 1. Config (layered: ways.json → XDG → project)
+    // 1. Config (layered: user → project)
     let cfg_lang = &crate::config::global().language;
     if cfg_lang != "auto" {
         return normalize_language(cfg_lang);
@@ -115,25 +115,5 @@ pub fn get_active_languages() -> Vec<String> {
         .unwrap_or_default();
     codes.sort();
     codes
-}
-
-/// Best-effort language name → code lookup (e.g., "Japanese" → "ja").
-/// Returns the input unchanged if it's already a short code.
-pub fn resolve_to_lang_code(lang: &str) -> String {
-    let lower = lang.to_lowercase();
-    if lower.len() <= 5 && lower.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
-        return lower;
-    }
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(LANGUAGES_JSON) {
-        if let Some(languages) = parsed.get("languages").and_then(|v| v.as_object()) {
-            for (code, entry) in languages {
-                let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if name.to_lowercase() == lower {
-                    return code.clone();
-                }
-            }
-        }
-    }
-    "en".to_string()
 }
 

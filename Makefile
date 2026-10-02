@@ -1,26 +1,22 @@
 # agent-ways
-# Top-level Makefile — build, install, and release.
+# Top-level Makefile — build and test.
 #
 # Quick start:   make setup
-# Full install:  make install
-# Update:        make update
+# Install/update/uninstall/release live in the binary and scripts:
+#   ways update | ways reconcile | ways uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: setup install link relink uninstall update update-binaries sync-to-home sync-to-home-link sync-to-home-test clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild ways-agent ways-agent-rebuild attend attend-rebuild attend-chat attend-chat-rebuild hooks-install way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live release purge-attend-state
+.PHONY: setup link relink install update sync-to-home update-binaries clean help deps ways ways-rebuild ways-audit ways-audit-rebuild ways-mcp ways-mcp-rebuild ways-agent ways-agent-rebuild attend attend-rebuild attend-chat attend-chat-rebuild way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
     .SHELLFLAGS := -c
     LINK := cp -f
     EXE := .exe
-    # Copy hooks/ways contents into ~/.claude/hooks/ways/ (no symlinks without Developer Mode)
-    INSTALL_HOOKS = mkdir -p "$(HOME)/.claude/hooks/ways" && cp -r "$(CURDIR)/hooks/ways/." "$(HOME)/.claude/hooks/ways/"
 else
     SHELL := bash
     LINK := ln -sf
     EXE :=
-    # Symlink hooks/ways into ~/.claude/hooks/ways
-    INSTALL_HOOKS = mkdir -p "$(HOME)/.claude/hooks" && ln -sf "$(CURDIR)/hooks/ways" "$(HOME)/.claude/hooks/ways"
 endif
 
 WAYS_BIN = bin/ways
@@ -41,12 +37,9 @@ help:
 	@echo "agent-ways"
 	@echo ""
 	@echo "  make setup        Build ways CLI + attend + fetch embedding model + corpus"
-	@echo "  make install      Full first-time setup (hooks + tools + PATH)"
+	@echo "                    (install, update and removal: ways update | reconcile | uninstall)"
 	@echo "  make deps         Install the C++ build toolchain (only if a prebuilt binary"
 	@echo "                    won't run on your platform and you must build from source)"
-	@echo "  make update       Pull + rebuild + relink in the app dir; then 'ways reconcile' to reproject"
-	@echo "  make sync-to-home [legacy] ADR-140 subdirectory projection — superseded by 'ways reconcile'"
-	@echo "  make sync-to-home-link  [legacy] symlink variant of sync-to-home"
 	@echo "  make ways         Get ways binary (download or build from source)"
 	@echo "  make ways-rebuild Force rebuild ways from source"
 	@echo "  make ways-audit   Get ways-audit compliance binary (download or build)"
@@ -64,15 +57,13 @@ help:
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
 	@echo "  make test-live TIER=1  Live install fixture in Docker (ADR-186; FLAVOR=branch|release)"
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
-	@echo "  make release      Build release binary for current platform"
 	@echo "  make cut-release  Open a version-bump PR for a component (COMPONENT=ways LEVEL=patch)"
 	@echo "  make publish-release  After the bump PR merges: tag + publish (COMPONENT=ways [PUSH=1])"
-	@echo "  make uninstall    Remove ways from PATH"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make purge-attend-state  Wipe all attend runtime cache (peers, signals,"
 	@echo "                           channels, instance names, heartbeats, sensor"
 	@echo "                           checkpoints). Manual recovery only — never"
-	@echo "                           invoked by setup/install/update."
+	@echo "                           invoked by setup or update."
 	@echo ""
 
 # Install the C++ build toolchain (cmake + compiler + git) needed to build
@@ -141,9 +132,11 @@ link:
 		fi; \
 	done
 	@if [ -e "$(CURDIR)/$(WAY_EMBED_BIN)" ]; then \
-		mkdir -p "$(CLAUDE_BIN)"; \
-		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$(CLAUDE_BIN)/way-embed" ]; then :; \
-		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$(CLAUDE_BIN)/way-embed"; fi; \
+		mkdir -p "$(CLAUDE_BIN)"; dst="$(CLAUDE_BIN)/way-embed"; \
+		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$$dst" ]; then :; \
+		elif [ -e "$$dst" ] && [ ! -L "$$dst" ]; then \
+			echo "  ⚠ $$dst is a real file; not replacing it (ways reconcile --force moves it aside)"; \
+		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$$dst"; fi; \
 	fi
 
 # Install any suite binary the install lacks, then link. `ways update` runs this
@@ -159,63 +152,24 @@ relink:
 	done
 	@$(MAKE) -s --no-print-directory link
 
-# Full install: build, setup, symlink to PATH.
-install: hooks-executable setup hooks-install
-	@$(MAKE) -s --no-print-directory link
-	@echo ""
-	@echo "Install complete."
-	@echo "  ways binary:        $(XDG_BIN)/ways → $(CURDIR)/$(WAYS_BIN)"
-	@echo "  ways-audit binary:  $(XDG_BIN)/ways-audit → $(CURDIR)/$(WAYS_AUDIT_BIN)"
-	@echo "  ways-mcp binary:    $(XDG_BIN)/ways-mcp → $(CURDIR)/$(WAYS_MCP_BIN)"
-	@echo "  ways-agent binary:  $(XDG_BIN)/ways-agent → $(CURDIR)/$(WAYS_AGENT_BIN)"
-	@echo "  attend binary:      $(XDG_BIN)/attend → $(CURDIR)/$(ATTEND_BIN)"
-	@echo "  attend-chat binary: $(XDG_BIN)/attend-chat → $(CURDIR)/$(ATTEND_CHAT_BIN)"
-	@echo "  way-embed binary:   $(CLAUDE_BIN)/way-embed → $(CURDIR)/$(WAY_EMBED_BIN)"
-	@case ":$$PATH:" in \
-		*":$(XDG_BIN):"*) ;; \
-		*) printf '\n  %s\n  %s\n  %s\n' \
-			"NOTE: $(XDG_BIN) is not on your PATH — ways/attend won't be found yet." \
-			"Add it to your shell rc (~/.bashrc or ~/.zshrc), then restart your shell:" \
-			"    export PATH=\"$(XDG_BIN):\$$PATH\"" ;; \
-	esac
-	@echo "  Restart Claude Code for ways to take effect."
+# transition: removed by #717 (ADR-506)
+# Retired targets, kept so an in-flight pre-#715 `make update` finishes: make has
+# already parsed the old Makefile, so its recipe still runs `$(MAKE) install`
+# against this file after `scripts/update.sh` pulls it.
+install: link
+	@echo "note: 'make install' is retired; use 'ways update'."
 
-hooks-install:
-	@$(INSTALL_HOOKS)
-	@echo "Hooks installed at $(HOME)/.claude/hooks/ways"
-
-# Remove symlink from PATH.
-uninstall:
-	@rm -f "$(XDG_BIN)/ways" "$(XDG_BIN)/ways-audit" "$(XDG_BIN)/ways-mcp" "$(XDG_BIN)/ways-agent" "$(XDG_BIN)/attend" "$(XDG_BIN)/attend-chat"
-	@echo "Removed $(XDG_BIN)/ways $(XDG_BIN)/ways-audit $(XDG_BIN)/ways-mcp $(XDG_BIN)/ways-agent $(XDG_BIN)/attend $(XDG_BIN)/attend-chat"
-
-# Pull upstream and re-setup. scripts/update.sh wraps the pull so machine-local
-# changes (settings.json, stale build artifacts) and merged branches don't abort
-# the fast-forward — it autostashes, prunes, and surfaces conflicts instead of
-# clobbering. See the script for recovery behavior.
+# transition: removed by #717 (ADR-506)
 update:
-	@bash scripts/update.sh
-	$(MAKE) update-binaries
-	$(MAKE) install
+	@echo "note: 'make update' is retired; running 'ways update'."
+	@./bin/ways update
 
-# Subdirectory topology (ADR-140): the repo lives in a subdir of ~/.claude and is
-# projected up into it. Copy is the default (robust everywhere); the -link variant
-# symlinks instead (git pull then becomes the whole update — no re-sync). Both
-# delegate to the same deterministic script and run a smoke test of the merge.
+# transition: removed by #717 (ADR-506)
 sync-to-home:
-	@bash scripts/sync-to-home.sh
+	@echo "'make sync-to-home' was removed; see docs/migration-1.0.md." >&2
+	@exit 1
 
-sync-to-home-link:
-	@SYNC_MODE=symlink bash scripts/sync-to-home.sh
-
-sync-to-home-test:
-	@bash scripts/sync-to-home-test.sh
-
-# Rebuild every binary `update` is responsible for refreshing.
-# Indirected from `update:` so adding a new rebuild here takes effect
-# on the same `make update` run that pulls the change — sub-makes
-# re-read the Makefile, but the in-memory `update:` recipe is fixed at
-# make-process startup.
+# Force-rebuild every binary `ways update` is responsible for refreshing.
 update-binaries: ways-rebuild ways-audit-rebuild ways-mcp-rebuild ways-agent-rebuild attend-rebuild attend-chat-rebuild way-embed-rebuild
 
 # --- Build ---
@@ -474,15 +428,14 @@ test-hooks:
 	@echo "Running hook script tests..."
 	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
+	@bash tests/make-link-test.sh
 	@bash tests/gh-tasks-test.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."
-	@cargo test --manifest-path tools/ways-cli/Cargo.toml --bin ways --quiet
-	@# The theme engine, and the raw-colour lint over every workspace source (ADR-504 §6).
-	@cargo test --manifest-path tools/Cargo.toml -p agent-theme --quiet
-	@# Piped output carries no escapes; hooks inject `ways context` into model context.
-	@cargo test --manifest-path tools/ways-cli/Cargo.toml --test piped_output --quiet
+	@# Every crate, including agent-theme (and its raw-colour lint over the workspace, ADR-504 §6)
+	@# and ways-cli's piped_output test.
+	@cargo test --manifest-path tools/Cargo.toml --workspace --quiet
 	@echo "Unit tests passed."
 
 test-sim: ways
@@ -513,17 +466,6 @@ test-live:
 
 # --- Release ---
 
-# Build release binary for current platform with checksum.
-# To publish: git tag ways-vX.Y.Z && git push --tags
-# CI builds all 4 platforms and creates a GitHub Release.
-release: ways-rebuild
-	@mkdir -p dist
-	@PLATFORM=$$(uname -s | tr '[:upper:]' '[:lower:]')-$$(uname -m | sed 's/arm64/aarch64/'); \
-		cp $(WAYS_BIN) dist/ways-$$PLATFORM; \
-		cd dist && sha256sum ways-$$PLATFORM > ways-$$PLATFORM.sha256; \
-		echo "dist/ways-$$PLATFORM ($$(ls -lh ways-$$PLATFORM | awk '{print $$5}'))"; \
-		cat ways-$$PLATFORM.sha256
-
 # Release a Cargo-versioned component (ADR-150). Two steps, because main is
 # branch-protected and PR-first:
 #   make cut-release COMPONENT=ways LEVEL=patch      # 1) open a version-bump PR
@@ -539,10 +481,6 @@ publish-release:
 
 # --- Supporting ---
 
-hooks-executable:
-	@find hooks \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true
-	@echo "Hooks marked executable."
-
 clean:
 	$(MAKE) -C tools/way-embed clean
 	cargo clean --manifest-path tools/ways-cli/Cargo.toml 2>/dev/null || true
@@ -551,7 +489,7 @@ clean:
 
 # Wipe all attend / attend-chat runtime cache state under
 # ~/.cache/attend/. Recovery target only — NEVER a dependency of
-# setup, install, update, update-binaries, or any rebuild target.
+# setup, update-binaries, or any rebuild target.
 # An advisory hint is printed at the end of attend / attend-chat
 # build targets pointing operators here when they update.
 #

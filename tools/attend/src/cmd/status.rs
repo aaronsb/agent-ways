@@ -74,10 +74,10 @@ pub(crate) fn cmd_status() {
 
     // ── Focus section
     if my_focus.is_empty() {
-        t.add(vec!["focus", "project only", ""]);
+        t.add(vec!["channels", "project only", ""]);
     } else {
         for (i, (name, pinned)) in my_focus.iter().enumerate() {
-            let label = if i == 0 { "focus" } else { "" };
+            let label = if i == 0 { "channels" } else { "" };
             let pin = if *pinned { " (pinned)" } else { "" };
             let info = format!("{name}{pin}");
             t.add(vec![label, &info, ""]);

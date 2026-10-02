@@ -4,7 +4,7 @@ This is the "sit down and build one" companion to [`authoring-sensors.md`](autho
 
 This tutorial builds a sensor from nothing, top to bottom, and explains each piece as it lands. Target reader: you know bash and Linux, you've read [`loop.md`](loop.md) so you understand attend is watching something for you, and now you want to make it watch one more thing.
 
-You'll need `attend` already built and installed (`make attend && make install` from the agent-ways repo). You do not need Rust.
+You'll need `attend` already built and installed (`ways update`, or `make attend link` from the agent-ways app dir). You do not need Rust.
 
 ## What we're building
 

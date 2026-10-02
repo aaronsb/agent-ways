@@ -58,14 +58,9 @@ struct Outcome {
 
 /// `ways reconcile` entrypoint.
 ///
-/// The legacy-in-place guard is unconditional: a manual `ways reconcile` must
-/// never clobber an in-place clone. The migrator used to bypass it (it called
-/// reconcile mid-migration, over a backed-up and relocated tree that still
-/// *looked* in-place); that bypass left with the migrator in 1.9.0 (ADR-179).
-///
-/// The real-path guard is the same posture one level down: a projection root
-/// that is already a real directory or file (a user's own `~/.claude/skills`,
-/// a pre-1.0 `make install` copy of `hooks/ways`) is never deleted. Without
+/// The real-path guard: a projection root that is already a real directory or
+/// file (a user's own `~/.claude/skills`, a pre-1.0 in-place clone's tree) is
+/// never deleted. Without
 /// `force` the run stops before touching any root and names the paths; with
 /// `force` each such path is renamed to a timestamped sibling first.
 pub fn run(
@@ -90,7 +85,7 @@ pub fn run(
 
     if mode == Mode::Copy {
         // Copy materialization + per-file orphan prune is the fallback path
-        // (ADR-142 §2); not yet ported from sync-to-home.sh.
+        // (ADR-142 §2); not ported from the removed sync-to-home.sh.
         bail!("copy mode not yet implemented; symlink mode is the default");
     }
 
@@ -410,23 +405,6 @@ fn converge_one(
     quiet: bool,
     force: bool,
 ) -> Result<()> {
-    // Refuse to reconcile a live in-place clone — that path needs migration,
-    // not the repair posture. An in-place clone is a dest that is itself the
-    // agent-ways git repo (has a .git AND ships the app source).
-    if is_legacy_in_place(dest_root) {
-        bail!(
-            "{} looks like a legacy in-place agent-ways clone — reconcile won't \
-             clobber it. Migration (ADR-144 §5) is the path off in-place. The \
-             migrator was removed in 1.9.0 (ADR-179); build it from the last tag \
-             that ships it:\n\
-             \x20 git clone --branch ways-v1.8.3 https://github.com/aaronsb/agent-ways /tmp/ways-migrator\n\
-             \x20 cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.toml\n\
-             \x20 /tmp/ways-migrator/tools/target/release/ways migrate --what-if\n\
-             Guide: docs/migration-1.0.md",
-            dest_root.display()
-        );
-    }
-
     // Pre-check, then act. Classify every root before any of them is touched,
     // so a refusal leaves the destination exactly as it was: no partial
     // projection, no settings merge.
@@ -437,10 +415,13 @@ fn converge_one(
         bail!(
             "{} projection root(s) under {} are real paths, not ways symlinks:\n{}\n\
              reconcile will not delete them. Move them aside yourself, or re-run with \
-             --force to rename each to a timestamped sibling (<name>.ways-backup-<seconds>).",
+             --force to rename each to a timestamped sibling (<name>.ways-backup-<seconds>). \
+             If {} is itself a git clone of agent-ways (pre-1.0), do not use --force; \
+             see docs/migration-1.0.md.",
             foreign.len(),
             dest_root.display(),
-            list
+            list,
+            dest_root.display()
         );
     }
 
@@ -485,9 +466,6 @@ fn withdraw_one(
     dry_run: bool,
     quiet: bool,
 ) -> Result<()> {
-    if is_legacy_in_place(dest_root) {
-        bail!("{} looks like a legacy in-place agent-ways clone; nothing to withdraw", dest_root.display());
-    }
     // Settings first: if the withdrawal's self-audit reverts, the links are
     // still in place and no hook entry points at a removed path.
     let mut settings_summary = None;
@@ -692,14 +670,6 @@ fn make_symlink(src: &Path, dst: &Path, is_dir: bool) -> Result<()> {
         std::os::windows::fs::symlink_file(src, dst)?;
     }
     Ok(())
-}
-
-/// True if `dest` is a legacy in-place agent-ways clone (its own git repo that
-/// also ships the app source) rather than a thin projection.
-pub(crate) fn is_legacy_in_place(dest: &Path) -> bool {
-    // A projection has symlinked/looked-up subtrees but no app source of its
-    // own; a clone has .git AND the app's source dirs (tools/, docs/).
-    dest.join(".git").exists() && dest.join("tools").is_dir() && dest.join("docs").is_dir()
 }
 
 fn report(outcomes: &[Outcome], source: &Path, dest: &Path, dry_run: bool, quiet: bool, withdrawing: bool) {
@@ -1125,26 +1095,34 @@ mod tests {
     }
 
     #[test]
-    fn refuses_legacy_in_place_clone() {
-        let base = sandbox("legacy");
+    fn an_in_place_clone_is_never_clobbered() {
+        // The pre-1.0 in-place clone has no dedicated guard; its real
+        // directories at the projection roots are what stop a reconcile.
+        let base = sandbox("inplace");
         let src = base.join("data");
         let dst = base.join("proj");
         std::fs::create_dir_all(&src).unwrap();
         fake_source(&src);
-        // Make dst look like an in-place clone.
         std::fs::create_dir_all(dst.join(".git")).unwrap();
         std::fs::create_dir_all(dst.join("tools")).unwrap();
         std::fs::create_dir_all(dst.join("docs")).unwrap();
+        std::fs::create_dir_all(dst.join("skills/mine")).unwrap();
+        std::fs::write(dst.join("skills/mine/SKILL.md"), "mine\n").unwrap();
+        std::fs::create_dir_all(dst.join("hooks/ways")).unwrap();
 
         let s = |p: &Path| Some(p.to_string_lossy().into_owned());
-        // The guard is unconditional since ADR-179 — the migrator's bypass was
-        // its only exception and left with it.
         let err = run(s(&src), s(&dst), None, false, true, false).unwrap_err();
-        assert!(err.to_string().contains("in-place"), "should refuse: {err}");
-        // The dest is left untouched: no projection root was materialized.
-        assert!(!dst.join("skills").exists(), "guard must not project over the clone");
+        assert!(err.to_string().contains("real paths"), "should refuse: {err}");
+        assert!(err.to_string().contains("do not use --force"), "should warn off --force: {err}");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("skills/mine/SKILL.md")).unwrap(),
+            "mine\n",
+            "the clone's own files stay put"
+        );
+        assert!(!std::fs::symlink_metadata(dst.join("skills")).unwrap().file_type().is_symlink());
         let _ = std::fs::remove_dir_all(&base);
     }
+
     /// Names of `dst`'s siblings that look like a moved-aside root.
     fn backups_of(dst_parent: &Path, name: &str) -> Vec<PathBuf> {
         let prefix = format!("{name}.ways-backup-");

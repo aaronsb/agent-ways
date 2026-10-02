@@ -20,7 +20,7 @@ makes the system hard to *believe in*, because the help leaves no mark on the
 conversation you can point to.
 
 It does leave a mark somewhere else. **Every time a way fires, the cheap
-substrate writes a line to `~/.claude/stats/events.jsonl`.** That append-only
+substrate writes a line to `$XDG_STATE/agent-ways/events.jsonl`.** That append-only
 record is the observable shadow of the cognitive loop: a turn-by-turn account of
 which premises surfaced, why, and when. This cluster is about reading that
 shadow — what it records, what it reveals about how ways helps, and how to pull

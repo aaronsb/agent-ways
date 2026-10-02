@@ -1,7 +1,7 @@
 //! Relevance / precision audit from fire telemetry (ADR-134 Decision 3).
 //!
 //! The cadence audit (`tune-curves`) asks *how often* a way fires; this asks
-//! *whether it fired in the right places*. It reads `~/.claude/stats/events.jsonl`
+//! *whether it fired in the right places*. It reads the events log (`paths::events_log()`)
 //! and, for each way, estimates how often its fires landed in sessions whose
 //! actual activity never touched the way's domain — the "17 of 47 fires landed
 //! off-domain" signal that motivated ADR-134.

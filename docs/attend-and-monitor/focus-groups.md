@@ -10,11 +10,11 @@ Attend's earliest design had two signal scopes: **project** (your own cwd, encod
 
 Concrete failure: agents on `api`, `infra`, and `docs` all working on a deploy together. If `api` sends a broadcast, it reaches `api`, `infra`, `docs`, and also every unrelated agent on the user's machine. If `api` sends to `infra` via `--to /home/aaron/.../infra`, that's directed and `docs` misses it. No way to say "reach the three agents working on this deploy, nobody else."
 
-The original workaround was static paths: add `--focus` flags pointing at specific directories. But paths are implementation details — agents kept misrouting because they reasoned about filesystem layout instead of about group intent. There was no way to dynamically add or remove agents from a scope without the sender knowing everyone's cwd.
+The original workaround was static paths: add path flags pointing at specific directories. But paths are implementation details — agents kept misrouting because they reasoned about filesystem layout instead of about group intent. There was no way to dynamically add or remove agents from a scope without the sender knowing everyone's cwd.
 
 ## The decision
 
-Focus groups are **named signal namespaces**. An agent joins a group by name (`attend focus on deploy`); attend creates an `@deploy` signal directory and records the session as a member. Other agents join the same group by name, and they all read each other's signals via the shared `@deploy` dir. Leaving (`attend focus off deploy`) removes the agent from the membership and — if the group is unpinned and empty — removes the group entirely.
+Focus groups are **named signal namespaces**. An agent joins a group by name (`attend join deploy`); attend creates an `@deploy` signal directory and records the session as a member. Other agents join the same group by name, and they all read each other's signals via the shared `@deploy` dir. Leaving (`attend focus off deploy`) removes the agent from the membership and — if the group is unpinned and empty — removes the group entirely.
 
 Groups compose naturally with the other two scopes:
 
@@ -30,19 +30,17 @@ Groups compose naturally with the other two scopes:
 
 ```bash
 # Join and leave
-attend focus on deploy         # join the 'deploy' group, creating it if needed
-attend focus on infra --pin    # join and mark the group as persistent when empty
-attend focus off deploy        # leave the group; removes it if empty and unpinned
-attend focus clear             # leave all joined groups (project scope only)
+attend join deploy             # join the 'deploy' channel, creating it if needed
+attend join infra --pin        # join and mark the channel as persistent when empty
+attend leave deploy            # leave the channel; removes it if empty and unpinned
+attend scene private           # leave all joined channels (project scope only)
 
 # Inspection
-attend focus list              # show groups this session is focused on
-attend focus all               # show all active groups with membership
+attend channels                # show all active channels with membership
 
 # Management
-attend focus pin <name>        # mark an existing group as persistent when empty
-attend focus unpin <name>      # unmark; group gets cleaned up if empty
-attend focus dissolve <name>   # remove the group entirely (ejects all members)
+attend channels create <name>  # create a channel
+attend dissolve <name>         # remove the channel entirely (ejects all members)
 ```
 
 **Pinning** is for groups that should outlive any individual session's membership. An unpinned group is removed the moment its last member leaves; a pinned group persists even when empty so that new agents joining later can find it. Useful for long-lived coordination channels.
@@ -68,7 +66,7 @@ Groups live under the signals base (`~/.cache/attend/signals/`) alongside the ot
 
 **Naming rules:**
 
-- Group names start with `@` on disk; the `@` is prepended automatically by attend (the user types `attend focus on deploy`, attend creates `@deploy/`)
+- Group names start with `@` on disk; the `@` is prepended automatically by attend (the user types `attend join deploy`, attend creates `@deploy/`)
 - Names cannot start with `_` or `@` (to avoid collision with reserved prefixes)
 - Names cannot contain `/` or whitespace
 - `broadcast` is reserved as a group name (would shadow `_broadcast`)
@@ -87,7 +85,7 @@ infra:
     - abc123-...-session
 ```
 
-Writes are atomic (write-then-rename pattern, fixed in issue #16). Concurrent `attend focus` commands from multiple sessions don't corrupt the file.
+Writes are atomic (write-then-rename pattern, fixed in issue #16). Concurrent `attend join` and `attend leave` commands from multiple sessions don't corrupt the file.
 
 ## The session-ID contract
 
@@ -105,13 +103,13 @@ The provider mechanism is simple: when `sensor-peers` is registered during start
 
 Groups scope **which signals reach the agent**. Once a signal reaches a session, delivery does not depend on engagement state. Signals are authored messages, so they ride attend's message lane: every signal a session scans is surfaced once, and the action-potential refractory and salience decay that throttle the event lane (the git and process sensors) do not apply to them (ADR-136). See [`signals.md`](signals.md) for the delivery lifecycle.
 
-- `attend focus on deploy` — the agent now receives `@deploy` signals as well as project and broadcast signals
+- `attend join deploy` — the agent now receives `@deploy` signals as well as project and broadcast signals
 - Each unseen `@deploy` signal surfaces on the next peer poll; more than 8 in one poll are coalesced into a digest line
 - Leaving the group stops the scan of `@deploy/`. If members remain, the signals stay on disk for them. If the leave empties the group and it is not pinned, attend removes `@deploy/` and its signals (`tools/attend-groups/src/lib.rs:184-197`)
 
 ## Broadcast by default
 
-`attend send` with no routing flag writes to `_broadcast/`, which every session with attend running scans. The sender does not have to choose between a group, a project, and broadcast for an ordinary message. ADR-401 records this default: `attend send <msg>` (and `--broadcast`) lands in `_broadcast/`, and `attend send --channel <name>` lands in `@<name>/`. `--focus` is a deprecated alias for `--channel`.
+`attend send` with no routing flag writes to `_broadcast/`, which every session with attend running scans. The sender does not have to choose between a group, a project, and broadcast for an ordinary message. ADR-401 records this default: `attend send <msg>` lands in `_broadcast/`, and `attend send --channel <name>` lands in `@<name>/`.
 
 Groups are **explicit scoping** for cases where broadcast is too wide:
 
@@ -125,7 +123,7 @@ For ad-hoc conversations, broadcast is sufficient. For structured scopes, use gr
 
 The `attend chat` TUI (ADR-120, documented in [`tui.md`](tui.md)) puts focus groups in the left sidebar as a clickable filter. Each joined group is listed with an unread indicator; clicking filters the message stream to only that group. The sidebar is how a human gets a visual handle on the otherwise-invisible scope topology.
 
-Importantly, clicking a group in the sidebar is a TUI-local filter — it doesn't change the session's actual group membership. To join or leave a group you still run `attend focus on` / `off` from a terminal (or, in future, via a TUI command). This separation means "looking at a group" and "being in a group" are distinct actions.
+Importantly, clicking a group in the sidebar is a TUI-local filter — it doesn't change the session's actual group membership. To join or leave a group you still run `attend join` / `leave` from a terminal (or, in future, via a TUI command). This separation means "looking at a group" and "being in a group" are distinct actions.
 
 ## Related
 

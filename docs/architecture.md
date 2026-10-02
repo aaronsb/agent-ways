@@ -305,7 +305,7 @@ flowchart LR
     Scan -->|fired| WF["way_fired<br/>(+ fire_score on first-fires)"]:::log
     Scan -->|"within near_miss_margin"| NM["way_nearmiss<br/>(recall signal)"]:::log
 
-    WF --> EV[("~/.claude/stats/events.jsonl<br/>bounded ~24–32 MiB")]:::log
+    WF --> EV[("$XDG_STATE/agent-ways/events.jsonl<br/>bounded ~24–32 MiB")]:::log
     NM --> EV
 
     EV --> TP["ways tune-precision<br/>off-class irrelevance audit"]:::tune
@@ -315,7 +315,7 @@ flowchart LR
 
 ### Telemetry events
 
-Two events in `~/.claude/stats/events.jsonl` carry the tuning signal:
+Two events in `$XDG_STATE/agent-ways/events.jsonl` carry the tuning signal:
 
 - `way_fired` now records `fire_score` — the embedding score that cleared threshold — on **first-fires only** (not on `way_redisclosed`). It feeds future `embed_threshold` tuning.
 - `way_nearmiss` is emitted when a way scores within `near_miss_margin` *below* its effective threshold but does not fire. The scores already exist; this is persistence, not new computation. Fields: `score_en`, `score_multi`, `thr_en`, `thr_multi`, `margin`, `trigger`, `query_tokens`. It is a recall signal — the first measure of likely *false silences*, the ways that should have fired and didn't.

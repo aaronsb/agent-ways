@@ -4,10 +4,48 @@
 use crate::cmd::inbox::is_valid_signal_id;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 
+/// The message is a trailing, hyphen-tolerant argument, so clap hands any
+/// unknown flag (a removed `--broadcast` or `--focus`, or a typo such as
+/// `--chanel`) over as message text, and the send would go out with the flag in
+/// its body. A leading token shaped like a long flag is refused unless a `--`
+/// sits immediately before it in the raw arguments (the escape hatch for a
+/// message that really starts with one); a later `--` in the text does not
+/// count.
+fn flag_like_refusal(message: &[String], raw_args: &[String]) -> Option<String> {
+    let first = message.first()?.as_str();
+    let name = first.split('=').next().unwrap_or(first);
+    let flag_like = name.len() > 2
+        && name.starts_with("--")
+        && name[2..].starts_with(|c: char| c.is_ascii_lowercase())
+        && name[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-');
+    let escaped = raw_args.windows(2).any(|w| w[0] == "--" && w[1] == first);
+    if !flag_like || escaped {
+        return None;
+    }
+    let hint = match name {
+        // transition: removed by #717 (ADR-506)
+        "--broadcast" => " It was removed: a send with no routing flag already reaches everyone.",
+        // transition: removed by #717 (ADR-506)
+        "--focus" => " It was removed: use --channel.",
+        _ => "",
+    };
+    Some(format!(
+        "`{name}` is not a flag this command accepts.{hint} To send it as text, put `--` before the message."
+    ))
+}
+
+/// Exit 2 when `message` leads with a flag-shaped token and no `--` escape.
+pub(crate) fn reject_flag_like(verb: &str, message: &[String]) {
+    let raw: Vec<String> = std::env::args().collect();
+    if let Some(why) = flag_like_refusal(message, &raw) {
+        eprintln!("attend {verb}: {why}");
+        std::process::exit(2);
+    }
+}
+
 pub(crate) fn cmd_send(
-    broadcast: bool,
     target_dir: Option<String>,
-    target_focus: Option<String>,
+    target_channel: Option<String>,
     reply_to: Option<String>,
     message_parts: Vec<String>,
 ) {
@@ -85,14 +123,14 @@ pub(crate) fn cmd_send(
 
     let r = get_groups();
 
-    // Validate --focus name against live `_groups.yaml` membership. A
+    // Validate --channel name against live `_groups.yaml` membership. A
     // signal written to a group nobody is *currently* listening on sits
     // unread in `@<name>/` until cleanup sweeps it; the sender only sees
     // "signal written" and assumes delivery. Mirror --to's liveness
     // discipline: `_groups.yaml` membership is intersected with
     // `PeerSensor::live_session_ids` so a peer that joined-and-died
     // does not let the validation pass on a phantom member.
-    if let Some(ref name) = target_focus {
+    if let Some(ref name) = target_channel {
         let members = r.members(name);
         let self_id = own_session_id();
         #[cfg(feature = "sensor-peers")]
@@ -154,18 +192,16 @@ pub(crate) fn cmd_send(
     // Default is broadcast — simplest possible routing: every send reaches
     // every peer. Escape hatches remain for humans and scripts:
     //   --to <path>: specific project only
-    //   --focus <name>: specific focus group only
-    //   --broadcast: explicit (same as default)
-    let dest_dirs: Vec<std::path::PathBuf> = if let Some(ref focus_name) = target_focus {
-        vec![r.group_dir(focus_name)]
+    //   --channel <name>: specific channel only
+    let dest_dirs: Vec<std::path::PathBuf> = if let Some(ref channel_name) = target_channel {
+        vec![r.group_dir(channel_name)]
     } else if let Some(ref path) = target_dir {
         let resolved = std::fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| path.clone());
         vec![base.join(encode_project(&resolved))]
     } else {
-        // Default (and --broadcast): reach everyone via the broadcast dir.
-        let _ = broadcast; // flag now redundant, kept for compat
+        // Default: reach everyone via the broadcast dir.
         vec![base.join("_broadcast")]
     };
 
@@ -193,8 +229,8 @@ pub(crate) fn cmd_send(
         None => format!("{}|{}|{}|{}\n", from, project, cwd, message),
     };
 
-    let scope = if target_focus.is_some() {
-        "focus"
+    let scope = if target_channel.is_some() {
+        "channel"
     } else if target_dir.is_some() {
         "directed"
     } else {
@@ -269,13 +305,12 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// uuid out of the agent's context window. A caller never sees the
 /// id, never has to hunt for it in `attend inbox`, and never reaches
 /// into `~/.cache/attend/signals/` to find it. Delegating to
-/// `cmd_send` preserves every existing `send` flag (`--focus`,
-/// `--to`, `--broadcast`) without duplication.
+/// `cmd_send` preserves every existing `send` flag (`--channel`,
+/// `--to`) without duplication.
 #[cfg(feature = "sensor-peers")]
 pub(crate) fn cmd_reply(
-    broadcast: bool,
     target_dir: Option<String>,
-    target_focus: Option<String>,
+    target_channel: Option<String>,
     message: Vec<String>,
 ) {
     let session_id =
@@ -308,16 +343,15 @@ pub(crate) fn cmd_reply(
         ReplyTarget::Threaded(id) => Some(id),
     };
     // Inject the resolved signal id as `reply_to` and delegate to cmd_send.
-    // All other routing flags (--focus, --to, --broadcast) flow through
+    // All other routing flags (--channel, --to) flow through
     // untouched.
-    cmd_send(broadcast, target_dir, target_focus, reply_to, message);
+    cmd_send(target_dir, target_channel, reply_to, message);
 }
 
 #[cfg(not(feature = "sensor-peers"))]
 pub(crate) fn cmd_reply(
-    _broadcast: bool,
     _target_dir: Option<String>,
-    _target_focus: Option<String>,
+    _target_channel: Option<String>,
     _message: Vec<String>,
 ) {
     eprintln!("attend reply: sensor-peers feature is not compiled in this build");
@@ -403,6 +437,48 @@ fn find_closest_peer<'a>(target: &str, peers: &[&'a str]) -> Option<&'a str> {
     }
 
     best.map(|(p, _)| p)
+}
+
+#[cfg(test)]
+mod removed_flag_tests {
+    use super::flag_like_refusal;
+
+    fn v(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn flag_shaped_leading_tokens_are_refused() {
+        let raw = v(&["attend", "send"]);
+        for first in ["--broadcast", "--focus", "--focus=x", "--chanel", "--to-all"] {
+            assert!(flag_like_refusal(&v(&[first, "hello"]), &raw).is_some(), "{first}");
+        }
+        assert!(flag_like_refusal(&v(&["--broadcast", "hi"]), &raw).unwrap().contains("removed"));
+        assert!(flag_like_refusal(&v(&["--focus", "x"]), &raw).unwrap().contains("--channel"));
+    }
+
+    #[test]
+    fn explicit_double_dash_escapes() {
+        let raw = v(&["attend", "send", "--", "--broadcast", "is", "gone"]);
+        assert!(flag_like_refusal(&v(&["--broadcast", "is", "gone"]), &raw).is_none());
+    }
+
+    #[test]
+    fn a_later_double_dash_does_not_escape() {
+        let raw = v(&["attend", "send", "--chanel", "deploy", "deploying", "now", "--", "ETA", "5m"]);
+        let msg = v(&["--chanel", "deploy", "deploying", "now", "--", "ETA", "5m"]);
+        assert!(flag_like_refusal(&msg, &raw).is_some());
+    }
+
+    #[test]
+    fn ordinary_messages_pass() {
+        let raw = v(&["attend", "send"]);
+        assert!(flag_like_refusal(&v(&["hello", "--broadcast"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["--"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["--2x", "text"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["-5", "degrees"]), &raw).is_none());
+        assert!(flag_like_refusal(&[], &raw).is_none());
+    }
 }
 
 #[cfg(all(test, feature = "sensor-peers"))]

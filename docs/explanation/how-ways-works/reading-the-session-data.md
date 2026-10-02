@@ -17,7 +17,7 @@ session through it. This page is about getting the record into your own hands â€
 which command answers which question, and what the data means once you have it.
 
 Everything here reads the same append-only log the matcher writes to,
-`~/.claude/stats/events.jsonl`, plus each session's transcript for token
+`$XDG_STATE/agent-ways/events.jsonl`, plus each session's transcript for token
 positions. Nothing here changes state; these are all observation commands. (For
 the full command reference, see [the ways CLI reference](../../reference/ways-cli.md).)
 
@@ -25,7 +25,7 @@ the full command reference, see [the ways CLI reference](../../reference/ways-cl
 
 ```mermaid
 flowchart TB
-    Log[("~/.claude/stats/events.jsonl<br/>append-only firing record")]
+    Log[("$XDG_STATE/agent-ways/events.jsonl<br/>append-only firing record")]
 
     List["<b>ways list</b><br/>this session, now"]
     Stats["<b>ways stats</b><br/>across all sessions"]

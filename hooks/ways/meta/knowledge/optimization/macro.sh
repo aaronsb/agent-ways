@@ -3,7 +3,7 @@
 # Runs ways suggest on all semantic ways and outputs a compact summary
 
 if ! command -v ways &>/dev/null; then
-  echo "**ways binary not found** — build with: \`make install\`"
+  echo "**ways binary not found** — build with: \`make setup\` in the agent-ways app dir (see docs/install-guide.md)"
   exit 0
 fi
 

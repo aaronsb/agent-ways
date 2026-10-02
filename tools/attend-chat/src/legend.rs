@@ -141,21 +141,6 @@ pub fn all_group_completions(
         .collect()
 }
 
-/// Find the best completion for `partial` among `known` groups.
-///
-/// Parallel to `best_completion` for agents — shared grammar, two
-/// distinct registries. The `-` is tolerated in group names so
-/// `#my-g` → `my-group` matches.
-pub fn best_group_completion<'a>(
-    partial: &str,
-    known: &'a [KnownGroup],
-) -> Option<&'a KnownGroup> {
-    let lc = partial.to_ascii_lowercase();
-    known
-        .iter()
-        .find(|k| k.group.name.to_ascii_lowercase().starts_with(&lc))
-}
-
 /// Parsed routing hint extracted from a message's first token.
 /// Either the message addresses a specific agent (`@Nick body`) or
 /// a focus group (`#group body`), or neither. The routing layer in

@@ -9,13 +9,10 @@ WAYS_BIN="${HOME}/.claude/bin/ways"
 # The app source (with the Makefile) lives in $XDG_DATA, not in the ~/.claude
 # projection — repairs run there, not in ~/.claude (ADR-142).
 APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
-# Prefer the 1.0 cache name; fall back to the legacy one for un-migrated installs
-# (must match paths::cache_root() in the binary so the probe checks where the
-# binary actually reads).
+# Must match paths::cache_root() in the binary so the probe checks where the
+# binary actually reads.
 _CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
-if [[ -d "${_CACHE}/agent-ways/user" ]]; then XDG_WAY="${_CACHE}/agent-ways/user"
-elif [[ -d "${_CACHE}/claude-ways/user" ]]; then XDG_WAY="${_CACHE}/claude-ways/user"
-else XDG_WAY="${_CACHE}/agent-ways/user"; fi
+XDG_WAY="${_CACHE}/agent-ways/user"
 
 # Nothing to check if this isn't a ways-enabled install
 [[ ! -d "${HOME}/.claude/hooks/ways" ]] && exit 0

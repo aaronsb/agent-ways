@@ -29,16 +29,10 @@ use std::path::{Path, PathBuf};
 /// The XDG application-directory name, shared by all four tiers.
 const APP: &str = "agent-ways";
 
-/// The pre-1.0 cache directory name, kept as a read-fallback for un-migrated
-/// installs (ADR-179 keeps the transition fallbacks after the migrator's
-/// removal).
-const LEGACY_CACHE: &str = "claude-ways";
-
 // ---------------------------------------------------------------------------
 // XDG base directories (spec defaults; Windows home handling via `home_dir`).
-// `xdg_cache_dir` already lives in `util`; the other three are defined here so
-// the taxonomy is self-contained. A later step folds `config`'s private copy
-// into this module.
+// Defined here so the taxonomy is self-contained. A later step folds `config`'s
+// private copy into this module.
 // ---------------------------------------------------------------------------
 
 /// Resolve an `$XDG_*` base, treating an empty or relative value as unset.
@@ -95,40 +89,10 @@ pub fn state_root() -> PathBuf {
     normalize_path_sep(&xdg_state_base().join(APP))
 }
 
-/// Derived state — corpus, embeddings, model. Regenerable; safe to delete.
-///
-/// During the 1.0 transition this is **read-fallback aware**: it prefers
-/// `$XDG_CACHE/agent-ways`, but if that doesn't exist yet while the legacy
-/// `$XDG_CACHE/claude-ways` does, it returns the legacy dir. So an un-migrated
-/// install keeps using its already-downloaded model + corpus (no re-fetch, no
-/// split-brain with the tooling that populated it). Once the dir carries the
-/// new name — the migrator renamed it, or the install was always 1.0+ — the
-/// preferred path wins. A fresh install gets the new name. Reads and writes
-/// both route through here, so they never diverge.
+/// Derived state — corpus, embeddings, model. Regenerable; safe to delete:
+/// `$XDG_CACHE/agent-ways`.
 pub fn cache_root() -> PathBuf {
-    resolve_cache(&xdg_cache_base())
-}
-
-/// Pure fallback resolution, factored out so it's testable without mutating the
-/// process-global `$XDG_CACHE_HOME`.
-fn resolve_cache(base: &Path) -> PathBuf {
-    let preferred = base.join(APP);
-    if preferred.exists() {
-        return normalize_path_sep(&preferred);
-    }
-    let legacy = base.join(LEGACY_CACHE);
-    if legacy.exists() {
-        return normalize_path_sep(&legacy);
-    }
-    normalize_path_sep(&preferred)
-}
-
-/// Every cache dir the app has written: `$XDG_CACHE/agent-ways` and the
-/// pre-1.0 `claude-ways`. Uninstall removes both; reads go through
-/// [`cache_root`].
-pub fn cache_roots_all() -> [PathBuf; 2] {
-    let base = xdg_cache_base();
-    [normalize_path_sep(&base.join(APP)), normalize_path_sep(&base.join(LEGACY_CACHE))]
+    normalize_path_sep(&xdg_cache_base().join(APP))
 }
 
 /// The Claude-Code-owned projection floor (`~/.claude`). What *stays*:
@@ -153,11 +117,6 @@ pub fn core_ways_root() -> PathBuf {
 /// Shipped binaries: `$XDG_DATA/agent-ways/bin`.
 pub fn bin_root() -> PathBuf {
     data_root().join("bin")
-}
-
-/// The lint frontmatter schema shipped with the app.
-pub fn frontmatter_schema() -> PathBuf {
-    core_ways_root().join("frontmatter-schema.yaml")
 }
 
 // --- user ($XDG_CONFIG) ---
@@ -185,8 +144,7 @@ pub fn current_config_dir() -> PathBuf {
     }
 }
 
-/// User config file: `$XDG_CONFIG/agent-ways/config.yaml` (migrated from the
-/// legacy `$XDG_CONFIG/ways/config.yaml` and `~/.claude/ways.json`).
+/// User config file: `$XDG_CONFIG/agent-ways/config.yaml`.
 pub fn user_config() -> PathBuf {
     config_root().join("config.yaml")
 }
@@ -194,16 +152,9 @@ pub fn user_config() -> PathBuf {
 // --- state ($XDG_STATE) ---
 
 /// Telemetry/event log: `$XDG_STATE/agent-ways/events.jsonl` (our telemetry).
-///
-/// Fallback-aware during the transition, mirroring [`cache_root`]: prefers the
-/// `$XDG_STATE` location, but if that doesn't exist yet while the legacy
-/// `~/.claude/stats/events.jsonl` does, returns the legacy file so an
-/// un-migrated install keeps appending to its existing history. Once the file
-/// sits under `$XDG_STATE` — lifted by the migrator, or written there from the
-/// start — the preferred path wins. Reads and the writer both route through
-/// here, so they never diverge.
+/// The Rust writer and every reader route through here.
 pub fn events_log() -> PathBuf {
-    resolve_events(&state_root(), &projection_root())
+    state_root().join("events.jsonl")
 }
 
 /// Append-only ledger of assembled compliance findings (ADR-201):
@@ -214,53 +165,16 @@ pub fn findings_ledger() -> PathBuf {
     state_root().join("findings.jsonl")
 }
 
-/// Pure fallback resolution for the event log, factored out for testing without
-/// touching `$XDG_STATE`/`$HOME`.
-fn resolve_events(state: &Path, projection: &Path) -> PathBuf {
-    let preferred = state.join("events.jsonl");
-    if preferred.exists() {
-        return preferred;
-    }
-    let legacy = projection.join("stats").join("events.jsonl");
-    if legacy.exists() {
-        return legacy;
-    }
-    preferred
-}
-
-/// Every existing event-log file a reader should union, newest-canonical first
-/// (ADR-153 §1, transitional). [`events_log`] resolves the single *write* target;
-/// this resolves the set to *read*. On a migrated install where the shell hooks
-/// were still hardcoding the legacy `~/.claude/stats/events.jsonl` (pre-fix),
-/// their `session_start` lines were orphaned in the legacy file while the Rust
-/// writer moved to `$XDG_STATE`. Reading both recovers those orphaned sessions
-/// without a backfill. The migrator *moved* `stats/` (it never copied), so the
-/// two files never overlap and the union is a plain concatenation — no dedup
-/// needed.
+/// The event-log files a reader should read: [`events_log`] when it exists.
 pub fn events_log_sources() -> Vec<PathBuf> {
-    resolve_event_sources(&state_root(), &projection_root())
-}
-
-/// Pure resolution for [`events_log_sources`], factored out for testing without
-/// touching `$XDG_STATE`/`$HOME`. Returns only files that exist, preferred
-/// (`$XDG_STATE`) before legacy, and never lists the same path twice.
-fn resolve_event_sources(state: &Path, projection: &Path) -> Vec<PathBuf> {
-    let preferred = state.join("events.jsonl");
-    let legacy = projection.join("stats").join("events.jsonl");
-    let mut out = Vec::new();
-    if preferred.exists() {
-        out.push(preferred.clone());
-    }
-    if legacy.exists() && legacy != preferred {
-        out.push(legacy);
-    }
-    out
+    let log = events_log();
+    if log.exists() { vec![log] } else { Vec::new() }
 }
 
 // --- cache ($XDG_CACHE) ---
 
 /// The embedding-engine working dir (model, corpus, manifest):
-/// `$XDG_CACHE/agent-ways/user` (was `claude-ways/user`).
+/// `$XDG_CACHE/agent-ways/user`.
 pub fn corpus_dir() -> PathBuf {
     cache_root().join("user")
 }
@@ -310,12 +224,10 @@ mod tests {
 
     #[test]
     fn roots_carry_the_app_name() {
-        // data/config/state are unconditional. cache is fallback-aware (it may
-        // resolve to the legacy dir on an un-migrated machine), so it is NOT
-        // asserted here — see cache_root_prefers_new_falls_back_to_legacy.
         assert!(data_root().ends_with("agent-ways"));
         assert!(config_root().ends_with("agent-ways"));
         assert!(state_root().ends_with("agent-ways"));
+        assert!(cache_root().ends_with("agent-ways"));
     }
 
     #[test]
@@ -327,77 +239,6 @@ mod tests {
         assert_eq!(project_slug("/x/SWA - Delivery"), "-x-SWA---Delivery");
         assert_eq!(project_slug("/x/é"), "-x--");
         assert_eq!(project_slug("/x/🦀"), "-x---");
-    }
-
-    #[test]
-    fn cache_root_prefers_new_falls_back_to_legacy() {
-        // Deterministic: drive the pure resolver with a controlled base dir
-        // instead of mutating $XDG_CACHE_HOME (process-global, races tests).
-        let base = std::env::temp_dir().join(format!("ways-cache-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-
-        // Neither exists → preferred (agent-ways).
-        assert!(resolve_cache(&base).ends_with("agent-ways"));
-        // Only legacy exists → legacy (so an un-migrated install keeps its cache).
-        std::fs::create_dir_all(base.join(LEGACY_CACHE)).unwrap();
-        assert!(resolve_cache(&base).ends_with(LEGACY_CACHE));
-        // New exists → new wins even with legacy present (post-migration).
-        std::fs::create_dir_all(base.join(APP)).unwrap();
-        assert!(resolve_cache(&base).ends_with(APP));
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn events_log_prefers_state_falls_back_to_legacy_stats() {
-        let base = std::env::temp_dir().join(format!("ways-events-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let state = base.join("state");
-        let projection = base.join(".claude");
-        std::fs::create_dir_all(&state).unwrap();
-        std::fs::create_dir_all(&projection).unwrap();
-
-        // Neither exists → preferred (state).
-        assert!(resolve_events(&state, &projection).starts_with(&state));
-        // Only legacy ~/.claude/stats/events.jsonl exists → legacy (continuity).
-        std::fs::create_dir_all(projection.join("stats")).unwrap();
-        std::fs::write(projection.join("stats/events.jsonl"), "{}\n").unwrap();
-        assert!(resolve_events(&state, &projection).starts_with(&projection));
-        // State events present → state wins (post-migration).
-        std::fs::write(state.join("events.jsonl"), "{}\n").unwrap();
-        assert!(resolve_events(&state, &projection).starts_with(&state));
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn event_sources_unions_state_and_orphaned_legacy() {
-        let base = std::env::temp_dir().join(format!("ways-evsrc-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let state = base.join("state");
-        let projection = base.join(".claude");
-        std::fs::create_dir_all(&state).unwrap();
-        std::fs::create_dir_all(projection.join("stats")).unwrap();
-
-        // Neither exists → empty (a reader over this is simply empty history).
-        assert!(resolve_event_sources(&state, &projection).is_empty());
-
-        // Only legacy → just legacy (un-migrated install).
-        std::fs::write(projection.join("stats/events.jsonl"), "{}\n").unwrap();
-        let only_legacy = resolve_event_sources(&state, &projection);
-        assert_eq!(only_legacy.len(), 1);
-        assert!(only_legacy[0].starts_with(&projection));
-
-        // Both present → union, preferred (state) first, legacy second. This is
-        // the post-migration orphaned-session_start case the union recovers.
-        std::fs::write(state.join("events.jsonl"), "{}\n").unwrap();
-        let both = resolve_event_sources(&state, &projection);
-        assert_eq!(both.len(), 2);
-        assert!(both[0].starts_with(&state));
-        assert!(both[1].starts_with(&projection));
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -418,10 +259,7 @@ mod tests {
     #[test]
     fn accessors_land_in_the_right_tier() {
         assert!(corpus_dir().ends_with("user"));
-        // corpus_dir's parent is the fallback-aware cache root (agent-ways or the
-        // legacy claude-ways), so only assert it's one of those — not a fixed name.
-        let cache_name = corpus_dir().parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
-        assert!(cache_name == APP || cache_name == LEGACY_CACHE, "unexpected cache dir: {cache_name}");
+        assert!(corpus_dir().parent().unwrap().ends_with(APP));
         assert!(events_log().ends_with("events.jsonl"));
         assert!(bin_root().ends_with("bin"));
     }

@@ -16,7 +16,7 @@ use crate::config::{Config, Target};
 use crate::paths;
 
 /// The names the app's directories carry. Nothing else is ever deleted.
-const APP_DIR_NAMES: &[&str] = &["agent-ways", "claude-ways"];
+const APP_DIR_NAMES: &[&str] = &["agent-ways"];
 
 /// Where things live, resolved from the environment once.
 #[derive(Debug, Clone)]
@@ -35,7 +35,7 @@ impl Roots {
             home: crate::util::home_dir(),
             projection: paths::projection_root(),
             data: paths::data_root(),
-            caches: paths::cache_roots_all().to_vec(),
+            caches: vec![paths::cache_root()],
             config: paths::config_root(),
             state: paths::state_root(),
         }
@@ -253,7 +253,7 @@ mod tests {
             home: base.to_path_buf(),
             projection: base.join(".claude"),
             data: base.join(data).join("agent-ways"),
-            caches: vec![base.join(".cache/agent-ways"), base.join(".cache/claude-ways")],
+            caches: vec![base.join(".cache/agent-ways")],
             config: base.join(config).join("agent-ways"),
             state: base.join(state).join("agent-ways"),
         };

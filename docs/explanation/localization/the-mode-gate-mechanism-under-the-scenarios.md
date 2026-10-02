@@ -17,10 +17,9 @@ note *Adopter localization lifecycle and tuning*; this is the operational map.
 
 ## The flag
 
-The resolved `Config.language`, default `en`/`auto`. It is *layered*: `output_language`
-in `~/.claude/ways.json` (Layer 1) is overridden by `language` in the user-scope
-`~/.config/ways/config.yaml` (Layer 2). So the effective switch is the user-scope
-`language` — the layer `ways-localize` writes. It is the only thing that writes a
+The resolved `Config.language`, default `en`/`auto`. It is *layered*: the project
+`ways.yaml` overrides the user-scope `~/.config/agent-ways/config.yaml`. So the
+effective switch is the user-scope `language` — the layer `ways-localize` writes. It is the only thing that writes a
 non-English value. It is
 read **once, upstream** — components do not each sniff for locale data; they consult the
 mode.

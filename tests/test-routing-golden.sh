@@ -27,7 +27,6 @@ NONE_MAX=0.30   # a `none` row must score below this
 
 CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}"
 CORPUS_DIR="$CACHE_BASE/agent-ways/user"
-[[ -d "$CORPUS_DIR" ]] || CORPUS_DIR="$CACHE_BASE/claude-ways/user"
 
 EMBED=""
 for c in "$CORPUS_DIR/way-embed" "$HOME/.claude/bin/way-embed" \

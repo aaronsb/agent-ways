@@ -69,7 +69,7 @@ fn best_score(rows: Option<&[(String, f64)]>, way_id: &str) -> Option<f64> {
 
 /// Whether the multilingual matching lane is enabled.
 ///
-/// The lane runs only in **localized mode** — `output_language` in ways.json set
+/// The lane runs only in **localized mode** — `output_language` in the user config set
 /// to a specific non-English language. English mode (`en` / `auto` / unset, the
 /// default) never loads the 768-dim multilingual model, regardless of whether a
 /// multi corpus is present (ADR-139). Both modes still match by embedding cosine;

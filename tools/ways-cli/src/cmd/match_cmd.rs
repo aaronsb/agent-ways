@@ -16,20 +16,10 @@ type Row = (String, ScorePair);
 /// multi score on another way (ADR-139). The multi column is a diagnostic
 /// display, dormant on English installs (all "—"), populated only when an
 /// adopter has localized via ways-localize.
-/// `--corpus PATH` scores that JSONL instead of the canonical corpus, so a dev
-/// checkout can be scored from a corpus built by `ways corpus --output DIR`
-/// without reprojecting it into `~/.claude` first.
-pub fn run(query: String, corpus: Option<String>) -> Result<()> {
-    let corpus_path = corpus.as_deref().map(std::path::Path::new);
-
-    if let Some(p) = corpus_path {
-        if !p.is_file() {
-            eprintln!("ERROR: corpus not found: {}", p.display());
-            std::process::exit(1);
-        }
-    }
-
-    let scores = super::scan::batch_embed_score_with(&query, corpus_path);
+/// The single-vector view, shown only as `run_late`'s fallback when
+/// late-interaction cannot run.
+fn run(query: String) -> Result<()> {
+    let scores = super::scan::batch_embed_score_with(&query, None);
 
     if !scores.any_ran() {
         eprintln!("ERROR: embedding engine unavailable.");
@@ -75,7 +65,7 @@ pub fn run(query: String, corpus: Option<String>) -> Result<()> {
     // an isolated corpus describes its own ways. The canonical file covers the
     // case where that sibling is absent.
     let canonical = crate::paths::corpus_dir();
-    let mut en_corpus = super::scan::sibling_corpus(corpus_path, &canonical, "ways-corpus-en.jsonl");
+    let mut en_corpus = super::scan::sibling_corpus(None, &canonical, "ways-corpus-en.jsonl");
     if !en_corpus.is_file() {
         en_corpus = canonical.join("ways-corpus-en.jsonl");
     }
@@ -120,7 +110,7 @@ pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
             "late-interaction unavailable for this query (surface too sparse to chunk, \
              or the embedding engine is not set up) — showing the single-vector view.\n"
         );
-        return run(query, None);
+        return run(query);
     };
 
     // Hand-format: `agent_fmt::Table` shrinks columns to the terminal width when

@@ -22,18 +22,11 @@ This document contains the help content for the `attend` command-line program.
 * [`attend leave`↴](#attend-leave)
 * [`attend channels`↴](#attend-channels)
 * [`attend channels list`↴](#attend-channels-list)
+* [`attend channels pin`↴](#attend-channels-pin)
+* [`attend channels unpin`↴](#attend-channels-unpin)
 * [`attend channels create`↴](#attend-channels-create)
 * [`attend channels describe`↴](#attend-channels-describe)
 * [`attend dissolve`↴](#attend-dissolve)
-* [`attend focus`↴](#attend-focus)
-* [`attend focus on`↴](#attend-focus-on)
-* [`attend focus off`↴](#attend-focus-off)
-* [`attend focus clear`↴](#attend-focus-clear)
-* [`attend focus pin`↴](#attend-focus-pin)
-* [`attend focus unpin`↴](#attend-focus-unpin)
-* [`attend focus dissolve`↴](#attend-focus-dissolve)
-* [`attend focus all`↴](#attend-focus-all)
-* [`attend focus list`↴](#attend-focus-list)
 * [`attend scene`↴](#attend-scene)
 * [`attend scenes`↴](#attend-scenes)
 * [`attend tune`↴](#attend-tune)
@@ -68,7 +61,6 @@ Active awareness for Claude Code sessions
 * `leave` — Leave a channel
 * `channels` — Channel lifecycle (default: list all, joined ones marked)
 * `dissolve` — Dissolve a channel (removes it for every member)
-* `focus` — Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
 * `scene` — Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
 * `scenes` — List available scenes
 * `tune` — Survey session history and derive engagement config
@@ -207,9 +199,8 @@ Send a signal to peer sessions (defaults to #open base channel)
 
 ###### **Options:**
 
-* `--broadcast` — Force broadcast (every peer + every Aaron session)
 * `--to <PATH>` — Scope send to a specific project path
-* `--channel <NAME>` — Scope send to a named channel (accepts `--focus` as a deprecated alias)
+* `--channel <NAME>` — Scope send to a named channel
 
 
 
@@ -225,9 +216,8 @@ Reply to the most recent peer message (auto-threaded)
 
 ###### **Options:**
 
-* `--broadcast` — Force broadcast
 * `--to <PATH>` — Scope send to a specific project path
-* `--channel <NAME>` — Scope send to a named channel (accepts `--focus` as a deprecated alias)
+* `--channel <NAME>` — Scope send to a named channel
 
 
 
@@ -275,13 +265,19 @@ Leave a channel
 
 Channel lifecycle (default: list all, joined ones marked)
 
-**Usage:** `attend channels [COMMAND]`
+**Usage:** `attend channels [OPTIONS] [COMMAND]`
 
 ###### **Subcommands:**
 
 * `list` — List all channels with joined marks (default)
+* `pin` — Pin a channel so it persists when empty
+* `unpin` — Unpin a channel; it is removed if empty
 * `create` — Create a channel without joining it (pinned so it persists empty)
 * `describe` — Set or replace a channel's single-line description
+
+###### **Options:**
+
+* `--joined` — List only the channels this session has joined (read-only: no cleanup)
 
 
 
@@ -290,6 +286,30 @@ Channel lifecycle (default: list all, joined ones marked)
 List all channels with joined marks (default)
 
 **Usage:** `attend channels list`
+
+
+
+## `attend channels pin`
+
+Pin a channel so it persists when empty
+
+**Usage:** `attend channels pin <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+
+
+
+## `attend channels unpin`
+
+Unpin a channel; it is removed if empty
+
+**Usage:** `attend channels unpin <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
 
 
 
@@ -328,113 +348,6 @@ Dissolve a channel (removes it for every member)
 ###### **Arguments:**
 
 * `<NAME>` — Channel name (with or without the # prefix)
-
-
-
-## `attend focus`
-
-Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
-
-**Usage:** `attend focus [COMMAND]`
-
-###### **Subcommands:**
-
-* `on` — Join a focus group
-* `off` — Leave a focus group
-* `clear` — Leave every joined group
-* `pin` — Pin a group so it persists across scene changes
-* `unpin` — Unpin a group
-* `dissolve` — Dissolve a group (remove for every peer)
-* `all` — Show every available group
-* `list` — List joined groups (default action)
-
-
-
-## `attend focus on`
-
-Join a focus group
-
-**Usage:** `attend focus on [OPTIONS] <NAME>`
-
-###### **Arguments:**
-
-* `<NAME>` — Group name
-
-###### **Options:**
-
-* `--pin` — Pin so it persists across scene changes
-
-
-
-## `attend focus off`
-
-Leave a focus group
-
-**Usage:** `attend focus off <NAME>`
-
-###### **Arguments:**
-
-* `<NAME>` — Group name
-
-
-
-## `attend focus clear`
-
-Leave every joined group
-
-**Usage:** `attend focus clear`
-
-
-
-## `attend focus pin`
-
-Pin a group so it persists across scene changes
-
-**Usage:** `attend focus pin <NAME>`
-
-###### **Arguments:**
-
-* `<NAME>`
-
-
-
-## `attend focus unpin`
-
-Unpin a group
-
-**Usage:** `attend focus unpin <NAME>`
-
-###### **Arguments:**
-
-* `<NAME>`
-
-
-
-## `attend focus dissolve`
-
-Dissolve a group (remove for every peer)
-
-**Usage:** `attend focus dissolve <NAME>`
-
-###### **Arguments:**
-
-* `<NAME>`
-
-
-
-## `attend focus all`
-
-Show every available group
-
-**Usage:** `attend focus all`
-
-
-
-## `attend focus list`
-
-List joined groups (default action)
-
-**Usage:** `attend focus list`
 
 
 

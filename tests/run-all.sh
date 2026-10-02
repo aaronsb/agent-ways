@@ -46,7 +46,7 @@ else
 fi
 
 # Embedding engine tests (if way-embed available)
-EMBED_BIN="$HOME/.cache/claude-ways/user/way-embed"
+EMBED_BIN="${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user/way-embed"
 if [[ -x "$EMBED_BIN" ]]; then
   run_suite "Embedding Engine Tests" bash "$REPO_ROOT/tools/way-embed/test-embedding.sh"
 else

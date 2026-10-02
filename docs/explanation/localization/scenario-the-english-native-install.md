@@ -25,8 +25,8 @@ sequenceDiagram
     participant W as agent-ways
     rect rgba(45,125,154,0.12)
     Op->>CC: settings.json language unset → English
-    Op->>W: make install
-    Note over W: ways.json output_language = en (default)
+    Op->>W: install (installer one-liner)
+    Note over W: output_language = en (default)
     end
     rect rgba(124,58,237,0.12)
     W->>W: build English corpus only
@@ -41,7 +41,7 @@ sequenceDiagram
 
 ## What each move is doing
 
-- **No language is set, so English mode is the default.** `ways.json` ships with
+- **No language is set, so English mode is the default.** The default config ships with
   `output_language: en`. There is no step to opt into; English *is* the built state.
 - **The build is English-only.** `make setup` fetches one model (the 384-dim English
   model) and builds one corpus. The 127 MB multilingual model is never downloaded — it

@@ -5,7 +5,7 @@
 //! is no body, no parsing, no schema. Consumers read mtime and compare
 //! against a grace window:
 //!
-//! - `groups::session_alive` (attend) gates focus-group membership
+//! - `attend_groups::member_alive` gates channel membership
 //!   cleanup on heartbeat freshness.
 //! - `chip::known_identities` (attend-chat) filters signal-derived
 //!   chips so dead peers stop polluting the legend after reload.

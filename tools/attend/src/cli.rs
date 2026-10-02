@@ -97,17 +97,13 @@ pub(crate) enum Commands {
 
     /// Send a signal to peer sessions (defaults to #open base channel)
     Send {
-        /// Force broadcast (every peer + every Aaron session)
-        #[arg(long)]
-        broadcast: bool,
-
         /// Scope send to a specific project path
         #[arg(long, value_name = "PATH")]
         to: Option<String>,
 
-        /// Scope send to a named channel (accepts `--focus` as a deprecated alias)
-        #[arg(long = "channel", alias = "focus", value_name = "NAME")]
-        focus: Option<String>,
+        /// Scope send to a named channel
+        #[arg(long, value_name = "NAME")]
+        channel: Option<String>,
 
         /// Thread reply to a specific signal id (use `attend reply` instead — it auto-threads)
         #[arg(long, value_name = "ID", hide = true)]
@@ -120,17 +116,13 @@ pub(crate) enum Commands {
 
     /// Reply to the most recent peer message (auto-threaded)
     Reply {
-        /// Force broadcast
-        #[arg(long)]
-        broadcast: bool,
-
         /// Scope send to a specific project path
         #[arg(long, value_name = "PATH")]
         to: Option<String>,
 
-        /// Scope send to a named channel (accepts `--focus` as a deprecated alias)
-        #[arg(long = "channel", alias = "focus", value_name = "NAME")]
-        focus: Option<String>,
+        /// Scope send to a named channel
+        #[arg(long, value_name = "NAME")]
+        channel: Option<String>,
 
         /// Message body (must follow all flags)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -161,6 +153,10 @@ pub(crate) enum Commands {
 
     /// Channel lifecycle (default: list all, joined ones marked)
     Channels {
+        /// List only the channels this session has joined (read-only: no cleanup)
+        #[arg(long)]
+        joined: bool,
+
         #[command(subcommand)]
         sub: Option<ChannelsCmd>,
     },
@@ -169,12 +165,6 @@ pub(crate) enum Commands {
     Dissolve {
         /// Channel name (with or without the # prefix)
         name: String,
-    },
-
-    /// Deprecated alias for the channel verbs (join/leave/channels/dissolve; ADR-173)
-    Focus {
-        #[command(subcommand)]
-        sub: Option<FocusCmd>,
     },
 
     /// Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
@@ -240,6 +230,18 @@ pub(crate) enum ChannelsCmd {
     /// List all channels with joined marks (default)
     List,
 
+    /// Pin a channel so it persists when empty
+    Pin {
+        /// Channel name (with or without the # prefix)
+        name: String,
+    },
+
+    /// Unpin a channel; it is removed if empty
+    Unpin {
+        /// Channel name (with or without the # prefix)
+        name: String,
+    },
+
     /// Create a channel without joining it (pinned so it persists empty)
     Create {
         /// Channel name (with or without the # prefix)
@@ -257,49 +259,6 @@ pub(crate) enum ChannelsCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         description: Vec<String>,
     },
-}
-
-/// Subcommands for `attend focus`. With no subcommand, defaults to `list`.
-#[derive(Subcommand)]
-pub(crate) enum FocusCmd {
-    /// Join a focus group
-    On {
-        /// Group name
-        name: String,
-        /// Pin so it persists across scene changes
-        #[arg(long)]
-        pin: bool,
-    },
-
-    /// Leave a focus group
-    Off {
-        /// Group name
-        name: String,
-    },
-
-    /// Leave every joined group
-    Clear,
-
-    /// Pin a group so it persists across scene changes
-    Pin {
-        name: String,
-    },
-
-    /// Unpin a group
-    Unpin {
-        name: String,
-    },
-
-    /// Dissolve a group (remove for every peer)
-    Dissolve {
-        name: String,
-    },
-
-    /// Show every available group
-    All,
-
-    /// List joined groups (default action)
-    List,
 }
 
 /// Subcommands for `attend permissions`. With no subcommand, defaults to `audit`.
@@ -346,11 +305,20 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    /// `attend focus` was a deprecated alias of the channel verbs (#692,
+    /// ADR-505); the whole subtree is gone and must be rejected.
+    #[test]
+    fn removed_focus_subtree_is_rejected() {
+        assert!(Cli::try_parse_from(["attend", "focus"]).is_err());
+        assert!(Cli::try_parse_from(["attend", "focus", "on", "deploy"]).is_err());
+        assert!(Cli::try_parse_from(["attend", "join", "deploy"]).is_ok());
+    }
+
     /// Every subcommand at every depth must carry a non-empty description.
     /// Without this guard, a doc comment could be dropped (or never added
     /// for a new variant) and the subcommand would silently render a
     /// blank line in `--help` and the markdown reference. Walks the
-    /// whole tree because nested subcommands (`config lint`, `focus on`)
+    /// whole tree because nested subcommands (`config lint`, `channels create`)
     /// are just as user-facing as the top-level ones.
     #[test]
     fn every_subcommand_has_a_description() {
