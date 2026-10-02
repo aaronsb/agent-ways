@@ -474,6 +474,7 @@ test-hooks:
 	@echo "Running hook script tests..."
 	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
+	@bash tests/gh-tasks-test.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."

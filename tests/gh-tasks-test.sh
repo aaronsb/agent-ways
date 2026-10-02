@@ -100,6 +100,12 @@ assert_eq "re-pull leaves file byte-identical" "$(cat "$STORE/gh-12.json")" "$be
 assert_empty "no delta whispered" "$("$GH_TASKS" whisper)"
 
 # ── 3. ownership ───────────────────────────────────────────────
+# An unowned pending task is auto-claimed by any idle teammate; the mirror
+# belongs to the head agent.
+assert_eq "a mirrored task is owned by the head agent" "$(jq -r .owner "$STORE/gh-12.json")" "team-lead"
+jq 'del(.owner)' "$STORE/gh-12.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-12.json"
+"$GH_TASKS" pull 2>/dev/null
+assert_eq "a re-pull gives an unowned mirror back to the head agent" "$(jq -r .owner "$STORE/gh-12.json")" "team-lead"
 jq '.status="in_progress" | .activeForm="Adding widget" | .owner="me"' "$STORE/gh-12.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-12.json"
 "$GH_TASKS" pull 2>/dev/null
 assert_eq "session in_progress survives pull" "$(jq -r .status "$STORE/gh-12.json")" "in_progress"
@@ -274,6 +280,7 @@ WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
   assert_eq "completed task left behind" "$([[ -e "$new/2.json" ]] && echo present || echo absent)" "absent"
   assert_eq "edge to a task not carried is dropped, edge to a carried one kept" "$(jq -c .blockedBy "$new/3.json")" '["1"]'
   assert_eq "mirrored task carried with its status" "$(jq -r .status "$new/gh-5.json")" "in_progress"
+  assert_eq "mirrored task carried to the head agent" "$(jq -r .owner "$new/gh-5.json")" "team-lead"
   out="$("$GH_TASKS" whisper 2>/dev/null)"
   assert_has "whisper names the carry once" "$out" "carried forward from session-prev0001: 3 task"
   "$GH_TASKS" attach resume 2>/dev/null
