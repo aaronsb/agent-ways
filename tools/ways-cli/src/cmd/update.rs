@@ -925,6 +925,7 @@ mod tests {
         assert!(version_older("0.4.0", "0.5.1"));
         assert!(version_older("0.9.0", "0.10.0"), "numeric, not string, order");
         assert!(version_older("1.2.0-rc1", "1.2.0"));
+        assert!(!version_older("1.2.0-rc1", "1.2.0-rc2"), "two pre-releases of one core are level");
         assert!(!version_older("0.5.1", "0.5.1"));
         assert!(!version_older("0.6.0", "0.5.1"), "a binary ahead of its source is not stale");
         assert!(version_older("garbage", "0.5.1"));
