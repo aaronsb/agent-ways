@@ -468,7 +468,9 @@ fn ctx_of(fx: &Fixture) -> Ctx {
 fn known(fx: &Fixture, rel: &str, ways: &[&str]) -> PathBuf {
     let dir = fx.dir(rel);
     let path = dir.display().to_string();
-    fx.file(&format!(".claude/projects/{}/sessions-index.json", claude_sessions::project_slug(&path)), &format!("{{\"originalPath\": \"{path}\"}}"));
+    // Serialized, not formatted: a Windows path's backslashes need escaping.
+    let index = serde_json::json!({ "originalPath": path }).to_string();
+    fx.file(&format!(".claude/projects/{}/sessions-index.json", claude_sessions::project_slug(&path)), &index);
     fx.dir(&format!("{rel}/.claude/ways"));
     for id in ways {
         let name = id.rsplit('/').next().unwrap();
