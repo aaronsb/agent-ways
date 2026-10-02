@@ -92,7 +92,9 @@ impl HookInput {
 
     /// The request `event` makes of this payload.
     pub fn request(&self, event: HookEvent) -> Request {
-        let Some(session) = self.text("/session_id") else {
+        // Every event builds paths under the sessions root from the id, so
+        // only a plain id is used; anything else is treated as absent.
+        let Some(session) = self.text("/session_id").filter(|s| crate::session::is_plain_session_id(s)) else {
             // Clearing with no session id logs the start and clears nothing.
             return match event {
                 HookEvent::SessionStart => Request::SessionStart { session: None },
@@ -265,6 +267,10 @@ mod tests {
     fn no_session_no_work() {
         for e in [E::Prompt, E::State, E::Command, E::File, E::Task, E::PostTool, E::Queued, E::Stop, E::SubagentStart, E::TasksActive] {
             assert_eq!(req(e, r#"{"prompt":"x","transcript_path":"/t"}"#), Request::Skip, "{e:?}");
+            // An id that would leave the sessions root is no id.
+            let escaping = r#"{"session_id":"../victim","prompt":"x","transcript_path":"/t"}"#;
+            assert_eq!(req(e, escaping), Request::Skip, "{e:?}");
         }
+        assert_eq!(req(E::SessionStart, r#"{"session_id":"../x"}"#), Request::SessionStart { session: None });
     }
 }

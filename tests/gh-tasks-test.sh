@@ -20,12 +20,11 @@ GUARD="$REPO_ROOT/hooks/ways/issues-task-created.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# gh-tasks reads the sessions root from `ways sessions-root`: put the build
-# named by $WAYS_TEST_BIN (default tools/target/debug/ways) first on PATH.
+# gh-tasks reads the sessions root from `ways sessions-root`; WAYS_BIN points
+# it at the build named by $WAYS_TEST_BIN (default tools/target/debug/ways).
 WAYS_TEST_BIN="${WAYS_TEST_BIN:-$REPO_ROOT/tools/target/debug/ways}"
 [[ -x "$WAYS_TEST_BIN" ]] || { echo "  FAIL: no ways binary at $WAYS_TEST_BIN (cargo build -p ways)"; exit 1; }
-mkdir -p "$TMP/bin" && ln -s "$WAYS_TEST_BIN" "$TMP/bin/ways"
-export PATH="$TMP/bin:$PATH"
+export WAYS_BIN="$WAYS_TEST_BIN"
 
 export CLAUDE_CONFIG_DIR="$TMP/config"
 export XDG_RUNTIME_DIR="$TMP/runtime"
