@@ -66,12 +66,25 @@ pub fn lock_path(target: &Path) -> PathBuf {
 pub struct Lock {
     path: PathBuf,
     file: Option<File>,
+    /// Leave the lock file in place on release ([`Lock::acquire_kept`]).
+    keep: bool,
 }
 
 impl Lock {
     /// Take the lock on `target`, waiting while another holder has it.
     pub fn acquire(target: &Path) -> io::Result<Lock> {
         Self::take(target, true).map(|l| l.expect("a blocking take always locks"))
+    }
+
+    /// Take the lock on `target`, waiting, and leave the lock file in place
+    /// when released. For a lock that older binaries also take with a plain
+    /// open and lock and never unlink: with the file never removed, every
+    /// holder locks the same inode, so a waiter from either side cannot end up
+    /// on an unlinked file beside a newer holder. The file stays behind.
+    pub fn acquire_kept(target: &Path) -> io::Result<Lock> {
+        let mut lock = Self::acquire(target)?;
+        lock.keep = true;
+        Ok(lock)
     }
 
     /// Take the lock on `target` if it is free: `Ok(None)` while another
@@ -97,7 +110,7 @@ impl Lock {
                 }
             }
             if same_file(&file, &path) {
-                return Ok(Some(Lock { path, file: Some(file) }));
+                return Ok(Some(Lock { path, file: Some(file), keep: false }));
             }
         }
     }
@@ -148,6 +161,10 @@ fn same_file(_file: &File, _path: &Path) -> bool {
 
 impl Drop for Lock {
     fn drop(&mut self) {
+        if self.keep {
+            drop(self.file.take());
+            return;
+        }
         #[cfg(unix)]
         {
             // Unlinked while held; the OS lock goes with the handle after.
@@ -270,6 +287,18 @@ pub fn create_new(path: &Path, body: &str) -> Result<bool, WriteError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A kept lock leaves its file in place on release, so a holder that never
+    /// unlinks (an older binary) and a newer one always lock the same inode.
+    #[test]
+    fn a_kept_lock_leaves_its_file_on_release() {
+        let d = tmp("kept-lock");
+        let target = d.join("way");
+        drop(Lock::acquire_kept(&target).unwrap());
+        assert!(lock_path(&target).is_file(), "the kept lock file stays");
+        drop(Lock::acquire_kept(&target).unwrap());
+        assert!(lock_path(&target).is_file());
+    }
 
     #[test]
     fn try_acquire_refuses_while_held_and_frees_on_drop() {
