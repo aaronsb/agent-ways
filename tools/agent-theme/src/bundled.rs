@@ -101,14 +101,7 @@ pub fn user_dir() -> Option<PathBuf> {
     Some(base.join("agent-ways").join("themes"))
 }
 
-/// The file beside the user themes that names the active one: its first
-/// non-empty line is a theme name.
-pub fn active_file(dir: &Path) -> PathBuf {
-    dir.join("active")
-}
-
-/// The active theme's name, when `dir` names one.
-pub fn active_name(dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(active_file(dir)).ok()?;
-    text.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string)
-}
+/// The name of the default theme: the terminal's own 16 colours, which is
+/// no file. The active choice is a settings key (`theme.active` in ways'
+/// registry, ADR-503); this crate reads no settings file.
+pub const TERMINAL: &str = "terminal";

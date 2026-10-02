@@ -1,0 +1,140 @@
+agent-tui frame 100x30
+| 1 ways  ●2 ↺    2 matching    3 gate    4 install    5 theme                                       |
+|┌ ways settings — ~/proj — review ────────────────────┐┌detail─────────────────────────────────────┐|
+|│▌    enabled               true → false              ││ways.enabled                               │|
+|│   ▾ project               ●1                        ││                                           │|
+|│     ▾ itops               ●1                        ││Whether hooks inject ways at all.          │|
+|│         incident          true → false              ││                                           │|
+|│                                                     ││Set false in a project's .claude/ways.yaml │|
+|│                                                     ││to switch ways off for that project: hooks │|
+|│                                                     ││inject nothing there (ADR-184).            │|
+|│                                                     ││                                           │|
+|│                                                     ││change    true → false                     │|
+|│                                                     ││from      default layer                    │|
+|│                                                     ││to        user layer                       │|
+|│                                                     ││file      ~/.config/agent-ways/config.yaml │|
+|│                                                     ││key       ways.enabled                     │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
+| review  a apply ways │ X discard ways │ Esc back  read-only in review; Esc to edit                 |
+styles
+  0   0-7   Black Cyan BOLD
+  0   8-13  Black Yellow BOLD
+  0  16-27  White DarkGray DIM
+  0  30-37  White DarkGray DIM
+  0  40-50  White DarkGray DIM
+  0  53-61  White DarkGray DIM
+  1   0-0   - - DIM
+  1   1-33  Blue - BOLD|DIM
+  1  34-55  - - DIM
+  1  56-61  Blue - BOLD|DIM
+  1  62-99  - - DIM
+  2   0-0   - - DIM
+  2   1-1   Cyan - BOLD|REVERSED
+  2   2-27  - - BOLD|REVERSED
+  2  28-31  - - BOLD|DIM|REVERSED|CROSSED_OUT
+  2  32-34  - - BOLD|REVERSED
+  2  35-39  Green - BOLD|REVERSED
+  2  40-53  - - BOLD|REVERSED
+  2  54-55  - - DIM
+  2  56-67  - - BOLD
+  2  99-99  - - DIM
+  3   0-0   - - DIM
+  3   4-12  - - BOLD
+  3  28-29  Yellow - -
+  3  54-55  - - DIM
+  3  99-99  - - DIM
+  4   0-0   - - DIM
+  4   4-12  - - BOLD
+  4  28-29  Yellow - -
+  4  54-55  - - DIM
+  4  99-99  - - DIM
+  5   0-0   - - DIM
+  5  28-31  - - DIM|CROSSED_OUT
+  5  35-39  Green - BOLD
+  5  54-55  - - DIM
+  5  99-99  - - DIM
+  6   0-0   - - DIM
+  6  54-55  - - DIM
+  6  99-99  - - DIM
+  7   0-0   - - DIM
+  7  54-55  - - DIM
+  7  99-99  - - DIM
+  8   0-0   - - DIM
+  8  54-55  - - DIM
+  8  99-99  - - DIM
+  9   0-0   - - DIM
+  9  54-55  - - DIM
+  9  99-99  - - DIM
+ 10   0-0   - - DIM
+ 10  54-65  - - DIM
+ 10  66-69  - - DIM|CROSSED_OUT
+ 10  73-77  Green - BOLD
+ 10  99-99  - - DIM
+ 11   0-0   - - DIM
+ 11  54-65  - - DIM
+ 11  99-99  - - DIM
+ 12   0-0   - - DIM
+ 12  54-65  - - DIM
+ 12  99-99  - - DIM
+ 13   0-0   - - DIM
+ 13  54-65  - - DIM
+ 13  99-99  - - DIM
+ 14   0-0   - - DIM
+ 14  54-65  - - DIM
+ 14  99-99  - - DIM
+ 15   0-0   - - DIM
+ 15  54-55  - - DIM
+ 15  99-99  - - DIM
+ 16   0-0   - - DIM
+ 16  54-55  - - DIM
+ 16  99-99  - - DIM
+ 17   0-0   - - DIM
+ 17  54-55  - - DIM
+ 17  99-99  - - DIM
+ 18   0-0   - - DIM
+ 18  54-55  - - DIM
+ 18  99-99  - - DIM
+ 19   0-0   - - DIM
+ 19  54-55  - - DIM
+ 19  99-99  - - DIM
+ 20   0-0   - - DIM
+ 20  54-55  - - DIM
+ 20  99-99  - - DIM
+ 21   0-0   - - DIM
+ 21  54-55  - - DIM
+ 21  99-99  - - DIM
+ 22   0-0   - - DIM
+ 22  54-55  - - DIM
+ 22  99-99  - - DIM
+ 23   0-0   - - DIM
+ 23  54-55  - - DIM
+ 23  99-99  - - DIM
+ 24   0-0   - - DIM
+ 24  54-55  - - DIM
+ 24  99-99  - - DIM
+ 25   0-0   - - DIM
+ 25  54-55  - - DIM
+ 25  99-99  - - DIM
+ 26   0-0   - - DIM
+ 26  54-55  - - DIM
+ 26  99-99  - - DIM
+ 27   0-0   - - DIM
+ 27  54-55  - - DIM
+ 27  99-99  - - DIM
+ 28   0-99  - - DIM
+ 29   0-7   Black LightRed BOLD
+ 29  21-23  - - DIM
+ 29  38-40  - - DIM

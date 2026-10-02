@@ -7,11 +7,21 @@ use std::path::PathBuf;
 /// Runs `ways-agent` with `args` and exits with its status.
 pub fn run(args: &[String]) -> Result<()> {
     let bin = resolve().context("ways-agent is not installed; run `ways update` to install it")?;
-    let status = std::process::Command::new(&bin)
-        .args(args)
-        .status()
-        .with_context(|| format!("running {}", bin.display()))?;
-    std::process::exit(status.code().unwrap_or(1));
+    // On Unix, become ways-agent: no process in between holds its pipes or
+    // outlives a signal sent to it.
+    #[cfg(unix)]
+    {
+        let e = std::os::unix::process::CommandExt::exec(std::process::Command::new(&bin).args(args));
+        Err(e).with_context(|| format!("running {}", bin.display()))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = std::process::Command::new(&bin)
+            .args(args)
+            .status()
+            .with_context(|| format!("running {}", bin.display()))?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }
 
 /// The `ways-agent` binary, found the way hooks find it to start the agent.

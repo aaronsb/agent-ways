@@ -33,8 +33,15 @@ claude-sessions = { path = "../claude-sessions" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
 ways-agent-core = { path = "../ways-agent-core" }
 agent-settings = { path = "../agent-settings" }
+# The settings screens (ADR-504 §8). Linked into `ways`, never called on a
+# hook path (§11).
+agent-tui = { path = "../agent-tui" }
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess).
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# A pty for the test that signals the settings screens mid-apply.
+libc = "0.2"

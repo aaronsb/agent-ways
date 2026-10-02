@@ -1,0 +1,171 @@
+agent-tui frame 100x30
+| 1 ways    2 matching    3 gate    4 install    5 theme  ●1                                         |
+|┌ edit mine ● (copy of nord, unwritten) ──────────────┐┌slot───────────────────────────────────────┐|
+|│▌ bg              #2e3440                            ││bg     #2e3440                             │|
+|│  fg              #d8dee9                            ││body         #d8dee9 moved to read         │|
+|│  dim             #4c566a                            ││                                           │|
+|│  subtle          #3b4252                            ││ H                     ┃              220° │|
+|│  accent          #b48ead                            ││ S      ┃                              16% │|
+|│  info            #81a1c1                            ││ L        ┃                            22% │|
+|│  ok              #a3be8c                            ││ # #2e3440  # or e types it                │|
+|│  warn            #d08770                            ││                                           │|
+|│  err             #bf616a                            ││in context                                 │|
+|│  alt       ┌quit with unsaved changes───────────────────────────────────────────────┐ion         │|
+|│  kind      │                                                                        │dy          │|
+|│  background│ 1 unsaved in 1 tabs                                                    │            │|
+|│            │   theme       ●1  edits to mine                                        │y           │|
+|│            │                                                                        │            │|
+|│            │  › Back (Esc)      Review theme (r)      Quit and discard all (D)      │            │|
+|│            └────────────────────────────────────────────────────────────────────────┘            │|
+|│                                                     ││                                           │|
+|│                                                     ││    Save ^S   unsaved                      │|
+|│                                                     ││writes    ~/.config/agent-ways/themes/mine.│|
+|│                                                     ││          theme                            │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
+| quit   Esc back · r review · D quit and discard all                                                |
+styles
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  White Blue -
+  0  34-44  White Blue -
+  0  47-55  Black Cyan BOLD
+  0  56-59  Black Yellow BOLD
+  1   0-0   - - DIM
+  1   1-39  Blue - BOLD|DIM
+  1  40-55  - - DIM
+  1  56-59  Blue - BOLD|DIM
+  1  60-99  - - DIM
+  2   0-0   - - DIM
+  2   1-1   Cyan - BOLD|REVERSED
+  2   2-13  - - BOLD|REVERSED
+  2  14-16  - Black BOLD|REVERSED
+  2  17-53  - - BOLD|REVERSED
+  2  54-55  - - DIM
+  2  56-59  - - BOLD
+  2  60-61  - Black -
+  2  99-99  - - DIM
+  3   0-0   - - DIM
+  3  14-16  - Gray -
+  3  54-65  - - DIM
+  3  66-67  - Gray -
+  3  99-99  - - DIM
+  4   0-0   - - DIM
+  4  14-16  - DarkGray -
+  4  54-55  - - DIM
+  4  99-99  - - DIM
+  5   0-0   - - DIM
+  5  14-16  - DarkGray -
+  5  54-58  - - DIM
+  5  59-78  - Black -
+  5  79-79  White Black BOLD
+  5  80-92  - Black -
+  5  99-99  - - DIM
+  6   0-0   - - DIM
+  6  14-16  - DarkGray -
+  6  54-58  - - DIM
+  6  59-63  - Black -
+  6  64-64  White Black BOLD
+  6  65-92  - Black -
+  6  99-99  - - DIM
+  7   0-0   - - DIM
+  7  14-16  - DarkGray -
+  7  54-58  - - DIM
+  7  59-65  - Black -
+  7  66-66  White Black BOLD
+  7  67-67  - Black -
+  7  68-82  - DarkGray -
+  7  83-90  - Gray -
+  7  91-92  - White -
+  7  99-99  - - DIM
+  8   0-0   - - DIM
+  8  14-16  - DarkGray -
+  8  54-58  - - DIM
+  8  66-82  - - DIM|ITALIC
+  8  99-99  - - DIM
+  9   0-0   - - DIM
+  9  14-16  - DarkGray -
+  9  54-55  - - DIM
+  9  99-99  - - DIM
+ 10   0-0   - - DIM
+ 10  14-16  - DarkGray -
+ 10  54-55  - - DIM
+ 10  56-65  - - BOLD
+ 10  99-99  - - DIM
+ 11   0-0   - - DIM
+ 11  13-13  Blue - -
+ 11  14-38  Blue - BOLD
+ 11  39-86  Blue - -
+ 11  87-89  - - DIM
+ 11  99-99  - - DIM
+ 12   0-0   - - DIM
+ 12  13-13  Blue - -
+ 12  86-86  Blue - -
+ 12  87-89  Gray - -
+ 12  99-99  - - DIM
+ 13   0-0   - - DIM
+ 13  13-13  Blue - -
+ 13  14-33  Yellow - BOLD
+ 13  86-86  Blue - -
+ 13  99-99  - - DIM
+ 14   0-0   - - DIM
+ 14  13-13  Blue - -
+ 14  29-30  Yellow - BOLD
+ 14  31-45  - - DIM|ITALIC
+ 14  86-86  Blue - -
+ 14  87-88  Black Green BOLD
+ 14  99-99  - - DIM
+ 15   0-0   - - DIM
+ 15  13-13  Blue - -
+ 15  86-86  Blue - -
+ 15  99-99  - - DIM
+ 16   0-0   - - DIM
+ 16  13-13  Blue - -
+ 16  15-28  White Blue BOLD
+ 16  31-50  Black Cyan -
+ 16  53-80  White Red -
+ 16  86-86  Blue - -
+ 16  99-99  - - DIM
+ 17   0-0   - - DIM
+ 17  13-86  Blue - -
+ 17  99-99  - - DIM
+ 18   0-0   - - DIM
+ 18  54-55  - - DIM
+ 18  99-99  - - DIM
+ 19   0-0   - - DIM
+ 19  54-55  - - DIM
+ 19  57-67  Black Green -
+ 19  70-76  Yellow - BOLD
+ 19  99-99  - - DIM
+ 20   0-0   - - DIM
+ 20  54-99  - - DIM
+ 21   0-0   - - DIM
+ 21  54-55  - - DIM
+ 21  66-70  - - DIM
+ 21  99-99  - - DIM
+ 22   0-0   - - DIM
+ 22  54-55  - - DIM
+ 22  99-99  - - DIM
+ 23   0-0   - - DIM
+ 23  54-55  - - DIM
+ 23  99-99  - - DIM
+ 24   0-0   - - DIM
+ 24  54-55  - - DIM
+ 24  99-99  - - DIM
+ 25   0-0   - - DIM
+ 25  54-55  - - DIM
+ 25  99-99  - - DIM
+ 26   0-0   - - DIM
+ 26  54-55  - - DIM
+ 26  99-99  - - DIM
+ 27   0-0   - - DIM
+ 27  54-55  - - DIM
+ 27  99-99  - - DIM
+ 28   0-99  - - DIM
+ 29   0-5   Black Yellow BOLD
+ 29   6-51  - - DIM|ITALIC

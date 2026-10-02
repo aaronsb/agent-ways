@@ -353,9 +353,23 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Read and change settings through their files (ADR-503). Exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden, 5 write failed
-    #[command(disable_help_subcommand = true)]
+    /// Read and change settings through their files (ADR-503); alone on a terminal, the settings screens. Exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden, 5 write failed
+    #[command(disable_help_subcommand = true, args_conflicts_with_subcommands = true)]
     Settings {
+        /// Open the screens on this tab: ways, matching, gate, install or theme
+        tab: Option<String>,
+        /// The project whose .claude/ways.yaml the screens read and write
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Test only: feed this key script to the screens, headless; repeatable. It cannot type into a masked entry
+        #[arg(long, hide = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
+        keys: Vec<String>,
+        /// Print the frame at WIDTHxHEIGHT, headless, in the test kit's frame format
+        #[arg(long, hide = true)]
+        snap: Option<String>,
+        /// The colour depth to draw at: truecolor, 256, 16 or none
+        #[arg(long, hide = true)]
+        depth: Option<String>,
         #[command(subcommand)]
         action: Option<SettingsCommand>,
     },
@@ -1019,10 +1033,11 @@ fn run() -> Result<()> {
                 Ok(())
             }
         },
-        Commands::Settings { action } => {
+        Commands::Settings { tab, project, keys, snap, depth, action } => {
             use cmd::settings as st;
             cmd::settings::exit_with(match action {
-                None => st::bare(),
+                None if tab.is_none() && project.is_none() && keys.is_empty() && snap.is_none() => st::bare(),
+                None => st::tui::open(&st::tui::Open { tab, project, keys, snap, depth }),
                 Some(SettingsCommand::Get { key, json, file, project }) => st::get(&key, json, file.as_deref(), project.as_deref()),
                 Some(SettingsCommand::Set { key, value, project }) => st::set(&key, &value, project.as_deref()),
                 Some(SettingsCommand::Unset { key, project }) => st::unset(&key, project.as_deref()),

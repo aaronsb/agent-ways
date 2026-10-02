@@ -274,3 +274,7 @@ The default theme is the 16-colour terminal palette: the status roles are the te
 ## Note (2026-10-02): the hooks call `ways hook <event>`
 
 §11's list of the commands hooks run is out of date. Since #702 (PR #730) every script under `hooks/ways/` is an adapter that runs `ways hook <event>`, which reads the hook's JSON payload on stdin. The events are `prompt`, `state`, `command`, `file`, `task`, `post-tool`, `queued`, `stop`, `subagent-start`, `session-start` and `tasks-active`; they reach the same scan and show code §11 names. The postcheck loop §11 left in `check-post.sh` as a follow-up now lives in the binary as the post-tool scan. `ways show way --budget-used` and `--subagent`, and `ways response-topics-path`, which only hooks called, are removed. `attend inbox --drain` on Stop is unchanged.
+
+## Note (2026-10-01): the active theme is a settings key
+
+The settings screens (#697) settle §5's active choice. It is the key `theme.active` in the user `config.yaml`, in ways' schema (ADR-503), beside `theme.shape`, which names the lozenge caps. The theme tab writes it through the settings writer, as `ways settings set theme.active <name>` does. A reader takes the name from the registry and passes it to `agent_theme::Painter::named`; `agent-theme` reads no settings file. `terminal` names the 16-colour default. The provisional `themes/active` file of #711 is not read, and there is no transition read (ADR-506). The `theme` section is not among the sections the hook commands load (§11).

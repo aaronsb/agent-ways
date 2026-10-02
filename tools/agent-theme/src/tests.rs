@@ -101,7 +101,9 @@ fn user_files_add_and_override_bundled_themes() {
     std::fs::write(dir.join("mine.toml"), to_text(&extra)).unwrap();
     std::fs::write(dir.join("broken.theme"), "THEME_NAME=\"broken\"\n").unwrap();
     std::fs::write(dir.join("ignored.txt"), "x").unwrap();
-    std::fs::write(active_file(&dir), "\n  mine \n").unwrap();
+    // The provisional `active` file of #711 is no longer read: the choice
+    // is the `theme.active` settings key (ADR-503).
+    std::fs::write(dir.join("active"), "mine\n").unwrap();
 
     let set = ThemeSet::load(Some(&dir));
     assert_eq!(set.get("nord").unwrap().label, "My Nord");
@@ -112,11 +114,12 @@ fn user_files_add_and_override_bundled_themes() {
     assert_eq!(set.rejected.len(), 1);
     assert!(set.rejected[0].0.ends_with("broken.theme"));
     assert!(set.get("broken").is_none());
-    assert_eq!(active_name(&dir).as_deref(), Some("mine"));
+    assert!(set.get("active").is_none(), "the old choice file is not a theme");
 
     assert_eq!(ThemeSet::load(None).list().count(), BUNDLED.len());
     assert_eq!(ThemeSet::load(Some(&dir.join("missing"))).list().count(), BUNDLED.len());
-    assert_eq!(active_name(&dir.join("missing")), None);
+    // With the old choice file present and no name given, the default.
+    assert_eq!(Painter::named_in(None, &dir, ColorDepth::TrueColor), (Painter::terminal(ColorDepth::TrueColor), None));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -353,26 +356,24 @@ fn no_choice_is_the_terminal_palette_at_every_depth() {
 }
 
 #[test]
-fn active_in_reads_the_choice_and_warns_when_it_cannot_be_honoured() {
+fn named_in_takes_the_choice_and_warns_when_it_cannot_be_honoured() {
     let dir = scratch_dir("active");
     let tc = ColorDepth::TrueColor;
-    // No choice: the default, silently.
-    assert_eq!(Painter::active_in(&dir, tc), (Painter::terminal(tc), None));
+    // No choice, or the default's name: the default, silently.
+    assert_eq!(Painter::named_in(None, &dir, tc), (Painter::terminal(tc), None));
+    assert_eq!(Painter::named_in(Some(TERMINAL), &dir, tc), (Painter::terminal(tc), None));
     // A bundled theme by name, and its 16-colour fallback.
-    std::fs::write(active_file(&dir), "dracula\n").unwrap();
     let dracula = ThemeSet::bundled().get("dracula").unwrap().clone();
-    assert_eq!(Painter::active_in(&dir, tc), (Painter::themed(&dracula, tc), None));
-    assert_eq!(Painter::active_in(&dir, ColorDepth::Ansi16).0, Painter::terminal(ColorDepth::Ansi16));
+    assert_eq!(Painter::named_in(Some("dracula"), &dir, tc), (Painter::themed(&dracula, tc), None));
+    assert_eq!(Painter::named_in(Some("dracula"), &dir, ColorDepth::Ansi16).0, Painter::terminal(ColorDepth::Ansi16));
     // A name that does not exist.
-    std::fs::write(active_file(&dir), "nope\n").unwrap();
-    let (p, w) = Painter::active_in(&dir, tc);
+    let (p, w) = Painter::named_in(Some("nope"), &dir, tc);
     assert_eq!(p, Painter::terminal(tc));
     assert!(w.unwrap().contains("`nope` not found"));
     // A broken user override of a bundled name: the bundled one, with a warning.
-    std::fs::write(active_file(&dir), "nord\n").unwrap();
     std::fs::write(dir.join("nord.theme"), "THEME_NAME=\"nord\"\n").unwrap();
     let nord = ThemeSet::bundled().get("nord").unwrap().clone();
-    let (p, w) = Painter::active_in(&dir, tc);
+    let (p, w) = Painter::named_in(Some("nord"), &dir, tc);
     assert_eq!(p, Painter::themed(&nord, tc));
     let w = w.unwrap();
     assert!(w.contains("nord.theme did not load") && w.contains("bundled"), "{w}");

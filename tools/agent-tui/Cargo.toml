@@ -8,3 +8,17 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "agent_tui"
 path = "src/lib.rs"
+
+# The shell knows nothing about ways or attend (ADR-504 §3): colour comes
+# from agent-theme, and an adapter supplies the content, the writes and the
+# commands.
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
+agent-theme = { path = "../agent-theme", features = ["ratatui"] }
+# The termination signals the run loop restores the terminal on.
+signal-hook = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+# killpg, for the process group of a command in flight, and tcgetattr, to
+# see a terminal that hung up.
+libc = "0.2"
