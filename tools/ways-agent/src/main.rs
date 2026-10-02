@@ -228,8 +228,8 @@ fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: 
         Some(r) => keys::record_check(provider, &keys::CheckRecord::now(r.record_word(), &model, &source)),
         None => keys::clear_check(provider),
     }
-    if std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty()) {
-        println!("note: ${} is set and overrides this file", provider.key_env());
+    if keys::env_set(provider) {
+        println!("note: ${} is set and overrides this file for `ways agent` commands; hooks use the file", provider.key_env());
     }
     let Some(result) = result else {
         println!("not checked: the agent checks it on first use, and gates only once it passes");
@@ -274,8 +274,8 @@ fn key_remove(provider: Provider) -> Result<ExitCode> {
     } else {
         println!("no stored {provider} key");
     }
-    if std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty()) {
-        println!("note: ${} is still set and still supplies a key", provider.key_env());
+    if keys::env_set(provider) {
+        println!("note: ${} is still set and supplies a key to `ways agent` commands; hooks use the file", provider.key_env());
     }
     Ok(ExitCode::SUCCESS)
 }

@@ -90,7 +90,7 @@ pub fn setup() -> Result<()> {
     };
     println!("{warning}");
     if let Readiness::NoKey(_) = state {
-        for p in Provider::ALL.into_iter().filter(|p| std::env::var(p.key_env()).is_ok_and(|v| !v.trim().is_empty())) {
+        for p in Provider::ALL.into_iter().filter(|p| keys::env_set(*p)) {
             println!("${} is set, but hooks read only the key file: add it there.", p.key_env());
         }
     }

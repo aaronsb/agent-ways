@@ -42,10 +42,16 @@ pub fn locate(provider: Provider) -> Option<Source> {
 }
 
 fn locate_in(provider: Provider, dir: &Path) -> Option<Source> {
-    if std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty()) {
+    if env_set(provider) {
         return Some(Source::Env(provider.key_env()));
     }
     locate_file_in(provider, dir).map(Source::File)
+}
+
+/// True when the provider's key variable is set. It overrides the file for
+/// `ways agent` commands and a hand-started agent; hooks use the file.
+pub fn env_set(provider: Provider) -> bool {
+    std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty())
 }
 
 /// The provider's key file, ignoring the environment. The hook gate and the
