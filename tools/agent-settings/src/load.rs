@@ -195,12 +195,26 @@ fn file_keys<'a>(schema: &'a Schema, file: &str) -> Vec<&'a KeySpec> {
 }
 
 /// The fail-closed reading of the raw value at `path`, if its key has one.
+/// A mapping no key names is a unit with keys inside it: it keeps the closed
+/// reading of each switch in it, so a bad value beside a switch never
+/// switches it back on.
 fn closed(keys: &[&KeySpec], scope: LayerScope, path: &[String], raw: &Value) -> Option<Value> {
-    let k = keys.iter().find(|k| k.match_path(path).is_some())?;
-    if !scope.admits(k.scope) {
-        return None;
+    if let Some(k) = keys.iter().find(|k| k.match_path(path).is_some()) {
+        if !scope.admits(k.scope) {
+            return None;
+        }
+        return (k.fail_closed?)(raw);
     }
-    (k.fail_closed?)(raw)
+    let mut out = Mapping::new();
+    for (ck, cv) in raw.as_mapping()? {
+        let Some(s) = ck.as_str() else { continue };
+        let mut at = path.to_vec();
+        at.push(s.to_string());
+        if let Some(c) = closed(keys, scope, &at, cv) {
+            out.insert(ck.clone(), c);
+        }
+    }
+    (!out.is_empty()).then_some(Value::Mapping(out))
 }
 
 /// Check a parsed file of kind `file` at `scope` against `schema`. With
@@ -250,12 +264,18 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                         }
                     };
                     let path = vec![top.to_string(), entry.clone()];
+                    // A name the section refuses drops its entry whole: it
+                    // names nothing, so no switch in it is kept either.
+                    let named = match (errs.is_empty(), sec.entry) {
+                        (true, Some(c)) => c(&entry).map_err(|m| errs.push((path.clone(), m))).is_ok(),
+                        (named, _) => named,
+                    };
                     if errs.is_empty() {
                         check_tree(&keys, scope, &mut path.clone(), ev, &mut errs);
                     }
                     if !errs.is_empty() {
                         out.fail(sec, format!("{}.{entry}", sec.name), errs);
-                        match (ek.is_string(), closed(&keys, scope, &path, ev)) {
+                        match (named, closed(&keys, scope, &path, ev)) {
                             (true, Some(c)) => {
                                 kept.insert(ek.clone(), c);
                             }
@@ -521,9 +541,9 @@ mod tests {
     use crate::schema::*;
 
     const SECTIONS: &[SectionSpec] = &[
-        SectionSpec { per_entry: false, repair: None, name: "general", file: "cfg", top: &["language"], doc: "" },
-        SectionSpec { per_entry: false, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
-        SectionSpec { per_entry: true, repair: None, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
+        SectionSpec { per_entry: false, entry: None, repair: None, name: "general", file: "cfg", top: &["language"], doc: "" },
+        SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
+        SectionSpec { per_entry: true, entry: None, repair: None, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
     ];
     const BASE: KeySpec = KeySpec {
         name: "general.language",
@@ -680,6 +700,72 @@ mod tests {
             for f in &l.findings {
                 let _ = f.diagnostic("t");
             }
+        }
+    }
+
+    /// A per-entry section of units with a switch inside each, and a section
+    /// whose switch sits under its top-level key: the shape of attend's
+    /// `sensors:` and `cleanup:`.
+    mod nested {
+        use super::*;
+
+        fn closed_off(v: &Value) -> Option<Value> {
+            (v != &Value::Bool(true)).then_some(Value::Bool(false))
+        }
+
+        fn plain_name(n: &str) -> Result<(), String> {
+            match n.chars().next() {
+                Some(c) if c.is_ascii_alphanumeric() => Ok(()),
+                _ => Err(format!("'{n}' is not a sensor name")),
+            }
+        }
+
+        const SECTIONS: &[SectionSpec] = &[
+            SectionSpec { per_entry: true, entry: Some(plain_name), repair: None, name: "sensors", file: "cfg", top: &["sensors"], doc: "" },
+            SectionSpec { per_entry: false, entry: None, repair: None, name: "cleanup", file: "cfg", top: &["cleanup"], doc: "" },
+        ];
+        const KEYS: &[KeySpec] = &[
+            KeySpec { name: "sensors.*.enabled", section: "sensors", path: &["sensors", "*", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), ..BASE },
+            KeySpec { name: "sensors.*.interval", section: "sensors", path: &["sensors", "*", "interval"], kind: Kind::Int { min: 1, max: 60 }, ..BASE },
+            KeySpec { name: "cleanup.enabled", section: "cleanup", path: &["cleanup", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), ..BASE },
+            KeySpec { name: "cleanup.interval", section: "cleanup", path: &["cleanup", "interval"], kind: Kind::Int { min: 1, max: 60 }, ..BASE },
+        ];
+        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[] }], sections: SECTIONS, keys: KEYS };
+
+        fn read(text: &str) -> Layer {
+            Layer::from_text(&S, "p", "cfg", LayerScope::Project, Some(Path::new("/p.yaml")), text)
+        }
+
+        fn get(l: &Layer, p: &str) -> Option<Value> {
+            l.get(&p.split('.').map(str::to_string).collect::<Vec<_>>()).cloned()
+        }
+
+        fn yaml(s: &str) -> Option<Value> {
+            Some(serde_yaml::from_str(s).unwrap())
+        }
+
+        #[test]
+        fn a_failed_unit_keeps_the_closed_reading_of_a_switch_inside_it() {
+            let l = read("sensors:\n  git: {enabled: maybe, interval: 5}\n  ps: {enabled: false, interval: 99}\n  ok: {interval: 3}\ncleanup:\n  enabled: 2\n  interval: 5\n");
+            assert_eq!(get(&l, "sensors.git"), yaml("{enabled: false}"), "a bad switch reads off; its neighbour falls through");
+            assert_eq!(get(&l, "sensors.ps"), yaml("{enabled: false}"), "a good off stays off beside a bad value");
+            assert_eq!(get(&l, "sensors.ok.interval"), yaml("3"));
+            assert_eq!(get(&l, "cleanup"), yaml("{enabled: false}"), "a section's nested switch fails closed too");
+            // A switch that reads on has no closed reading: its unit falls through.
+            let l = read("sensors:\n  git: {enabled: true, interval: 99}\n");
+            assert_eq!(get(&l, "sensors.git"), None);
+        }
+
+        #[test]
+        fn a_name_the_section_refuses_drops_its_entry_whole() {
+            let l = read("sensors:\n  -ps:\n  +mine: {enabled: false}\n  git: {interval: 4}\n");
+            assert_eq!(get(&l, "sensors.-ps"), None);
+            assert_eq!(get(&l, "sensors.+mine"), None, "no switch is kept under a name that names nothing");
+            assert_eq!(get(&l, "sensors.git.interval"), yaml("4"));
+            let f: Vec<_> = l.findings.iter().map(|f| (f.unit.clone().unwrap_or_default(), f.line, f.message.clone())).collect();
+            assert_eq!(f[0], ("sensors.-ps".into(), Some(2), "'-ps' is not a sensor name".into()), "{f:?}");
+            assert_eq!(f[1].0, "sensors.+mine");
+            assert!(l.findings.iter().all(|f| f.fallback));
         }
     }
 
