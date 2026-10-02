@@ -85,6 +85,12 @@ sha256_of() {
   fi
 }
 
+# Echo the version a binary reports: the second word of `BIN --version`, as
+# in `attend 0.15.1 (47d7a97)`. Empty when it prints no second word.
+binary_version() {
+  "$1" --version 2>/dev/null | awk 'NR == 1 { print $2 }'
+}
+
 # Install the pre-built binary of COMPONENT from a GitHub Release.
 #
 #   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT
@@ -116,37 +122,52 @@ prebuilt_install() (
   bin_name="${comp}-${platform}"
   out_file="${out_dir}/${comp}"
 
+  # A working binary is kept when its version is the release's, or when the
+  # release cannot be resolved. One at another version is replaced (#772).
+  installed=""
   if [[ -x "$out_file" ]] && "$out_file" --version >/dev/null 2>&1; then
+    installed=$(binary_version "$out_file")
+    [[ -n "$installed" ]] || installed="unknown"
+  fi
+  keep_installed() {
     echo "${comp} already installed and working: $out_file" >&2
     "$out_file" --version >&2
     echo "$out_file"
     exit 0
+  }
+  if [[ -n "$installed" && "$tag" != "latest" && "$installed" == "${tag#"${comp}-v"}" ]]; then
+    keep_installed
   fi
 
   if ! command -v gh >/dev/null 2>&1; then
+    [[ -n "$installed" ]] && keep_installed
     echo "error: gh CLI not found — build from source instead:" >&2
     echo "  ${hint}" >&2
     exit 1
   fi
 
-  mkdir -p "$out_dir" || exit 1
-  stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX") || exit 1
-  trap 'rm -rf "$stage"' EXIT
-
   if [[ "$tag" == "latest" ]]; then
     # A failed API call (retries exhausted) is an honest error; an empty
     # answer means the API was reached and no release matches.
     if ! tag=$(latest_tag_for_prefix "$repo" "${comp}-v"); then
+      [[ -n "$installed" ]] && keep_installed
       echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
       echo "  Falling back to build-from-source: ${hint}" >&2
       exit 1
     fi
     if [[ -z "$tag" ]]; then
+      [[ -n "$installed" ]] && keep_installed
       echo "No ${comp} release found. Build from source:" >&2
       echo "  ${hint}" >&2
       exit 1
     fi
+    [[ "$installed" == "${tag#"${comp}-v"}" ]] && keep_installed
   fi
+  [[ -n "$installed" ]] && echo "Replacing ${comp} ${installed} with ${tag}" >&2
+
+  mkdir -p "$out_dir" || exit 1
+  stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX") || exit 1
+  trap 'rm -rf "$stage"' EXIT
 
   echo "Platform: ${platform}" >&2
   echo "Release:  ${tag}" >&2

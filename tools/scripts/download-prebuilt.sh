@@ -61,14 +61,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# A way-embed that was already installed and running is kept as it is, as the
-# capability gate below applies only to a fresh download.
-preinstalled=false
-[[ -x "$OUTPUT_DIR/$COMPONENT" ]] && "$OUTPUT_DIR/$COMPONENT" --version >/dev/null 2>&1 && preinstalled=true
+# prebuilt_install keeps a running binary at the release's version as it is.
+# The capability gate below applies only to a binary it downloaded, which
+# reports a different version from the one there before.
+before=""
+[[ -x "$OUTPUT_DIR/$COMPONENT" ]] && before="$("$OUTPUT_DIR/$COMPONENT" --version 2>/dev/null)"
 
 installed="$(prebuilt_install "$COMPONENT" "$RELEASE_TAG" "$OUTPUT_DIR" "$GH_REPO" "$BUILD_HINT")"
 
-if [[ "$COMPONENT" == "way-embed" && "$preinstalled" == false ]]; then
+if [[ "$COMPONENT" == "way-embed" && ( -z "$before" || "$before" != "$("$installed" --version 2>/dev/null)" ) ]]; then
   # Capability gate: the late-interaction matcher (ADR-160) requires `match --batch`,
   # added in #319. A release binary cut before that runs fine (`--version` passes)
   # but lacks --batch, and the matcher then silently degrades to the single-vector
