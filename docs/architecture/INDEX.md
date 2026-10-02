@@ -153,6 +153,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-504](./platform/ADR-504-one-tui-engine-on-ratatui-and-one-theme-for-every-interactive-surface.md) | One TUI engine on ratatui and one theme for every interactive surface | accepted |
 | [ADR-505](./platform/ADR-505-duplicated-implementations-across-ways-attend-and-the-hooks-audited-2026-10-01.md) | Duplicated implementations across ways, attend and the hooks, audited 2026-10-01 | proposed |
 | [ADR-506](./platform/ADR-506-the-consolidation-ends-with-no-legacy-compatibility.md) | The consolidation ends with no legacy compatibility | accepted |
+| [ADR-507](./platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md) | The ways commands regroup into operator commands and six groups; names another process calls stay fixed | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
