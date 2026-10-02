@@ -3,8 +3,9 @@
 //! every way out: a quit, an error, a panic, or a signal (SIGTERM, SIGHUP,
 //! SIGINT), which the loop sees between polls.
 
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use ratatui::crossterm::cursor::Show;
@@ -26,16 +27,23 @@ pub fn restore() {
 }
 
 /// The terminal in raw mode on the alternate screen, restored when dropped.
+///
+/// The terminal itself is never dropped: ratatui's drop shows the cursor
+/// and prints when that fails, and a print to a terminal that hung up
+/// panics, which with `panic = "abort"` dumps core. [`restore`] has shown
+/// the cursor already.
 pub struct TermGuard {
-    pub term: DefaultTerminal,
+    pub term: ManuallyDrop<DefaultTerminal>,
 }
 
 impl TermGuard {
     /// Take the terminal. A panic restores it too: `ratatui::init`'s hook
     /// and the one [`crate::run`] adds, which matter where a panic aborts
-    /// without unwinding.
+    /// without unwinding. The line settings from before are kept, for the
+    /// restore a second signal makes from its handler.
     pub fn new() -> TermGuard {
-        TermGuard { term: ratatui::init() }
+        save_termios();
+        TermGuard { term: ManuallyDrop::new(ratatui::init()) }
     }
 }
 
@@ -48,6 +56,55 @@ impl Default for TermGuard {
 impl Drop for TermGuard {
     fn drop(&mut self) {
         restore();
+    }
+}
+
+/// The terminal's line settings before raw mode, for the signal handler.
+#[cfg(unix)]
+static SAVED_TERMIOS: OnceLock<libc::termios> = OnceLock::new();
+
+/// The escapes that turn mouse reporting off, leave the alternate screen
+/// and show the cursor, built once, for the signal handler to write.
+static RESET: OnceLock<Vec<u8>> = OnceLock::new();
+
+fn save_termios() {
+    #[cfg(unix)]
+    {
+        // SAFETY: termios is plain data the call fills.
+        let mut t: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: fd 0 is ours to query.
+        if unsafe { libc::tcgetattr(0, &mut t) } == 0 {
+            let _ = SAVED_TERMIOS.set(t);
+        }
+    }
+    let _ = RESET.get_or_init(|| {
+        ["?1000l", "?1002l", "?1003l", "?1006l", "?1015l", "?1049l", "?25h"]
+            .iter()
+            .flat_map(|s| [&[0x1b, b'['][..], s.as_bytes()].concat())
+            .collect()
+    });
+}
+
+/// A second signal while the first is not yet acted on: end the command's
+/// process group, put the terminal back and exit, from the handler. Only
+/// async-signal-safe calls: an atomic load, killpg, write, tcsetattr and
+/// _exit.
+#[cfg(unix)]
+fn emergency_exit(sig: i32) -> ! {
+    let pg = JOB_GROUP.load(Ordering::SeqCst);
+    // SAFETY: each call below is async-signal-safe and touches only data
+    // set up before the handler was installed.
+    unsafe {
+        if pg > 0 {
+            libc::killpg(pg, libc::SIGKILL);
+        }
+        if let Some(r) = RESET.get() {
+            libc::write(1, r.as_ptr().cast(), r.len());
+        }
+        if let Some(t) = SAVED_TERMIOS.get() {
+            libc::tcsetattr(0, libc::TCSANOW, t);
+        }
+        libc::_exit(128 + sig)
     }
 }
 
@@ -121,12 +178,22 @@ impl Signals {
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT, signal_hook::consts::SIGHUP];
         #[cfg(not(unix))]
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT];
-        let again = Arc::new(AtomicBool::new(false));
+        save_termios();
         for sig in caught {
-            // Registered first, so it runs before the flag below is set: the
-            // first signal arms it, the second exits.
-            signal_hook::flag::register_conditional_shutdown(sig, 128 + sig, again.clone())?;
-            signal_hook::flag::register(sig, again.clone())?;
+            // The first signal of any kind arms it; a second, of any kind,
+            // ends the process from the handler, the job and terminal first.
+            #[cfg(unix)]
+            {
+                static ARMED: AtomicBool = AtomicBool::new(false);
+                // SAFETY: the handler makes only async-signal-safe calls.
+                unsafe {
+                    signal_hook::low_level::register(sig, move || {
+                        if ARMED.swap(true, Ordering::SeqCst) {
+                            emergency_exit(sig);
+                        }
+                    })?;
+                }
+            }
             signal_hook::flag::register_usize(sig, s.caught.clone(), sig as usize)?;
         }
         let w = s.clone();

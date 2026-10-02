@@ -589,3 +589,6 @@ mod tests;
 
 #[cfg(test)]
 mod shell_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+mod term_tests;

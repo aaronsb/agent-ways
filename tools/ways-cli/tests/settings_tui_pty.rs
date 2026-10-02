@@ -49,7 +49,7 @@ fn alive(pid: i32) -> bool {
 struct Screens {
     root: PathBuf,
     master: Option<OwnedFd>,
-    slave: OwnedFd,
+    slave: Option<OwnedFd>,
     child: Child,
     out: Arc<Mutex<Vec<u8>>>,
     /// Tells the reader to let go of its handle on the master.
@@ -61,6 +61,20 @@ struct Screens {
 
 impl Screens {
     fn start(tag: &str) -> Screens {
+        let mut s = Screens::open(tag);
+        // The targets row's menu, plan, a directory, then review and apply.
+        for k in ["a", "j", "j", "\r", "/tmp/x", "\r", "w", "a"] {
+            s.press(k);
+        }
+        s.wait_for("applying");
+        s.grandchild = s.pid("sleep.pid");
+        s.runner = s.pid("runner.pid");
+        assert!(alive(s.grandchild) && alive(s.runner));
+        s
+    }
+
+    /// The screens open and idle on the install tab.
+    fn open(tag: &str) -> Screens {
         let root = std::env::temp_dir().join(format!("ways-settings-pty-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let home = root.join("home");
@@ -124,17 +138,39 @@ impl Screens {
                 }
             }
         });
-        let mut s = Screens { root, master: Some(master), slave, child, out, stop, reader: Some(reader), grandchild: 0, runner: 0 };
+        let s = Screens { root, master: Some(master), slave: Some(slave), child, out, stop, reader: Some(reader), grandchild: 0, runner: 0 };
         s.wait_for("targets");
-        // The targets row's menu, plan, a directory, then review and apply.
-        for k in ["a", "j", "j", "\r", "/tmp/x", "\r", "w", "a"] {
-            s.press(k);
-        }
-        s.wait_for("applying");
-        s.grandchild = s.pid("sleep.pid");
-        s.runner = s.pid("runner.pid");
-        assert!(alive(s.grandchild) && alive(s.runner));
         s
+    }
+
+    /// The terminal goes away: the reader lets go and every handle on the
+    /// master closes, and with `slave` the test's handle on that side too,
+    /// so the screens' stderr is dead as well.
+    fn hang_up(&mut self, slave: bool) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = self.reader.take().map(|r| r.join());
+        drop(self.master.take());
+        if slave {
+            drop(self.slave.take());
+        }
+    }
+
+    /// The pty is in line mode with echo and signals, as a shell leaves it.
+    fn assert_line_mode(&self) {
+        // SAFETY: termios is plain data the call fills.
+        let mut t: libc::termios = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::tcgetattr(self.slave.as_ref().unwrap().as_raw_fd(), &mut t) }, 0);
+        assert!(t.c_lflag & libc::ICANON != 0 && t.c_lflag & libc::ECHO != 0 && t.c_lflag & libc::ISIG != 0, "the pty is left in raw mode");
+    }
+
+    /// The escapes after the screens last took the alternate screen put the
+    /// terminal back.
+    fn assert_reset(&self) {
+        let text = self.text();
+        let after = &text[text.rfind(&esc("[?1049h")).expect("the screens took the alternate screen")..];
+        for (seq, what) in [("[?1049l", "the main screen"), ("[?25h", "the cursor"), ("[?1000l", "mouse reporting off"), ("[?1003l", "motion reporting off")] {
+            assert!(after.contains(&esc(seq)), "{what} is not restored: {after:?}");
+        }
     }
 
     fn press(&self, k: &str) {
@@ -226,16 +262,39 @@ fn a_signal_during_an_apply_restores_the_terminal_and_ends_the_command_and_its_c
     assert_eq!(status.code(), Some(128 + libc::SIGTERM), "exit is 128 plus the signal");
     assert!(took < Duration::from_secs(2), "the stop waited on the command's children: {took:?}");
     std::thread::sleep(Duration::from_millis(200));
-    let text = s.text();
-    let after = &text[text.rfind(&esc("[?1049h")).expect("the screens took the alternate screen")..];
-    for (seq, what) in [("[?1049l", "the main screen"), ("[?25h", "the cursor"), ("[?1000l", "mouse reporting off"), ("[?1003l", "motion reporting off")] {
-        assert!(after.contains(&esc(seq)), "{what} is not restored after the signal: {after:?}");
-    }
-    // SAFETY: termios is plain data the call fills.
-    let mut t: libc::termios = unsafe { std::mem::zeroed() };
-    assert_eq!(unsafe { libc::tcgetattr(s.slave.as_raw_fd(), &mut t) }, 0);
-    assert!(t.c_lflag & libc::ICANON != 0 && t.c_lflag & libc::ECHO != 0 && t.c_lflag & libc::ISIG != 0, "the pty is left in raw mode");
+    s.assert_reset();
+    s.assert_line_mode();
     s.assert_jobs_gone();
+}
+
+#[test]
+fn two_different_signals_end_the_command_and_restore_the_terminal() {
+    for _ in 0..3 {
+        let mut s = Screens::start("two");
+        // SAFETY: signals to our own child, back to back, so the second
+        // arrives before the loop takes up the first.
+        unsafe {
+            libc::kill(s.child.id() as i32, libc::SIGTERM);
+            libc::kill(s.child.id() as i32, libc::SIGINT);
+        }
+        let (status, _) = s.exit_within(5);
+        assert!(matches!(status.code(), Some(c) if c == 128 + libc::SIGTERM || c == 128 + libc::SIGINT), "{status:?}");
+        std::thread::sleep(Duration::from_millis(200));
+        s.assert_jobs_gone();
+        s.assert_reset();
+        s.assert_line_mode();
+    }
+}
+
+#[test]
+fn a_hangup_with_stderr_gone_too_exits_129_without_a_core() {
+    for _ in 0..5 {
+        let mut s = Screens::open("dead");
+        s.hang_up(true);
+        let (status, _) = s.exit_within(5);
+        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), None, "ended by a signal (abort dumps core): {status:?}");
+        assert_eq!(status.code(), Some(128 + libc::SIGHUP));
+    }
 }
 
 #[test]
@@ -259,9 +318,7 @@ fn a_second_ctrl_c_stops_a_command_that_started_its_own_process_at_once() {
 fn closing_the_terminal_ends_the_screens_and_the_command() {
     let mut s = Screens::start("hangup");
     // The terminal goes away: every handle on its master is closed.
-    s.stop.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _ = s.reader.take().map(|r| r.join());
-    drop(s.master.take());
+    s.hang_up(false);
     let (status, took) = s.exit_within(5);
     assert!(took < Duration::from_secs(4), "{took:?}");
     assert_eq!(status.code(), Some(128 + libc::SIGHUP), "a hangup ends as SIGHUP does: {:?}", std::os::unix::process::ExitStatusExt::signal(&status));
