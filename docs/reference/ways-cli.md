@@ -83,26 +83,36 @@ ways stats --json
 
 ---
 
-### `ways rethink`
+### `ways introspect`
 
-**When:** After a session where guidance seemed off, to replay exactly what fired and when. Also useful for onboarding — walk through a past session to see the system in action.
+**When:** After a session where guidance seemed off, to replay exactly what fired, when, and why. Also useful for onboarding: walk through a past session to see the system in action, or follow the current one as ways fire.
 
-**Run from:** Anywhere — launches an interactive session picker.
+**Run from:** The project directory, which scopes the sessions to that project. `--project <dir>` picks another project and `--all` takes every project; when the current project cannot be detected, the command fails rather than reading every project.
 
-**Tells you:** An animated frame-by-frame replay of way firings across the session timeline, showing epoch, way name, and trigger at each step. `--list` skips the animation and gives a plain session table. `--json` skips the animation entirely and dumps the reconstructed timeline as a single JSON document — for agents, scripts, and CI where a TUI can't run.
+**Tells you:**
+
+- `replay` opens a session's timeline on screen: the ways active at each frame, with epoch, distance, trigger, re-disclosure forecast and the token gauge, and a scrubber across the session's frames and compaction windows. ←→ move a frame, space plays, `+`/`-` set the speed, ⏎ or Tab opens why the selected way fired (its trigger, criteria, matched span and the way's own text), Esc goes back and `q` quits. Without `--session` it opens on a picker of the sessions in scope, newest first, which also shows whether Claude Code still holds each session's transcript.
+- `replay --json` writes the reconstructed timeline as a single JSON document instead, for agents, scripts and CI, where no terminal is needed.
+- `live` follows the session that is writing events now, on the same screen, and stays on the newest frame until you move back; space or End resumes following.
+- `list` prints the session table; `--json` gives it as data.
+- `dump` writes the session's introspection model as JSON: turns, fired ways, their criteria, the keyed transcript join and matched spans.
+- `fires` lists the semantic fires of a session with their scores, lowest first.
 
 ```
-ways rethink                          # interactive picker
-ways rethink --session <id>           # jump to a specific session
-ways rethink --list                   # non-interactive session table
-ways rethink --project <dir>          # sessions from another project
-ways rethink --all                    # sessions across every project
-ways rethink --speed 500              # faster animation (ms per frame)
-ways rethink --json                   # dump most recent session as JSON
-ways rethink --session <id> --json    # dump a specific session as JSON
+ways introspect replay                                 # picker of this project's sessions
+ways introspect replay --session <id>                  # one session
+ways introspect replay --all                           # sessions across every project
+ways introspect replay --speed 500                     # faster playback (ms per frame)
+ways introspect replay --json                          # most recent session as JSON
+ways introspect replay --session <id> --json           # a specific session as JSON
+ways introspect live                                   # follow the active session
+ways introspect list                                   # session table
+ways introspect list --json                            # session list as data
+ways introspect dump --session <id>                    # introspection model as JSON
+ways introspect fires --session <id> --max-score 0.6   # the borderline semantic fires
 ```
 
-**`--json` output:** a single object with `session`, `project`, `context_window_k`, a `summary` (epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, trigger breakdown, top ways), the full `frames` timeline (each with epoch, timestamp, token position, active ways, and what newly fired that turn), and `near_misses` (ways whose calibrated probability came within `near_miss_margin` of the semantic firing threshold but didn't fire — each with its EN/multilingual relevance probabilities (`prob_en` / `prob_multi`), the global semantic threshold `tau_s`, and the `margin` below it). Unlike the animation, the dump runs without the `tui` feature and surfaces near-misses, which the TUI omits. Slice large sessions with `jq` — a multi-day session can run to thousands of frames.
+**`replay --json` output:** a single object with `session`, `project`, `context_window_k`, a `summary` (epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, trigger breakdown, top ways, and the relevance gate's work), the full `frames` timeline (each with epoch, timestamp, token position, active ways, and what newly fired that turn), and `near_misses` (ways whose calibrated probability came within `near_miss_margin` of the semantic firing threshold but didn't fire — each with its EN/multilingual relevance probabilities (`prob_en` / `prob_multi`), the global semantic threshold `tau_s`, and the `margin` below it). The screen omits near-misses. Slice large sessions with `jq` — a multi-day session can run to thousands of frames.
 
 ---
 

@@ -79,7 +79,7 @@ match state.current_salience(current_tick) {
 
 For ways with `Curve::Exponential { half_life: H }` and the 0.5 floor, re-fire happens at exactly delta `H` — the half-life *is* the re-fire distance. Ways' "20–30K intervals" footer in `ways list` is exactly this: the range of `half_life` values across the active way set.
 
-Per-way visualization in `ways list` and `ways rethink` uses `Curve::refire_delta(floor)` to render each row's bar and forecast position from its own threshold, not a shared global. See [ADR-123 §2](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#2-pluggable-curve-as-first-class-parameter) for the curve types and [`engagement.md`](engagement.md) for the engine's other queries.
+Per-way visualization in `ways list` and `ways introspect replay` uses `Curve::refire_delta(floor)` to render each row's bar and forecast position from its own threshold, not a shared global. See [ADR-123 §2](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md#2-pluggable-curve-as-first-class-parameter) for the curve types and [`engagement.md`](engagement.md) for the engine's other queries.
 
 ## Attend's concrete application (shipping now)
 
