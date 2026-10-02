@@ -9,8 +9,6 @@ use attend_instances::SnapshotCache;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 use agent_identity::TermCaps;
 
-// The ADR-120 wire-format parser lives in agent-identity, shared with the
-// attend-chat TUI so both read a `re:` prefix the same way.
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
 pub(crate) fn cmd_inbox_read(msg_id: &str) {

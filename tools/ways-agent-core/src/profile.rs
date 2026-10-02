@@ -247,11 +247,14 @@ impl UserLayer {
         let dir = path.parent().context("user layer path has no parent")?;
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         let tmp = dir.join(format!(".agent.yaml.{}.{}.tmp", std::process::id(), crate::keys::unique()));
-        std::fs::write(&tmp, body).with_context(|| format!("writing {}", tmp.display()))?;
+        let discard = |_: &std::io::Error| {
+            let _ = std::fs::remove_file(&tmp);
+        };
+        std::fs::write(&tmp, body)
+            .inspect_err(discard)
+            .with_context(|| format!("writing {}", tmp.display()))?;
         std::fs::rename(&tmp, path)
-            .inspect_err(|_| {
-                let _ = std::fs::remove_file(&tmp);
-            })
+            .inspect_err(discard)
             .with_context(|| format!("replacing {}", path.display()))
     }
 }
@@ -448,6 +451,18 @@ mod tests {
         assert!(UserLayer::load(&path).unwrap().mode.is_some());
         let leftovers = std::fs::read_dir(&dir).unwrap().count();
         assert_eq!(leftovers, 1, "only agent.yaml remains");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_save_leaves_no_temp_file() {
+        // A directory at the target makes the rename fail after the write.
+        let dir = std::env::temp_dir().join(format!("ways-agent-profile-fail-{}", std::process::id()));
+        let path = dir.join("agent.yaml");
+        std::fs::create_dir_all(path.join("occupied")).unwrap();
+        assert!(UserLayer::default().save(&path).is_err());
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("agent.yaml")]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
