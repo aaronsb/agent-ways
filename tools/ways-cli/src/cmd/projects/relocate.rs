@@ -62,7 +62,13 @@ fn norm_path(p: &str, home: &str) -> String {
     let expanded = if p == "~" {
         home.to_string()
     } else if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
-        Path::new(home).join(rest).to_string_lossy().into_owned()
+        // A `/`-rooted home joins on `/`, so the text normalization below
+        // sees one separator; a drive-rooted home joins natively.
+        if home.starts_with('/') {
+            format!("{home}/{rest}")
+        } else {
+            Path::new(home).join(rest).to_string_lossy().into_owned()
+        }
     } else {
         p.to_string()
     };
