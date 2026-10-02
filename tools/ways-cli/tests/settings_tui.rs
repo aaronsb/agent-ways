@@ -340,8 +340,9 @@ fn tree_pane(frame: &str) -> Vec<String> {
 #[test]
 fn setting_a_way_toggle_keeps_every_row_in_place() {
     let fx = Fx::new();
-    // Open project, itops and softwaredev; the cursor on softwaredev.
-    let keys = "end right down right down down right";
+    // Open project, itops and softwaredev; the cursor on softwaredev. Under
+    // project, the shipped ways follow this project's section.
+    let keys = "end right down down down down right down down right";
     let before = fx.snap("ways", keys, "100x30", "16");
     let (_, err, code) = fx.run(&["settings", "set", "ways.project.softwaredev/code/testing", "false"]);
     assert_eq!(code, 0, "{err}");
@@ -355,7 +356,7 @@ fn after_an_apply_the_cursor_is_on_the_same_key() {
     let fx = Fx::new();
     // Toggle softwaredev/code/testing, apply; the reload puts the toggle in
     // the project file, and the cursor stays on it.
-    let f = glyphs(&fx.snap("ways", "end right down right down down right down right down enter w a", "100x30", "16"));
+    let f = glyphs(&fx.snap("ways", "end right down down down down right down down right down right down enter w a", "100x30", "16"));
     let cursor = tree_pane(&f).into_iter().find(|l| l.contains('▌')).unwrap_or_default();
     assert!(cursor.contains("testing") && cursor.contains("false"), "the cursor moved off its key:
 {f}");
@@ -446,6 +447,11 @@ fn golden_frames() {
     }
     // A chosen theme at truecolor: its roles, and the editor's swatches.
     g.check_text("theme-nord-truecolor", &fx.snap("theme", "down down enter 1", "100x30", "truecolor"));
+    // A project way with a macro: its switch above, what it is below.
+    let way = Fx::new();
+    way.file("proj/.claude/ways/api/dual/dual.md", "---\ndescription: Two modes for every endpoint, read and write.\nvocabulary: endpoint read write mode\npattern: \\bapi\\b\nmacro: prepend\nrefire: normal\n---\nbody\n");
+    way.file("proj/.claude/ways/api/dual/macro.sh", "#!/bin/sh\n# lists the endpoints\nls src/routes\n");
+    g.check_text("ways-project-way", &way.snap("ways", "end right down down right down", "100x30", "16"));
     let broken = Fx::new();
     broken.file(".config/agent-ways/config.yaml", BROKEN);
     g.check_text("matching-broken", &broken.snap("matching", "", "100x30", "16"));

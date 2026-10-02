@@ -153,8 +153,7 @@ pub fn run(
     if let Some(cpd) = crate::util::env_project_dir() {
         vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
         let proj_root = PathBuf::from(&cpd);
-        let ways_path = proj_root.join(".claude/ways");
-        if ways_path.is_dir() {
+        if let Some(ways_path) = super::ways_roots::project_ways(&proj_root) {
             let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
             seen_ways_dirs.insert(canon);
             let key = crate::util::encode_project_key(&proj_root);
@@ -173,55 +172,19 @@ pub fn run(
         }
     }
 
-    let projects_dir = ways_core::paths::transcripts_root();
-    if projects_dir.is_dir() {
-        vlog(&format!("enumerating projects: {}", projects_dir.display()));
-        for entry in std::fs::read_dir(&projects_dir)? {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
-            }
-
-            let encoded = entry.file_name().to_string_lossy().to_string();
-            // Announce before resolving: resolve_project_path falls back to
-            // probing is_dir() across every candidate split of the encoded name,
-            // so an unreachable mount stalls here, under this project's name.
-            vlog(&format!("  resolving {encoded}"));
-            let project_path = match claude_sessions::resolve_project_path(&projects_dir, &encoded) {
-                Some(p) => p,
-                None => {
-                    vlog("    unresolved — skipped");
-                    continue;
-                }
-            };
-
-            // Walk up to find .claude/ways/ (project may be invoked from subdirectory)
-            let ways_path = match find_ways_dir(&project_path) {
-                Some(p) => p,
-                None => continue,
-            };
-            vlog(&format!("    ways: {}", ways_path.display()));
-
-            // Dedup: multiple encoded dirs (and the current project above) may
-            // resolve to the same .claude/ways/. Compare canonical paths.
-            let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
-            if !seen_ways_dirs.insert(canon) {
-                continue;
-            }
-
-            // Key off the resolved REAL path, not the lossy encoded dir name, so
-            // it matches `ways scan <lane> --project <that project>`.
-            let key = crate::util::encode_project_key(Path::new(&project_path));
-            project_total += embed_one_project(
-                &ways_path,
-                &key,
-                &project_path,
-                &excluded,
-                &mut w,
-                &mut manifest_projects,
-                &log,
-            )?;
+    // Every other project Claude Code knows, from its transcript directories.
+    for (project_path, ways_path) in super::ways_roots::known_project_ways(&|line| vlog(line)) {
+        vlog(&format!("    ways: {}", ways_path.display()));
+        // Dedup: multiple encoded dirs (and the current project above) may
+        // resolve to the same .claude/ways/. Compare canonical paths.
+        let canon = std::fs::canonicalize(&ways_path).unwrap_or_else(|_| ways_path.clone());
+        if !seen_ways_dirs.insert(canon) {
+            continue;
         }
+        // Key off the resolved REAL path, not the lossy encoded dir name, so
+        // it matches `ways scan <lane> --project <that project>`.
+        let key = crate::util::encode_project_key(Path::new(&project_path));
+        project_total += embed_one_project(&ways_path, &key, &project_path, &excluded, &mut w, &mut manifest_projects, &log)?;
     }
 
     w.flush()?;
@@ -920,20 +883,6 @@ fn auto_embed(
     })
 }
 
-/// Walk up from a project path to find .claude/ways/ directory.
-fn find_ways_dir(project_path: &str) -> Option<PathBuf> {
-    let home = home_dir();
-    let mut check = PathBuf::from(project_path);
-    while check != Path::new("/") && check != home {
-        let candidate = check.join(".claude/ways");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        check = check.parent()?.to_path_buf();
-    }
-    None
-}
-
 /// Content hash of a directory: FNV-1a over the sorted file list (relative
 /// paths joined with `/`) and sizes, stable across Rust releases and
 /// platforms, so a manifest written by one build or OS matches another's hash
@@ -963,8 +912,6 @@ fn content_hash_input(entries: &[(String, u64)]) -> Vec<u8> {
     }
     bytes
 }
-
-use crate::util::home_dir;
 
 /// True if a way or locale file (`.md`, `.jsonl`) under `root` is newer than
 /// the manifest.

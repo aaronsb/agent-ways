@@ -143,7 +143,18 @@ impl App {
         if self.show_changes {
             self.draw_changes(f, right);
         } else if let Some(r) = rows.get(self.cursor) {
-            self.draw_detail(f, right, &r.path);
+            // A row with an `about` splits the pane: its controls above,
+            // what it stands for below.
+            let n = tree::get(&self.roots, &r.path);
+            if n.about.is_empty() {
+                self.draw_detail(f, right, &r.path);
+            } else {
+                let [top, bottom] = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(right);
+                self.draw_detail(f, top, &r.path);
+                let title = if n.about_title.is_empty() { "about".to_string() } else { n.about_title.clone() };
+                let lines: Vec<Line> = n.about.lines().map(|l| Line::raw(l.to_string())).collect();
+                f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title)), bottom);
+            }
         }
         if let Mode::Flow(flow) = &mut self.mode {
             flow.draw(f, main, self.shape);
@@ -281,7 +292,9 @@ impl App {
         let dim = theme::muted();
         let title = tree::label(&self.roots, path);
         let mut lines = vec![Line::styled(title, Style::new().add_modifier(Modifier::BOLD)), Line::raw("")];
-        if !n.doc.is_empty() {
+        // A setting beside its `about` shows its controls alone; a group
+        // keeps its doc above the summary.
+        if !n.doc.is_empty() && (n.about.is_empty() || n.setting.is_none()) {
             lines.extend(n.doc.lines().map(|l| Line::raw(l.to_string())));
             lines.push(Line::raw(""));
         }

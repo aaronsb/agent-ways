@@ -5,7 +5,7 @@
 //! lint findings of its file. Keys the TUI cannot set (read-only, secret)
 //! carry the action commands that change them.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use agent_settings::load::{resolve, Finding, Layer};
@@ -14,7 +14,7 @@ use agent_tui::tree::{quote, Action, Arg, Kind as TKind, Node, Setting};
 use serde_yaml::Value;
 
 use super::super::{help_text, layer_label, plain, target_file};
-use super::Ways;
+use super::{Ctx, Ways};
 
 /// A settings tab: its name, the prefix of the keys it shows, and the
 /// prefixes under that one another tab shows instead.
@@ -142,6 +142,104 @@ fn segments(b: &Bound) -> Vec<String> {
     out
 }
 
+/// Where a way's file comes from, highest precedence first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum WayScope {
+    Project,
+    User,
+    Shipped,
+    /// Named in a ways.yaml, found in no root.
+    Missing,
+}
+
+impl WayScope {
+    const ORDER: [WayScope; 4] = [WayScope::Project, WayScope::User, WayScope::Shipped, WayScope::Missing];
+
+    fn label(self) -> &'static str {
+        match self {
+            WayScope::Project => "this project",
+            WayScope::User => "your ways",
+            WayScope::Shipped => "shipped",
+            WayScope::Missing => "not found",
+        }
+    }
+
+    fn doc(self, ctx: &Ctx) -> String {
+        let home = &ctx.home;
+        match self {
+            WayScope::Project => format!("The ways of this project, in {}/.claude/ways/. They shadow a user or shipped way of the same id.", tilde(&ctx.project, home)),
+            WayScope::User => format!("Your own ways, in {}. They survive updates and shadow a shipped way of the same id.", tilde(&ctx.user_ways, home)),
+            WayScope::Shipped => "The ways agent-ways ships.".into(),
+            WayScope::Missing => "Switches this project's ways.yaml names for ways no root holds any more.".into(),
+        }
+    }
+}
+
+/// A way's scope and its file.
+struct Located {
+    scope: WayScope,
+    /// The root of its scope, which the detail names its file against.
+    root: PathBuf,
+    /// None when the directory holds no way file sessions would read.
+    file: Option<PathBuf>,
+}
+
+/// A way's file, found as sessions find it: the first `.md` with
+/// frontmatter in `<root>/<id>/`, whatever its name.
+fn way_file(root: &Path, id: &str) -> Option<PathBuf> {
+    crate::session::find_way_in_dir(&root.join(id))
+}
+
+/// What a way is, for the detail pane: its description, then the fields
+/// that decide when it fires, and its macro with the first lines it runs.
+fn way_about(w: &Located, home: &Path) -> String {
+    let row = |k: &str, v: String| format!("{k:<11}{v}");
+    let Some(file) = &w.file else {
+        return format!("No way file in this way's directory, so sessions skip it.\n\n{}", row("from", w.scope.label().into()));
+    };
+    let text = std::fs::read_to_string(file).unwrap_or_default();
+    let field = |name: &str| ways_core::frontmatter::field_in(&text, name).filter(|v| !v.is_empty());
+    let mut out = vec![field("description").unwrap_or_else(|| "(no description)".into()), String::new()];
+    out.push(row("from", w.scope.label().into()));
+    out.push(row("root", tilde(&w.root, home)));
+    out.push(row("file", file.strip_prefix(&w.root).unwrap_or(file).display().to_string()));
+    for k in ["vocabulary", "pattern", "files", "commands", "trigger", "scope", "refire"] {
+        if let Some(v) = field(k) {
+            out.push(row(k, v));
+        }
+    }
+    if let Some(m) = field("macro") {
+        let script = file.with_file_name("macro.sh");
+        out.push(row("macro", format!("{m} · macro.sh")));
+        let body = std::fs::read_to_string(&script).unwrap_or_default();
+        let runs = body.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(3);
+        out.extend(runs.map(|l| row("", l.to_string())));
+    }
+    out.join("\n")
+}
+
+/// Each group under `n` sums up its switches, as the files were read:
+/// how many ways, how many off. Only a row with a store is a switch.
+/// Returns `(ways, off)` for `n`.
+fn summarize(n: &mut Node) -> (usize, usize) {
+    let own = n.setting.as_ref().filter(|s| s.store.is_some()).map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
+    if n.children.is_empty() {
+        return own;
+    }
+    let (mut ways, mut off) = own;
+    for c in &mut n.children {
+        let (w, o) = summarize(c);
+        ways += w;
+        off += o;
+    }
+    if n.about.is_empty() {
+        let noun = if ways == 1 { "way" } else { "ways" };
+        n.about_title = "ways".into();
+        n.about = format!("{ways} {noun}, {off} switched off as loaded.");
+    }
+    (ways, off)
+}
+
 /// Put `leaf` at `path` under `root`, making the groups between. A node
 /// already there keeps its children and takes the leaf's setting: a way
 /// with ways under it is both.
@@ -170,7 +268,7 @@ fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn(&str) -> S
 impl Ways {
     /// The keys of a tab: every concrete key under it, and a toggle for each
     /// way of the corpus on the ways tab.
-    fn keys_of(&self, tab: &Tab, layers: &[Layer]) -> Vec<Bound> {
+    fn keys_of(&self, tab: &Tab, layers: &[Layer], scopes: &BTreeMap<String, Located>) -> Vec<Bound> {
         let mut keys = self.reg.concrete(tab.prefix, layers);
         keys.retain(|b| tab.holds(&b.name()));
         if tab.name == "ways" {
@@ -180,7 +278,7 @@ impl Ways {
                 // so setting a toggle never moves a row.
                 let project = |k: &Bound| k.spec.name == b.spec.name;
                 let mut ids: BTreeSet<String> = keys.iter().filter(|k| project(k)).filter_map(|k| k.bound.first().cloned()).collect();
-                ids.extend(crate::cmd::scan::candidates::way_ids(&self.ctx.corpus));
+                ids.extend(scopes.keys().cloned());
                 let at = keys.iter().position(project).unwrap_or(keys.len());
                 keys.retain(|k| !project(k));
                 let ways: Vec<Bound> = ids.into_iter().map(|id| Bound { bound: vec![id], ..b.clone() }).collect();
@@ -212,7 +310,8 @@ impl Ways {
         let mut files: BTreeSet<&'static str> = BTreeSet::new();
         // The parts of a name the tab itself stands for.
         let depth = tab.prefix.split('.').count();
-        for b in self.keys_of(tab, layers) {
+        let scopes = if tab.name == "ways" { self.way_scopes() } else { BTreeMap::new() };
+        for b in self.keys_of(tab, layers, &scopes) {
             files.insert(b.spec.file);
             let segs = segments(&b);
             let rest = &segs[depth.min(segs.len())..];
@@ -256,7 +355,23 @@ impl Ways {
             if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {
                 node = node.with_finding(tilde_text(&f.to_string(), home));
             }
+            if b.spec.name == "ways.project.*" {
+                // A way's switch sits under the scope its file comes from.
+                let id = b.bound.first().cloned().unwrap_or_default();
+                let found = scopes.get(&id);
+                let scope = found.map_or(WayScope::Missing, |w| w.scope);
+                if let Some(w) = found {
+                    node = node.about("way", way_about(w, home));
+                }
+                let mut at = rest.to_vec();
+                at.insert(1, scope.label().to_string());
+                insert(&mut root, &at, node, &docs, tab.prefix);
+                continue;
+            }
             insert(&mut root, rest, node, &docs, tab.prefix);
+        }
+        if tab.name == "ways" {
+            self.scope_sections(&mut root);
         }
         self.headers(&mut root, tab.prefix);
         let mut found = self.findings(tab, &files, layers);
@@ -280,6 +395,58 @@ impl Ways {
             _ => {}
         }
         root
+    }
+
+    /// Every way a session here can fire, by id: the project's own, the
+    /// user's, then the shipped corpus, a higher scope shadowing a lower one
+    /// as `ways corpus` does (ADR-143).
+    fn way_scopes(&self) -> BTreeMap<String, Located> {
+        let mut out = BTreeMap::new();
+        let roots = [
+            (WayScope::Project, crate::cmd::ways_roots::project_ways(&self.ctx.project)),
+            (WayScope::User, Some(self.ctx.user_ways.clone())),
+            (WayScope::Shipped, Some(self.ctx.corpus.clone())),
+        ];
+        for (scope, root) in roots {
+            let Some(root) = root else { continue };
+            for id in crate::cmd::scan::candidates::way_ids(&root) {
+                out.entry(id.clone()).or_insert_with(|| Located { scope, file: way_file(&root, &id), root: root.clone() });
+            }
+        }
+        out
+    }
+
+    /// The ways tab's `project` group, its switches gathered by scope into
+    /// sections, in precedence order, each group summing up what it holds.
+    /// A project with no ways of its own gets a row saying how to add some.
+    fn scope_sections(&self, root: &mut Node) {
+        let Some(project) = root.children.iter_mut().find(|n| n.name == "project") else { return };
+        let mut sections: Vec<Node> = Vec::new();
+        for scope in WayScope::ORDER {
+            let at = project.children.iter().position(|c| c.name == scope.label());
+            let mut s = match at {
+                Some(i) => project.children.remove(i),
+                None if scope == WayScope::Project => Node::group(scope.label(), "", vec![self.no_project_ways()]),
+                None => continue,
+            };
+            s.section = true;
+            s.open = true;
+            s.columns = Some((String::new(), String::new()));
+            s.doc = scope.doc(&self.ctx);
+            sections.push(s);
+        }
+        sections.extend(std::mem::take(&mut project.children));
+        project.children = sections;
+        summarize(project);
+    }
+
+    /// The row a project without ways of its own shows: how to start.
+    fn no_project_ways(&self) -> Node {
+        Node::leaf(
+            "(no project ways)",
+            "A project's ways are markdown files at .claude/ways/<domain>/<name>/<name>.md in its root. `ways init` sets up .claude/ for a project; `ways author template` writes a way.",
+            Setting::new(TKind::ReadOnly, "none · ways init", "project"),
+        )
     }
 
     /// Header rows for a tab's sections: its loose keys gather under one

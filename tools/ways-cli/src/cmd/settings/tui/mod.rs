@@ -41,6 +41,8 @@ pub struct Ctx {
     pub home: PathBuf,
     /// The core ways, one toggle each on the ways tab.
     pub corpus: PathBuf,
+    /// The user's own ways (ADR-143), toggled beside the core ones.
+    pub user_ways: PathBuf,
     /// User themes; none means nothing saves.
     pub themes: Option<PathBuf>,
     pub xdg_config: PathBuf,
@@ -56,6 +58,7 @@ impl Ctx {
         Ctx {
             project: project_dir(project),
             corpus: ways_core::paths::core_ways_root(),
+            user_ways: ways_core::paths::user_ways_root(),
             themes: agent_theme::user_dir(),
             claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
             claude: ways_core::paths::claude_dir().root().to_path_buf(),
