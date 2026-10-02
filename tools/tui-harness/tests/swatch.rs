@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 
 use image::RgbImage;
-use tui_harness::render::fc_has_family;
 use tui_harness::{parse, Grid, Renderer, DEFAULT_FONT, DEFAULT_SIZE, FALLBACK_FONT};
 
 const COLS: u32 = 100;
@@ -156,32 +155,94 @@ fn swatch_has_every_row() {
 const CHANNEL_TOLERANCE: u8 = 32;
 const MAX_DIFFERENT: f64 = 0.01;
 
-/// The CJK family the golden image was recorded with.
-const CJK_FAMILY: &str = "Noto Sans CJK SC";
+/// The CJK face the golden image was recorded with, as
+/// `Renderer::cjk_font` names it.
+const GOLDEN_CJK: &str = "Noto Sans Mono CJK SC";
+
+/// What the golden test does, decided before any rendering.
+#[derive(Debug, PartialEq, Eq)]
+enum Gate {
+    Run,
+    Skip(String),
+    Fail(String),
+}
+
+/// Bless and require are read first: a bless or a font-provisioned run
+/// never passes as a skip.
+fn gate(bless: bool, require_fonts: bool, missing: &[String]) -> Gate {
+    if missing.is_empty() {
+        return Gate::Run;
+    }
+    let what = format!(
+        "fonts the golden was recorded with are missing: {}",
+        missing.join(", ")
+    );
+    if bless {
+        Gate::Fail(format!(
+            "TUI_HARNESS_BLESS=1 but {what}; a bless needs the real fonts"
+        ))
+    } else if require_fonts {
+        Gate::Fail(format!("TUI_HARNESS_REQUIRE_FONTS=1 but {what}"))
+    } else {
+        Gate::Skip(format!("SKIPPED swatch_matches_golden_png: {what}"))
+    }
+}
+
+fn env_is_1(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| v == "1")
+}
+
+/// The fonts this renderer lacks, against the ones the golden used: the
+/// two families, and the CJK face it would actually pick.
+fn missing_fonts(renderer: &Renderer) -> Vec<String> {
+    let mut missing = Vec::new();
+    if !renderer.has_primary_font() {
+        missing.push(DEFAULT_FONT.to_string());
+    }
+    if !renderer.has_fallback_font() {
+        missing.push(FALLBACK_FONT.to_string());
+    }
+    match renderer.cjk_font() {
+        Some(GOLDEN_CJK) => {}
+        Some(other) => missing.push(format!("{GOLDEN_CJK} (the renderer picked {other})")),
+        None => missing.push(GOLDEN_CJK.to_string()),
+    }
+    missing
+}
+
+#[test]
+fn golden_gate_never_passes_a_bless_or_required_run_silently() {
+    let missing = vec!["X".to_string()];
+    assert_eq!(gate(false, false, &[]), Gate::Run);
+    assert_eq!(gate(true, false, &[]), Gate::Run);
+    assert!(matches!(gate(false, false, &missing), Gate::Skip(_)));
+    assert!(matches!(gate(true, false, &missing), Gate::Fail(_)));
+    assert!(matches!(gate(false, true, &missing), Gate::Fail(_)));
+}
 
 /// Compare a render with the fonts against `fixtures/swatch.golden.png`.
-/// Runs only where fontconfig has the fonts the golden was recorded with.
+/// Runs only where the renderer gets the fonts the golden was recorded
+/// with; otherwise it skips, or fails under `TUI_HARNESS_REQUIRE_FONTS=1`.
 /// Set `TUI_HARNESS_BLESS=1` to write `swatch.golden.new.png` beside it;
 /// the run then fails, so a person reviews the image and moves it into
-/// place by hand.
+/// place by hand. A bless with fonts missing fails too.
 #[test]
 fn swatch_matches_golden_png() {
-    let missing: Vec<&str> = [DEFAULT_FONT, FALLBACK_FONT, CJK_FAMILY]
-        .into_iter()
-        .filter(|f| !fc_has_family(f))
-        .collect();
-    if !missing.is_empty() {
-        eprintln!(
-            "SKIPPED swatch_matches_golden_png: fontconfig lacks {}",
-            missing.join(", ")
-        );
-        return;
-    }
+    let bless = env_is_1("TUI_HARNESS_BLESS");
+    let require_fonts = env_is_1("TUI_HARNESS_REQUIRE_FONTS");
     let renderer = Renderer::new(DEFAULT_FONT, DEFAULT_SIZE);
+    match gate(bless, require_fonts, &missing_fonts(&renderer)) {
+        Gate::Run => {}
+        Gate::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        Gate::Fail(msg) => panic!("{msg}"),
+    }
     let fresh = renderer.render(&swatch_grid(), Some(COLS), Some(ROWS));
     let golden_path = fixtures().join("swatch.golden.png");
 
-    if std::env::var_os("TUI_HARNESS_BLESS").is_some_and(|v| v == "1") {
+    if bless {
         let new_path = fixtures().join("swatch.golden.new.png");
         fresh.save(&new_path).expect("writing the blessed image");
         panic!(

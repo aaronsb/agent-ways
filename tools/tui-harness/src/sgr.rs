@@ -65,25 +65,63 @@ pub struct Style {
     pub italic: bool,
     pub underline: bool,
     pub reverse: bool,
+    pub strike: bool,
+    pub conceal: bool,
 }
 
 impl Style {
-    /// Apply one SGR parameter list, given as flat numbers (the `;` form).
+    /// Apply one SGR parameter list given in the `;` form only, one number
+    /// per parameter. [`Style::apply_groups`] takes the `:` form as well.
     pub fn apply_sgr(&mut self, params: &[u16]) {
-        if params.is_empty() {
+        let groups: Vec<&[u16]> = params.iter().map(std::slice::from_ref).collect();
+        self.apply_groups(&groups);
+    }
+
+    /// Apply one SGR parameter list as tmux and vte deliver it: one group
+    /// per `;`-separated parameter, each holding the parameter and its
+    /// `:` sub-parameters.
+    ///
+    /// A group with sub-parameters is decoded whole: `4:n` sets underline
+    /// for any non-zero style `n` (single, double, curly, dotted, dashed),
+    /// `38`/`48` colours decode in place, `58` (underline colour) is read
+    /// and dropped, and any other code with sub-parameters is ignored. In
+    /// the `;` form an extended colour (`38`, `48`, `58` followed by `5;n`
+    /// or `2;r;g;b`) consumes its parameters; a truncated one ends the
+    /// sequence rather than having its leftovers read as attributes, and a
+    /// palette index above 255 is ignored.
+    pub fn apply_groups(&mut self, groups: &[&[u16]]) {
+        if groups.is_empty() {
             *self = Style::default();
             return;
         }
         let mut i = 0;
-        while i < params.len() {
-            let p = params[i];
+        while i < groups.len() {
+            let group = groups[i];
+            i += 1;
+            let Some((&p, subs)) = group.split_first() else {
+                continue;
+            };
+            if !subs.is_empty() {
+                match p {
+                    4 => self.underline = subs[0] != 0,
+                    38 | 48 | 58 => {
+                        if let Some(colour) = colon_colour(subs) {
+                            self.set_extended(p, colour);
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
             match p {
                 0 => *self = Style::default(),
                 1 => self.bold = true,
                 2 => self.dim = true,
                 3 => self.italic = true,
-                4 => self.underline = true,
+                4 | 21 => self.underline = true,
                 7 => self.reverse = true,
+                8 => self.conceal = true,
+                9 => self.strike = true,
                 22 => {
                     self.bold = false;
                     self.dim = false;
@@ -91,37 +129,77 @@ impl Style {
                 23 => self.italic = false,
                 24 => self.underline = false,
                 27 => self.reverse = false,
+                28 => self.conceal = false,
+                29 => self.strike = false,
                 30..=37 => self.fg = Some(BASIC[(p - 30) as usize]),
                 39 => self.fg = None,
                 40..=47 => self.bg = Some(BASIC[(p - 40) as usize]),
                 49 => self.bg = None,
                 90..=97 => self.fg = Some(BASIC[(p - 90 + 8) as usize]),
                 100..=107 => self.bg = Some(BASIC[(p - 100 + 8) as usize]),
-                38 | 48 => {
-                    if let Some((colour, used)) = extended_colour(&params[i + 1..]) {
-                        if p == 38 {
-                            self.fg = Some(colour);
-                        } else {
-                            self.bg = Some(colour);
+                38 | 48 | 58 => match semicolon_colour(&groups[i..]) {
+                    Some((colour, used)) => {
+                        if let Some(colour) = colour {
+                            self.set_extended(p, colour);
                         }
                         i += used;
                     }
-                }
+                    // Truncated or malformed: stop rather than misread.
+                    None => return,
+                },
+                // 59 resets the underline colour, which is not drawn.
                 _ => {}
             }
-            i += 1;
+        }
+    }
+
+    /// Set the colour an extended-colour code names. `58` is the underline
+    /// colour, which is parsed and not drawn.
+    fn set_extended(&mut self, code: u16, colour: Rgb) {
+        match code {
+            38 => self.fg = Some(colour),
+            48 => self.bg = Some(colour),
+            _ => {}
         }
     }
 }
 
-/// Decode the tail of a `38`/`48` sequence: `5;n` or `2;r;g;b`. Returns the
-/// colour and how many parameters it consumed.
-fn extended_colour(rest: &[u16]) -> Option<(Rgb, usize)> {
-    match rest {
-        [5, n, ..] => Some((palette256((*n & 0xFF) as u8), 2)),
-        [2, r, g, b, ..] => Some(([clamp_u8(*r), clamp_u8(*g), clamp_u8(*b)], 4)),
+/// Decode the sub-parameters of a colon-form colour: `5:n`, `2:r:g:b`, or
+/// `2:cs:r:g:b` with a colour-space slot. `None` when malformed or when the
+/// palette index is above 255.
+fn colon_colour(subs: &[u16]) -> Option<Rgb> {
+    match subs {
+        [5, n] => palette_index(*n),
+        [2, r, g, b] | [2, _, r, g, b] => Some(rgb(*r, *g, *b)),
         _ => None,
     }
+}
+
+/// Decode the `;`-form tail of a `38`/`48`/`58` code: `5;n` or `2;r;g;b`,
+/// each a one-number group. Returns the colour (`None` for a palette index
+/// above 255) and the number of groups consumed, or `None` when the tail is
+/// truncated or malformed.
+fn semicolon_colour(rest: &[&[u16]]) -> Option<(Option<Rgb>, usize)> {
+    let mut nums = Vec::with_capacity(4);
+    for group in rest.iter().take(4) {
+        match group {
+            [n] => nums.push(*n),
+            _ => break,
+        }
+    }
+    match nums.as_slice() {
+        [5, n, ..] => Some((palette_index(*n), 2)),
+        [2, r, g, b, ..] => Some((Some(rgb(*r, *g, *b)), 4)),
+        _ => None,
+    }
+}
+
+fn palette_index(n: u16) -> Option<Rgb> {
+    u8::try_from(n).ok().map(palette256)
+}
+
+fn rgb(r: u16, g: u16, b: u16) -> Rgb {
+    [clamp_u8(r), clamp_u8(g), clamp_u8(b)]
 }
 
 fn clamp_u8(v: u16) -> u8 {
@@ -181,16 +259,8 @@ impl vte::Perform for Builder {
         if action != 'm' || ignore || !intermediates.is_empty() {
             return;
         }
-        // Flatten the `:` sub-parameter form (`38:2::r:g:b`) into the `;`
-        // form, dropping the colour-space slot that the colon form carries.
-        let mut flat: Vec<u16> = Vec::new();
-        for group in params.iter() {
-            match group {
-                [38 | 48, 2, _cs, r, g, b] => flat.extend_from_slice(&[group[0], 2, *r, *g, *b]),
-                _ => flat.extend_from_slice(group),
-            }
-        }
-        self.style.apply_sgr(&flat);
+        let groups: Vec<&[u16]> = params.iter().collect();
+        self.style.apply_groups(&groups);
     }
 }
 
@@ -288,5 +358,93 @@ mod tests {
         assert_eq!(palette256(232), [8, 8, 8]);
         assert_eq!(palette256(255), [238, 238, 238]);
         assert_eq!(palette256(9), BASIC[9]);
+    }
+
+    /// The style of the first cell of `capture` (ESC written as `^`).
+    fn style_of(capture: &str) -> Style {
+        parse(&esc(capture))[0][0].style
+    }
+
+    fn underlined() -> Style {
+        Style {
+            underline: true,
+            ..Style::default()
+        }
+    }
+
+    // The reviewer's probes (PR #724): sub-parameters and underline colour
+    // must not leak into other attributes.
+
+    #[test]
+    fn curly_underline_is_underline_not_italic() {
+        assert_eq!(style_of("^[4:3mC"), underlined());
+        assert_eq!(style_of("^[4:2mC"), underlined());
+        assert_eq!(style_of("^[4:1mC"), underlined());
+    }
+
+    #[test]
+    fn underline_style_zero_turns_underline_off() {
+        assert_eq!(style_of("^[4m^[4:0mC"), Style::default());
+    }
+
+    #[test]
+    fn underline_colour_truecolor_keeps_the_underline() {
+        // As tmux captures `\e[4:3m` + `\e[58:2::255:0:0m`.
+        assert_eq!(style_of("^[4m^[58;2;255;0;0mU"), underlined());
+    }
+
+    #[test]
+    fn underline_colour_indexed_is_ignored() {
+        assert_eq!(style_of("^[58;5;7mU"), Style::default());
+        assert_eq!(style_of("^[58;5;31mU"), Style::default());
+        assert_eq!(style_of("^[4;58:5:31mU"), underlined());
+    }
+
+    #[test]
+    fn underline_colour_colon_form_is_ignored() {
+        assert_eq!(style_of("^[4;58:2::1:2:3mU"), underlined());
+        assert_eq!(style_of("^[4;58:2:1:2:3mU"), underlined());
+    }
+
+    #[test]
+    fn underline_colour_reset_is_ignored() {
+        assert_eq!(style_of("^[4;59mU"), underlined());
+    }
+
+    #[test]
+    fn truncated_extended_colour_stops_decoding() {
+        assert_eq!(style_of("^[38;2;1;2mT"), Style::default());
+        assert_eq!(style_of("^[48;5mT"), Style::default());
+        assert_eq!(style_of("^[38mT"), Style::default());
+    }
+
+    #[test]
+    fn palette_index_above_255_is_ignored() {
+        assert_eq!(style_of("^[38;5;300mT"), Style::default());
+        assert!(style_of("^[38;5;300;1mT").bold);
+        assert_eq!(style_of("^[48:5:256mT"), Style::default());
+    }
+
+    #[test]
+    fn colon_colour_forms_decode_in_place() {
+        assert_eq!(style_of("^[38:5:196mX").fg, Some([255, 0, 0]));
+        assert_eq!(style_of("^[38:2:1:2:3mX").fg, Some([1, 2, 3]));
+        assert_eq!(style_of("^[48:2::4:5:6mX").bg, Some([4, 5, 6]));
+        // Codes after a colon group still apply.
+        let s = style_of("^[38:2::1:2:3;1mX");
+        assert_eq!((s.fg, s.bold), (Some([1, 2, 3]), true));
+    }
+
+    #[test]
+    fn unknown_colon_groups_are_ignored_whole() {
+        assert_eq!(style_of("^[1:3mX"), Style::default());
+    }
+
+    #[test]
+    fn strikethrough_and_conceal() {
+        let s = style_of("^[9;8mX");
+        assert!(s.strike && s.conceal);
+        let s = style_of("^[9;8;29;28mX");
+        assert!(!s.strike && !s.conceal);
     }
 }

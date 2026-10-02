@@ -23,6 +23,7 @@ pub mod sgr;
 
 pub use render::{Renderer, DEFAULT_FONT, DEFAULT_SIZE, FALLBACK_FONT};
 pub use session::{
-    default_state_dir, tmux_available, Harness, LaunchOptions, Session, DEFAULT_COLS, DEFAULT_ROWS,
+    default_state_dir, tmux_available, DownOutcome, Harness, LaunchOptions, Session, DEFAULT_COLS,
+    DEFAULT_ROWS,
 };
 pub use sgr::{parse, Cell, Grid, Style};

@@ -8,12 +8,14 @@
 //! font's missing-glyph box.
 //! Metrics follow render.py (PIL on FreeType) so the two produce images of
 //! the same geometry from the same capture.
+//!
+//! A wide character in the last column would overhang the image; tmux never
+//! puts one there, and the image grows by a cell rather than crop it.
 
-use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
 
 use ab_glyph::{point, Font, FontVec, PxScale};
 use anyhow::{Context, Result};
@@ -32,6 +34,11 @@ pub const FALLBACK_FONT: &str = "CaskaydiaMono Nerd Font Mono";
 pub const CJK_FONTS: [&str; 2] = ["Noto Sans Mono CJK SC", "Noto Sans CJK SC"];
 /// The character a CJK candidate must map to be used.
 const CJK_PROBE: char = '\u{4e2d}';
+/// The largest grid, in cells, a render covers in either direction: tmux's
+/// own window size limit. Larger requests are clamped.
+pub const MAX_CELLS: u32 = 10_000;
+/// The largest font size, in pixels per em, a renderer accepts.
+pub const MAX_SIZE: u32 = 512;
 
 /// A loaded face plus the metrics needed to place its glyphs.
 struct Face {
@@ -124,17 +131,26 @@ fn fc_list_lang(lang: &str) -> Vec<(PathBuf, u32)> {
 }
 
 /// Renders grids at one font and size. Build it once and reuse it: font
-/// lookup and loading happen in [`Renderer::new`].
+/// lookup and loading happen in [`Renderer::new`]. It is `Send` and `Sync`,
+/// so tests can share one across threads.
 pub struct Renderer {
     /// Indexed by `bold as usize | (italic as usize) << 1`.
-    primary: [Option<Rc<Face>>; 4],
-    fallback: [Option<Rc<Face>>; 4],
+    primary: [Option<Arc<Face>>; 4],
+    fallback: [Option<Arc<Face>>; 4],
+    /// Whether fontconfig has the requested families themselves, rather
+    /// than substitutes for them.
+    primary_found: bool,
+    fallback_found: bool,
+    requested: String,
     /// Loaded on first use: CJK fonts are large and most screens need none.
-    cjk: OnceCell<Option<Face>>,
+    /// Holds the face and a label naming where it came from.
+    cjk: OnceLock<Option<(String, Face)>>,
     /// Pixels per em; 0 when the renderer draws no glyphs.
     ppem: f32,
     cell_w: u32,
     cell_h: u32,
+    /// Offset from the cell top to the strikethrough line.
+    strike_y: u32,
 }
 
 impl Renderer {
@@ -142,48 +158,94 @@ impl Renderer {
     /// all four styles of each. With no usable font at all the renderer
     /// still draws colours and attributes, just no glyphs.
     pub fn new(family: &str, size: u32) -> Renderer {
+        let size = size.clamp(1, MAX_SIZE);
         let ppem = size as f32;
-        let mut cache: HashMap<(PathBuf, u32), Option<Rc<Face>>> = HashMap::new();
+        let mut cache: HashMap<(PathBuf, u32), Option<Arc<Face>>> = HashMap::new();
         let mut load = |fam: &str, style: usize| {
             let (path, index) = fc_match(fam, style & 1 != 0, style & 2 != 0)?;
             cache
                 .entry((path.clone(), index))
-                .or_insert_with(|| Face::load(&path, index, ppem).map(Rc::new))
+                .or_insert_with(|| Face::load(&path, index, ppem).map(Arc::new))
                 .clone()
         };
-        let primary: [Option<Rc<Face>>; 4] = std::array::from_fn(|s| load(family, s));
-        let fallback: [Option<Rc<Face>>; 4] = std::array::from_fn(|s| load(FALLBACK_FONT, s));
+        let primary: [Option<Arc<Face>>; 4] = std::array::from_fn(|s| load(family, s));
+        let fallback: [Option<Arc<Face>>; 4] = std::array::from_fn(|s| load(FALLBACK_FONT, s));
 
-        let (cell_w, cell_h) = match primary[0].as_ref().or(fallback[0].as_ref()) {
+        let metrics_face = primary[0].as_ref().or(fallback[0].as_ref());
+        let (cell_w, cell_h) = match metrics_face {
             Some(face) => measure_cell(face, ppem),
             None => fontless_cell(size),
+        };
+        // Through the middle of the x-height: about 0.25 em above the
+        // baseline.
+        let strike_y = match metrics_face {
+            Some(face) => (face.ascent - (ppem * 0.25).round() as i32).max(0) as u32,
+            None => cell_h / 2,
         };
         Renderer {
             primary,
             fallback,
-            cjk: OnceCell::new(),
+            primary_found: fc_has_family(family),
+            fallback_found: fc_has_family(FALLBACK_FONT),
+            requested: family.to_string(),
+            cjk: OnceLock::new(),
             ppem,
             cell_w,
             cell_h,
+            strike_y: strike_y.min(cell_h.saturating_sub(1)),
         }
     }
 
     /// A renderer with no fonts and a fixed cell size: colours, reverse,
     /// dim and underline only. Deterministic on any machine, for tests.
     pub fn without_fonts(cell_w: u32, cell_h: u32) -> Renderer {
+        let cell_w = cell_w.clamp(1, MAX_SIZE);
+        let cell_h = cell_h.clamp(1, MAX_SIZE);
         Renderer {
             primary: Default::default(),
             fallback: Default::default(),
-            cjk: OnceCell::new(),
+            primary_found: false,
+            fallback_found: false,
+            requested: String::new(),
+            cjk: OnceLock::new(),
             ppem: 0.0,
-            cell_w: cell_w.max(1),
-            cell_h: cell_h.max(1),
+            cell_w,
+            cell_h,
+            strike_y: cell_h / 2,
         }
     }
 
-    /// Whether the primary family resolved to a loadable font.
+    /// Whether the requested primary family is installed and loaded.
+    /// `fc-match` always answers, so a missing or misspelt family loads a
+    /// substitute; this is false then, and [`Renderer::warnings`] says so.
     pub fn has_primary_font(&self) -> bool {
-        self.primary[0].is_some()
+        self.primary_found && self.primary[0].is_some()
+    }
+
+    /// Whether the Nerd Font fallback family is installed and loaded.
+    pub fn has_fallback_font(&self) -> bool {
+        self.fallback_found && self.fallback[0].is_some()
+    }
+
+    /// Font problems worth telling a person about: a requested family that
+    /// fontconfig replaced with a substitute, or a missing fallback.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.ppem <= 0.0 {
+            return out;
+        }
+        if !self.has_primary_font() {
+            out.push(format!(
+                "font '{}' is not installed; fontconfig substituted another font, so cell size and glyphs will differ",
+                self.requested
+            ));
+        }
+        if !self.has_fallback_font() {
+            out.push(format!(
+                "fallback font '{FALLBACK_FONT}' is not installed; Braille and icon glyphs may draw as boxes"
+            ));
+        }
+        out
     }
 
     /// Whether a CJK font was found (this loads it on first call).
@@ -191,16 +253,37 @@ impl Renderer {
         self.cjk_face().is_some()
     }
 
-    /// The CJK face, found and loaded on first call.
+    /// Where the CJK face came from: the family name for one of
+    /// [`CJK_FONTS`], or `fc-list:<file>#<index>`. Loads it on first call.
+    pub fn cjk_font(&self) -> Option<&str> {
+        self.cjk_entry().map(|(label, _)| label.as_str())
+    }
+
     fn cjk_face(&self) -> Option<&Face> {
+        self.cjk_entry().map(|(_, face)| face)
+    }
+
+    /// The CJK face and its label, found and loaded on first call. A named
+    /// family is used only when fontconfig has that family itself.
+    fn cjk_entry(&self) -> Option<&(String, Face)> {
         self.cjk
             .get_or_init(|| {
                 if self.ppem <= 0.0 {
                     return None;
                 }
-                let matched = CJK_FONTS.iter().filter_map(|f| fc_match(f, false, false));
-                matched.chain(fc_list_lang("zh")).find_map(|(path, index)| {
-                    Face::load(&path, index, self.ppem).filter(|f| f.has(CJK_PROBE))
+                let named = CJK_FONTS
+                    .iter()
+                    .filter(|f| fc_has_family(f))
+                    .filter_map(|f| {
+                        let (path, index) = fc_match(f, false, false)?;
+                        Some((f.to_string(), path, index))
+                    });
+                let listed = fc_list_lang("zh").into_iter().map(|(path, index)| {
+                    (format!("fc-list:{}#{index}", path.display()), path, index)
+                });
+                named.chain(listed).find_map(|(label, path, index)| {
+                    let face = Face::load(&path, index, self.ppem).filter(|f| f.has(CJK_PROBE))?;
+                    Some((label, face))
                 })
             })
             .as_ref()
@@ -231,17 +314,18 @@ impl Renderer {
     }
 
     /// Render `grid`. `cols` and `rows`, when given, set the image size in
-    /// cells (padding with the default background, never cropping).
+    /// cells (padding with the default background, never cropping), up to
+    /// [`MAX_CELLS`] each way; cells beyond that are not drawn.
     pub fn render(&self, grid: &Grid, cols: Option<u32>, rows: Option<u32>) -> RgbImage {
         let widest = grid.iter().map(Vec::len).max().unwrap_or(0) as u32;
-        let cols = cols.unwrap_or(widest).max(widest).max(1);
-        let rows_n = rows.unwrap_or(0).max(grid.len() as u32).max(1);
+        let cols = cols.unwrap_or(widest).max(widest).clamp(1, MAX_CELLS);
+        let rows_n = rows.unwrap_or(0).max(grid.len() as u32).clamp(1, MAX_CELLS);
         let (cw, ch) = (self.cell_w, self.cell_h);
         let mut img = RgbImage::from_pixel(cols * cw, rows_n * ch, Pixel(DEFAULT_BG));
 
-        for (ry, row) in grid.iter().enumerate() {
+        for (ry, row) in grid.iter().take(rows_n as usize).enumerate() {
             let y = ry as u32 * ch;
-            for (cx, cell) in row.iter().enumerate() {
+            for (cx, cell) in row.iter().take(cols as usize).enumerate() {
                 let x = cx as u32 * cw;
                 let st = cell.style;
                 let mut fg = st.fg.unwrap_or(DEFAULT_FG);
@@ -255,7 +339,7 @@ impl Renderer {
                 if bg != DEFAULT_BG {
                     fill(&mut img, x, y, cw, ch, bg);
                 }
-                if let Some(c) = cell.ch.filter(|c| *c != ' ') {
+                if let Some(c) = cell.ch.filter(|c| *c != ' ' && !st.conceal) {
                     let key = st.bold as usize | (st.italic as usize) << 1;
                     if let Some(face) = self.face_for(c, key) {
                         draw_glyph(&mut img, face, c, x, y, fg);
@@ -263,6 +347,9 @@ impl Renderer {
                 }
                 if st.underline {
                     fill(&mut img, x, y + ch - 1, cw, 1, fg);
+                }
+                if st.strike {
+                    fill(&mut img, x, y + self.strike_y, cw, 1, fg);
                 }
             }
         }
@@ -386,6 +473,12 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_family_is_not_reported_as_the_primary_font() {
+        let r = Renderer::new("NoSuchFontXYZ", DEFAULT_SIZE);
+        assert!(!r.has_primary_font());
+    }
+
+    #[test]
     fn cjk_glyph_comes_from_the_cjk_font_when_one_exists() {
         let r = Renderer::new(DEFAULT_FONT, DEFAULT_SIZE);
         let Some(cjk) = r.cjk_face() else {
@@ -403,11 +496,35 @@ mod tests {
     fn full_block_glyph_takes_fg_when_a_font_exists() {
         let r = Renderer::new(DEFAULT_FONT, DEFAULT_SIZE);
         if !r.has_primary_font() {
-            eprintln!("skipping glyph check: fc-match found no font");
+            eprintln!("skipping glyph check: {DEFAULT_FONT} is not installed");
             return;
         }
         let (w, h) = r.cell_size();
         let img = r.render(&parse(&esc("^[32;45m\u{2588}^[0m")), None, None);
         assert_eq!(img.get_pixel(w / 2, h / 2).0, BASIC[2]);
+        // Concealed, the same cell shows only its background.
+        let img = r.render(&parse(&esc("^[8;32;45m\u{2588}^[0m")), None, None);
+        assert_eq!(img.get_pixel(w / 2, h / 2).0, BASIC[5]);
+    }
+
+    #[test]
+    fn strikethrough_draws_a_line_in_the_fg() {
+        let r = Renderer::without_fonts(8, 16);
+        let img = r.render(&parse(&esc("^[9;33m ^[0m")), None, None);
+        assert_eq!(img.get_pixel(4, 8).0, BASIC[3]);
+        assert_eq!(img.get_pixel(4, 2).0, DEFAULT_BG);
+    }
+
+    #[test]
+    fn geometry_is_clamped() {
+        let r = Renderer::without_fonts(1, 1);
+        let img = r.render(&parse("x"), Some(u32::MAX), Some(3));
+        assert_eq!(img.dimensions(), (MAX_CELLS, 3));
+    }
+
+    #[test]
+    fn renderer_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Renderer>();
     }
 }

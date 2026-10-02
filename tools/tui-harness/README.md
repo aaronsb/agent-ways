@@ -17,8 +17,10 @@ tui-harness send   <name> <keys...>      # tmux send-keys passthrough: j Enter C
 tui-harness shot   <name> [--out PATH]   # prints the PNG path
 tui-harness text   <name> [--ansi]       # pane contents; --ansi keeps SGR escapes
 tui-harness attach <name>                # look in from your terminal; detach with C-b d
-tui-harness down   <name>
-tui-harness ls
+tui-harness down   <name>                # kills it only if this root launched it
+tui-harness down   --all                 # every session of this root, and its orphans
+tui-harness prune                        # kill this root's orphans, drop state of dead sessions
+tui-harness ls                           # STATE: up, gone, foreign, or orphan
 tui-harness render --out PATH [--in FILE] [--cols N] [--rows M] [--font NAME] [--size PT]
 ```
 
@@ -37,6 +39,10 @@ $th down spike
 A command that prints and exits closes its session at once. To shoot one, keep
 the pane open: `-- sh -c 'ways list; sleep 600'`.
 
+The command runs with the environment and working directory of the shell that
+ran `launch`, whoever started the tmux server. A key or text ending in `;`
+(`send app ';'`, `send app -l 'a;'`) is typed as is.
+
 ## Defaults
 
 - The geometry is 200x50.
@@ -50,7 +56,11 @@ the pane open: `-- sh -c 'ways list; sleep 600'`.
   glyphs.
 - State lives in `$XDG_STATE_HOME/agent-ways/tui-harness/`, with
   `XDG_STATE_HOME` defaulting to `~/.local/state`. Sessions are under
-  `sessions/<name>/env` and shots under `shots/<name>-<UTC timestamp>.png`.
+  `sessions/<name>/env` and shots under
+  `shots/<name>-<UTC timestamp with milliseconds>.png`.
+- `--cols` and `--rows` go up to 10000, tmux's limit, and `--size` up to 512.
+- A font that is not installed is replaced by whatever fontconfig picks, and
+  `launch`, `shot` and `render` print a warning saying so.
 
 ## From a test
 
@@ -63,6 +73,8 @@ if !tmux_available() {
     return;
 }
 let h = Harness::new(std::env::temp_dir().join("my-test"));
+// The default env and cwd are the test process's; set `env` or `cwd` to
+// point the command at a fixture HOME or config directory.
 let s = h.launch("demo", &LaunchOptions { cols: 80, rows: 24, ..Default::default() }, &cmd)?;
 s.wait_for("ready", Duration::from_secs(10))?;
 s.send(&["j", "Enter"])?;
@@ -72,9 +84,11 @@ s.down()?;
 ```
 
 `Renderer::without_fonts` gives fixed-size cells and draws no glyphs, so pixel
-checks on background colours hold on any machine. `tests/drive.rs` is a worked
-example. CI installs tmux and sets `TUI_HARNESS_REQUIRE_TMUX=1`, which turns that
-test's skip into a failure.
+checks on background colours hold on any machine. `Renderer` is `Send` and
+`Sync`. `tests/drive.rs` is a worked example; its `common` module has a `Drop`
+guard that kills a test's sessions and removes its root even when the test
+panics. CI installs tmux and sets `TUI_HARNESS_REQUIRE_TMUX=1`, which turns
+those tests' skip into a failure.
 
 ## The swatch: the regression target
 
@@ -91,16 +105,19 @@ Font icons, and wide CJK text. `swatch.ansi` is its capture through tmux at
   `swatch.golden.png`. A pixel counts as different when a channel is off by
   more than 32 levels. The test fails when more than 1% of pixels differ,
   which is the drift that hinting and font versions produce. It runs only
-  when fontconfig has JetBrains Mono, CaskaydiaMono Nerd Font Mono and Noto
-  Sans CJK SC; otherwise it skips and names the missing fonts. The bound is
-  loose for small regions: a broken reverse moved too few pixels to trip it,
-  and the exact-colour tests catch that case.
+  when the renderer gets the fonts the golden was recorded with: JetBrains
+  Mono, CaskaydiaMono Nerd Font Mono, and Noto Sans Mono CJK SC as the CJK
+  face it actually picks. Otherwise it skips and names what is missing, or
+  fails when `TUI_HARNESS_REQUIRE_FONTS=1`. The bound is loose for small
+  regions: a broken reverse moved too few pixels to trip it, and the
+  exact-colour tests catch that case.
 
 To re-record after an intended change, re-capture `swatch.ansi` (the commands
 are in `swatch.sh`), then run
 `TUI_HARNESS_BLESS=1 cargo test -p tui-harness --test swatch`. That run writes
 `swatch.golden.new.png` and fails. Review the image, then move it over
-`swatch.golden.png` by hand.
+`swatch.golden.png` by hand. A bless on a machine without the recorded fonts
+fails rather than skips.
 
 ## Notes
 
@@ -112,12 +129,25 @@ are in `swatch.sh`), then run
   `~/.tmux.conf` never changes what a test sees. Its options are set
   explicitly: no status line, no pane border status, `history-limit 50000`,
   `default-terminal tmux-256color`, and `COLORTERM=truecolor` in the
-  environment of the apps it runs. To look in, use `tui-harness attach <name>`
-  or `tmux -L agent-ways-tui attach -t tui-<name>`.
+  environment of the apps whose caller set none. To look in, use
+  `tui-harness attach <name>` or `tmux -L agent-ways-tui attach -t tui-<name>`.
+- Every root shares that server and the `tui-<name>` names, so each session is
+  tagged with the root that launched it (the `@tui_harness_root` option).
+  `down` kills a session only when the tag is its own root; otherwise it
+  removes its own stale state and leaves the session running. A launch that
+  times out kills what it started.
+- The command's environment travels in a file in its state directory,
+  readable only by you, which the command's shell sources and deletes before
+  `launch` returns. tmux's `new-session -e` cannot carry a full environment:
+  it overflows tmux's message size.
 - Only SGR is interpreted: 16, 256 and truecolor fg and bg, bold, dim, italic,
-  underline and reverse. Wide characters take two cells and zero-width
-  characters are dropped. Sixel, OSC hyperlinks and complex shaping are not
-  rendered.
+  underline (including the `4:n` styles, drawn as a single line), reverse,
+  strikethrough and conceal. The underline colour (`58`, `59`) is parsed and
+  not drawn. A truncated extended colour ends its sequence, and a palette
+  index above 255 is ignored. Wide characters take two cells and zero-width
+  characters are dropped. A wide character in the last column would widen the
+  image by a cell; tmux never puts one there. Sixel, OSC hyperlinks and
+  complex shaping are not rendered.
 - Cell metrics follow the original `render.py` (PIL on FreeType), so both give
   images of the same geometry from the same capture. Glyphs are unhinted, so
   strokes come out a little heavier. Unlike `render.py`, the capture's final
